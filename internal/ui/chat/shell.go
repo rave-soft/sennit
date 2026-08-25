@@ -98,7 +98,12 @@ func (s *ShellItem) newAnim() *anim.Anim {
 		LabelColor: s.sty.WorkingLabelColor,
 		GradColorA: s.sty.WorkingGradFromColor,
 		GradColorB: s.sty.WorkingGradToColor,
-		NoScramble: true,
+		// Always ModeNone regardless of the configured spinner: a
+		// shell command is running, not thinking, and the scrambled
+		// glyphs say the opposite. The person's spinner preference
+		// governs the LLM-work spinners, which is where the choice is
+		// about how much motion they want to sit next to.
+		Mode: anim.ModeNone,
 	})
 }
 

@@ -202,6 +202,7 @@ func (t *baseToolMessageItem) newAnim() *anim.Anim {
 		GradColorB:  t.sty.WorkingGradToColor,
 		LabelColor:  t.sty.WorkingLabelColor,
 		CycleColors: true,
+		Mode:        t.sty.WorkingSpinner,
 	})
 }
 

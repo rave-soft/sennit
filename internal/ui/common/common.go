@@ -10,6 +10,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -55,7 +56,7 @@ func (c *Common) Context() context.Context {
 // the theme the workspace's config selects (see the "/theme" command). An
 // unset or unknown theme resolves to Sennit's default palette.
 func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
-	s := styles.Theme(ThemeID(ws))
+	s := styles.Theme(ThemeID(ws)).WithSpinner(SpinnerMode(ws))
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
@@ -71,6 +72,18 @@ func ThemeID(ws workspace.ConfigAccessor) string {
 		return ""
 	}
 	return ws.Config().ThemeID()
+}
+
+// SpinnerMode returns the working-indicator motion configured for the
+// workspace, defaulting when there is no workspace or no config yet. An
+// unrecognised value resolves to the default here and is reported as a
+// config problem by the doctor, not by refusing to render.
+func SpinnerMode(ws workspace.ConfigAccessor) anim.Mode {
+	if ws == nil {
+		return anim.ModeScramble
+	}
+	mode, _ := ws.Config().SpinnerMode()
+	return styles.SpinnerMode(mode)
 }
 
 // CenterRect returns a new [Rectangle] centered within the given area with the

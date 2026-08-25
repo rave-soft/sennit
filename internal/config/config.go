@@ -159,9 +159,17 @@ type TUIOptions struct {
 	// for the existing pattern; a theme counterpart belongs there).
 	Theme string `json:"theme,omitempty" jsonschema:"description=Color palette for the TUI\\, chosen with the /theme command. An unknown value falls back to the default theme,default=steel-teal"`
 
-	Completions Completions         `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool               `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	Scrollbar   string              `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	// Spinner selects how much motion the working indicator shows while
+	// the agent is busy. It governs the LLM-work spinners only: a shell
+	// command's "Running…" has never scrambled, because the scrambled
+	// glyphs read as thinking rather than executing.
+	//
+	// An unknown value falls back to "scramble" and is reported as a
+	// config problem rather than failing the load, the way Theme does.
+	Spinner     string              `json:"spinner,omitempty" jsonschema:"description=Motion of the working indicator while the agent is busy. scramble is the animated glyph band; pulse keeps the band but moves a single highlight across it; dots is one braille spinner; none leaves only the label and the elapsed timer.,enum=scramble,enum=pulse,enum=dots,enum=none,default=scramble"`
 	Keybindings map[string][]string `json:"keybindings,omitempty" jsonschema:"description=Keyboard shortcuts keyed by action name. Each value replaces the default shortcuts for that action"`
 }
 
@@ -181,6 +189,37 @@ const (
 	ScrollbarAlways  = "always"  // Always show when content exceeds viewport
 	ScrollbarNever   = "never"   // Never show scrollbar
 )
+
+// Working-indicator motion options. The strings match [anim.Mode]; this
+// package deliberately does not import internal/ui/anim (config must not
+// depend on the TUI), so the pairing is held by TestSpinnerModeParity in
+// internal/ui/styles rather than by the type system.
+const (
+	SpinnerScramble = "scramble" // Band of glyphs redrawn every frame
+	SpinnerPulse    = "pulse"    // Band of dots with one travelling highlight
+	SpinnerDots     = "dots"     // A single braille spinner glyph
+	SpinnerNone     = "none"     // No animated region; label and timer only
+)
+
+// SpinnerModes lists every accepted value of [TUIOptions.Spinner], in the
+// order they are offered to the person.
+var SpinnerModes = []string{SpinnerScramble, SpinnerPulse, SpinnerDots, SpinnerNone}
+
+// SpinnerMode returns the configured working-indicator motion, and whether
+// the configured value was recognised. An empty setting is not a problem —
+// it means "unset" and resolves to the default — so it reports ok.
+func (c *Config) SpinnerMode() (mode string, ok bool) {
+	// Options is a pointer and TUI is a pointer inside it; a Config
+	// built by hand (every test, and sennit_info's doctor path) has
+	// neither. Both are checked, not just the inner one.
+	if c == nil || c.Options == nil || c.Options.TUI == nil || c.Options.TUI.Spinner == "" {
+		return SpinnerScramble, true
+	}
+	if slices.Contains(SpinnerModes, c.Options.TUI.Spinner) {
+		return c.Options.TUI.Spinner, true
+	}
+	return SpinnerScramble, false
+}
 
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=read"`

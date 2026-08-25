@@ -188,6 +188,7 @@ func runAgent(
 	var spinner *format.Spinner
 	if !hideSpinner && stderrTTY {
 		t := styles.Theme(ws.Config().ThemeID())
+		spinnerMode, _ := ws.Config().SpinnerMode()
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
@@ -195,6 +196,7 @@ func runAgent(
 			GradColorA:  t.WorkingGradFromColor,
 			GradColorB:  t.WorkingGradToColor,
 			CycleColors: true,
+			Mode:        styles.SpinnerMode(spinnerMode),
 		})
 		spinner.Start()
 	}

@@ -32,6 +32,7 @@ const (
 	AreaMCP         Area = "mcp"
 	AreaPermission  Area = "permission"
 	AreaEnvironment Area = "environment"
+	AreaTUI         Area = "tui"
 )
 
 // Problem describes one thing that is wrong, or worth flagging, in the
@@ -77,7 +78,29 @@ func Doctor(cfg *Config) []Problem {
 	problems = append(problems, doctorToolNames(cfg)...)
 	problems = append(problems, doctorPermissionsBypass(cfg)...)
 	problems = append(problems, doctorJunkModelIDs(cfg)...)
+	problems = append(problems, doctorSpinnerMode(cfg)...)
 	return problems
+}
+
+// doctorSpinnerMode flags an options.tui.spinner the UI does not know.
+// The value is not validated at load time on purpose: an unreadable
+// motion setting is no reason to refuse to start, so SpinnerMode falls
+// back to the default and the mistake is reported here instead — which is
+// the only place it would otherwise be visible, since a spinner that
+// silently ignores its setting looks exactly like one that was never
+// configured.
+func doctorSpinnerMode(cfg *Config) []Problem {
+	if _, ok := cfg.SpinnerMode(); ok {
+		return nil
+	}
+	return []Problem{{
+		Severity: SeverityWarn,
+		Area:     AreaTUI,
+		Subject:  "spinner",
+		Message: fmt.Sprintf("unknown options.tui.spinner %q; using %q",
+			cfg.Options.TUI.Spinner, SpinnerScramble),
+		Hint: "one of: " + strings.Join(SpinnerModes, ", "),
+	}}
 }
 
 // doctorJunkModelIDs flags a provider whose model list contains a

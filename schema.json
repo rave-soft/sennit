@@ -89,7 +89,7 @@
         "hooks": {
           "additionalProperties": {
             "items": {
-              "$ref": "#/$defs/HookConfig"
+              "$ref": "#/$defs/Hook"
             },
             "type": "array"
           },
@@ -107,7 +107,7 @@
       "additionalProperties": false,
       "type": "object"
     },
-    "HookConfig": {
+    "Hook": {
       "properties": {
         "name": {
           "type": "string",
@@ -845,6 +845,17 @@
           ],
           "description": "Chat scrollbar visibility",
           "default": "default"
+        },
+        "spinner": {
+          "type": "string",
+          "enum": [
+            "scramble",
+            "pulse",
+            "dots",
+            "none"
+          ],
+          "description": "Motion of the working indicator while the agent is busy. scramble is the animated glyph band; pulse keeps the band but moves a single highlight across it; dots is one braille spinner; none leaves only the label and the elapsed timer.",
+          "default": "scramble"
         },
         "keybindings": {
           "additionalProperties": {

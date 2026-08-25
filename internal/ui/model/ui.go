@@ -1092,7 +1092,11 @@ func (m *UI) cancelThemePreview() tea.Cmd {
 // The returned command re-arms the animations that had to be rebuilt (see
 // [Chat.Restyle]); it is nil when nothing was animating.
 func (m *UI) setTheme(id string) tea.Cmd {
-	*m.com.Styles = styles.Theme(id)
+	// WithSpinner, because this is a wholesale replacement: the motion
+	// setting is config-derived and a palette cannot carry it, so
+	// without re-applying it here the first /theme switch of a session
+	// silently put every spinner back to the scramble.
+	*m.com.Styles = styles.Theme(id).WithSpinner(common.SpinnerMode(m.com.Workspace))
 	m.ops.themeLive = styles.PaletteByID(id).ID
 	t := m.com.Styles
 

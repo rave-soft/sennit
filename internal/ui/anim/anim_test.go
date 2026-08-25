@@ -285,21 +285,39 @@ func TestAnimate_StepWrapAtomic(t *testing.T) {
 	wg.Wait()
 }
 
-// TestSettingsHash_DistinguishesNoScramble is a regression test for the
-// animation cache key: settingsHash used to omit NoScramble, so a
-// NoScramble Settings and its scrambled counterpart (otherwise
-// identical) hashed to the same cache key. New() would then hand back
-// whichever variant happened to populate the cache first — e.g. a
-// NoScramble spinner reusing cyclingFrames it should never have built.
-func TestSettingsHash_DistinguishesNoScramble(t *testing.T) {
+// TestSettingsHash_DistinguishesModes is a regression test for the
+// animation cache key: settingsHash used to omit the motion setting, so
+// two otherwise-identical Settings that differ only in how the band is
+// drawn hashed to the same key. New() would then hand back whichever
+// variant happened to populate the cache first — e.g. a ModeNone spinner
+// reusing cyclingFrames it should never have built.
+//
+// Every mode is compared against every other, so adding one without
+// extending the hash fails here rather than in whichever pair of screens
+// happened to collide.
+func TestSettingsHash_DistinguishesModes(t *testing.T) {
 	t.Parallel()
 
 	base := Settings{Size: 5, Label: "loading"}
-	scrambled := base
-	scrambled.NoScramble = false
-	plain := base
-	plain.NoScramble = true
+	modes := []Mode{ModeScramble, ModePulse, ModeDots, ModeNone}
 
-	require.NotEqual(t, settingsHash(scrambled), settingsHash(plain),
-		"NoScramble must be part of the cache key")
+	seen := map[string]Mode{}
+	for _, m := range modes {
+		s := base
+		s.Mode = m
+		h := settingsHash(s)
+		if other, clash := seen[h]; clash {
+			t.Fatalf("modes %q and %q share a cache key", other, m)
+		}
+		seen[h] = m
+	}
+
+	// The zero value is ModeScramble, so it must land on that mode's key
+	// rather than a fourth one of its own: call sites that say nothing
+	// about motion have to share the scramble's prerendered frames.
+	unset := base
+	scrambled := base
+	scrambled.Mode = ModeScramble
+	require.Equal(t, settingsHash(scrambled), settingsHash(unset),
+		"the zero Mode must hash as ModeScramble")
 }

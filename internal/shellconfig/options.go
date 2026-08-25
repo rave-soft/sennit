@@ -158,10 +158,15 @@ var optionSpecs = map[string]optionSpec{
 // bare-flag boolean shorthand: "option ui compact" without a value is a
 // usage error, enforced by optionUI before dispatch.
 var uiOptionSpecs = map[string]optionSpec{
-	"compact":               {jsonKey: "compact_mode", kind: optBool},
-	"transparent":           {jsonKey: "transparent", kind: optBool},
-	"diff":                  {jsonKey: "diff_mode", kind: optString, enum: []string{"unified", "split"}},
-	"scrollbar":             {jsonKey: "scrollbar", kind: optString, enum: []string{"default", "always", "never"}},
+	"compact":     {jsonKey: "compact_mode", kind: optBool},
+	"transparent": {jsonKey: "transparent", kind: optBool},
+	"diff":        {jsonKey: "diff_mode", kind: optString, enum: []string{"unified", "split"}},
+	"scrollbar":   {jsonKey: "scrollbar", kind: optString, enum: []string{"default", "always", "never"}},
+	// Spelled out rather than taken from config.SpinnerModes: config
+	// imports this package, so this package cannot import config.
+	// TestUIOptionSpinnerMatchesConfig (an external test package, which
+	// may import config) is what holds the two lists together.
+	"spinner":               {jsonKey: "spinner", kind: optString, enum: []string{"scramble", "pulse", "dots", "none"}},
 	"completions-max-depth": {jsonKey: "max_depth", kind: optInt, path: []string{"completions"}, nonNegative: true},
 	"completions-max-items": {jsonKey: "max_items", kind: optInt, path: []string{"completions"}, nonNegative: true},
 }
@@ -249,7 +254,7 @@ func joinEnum(vals []string) string {
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) < 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|completions-max-depth|completions-max-items|keybinding> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|spinner|completions-max-depth|completions-max-items|keybinding> <value>")
 	}
 
 	key := args[2]
@@ -274,7 +279,7 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 		return nil
 	}
 	if len(args) != 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|completions-max-depth|completions-max-items> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|spinner|completions-max-depth|completions-max-items> <value>")
 	}
 
 	spec, ok := uiOptionSpecs[key]

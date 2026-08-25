@@ -140,9 +140,28 @@ option ui compact true              # compact chat layout
 option ui diff unified              # unified or split diffs
 option ui transparent true          # use the terminal background
 option ui scrollbar always          # default | always | never
+option ui spinner dots              # scramble | pulse | dots | none
 option ui completions-max-depth 4
 option ui completions-max-items 200
 ```
+
+`spinner` sets how much the working indicator moves while the agent is
+busy:
+
+| Value | What you see |
+|---|---|
+| `scramble` | The default: a band of glyphs redrawn every frame under a cycling gradient. |
+| `pulse` | The same band, but a fixed row of dots with one highlight travelling across it. Periodic instead of random. |
+| `dots` | A single braille spinner. |
+| `none` | No animated region at all — the label and the elapsed timer only. |
+
+It governs the indicator shown while the model is working, whether that is
+thinking or waiting on a tool. A shell command's `Running…` is unaffected:
+it has never scrambled, because the scrambled glyphs read as thinking
+rather than executing.
+
+A value Sennit does not recognise falls back to `scramble` and is reported
+by `sennit doctor` rather than refusing to start.
 
 Themes are switched from the `theme` command rather than config. Moving
 through the list previews each palette on the whole screen; `enter` keeps

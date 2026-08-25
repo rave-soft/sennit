@@ -4,11 +4,13 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/rave-soft/sennit/internal/ui/anim"
 )
 
 // quickStyleWorking fills in the working-indicator gradient colors used by
 // spinners/shimmers (assistant "thinking", tool-call pending, CLI
-// generating, startup) and the top-level Background color.
+// generating, startup), how much that indicator moves, and the top-level
+// Background color.
 func quickStyleWorking(s *Styles, o quickStyleOpts, _, _, _ lipgloss.Style) {
 	s.Background = o.bgBase
 
@@ -16,6 +18,13 @@ func quickStyleWorking(s *Styles, o quickStyleOpts, _, _, _ lipgloss.Style) {
 	s.WorkingGradToColor = o.secondary
 	s.WorkingLabelColor = o.fgMostSubtle
 	s.WorkingTimerColor = o.fgMostSubtle
+	// The default motion, written out rather than left to the zero
+	// value: this is where defaults live, and a reader asking what a
+	// fresh Styles animates like should find the answer next to the
+	// colours it animates in. A palette has no opinion on motion, so
+	// every palette gets the same one; the person's own choice arrives
+	// afterwards through [Styles.WithSpinner].
+	s.WorkingSpinner = anim.ModeScramble
 }
 
 // quickStyleHeader fills in Header, CompactDetails, ToolCallSuccess, and

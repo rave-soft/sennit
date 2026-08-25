@@ -552,6 +552,8 @@ Available Keys:
   transparent bool              use the terminal background
   scrollbar string              control chat scrollbar visibility: default,
                                 always, or never
+  spinner string                motion of the working indicator: scramble,
+                                pulse, dots, or none
   completions-max-depth int     maximum directory depth shown by completions
   completions-max-items int     maximum items returned to completions
   keybinding action key...      replace all shortcuts for an action
@@ -562,6 +564,7 @@ option ui compact true
 option ui diff unified
 option ui transparent true
 option ui scrollbar always
+option ui spinner dots
 option ui completions-max-depth 4
 option ui completions-max-items 200
 option ui keybinding commands super+p

@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/rave-soft/sennit/internal/ui/anim"
 )
 
 // Sennit's default brand colors, re-exported from the default palette for the
@@ -52,8 +53,43 @@ func SennitDark() Styles {
 
 // Theme returns the Styles for the palette with the given ID, falling back
 // to the default palette when the ID is unknown (see [PaletteByID]).
+//
+// The result carries the default working-indicator motion. A caller that
+// has the person's configuration — which a palette cannot carry — applies
+// it with [Styles.WithSpinner].
 func Theme(id string) Styles {
 	return themeFromPalette(PaletteByID(id))
+}
+
+// WithSpinner returns s with the working indicator's motion set to mode.
+//
+// Kept separate from [Theme] rather than made a parameter of it because
+// the great majority of Theme's callers are tests that have no opinion on
+// motion, and the zero value is the mode Sennit has always used. The cost
+// of that choice is that a caller rebuilding Styles must re-apply the
+// mode; the /theme handler is the one place that does, and a test holds
+// it to that.
+func (s Styles) WithSpinner(mode anim.Mode) Styles {
+	s.WorkingSpinner = mode
+	return s
+}
+
+// SpinnerMode maps a config value (see config.SpinnerMode) onto the
+// animation's own mode. This is the seam that lets internal/config stay
+// out of the TUI's packages: it names the modes as strings, and this
+// converts. An unrecognised string resolves to the default, the same
+// fallback config.SpinnerMode reports as a problem.
+func SpinnerMode(mode string) anim.Mode {
+	switch mode {
+	case string(anim.ModePulse):
+		return anim.ModePulse
+	case string(anim.ModeDots):
+		return anim.ModeDots
+	case string(anim.ModeNone):
+		return anim.ModeNone
+	default:
+		return anim.ModeScramble
+	}
 }
 
 // themeFromPalette builds the full Styles graph from a palette. Everything

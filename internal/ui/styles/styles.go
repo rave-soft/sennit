@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/diffview"
 )
 
@@ -198,6 +199,17 @@ type Styles struct {
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
 	WorkingTimerColor    color.Color // Elapsed timer suffix color
+
+	// WorkingSpinner is how much motion that indicator shows.
+	//
+	// Unlike every other field here its final value comes from the
+	// person's config rather than the palette. quickStyleWorking still
+	// assigns the default, so a Styles is never half-built; the three
+	// places that construct one for a running app then apply the
+	// configured choice with [Styles.WithSpinner]. That includes the
+	// /theme switch, which rebuilds Styles wholesale — see
+	// TestThemeSwitchKeepsSpinnerMode for the regression that guards it.
+	WorkingSpinner anim.Mode
 
 	// ChildBanner styles the info panel that replaces the editor while
 	// viewing a sub-agent's session (see UI.drawChildSessionPanel): a

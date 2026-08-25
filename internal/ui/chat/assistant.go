@@ -246,6 +246,7 @@ func (a *AssistantMessageItem) newAnim() *anim.Anim {
 		GradColorB:  a.sty.WorkingGradToColor,
 		LabelColor:  a.sty.WorkingLabelColor,
 		CycleColors: true,
+		Mode:        a.sty.WorkingSpinner,
 		Suffix: func() string {
 			return common.Elapsed()
 		},

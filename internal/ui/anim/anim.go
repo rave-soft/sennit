@@ -46,6 +46,18 @@ const (
 
 	// Default number of cycling chars.
 	defaultNumCyclingChars = 10
+
+	// pulseIdleChar is what a column of the pulse band shows when the
+	// comet is elsewhere. The band is a fixed row of these, and the
+	// comet travels over it — periodic motion the eye can lock onto
+	// instead of the scramble's dither.
+	pulseIdleChar = '⠄'
+
+	// dotsFrameHold is how many animation steps each braille glyph is
+	// held for. With fps == 20 this is 100ms per glyph — the cadence a
+	// conventional terminal spinner runs at; one step per glyph reads as
+	// a blur.
+	dotsFrameHold = 2
 )
 
 // Default colors for gradient.
@@ -57,7 +69,61 @@ var (
 var (
 	availableRunes = []rune("0123456789abcdefABCDEF~!@#$£€%^&*()+=_")
 	ellipsisFrames = []string{".", "..", "...", ""}
+
+	// brailleFrames is the rotation [ModeDots] cycles through.
+	brailleFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
+	// pulseComet is [ModePulse]'s travelling highlight, head first, over
+	// a band of pulseIdleChar. Its length is the comet's length, so the
+	// two cannot disagree.
+	//
+	// The comet is drawn in *denser glyphs*, not merely in a brighter
+	// colour. Colour alone reads well on a truecolor terminal and is
+	// invisible on the ones that are not: colorprofile degrades to Ascii
+	// under NO_COLOR and on a dumb terminal, stripping every SGR
+	// sequence on the way out — and a colour-only pulse then renders as
+	// a motionless row of identical dots, which is the one thing this
+	// mode exists to avoid. Density survives that; the gradient
+	// underneath is a bonus wherever colour exists.
+	pulseComet = []rune("⠿⠷⠆")
 )
+
+// Mode selects how the animated region is drawn. The zero value is
+// [ModeScramble], so a Settings literal that says nothing about motion
+// keeps the behaviour every call site had before modes existed.
+type Mode string
+
+const (
+	// ModeScramble fills the band with random glyphs redrawn every
+	// frame, under a cycling gradient.
+	ModeScramble Mode = "scramble"
+
+	// ModePulse keeps the band and its gradient but replaces the random
+	// glyphs with a fixed row of dots and one travelling highlight. The
+	// motion is periodic and deterministic.
+	ModePulse Mode = "pulse"
+
+	// ModeDots collapses the band to a single braille spinner glyph.
+	ModeDots Mode = "dots"
+
+	// ModeNone draws no animated region at all: only the label, its
+	// ellipsis and the suffix. Motion is limited to the ellipsis, and to
+	// nothing at all when there is no label.
+	ModeNone Mode = "none"
+)
+
+// resolve maps the zero value and any unrecognised mode onto
+// [ModeScramble]. An unknown value reaches here from a config file, where
+// it has already been reported as a problem; rendering falls back rather
+// than failing.
+func (m Mode) resolve() Mode {
+	switch m {
+	case ModePulse, ModeDots, ModeNone:
+		return m
+	default:
+		return ModeScramble
+	}
+}
 
 // Internal ID management. Used during animating to ensure that frame messages
 // are received only by spinner components that sent them.
@@ -82,13 +148,13 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	// NoScramble changes which frames New() builds (no cycling chars,
-	// no birth animation — see the cyclingCharWidth branch below), so
-	// it must be part of the cache key. Without it, two Anims that
-	// differ only in NoScramble could hash to the same key and one
-	// would be handed the other's prerendered frames.
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v-%t",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor, opts.NoScramble)
+	// Mode decides which frames New() builds — how wide the animated
+	// region is, what glyphs go in it and how many frames there are —
+	// so it must be part of the cache key. Without it, two Anims that
+	// differ only in Mode would hash to the same key and one would be
+	// handed the other's prerendered frames.
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v-%s",
+		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor, opts.Mode.resolve())
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -133,11 +199,12 @@ type Settings struct {
 	GradColorB  color.Color
 	CycleColors bool
 
-	// NoScramble disables the scrambled rune animation. The cycling
-	// character region is removed entirely so only the label and its
-	// animated ellipsis are visible. Useful for non-LLM contexts where
-	// scrambled glyphs imply "thinking" rather than "running".
-	NoScramble bool
+	// Mode selects how the animated region is drawn. The zero value is
+	// [ModeScramble]. [ModeNone] removes the region entirely so only the
+	// label and its animated ellipsis are visible — what non-LLM
+	// contexts want, where scrambled glyphs would imply "thinking"
+	// rather than "running".
+	Mode Mode
 
 	// Suffix is an optional function that returns a dynamic suffix string
 	// to render after the label and ellipsis. Called on every Render().
@@ -200,9 +267,15 @@ func New(opts Settings) *Anim {
 	} else {
 		a.id = fmt.Sprintf("%d", nextID())
 	}
-	if opts.NoScramble {
+	mode := opts.Mode.resolve()
+	switch mode {
+	case ModeNone:
 		a.cyclingCharWidth = 0
-	} else {
+	case ModeDots:
+		// One glyph, whatever Size says: the point of the mode is that
+		// the moving part is a single character.
+		a.cyclingCharWidth = 1
+	default:
 		a.cyclingCharWidth = opts.Size
 	}
 	a.labelColor = opts.LabelColor
@@ -217,9 +290,12 @@ func New(opts Settings) *Anim {
 		a.suffixColor = opts.LabelColor
 	}
 
-	// NoScramble means no cycling chars and no birth animation. Mark as
-	// initialized immediately so the label renders without a fade-in.
-	if opts.NoScramble {
+	// Only the scramble has a birth animation: the staggered fade-in is
+	// part of that effect's language. The calm modes exist to stop the
+	// spinner drawing attention to itself, and a one-second entrance
+	// would be the first thing they did. Mark them initialized up front
+	// so they render their steady state from the first frame.
+	if mode != ModeScramble {
 		a.initialized.Store(true)
 	}
 
@@ -239,8 +315,8 @@ func New(opts Settings) *Anim {
 		// Generate new values and cache them
 		a.labelWidth = lipgloss.Width(opts.Label)
 
-		// Total width of anim, in cells. When NoScramble is set there
-		// are no cycling chars so the label gap is unnecessary.
+		// Total width of anim, in cells. ModeNone has no cycling
+		// chars, so the label gap is unnecessary there.
 		a.width = a.cyclingCharWidth
 		if opts.Label != "" {
 			if a.cyclingCharWidth > 0 {
@@ -253,6 +329,14 @@ func New(opts Settings) *Anim {
 		a.renderLabel(opts.Label)
 
 		// Pre-generate gradient.
+		//
+		// The cycling ramp is three widths long and the frame count two,
+		// so the largest index Render can reach (column a.width-1 at
+		// offset numFrames-1) is exactly the last colour: the gradient
+		// slides by one column per frame and returns to where it began,
+		// seamlessly. Pulse and dots pick their own frame counts below
+		// and hold the gradient still instead, so they keep that
+		// relationship by not using the offset at all.
 		var ramp []color.Color
 		numFrames := prerenderedFrames
 		if opts.CycleColors {
@@ -260,6 +344,18 @@ func New(opts Settings) *Anim {
 			numFrames = a.width * 2
 		} else {
 			ramp = makeGradientRamp(a.width, opts.GradColorA, opts.GradColorB)
+		}
+		// A still gradient across the band, for the modes that move a
+		// highlight over it rather than moving the colours themselves.
+		bandRamp := makeGradientRamp(max(a.cyclingCharWidth, 1), opts.GradColorA, opts.GradColorB)
+		switch mode {
+		case ModePulse:
+			// One column per frame, one sweep per cycle. Because the
+			// period *is* the band width, the wrap from the last frame
+			// to the first continues the sweep instead of jumping.
+			numFrames = a.cyclingCharWidth
+		case ModeDots:
+			numFrames = len(brailleFrames) * dotsFrameHold
 		}
 
 		// Pre-render initial characters.
@@ -290,31 +386,38 @@ func New(opts Settings) *Anim {
 			}
 		}
 
-		// Prerender scrambled rune frames for the animation. Seed
-		// the rune picker off the settings hash so cyclingFrames is
-		// a pure function of Settings: two processes with identical
-		// Settings populate the cache with the same glyphs, which
-		// keeps any cross-process golden-file comparison stable.
-		seed := xxh3.HashString(cacheKey)
-		rng := rand.New(rand.NewPCG(seed, ^seed))
-		a.cyclingFrames = make([][]string, numFrames)
-		offset = 0
-		for i := range a.cyclingFrames {
-			a.cyclingFrames[i] = make([]string, a.width)
-			for j := range a.cyclingFrames[i] {
-				if j+offset >= len(ramp) {
-					continue // skip if we run out of colors
-				}
+		switch mode {
+		case ModePulse:
+			a.cyclingFrames = pulseFrames(numFrames, a.width, a.cyclingCharWidth, bandRamp, opts.LabelColor)
+		case ModeDots:
+			a.cyclingFrames = dotsFrames(numFrames, a.width, bandRamp)
+		default:
+			// Prerender scrambled rune frames for the animation. Seed
+			// the rune picker off the settings hash so cyclingFrames is
+			// a pure function of Settings: two processes with identical
+			// Settings populate the cache with the same glyphs, which
+			// keeps any cross-process golden-file comparison stable.
+			seed := xxh3.HashString(cacheKey)
+			rng := rand.New(rand.NewPCG(seed, ^seed))
+			a.cyclingFrames = make([][]string, numFrames)
+			offset = 0
+			for i := range a.cyclingFrames {
+				a.cyclingFrames[i] = make([]string, a.width)
+				for j := range a.cyclingFrames[i] {
+					if j+offset >= len(ramp) {
+						continue // skip if we run out of colors
+					}
 
-				// Also prerender the color with Lip Gloss here to avoid processing
-				// in the render loop.
-				r := availableRunes[rng.IntN(len(availableRunes))]
-				a.cyclingFrames[i][j] = lipgloss.NewStyle().
-					Foreground(ramp[j+offset]).
-					Render(string(r))
-			}
-			if opts.CycleColors {
-				offset++
+					// Also prerender the color with Lip Gloss here to avoid processing
+					// in the render loop.
+					r := availableRunes[rng.IntN(len(availableRunes))]
+					a.cyclingFrames[i][j] = lipgloss.NewStyle().
+						Foreground(ramp[j+offset]).
+						Render(string(r))
+				}
+				if opts.CycleColors {
+					offset++
+				}
 			}
 		}
 
@@ -524,6 +627,75 @@ func (a *Anim) Step() tea.Cmd {
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
 		return StepMsg{ID: a.id, Gen: gen}
 	})
+}
+
+// pulseFrames builds the frames for [ModePulse]: a fixed row of idle dots
+// with a short comet travelling across it, one column per frame.
+//
+// The comet's colour is the band's own gradient at the column it
+// occupies, so the sweep carries the theme across rather than painting a
+// foreign accent onto it, and the tail fades back towards idleColor. When
+// that is nil — "whatever the terminal's foreground is", which no blend
+// can be computed against — the tail keeps the head's colour; the motion
+// survives either way, because pulseComet carries it in the glyphs.
+func pulseFrames(numFrames, width, bandWidth int, bandRamp []color.Color, idleColor color.Color) [][]string {
+	idle := lipgloss.NewStyle().Foreground(idleColor).Render(string(pulseIdleChar))
+	frames := make([][]string, numFrames)
+	for i := range frames {
+		frames[i] = make([]string, width)
+		for j := range frames[i] {
+			frames[i][j] = idle
+		}
+		// The comet occupies the columns ending at i, head last-written
+		// so it wins any overlap. Walking back from the head keeps the
+		// modulo arithmetic in one place and lets the comet wrap around
+		// the left edge intact.
+		for t, glyph := range pulseComet {
+			col := ((i-t)%bandWidth + bandWidth) % bandWidth
+			if col >= len(bandRamp) || col >= width {
+				continue
+			}
+			c := bandRamp[col]
+			if t > 0 && idleColor != nil {
+				c = blend(c, idleColor, float64(t)/float64(len(pulseComet)))
+			}
+			frames[i][col] = lipgloss.NewStyle().
+				Foreground(c).
+				Render(string(glyph))
+		}
+	}
+	return frames
+}
+
+// dotsFrames builds the frames for [ModeDots]: a single braille glyph,
+// held for dotsFrameHold steps each so the rotation runs at a
+// conventional spinner cadence rather than the animation's full rate.
+func dotsFrames(numFrames, width int, bandRamp []color.Color) [][]string {
+	var c color.Color
+	if len(bandRamp) > 0 {
+		c = bandRamp[0]
+	}
+	style := lipgloss.NewStyle().Foreground(c)
+	frames := make([][]string, numFrames)
+	for i := range frames {
+		frames[i] = make([]string, width)
+		frames[i][0] = style.Render(string(brailleFrames[(i/dotsFrameHold)%len(brailleFrames)]))
+	}
+	return frames
+}
+
+// blend mixes a towards b by t in [0,1], in Hcl to stay in gamut — the
+// same space makeGradientRamp blends in.
+func blend(a, b color.Color, t float64) color.Color {
+	ca, ok := colorful.MakeColor(a)
+	if !ok {
+		return a
+	}
+	cb, ok := colorful.MakeColor(b)
+	if !ok {
+		return a
+	}
+	return ca.BlendHcl(cb, t)
 }
 
 // makeGradientRamp() returns a slice of colors blended between the given keys.
