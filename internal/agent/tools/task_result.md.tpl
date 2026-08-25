@@ -1,7 +1,17 @@
-Get a task's current status and, once it has finished, its final answer.
+Get a task's current status, and its final answer if it has already
+finished.
 
-If the task is still running, this reports its current status instead of
-a result — check back later rather than polling in a tight loop.
+You do not need this to receive a task's result. Every delegation's
+terminal outcome is delivered to you on its own: if the task finishes
+while you are still working, the completion reaches your next turn, and if
+you have already ended your turn, its arrival wakes the session. Ending
+the turn is how you wait for a delegation. Calling this in a loop is not
+waiting — it spends turns to learn what you would have been told anyway.
+
+Call it when a decision of yours needs the answer sooner than the
+completion would bring it: whether to stop the task (`task_cancel`),
+redirect it (`task_send`), or start work that only makes sense once it has
+finished.
 
 Parameters:
 - `id` (required): the task's ID (see `task_list`).

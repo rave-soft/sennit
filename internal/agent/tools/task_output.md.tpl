@@ -2,6 +2,11 @@ Show a task's progress so far: the most recent messages from its child
 session (the same transcript the UI would show), without waiting for it
 to finish.
 
+This is for seeing *how* a running task is going, not for finding out
+whether it is done. Its result is delivered to you on its own — see
+`task_result` — so repeating this call while a task runs tells you nothing
+you were not going to be told.
+
 Only user and assistant text is included — no tool calls, tool results,
 or reasoning — and only the most recent messages, not the whole
 transcript, so checking in on a task does not flood your own context. If
