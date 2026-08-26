@@ -733,7 +733,19 @@ func (a *sessionAgent) finishTurn(
 		}
 		// If the agent wasn't done...
 		if len(t.currentAssistant.ToolCalls()) > 0 {
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			// A continuation's prompt is not a prompt: it is the
+			// placeholder its own step 0 verifies and strips (see
+			// continuationPromptPlaceholder). Rewriting it broke that
+			// invariant — the resumed turn, still flagged Continuation,
+			// failed at step 0 with "does not match the expected
+			// placeholder text", which is how summarizing came to stop
+			// the agent outright. It would also have told the model its
+			// "initial user request" was a placeholder string. A
+			// continuation resumes on the summary, which is what it was
+			// going to read anyway.
+			if !call.Continuation {
+				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			}
 			a.requeueContinuation(call, reporter.suppress)
 		}
 	}
