@@ -48,6 +48,7 @@ func fakeWorkspaceSymbolResult() string {
 
 func runFakeLSPServer() {
 	r := bufio.NewReader(os.Stdin)
+	initialized := false
 	for {
 		body, err := readLSPFrame(r)
 		if err != nil {
@@ -60,17 +61,39 @@ func runFakeLSPServer() {
 		if err := json.Unmarshal(body, &envelope); err != nil {
 			continue
 		}
+		if logPath := os.Getenv("SENNIT_LSP_FAKE_LOG"); logPath != "" {
+			file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+			if err == nil {
+				_, _ = fmt.Fprintf(file, "%d %s\n", os.Getpid(), envelope.Method)
+				_ = file.Close()
+			}
+		}
 		if len(envelope.ID) == 0 {
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "stop-reading-after-workspace-change" && envelope.Method == "workspace/didChangeWatchedFiles" {
+				select {}
+			}
 			continue // notification, no response expected
 		}
 		result := "null"
 		switch envelope.Method {
 		case "initialize":
-			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "symbols" {
+			// "crash-after-init" answers the handshake normally and only
+			// dies once the client sends initialized: that is the
+			// WaitForServerReady failure path, which needs a process that
+			// is initialized but never usable.
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "crash-after-init" && initialized {
+				os.Exit(1)
+			}
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "bad-init" {
+				// A syntactically valid response whose result is not an
+				// object: the client's Initialize fails to decode it.
+				result = `5`
+			} else if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "symbols" {
 				result = `{"capabilities":{"hoverProvider":true,"workspaceSymbolProvider":true}}`
 			} else {
 				result = `{"capabilities":{}}`
 			}
+			initialized = true
 		case "workspace/symbol":
 			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "symbols" {
 				result = fakeWorkspaceSymbolResult()

@@ -228,3 +228,63 @@ func TestStartServer_ConcurrentStartsCreateOneClient(t *testing.T) {
 	t.Cleanup(client.Kill)
 	require.Equal(t, StateReady, client.GetServerState())
 }
+
+// TestStartServer_StateRaceSafeUnderConcurrentUIReads pins the state
+// race: startServer writes the server state (Starting during Initialize,
+// Ready/Error afterwards) while a UI goroutine polls GetServerState. A
+// plain field would data-race here; the state must be atomic. Run with
+// -race.
+func TestStartServer_StateRaceSafeUnderConcurrentUIReads(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o644))
+
+	autoLSPOff := false
+	cfg := configtest.NewStore(t, &config.Config{
+		Options: &config.Options{AutoLSP: &autoLSPOff},
+		LSP: config.LSPs{
+			"fake": {
+				Command:   exe,
+				FileTypes: []string{"go"},
+				Env:       map[string]string{fakeLSPServerEnv: "1"},
+				Timeout:   30,
+			},
+		},
+	}, configtest.WithWorkingDir(dir))
+
+	mgr := NewManager(cfg)
+	server, ok := mgr.manager.GetServer("fake")
+	require.True(t, ok)
+
+	stopReading := make(chan struct{})
+	doneReading := make(chan struct{})
+	go func() {
+		defer close(doneReading)
+		for {
+			select {
+			case <-stopReading:
+				return
+			default:
+			}
+			if c, ok := mgr.clients.Get("fake"); ok {
+				if s := c.GetServerState(); s < StateUnstarted || s > StateDisabled {
+					t.Errorf("GetServerState returned an invalid state %d", s)
+					return
+				}
+			}
+		}
+	}()
+
+	mgr.startServer("fake", path, server)
+
+	close(stopReading)
+	<-doneReading
+
+	client, ok := mgr.clients.Get("fake")
+	require.True(t, ok)
+	t.Cleanup(client.Kill)
+	require.Equal(t, StateReady, client.GetServerState())
+}

@@ -98,38 +98,10 @@ func HandleServerMessage(_ context.Context, method string, params json.RawMessag
 	}
 }
 
-// HandleDiagnostics handles diagnostic notifications from the LSP server
+// HandleDiagnostics handles a textDocument/publishDiagnostics notification
+// that did not arrive through the registered generation handler (tests and
+// manual dispatch). It forwards to the current generation's diagnostics
+// path.
 func HandleDiagnostics(client *Client, params json.RawMessage) {
-	client.handleDiagnostics(client.currentGeneration(), params)
-}
-
-func (c *Client) handleDiagnostics(gen *clientGeneration, params json.RawMessage) {
-	var diagParams protocol.PublishDiagnosticsParams
-	if err := json.Unmarshal(params, &diagParams); err != nil {
-		slog.Error("Error unmarshaling diagnostics params", "error", err)
-		return
-	}
-	c.applyDiagnostics(gen, diagParams, nil)
-}
-
-func (c *Client) applyDiagnostics(
-	gen *clientGeneration,
-	diagParams protocol.PublishDiagnosticsParams,
-	beforeCallback func(),
-) {
-	c.dispatchDiagnosticEvent(diagnosticEvent{generation: gen, prepare: func() func() {
-		c.diagnosticsMu.Lock()
-		c.diagnostics.Set(diagParams.URI, diagParams.Diagnostics)
-		totalCount := 0
-		for _, diagnostics := range c.diagnostics.Seq2() {
-			totalCount += len(diagnostics)
-		}
-		c.diagnosticsMu.Unlock()
-		return func() {
-			if beforeCallback != nil {
-				beforeCallback()
-			}
-			c.invokeDiagnosticsCallback(totalCount)
-		}
-	}})
+	client.diagnostics.publish(client.runtime.currentGeneration(), params)
 }

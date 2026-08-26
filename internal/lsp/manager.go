@@ -266,7 +266,7 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		s.callback(name, client)
 	}()
 
-	client.serverState.Store(StateStarting)
+	client.SetServerState(StateStarting)
 
 	// Use an independent context for initialization so that the LSP server
 	// startup is not tied to the caller's request context. The caller's
