@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,8 +55,19 @@ func TestHookedTool_ProjectHookRequiresTrust(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 	t.Setenv("SENNIT_GLOBAL_DATA", t.TempDir())
 	project := t.TempDir()
+	// A redirect rather than touch(1), and json.Marshal rather than a
+	// string literal: hooks run through Sennit's own embedded POSIX shell,
+	// which has no touch on a Windows runner, and a raw Windows path
+	// pasted into JSON is not valid JSON. The path is single-quoted so its
+	// backslashes survive the shell's word expansion too.
 	sideEffect := filepath.Join(t.TempDir(), "hook-ran")
-	require.NoError(t, os.WriteFile(filepath.Join(project, "sennit.json"), []byte(`{"hooks":{"PreToolUse":[{"command":"touch `+sideEffect+`"}]}}`), 0o600))
+	projectConfig, err := json.Marshal(map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse": []map[string]any{{"command": "echo ran > '" + sideEffect + "'"}},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(project, "sennit.json"), projectConfig, 0o600))
 
 	store, err := configruntime.Load(project, t.TempDir(), false)
 	require.NoError(t, err)

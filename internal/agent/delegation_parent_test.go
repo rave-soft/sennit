@@ -174,13 +174,42 @@ func TestSendToParent_BusyParentDoesNotStartSecondTurn(t *testing.T) {
 // a completion landing "at the same time" (enqueued back to back before
 // the parent's next drain) both survive and are both folded in - neither
 // lost nor duplicated.
+//
+// The parent is held mid-stream on a gate for the same reason
+// TestSendToParent_BusyParentDoesNotStartSecondTurn holds it: SendToParent
+// rides DeliverTaskCompletion, whose idle-wake would otherwise start a
+// continuation that drains the inbox from its own goroutine and races the
+// drain below - the drain the test is here to make an assertion about. It
+// lost that race under -race on CI and found an empty queue.
 func TestSendToParent_AndCompletionBothSurviveSameDrain(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	sa := testSessionAgent(env, &promptRecordingModel{text: "done"}, "system").(*sessionAgent)
+	model := &cancelAwareGatedModel{
+		text:    "done",
+		gate:    make(chan struct{}),
+		entered: make(chan struct{}),
+	}
+	sa := NewSessionAgent(SessionAgentOptions{
+		Model:    Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
 
 	parentSess, err := env.sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
+
+	runDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: parentSess.ID, Prompt: "main"})
+		runDone <- runErr
+	}()
+
+	select {
+	case <-model.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("main run never entered Stream")
+	}
+	require.True(t, sa.IsSessionBusy(parentSess.ID))
 
 	const childSessionID = "child-session-both"
 	registerSelfParent(sa, childSessionID, parentSess.ID)
@@ -211,6 +240,14 @@ func TestSendToParent_AndCompletionBothSurviveSameDrain(t *testing.T) {
 	require.True(t, sawMessage, "the message must not be lost")
 
 	require.Empty(t, sa.drainCompletionsForStep(parentSess.ID), "a second drain must find nothing left - neither event should be duplicated")
+
+	close(model.gate)
+	select {
+	case runErr := <-runDone:
+		require.NoError(t, runErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("run never finished")
+	}
 }
 
 // TestSendToParent_NoRegisteredParentReturnsError proves the parentless

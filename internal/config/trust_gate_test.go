@@ -18,7 +18,11 @@ func TestLoad_ProjectTrustGate(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(GlobalConfig()), 0o700))
 	require.NoError(t, os.WriteFile(shellConfigSibling(GlobalConfig()), []byte("option debug true\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(project, "sennit.json"), []byte(`{"env":{"SENNIT_PROJECT_JSON":"json"},"options":{"notifications":"bell"}}`), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(project, "sennitrc"), []byte("touch "+sideEffect+"\noption notifications osc\n"), 0o600))
+	// A redirect rather than touch(1): sennitrc runs through Sennit's own
+	// embedded POSIX shell, which implements redirection itself but finds
+	// no touch on a Windows runner. The path is single-quoted so its
+	// backslashes survive word expansion there.
+	require.NoError(t, os.WriteFile(filepath.Join(project, "sennitrc"), []byte("echo ran > '"+sideEffect+"'\noption notifications osc\n"), 0o600))
 
 	store, err := LoadData(project, "", false)
 	require.NoError(t, err)

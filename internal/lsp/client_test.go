@@ -1484,7 +1484,12 @@ func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
 			}}); notifyErr != nil {
 				return nil, notifyErr
 			}
-			deadline := time.Now().Add(5 * time.Second)
+			// Generous: this waits on a spawned process writing a log
+			// file, which a loaded Windows runner can take seconds to
+			// get to. Nothing is asserted by the wait being short - the
+			// deadline exists only so a server that never confirms
+			// fails with a reason instead of hanging.
+			deadline := time.Now().Add(30 * time.Second)
 			for {
 				contents, readErr := os.ReadFile(logPath)
 				if readErr == nil && strings.Contains(string(contents), " workspace/didChangeWatchedFiles") {
@@ -1526,8 +1531,16 @@ func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
 
 	select {
 	case <-blockedSend:
-	case <-time.After(12 * time.Second):
-		t.Fatal("candidate transport never reached a confirmed blocked-send state")
+	case <-time.After(60 * time.Second):
+		// The restart error, when there is one already, says which of
+		// the steps above gave up - without it this timeout reports only
+		// that something upstream did not happen.
+		select {
+		case restartErr := <-restartDone:
+			t.Fatalf("candidate transport never reached a confirmed blocked-send state: %v", restartErr)
+		default:
+			t.Fatal("candidate transport never reached a confirmed blocked-send state")
+		}
 	}
 	select {
 	case err = <-restartDone:

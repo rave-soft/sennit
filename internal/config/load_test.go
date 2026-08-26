@@ -57,7 +57,10 @@ func TestHasAWSCredentialsWithFiles(t *testing.T) {
 				paths = append(paths, path)
 				rel, err := filepath.Rel("/isolated/home", path)
 				require.NoError(t, err)
-				if test.files[rel] {
+				// The table keys are slash paths; filepath.Rel hands back
+				// backslashes on Windows, where every lookup missed and
+				// the credentials went undetected.
+				if test.files[filepath.ToSlash(rel)] {
 					return nil, nil
 				}
 				return nil, os.ErrNotExist
