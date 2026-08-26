@@ -100,6 +100,9 @@ type JobOutputResponseMetadata struct {
 	Description      string `json:"description"`
 	Done             bool   `json:"done"`
 	WorkingDirectory string `json:"working_directory"`
+	Status           string `json:"status"`
+	ExitCode         int    `json:"exit_code"`
+	Output           string `json:"output"`
 }
 
 type JobKillParams struct {

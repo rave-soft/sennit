@@ -432,8 +432,7 @@ type Styles struct {
 		JobIconPending lipgloss.Style // Pending job icon (green dark)
 		JobIconError   lipgloss.Style // Error job icon (red dark)
 		JobIconSuccess lipgloss.Style // Success job icon (green)
-		JobToolName    lipgloss.Style // Job tool name "Bash" (blue)
-		JobAction      lipgloss.Style // Action text (Start, Output, Kill)
+		JobToolName    lipgloss.Style // Job tool name "Job" (blue)
 		JobPID         lipgloss.Style // PID text
 		JobDescription lipgloss.Style // Description text
 

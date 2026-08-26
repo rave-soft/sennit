@@ -28,6 +28,15 @@ type JobOutputResponseMetadata struct {
 	Description      string `json:"description"`
 	Done             bool   `json:"done"`
 	WorkingDirectory string `json:"working_directory"`
+	// Status is the word the model reads at the top of the result:
+	// "running" or "completed". ExitCode is the process's, and is only
+	// meaningful once Done. Output is what the job has printed so far,
+	// without the status preamble — the transcript shows it as the
+	// tool's body, so it must not have to parse the model's text back
+	// apart to find it.
+	Status   string `json:"status"`
+	ExitCode int    `json:"exit_code"`
+	Output   string `json:"output"`
 }
 
 func NewJobOutputTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool {
@@ -62,10 +71,11 @@ func NewJobOutputTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool
 			}
 
 			status := "running"
+			exitCode := 0
 			if done {
 				status = "completed"
 				if err != nil {
-					exitCode := shell.ExitCode(err)
+					exitCode = shell.ExitCode(err)
 					if exitCode != 0 {
 						outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
 					}
@@ -81,6 +91,9 @@ func NewJobOutputTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool
 				Description:      bgShell.Description,
 				Done:             done,
 				WorkingDirectory: bgShell.WorkingDir,
+				Status:           status,
+				ExitCode:         exitCode,
+				Output:           output,
 			}
 
 			if output == "" {

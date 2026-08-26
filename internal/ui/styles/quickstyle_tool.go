@@ -52,7 +52,6 @@ func quickStyleTool(s *Styles, o quickStyleOpts, base, muted, subtle lipgloss.St
 	s.Tool.JobIconError = base.Foreground(o.error)
 	s.Tool.JobIconSuccess = base.Foreground(o.success)
 	s.Tool.JobToolName = base.Foreground(o.info)
-	s.Tool.JobAction = base.Foreground(o.infoMostSubtle)
 	s.Tool.JobPID = muted
 	s.Tool.JobDescription = subtle
 
