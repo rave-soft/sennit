@@ -1010,3 +1010,92 @@ func TestTaskManager_CreateHonorsCallerSuppliedSessionID(t *testing.T) {
 	require.Equal(t, "msg-7$$call-1", created.ID)
 	require.Equal(t, "parent-sess", created.ParentSessionID)
 }
+
+// TestTaskManager_CancelFinalizesOnACanceledContext is the cancel-side
+// twin of TestManager_RunCompleteRecordsAndDeliversOnACanceledContext.
+// The bookkeeping ran on the caller's context, and the contexts a cancel
+// arrives on are exactly the ones a cancel kills: the finalizing
+// transaction never opened ("cancel finalization: beginning transaction:
+// context canceled"), so the task stayed at running, its workspace was
+// never released, and the parent was never told the delegation ended.
+func TestTaskManager_CancelFinalizesOnACanceledContext(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	dead, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NoError(t, tasks.Cancel(dead, st.ID, "no longer needed"))
+
+	got, err := store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusCancelled, got.Status,
+		"the terminal status must be recorded even though the context was canceled")
+	require.Equal(t, "no longer needed", got.Error)
+	require.Nil(t, mgr.Handle(st.ID), "the runtime must still be released")
+}
+
+// TestTaskManager_WaitingOnItsOwnDelegationIsNotFinished is the
+// regression test for a pipeline reviewing work that was still being
+// written.
+//
+// A delegation that itself delegates ends its turn to wait — that is how
+// an agent waits, and its completion inbox wakes it to carry on. The
+// lifecycle read that turn's end as the delegation's answer: it recorded
+// completed and told the parent, so a coordinator running
+// developer-then-reviewer started the reviewer while the developer was
+// still working. The delegation now stays running until its own
+// delegations are accounted for.
+func TestTaskManager_WaitingOnItsOwnDelegationIsNotFinished(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	developer, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	// The developer delegates in turn, and ends its turn to wait for it.
+	child, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "a piece of it", ParentSessionID: developer.SessionID})
+	require.NoError(t, err)
+	publishSuccessForSession(t, parentApp, developer.SessionID)
+
+	got, err := store.Get(t.Context(), developer.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status,
+		"a delegation waiting on its own delegation has not answered its goal")
+	require.Empty(t, coord.deliveredCompletions(),
+		"the parent must not be told its delegation is done while it is waiting")
+	require.NotNil(t, mgr.Handle(developer.ID), "the workspace it will be woken into must stay live")
+
+	// The child answers and its result is delivered, so the developer has
+	// nothing outstanding; the continuation that resumes it carries no run
+	// id of its own, which is exactly what the park has to accept.
+	publishSuccessForSession(t, parentApp, child.SessionID)
+	require.Eventually(t, func() bool {
+		st, getErr := store.Get(t.Context(), child.ID)
+		return getErr == nil && st.Status == thread.StatusCompleted && !st.CompletionPending
+	}, eventuallyTimeout, eventuallyTick)
+
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: developer.SessionID, Text: "implemented",
+	})
+
+	require.Eventually(t, func() bool {
+		st, getErr := store.Get(t.Context(), developer.ID)
+		return getErr == nil && st.Status == thread.StatusCompleted
+	}, eventuallyTimeout, eventuallyTick, "the delegation must finalize once it really is done")
+	require.Eventually(t, func() bool {
+		for _, d := range coord.deliveredCompletions() {
+			if d.completion.DelegationID == developer.ID {
+				return true
+			}
+		}
+		return false
+	}, eventuallyTimeout, eventuallyTick, "and the parent must be told then")
+}

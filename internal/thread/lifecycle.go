@@ -28,6 +28,19 @@ import (
 // to be a backstop, since shutdown joins the worker goroutine running it.
 const terminalBookkeepingTimeout = 15 * time.Second
 
+// detachForTerminalWork strips ctx of its cancellation and bounds it by
+// terminalBookkeepingTimeout, for work that has to land whatever happened
+// to the context that asked for it: recording a terminal status, telling
+// the parent, releasing a workspace.
+//
+// Both callers are handed contexts that a cancellation kills — the run's
+// own, and a shutting-down app's — which is precisely the case they most
+// need to work in. Values (the delegation tag, the session id) are kept;
+// only the cancellation is dropped.
+func detachForTerminalWork(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), terminalBookkeepingTimeout)
+}
+
 type runtimeState struct {
 	handle      Handle
 	spawner     Spawner
@@ -39,6 +52,21 @@ type runtimeState struct {
 	// end very differently — see handleRunComplete — so the flag is set
 	// and cleared together with runID, under the same mutex.
 	person bool
+	// awaitingDelegations marks a delegation whose dispatched run ended
+	// while delegations of its own were still in flight: it is not
+	// finished, it is waiting, and its agent will be woken by its own
+	// completion inbox to carry on (see handleRunComplete's park branch).
+	//
+	// While it is set the entity has no run id to match against — the
+	// turn that resumes it is an auto-woken continuation, which carries
+	// none — so handleRunComplete accepts that session's next completion
+	// on the strength of this flag instead. parkedSession is the session
+	// that identity rests on: the ordinary path's session check happens
+	// only after the workspace has been released, which is too late for a
+	// parked entity that must ignore every other session's completions
+	// without tearing itself down.
+	awaitingDelegations bool
+	parkedSession       string
 }
 
 // threadControl is permanent while an entity is known to the lifecycle. opMu
@@ -316,6 +344,7 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 	runID := uuid.NewString()
 	c.mu.Lock()
 	rt.runID = runID
+	rt.awaitingDelegations = false
 	c.mu.Unlock()
 
 	// Reserve acceptance before dispatch so cancellation cannot leave a run
@@ -363,6 +392,7 @@ func (l *lifecycle) startFactoryRun(ctx context.Context, handle Handle, spawner 
 	c.mu.Lock()
 	rt.runID = runID
 	rt.runCancel = runCancel
+	rt.awaitingDelegations = false
 	c.mu.Unlock()
 
 	l.goWorker(func() {
@@ -559,6 +589,7 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 		c.mu.Lock()
 		rt.runID = runID
 		rt.person = true
+		rt.awaitingDelegations = false
 		c.mu.Unlock()
 		return SendDisposition{}, nil
 	}
@@ -732,6 +763,7 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		}
 		c.mu.Lock()
 		rt.runID = runID
+		rt.awaitingDelegations = false
 		c.mu.Unlock()
 		// Reserved before dispatch, exactly as startRun and steer do: a
 		// follow-up sent to a delegation can be cancelled the moment after
@@ -810,6 +842,17 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 // caller's job, decided before reaching here — this method itself has no
 // notion of Kind.
 func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error {
+	// Same detach handleRunComplete does, for the same reason: everything
+	// below is terminal bookkeeping, and the contexts a cancel arrives on
+	// are exactly the ones a cancel kills — the run's own, or a shutting
+	// down app's. On a dead one the finalizing transaction never opens
+	// ("cancel finalization: beginning transaction: context canceled"),
+	// so the row stays at running, the parent is never told its
+	// delegation ended, and the workspace release is skipped too. The
+	// deadline keeps a wedged store from holding shutdown open.
+	ctx, releaseBookkeeping := detachForTerminalWork(ctx)
+	defer releaseBookkeeping()
+
 	c := l.control(st.ID)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
@@ -891,7 +934,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	// it the bounded one below would cancel the merge the moment this
 	// function returns.
 	followUpCtx := ctx
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalBookkeepingTimeout)
+	ctx, cancel := detachForTerminalWork(ctx)
 	defer cancel()
 
 	c := l.existingControl(id)
@@ -902,7 +945,19 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	defer c.opMu.Unlock()
 	c.mu.Lock()
 	rt := c.runtime
-	if rt == nil || rc.RunID == "" || rc.RunID != rt.runID {
+	if rt == nil {
+		c.mu.Unlock()
+		return
+	}
+	// A parked delegation (see the park branch below) has no run id to
+	// match: what resumes it is an auto-woken continuation, which carries
+	// none. Its session is the identity that still holds, and rc is
+	// checked against it below, once the row is loaded.
+	if !rt.awaitingDelegations && (rc.RunID == "" || rc.RunID != rt.runID) {
+		c.mu.Unlock()
+		return
+	}
+	if rt.awaitingDelegations && rc.SessionID != rt.parkedSession {
 		c.mu.Unlock()
 		return
 	}
@@ -921,6 +976,37 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 		l.restIdleAfterPersonTurn(ctx, id, rc)
 		return
 	}
+	c.mu.Unlock()
+
+	// A delegation that ended its turn to wait for delegations of its own
+	// is not finished — that is how an agent waits, and its own
+	// completion inbox will wake it to carry on. Finalizing here told the
+	// parent its delegation had answered, and a pipeline that starts a
+	// reviewer the moment the developer "finishes" then ran the review
+	// against work that was still being written.
+	//
+	// So park instead: the workspace stays live, the row stays running
+	// (which is what task_result reports), and nothing is delivered. The
+	// continuation that resumes the session ends in this same function,
+	// and finalizes there — or parks again, for as many rounds as the
+	// delegation needs.
+	//
+	// Only for a run that ended cleanly: an error or a cancel is this
+	// delegation's own outcome, and no child's result changes it.
+	if !rc.Cancelled && rc.Error == "" && l.awaitsOwnDelegations(ctx, rc.SessionID) {
+		c.mu.Lock()
+		if c.runtime == rt {
+			rt.runID = ""
+			rt.awaitingDelegations = true
+			rt.parkedSession = rc.SessionID
+		}
+		c.mu.Unlock()
+		slog.Info("Delegation is waiting on delegations of its own; not finalizing yet",
+			"component", "thread", "id", id, "session_id", rc.SessionID)
+		return
+	}
+
+	c.mu.Lock()
 	c.runtime = nil
 	depth := c.depth
 	c.mu.Unlock()
@@ -1047,6 +1133,36 @@ func (l *lifecycle) finalizeTask(ctx context.Context, st Thread, status Status, 
 	}
 	l.publish(EventStatusChanged, final)
 	return final, nil
+}
+
+// awaitsOwnDelegations reports whether sessionID has delegations of its
+// own that are not yet accounted for: still running, or terminal with
+// their result not yet handed to this session (the durable outbox bit —
+// a child that finished a moment ago is a wake this session has coming,
+// not an answer it already has).
+//
+// A store that cannot answer is treated as "nothing outstanding": the
+// caller then finalizes exactly as it always did, which is the behaviour
+// a failed read must not be allowed to change.
+func (l *lifecycle) awaitsOwnDelegations(ctx context.Context, sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	all, err := l.store.ListAll(ctx)
+	if err != nil {
+		slog.Warn("Could not check a delegation's own delegations before finalizing it",
+			"component", "thread", "session_id", sessionID, "error", err)
+		return false
+	}
+	for _, child := range all {
+		if child.ParentSessionID != sessionID {
+			continue
+		}
+		if child.Status == StatusRunning || child.CompletionPending {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thread, depth int) {

@@ -414,14 +414,19 @@ func (t *TaskManager) Get(ctx context.Context, id string) (Thread, error) {
 // Get-then-delegate wrapper; see [lifecycle.cancel] for the mechanics
 // shared with [Manager.Cancel].
 func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
+	// Detached before the read below, not just around the write: a
+	// cancel arriving on a dead context could not even load the task to
+	// cancel it. See detachForTerminalWork.
+	ctx, done := detachForTerminalWork(ctx)
+	defer done()
 	// Admitted like every other mutation: without this a cancel could
 	// start after Shutdown had closed admission and begun joining
 	// workers, and then tear down state those workers were still using.
-	done, err := t.lc.beginOp()
+	admitted, err := t.lc.beginOp()
 	if err != nil {
 		return err
 	}
-	defer done()
+	defer admitted()
 	st, err := t.Get(ctx, id)
 	if err != nil {
 		return err

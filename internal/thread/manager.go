@@ -632,6 +632,10 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 // cancel, and folding a branch back into its base is not a step to
 // interrupt partway.
 func (m *Manager) Cancel(ctx context.Context, idOrName, reason string) error {
+	// See TaskManager.Cancel: the resolve below is part of the terminal
+	// work and has to survive the context the cancel arrived on.
+	ctx, released := detachForTerminalWork(ctx)
+	defer released()
 	done, err := m.lc.beginOp()
 	if err != nil {
 		return err
