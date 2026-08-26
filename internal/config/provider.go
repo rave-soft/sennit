@@ -48,6 +48,14 @@ type ProviderConfig struct {
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 
+	// Account is the ID of the account (see internal/providers/accounts)
+	// whose credentials this provider entry currently carries. The
+	// APIKey/OAuthToken/ProxyURL fields above are a projection of that
+	// account onto this config entry, not independent state; a provider
+	// with only one account may leave this empty. Nothing reads or writes
+	// this field yet — account switching is wired up in a later change.
+	Account string `json:"account,omitempty" jsonschema:"description=ID of the active account for this provider, if it has more than one"`
+
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
 
@@ -168,6 +176,19 @@ func (c *ProviderConfig) SetupCodex() {
 	accountID := codex.AccountID(c.APIKey)
 	if accountID == "" && c.OAuthToken != nil {
 		accountID = codex.AccountID(c.OAuthToken.AccessToken)
+	}
+	// codex.Headers omits the account header entirely when accountID is
+	// "" (personal-plan tokens carry no chatgpt_account_id claim), and
+	// maps.Copy only ever adds or overwrites — it never deletes. Left
+	// alone, a switch from an account whose token names one to an
+	// account whose token doesn't would leave the PREVIOUS account's
+	// header sitting in ExtraHeaders, so the backend would keep acting
+	// on its behalf instead of falling back to the token's own account
+	// as it should. Delete it explicitly so an unclaimed accountID
+	// really does mean "let the backend decide," not "whoever asked
+	// last."
+	if accountID == "" {
+		delete(c.ExtraHeaders, codex.AccountIDHeader)
 	}
 	maps.Copy(c.ExtraHeaders, codex.Headers(accountID))
 }

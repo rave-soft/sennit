@@ -684,6 +684,10 @@
           "description": "Whether this provider is disabled",
           "default": false
         },
+        "account": {
+          "type": "string",
+          "description": "ID of the active account for this provider"
+        },
         "system_prompt_prefix": {
           "type": "string",
           "description": "Custom prefix to add to system prompts for this provider"

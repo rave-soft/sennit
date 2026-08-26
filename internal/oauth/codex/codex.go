@@ -85,10 +85,10 @@ func RedirectURI() string {
 	return fmt.Sprintf("http://localhost:%d%s", callbackPort, callbackPath)
 }
 
-// accountIDHeader carries the ChatGPT account ID on outgoing requests. It is
+// AccountIDHeader carries the ChatGPT account ID on outgoing requests. It is
 // also how usageTransport tells whose response it is looking at, since a
 // snapshot is only ever attached to the request that produced it.
-const accountIDHeader = "chatgpt-account-id"
+const AccountIDHeader = "chatgpt-account-id"
 
 // Headers returns the headers every Codex backend request needs beyond
 // Authorization, given the account the token belongs to. accountID may be
@@ -101,7 +101,7 @@ func Headers(accountID string) map[string]string {
 		"OpenAI-Beta": "responses=experimental",
 	}
 	if accountID != "" {
-		headers[accountIDHeader] = accountID
+		headers[AccountIDHeader] = accountID
 	}
 	return headers
 }

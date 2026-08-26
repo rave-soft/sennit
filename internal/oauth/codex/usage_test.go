@@ -194,7 +194,7 @@ func TestUsageTransportRecordsPerAccount(t *testing.T) {
 	client := &http.Client{Transport: NewUsageTransport(nil)}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
-	req.Header.Set(accountIDHeader, "acct-42")
+	req.Header.Set(AccountIDHeader, "acct-42")
 	resp, err := client.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())

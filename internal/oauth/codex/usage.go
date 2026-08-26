@@ -224,7 +224,7 @@ func (t *usageTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	// Read the account off the request before handing it to base: after
 	// RoundTrip returns, req is no longer ours to touch.
-	accountID := req.Header.Get(accountIDHeader)
+	accountID := req.Header.Get(AccountIDHeader)
 	resp, err := base.RoundTrip(req)
 	if err != nil || resp == nil {
 		return resp, err

@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -209,7 +210,25 @@ func (s *ConfigStore) CredentialVersion() uint64 {
 // The provider's model identity is preserved by the caller; incrementing the
 // store version forces future runtime compilation to construct a provider with
 // the newly published credentials.
+//
+// It is a thin wrapper over UpdateProviderAccount with proxyURL nil, i.e.
+// "leave the provider's proxy alone" — this entry point predates per-account
+// proxies and its callers (credentials.Manager, runtime_builder.go's token
+// refresh path) have no proxy to publish.
 func (s *ConfigStore) UpdateProviderCredentials(providerID, apiKey string, token *oauth.Token) error {
+	return s.UpdateProviderAccount(providerID, apiKey, token, nil)
+}
+
+// UpdateProviderAccount publishes a full account switch: credentials and,
+// when proxyURL is non-nil, the proxy those requests take.
+//
+// proxyURL distinguishes "don't touch the provider's proxy" (nil) from
+// "set it to exactly this" (non-nil), including the empty string (clear
+// any override, fall back to the environment) and [proxyhttp.Direct]
+// ("none", force a direct connection). A plain string parameter could not
+// carry that distinction — an empty string would be ambiguous between
+// "leave it" and "clear it" — hence the pointer.
+func (s *ConfigStore) UpdateProviderAccount(providerID, apiKey string, token *oauth.Token, proxyURL *string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -224,8 +243,14 @@ func (s *ConfigStore) UpdateProviderCredentials(providerID, apiKey string, token
 	}
 	provider.APIKey = apiKey
 	provider.OAuthToken = token
-	if providerID == string(catwalk.InferenceProviderCopilot) {
+	if proxyURL != nil {
+		provider.ProxyURL = *proxyURL
+	}
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
 		provider.SetupGitHubCopilot()
+	case codex.ProviderID:
+		provider.SetupCodex()
 	}
 	cfg.Providers.Set(providerID, provider)
 	s.credentialVersion.Add(1)
