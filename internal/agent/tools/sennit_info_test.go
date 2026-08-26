@@ -552,6 +552,11 @@ func TestSennitInfo_Hooks_NoHooks(t *testing.T) {
 
 // TestSennitInfo_Problems_None verifies the section is omitted for a clean
 // config, matching the other [section] omission tests above.
+//
+// The environment problems are stubbed out rather than read from the host:
+// they report what the machine is missing, so a CI runner with no clipboard
+// helper installed would otherwise put a [problems] section in the output of
+// a config that has nothing wrong with it.
 func TestSennitInfo_Problems_None(t *testing.T) {
 	t.Parallel()
 
@@ -560,7 +565,7 @@ func TestSennitInfo_Problems_None(t *testing.T) {
 		Options:   &config.Options{},
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil, func() []config.Problem { return nil })
 	require.NotContains(t, output, "[problems]")
 }
 

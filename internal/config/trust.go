@@ -10,7 +10,7 @@ import (
 
 func IsTrusted(workingDir string) bool {
 	info, err := os.Lstat(trustPath(workingDir))
-	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0
+	return err == nil && info.Mode().IsRegular() && markerIsPrivate(info)
 }
 
 func Trust(workingDir string) error {

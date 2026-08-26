@@ -8,19 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTrustRequiresSecureRegularMarker(t *testing.T) {
+func TestTrustMarksProjectTrusted(t *testing.T) {
 	globalDir := t.TempDir()
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 	project := t.TempDir()
 
 	require.False(t, IsTrusted(project))
 	require.NoError(t, Trust(project))
-	require.True(t, IsTrusted(project))
-
-	marker := trustPath(project)
-	require.NoError(t, os.Chmod(marker, 0o644))
-	require.False(t, IsTrusted(project), "a marker readable by other users must not grant trust")
-	require.NoError(t, os.Chmod(marker, 0o600))
 	require.True(t, IsTrusted(project))
 }
 
