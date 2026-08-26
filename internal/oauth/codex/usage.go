@@ -1,6 +1,9 @@
 package codex
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -95,33 +98,113 @@ func headerTime(h http.Header, name string) time.Time {
 	return time.Unix(int64(seconds), 0)
 }
 
-// latestUsage holds the most recent snapshot for the process.
+// usageStore holds the most recent snapshot per account.
 //
-// It is package state because that is what it describes: one machine, one
-// signed-in account, one allowance, read by the UI and written by whichever
-// request happened last. Threading it through the provider stack to the
-// sidebar would touch a dozen types to say the same thing.
-var latestUsage struct {
+// It is package state because that is what it describes: one machine,
+// possibly several signed-in accounts, each with its own allowance, read by
+// the UI and written by whichever request happened last for that account.
+// Threading it through the provider stack to the sidebar would touch a
+// dozen types to say the same thing.
+//
+// The empty accountID is a legal key, not a missing one: personal plans
+// never send the chatgpt-account-id header (see Headers), so their snapshot
+// has to live somewhere too, and "" is where it lands.
+var usageStore struct {
 	sync.RWMutex
-	usage Usage
-	known bool
+	byAccount map[string]Usage
+	latest    string
+	hasLatest bool
 }
 
-// RecordUsage stores a snapshot as the current one.
+// RecordUsageFor stores a snapshot for one account.
+func RecordUsageFor(accountID string, u Usage) {
+	usageStore.Lock()
+	defer usageStore.Unlock()
+	if usageStore.byAccount == nil {
+		usageStore.byAccount = make(map[string]Usage)
+	}
+	usageStore.byAccount[accountID] = u
+	usageStore.latest = accountID
+	usageStore.hasLatest = true
+}
+
+// RecordUsage stores a snapshot under the empty accountID, the personal-plan
+// case. Production code records through the transport, which knows whose
+// response it is holding; this wrapper's only remaining callers are tests in
+// other packages that stage a snapshot for the sidebar to render.
 func RecordUsage(u Usage) {
-	latestUsage.Lock()
-	defer latestUsage.Unlock()
-	latestUsage.usage = u
-	latestUsage.known = true
+	RecordUsageFor("", u)
 }
 
-// LatestUsage returns the most recent snapshot, and whether there is one.
-// Nothing is reported until the account has made a request, since the
-// allowance is only ever quoted in a response.
+// UsageFor returns the snapshot for one account, and whether there is one.
+func UsageFor(accountID string) (Usage, bool) {
+	usageStore.RLock()
+	defer usageStore.RUnlock()
+	u, ok := usageStore.byAccount[accountID]
+	return u, ok
+}
+
+// LatestUsage returns the snapshot for whichever account made the most
+// recent request, and whether there is one. Nothing is reported until some
+// account has made a request, since the allowance is only ever quoted in a
+// response.
 func LatestUsage() (Usage, bool) {
-	latestUsage.RLock()
-	defer latestUsage.RUnlock()
-	return latestUsage.usage, latestUsage.known
+	usageStore.RLock()
+	defer usageStore.RUnlock()
+	if !usageStore.hasLatest {
+		return Usage{}, false
+	}
+	return usageStore.byAccount[usageStore.latest], true
+}
+
+// resetUsage clears the store. Tests that touch package state call this so
+// they do not leak snapshots into one another; such tests must not run
+// t.Parallel().
+func resetUsage() {
+	usageStore.Lock()
+	defer usageStore.Unlock()
+	usageStore.byAccount = nil
+	usageStore.latest = ""
+	usageStore.hasLatest = false
+}
+
+// FetchUsage asks the Codex backend for one account's current allowance, by
+// sending the same request FetchModels does and reading only its X-Codex-*
+// response headers.
+//
+// It deliberately does NOT go through NewUsageTransport and does NOT call
+// RecordUsageFor: the account being asked about here need not be the active
+// one — this is how account management checks a not-currently-used
+// account's limits, and how rotation will later pick among several — so
+// writing the result into the store would silently make it "latest" and
+// hand the sidebar someone else's numbers. Do not "optimize" this to reuse
+// NewUsageTransport; that would reintroduce exactly that bug.
+//
+// The Codex backend is confirmed to set these headers on /responses; /models
+// carrying them too is an assumption, not a documented guarantee (see
+// TestLiveFetchUsage). Their absence is therefore reported as
+// (Usage{}, false, nil), not an error — an honest "unknown" rather than a
+// guess.
+func FetchUsage(ctx context.Context, proxyURL, accessToken, accountID string) (Usage, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, modelsTimeout)
+	defer cancel()
+
+	req, client, err := newModelsRequest(ctx, proxyURL, accessToken, accountID)
+	if err != nil {
+		return Usage{}, false, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return Usage{}, false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return Usage{}, false, fmt.Errorf("codex usage fetch failed: %s: %s", resp.Status, truncate(string(body), 200))
+	}
+	usage, ok := ParseUsage(resp.Header)
+	return usage, ok, nil
 }
 
 // NewUsageTransport wraps base so every Codex response updates the current
@@ -139,12 +222,15 @@ func (t *usageTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	// Read the account off the request before handing it to base: after
+	// RoundTrip returns, req is no longer ours to touch.
+	accountID := req.Header.Get(accountIDHeader)
 	resp, err := base.RoundTrip(req)
 	if err != nil || resp == nil {
 		return resp, err
 	}
 	if usage, ok := ParseUsage(resp.Header); ok {
-		RecordUsage(usage)
+		RecordUsageFor(accountID, usage)
 	}
 	return resp, err
 }

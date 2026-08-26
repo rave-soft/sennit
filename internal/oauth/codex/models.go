@@ -16,6 +16,11 @@ import (
 // on config load, so it must fail fast rather than hold either up.
 const modelsTimeout = 10 * time.Second
 
+// apiBaseURL is APIBaseURL behind a variable so tests can point requests at
+// an httptest server, the same trick codex.go plays with callbackPort.
+// Production code never assigns to this.
+var apiBaseURL = APIBaseURL
+
 // modelEntry is the subset of the Codex model list Sennit uses. The endpoint
 // returns a great deal more (prompt templates, tool modes, NUX copy) that
 // belongs to the Codex CLI's own UI, not to a model catalog.
@@ -39,19 +44,17 @@ type modelEntry struct {
 	} `json:"supported_reasoning_levels"`
 }
 
-// FetchModels asks the Codex backend which models the signed-in account can
-// use. The list is per-account (plans differ, and models come and go), which
-// is why it is fetched rather than shipped in the catalog.
-func FetchModels(ctx context.Context, proxyURL, accessToken, accountID string) ([]catwalk.Model, error) {
-	ctx, cancel := context.WithTimeout(ctx, modelsTimeout)
-	defer cancel()
-
+// newModelsRequest builds the GET /models request that both FetchModels and
+// FetchUsage send — same URL, same headers, same proxy-aware client. The two
+// callers only differ in which part of the response they read: one the
+// body, the other the X-Codex-* headers riding along with it.
+func newModelsRequest(ctx context.Context, proxyURL, accessToken, accountID string) (*http.Request, *http.Client, error) {
 	// client_version is mandatory here: the endpoint answers 400 without it,
 	// since which models it lists depends on what the client can drive.
-	url := APIBaseURL + "/models?client_version=" + clientVersion
+	url := apiBaseURL + "/models?client_version=" + clientVersion
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
@@ -60,6 +63,20 @@ func FetchModels(ctx context.Context, proxyURL, accessToken, accountID string) (
 	}
 
 	client, err := httpClient(proxyURL, modelsTimeout)
+	if err != nil {
+		return nil, nil, err
+	}
+	return req, client, nil
+}
+
+// FetchModels asks the Codex backend which models the signed-in account can
+// use. The list is per-account (plans differ, and models come and go), which
+// is why it is fetched rather than shipped in the catalog.
+func FetchModels(ctx context.Context, proxyURL, accessToken, accountID string) ([]catwalk.Model, error) {
+	ctx, cancel := context.WithTimeout(ctx, modelsTimeout)
+	defer cancel()
+
+	req, client, err := newModelsRequest(ctx, proxyURL, accessToken, accountID)
 	if err != nil {
 		return nil, err
 	}

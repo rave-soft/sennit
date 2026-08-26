@@ -57,3 +57,43 @@ func TestLiveAuthAndModels(t *testing.T) {
 		require.Positive(t, model.ContextWindow)
 	}
 }
+
+// TestLiveFetchUsage checks the assumption FetchUsage's doc comment makes:
+// that /models carries the same X-Codex-* rate-limit headers /responses is
+// confirmed to send. That is unverified against the real backend, so this
+// test only logs what it finds and fails solely on a request error — never
+// on ok being false — since the point is to observe the current truth, not
+// lock in a guess as a passing contract.
+//
+//	CODEX_LIVE=1 go test ./internal/oauth/codex/ -run TestLiveFetchUsage -v
+func TestLiveFetchUsage(t *testing.T) {
+	if os.Getenv("CODEX_LIVE") != "1" {
+		t.Skip("set CODEX_LIVE=1 to run against the real Codex backend")
+	}
+	ctx := context.Background()
+	proxy := os.Getenv("CODEX_PROXY")
+
+	disk, ok := TokensFromDisk()
+	require.True(t, ok, "no Codex CLI login on disk to test with")
+
+	token, ok := disk.Token()
+	if !ok {
+		var err error
+		token, err = RefreshToken(ctx, proxy, disk.RefreshToken)
+		require.NoError(t, err)
+	}
+	require.NotEmpty(t, token.AccessToken)
+
+	accountID := AccountID(token.AccessToken)
+	require.NotEmpty(t, accountID, "the access token must name the account to bill")
+
+	usage, ok, err := FetchUsage(ctx, proxy, token.AccessToken, accountID)
+	require.NoError(t, err)
+	if !ok {
+		t.Log("GET /models did not carry X-Codex-* usage headers: FetchUsage's doc comment's assumption does not hold")
+		return
+	}
+	t.Logf("GET /models carried usage headers: plan=%s primary=%d%% (window=%dm) secondary=%d%% (window=%dm)",
+		usage.Plan, usage.Primary.UsedPercent, usage.Primary.WindowMinutes,
+		usage.Secondary.UsedPercent, usage.Secondary.WindowMinutes)
+}
