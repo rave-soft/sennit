@@ -79,3 +79,23 @@ func TestWorktreeRoot_NonGitDirSkipsGitSubprocess(t *testing.T) {
 			"findGitEntry should have short-circuited before computeWorktreeRoot", err)
 	}
 }
+
+// TestGlobalAccountsFile_SitsBesideGlobalConfig pins that the account store
+// always lives in the same directory as sennit.json — including when
+// SENNIT_GLOBAL_CONFIG relocates that directory — so a workspace never goes
+// looking for accounts.json somewhere the rest of the global state isn't.
+func TestGlobalAccountsFile_SitsBesideGlobalConfig(t *testing.T) {
+	path := GlobalAccountsFile()
+	if filepath.Base(path) != "accounts.json" {
+		t.Fatalf("GlobalAccountsFile() = %q, want a file named accounts.json", path)
+	}
+	if filepath.Dir(path) != filepath.Dir(GlobalConfig()) {
+		t.Fatalf("GlobalAccountsFile() = %q, want it beside GlobalConfig() = %q", path, GlobalConfig())
+	}
+
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	if filepath.Dir(GlobalAccountsFile()) != filepath.Dir(GlobalConfig()) {
+		t.Fatalf("GlobalAccountsFile() did not follow SENNIT_GLOBAL_CONFIG to %q", dir)
+	}
+}

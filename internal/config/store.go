@@ -212,19 +212,52 @@ func (s *ConfigStore) CredentialVersion() uint64 {
 // store version forces future runtime compilation to construct a provider with
 // the newly published credentials.
 //
-// It is a thin wrapper over UpdateProviderAccount with accountProxy nil,
-// i.e. "leave the provider's effective proxy alone" — this entry point
-// predates per-account proxies and its callers (credentials.Manager,
-// runtime_builder.go's token refresh path) are updating a token in place,
-// not switching accounts, so the request route should not move.
+// It is a thin wrapper over UpdateProviderAccount with an AccountCredential
+// carrying only APIKey and Token — ProxyURL nil, i.e. "leave the provider's
+// effective proxy alone", and APIKeyTemplate empty, i.e. "leave
+// ProviderConfig.APIKeyTemplate alone". This entry point predates accounts
+// entirely; its callers (credentials.Manager, runtime_builder.go's token
+// refresh path) are updating a token or a resolved key in place, not
+// switching accounts, so neither the request route nor the template should
+// move.
 func (s *ConfigStore) UpdateProviderCredentials(providerID, apiKey string, token *oauth.Token) error {
-	return s.UpdateProviderAccount(providerID, apiKey, token, nil)
+	return s.UpdateProviderAccount(providerID, AccountCredential{APIKey: apiKey, Token: token})
+}
+
+// AccountCredential is everything publishing an account switch needs to
+// hand ConfigStore.UpdateProviderAccount, gathered into one value because
+// the mutator was outgrowing a positional-argument signature.
+type AccountCredential struct {
+	// APIKey is the value requests actually carry in Authorization — for
+	// an API-key account this must already be resolved (no "$VAR" or
+	// "$(cmd)" left in it), and for an OAuth account it is the token's
+	// access token. Sending anything else here would put a raw template
+	// on the wire, so callers resolve before constructing this.
+	APIKey string
+	// APIKeyTemplate is the unresolved form APIKey was resolved from
+	// ("$VAR", "$(cmd)", or a literal key an account happens to store
+	// verbatim). It is kept alongside the resolved APIKey because
+	// ProviderConfig.APIKeyTemplate is what a later auth-error retry
+	// re-resolves from (see runtime_builder.go's refreshApiKeyTemplate);
+	// without republishing it here, a retry after an account switch
+	// would re-resolve the PREVIOUS account's template. Empty means
+	// "nothing to update" — the OAuth path, and UpdateProviderCredentials'
+	// bare-token-refresh callers, have no template at all.
+	APIKeyTemplate string
+	// Token is the OAuth credential, nil for an API-key account.
+	Token *oauth.Token
+	// ProxyURL is the account's own proxy override; nil means "don't
+	// touch the provider's effective proxy route", matching
+	// UpdateProviderAccount's accountProxy parameter before this type
+	// existed — see UpdateProviderAccount's doc comment for the full
+	// resolution rule.
+	ProxyURL *string
 }
 
 // UpdateProviderAccount publishes a full account switch: credentials and,
-// when accountProxy is non-nil, the account's own proxy override.
+// when cred.ProxyURL is non-nil, the account's own proxy override.
 //
-// accountProxy distinguishes "don't touch the proxy route" (nil, used by
+// cred.ProxyURL distinguishes "don't touch the proxy route" (nil, used by
 // UpdateProviderCredentials) from "this account's proxy is exactly this"
 // (non-nil). A non-nil value is resolved against the provider's own
 // configured proxy via accounts.ResolveProxy before being published to
@@ -238,7 +271,7 @@ func (s *ConfigStore) UpdateProviderCredentials(providerID, apiKey string, token
 // everything below it — see ResolveProxy's doc comment for why that
 // distinction matters. A plain string parameter could not carry "don't
 // touch" vs. "clear to provider default" — hence the pointer.
-func (s *ConfigStore) UpdateProviderAccount(providerID, apiKey string, token *oauth.Token, accountProxy *string) error {
+func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCredential) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -251,10 +284,13 @@ func (s *ConfigStore) UpdateProviderAccount(providerID, apiKey string, token *oa
 	if !ok {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
-	provider.APIKey = apiKey
-	provider.OAuthToken = token
-	if accountProxy != nil {
-		provider.ProxyURL = accounts.ResolveProxy(*accountProxy, provider.ConfiguredProxyURL)
+	provider.APIKey = cred.APIKey
+	provider.OAuthToken = cred.Token
+	if cred.APIKeyTemplate != "" {
+		provider.APIKeyTemplate = cred.APIKeyTemplate
+	}
+	if cred.ProxyURL != nil {
+		provider.ProxyURL = accounts.ResolveProxy(*cred.ProxyURL, provider.ConfiguredProxyURL)
 	}
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
@@ -265,6 +301,58 @@ func (s *ConfigStore) UpdateProviderAccount(providerID, apiKey string, token *oa
 	cfg.Providers.Set(providerID, provider)
 	s.credentialVersion.Add(1)
 	s.setConfig(cfg)
+	return nil
+}
+
+// ActivateAccount makes the given account the provider's active one: it
+// publishes the account's credentials and proxy to the running config and
+// persists the choice so the next start comes back to the same account.
+//
+// It publishes to memory before persisting to disk, deliberately the
+// opposite order from most of this file's other credential writers (which
+// write-then-reload). Reversed here because the two failure modes are not
+// symmetric: if the disk write fails after the in-memory publish already
+// landed, the process runs on the right account until it restarts, then
+// falls back to whatever was last durably chosen — annoying, but the same
+// account it would have picked before this call. If the disk write
+// succeeded first and the in-memory publish then failed, the persisted
+// choice would claim an account the running process never actually
+// switched to, and nothing would tell the caller to retry the switch that
+// matters right now. In-memory-first makes the failure the caller actually
+// sees (a returned error) the one that still leaves the account it can act
+// on immediately.
+func (s *ConfigStore) ActivateAccount(scope Scope, providerID string, a accounts.Account) error {
+	if err := a.Validate(); err != nil {
+		return fmt.Errorf("account for provider %s is invalid: %w", providerID, err)
+	}
+
+	cred := AccountCredential{ProxyURL: &a.ProxyURL}
+	switch {
+	case a.Token != nil:
+		// Mirrors SetProviderAPIKey's *oauth.Token case: the access
+		// token is what Authorization actually carries for an OAuth
+		// provider, alongside the full token for refresh.
+		cred.APIKey = a.Token.AccessToken
+		cred.Token = a.Token
+	default:
+		resolved, err := s.Resolve(a.APIKey)
+		if err != nil {
+			return fmt.Errorf("resolving api key for account %s of provider %s: %w", a.ID, providerID, err)
+		}
+		if resolved == "" {
+			return fmt.Errorf("api key for account %s of provider %s resolved to an empty value", a.ID, providerID)
+		}
+		cred.APIKey = resolved
+		cred.APIKeyTemplate = a.APIKey
+	}
+
+	if err := s.UpdateProviderAccount(providerID, cred); err != nil {
+		return err
+	}
+
+	if err := s.SetConfigField(scope, ProviderFieldKey(providerID, "account"), a.ID); err != nil {
+		return fmt.Errorf("persisting active account for provider %s: %w", providerID, err)
+	}
 	return nil
 }
 

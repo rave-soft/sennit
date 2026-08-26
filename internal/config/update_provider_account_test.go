@@ -114,7 +114,7 @@ func TestUpdateProviderAccount_NilAccountProxyLeavesRouteUntouched(t *testing.T)
 	store := newCodexTestStoreWithProxy(t, "http://existing:8080")
 
 	before := store.CredentialVersion()
-	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, nil))
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key"}))
 
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
@@ -130,7 +130,7 @@ func TestUpdateProviderAccount_AccountProxyOverridesConfigured(t *testing.T) {
 
 	accountProxy := "http://account:9090"
 	before := store.CredentialVersion()
-	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &accountProxy))
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &accountProxy}))
 
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
@@ -150,13 +150,13 @@ func TestUpdateProviderAccount_SwitchingBackFallsBackToProviderProxy(t *testing.
 	store := newCodexTestStoreWithProxy(t, "http://provider:8080")
 
 	accountProxy := "http://account:9090"
-	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &accountProxy))
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &accountProxy}))
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://account:9090", provider.ProxyURL)
 
 	noOwnProxy := ""
-	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &noOwnProxy))
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &noOwnProxy}))
 	provider, ok = store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider:8080", provider.ProxyURL, "must fall back to the provider's proxy, not stay on the old account's")
@@ -170,7 +170,7 @@ func TestUpdateProviderAccount_AccountProxyNoneForcesDirect(t *testing.T) {
 
 	none := "none"
 	before := store.CredentialVersion()
-	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &none))
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &none}))
 
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
@@ -189,7 +189,7 @@ func TestUpdateProviderAccount_EmptyConfiguredFallsBackToAccountProxy(t *testing
 	store := newCodexTestStoreWithProxies(t, "", "")
 
 	accountProxy := "http://account:9090"
-	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &accountProxy))
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &accountProxy}))
 
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)

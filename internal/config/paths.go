@@ -87,6 +87,22 @@ func GlobalLogFile() string {
 	return filepath.Join(GlobalDBDir(), "logs", brand.LogFile)
 }
 
+// GlobalAccountsFile returns the path to the provider account store,
+// ~/.config/sennit/accounts.json by default (or alongside SENNIT_GLOBAL_
+// CONFIG's directory when set). It lives next to GlobalConfig rather than
+// under a workspace: providers are global-only in this project (see
+// globalonly.go), and an account belongs to a provider, not a project.
+//
+// It is a file of its own rather than a section of sennit.json because
+// sennit.json is meant to be read and hand-edited by users, and OAuth
+// tokens for several accounts per provider — plus usage snapshots that
+// churn far more often than the rest of the config — would bloat it into
+// something nobody wants to open. See internal/providers/accounts' package
+// doc for the account model this file holds.
+func GlobalAccountsFile() string {
+	return filepath.Join(GlobalDBDir(), "accounts.json")
+}
+
 // shellConfigSibling returns the sennitrc path that sits alongside a given
 // sennit.json path (same directory). Used so global config locations pick up a
 // shell config, not just JSON.
