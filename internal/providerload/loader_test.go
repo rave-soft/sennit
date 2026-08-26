@@ -77,7 +77,36 @@ func TestLoaderResolvesCustomProviderValues(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "header-value", provider.ExtraHeaders["X-Test"])
 	require.Equal(t, "http://proxy.test:8080", provider.ProxyURL)
+	// ConfiguredProxyURL must track ProxyURL after load — it is the base
+	// UpdateProviderAccount resolves an account's effective proxy from,
+	// so a load that leaves it unset would make the very first account
+	// switch forget the provider's own proxy.
+	require.Equal(t, "http://proxy.test:8080", provider.ConfiguredProxyURL)
 	require.NotEmpty(t, config.Doctor(cfg))
+}
+
+// TestLoaderMergeCatalogProvidersSetsConfiguredProxyURL covers the other
+// load path that writes ProxyURL (mergeCatalogProviders, for providers that
+// come from the embedded catalog rather than a user-defined "local" one):
+// ConfiguredProxyURL must be populated there too.
+func TestLoaderMergeCatalogProvidersSetsConfiguredProxyURL(t *testing.T) {
+	cfg := &config.Config{
+		Options: &config.Options{},
+		Providers: csync.NewMap(map[string]config.ProviderConfig{
+			"azure": {ProxyURL: "$AZURE_PROXY"},
+		}),
+	}
+	environment := testEnvironment{
+		"AZURE_ENDPOINT":           "https://azure.test",
+		"AZURE_OPENAI_API_VERSION": "2026-01-01",
+		"AZURE_PROXY":              "http://azure-proxy.test:8080",
+	}
+	_, err := New().mergeCatalogProviders(cfg, nil, environment, environment, []catwalk.Provider{{ID: catwalk.InferenceProviderAzure, APIEndpoint: "$AZURE_ENDPOINT", Models: []catwalk.Model{{ID: "model"}}}}, "", os.Stat)
+	require.NoError(t, err)
+	provider, ok := cfg.Providers.Get("azure")
+	require.True(t, ok)
+	require.Equal(t, "http://azure-proxy.test:8080", provider.ProxyURL)
+	require.Equal(t, "http://azure-proxy.test:8080", provider.ConfiguredProxyURL)
 }
 
 func TestLoaderCatalogCredentialPolicies(t *testing.T) {

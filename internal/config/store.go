@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -211,24 +212,33 @@ func (s *ConfigStore) CredentialVersion() uint64 {
 // store version forces future runtime compilation to construct a provider with
 // the newly published credentials.
 //
-// It is a thin wrapper over UpdateProviderAccount with proxyURL nil, i.e.
-// "leave the provider's proxy alone" — this entry point predates per-account
-// proxies and its callers (credentials.Manager, runtime_builder.go's token
-// refresh path) have no proxy to publish.
+// It is a thin wrapper over UpdateProviderAccount with accountProxy nil,
+// i.e. "leave the provider's effective proxy alone" — this entry point
+// predates per-account proxies and its callers (credentials.Manager,
+// runtime_builder.go's token refresh path) are updating a token in place,
+// not switching accounts, so the request route should not move.
 func (s *ConfigStore) UpdateProviderCredentials(providerID, apiKey string, token *oauth.Token) error {
 	return s.UpdateProviderAccount(providerID, apiKey, token, nil)
 }
 
 // UpdateProviderAccount publishes a full account switch: credentials and,
-// when proxyURL is non-nil, the proxy those requests take.
+// when accountProxy is non-nil, the account's own proxy override.
 //
-// proxyURL distinguishes "don't touch the provider's proxy" (nil) from
-// "set it to exactly this" (non-nil), including the empty string (clear
-// any override, fall back to the environment) and [proxyhttp.Direct]
-// ("none", force a direct connection). A plain string parameter could not
-// carry that distinction — an empty string would be ambiguous between
-// "leave it" and "clear it" — hence the pointer.
-func (s *ConfigStore) UpdateProviderAccount(providerID, apiKey string, token *oauth.Token, proxyURL *string) error {
+// accountProxy distinguishes "don't touch the proxy route" (nil, used by
+// UpdateProviderCredentials) from "this account's proxy is exactly this"
+// (non-nil). A non-nil value is resolved against the provider's own
+// configured proxy via accounts.ResolveProxy before being published to
+// ProviderConfig.ProxyURL — the field every request-sending call site
+// actually reads — rather than written there directly: an empty string
+// means "this account has no proxy of its own," which must fall back to
+// the provider's, not clear the route entirely, and only
+// ConfiguredProxyURL (set once at load time, never touched by an account
+// switch) remembers what that provider-level value was. [proxyhttp.Direct]
+// ("none") is a real value at either level, not emptiness, and beats
+// everything below it — see ResolveProxy's doc comment for why that
+// distinction matters. A plain string parameter could not carry "don't
+// touch" vs. "clear to provider default" — hence the pointer.
+func (s *ConfigStore) UpdateProviderAccount(providerID, apiKey string, token *oauth.Token, accountProxy *string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -243,8 +253,8 @@ func (s *ConfigStore) UpdateProviderAccount(providerID, apiKey string, token *oa
 	}
 	provider.APIKey = apiKey
 	provider.OAuthToken = token
-	if proxyURL != nil {
-		provider.ProxyURL = *proxyURL
+	if accountProxy != nil {
+		provider.ProxyURL = accounts.ResolveProxy(*accountProxy, provider.ConfiguredProxyURL)
 	}
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):

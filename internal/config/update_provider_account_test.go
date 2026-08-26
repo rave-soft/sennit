@@ -39,11 +39,25 @@ func newCodexTestStore(t *testing.T) *ConfigStore {
 // construction time, rather than a test poking the published Config in
 // place afterwards — Config snapshots are meant to be immutable once
 // published (mutators clone-and-swap; see the ConfigStore doc comment in
-// store.go), so tests should set up state the same way.
+// store.go), so tests should set up state the same way. ProxyURL and
+// ConfiguredProxyURL start equal, matching what providerload sets them to
+// at load time, before any account has ever overridden the route.
 func newCodexTestStoreWithProxy(t *testing.T, proxyURL string) *ConfigStore {
 	t.Helper()
+	return newCodexTestStoreWithProxies(t, proxyURL, proxyURL)
+}
+
+// newCodexTestStoreWithProxies seeds ProxyURL and ConfiguredProxyURL
+// independently, for tests that need to simulate a route an earlier
+// account switch already moved off of the provider's configured value.
+func newCodexTestStoreWithProxies(t *testing.T, proxyURL, configuredProxyURL string) *ConfigStore {
+	t.Helper()
 	providers := csync.NewMap[string, ProviderConfig]()
-	providers.Set(codex.ProviderID, ProviderConfig{ID: codex.ProviderID, ProxyURL: proxyURL})
+	providers.Set(codex.ProviderID, ProviderConfig{
+		ID:                 codex.ProviderID,
+		ProxyURL:           proxyURL,
+		ConfiguredProxyURL: configuredProxyURL,
+	})
 	return &ConfigStore{config: &Config{Providers: providers}}
 }
 
@@ -94,7 +108,7 @@ func TestUpdateProviderCredentials_CodexClearsHeaderWhenAccountUnclaimed(t *test
 	require.False(t, present, "stale chatgpt-account-id header should have been removed")
 }
 
-func TestUpdateProviderAccount_NilProxyLeavesProviderProxyUntouched(t *testing.T) {
+func TestUpdateProviderAccount_NilAccountProxyLeavesRouteUntouched(t *testing.T) {
 	t.Parallel()
 
 	store := newCodexTestStoreWithProxy(t, "http://existing:8080")
@@ -105,28 +119,54 @@ func TestUpdateProviderAccount_NilProxyLeavesProviderProxyUntouched(t *testing.T
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://existing:8080", provider.ProxyURL)
+	require.Equal(t, "http://existing:8080", provider.ConfiguredProxyURL)
 	require.Greater(t, store.CredentialVersion(), before)
 }
 
-func TestUpdateProviderAccount_EmptyPointerClearsProxy(t *testing.T) {
+func TestUpdateProviderAccount_AccountProxyOverridesConfigured(t *testing.T) {
 	t.Parallel()
 
-	store := newCodexTestStoreWithProxy(t, "http://existing:8080")
+	store := newCodexTestStoreWithProxy(t, "http://provider:8080")
 
-	empty := ""
+	accountProxy := "http://account:9090"
 	before := store.CredentialVersion()
-	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &empty))
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &accountProxy))
 
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
-	require.Equal(t, "", provider.ProxyURL)
+	require.Equal(t, "http://account:9090", provider.ProxyURL, "effective proxy should be the account's")
+	require.Equal(t, "http://provider:8080", provider.ConfiguredProxyURL, "provider's configured proxy must survive the switch")
 	require.Greater(t, store.CredentialVersion(), before)
 }
 
-func TestUpdateProviderAccount_NoneSetsDirect(t *testing.T) {
+// TestUpdateProviderAccount_SwitchingBackFallsBackToProviderProxy is the
+// regression this whole ConfiguredProxyURL split exists for: switching to
+// an account with its own proxy and then to one without must return to the
+// provider's configured proxy, not silently keep routing through the
+// PREVIOUS account's proxy because that's what ProxyURL last held.
+func TestUpdateProviderAccount_SwitchingBackFallsBackToProviderProxy(t *testing.T) {
 	t.Parallel()
 
-	store := newCodexTestStore(t)
+	store := newCodexTestStoreWithProxy(t, "http://provider:8080")
+
+	accountProxy := "http://account:9090"
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &accountProxy))
+	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "http://account:9090", provider.ProxyURL)
+
+	noOwnProxy := ""
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &noOwnProxy))
+	provider, ok = store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "http://provider:8080", provider.ProxyURL, "must fall back to the provider's proxy, not stay on the old account's")
+	require.Equal(t, "http://provider:8080", provider.ConfiguredProxyURL)
+}
+
+func TestUpdateProviderAccount_AccountProxyNoneForcesDirect(t *testing.T) {
+	t.Parallel()
+
+	store := newCodexTestStoreWithProxy(t, "http://provider:8080")
 
 	none := "none"
 	before := store.CredentialVersion()
@@ -135,7 +175,25 @@ func TestUpdateProviderAccount_NoneSetsDirect(t *testing.T) {
 	provider, ok := store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "none", provider.ProxyURL)
+	require.Equal(t, "http://provider:8080", provider.ConfiguredProxyURL)
 	require.Greater(t, store.CredentialVersion(), before)
+}
+
+// TestUpdateProviderAccount_EmptyConfiguredFallsBackToAccountProxy covers a
+// provider loaded without ConfiguredProxyURL ever having been set (an old
+// load path, or a test that forgot it): the account's own proxy must still
+// become effective rather than resolving to emptiness.
+func TestUpdateProviderAccount_EmptyConfiguredFallsBackToAccountProxy(t *testing.T) {
+	t.Parallel()
+
+	store := newCodexTestStoreWithProxies(t, "", "")
+
+	accountProxy := "http://account:9090"
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, "key", nil, &accountProxy))
+
+	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "http://account:9090", provider.ProxyURL)
 }
 
 func TestUpdateProviderAccount_CopilotPathUnaffected(t *testing.T) {

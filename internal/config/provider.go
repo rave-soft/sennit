@@ -36,7 +36,25 @@ type ProviderConfig struct {
 	// per-provider proxy override — requests fall back to the standard
 	// HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment variables via net/http's
 	// default proxy resolution.
+	//
+	// This is the EFFECTIVE proxy: everywhere in Sennit that sends a
+	// request reads this field and this field alone, so a switch to an
+	// account with its own proxy is published here (see
+	// ConfigStore.UpdateProviderAccount), not through a second field
+	// every call site would have had to learn to also check. See
+	// ConfiguredProxyURL for the value this is computed from.
 	ProxyURL string `json:"proxy_url,omitempty" jsonschema:"description=Proxy URL for requests to this provider (http/https/socks5); set to \"none\" to force a direct connection even if HTTP_PROXY/HTTPS_PROXY are set in the environment,example=http://localhost:8080"`
+	// ConfiguredProxyURL is the provider-level proxy exactly as
+	// configured (i.e. what ProxyURL held before any account ever
+	// overrode it) — the base that UpdateProviderAccount resolves the
+	// effective ProxyURL from on every account switch. Without it, a
+	// switch away from an account with its own proxy to one with none
+	// would have nothing to fall back to except whatever ProxyURL
+	// happened to hold at that moment — the PREVIOUS account's proxy —
+	// instead of the provider's own. Set once, at load time, alongside
+	// ProxyURL (see providerload); never serialized, since it is derived
+	// from the same source ProxyURL already reads from disk.
+	ConfiguredProxyURL string `json:"-"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
 	// The provider's API key.

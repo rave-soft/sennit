@@ -99,6 +99,7 @@ func (l *Loader) mergeCatalogProviders(cfg *config.Config, store config.RuntimeS
 		prepared.Models = provider.Models
 		prepared.ExtraHeaders = headers
 		prepared.ProxyURL = config.ResolveOptionalProviderProxy(userConfig.ProxyURL, resolver, id)
+		prepared.ConfiguredProxyURL = prepared.ProxyURL
 		if prepared.ExtraParams == nil {
 			prepared.ExtraParams = make(map[string]string)
 		}

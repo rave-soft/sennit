@@ -138,6 +138,7 @@ func (l *Loader) validateCustomProviders(cfg *config.Config, knownProviderNames 
 		}
 
 		providerConfig.ProxyURL = resolveOptionalProxy(providerConfig.ProxyURL, resolver, id)
+		providerConfig.ConfiguredProxyURL = providerConfig.ProxyURL
 
 		cfg.Providers.Set(id, providerConfig)
 	}
