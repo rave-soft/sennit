@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1431,7 +1432,21 @@ func TestClient_FailedRestartRollsBackCandidateFilesAndRetries(t *testing.T) {
 	client.Shutdown()
 }
 
+// TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown wedges a
+// candidate generation on a send the server has stopped reading, then
+// forces its cleanup: the kill and the shutdown that follow must not wait
+// on that send.
+//
+// Unix only, because the wedge is: the test fills the server's stdin pipe
+// with 8MB the fake server never reads, and relies on the write blocking
+// on back-pressure. On a Windows runner that write returns an error
+// instead ("large send completed before process destruction: jsonrpc2:
+// connection is closed"), so the state the test is about never exists
+// there and there is nothing to assert.
 func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("the blocked-send wedge this test needs does not reproduce on Windows")
+	}
 	exe, err := os.Executable()
 	require.NoError(t, err)
 	dir := t.TempDir()
