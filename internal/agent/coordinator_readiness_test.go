@@ -63,6 +63,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		mcp:         reg,
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.newCoordinatorComponents()
 
 	// Arm the MCP init gate so buildAgent's readiness goroutine blocks in
 	// WaitForInit. We never complete init, so the goroutine stays parked; the
@@ -75,7 +76,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 
 	ctx, cancel := context.WithCancel(context.Background())
-	_, err = coord.buildAgent(ctx, p, agentCfg, false)
+	_, err = coord.delegation.buildAgent(ctx, p, agentCfg, false)
 	require.NoError(t, err)
 
 	// The caller goes away, mirroring an HTTP handler returning and canceling
@@ -83,7 +84,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	cancel()
 
 	done := make(chan error, 1)
-	go func() { done <- coord.readyWg.Wait() }()
+	go func() { done <- coord.dispatcher.lifecycle.waitPrimary() }()
 
 	select {
 	case err := <-done:

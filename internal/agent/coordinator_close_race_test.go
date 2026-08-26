@@ -4,6 +4,9 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
@@ -23,6 +26,26 @@ import (
 // readyGroup.Wait at most once (via closeOnce) no matter how many callers
 // invoke it concurrently. Run with -race -count=N; a regression panics the
 // test binary rather than failing an assertion.
+func TestCoordinatorCloseWaitsForBlockedFinalizerReadiness(t *testing.T) {
+	lifecycle := &readinessLifecycle{}
+	finalizer := &delegationFinalizer{lifecycle: lifecycle}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	group := &errgroup.Group{}
+	require.True(t, finalizer.lifecycle.launch(group, func(context.Context) error {
+		close(started)
+		<-release
+		return nil
+	}))
+	<-started
+
+	closeCtx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, (&turnDispatcher{lifecycle: lifecycle}).Close(closeCtx), context.DeadlineExceeded)
+	close(release)
+	require.NoError(t, (&turnDispatcher{lifecycle: lifecycle}).Close(t.Context()))
+}
+
 func TestCoordinatorCloseRaceWithBuildAgent(t *testing.T) {
 	env := testEnv(t)
 
@@ -53,6 +76,7 @@ func TestCoordinatorCloseRaceWithBuildAgent(t *testing.T) {
 		mcp:         mcp.NewRegistry(),
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.newCoordinatorComponents()
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
@@ -67,7 +91,7 @@ func TestCoordinatorCloseRaceWithBuildAgent(t *testing.T) {
 			defer wg.Done()
 			// isSubAgent=true: this is the path that rebuilds on every
 			// run and, before the fix, shared readyGroup unprotected.
-			_, _ = coord.buildAgent(context.Background(), p, agentCfg, true)
+			_, _ = coord.delegation.buildAgent(context.Background(), p, agentCfg, true)
 		}()
 	}
 

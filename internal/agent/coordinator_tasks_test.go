@@ -81,6 +81,7 @@ func newTasksTestCoordinator(t *testing.T, taskManager tools.TaskManager) (*coor
 		mcp:         mcp.NewRegistry(),
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.newCoordinatorComponents()
 	coord.SetDelegationTools(nil, taskManager)
 	return coord, cfg.Config().Agents[config.AgentCoder]
 }
@@ -88,7 +89,7 @@ func newTasksTestCoordinator(t *testing.T, taskManager tools.TaskManager) (*coor
 func TestBuildTools_TaskToolsPresentForMainAgentWithManager(t *testing.T) {
 	coord, agentCfg := newTasksTestCoordinator(t, noopTaskManager{})
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -100,7 +101,7 @@ func TestBuildTools_TaskToolsPresentForMainAgentWithManager(t *testing.T) {
 func TestBuildTools_TaskToolsAbsentWhenManagerNil(t *testing.T) {
 	coord, agentCfg := newTasksTestCoordinator(t, nil)
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -112,7 +113,7 @@ func TestBuildTools_TaskToolsAbsentWhenManagerNil(t *testing.T) {
 func TestBuildTools_TaskToolsAbsentForSubAgent(t *testing.T) {
 	coord, agentCfg := newTasksTestCoordinator(t, noopTaskManager{})
 
-	built, err := coord.buildTools(t.Context(), agentCfg, true)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, true)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -130,7 +131,7 @@ func TestBuildTools_TaskToolsAbsentWhenBackgroundAgentsDisabled(t *testing.T) {
 	disabled := false
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -147,7 +148,7 @@ func TestBuildTools_TaskToolsPresentWhenBackgroundAgentsExplicitlyEnabled(t *tes
 	enabled := true
 	coord.cfg.Config().Options.BackgroundAgents = &enabled
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -159,13 +160,13 @@ func TestBuildTools_TaskToolsPresentWhenBackgroundAgentsExplicitlyEnabled(t *tes
 func TestCoordinator_SetDelegationToolsTaskTakesEffectImmediately(t *testing.T) {
 	coord, agentCfg := newTasksTestCoordinator(t, nil)
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.NotContains(t, toolNames(t, built), tools.TaskListToolName)
 
 	coord.SetDelegationTools(nil, noopTaskManager{})
 
-	built, err = coord.buildTools(t.Context(), agentCfg, false)
+	built, err = coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(t, built), tools.TaskListToolName)
 }

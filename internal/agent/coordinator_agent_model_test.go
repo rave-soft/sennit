@@ -44,6 +44,7 @@ func agentModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
 		filetracker: *env.filetracker,
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.newCoordinatorComponents()
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
@@ -64,14 +65,14 @@ func TestCoordinatorAgentModelSelection(t *testing.T) {
 
 		// The resolution itself, independent of how buildAgent wires the
 		// result into the session agent.
-		model, err := coord.buildCustomAgentModel(t.Context(), agentCfg, false)
+		model, err := coord.builder.buildCustomAgentModel(t.Context(), agentCfg, false)
 		require.NoError(t, err)
 		require.Equal(t, config.SelectedModel{Provider: "mock", Model: "agent-model"}, model.ModelCfg)
 		require.Equal(t, "agent-model", model.CatalogCfg.ID)
 
 		// And the model the built agent actually runs on, which must be
 		// that same model and not the app's main model.
-		result, err := coord.buildAgent(t.Context(), p, agentCfg, false)
+		result, err := coord.delegation.buildAgent(t.Context(), p, agentCfg, false)
 		require.NoError(t, err)
 		require.Equal(t, "mock", result.Model().ModelCfg.Provider)
 		require.Equal(t, "agent-model", result.Model().ModelCfg.Model)
@@ -86,7 +87,7 @@ func TestCoordinatorAgentModelSelection(t *testing.T) {
 		main := coord.cfg.Config().Model
 		require.Equal(t, "main-model", main.Model)
 
-		result, err := coord.buildAgent(t.Context(), p, agentCfg, false)
+		result, err := coord.delegation.buildAgent(t.Context(), p, agentCfg, false)
 		require.NoError(t, err)
 		require.Equal(t, main.Provider, result.Model().ModelCfg.Provider)
 		require.Equal(t, main.Model, result.Model().ModelCfg.Model)

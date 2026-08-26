@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
+	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -100,7 +101,9 @@ func newThreadsTestCoordinator(t *testing.T, threads tools.ThreadManager) (*coor
 		filetracker: *env.filetracker,
 		mcp:         mcp.NewRegistry(),
 		background:  shell.NewBackgroundShellManager(),
+		questions:   question.NewService(),
 	}
+	coord.newCoordinatorComponents()
 	coord.SetDelegationTools(threads, nil)
 	return coord, cfg.Config().Agents[config.AgentCoder]
 }
@@ -117,7 +120,7 @@ func toolNames(t *testing.T, agentTools []fantasy.AgentTool) []string {
 func TestBuildTools_ThreadToolsPresentForMainAgentWithManager(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -129,7 +132,7 @@ func TestBuildTools_ThreadToolsPresentForMainAgentWithManager(t *testing.T) {
 func TestBuildTools_ThreadToolsAbsentWhenManagerNil(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, nil)
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -144,7 +147,7 @@ func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
 	// isSubAgent=true mirrors how the coordinator builds the "agent"
 	// delegation tool's target and other sub-agents: thread tools must
 	// never be handed to them even when the workspace owns a manager.
-	built, err := coord.buildTools(t.Context(), agentCfg, true)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, true)
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -165,14 +168,14 @@ func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
 func TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.NotContains(t, toolNames(t, built), tools.ThreadSendToolName,
 		"thread_send must not be offered under the default AllowedTools")
 
 	allowed := agentCfg
 	allowed.AllowedTools = append(slices.Clone(agentCfg.AllowedTools), tools.ThreadSendToolName)
-	built, err = coord.buildTools(t.Context(), allowed, false)
+	built, err = coord.delegation.buildTools(t.Context(), allowed, false)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(t, built), tools.ThreadSendToolName,
 		"thread_send must still be constructible/registerable when an agent config explicitly allows it")
@@ -181,13 +184,13 @@ func TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed(t
 func TestCoordinator_SetDelegationToolsThreadTakesEffectOnNextBuild(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, nil)
 
-	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.NotContains(t, toolNames(t, built), tools.ThreadCreateToolName)
 
 	coord.SetDelegationTools(noopThreadManager{}, nil)
 
-	built, err = coord.buildTools(t.Context(), agentCfg, false)
+	built, err = coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(t, built), tools.ThreadCreateToolName)
 }
@@ -196,7 +199,8 @@ func TestCoordinator_SetDelegationToolsThreadTakesEffectOnNextBuild(t *testing.T
 // readers never observe a thread adapter from a different generation than the
 // task adapter, even while concurrent publishers replace the pair.
 func TestCoordinator_SetDelegationToolsPublishesOneAdapterGeneration(t *testing.T) {
-	coord := &coordinator{runtime: newRuntimeCache()}
+	coord := &coordinator{builder: &runtimeBuilder{runtime: newRuntimeCache()}}
+	coord.delegation = &delegationFinalizer{builder: coord.builder}
 	const (
 		generations = 64
 		readers     = 4
@@ -264,7 +268,7 @@ func TestCoordinator_SetDelegationToolsPublishesOneAdapterGeneration(t *testing.
 					}
 				}
 
-				snapshot := coord.delegationToolsForRead()
+				snapshot := coord.delegation.delegationToolsForRead()
 				if snapshot.threads != nil && pairs[snapshot.threads] != snapshot.tasks && mismatchReported.CompareAndSwap(false, true) {
 					mismatches <- struct{}{}
 				}

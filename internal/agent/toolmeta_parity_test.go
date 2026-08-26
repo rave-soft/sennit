@@ -27,7 +27,7 @@ var expectedGateByName = map[toolmeta.Gate][]string{
 
 func TestToolSpecsMatchFrozenGateMatrixAndBuildNames(t *testing.T) {
 	coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
-	coord.SetDelegationTools(coord.threadsManager(), noopTaskManager{})
+	coord.SetDelegationTools(coord.delegation.threadsManager(), noopTaskManager{})
 	b := &buildToolsCtx{
 		agent:              config.Agent{AllowedTools: toolmeta.NamesAll()},
 		interactive:        true,
@@ -35,6 +35,7 @@ func TestToolSpecsMatchFrozenGateMatrixAndBuildNames(t *testing.T) {
 		threads:            noopThreadManager{},
 		taskManager:        noopTaskManager{},
 		backgroundAgentsOn: true,
+		inputs:             coord.delegation.runtimeInputs(),
 	}
 	seen := make(map[string]bool)
 	for _, spec := range toolSpecs() {
@@ -46,7 +47,7 @@ func TestToolSpecsMatchFrozenGateMatrixAndBuildNames(t *testing.T) {
 			require.Falsef(t, seen[name], "tool %q is built by more than one spec", name)
 			seen[name] = true
 		}
-		built, err := spec.Build(t.Context(), coord, b)
+		built, err := spec.Build(t.Context(), coord.builder, b)
 		require.NoError(t, err)
 		actual := make([]string, len(built))
 		for i, tool := range built {
@@ -142,15 +143,16 @@ func TestBuildToolsMatchesFrozenGateScenarios(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
-			coord.SetDelegationTools(coord.threadsManager(), noopTaskManager{})
+			coord.SetDelegationTools(coord.delegation.threadsManager(), noopTaskManager{})
 			coord.interactive = true
+			coord.builder.interactive = true
 			cfg := coord.cfg.Config()
 			cfg.MCP["test"] = config.MCPConfig{Type: config.MCPStdio, Command: "unused"}
 			if tt.configure != nil {
 				tt.configure(cfg)
 			}
 
-			built, err := coord.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: tt.allowedTools}, tt.isSubAgent)
+			built, err := coord.delegation.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: tt.allowedTools}, tt.isSubAgent)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, toolNames(t, built))
 		})
@@ -160,7 +162,7 @@ func TestBuildToolsMatchesFrozenGateScenarios(t *testing.T) {
 func TestCoordinatorBuiltToolMetadataMatchesInfo(t *testing.T) {
 	coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
 	coord.background = shell.NewBackgroundShellManager()
-	built, err := coord.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: toolmeta.NamesAll()}, false)
+	built, err := coord.delegation.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: toolmeta.NamesAll()}, false)
 	require.NoError(t, err)
 	seen := make(map[string]bool)
 	for _, tool := range built {

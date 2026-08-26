@@ -1,9 +1,7 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -269,68 +267,6 @@ func trimCorr(sessionID, runID string) trimCorrelation {
 	return trimCorrelation{sessionID: sessionID, runID: runID}
 }
 
-func (c *coordinator) carryOverMessages(ctx context.Context, in carryOverBudgetInput, parentSessionID, agentID, currentSessionID string) ([]message.Message, error) {
-	if agentID == "" {
-		return nil, nil
-	}
-
-	prior, err := c.sessions.ListSubAgentSessions(ctx, parentSessionID, agentID, currentSessionID)
-	if err != nil {
-		return nil, fmt.Errorf("list prior %s sessions: %w", agentID, err)
-	}
-	if len(prior) == 0 {
-		return nil, nil
-	}
-
-	// Per-session slices, kept apart until the budget has been applied:
-	// the budget drops whole sessions, never half of an exchange.
-	perSession := make([][]message.Message, 0, len(prior))
-	for _, s := range prior {
-		msgs, err := c.messages.List(ctx, s.ID)
-		if err != nil {
-			return nil, fmt.Errorf("list messages of prior %s session %s: %w", agentID, s.ID, err)
-		}
-		msgs = trimToSummary(s, msgs)
-		if len(msgs) == 0 {
-			continue
-		}
-		perSession = append(perSession, msgs)
-	}
-
-	budget := carryOverBudget(in)
-	// The trim is correlated to the PARENT session (the one whose sub-agent
-	// history is being carried) and the current run, so the chain tool can
-	// group it with the run's provider/repair lines by session_id/run_id.
-	kept, dropped := applyCarryOverBudget(perSession, budget, trimCorr(parentSessionID, RunIDFromContext(ctx)))
-	if dropped > 0 {
-		slog.Info(
-			"Dropped oldest sub-agent sessions from carried history",
-			"agent", agentID,
-			"parent_session", parentSessionID,
-			"dropped_sessions", dropped,
-			"kept_sessions", len(perSession)-dropped,
-			"budget_bytes", budget,
-			"context_window", in.Model.CatalogCfg.ContextWindow,
-		)
-	}
-	return kept, nil
-}
-
-// applyCarryOverBudget keeps the newest whole sessions that fit in
-// budget and reports how many older ones it dropped. The newest session
-// is always kept: returning nothing there would silently turn the most
-// recent exchange - the one the next delegation almost certainly follows
-// on from - into the one piece of context that goes missing.
-//
-// Kept, but no longer kept whole. A single delegation can run for
-// hundreds of messages and carry megabytes of tool output, and replaying
-// one of those verbatim put a quarter of a million tokens in front of a
-// sub-agent whose own task had not started yet. Every turn then died on
-// the provider's context limit, and auto-summarize could not save it -
-// the session's own history was a rounding error next to the carried
-// one, so there was nothing there to summarize (see
-// runTurn.stopOnContextWindow). The budget has to bind here too, or it
-// is not a budget.
 func applyCarryOverBudget(perSession [][]message.Message, budget int, corr ...trimCorrelation) ([]message.Message, int) {
 	if len(perSession) == 0 {
 		return nil, 0

@@ -215,7 +215,7 @@ func TestRunSubAgentUsesOneRuntimeSnapshotForBudgetAndProvider(t *testing.T) {
 		sa.SetSystemPrompt(mutatedSystem)
 		sa.systemPromptPrefix.Set(mutatedPref)
 	}}
-	resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+	resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 		Agent: agent, SessionID: parent.ID, AgentMessageID: "new-message", ToolCallID: "new-call",
 		Prompt: delegation, SessionTitle: "New delegation", AgentID: agentID,
 	})

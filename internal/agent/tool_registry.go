@@ -30,13 +30,15 @@ type buildToolsCtx struct {
 	taskManager        tools.TaskManager
 	backgroundAgentsOn bool
 	toolAvailability   tools.ToolAvailabilityOption
+
+	inputs runtimeToolInputs
 }
 
 // toolSpec lists the exact static tool names built by a row. Their gate is
 // always derived from toolmeta; grouped rows must have one shared gate.
 type toolSpec struct {
 	Names []string
-	Build func(ctx context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error)
+	Build func(ctx context.Context, b *runtimeBuilder, bctx *buildToolsCtx) ([]fantasy.AgentTool, error)
 }
 
 func specGate(spec toolSpec) (toolmeta.Gate, bool) {
@@ -83,9 +85,9 @@ func gateAllows(g toolmeta.Gate, name string, b *buildToolsCtx) bool {
 
 // one adapts a single-tool builder into a toolSpec.Build func for rows
 // that never fail and never need ctx.
-func one(fn func(c *coordinator, b *buildToolsCtx) fantasy.AgentTool) func(context.Context, *coordinator, *buildToolsCtx) ([]fantasy.AgentTool, error) {
-	return func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
-		return []fantasy.AgentTool{fn(c, b)}, nil
+func one(fn func(b *buildToolsCtx) fantasy.AgentTool) func(context.Context, *runtimeBuilder, *buildToolsCtx) ([]fantasy.AgentTool, error) {
+	return func(_ context.Context, _ *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		return []fantasy.AgentTool{fn(b)}, nil
 	}
 }
 
@@ -113,76 +115,69 @@ func toolSpecs() []toolSpec {
 		// the post-table filter every other row uses.
 		{
 			[]string{AgentToolName},
-			func(ctx context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
-				t, err := c.agentTool(ctx, b.cfg)
-				if err != nil {
-					return nil, err
-				}
-				return []fantasy.AgentTool{t}, nil
+			func(ctx context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+				return []fantasy.AgentTool{b.inputs.delegationToolsBuilt[AgentToolName]}, nil
 			},
 		},
 		{
 			[]string{tools.AgenticFetchToolName},
-			func(ctx context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
-				t, err := c.agenticFetchTool(ctx, nil)
-				if err != nil {
-					return nil, err
-				}
-				return []fantasy.AgentTool{t}, nil
+			func(ctx context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+				return []fantasy.AgentTool{b.inputs.delegationToolsBuilt[tools.AgenticFetchToolName]}, nil
 			},
 		},
 
 		// Always-built core tools; agent.AllowedTools decides who actually
 		// gets each one via the uniform filter in buildTools.
-		{coreToolNames(), func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{coreToolNames(), func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+			f := b.inputs
 			return []fantasy.AgentTool{
-				tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), b.cfg.Attribution(), b.modelID, c.background, b.toolAvailability),
-				tools.NewGitStatusTool(c.cfg.WorkingDir()),
-				tools.NewGitDiffTool(c.cfg.WorkingDir()),
-				tools.NewGitLogTool(c.cfg.WorkingDir()),
-				tools.NewSennitInfoTool(c.cfg, c.mcp, c.lspManager, b.allSkills, b.activeSkills, b.skillTracker, c.skillStates()),
+				tools.NewBashTool(f.permissions, rb.cfg.WorkingDir(), b.cfg.Attribution(), b.modelID, f.background, b.toolAvailability),
+				tools.NewGitStatusTool(rb.cfg.WorkingDir()),
+				tools.NewGitDiffTool(rb.cfg.WorkingDir()),
+				tools.NewGitLogTool(rb.cfg.WorkingDir()),
+				tools.NewSennitInfoTool(rb.cfg, rb.mcp, f.lspManager, b.allSkills, b.activeSkills, b.skillTracker, b.inputs.skillStates),
 				tools.NewSennitLogsTool(b.logFile),
 				tools.NewAgentTraceTool(b.logFile),
-				tools.NewJobOutputTool(c.background),
-				tools.NewJobKillTool(c.background),
-				tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-				tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-				tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-				tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil, b.toolAvailability),
-				tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), nil, b.toolAvailability),
-				tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil, b.searchBackend, b.toolAvailability),
-				tools.NewGlobTool(c.cfg.WorkingDir(), b.cfg.Glob()),
-				tools.NewSearchTool(c.cfg.WorkingDir(), b.cfg.Grep()),
-				tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), b.cfg.Ls()),
-				tools.NewTodosTool(c.sessions),
-				tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, b.skillTracker, c.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
-				tools.NewMultiReadTool(c.lspManager, c.permissions, c.filetracker, b.skillTracker, c.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
-				tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+				tools.NewJobOutputTool(f.background),
+				tools.NewJobKillTool(f.background),
+				tools.NewDownloadTool(f.permissions, rb.cfg.WorkingDir(), nil),
+				tools.NewEditTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
+				tools.NewMultiEditTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
+				tools.NewFetchTool(f.permissions, rb.cfg.WorkingDir(), nil, b.toolAvailability),
+				tools.NewWebFetchTool(f.permissions, rb.cfg.WorkingDir(), nil, b.toolAvailability),
+				tools.NewWebSearchTool(f.permissions, rb.cfg.WorkingDir(), nil, b.searchBackend, b.toolAvailability),
+				tools.NewGlobTool(rb.cfg.WorkingDir(), b.cfg.Glob()),
+				tools.NewSearchTool(rb.cfg.WorkingDir(), b.cfg.Grep()),
+				tools.NewLsTool(f.permissions, rb.cfg.WorkingDir(), b.cfg.Ls()),
+				tools.NewTodosTool(f.sessions),
+				tools.NewReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, rb.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
+				tools.NewMultiReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, rb.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
+				tools.NewWriteTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
 			}, nil
 		}},
 
 		// Thread tools: top-level agent of the workspace owning the thread
 		// manager only — sub-agents nesting workspace ownership isn't
 		// supported, and non-git/thread-spawned workspaces have no manager.
-		{[]string{"thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{[]string{"thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
-				tools.NewThreadCreateTool(b.threads, c.permissions),
+				tools.NewThreadCreateTool(b.threads, b.inputs.permissions),
 				tools.NewThreadListTool(b.threads),
 				tools.NewThreadStatusTool(b.threads),
 				tools.NewThreadSendTool(b.threads),
-				tools.NewThreadMergeTool(b.threads, c.permissions),
-				tools.NewThreadRemoveTool(b.threads, c.permissions),
+				tools.NewThreadMergeTool(b.threads, b.inputs.permissions),
+				tools.NewThreadRemoveTool(b.threads, b.inputs.permissions),
 			}, nil
 		}},
 
 		// Task tools observe/steer background task delegations (see the
 		// "agent" tool's background mode). Same restriction as thread
 		// tools, plus the explicit options.background_agents opt-out.
-		{[]string{"task_list", "task_result", "task_cancel", "task_send", "task_output"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{[]string{"task_list", "task_result", "task_cancel", "task_send", "task_output"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
 				tools.NewTaskListTool(b.taskManager),
 				tools.NewTaskResultTool(b.taskManager),
-				tools.NewTaskCancelTool(b.taskManager, c.permissions),
+				tools.NewTaskCancelTool(b.taskManager, b.inputs.permissions),
 				tools.NewTaskSendTool(b.taskManager),
 				tools.NewTaskOutputTool(b.taskManager),
 			}, nil
@@ -192,38 +187,41 @@ func toolSpecs() []toolSpec {
 		// non-sub-agent build, including the parent's own top-level
 		// session (a task shares its parent's coordinator/tool list), and
 		// gated for real at runtime instead — see withoutUnusableParentTool.
-		{[]string{"ask_parent"}, one(func(c *coordinator, b *buildToolsCtx) fantasy.AgentTool { return tools.NewAskParentTool(c) })},
+		{[]string{"ask_parent"}, one(func(b *buildToolsCtx) fantasy.AgentTool { return b.inputs.delegationToolsBuilt["ask_parent"] })},
 
 		// Question tool is interactive-only and not available to sub-agents.
 		{
 			[]string{"question"},
-			one(func(c *coordinator, b *buildToolsCtx) fantasy.AgentTool { return tools.NewQuestionTool(c.questions) }),
+			one(func(b *buildToolsCtx) fantasy.AgentTool {
+				return tools.NewQuestionTool(b.inputs.questions)
+			}),
 		},
 
 		// LSP tools: offered whenever the user configured an LSP
 		// explicitly, or auto_lsp is unset/true.
-		{[]string{"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{[]string{"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+			f := b.inputs
 			return []fantasy.AgentTool{
-				tools.NewDiagnosticsTool(c.lspManager),
-				tools.NewReferencesTool(c.lspManager, c.cfg.WorkingDir()),
-				tools.NewLSPRestartTool(c.lspManager),
-				tools.NewSymbolsTool(c.lspManager, c.cfg.WorkingDir()),
-				tools.NewWorkspaceSymbolsTool(c.lspManager, c.cfg.WorkingDir()),
-				tools.NewHoverTool(c.lspManager, c.cfg.WorkingDir()),
-				tools.NewDefinitionTool(c.lspManager, c.cfg.WorkingDir()),
-				tools.NewCallHierarchyTool(c.lspManager, c.cfg.WorkingDir()),
-				tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-				tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+				tools.NewDiagnosticsTool(f.lspManager),
+				tools.NewReferencesTool(f.lspManager, rb.cfg.WorkingDir()),
+				tools.NewLSPRestartTool(f.lspManager),
+				tools.NewSymbolsTool(f.lspManager, rb.cfg.WorkingDir()),
+				tools.NewWorkspaceSymbolsTool(f.lspManager, rb.cfg.WorkingDir()),
+				tools.NewHoverTool(f.lspManager, rb.cfg.WorkingDir()),
+				tools.NewDefinitionTool(f.lspManager, rb.cfg.WorkingDir()),
+				tools.NewCallHierarchyTool(f.lspManager, rb.cfg.WorkingDir()),
+				tools.NewRenameTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
+				tools.NewReplaceSymbolTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
 			}, nil
 		}},
 
 		// MCP resource browsing tools: offered whenever at least one MCP
 		// server is configured (independent of AllowedMCP, which only
 		// gates the per-server tools built outside this table).
-		{[]string{"list_mcp_resources", "read_mcp_resource"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{[]string{"list_mcp_resources", "read_mcp_resource"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
-				tools.NewListMCPResourcesTool(c.cfg, c.mcp, c.permissions),
-				tools.NewReadMCPResourceTool(c.cfg, c.mcp, c.permissions),
+				tools.NewListMCPResourcesTool(rb.cfg, rb.mcp, b.inputs.permissions),
+				tools.NewReadMCPResourceTool(rb.cfg, rb.mcp, b.inputs.permissions),
 			}, nil
 		}},
 	}

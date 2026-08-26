@@ -55,7 +55,7 @@ func pinTestCoordinator(t *testing.T, interactive bool) *coordinator {
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
-	return &coordinator{
+	coord := &coordinator{
 		cfg:         cfg,
 		sessions:    env.sessions,
 		messages:    env.messages,
@@ -66,6 +66,8 @@ func pinTestCoordinator(t *testing.T, interactive bool) *coordinator {
 		background:  shell.NewBackgroundShellManager(),
 		interactive: interactive,
 	}
+	coord.newCoordinatorComponents()
+	return coord
 }
 
 // toolNames is defined in coordinator_threads_test.go.
@@ -90,7 +92,7 @@ func TestBuildToolsPinnedSet_Coder(t *testing.T) {
 	coord := pinTestCoordinator(t, false)
 	agent := config.Agent{Name: "coder", AllowedTools: pinTestAllowedTools}
 
-	built, err := coord.buildTools(t.Context(), agent, false)
+	built, err := coord.delegation.buildTools(t.Context(), agent, false)
 	require.NoError(t, err)
 
 	expected := []string{
@@ -120,7 +122,7 @@ func TestBuildToolsPinnedSet_SubAgent(t *testing.T) {
 	coord := pinTestCoordinator(t, false)
 	agent := config.Agent{Name: "task", AllowedTools: pinTestAllowedTools}
 
-	built, err := coord.buildTools(t.Context(), agent, true)
+	built, err := coord.delegation.buildTools(t.Context(), agent, true)
 	require.NoError(t, err)
 
 	expected := []string{

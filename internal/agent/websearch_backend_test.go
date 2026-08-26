@@ -20,7 +20,7 @@ import (
 func TestCoordinatorWebSearchBackend(t *testing.T) {
 	t.Run("builds without error when unset", func(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
-		backend, err := c.webSearchBackend()
+		backend, err := c.builder.webSearchBackend()
 		require.NoError(t, err)
 		require.NotNil(t, backend)
 	})
@@ -45,7 +45,7 @@ func TestCoordinatorWebSearchBackend(t *testing.T) {
 			BaseURL:  srv.URL,
 		}
 
-		backend, err := c.webSearchBackend()
+		backend, err := c.builder.webSearchBackend()
 		require.NoError(t, err)
 
 		results, err := backend.Search(context.Background(), "query", 5)

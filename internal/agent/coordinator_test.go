@@ -82,11 +82,13 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderCo
 	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
-	return &coordinator{
+	coord := &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
 		messages: env.messages,
 	}
+	coord.newCoordinatorComponents()
+	return coord
 }
 
 // newMockAgent creates a mockSessionAgent with the given provider and run function.
@@ -132,7 +134,7 @@ func TestRunSubAgent(t *testing.T) {
 			return agentResultWithText("done"), nil
 		})
 
-		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -153,7 +155,7 @@ func TestRunSubAgent(t *testing.T) {
 			return agentResultWithText("output before cost failure"), nil
 		})
 
-		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      "missing-parent-session",
 			AgentMessageID: "msg-1",
@@ -177,7 +179,7 @@ func TestRunSubAgent(t *testing.T) {
 			return agentResultWithText("the answer"), nil
 		})
 
-		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -201,7 +203,7 @@ func TestRunSubAgent(t *testing.T) {
 			return nil, nil
 		})
 
-		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -225,7 +227,7 @@ func TestRunSubAgent(t *testing.T) {
 			return &fantasy.AgentResult{}, nil
 		})
 
-		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -261,7 +263,7 @@ func TestRunSubAgent(t *testing.T) {
 			},
 		}
 
-		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -286,7 +288,7 @@ func TestRunSubAgent(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		_, err = coord.runSubAgent(ctx, subAgentParams{
+		_, err = coord.delegation.runSubAgent(ctx, subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -307,7 +309,7 @@ func TestRunSubAgent(t *testing.T) {
 		// Agent references a provider that doesn't exist in config.
 		agent := newMockAgent("unknown-provider", nil)
 
-		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+		_, err = coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -330,7 +332,7 @@ func TestRunSubAgent(t *testing.T) {
 			return nil, errors.New("provider request failed")
 		})
 
-		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -356,7 +358,7 @@ func TestRunSubAgent(t *testing.T) {
 			return agentResultWithText("ok"), nil
 		})
 
-		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+		_, err = coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -392,7 +394,7 @@ func TestRunSubAgent(t *testing.T) {
 			return agentResultWithText("ok"), nil
 		})
 
-		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+		_, err = coord.delegation.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -414,7 +416,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-
+		coord.newCoordinatorComponents()
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
@@ -426,7 +428,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		_, err = env.sessions.Save(t.Context(), child)
 		require.NoError(t, err)
 
-		err = coord.updateParentSessionCost(t.Context(), child.ID, parent.ID)
+		err = coord.delegation.updateParentSessionCost(t.Context(), child.ID, parent.ID)
 		require.NoError(t, err)
 
 		updated, err := env.sessions.Get(t.Context(), parent.ID)
@@ -439,7 +441,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-
+		coord.newCoordinatorComponents()
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
@@ -455,9 +457,9 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		_, err = env.sessions.Save(t.Context(), child2)
 		require.NoError(t, err)
 
-		err = coord.updateParentSessionCost(t.Context(), child1.ID, parent.ID)
+		err = coord.delegation.updateParentSessionCost(t.Context(), child1.ID, parent.ID)
 		require.NoError(t, err)
-		err = coord.updateParentSessionCost(t.Context(), child2.ID, parent.ID)
+		err = coord.delegation.updateParentSessionCost(t.Context(), child2.ID, parent.ID)
 		require.NoError(t, err)
 
 		updated, err := env.sessions.Get(t.Context(), parent.ID)
@@ -470,11 +472,11 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-
+		coord.newCoordinatorComponents()
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		err = coord.updateParentSessionCost(t.Context(), "non-existent", parent.ID)
+		err = coord.delegation.updateParentSessionCost(t.Context(), "non-existent", parent.ID)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "get child session")
 	})
@@ -484,13 +486,13 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-
+		coord.newCoordinatorComponents()
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 		child, err := env.sessions.CreateTaskSession(t.Context(), "tool-1", parent.ID, "Child")
 		require.NoError(t, err)
 
-		err = coord.updateParentSessionCost(t.Context(), child.ID, "non-existent")
+		err = coord.delegation.updateParentSessionCost(t.Context(), child.ID, "non-existent")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "get parent session")
 	})
@@ -507,7 +509,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-
+		coord.newCoordinatorComponents()
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
@@ -528,7 +530,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				errs[i] = coord.updateParentSessionCost(t.Context(), childIDs[i], parent.ID)
+				errs[i] = coord.delegation.updateParentSessionCost(t.Context(), childIDs[i], parent.ID)
 			}(i)
 		}
 		wg.Wait()
@@ -546,13 +548,13 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-
+		coord.newCoordinatorComponents()
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 		child, err := env.sessions.CreateTaskSession(t.Context(), "tool-1", parent.ID, "Child")
 		require.NoError(t, err)
 
-		err = coord.updateParentSessionCost(t.Context(), child.ID, parent.ID)
+		err = coord.delegation.updateParentSessionCost(t.Context(), child.ID, parent.ID)
 		require.NoError(t, err)
 
 		updated, err := env.sessions.Get(t.Context(), parent.ID)

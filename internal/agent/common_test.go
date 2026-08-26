@@ -87,9 +87,13 @@ func testTempRoot() string {
 	return canonicalTestTempRoot
 }
 
+func testVCRWorkingDir(testName string) string {
+	return filepath.Join(testTempRoot(), "sennit-test-", testName)
+}
+
 func testEnv(t *testing.T) fakeEnv {
 	t.Helper()
-	return testEnvAt(t, filepath.Join(testTempRoot(), "sennit-test-", t.Name()))
+	return testEnvAt(t, filepath.Join(t.TempDir(), "workspace"))
 }
 
 func testEnvAt(t *testing.T, workingDir string) fakeEnv {

@@ -57,7 +57,7 @@ func TestRunSubAgentReportsChildSessionBusyWhileRunning(t *testing.T) {
 		},
 	}
 
-	resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+	resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 		Agent:          delegate,
 		SessionID:      parent.ID,
 		AgentMessageID: "msg-1",
@@ -79,10 +79,12 @@ func TestRunSubAgentReportsChildSessionBusyWhileRunning(t *testing.T) {
 // message and tool-call ids, so a retried call reuses it, and a first
 // release must not report the second run as idle.
 func TestSubSessionBusyCountsConcurrentDelegations(t *testing.T) {
-	coord := &coordinator{currentAgent: &sessionAgent{dispatch: newDispatcher()}}
+	coord := &coordinator{}
+	coord.newCoordinatorComponents()
+	coord.dispatcher.agentPort.set(&sessionAgent{dispatch: newDispatcher()})
 
-	releaseFirst := coord.markSubSessionBusy("child")
-	releaseSecond := coord.markSubSessionBusy("child")
+	releaseFirst := coord.delegation.markSubSessionBusy("child")
+	releaseSecond := coord.delegation.markSubSessionBusy("child")
 	require.True(t, coord.IsSessionBusy("child"))
 
 	releaseFirst()
@@ -115,15 +117,17 @@ func newSubAgentBusyTestCoordinator(t *testing.T) *coordinator {
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
-	return &coordinator{
-		cfg:          cfg,
-		sessions:     env.sessions,
-		messages:     env.messages,
-		permissions:  env.permissions,
-		history:      env.history,
-		filetracker:  *env.filetracker,
-		mcp:          mcp.NewRegistry(),
-		background:   shell.NewBackgroundShellManager(),
-		currentAgent: &sessionAgent{dispatch: newDispatcher()},
+	c := &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+		history:     env.history,
+		filetracker: *env.filetracker,
+		mcp:         mcp.NewRegistry(),
+		background:  shell.NewBackgroundShellManager(),
 	}
+	c.newCoordinatorComponents()
+	c.dispatcher.agentPort.set(&sessionAgent{dispatch: newDispatcher()})
+	return c
 }

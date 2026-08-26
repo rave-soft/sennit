@@ -579,15 +579,16 @@ func TestEffectiveReasoningEffort(t *testing.T) {
 func TestIsAnthropicThinking(t *testing.T) {
 	t.Parallel()
 	c := &coordinator{}
+	c.newCoordinatorComponents()
 
 	t.Run("explicit Think flag wins outright", func(t *testing.T) {
 		t.Parallel()
-		require.True(t, c.isAnthropicThinking(config.SelectedModel{Think: true}))
+		require.True(t, c.builder.isAnthropicThinking(config.SelectedModel{Think: true}))
 	})
 
 	t.Run("no provider options means no thinking", func(t *testing.T) {
 		t.Parallel()
-		require.False(t, c.isAnthropicThinking(config.SelectedModel{}))
+		require.False(t, c.builder.isAnthropicThinking(config.SelectedModel{}))
 	})
 
 	t.Run("a parsed thinking option is detected", func(t *testing.T) {
@@ -595,12 +596,12 @@ func TestIsAnthropicThinking(t *testing.T) {
 		model := config.SelectedModel{ProviderOptions: map[string]any{
 			"thinking": map[string]any{"budget_tokens": 2000},
 		}}
-		require.True(t, c.isAnthropicThinking(model))
+		require.True(t, c.builder.isAnthropicThinking(model))
 	})
 
 	t.Run("options that fail to parse are treated as no thinking", func(t *testing.T) {
 		t.Parallel()
 		model := config.SelectedModel{ProviderOptions: map[string]any{"thinking": "not-an-object"}}
-		require.False(t, c.isAnthropicThinking(model))
+		require.False(t, c.builder.isAnthropicThinking(model))
 	})
 }

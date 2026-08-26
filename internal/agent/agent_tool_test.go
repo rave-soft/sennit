@@ -90,6 +90,7 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 		mcp:         mcp.NewRegistry(),
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.newCoordinatorComponents()
 	coord.SetDelegationTools(nil, tasks)
 	return coord
 }
@@ -102,12 +103,12 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 func TestCoordinatorBuiltToolParallelFlags(t *testing.T) {
 	coord := newAgentToolTestCoordinator(t, nil)
 
-	agentTool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	agentTool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 	require.True(t, agentTool.Info().Parallel, "agent must retain its runtime parallel flag")
 	require.Equal(t, 1, agentTool.Info().InputSchema["properties"].(map[string]any)["prompt"].(map[string]any)["minLength"])
 
-	agenticFetchTool, err := coord.agenticFetchTool(t.Context(), nil)
+	agenticFetchTool, err := coord.delegation.agenticFetchTool(t.Context(), nil)
 	require.NoError(t, err)
 	require.True(t, agenticFetchTool.Info().Parallel, "agentic_fetch must retain its runtime parallel flag")
 	require.Equal(t, 1, agenticFetchTool.Info().InputSchema["properties"].(map[string]any)["prompt"].(map[string]any)["minLength"])
@@ -117,7 +118,7 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -147,7 +148,7 @@ func TestAgentTool_AlwaysCreatesTask(t *testing.T) {
 	fake := &fakeTaskManager{}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -168,7 +169,7 @@ func TestAgentTool_AlwaysCreatesTask(t *testing.T) {
 func TestAgentTool_BackgroundUnavailableReturnsClearError(t *testing.T) {
 	coord := newAgentToolTestCoordinator(t, nil)
 
-	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -192,7 +193,7 @@ func TestRunBackgroundAgent_RefusedWhenDisabledByConfig(t *testing.T) {
 	disabled := false
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
+	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "a disabled switch must refuse, not silently run in the foreground")
 	require.Contains(t, resp.Content, "background_agents")
@@ -209,7 +210,7 @@ func TestRunBackgroundAgent_AllowedWhenExplicitlyEnabled(t *testing.T) {
 	enabled := true
 	coord.cfg.Config().Options.BackgroundAgents = &enabled
 
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
+	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -231,7 +232,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 
 	// Dispatched while enabled - this is the "in-flight task" the reload
 	// below must leave alone.
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "do work", "", 1)
+	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "do work", "", 1)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -240,7 +241,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
 	// New dispatch is refused from here on...
-	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "more work", "", 1)
+	resp, err = coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "more work", "", 1)
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Len(t, fake.created, 1, "the refused call must never reach the task manager")
@@ -263,7 +264,7 @@ func TestAgentTool_ChildSessionKeepsToolCallIdentity(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -289,7 +290,7 @@ func TestAgentTool_ChildSessionIdentityOptional(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")

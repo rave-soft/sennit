@@ -74,7 +74,7 @@ func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
 			return strings.ReplaceAll(strings.Split(t.Name(), "/")[2], " ", "_")
 		}
 	}
-	return setupAgentWithVCR(t, cfg, cassetteName(t, pair.name), "", scenario)
+	return setupAgentWithVCR(t, cfg, cassetteName(t, pair.name), testVCRWorkingDir(t.Name()), scenario)
 }
 
 // setupAgentWithVCR constructs the production-like test agent with an explicit
@@ -83,12 +83,7 @@ func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
 // without mutating process-wide test environment variables.
 func setupAgentWithVCR(t *testing.T, cfg testVCRConfig, cassetteBasename, workspaceDir string, scenario func() string) (SessionAgent, fakeEnv) {
 	t.Helper()
-	var env fakeEnv
-	if workspaceDir == "" {
-		env = testEnv(t)
-	} else {
-		env = testEnvAt(t, workspaceDir)
-	}
+	env := testEnvAt(t, workspaceDir)
 	initGitWorktree(t, env.workingDir)
 	if scenario != nil {
 		_, server := NewFixtureHTTPServer(FixtureConfig{Scenario: scenario, DefaultModel: cfg.Model})

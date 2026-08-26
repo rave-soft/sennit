@@ -13,16 +13,10 @@ import (
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 )
 
-// TestTestEnvWorkingDirIgnoresTMPDIR is the direct, fast check on the fix
-// itself: testEnv's working directory must stay rooted at
-// canonicalTestTempRoot no matter what $TMPDIR says. os.TempDir() honors
-// $TMPDIR, which is "/tmp" on Linux CI runners but a per-run path like
-// "/var/folders/xx/yy/T" on macOS runners — and that root ends up baked
-// verbatim into VCR cassette content (see TestCoderAgentWorkingDirIsOSIndependent
-// for the end-to-end replay). Swap canonicalTestTempRoot back for
-// os.TempDir() in testEnv and this test fails immediately, since the forced
-// $TMPDIR below no longer matches.
-func TestTestEnvWorkingDirIgnoresTMPDIR(t *testing.T) {
+// TestVCRWorkingDirIgnoresTMPDIR pins the deterministic path used only by VCR
+// tests. General test environments use t.TempDir so independent go test
+// processes cannot remove each other's workspaces.
+func TestVCRWorkingDirIgnoresTMPDIR(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		// testTempRoot() *is* os.TempDir() on Windows (see its doc comment
 		// in common_test.go: no cassette is ever replayed there, so there is
@@ -35,12 +29,7 @@ func TestTestEnvWorkingDirIgnoresTMPDIR(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "var", "folders", "xx", "yy", "T"))
 	require.NotEqual(t, testTempRoot(), os.TempDir(), "test setup: TMPDIR override did not take effect")
 
-	env := testEnv(t)
-	// Exact match, not just a prefix check: the forced $TMPDIR above happens
-	// to nest under the real /tmp too (t.TempDir() defaults there on this
-	// box), so a bare HasPrefix(workingDir, "/tmp/") would pass even with
-	// the fix reverted to os.TempDir(). Pin the whole path instead.
-	require.Equal(t, filepath.Join(testTempRoot(), "sennit-test-", t.Name()), env.workingDir)
+	require.Equal(t, filepath.Join(testTempRoot(), "sennit-test-", t.Name()), testVCRWorkingDir(t.Name()))
 }
 
 // TestCoderAgentWorkingDirIsOSIndependent is the closest thing to a real
@@ -136,7 +125,7 @@ func runRepresentativeCoderAgentFixtureFlow(t *testing.T, cassetteRoot, cassette
 		CassetteRoot: cassetteRoot,
 		Model:        defaultFixtureModel,
 	}
-	agent, env := setupAgentWithVCR(t, cfg, cassetteBasename, "", func() string {
+	agent, env := setupAgentWithVCR(t, cfg, cassetteBasename, testVCRWorkingDir(t.Name()), func() string {
 		return "deterministic_flow"
 	})
 

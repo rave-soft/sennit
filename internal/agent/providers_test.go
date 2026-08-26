@@ -19,20 +19,22 @@ func newProxyTestCoordinator(t *testing.T, debug bool) *coordinator {
 	t.Helper()
 	cfg, err := configruntime.Load(t.TempDir(), t.TempDir(), debug)
 	require.NoError(t, err)
-	return &coordinator{cfg: cfg}
+	coord := &coordinator{cfg: cfg}
+	coord.newCoordinatorComponents()
+	return coord
 }
 
 func TestBuildProviderHTTPClient(t *testing.T) {
 	t.Run("no proxy, no debug returns nil client", func(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
-		client, err := c.buildProviderHTTPClient("")
+		client, err := c.builder.buildProviderHTTPClient("")
 		require.NoError(t, err)
 		require.Nil(t, client)
 	})
 
 	t.Run("debug only wraps default transport in logger", func(t *testing.T) {
 		c := newProxyTestCoordinator(t, true)
-		client, err := c.buildProviderHTTPClient("")
+		client, err := c.builder.buildProviderHTTPClient("")
 		require.NoError(t, err)
 		require.NotNil(t, client)
 		logger, ok := client.Transport.(*log.HTTPRoundTripLogger)
@@ -42,7 +44,7 @@ func TestBuildProviderHTTPClient(t *testing.T) {
 
 	t.Run("proxy only returns a proxying client with no logger", func(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
-		client, err := c.buildProviderHTTPClient("http://localhost:8080")
+		client, err := c.builder.buildProviderHTTPClient("http://localhost:8080")
 		require.NoError(t, err)
 		require.NotNil(t, client)
 		_, ok := client.Transport.(*log.HTTPRoundTripLogger)
@@ -53,7 +55,7 @@ func TestBuildProviderHTTPClient(t *testing.T) {
 
 	t.Run("proxy and debug compose: logger wraps the proxying transport", func(t *testing.T) {
 		c := newProxyTestCoordinator(t, true)
-		client, err := c.buildProviderHTTPClient("http://localhost:8080")
+		client, err := c.builder.buildProviderHTTPClient("http://localhost:8080")
 		require.NoError(t, err)
 		require.NotNil(t, client)
 		logger, ok := client.Transport.(*log.HTTPRoundTripLogger)
@@ -64,14 +66,14 @@ func TestBuildProviderHTTPClient(t *testing.T) {
 
 	t.Run("invalid proxy_url surfaces an error", func(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
-		client, err := c.buildProviderHTTPClient("://not-a-url")
+		client, err := c.builder.buildProviderHTTPClient("://not-a-url")
 		require.Error(t, err)
 		require.Nil(t, client)
 	})
 
 	t.Run("ProxyDirect returns a real client with Proxy explicitly nil", func(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
-		client, err := c.buildProviderHTTPClient(config.ProxyDirect)
+		client, err := c.builder.buildProviderHTTPClient(config.ProxyDirect)
 		require.NoError(t, err)
 		// Distinct from the "no proxyURL, no debug" case above, which
 		// returns a nil *http.Client entirely: "none" must still produce a

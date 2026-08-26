@@ -46,6 +46,7 @@ func buildCustomModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
 		filetracker: *env.filetracker,
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.newCoordinatorComponents()
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
@@ -64,7 +65,7 @@ func TestBuildAgentCustomModel(t *testing.T) {
 		agentCfg := coord.cfg.Config().Agents[config.AgentCoder]
 		agentCfg.Model = ""
 
-		result, err := coord.buildAgent(t.Context(), p, agentCfg, false)
+		result, err := coord.delegation.buildAgent(t.Context(), p, agentCfg, false)
 		require.NoError(t, err)
 		require.Equal(t, "mock", result.Model().ModelCfg.Provider)
 		require.Equal(t, "mock-model", result.Model().ModelCfg.Model)
@@ -80,7 +81,7 @@ func TestBuildAgentCustomModel(t *testing.T) {
 		// Config.validUserAgents, not here.
 		agentCfg.Model = "small"
 
-		_, err := coord.buildAgent(t.Context(), p, agentCfg, false)
+		_, err := coord.delegation.buildAgent(t.Context(), p, agentCfg, false)
 		require.Error(t, err)
 	})
 
@@ -89,7 +90,7 @@ func TestBuildAgentCustomModel(t *testing.T) {
 		agentCfg := coord.cfg.Config().Agents[config.AgentCoder]
 		agentCfg.Model = "mock/custom-model"
 
-		result, err := coord.buildAgent(t.Context(), p, agentCfg, false)
+		result, err := coord.delegation.buildAgent(t.Context(), p, agentCfg, false)
 		require.NoError(t, err)
 		require.Equal(t, "mock", result.Model().ModelCfg.Provider)
 		require.Equal(t, "custom-model", result.Model().ModelCfg.Model)
@@ -101,7 +102,7 @@ func TestBuildAgentCustomModel(t *testing.T) {
 		agentCfg.Model = "mock/custom-model"
 		agentCfg.ReasoningEffort = "high"
 
-		result, err := coord.buildAgent(t.Context(), p, agentCfg, false)
+		result, err := coord.delegation.buildAgent(t.Context(), p, agentCfg, false)
 		require.NoError(t, err)
 		require.Equal(t, "high", result.Model().ModelCfg.ReasoningEffort)
 	})
@@ -116,7 +117,7 @@ func TestBuildAgentCustomModel(t *testing.T) {
 		// or silently using the wrong model.
 		agentCfg.Model = "unknown-provider/some-model"
 
-		_, err := coord.buildAgent(t.Context(), p, agentCfg, false)
+		_, err := coord.delegation.buildAgent(t.Context(), p, agentCfg, false)
 		require.Error(t, err)
 	})
 }

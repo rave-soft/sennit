@@ -1,0 +1,354 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+
+	"charm.land/fantasy"
+
+	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/latency"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/session"
+)
+
+// turnDispatcher owns the turn lifecycle of the coordinator's own agent:
+// the per-session accept/queue/cancel state (through the dispatcher each
+// sessionAgent embeds), the readiness work buildAgent starts and the Close
+// protocol that waits for it, and the top-level Run/Steer/Summarize entry
+// points that resolve a runtime and hand the call to the current agent.
+//
+// It does not build models, tools, or providers (runtimeBuilder's job) and
+// does not run or finalize delegations (delegationFinalizer's job); it is
+// the seam that orders those two behind the session's own dispatch
+// protocol.
+type turnDispatcher struct {
+	cfg         *config.ConfigStore
+	sessions    session.Service
+	messages    MessageService
+	notify      pubsub.Publisher[notify.Notification]
+	runComplete pubsub.Publisher[notify.RunComplete]
+	mcp         *mcp.Registry
+	latency     latency.Recorder
+	builder     *runtimeBuilder
+	delegation  *delegationFinalizer
+
+	agentPort *coordinatorAgentPort
+	agents    map[string]SessionAgent
+
+	lifecycle *readinessLifecycle
+}
+
+// Close cancels the coordinator's background readiness work (buildAgent's
+// async system-prompt/tool-list setup, including sub-agent rebuilds on
+// every run) and waits for it to actually stop, bounded by ctx. This is
+// what keeps the git/MCP subprocesses that work may spawn (see
+// internal/agent/prompt) from outliving the coordinator — production
+// callers wire it into App.Shutdown; tests that build a coordinator
+// directly should call it in their own teardown for the same reason.
+// Safe to call even if buildAgent was never invoked, and safe to call
+// concurrently or more than once: every call waits on the same
+// closeDone, but only the first ever starts readyGroup.Wait.
+func (d *turnDispatcher) Close(ctx context.Context) error {
+	return d.lifecycle.close(ctx)
+}
+
+// buildAgent assembles a session agent for agent: its model (inherited or
+// its own, see buildAgentModel/buildCustomAgentModel) and, on this
+// dispatcher's own readiness goroutines, its system prompt and tool list.
+// The returned agent is not ready to run until those goroutines finish:
+// the coordinator's own agent is waited on by run()'s preamble through
+// readyWg, and sub-agents carry a subReady group the delegation path
+// waits on.
+// runUpdateModels resolves the compiled runtime and hands its model, tools
+// and system prompt to agent. It owns the resolve-and-hand-off because the
+// builder must not reach into the dispatcher's current agent through a
+// stored pointer: it is wired into the builder as a callback, and it is
+// what a config reload or credential refresh uses to pick up the new
+// generation.
+func (d *turnDispatcher) runUpdateModels(ctx context.Context, agent SessionAgent) error {
+	runtime, err := d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+	if errors.Is(err, errRuntimeChanged) {
+		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+	}
+	if err != nil {
+		return err
+	}
+	agent.SetModel(runtime.model)
+	agent.SetTools(runtime.tools)
+	agent.SetSystemPrompt(runtime.systemPrompt)
+	return nil
+}
+
+// Summarize implements Coordinator: it resolves the runtime the summary
+// request replays through, refreshes an expired OAuth token first, and
+// hands the call to the current agent's own summarize pass.
+func (d *turnDispatcher) Summarize(ctx context.Context, sessionID string) error {
+	runtime, err := d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+	if err != nil {
+		return err
+	}
+	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
+		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
+	} else if d.builder.runtimeKey() != runtime.key {
+		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+		if err != nil {
+			return err
+		}
+	}
+	active := newActiveRuntime(runtime)
+
+	// The summary request replays the same conversation prefix the turns
+	// did, so it wants the same routing (see withPromptCacheKey) — and it
+	// is the single most expensive request a session makes, since a
+	// summary is only asked for once the context is full.
+	summaryOptions := withPromptCacheKey(runtime.providerOptions, runtime.model, runtime.providerCfg, sessionID)
+	agent := d.agentPort.current()
+	if sa, ok := agent.(*sessionAgent); ok {
+		return sa.summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}), runtime.model, runtime.systemPromptPrefix, active, nil)
+	}
+	return agent.Summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}))
+}
+
+// GenerateTitle generates a session title using the current agent, with
+// the model and prefix the runtime was compiled from.
+func (d *turnDispatcher) GenerateTitle(ctx context.Context, sessionID, prompt string) {
+	agent := d.agentPort.current()
+	if agent == nil {
+		return
+	}
+	runtime, err := d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+	if err != nil {
+		slog.Error("Failed to prepare agent runtime for title", "error", err)
+		return
+	}
+	if sa, ok := agent.(*sessionAgent); ok {
+		sa.generateTitle(ctx, sessionID, prompt, runtime.model, runtime.systemPromptPrefix)
+		return
+	}
+	agent.GenerateTitle(ctx, sessionID, prompt)
+}
+
+// runContinuation dispatches an auto-woken continuation turn for
+// sessionID through the same preparation a prompted turn gets: MCP
+// initialization waited out, a runtime resolved from the current config,
+// an expired OAuth token refreshed first, and the model's own call
+// options carried onto the call.
+//
+// It exists because the wake path used to go straight to
+// sessionAgent.Run with nothing but the session id and a placeholder
+// prompt: no Runtime, so no thinking options and no output-token budget;
+// no OnAuthRefresh, so an OAuth token that expired while a delegation ran
+// produced a 401 with no retry; and no MCP wait, so a continuation that
+// woke early could be built without the tools it needed. Every one of
+// those is most likely precisely when a continuation fires — long after
+// the turn that started the delegation.
+func (d *turnDispatcher) runContinuation(ctx context.Context, sessionID string) error {
+	if err := d.lifecycle.waitPrimary(); err != nil {
+		return err
+	}
+	if err := d.builder.waitForMCPInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	runtime, err := d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+	if err != nil {
+		return fmt.Errorf("failed to prepare agent runtime: %w", err)
+	}
+	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
+		slog.Error("Failed to refresh OAuth2 token for a continuation. Proceeding with existing token.", "error", err)
+	} else if d.builder.runtimeKey() != runtime.key {
+		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+		if err != nil {
+			return fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
+		}
+	}
+	active := newActiveRuntime(runtime)
+
+	_, err = d.agentPort.current().Run(ctx, d.makeRunCall(SessionAgentCall{
+		Runtime:       runtime,
+		ActiveRuntime: active,
+		SessionID:     sessionID,
+		Prompt:        continuationPromptPlaceholder,
+		Continuation:  true,
+	}))
+	return err
+}
+
+// makeRunCall carries the per-run model options resolved from runtime onto
+// the SessionAgentCall, plus the auth-refresh callback that re-resolves them
+// after a successful credential refresh. Every SessionAgentCall assembled
+// from a runtime goes through this one point, so the options cannot drift
+// from the runtime they were resolved out of.
+func (d *turnDispatcher) makeRunCall(call SessionAgentCall) SessionAgentCall {
+	runtime := call.Runtime
+	call.MaxOutputTokens = runtime.maxOutputTokens
+	call.ProviderOptions = withPromptCacheKey(runtime.providerOptions, runtime.model, runtime.providerCfg, call.SessionID)
+	call.Temperature = runtime.temperature
+	call.TopP = runtime.topP
+	call.TopK = runtime.topK
+	call.FrequencyPenalty = runtime.frequencyPenalty
+	call.PresencePenalty = runtime.presencePenalty
+	call.OnAuthRefresh = d.builder.makeAuthRefreshCallback(runtime.providerCfg, call.ActiveRuntime, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()})
+	return call
+}
+
+// run is the shared implementation behind the coordinator's Run and
+// RunAccepted entry points. When accept is non-nil it is threaded onto the
+// SessionAgentCall as Accepted so sessionAgent.Run can consume the accept
+// reservation under dispatchMu; when nil (the in-process/local path) no
+// accept tracking applies.
+func (d *turnDispatcher) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	if err := d.lifecycle.waitPrimary(); err != nil {
+		return nil, err
+	}
+
+	// Wait for MCP initialization to complete before building the tool list.
+	// Without this, slow-to-start MCP servers (e.g. stdio Python via uv) may
+	// not have registered their tools yet when buildTools reads the registry,
+	// so their tools silently never appear in the LLM tool palette — even
+	// though sennit_info reports them as connected.
+	if err := d.builder.waitForMCPInit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	runtime, err := d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare agent runtime: %w", err)
+	}
+
+	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
+		// We don't return here because the event handling to ask the user to reauthenticate
+		// depends on the flow below. If refresh fails, proceed with the token we have.
+		slog.Error("Failed to refresh OAuth2 token. Proceeding with existing token.", "error", err)
+	} else if d.builder.runtimeKey() != runtime.key {
+		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
+		}
+	}
+	active := newActiveRuntime(runtime)
+
+	// Coalesce per-attempt RunComplete payloads so only the final
+	// outcome reaches subscribers. Without this, the first attempt's
+	// failed RunComplete (unauthorized) would race ahead of the
+	// retry's success, and `sennit run` would exit on the stale error
+	// before ever seeing the retry result. Each attempt's
+	// SessionAgentCall.OnComplete hook overwrites latest; we publish
+	// exactly once after retries resolve, via PublishMustDeliver, so
+	// a momentarily-full subscriber buffer can't silently drop the
+	// terminal event.
+	var (
+		latest    notify.RunComplete
+		hasLatest bool
+	)
+	onComplete := func(rc notify.RunComplete) {
+		latest = rc
+		hasLatest = true
+	}
+	// Propagate the caller-supplied RunID (set via agent.WithRunID
+	// at the dispatch boundary in AgentDispatcher.Send) onto the
+	// SessionAgentCall so the terminal RunComplete event echoes it
+	// back. Both attempts in the retry chain reuse the same RunID;
+	// the coalesce closure publishes the final outcome under that
+	// same correlator.
+	runID := RunIDFromContext(ctx)
+	promptOrigin := PromptOriginFromContext(ctx)
+	// A steering dispatch (agent.WithSteering) asks for this prompt to
+	// reach a turn already in flight rather than queue behind it. The
+	// decision hook is wrapped in a Once because the auth-retry chain
+	// below may call run twice: the retry's dispatch decision is not a
+	// second event to report - the first attempt already reached one, and
+	// an auth failure happens while streaming, long past it.
+	onDispatch, steering := SteeringFromContext(ctx)
+	if onDispatch != nil {
+		var once sync.Once
+		hook := onDispatch
+		onDispatch = func(outcome SteerOutcome) { once.Do(func() { hook(outcome) }) }
+	}
+	run := func() (*fantasy.AgentResult, error) {
+		return d.agentPort.current().Run(ctx, d.makeRunCall(SessionAgentCall{
+			Runtime:       runtime,
+			ActiveRuntime: active,
+			SessionID:     sessionID,
+			RunID:         runID,
+			Prompt:        prompt,
+			PromptOrigin:  promptOrigin,
+			Steering:      steering,
+			OnDispatch:    onDispatch,
+			Attachments:   attachments,
+			OnComplete:    onComplete,
+			Accepted:      accept,
+		}))
+	}
+	_, activeSkillsSnapshot, skillTrackerSnapshot := d.delegation.skillsSnapshot()
+	beforeLoaded := skillTrackerSnapshot.LoadedNames()
+	result, originalErr := run()
+	logTurnSkillUsage(sessionID, prompt, activeSkillsSnapshot, skillTrackerSnapshot, beforeLoaded)
+
+	// Notify only if still unauthorized after retry — a successful
+	// retry means the user doesn't need to re-authenticate. AWS SSO is
+	// handled transparently inside OnAuthRefresh, so it needs no post-run
+	// notification here.
+	if hasLatest && d.runComplete != nil {
+		// Detached, with a bounded deadline of its own: this is the
+		// authoritative terminal event, and the commonest reason to be
+		// publishing it is that the run was cancelled — which cancels
+		// ctx too, so publishing on it dropped the very event a caller
+		// waiting on this RunID needs. The deferred publisher inside
+		// sessionAgent.run already detaches for the same reason.
+		publishCtx, cancelPublish := context.WithTimeout(context.WithoutCancel(ctx), runCompletePublishTimeout)
+		d.runComplete.PublishMustDeliver(publishCtx, pubsub.UpdatedEvent, latest)
+		cancelPublish()
+		// Signal to the dispatcher (AgentDispatcher.run) that the
+		// authoritative terminal RunComplete for this run was already
+		// emitted, so it does not publish a duplicate fallback for the
+		// error it is about to receive.
+		MarkRunCompletePublished(ctx)
+	}
+	return result, originalErr
+}
+
+// BeginAccepted reserves an accept slot for sessionID on the active
+// agent and returns the ownership handle. It is the fire-and-forget
+// dispatch path's only way to mark a run as accepted-but-not-yet-active
+// so a cancel arriving before the run registers in activeRequests is not
+// lost.
+func (d *turnDispatcher) BeginAccepted(sessionID string) *AcceptedRun {
+	return d.agentPort.current().BeginAccepted(sessionID)
+}
+
+// Steer implements Coordinator.
+func (d *turnDispatcher) Steer(ctx context.Context, call SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error) {
+	return d.agentPort.current().Steer(ctx, call)
+}
+
+func (d *turnDispatcher) Cancel(sessionID string) {
+	d.agentPort.current().Cancel(sessionID)
+}
+
+func (d *turnDispatcher) CancelAll() {
+	d.agentPort.current().CancelAll()
+}
+
+func (d *turnDispatcher) ClearQueue(sessionID string) {
+	d.agentPort.current().ClearQueue(sessionID)
+}
+
+func (d *turnDispatcher) Model() Model {
+	return d.agentPort.current().Model()
+}
+
+func (d *turnDispatcher) QueuedPrompts(sessionID string) int {
+	return d.agentPort.current().QueuedPrompts(sessionID)
+}
+
+func (d *turnDispatcher) QueuedPromptsList(sessionID string) []string {
+	return d.agentPort.current().QueuedPromptsList(sessionID)
+}

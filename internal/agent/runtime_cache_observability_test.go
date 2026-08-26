@@ -139,29 +139,31 @@ func (sliceThreadManager) Merge(context.Context, string) (tools.ThreadInfo, erro
 func (sliceThreadManager) Remove(context.Context, string, bool, bool) error { return nil }
 
 func TestSetThreadsManagerIdentity(t *testing.T) {
-	coordinator := &coordinator{runtime: newRuntimeCache()}
+	coordinator := &coordinator{}
+	coordinator.newCoordinatorComponents()
+	builder := coordinator.builder
 	first := mapThreadManager{"id": "one"}
 	coordinator.SetDelegationTools(first, nil)
-	require.Equal(t, uint64(1), coordinator.localVersion.Load())
+	require.Equal(t, uint64(1), builder.localVersion.Load())
 	coordinator.SetDelegationTools(first, nil)
-	require.Equal(t, uint64(1), coordinator.localVersion.Load(), "same map identity is a no-op")
+	require.Equal(t, uint64(1), builder.localVersion.Load(), "same map identity is a no-op")
 	coordinator.SetDelegationTools(mapThreadManager{"id": "one"}, nil)
-	require.Equal(t, uint64(2), coordinator.localVersion.Load(), "different maps rebuild")
+	require.Equal(t, uint64(2), builder.localVersion.Load(), "different maps rebuild")
 
 	slice := sliceThreadManager{"one"}
 	coordinator.SetDelegationTools(slice, nil)
 	coordinator.SetDelegationTools(slice, nil)
-	require.Equal(t, uint64(4), coordinator.localVersion.Load(), "slices conservatively rebuild")
+	require.Equal(t, uint64(4), builder.localVersion.Load(), "slices conservatively rebuild")
 
 	unknown := structThreadManager{mapThreadManager: mapThreadManager{"id": "one"}, values: []string{"one"}}
 	coordinator.SetDelegationTools(unknown, nil)
 	coordinator.SetDelegationTools(unknown, nil)
-	require.Equal(t, uint64(6), coordinator.localVersion.Load(), "unknown non-comparable structs rebuild")
+	require.Equal(t, uint64(6), builder.localVersion.Load(), "unknown non-comparable structs rebuild")
 
 	closure := closureThreadManager(func() {})
 	coordinator.SetDelegationTools(closure, nil)
 	coordinator.SetDelegationTools(closure, nil)
-	require.Equal(t, uint64(8), coordinator.localVersion.Load(), "function managers conservatively rebuild even when the closure pointer matches")
+	require.Equal(t, uint64(8), builder.localVersion.Load(), "function managers conservatively rebuild even when the closure pointer matches")
 }
 
 func TestRuntimeCacheLogsLifecycleAndCorrelation(t *testing.T) {
@@ -182,12 +184,12 @@ func TestRuntimeCacheLogsLifecycleAndCorrelation(t *testing.T) {
 }
 
 func TestCoordinatorInvalidationKeepsNewestReasonAndGeneration(t *testing.T) {
-	coordinator := &coordinator{runtime: newRuntimeCache()}
+	builder := &runtimeBuilder{runtime: newRuntimeCache()}
 	firstMutated := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	firstDone := make(chan struct{})
 	go func() {
-		coordinator.invalidateRuntime(context.Background(), "threads_changed", func() bool {
+		builder.invalidateRuntime(context.Background(), "threads_changed", func() bool {
 			close(firstMutated)
 			<-releaseFirst
 			return true
@@ -197,28 +199,28 @@ func TestCoordinatorInvalidationKeepsNewestReasonAndGeneration(t *testing.T) {
 	<-firstMutated
 	secondDone := make(chan struct{})
 	go func() {
-		coordinator.invalidateRuntime(context.Background(), "skills_changed", func() bool { return true })
+		builder.invalidateRuntime(context.Background(), "skills_changed", func() bool { return true })
 		close(secondDone)
 	}()
 	close(releaseFirst)
 	<-firstDone
 	<-secondDone
 
-	key := coordinator.runtimeKey()
+	key := builder.runtimeKey()
 	require.Equal(t, uint64(2), key.local)
-	coordinator.runtime.mu.Lock()
-	require.Equal(t, "skills_changed", coordinator.runtime.missReasonLocked(key))
-	coordinator.runtime.mu.Unlock()
+	builder.runtime.mu.Lock()
+	require.Equal(t, "skills_changed", builder.runtime.missReasonLocked(key))
+	builder.runtime.mu.Unlock()
 }
 
 func TestCoordinatorInvalidationDoesNotWaitForRuntimeBuild(t *testing.T) {
-	coordinator := &coordinator{runtime: newRuntimeCache()}
+	builder := &runtimeBuilder{runtime: newRuntimeCache()}
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var startOnce sync.Once
 	buildDone := make(chan error, 1)
 	go func() {
-		_, err := coordinator.runtime.getOrBuild(context.Background(), coordinator.runtimeKey, func(_ context.Context, key runtimeKey) (*compiledRuntime, error) {
+		_, err := builder.runtime.getOrBuild(context.Background(), builder.runtimeKey, func(_ context.Context, key runtimeKey) (*compiledRuntime, error) {
 			startOnce.Do(func() { close(started) })
 			if key.local == 0 {
 				<-release
@@ -231,7 +233,7 @@ func TestCoordinatorInvalidationDoesNotWaitForRuntimeBuild(t *testing.T) {
 
 	mutationDone := make(chan struct{})
 	go func() {
-		coordinator.invalidateRuntime(context.Background(), "threads_changed", func() bool { return true })
+		builder.invalidateRuntime(context.Background(), "threads_changed", func() bool { return true })
 		close(mutationDone)
 	}()
 	select {
@@ -239,23 +241,23 @@ func TestCoordinatorInvalidationDoesNotWaitForRuntimeBuild(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("runtime mutation blocked behind in-flight build")
 	}
-	require.Equal(t, uint64(1), coordinator.localVersion.Load())
-	coordinator.runtime.mu.Lock()
-	require.Equal(t, "threads_changed", coordinator.runtime.pendingReason[runtimeKey{local: 1}])
-	coordinator.runtime.mu.Unlock()
+	require.Equal(t, uint64(1), builder.localVersion.Load())
+	builder.runtime.mu.Lock()
+	require.Equal(t, "threads_changed", builder.runtime.pendingReason[runtimeKey{local: 1}])
+	builder.runtime.mu.Unlock()
 
 	close(release)
 	require.NoError(t, <-buildDone)
 }
 
 func TestRuntimeCacheWaiterCancellationDoesNotBlockMutation(t *testing.T) {
-	coordinator := &coordinator{runtime: newRuntimeCache()}
+	builder := &runtimeBuilder{runtime: newRuntimeCache()}
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var startOnce sync.Once
 	builderDone := make(chan error, 1)
 	go func() {
-		_, err := coordinator.runtime.getOrBuild(context.Background(), coordinator.runtimeKey, func(_ context.Context, key runtimeKey) (*compiledRuntime, error) {
+		_, err := builder.runtime.getOrBuild(context.Background(), builder.runtimeKey, func(_ context.Context, key runtimeKey) (*compiledRuntime, error) {
 			startOnce.Do(func() { close(started) })
 			if key.local == 0 {
 				<-release
@@ -269,7 +271,7 @@ func TestRuntimeCacheWaiterCancellationDoesNotBlockMutation(t *testing.T) {
 	waiterCtx, cancel := context.WithCancel(context.Background())
 	waiterDone := make(chan error, 1)
 	go func() {
-		_, err := coordinator.runtime.getOrBuild(waiterCtx, coordinator.runtimeKey, nil)
+		_, err := builder.runtime.getOrBuild(waiterCtx, builder.runtimeKey, nil)
 		waiterDone <- err
 	}()
 	cancel()
@@ -277,7 +279,7 @@ func TestRuntimeCacheWaiterCancellationDoesNotBlockMutation(t *testing.T) {
 
 	mutationDone := make(chan struct{})
 	go func() {
-		coordinator.invalidateRuntime(context.Background(), "skills_changed", func() bool { return true })
+		builder.invalidateRuntime(context.Background(), "skills_changed", func() bool { return true })
 		close(mutationDone)
 	}()
 	select {

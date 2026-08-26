@@ -96,7 +96,7 @@ func (r *recordingSubAgent) priorText() string {
 // from, and reusing them would collide on the session insert.
 func delegate(t *testing.T, coord *coordinator, agent SessionAgent, parentSessionID, agentID, nonce, prompt string) {
 	t.Helper()
-	resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+	resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
 		Agent:          agent,
 		SessionID:      parentSessionID,
 		AgentMessageID: "msg-" + nonce,
