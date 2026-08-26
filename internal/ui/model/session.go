@@ -240,7 +240,7 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 		readFiles:           readFiles,
 		items:               items,
 		lastUserMessageTime: lastUserMessageTime,
-		modelUsed:           lastAssistantModel(msgs),
+		modelUsed:           lastAssistantModel(sessionID, msgs),
 		modelSwitched:       modelSwitched,
 	}
 }

@@ -106,7 +106,10 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	// the picker. "default model" only when it has yet to answer anything.
 	line := childPanelModelSubtitle(frame.model, frame.effort)
 	if line == "" {
-		line = childPanelModelSubtitle(m.sess.modelUsed.String(), frame.effort)
+		// forSession: the loaded session is still the parent for as
+		// long as the child's load takes, and its reading is not this
+		// delegation's.
+		line = childPanelModelSubtitle(m.sess.modelUsed.forSession(frame.childSessionID).String(), frame.effort)
 	}
 	if line == "" {
 		line = "default model"
