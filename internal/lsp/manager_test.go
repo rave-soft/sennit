@@ -10,6 +10,7 @@ import (
 
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +34,7 @@ func TestStart_ResolvesSymlinkedWorkingDir(t *testing.T) {
 	require.NoError(t, err)
 
 	autoLSPOff := false
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Options: &config.Options{AutoLSP: &autoLSPOff},
 		LSP: map[string]config.LSPConfig{
 			"fake": {
@@ -42,7 +43,7 @@ func TestStart_ResolvesSymlinkedWorkingDir(t *testing.T) {
 				Env:       map[string]string{fakeLSPServerEnv: "1"},
 			},
 		},
-	}, config.WithWorkingDir(symDir))
+	}, configtest.WithWorkingDir(symDir))
 
 	manager := NewManager(cfg)
 	started := make(chan string, 1)
@@ -193,7 +194,7 @@ func TestStartServer_ConcurrentStartsCreateOneClient(t *testing.T) {
 	path := filepath.Join(dir, "main.go")
 	require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o644))
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Options: &config.Options{},
 		LSP: config.LSPs{
 			"fake": {
@@ -203,7 +204,7 @@ func TestStartServer_ConcurrentStartsCreateOneClient(t *testing.T) {
 				Timeout:   5,
 			},
 		},
-	}, config.WithWorkingDir(dir))
+	}, configtest.WithWorkingDir(dir))
 
 	mgr := NewManager(cfg)
 	server, ok := mgr.manager.GetServer("fake")

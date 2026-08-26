@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/db"
-	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/zeebo/xxh3"
 )
@@ -152,11 +151,25 @@ type Service interface {
 	IsAgentToolSession(sessionID string) bool
 }
 
+// TelemetrySink is the narrow seam the session service reports its
+// lifecycle through, so internal/session never reaches into the telemetry
+// package. The composition layer (app and the session CLI commands) wires
+// it to the telemetry sink; a service built without one simply does not
+// report.
+type TelemetrySink interface {
+	SessionCreated()
+	SessionDeleted()
+}
+
 type service struct {
 	*pubsub.Broker[Session]
 	db          *sql.DB
 	q           *db.Queries
 	projectPath string
+
+	// telemetry receives the service's lifecycle reports; nil when no
+	// composition wired a sink (the zero service built in tests).
+	telemetry TelemetrySink
 
 	// Estimated usage stays in memory so fetch-modify-save paths (e.g.,
 	// updating todos or parent-session cost) do not rebuild a session from
@@ -176,7 +189,7 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	}
 	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.CreatedEvent, session)
-	event.SessionCreated()
+	s.reportSessionCreated()
 	return session, nil
 }
 
@@ -279,7 +292,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		s.clearEstimatedUsageState(treeID)
 	}
 	s.Publish(pubsub.DeletedEvent, session)
-	event.SessionDeleted()
+	s.reportSessionDeleted()
 	return nil
 }
 
@@ -523,14 +536,44 @@ func unmarshalTodos(data string) ([]Todo, error) {
 // NewService returns a Service backed by the given sqlc queries, scoped
 // to projectPath: sessions now live in a single shared database, so
 // "last session" and listings are scoped per project.
-func NewService(q *db.Queries, conn *sql.DB, projectPath string) Service {
+func NewService(q *db.Queries, conn *sql.DB, projectPath string, opts ...Option) Service {
 	broker := pubsub.NewBroker[Session]()
-	return &service{
+	s := &service{
 		Broker:         broker,
 		db:             conn,
 		q:              q,
 		projectPath:    projectPath,
 		estimatedUsage: make(map[string]bool),
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// Option configures a service returned by [NewService].
+type Option func(*service)
+
+// WithTelemetry wires the sink the service reports its lifecycle
+// (session creation and deletion) through. A service built without it is
+// nil-safe and reports nothing.
+func WithTelemetry(sink TelemetrySink) Option {
+	return func(s *service) { s.telemetry = sink }
+}
+
+// reportSessionCreated reports a created session through the wired
+// telemetry sink. Nil-safe: a service without a sink reports nothing.
+func (s *service) reportSessionCreated() {
+	if s.telemetry != nil {
+		s.telemetry.SessionCreated()
+	}
+}
+
+// reportSessionDeleted reports a deleted session through the wired
+// telemetry sink. Nil-safe: a service without a sink reports nothing.
+func (s *service) reportSessionDeleted() {
+	if s.telemetry != nil {
+		s.telemetry.SessionDeleted()
 	}
 }
 

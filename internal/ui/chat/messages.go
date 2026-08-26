@@ -10,7 +10,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
@@ -32,7 +32,7 @@ type Identifiable interface {
 // Animatable is an interface for items that support animation.
 type Animatable interface {
 	StartAnimation() tea.Cmd
-	Animate(msg anim.StepMsg) tea.Cmd
+	Animate(msg spin.StepMsg) tea.Cmd
 }
 
 // Expandable is an interface for items that can be expanded or collapsed.
@@ -169,7 +169,7 @@ func ClearItemCaches(items []MessageItem) {
 }
 
 // Restylable is implemented by message items that hold palette-derived
-// state Render cannot re-read: an [anim.Anim] pre-renders its gradient
+// state Render cannot re-read: an [spin.Anim] pre-renders its gradient
 // frames from the colors it was built with, so a running spinner keeps the
 // old palette until the anim itself is rebuilt. Restyle rebuilds it and
 // returns the command that re-arms the tick chain, if the item was

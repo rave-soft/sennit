@@ -259,10 +259,14 @@ through all components that need access to app state or styles.
 - `attachments/` — File attachment management
 - `styles/` — All style definitions, color tokens, icons
 - `diffview/` — Unified and split diff rendering with syntax highlighting
-- `anim/` — Animated spinnner
 - `image/` — Terminal image rendering (Kitty graphics)
 - `logo/` — Logo rendering
 - `util/` — Small shared utilities and message types
+
+The animated spinner itself is not a UI file: it lives in
+`internal/spin` (package `spin`), a presentation-neutral leaf so that
+non-UI consumers (`internal/format`, `internal/cmd`) can build one without
+importing this tree.
 
 ## Common Gotchas
 

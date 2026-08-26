@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -123,7 +123,7 @@ func TestScrollbarDrag_SuspendsFollowUntilReleasedAtBottom(t *testing.T) {
 	require.False(t, u.chat.AtBottom())
 
 	// A live progress tick must not pull the viewport back to the end.
-	_, _ = u.Update(anim.StepMsg{ID: "live-progress"})
+	_, _ = u.Update(spin.StepMsg{ID: "live-progress"})
 	require.Equal(t, offsetAtTop, u.chat.list.Offset())
 
 	require.True(t, u.chat.HandleScrollbarMouseUp())

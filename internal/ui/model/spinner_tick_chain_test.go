@@ -11,7 +11,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -55,7 +55,7 @@ func TestOffscreenSpinnerKeepsItsTickChain(t *testing.T) {
 
 	start := spinning.(chat.Animatable).StartAnimation()
 	require.NotNil(t, start, "a spinning item must arm an animation")
-	step, ok := start().(anim.StepMsg)
+	step, ok := start().(spin.StepMsg)
 	require.True(t, ok, "arming must schedule a step")
 
 	// The chat is pinned to the bottom, so the first item is off-screen.
@@ -77,15 +77,15 @@ func TestSpinnerTickSurvivesANonChatScreen(t *testing.T) {
 	m.chat.SetMessages(spinning)
 	m.state = uiLanding
 
-	step := anim.StepMsg{ID: "m-spin", Gen: 3}
+	step := spin.StepMsg{ID: "m-spin", Gen: 3}
 	_, cmd := m.Update(step)
 	require.NotNil(t, cmd, "a tick arriving off the chat screen must be retried")
-	require.Equal(t, step, drainTo[anim.StepMsg](t, cmd), "the retry must carry the same id and generation")
+	require.Equal(t, step, drainTo[spin.StepMsg](t, cmd), "the retry must carry the same id and generation")
 
 	// A tick for something this chat no longer shows has nothing left to
 	// drive, and must not be retried for the rest of the session.
-	_, cmd = m.Update(anim.StepMsg{ID: "gone", Gen: 3})
-	require.Zero(t, drainTo[anim.StepMsg](t, cmd), "a tick with no item behind it must not be retried")
+	_, cmd = m.Update(spin.StepMsg{ID: "gone", Gen: 3})
+	require.Zero(t, drainTo[spin.StepMsg](t, cmd), "a tick with no item behind it must not be retried")
 }
 
 // drainTo runs a command tree and returns the first message of type T.

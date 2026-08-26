@@ -14,6 +14,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/lsp"
@@ -24,7 +25,7 @@ import (
 func TestSennitInfo_MinimalConfig(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
@@ -38,9 +39,9 @@ func TestSennitInfo_MinimalConfig(t *testing.T) {
 func TestSennitInfo_ConfigFiles(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t,
+	cfg := configtest.NewStore(t,
 		&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()},
-		config.WithLoadedPaths(
+		configtest.WithLoadedPaths(
 			"/home/user/.config/sennit/sennit.json",
 			"/project/.sennit/sennit.json",
 		),
@@ -54,7 +55,7 @@ func TestSennitInfo_ConfigFiles(t *testing.T) {
 func TestSennitInfo_Models(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Model:     config.SelectedModel{Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
@@ -70,7 +71,7 @@ func TestSennitInfo_Providers(t *testing.T) {
 	providers.Set("openai", config.ProviderConfig{Models: make([]catwalk.Model, 8)})
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
 
-	cfg := config.NewTestStore(t, &config.Config{Providers: providers})
+	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[providers]")
 	anthropicIdx := strings.Index(output, "anthropic = enabled")
@@ -91,7 +92,7 @@ func TestBuildModelsFor_ListsIDs(t *testing.T) {
 		{ID: "claude-sonnet-4"},
 	}})
 
-	cfg := config.NewTestStore(t, &config.Config{Providers: providers})
+	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
 	output := buildModelsFor(cfg, "anthropic")
 	require.Contains(t, output, "[models_for.anthropic]")
 	require.Contains(t, output, "claude-opus-4")
@@ -102,7 +103,7 @@ func TestBuildModelsFor_ListsIDs(t *testing.T) {
 func TestBuildModelsFor_UnknownProvider(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
+	cfg := configtest.NewStore(t, &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
 	output := buildModelsFor(cfg, "does-not-exist")
 	require.Contains(t, output, "[models_for.does-not-exist]")
 	require.Contains(t, output, "error = provider not found or disabled")
@@ -118,7 +119,7 @@ func TestBuildModelsFor_CapsLargeRouterCatalog(t *testing.T) {
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	providers.Set("omniroute", config.ProviderConfig{Models: models})
 
-	cfg := config.NewTestStore(t, &config.Config{Providers: providers})
+	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
 	output := buildModelsFor(cfg, "omniroute")
 	require.Contains(t, output, "[models_for.omniroute]")
 	require.Contains(t, output, "...and 1189 more")
@@ -132,7 +133,7 @@ func TestSennitInfo_DisabledProvidersOmitted(t *testing.T) {
 	providers.Set("openai", config.ProviderConfig{Disable: true, Models: make([]catwalk.Model, 8)})
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
 
-	cfg := config.NewTestStore(t, &config.Config{Providers: providers})
+	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "anthropic = enabled")
 	require.NotContains(t, output, "openai")
@@ -141,7 +142,7 @@ func TestSennitInfo_DisabledProvidersOmitted(t *testing.T) {
 func TestSennitInfo_LSPStates(t *testing.T) {
 	t.Parallel()
 
-	mgr := lsp.NewManager(config.NewTestStore(t, &config.Config{
+	mgr := lsp.NewManager(configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	}))
 	readyClient := &lsp.Client{}
@@ -152,7 +153,7 @@ func TestSennitInfo_LSPStates(t *testing.T) {
 	errorClient.SetServerState(lsp.StateError)
 	mgr.Clients().Set("pyright", errorClient)
 
-	cfg := config.NewTestStore(t, &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
+	cfg := configtest.NewStore(t, &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
 	output := buildSennitInfo(cfg, nil, mgr, nil, nil, nil, nil)
 	require.Contains(t, output, "[lsp]")
 	require.Contains(t, output, "gopls = ready")
@@ -180,7 +181,7 @@ func TestSennitInfo_MCPStates(t *testing.T) {
 		},
 	}
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 
@@ -198,7 +199,7 @@ func TestSennitInfo_MCPStates(t *testing.T) {
 func TestSennitInfo_YoloMode(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{},
 	})
@@ -212,7 +213,7 @@ func TestSennitInfo_YoloMode(t *testing.T) {
 func TestSennitInfo_AllowedTools(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{AllowedTools: []string{"edit:write", "bash"}},
 	})
@@ -225,7 +226,7 @@ func TestSennitInfo_AllowedTools(t *testing.T) {
 func TestSennitInfo_DisabledTools(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisabledTools: []string{"download", "agentic_fetch"}},
 	})
@@ -238,7 +239,7 @@ func TestSennitInfo_DisabledTools(t *testing.T) {
 func TestSennitInfo_Options(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options: &config.Options{
 			DataDirectory:        "/Users/user/project/.sennit",
@@ -258,14 +259,14 @@ func TestSennitInfo_Options(t *testing.T) {
 func TestSennitInfo_AutoSummarizeInversion(t *testing.T) {
 	t.Parallel()
 
-	cfgFalse := config.NewTestStore(t, &config.Config{
+	cfgFalse := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: true},
 	})
 	outputFalse := buildSennitInfo(cfgFalse, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, outputFalse, "auto_summarize = false")
 
-	cfgTrue := config.NewTestStore(t, &config.Config{
+	cfgTrue := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: false},
 	})
@@ -282,7 +283,7 @@ func TestSennitInfo_NoSecrets(t *testing.T) {
 		Models: make([]catwalk.Model, 8),
 	})
 
-	cfg := config.NewTestStore(t, &config.Config{Providers: providers})
+	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "sk-super-secret-key-12345")
 	require.NotContains(t, output, "secret")
@@ -302,7 +303,7 @@ func TestSennitInfo_DeterministicOrdering(t *testing.T) {
 		"a-mcp": {Name: "a-mcp", State: mcp.StateConnected, Counts: mcp.Counts{Tools: 2}},
 	}
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: providers,
 		Options:   &config.Options{DisabledTools: []string{"z-tool", "a-tool"}},
 		Permissions: &config.Permissions{
@@ -334,7 +335,7 @@ func TestSennitInfo_DeterministicOrdering(t *testing.T) {
 func TestSennitInfo_EmptySectionsOmitted(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{},
 		Options:     &config.Options{},
@@ -355,9 +356,9 @@ func TestSennitInfo_ConfigStaleness_Clean(t *testing.T) {
 	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
-	store := config.NewTestStore(t, &config.Config{
+	store := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
-	}, config.WithLoadedPaths(configPath))
+	}, configtest.WithLoadedPaths(configPath))
 
 	// Capture snapshot (normally done in Load)
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -376,9 +377,9 @@ func TestSennitInfo_ConfigStaleness_Dirty(t *testing.T) {
 	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
 
-	store := config.NewTestStore(t, &config.Config{
+	store := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
-	}, config.WithLoadedPaths(configPath))
+	}, configtest.WithLoadedPaths(configPath))
 
 	// Capture initial snapshot
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -401,9 +402,9 @@ func TestSennitInfo_ConfigStaleness_MissingPath(t *testing.T) {
 	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
-	store := config.NewTestStore(t, &config.Config{
+	store := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
-	}, config.WithLoadedPaths(configPath))
+	}, configtest.WithLoadedPaths(configPath))
 
 	// Capture initial snapshot
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -421,7 +422,7 @@ func TestSennitInfo_ConfigStaleness_MissingPath(t *testing.T) {
 func TestSennitInfo_Skills_NoSkills(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
@@ -442,7 +443,7 @@ func TestSennitInfo_Skills_MixedLoadedUnloaded(t *testing.T) {
 	tracker.MarkLoaded("bash")
 	tracker.MarkLoaded("sennit-config")
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker, nil)
@@ -467,7 +468,7 @@ func TestSennitInfo_Skills_DisabledSkills(t *testing.T) {
 
 	tracker := skills.NewTracker(activeSkills)
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisabledSkills: []string{"image-convert"}},
 	})
@@ -489,7 +490,7 @@ func TestSennitInfo_Skills_Ordering(t *testing.T) {
 	activeSkills := allSkills
 	tracker := skills.NewTracker(activeSkills)
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker, nil)
@@ -511,7 +512,7 @@ func TestSennitInfo_Skills_BuiltinOrigin(t *testing.T) {
 	activeSkills := allSkills
 	tracker := skills.NewTracker(activeSkills)
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker, nil)
@@ -522,7 +523,7 @@ func TestSennitInfo_Skills_BuiltinOrigin(t *testing.T) {
 func TestSennitInfo_Hooks(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Hooks: map[string][]config.HookConfig{
 			"PreToolUse": {
@@ -541,7 +542,7 @@ func TestSennitInfo_Hooks(t *testing.T) {
 func TestSennitInfo_Hooks_NoHooks(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 
@@ -554,7 +555,7 @@ func TestSennitInfo_Hooks_NoHooks(t *testing.T) {
 func TestSennitInfo_Problems_None(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{},
 	})
@@ -585,7 +586,7 @@ func TestSennitInfo_Problems_UnresolvedAgentModel(t *testing.T) {
 			},
 		},
 	}
-	cfg := config.NewTestStore(t, c)
+	cfg := configtest.NewStore(t, c)
 
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[problems]")
@@ -603,7 +604,7 @@ func TestSennitInfo_Problems_MCPError(t *testing.T) {
 	states := map[string]mcp.ClientInfo{
 		"filesystem": {Name: "filesystem", State: mcp.StateError, Error: errors.New("connection refused")},
 	}
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{},
 	})
@@ -623,7 +624,7 @@ func TestSennitInfo_Problems_MCPError(t *testing.T) {
 func TestSennitInfo_Problems_BrokenSkill(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{},
 	})

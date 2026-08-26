@@ -6,11 +6,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 )
 
 // TestSpinnerModeParity holds internal/config's spinner names and
-// internal/ui/anim's modes to the same list.
+// internal/spin's modes to the same list.
 //
 // The two cannot share a type: config must not import the TUI, so it
 // names the modes as plain strings and SpinnerMode converts. Nothing in
@@ -27,7 +27,7 @@ func TestSpinnerModeParity(t *testing.T) {
 
 	// And the other direction: a mode added to anim without a config
 	// constant is one no one can ever select.
-	for _, mode := range []anim.Mode{anim.ModeScramble, anim.ModePulse, anim.ModeDots, anim.ModeNone} {
+	for _, mode := range []spin.Mode{spin.ModeScramble, spin.ModePulse, spin.ModeDots, spin.ModeNone} {
 		require.Contains(t, config.SpinnerModes, string(mode),
 			"anim has mode %q with no config constant to select it", mode)
 	}
@@ -40,11 +40,11 @@ func TestWithSpinnerLeavesPaletteAlone(t *testing.T) {
 	t.Parallel()
 
 	base := Theme(PaletteSteelTeal.ID)
-	withMode := Theme(PaletteSteelTeal.ID).WithSpinner(anim.ModeDots)
+	withMode := Theme(PaletteSteelTeal.ID).WithSpinner(spin.ModeDots)
 
-	require.Equal(t, anim.ModeScramble, base.WorkingSpinner,
+	require.Equal(t, spin.ModeScramble, base.WorkingSpinner,
 		"Theme alone must produce the default motion")
-	require.Equal(t, anim.ModeDots, withMode.WorkingSpinner)
+	require.Equal(t, spin.ModeDots, withMode.WorkingSpinner)
 	require.Equal(t, base.WorkingGradFromColor, withMode.WorkingGradFromColor)
 	require.Equal(t, base.WorkingLabelColor, withMode.WorkingLabelColor)
 }

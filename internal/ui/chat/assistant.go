@@ -12,7 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -181,7 +181,7 @@ type AssistantMessageItem struct {
 
 	message           *message.Message
 	sty               *styles.Styles
-	anim              *anim.Anim
+	anim              *spin.Anim
 	animLabel         string // last label pushed into anim; see renderSpinning
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
@@ -240,8 +240,8 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 // newAnim builds the working animation from the item's current styles.
 // Both construction and [AssistantMessageItem.Restyle] go through it so a
 // rebuilt animation cannot drift from the original settings.
-func (a *AssistantMessageItem) newAnim() *anim.Anim {
-	return anim.New(anim.Settings{
+func (a *AssistantMessageItem) newAnim() *spin.Anim {
+	return spin.New(spin.Settings{
 		ID:          a.ID(),
 		Size:        15,
 		GradColorA:  a.sty.WorkingGradFromColor,
@@ -277,7 +277,7 @@ func (a *AssistantMessageItem) StartAnimation() tea.Cmd {
 }
 
 // Animate progresses the assistant message animation if it should be spinning.
-func (a *AssistantMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+func (a *AssistantMessageItem) Animate(msg spin.StepMsg) tea.Cmd {
 	if !a.isSpinning() {
 		return nil
 	}

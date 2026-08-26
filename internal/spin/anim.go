@@ -1,5 +1,11 @@
-// Package anim provides an animated spinner.
-package anim
+// Package spin provides an animated spinner.
+//
+// It lives outside internal/ui deliberately: internal/format's
+// non-interactive spinner and internal/cmd build it without the TUI, and
+// neither should pull the presentation layer in for a primitive they
+// drive through plain tea messages. The package depends only on the
+// terminal toolkit (bubbletea, lipgloss), never on ui.
+package spin
 
 import (
 	"fmt"

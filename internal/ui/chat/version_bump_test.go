@@ -6,7 +6,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -169,7 +169,7 @@ func TestBaseToolMessageItem_MutatorsBumpVersion(t *testing.T) {
 
 // TestAssistantMessageItem_AnimateBumpsVersion covers the spinner
 // regression: while the assistant message is spinning, every
-// anim.StepMsg fed through Animate must bump Version() so the
+// spin.StepMsg fed through Animate must bump Version() so the
 // list-level cache invalidates and the next draw re-renders the
 // advanced spinner frame. Without this bump the cached entry's
 // version stays put and the spinner appears frozen.
@@ -187,7 +187,7 @@ func TestAssistantMessageItem_AnimateBumpsVersion(t *testing.T) {
 	item := NewAssistantMessageItem(&sty, streaming).(*AssistantMessageItem)
 
 	requireBump(t, "Animate", item, func() {
-		item.Animate(anim.StepMsg{})
+		item.Animate(spin.StepMsg{})
 	})
 
 	// A non-spinning item must not bump on Animate: the bump only
@@ -204,7 +204,7 @@ func TestAssistantMessageItem_AnimateBumpsVersion(t *testing.T) {
 	item.SetMessage(finished)
 	require.True(t, item.Finished(), "item must report Finished() once the message finishes")
 	before := item.Version()
-	item.Animate(anim.StepMsg{})
+	item.Animate(spin.StepMsg{})
 	require.Equal(t, before, item.Version(), "Animate must not bump Version() on a non-spinning item")
 }
 
@@ -417,7 +417,7 @@ func requireNoBump(t *testing.T, name string, item versionedItem, mutate func())
 
 // TestBaseToolMessageItem_AnimateBumpsVersion is the spinner
 // regression test for non-agent tools: while the tool is spinning,
-// every anim.StepMsg whose ID matches the tool must bump Version()
+// every spin.StepMsg whose ID matches the tool must bump Version()
 // so the list-level cache invalidates and the next draw re-renders
 // the advanced spinner frame. Foreign IDs must not bump (they would
 // churn the cache on every frame), and a finished tool must not
@@ -434,14 +434,14 @@ func TestBaseToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 
 	// Spinning + matching ID → bump.
 	requireBump(t, "Animate[spinning,own ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: tc.ID})
+		a.Animate(spin.StepMsg{ID: tc.ID})
 	})
 
 	// Spinning + foreign ID → no bump. Routing this StepMsg here at
 	// all would mean a future chat.Animate refactor; the item must
 	// be defensive against it so we don't churn the list cache.
 	requireNoBump(t, "Animate[spinning,foreign ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: "some-other-tool"})
+		a.Animate(spin.StepMsg{ID: "some-other-tool"})
 	})
 
 	// Finished → no bump on any ID. The entry is frozen; a stray
@@ -453,10 +453,10 @@ func TestBaseToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	require.True(t, item.Finished(), "tool must report Finished() once the result lands")
 
 	requireNoBump(t, "Animate[finished,own ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: tc.ID})
+		a.Animate(spin.StepMsg{ID: tc.ID})
 	})
 	requireNoBump(t, "Animate[finished,foreign ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: "some-other-tool"})
+		a.Animate(spin.StepMsg{ID: "some-other-tool"})
 	})
 }
 
@@ -480,7 +480,7 @@ func TestAgentToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 
 	// Spinning + parent's own ID → parent bumps.
 	requireBump(t, "Animate[spinning,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+		parent.Animate(spin.StepMsg{ID: parentTC.ID})
 	})
 
 	// Spinning + nested child ID → parent bumps. The list only
@@ -488,28 +488,28 @@ func TestAgentToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	// spinner's frame would never reach the screen even though
 	// the nested anim's step has advanced.
 	requireBump(t, "Animate[spinning,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
+		parent.Animate(spin.StepMsg{ID: childTC.ID})
 	})
 
 	// Spinning + unrelated ID → no bump.
 	requireNoBump(t, "Animate[spinning,foreign ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: "unrelated"})
+		parent.Animate(spin.StepMsg{ID: "unrelated"})
 	})
 
 	// Once the parent has a result, neither branch bumps.
 	parent.SetResult(&message.ToolResult{ToolCallID: parentTC.ID, Content: "done"})
 	requireNoBump(t, "Animate[finished,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+		parent.Animate(spin.StepMsg{ID: parentTC.ID})
 	})
 	requireNoBump(t, "Animate[finished,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
+		parent.Animate(spin.StepMsg{ID: childTC.ID})
 	})
 }
 
 // TestAgenticFetchToolMessageItem_AnimateBumpsVersion is the
 // agentic-fetch counterpart of the agent-tool Animate bump test.
 // Without an explicit override the embedded base Animate would
-// drop nested-child StepMsgs at anim.Animate's ID check and never
+// drop nested-child StepMsgs at spin.Animate's ID check and never
 // bump the parent on its own ticks; this test locks in the
 // override.
 func TestAgenticFetchToolMessageItem_AnimateBumpsVersion(t *testing.T) {
@@ -524,21 +524,21 @@ func TestAgenticFetchToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	parent.AddNestedTool(child)
 
 	requireBump(t, "Animate[spinning,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+		parent.Animate(spin.StepMsg{ID: parentTC.ID})
 	})
 	requireBump(t, "Animate[spinning,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
+		parent.Animate(spin.StepMsg{ID: childTC.ID})
 	})
 	requireNoBump(t, "Animate[spinning,foreign ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: "unrelated"})
+		parent.Animate(spin.StepMsg{ID: "unrelated"})
 	})
 
 	parent.SetResult(&message.ToolResult{ToolCallID: parentTC.ID, Content: "done"})
 	requireNoBump(t, "Animate[finished,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+		parent.Animate(spin.StepMsg{ID: parentTC.ID})
 	})
 	requireNoBump(t, "Animate[finished,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
+		parent.Animate(spin.StepMsg{ID: childTC.ID})
 	})
 }
 

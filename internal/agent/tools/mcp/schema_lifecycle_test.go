@@ -7,6 +7,7 @@ import (
 
 	mcpapi "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,7 +58,7 @@ func TestInvalidSchemaInitialPublishFailsClosed(t *testing.T) {
 func TestInvalidSchemaRefreshFailsClosedWithoutClobberingNewSession(t *testing.T) {
 	const name = "invalid-refresh"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	old, oldCtx := liveSessionWithSchema(t, &mcpapi.Tool{Name: "bad-tool", InputSchema: map[string]any{"type": "object", "properties": []any{}}})

@@ -14,7 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/diffview"
 )
 
@@ -209,7 +209,7 @@ type Styles struct {
 	// configured choice with [Styles.WithSpinner]. That includes the
 	// /theme switch, which rebuilds Styles wholesale — see
 	// TestThemeSwitchKeepsSpinnerMode for the regression that guards it.
-	WorkingSpinner anim.Mode
+	WorkingSpinner spin.Mode
 
 	// ChildBanner styles the info panel that replaces the editor while
 	// viewing a sub-agent's session (see UI.drawChildSessionPanel): a

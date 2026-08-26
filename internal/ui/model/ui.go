@@ -22,7 +22,7 @@ import (
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
@@ -577,7 +577,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch msg := msg.(type) {
-	case tea.EnvMsg, tea.ModeReportMsg, uv.UnknownOscEvent, tea.FocusMsg, tea.BlurMsg, tea.WindowSizeMsg, tea.KeyboardEnhancementsMsg, anim.StepMsg, scrollbarHideMsg, chatWarmMsg, sidebarScrollbarHideMsg, spinner.TickMsg, uv.KittyGraphicsEvent:
+	case tea.EnvMsg, tea.ModeReportMsg, uv.UnknownOscEvent, tea.FocusMsg, tea.BlurMsg, tea.WindowSizeMsg, tea.KeyboardEnhancementsMsg, spin.StepMsg, scrollbarHideMsg, chatWarmMsg, sidebarScrollbarHideMsg, spinner.TickMsg, uv.KittyGraphicsEvent:
 		var done bool
 		if cmds, done = m.updateSystem(msg, cmds); done {
 			return m, tea.Batch(cmds...)

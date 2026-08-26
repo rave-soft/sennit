@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -248,7 +249,7 @@ func TestUpdateState_ErrorClearsPromptsAndResources(t *testing.T) {
 func TestGetOrRenewClient_StalePingCannotReplaceNewSession(t *testing.T) {
 	const name = "test-stale-ping"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	old, _ := liveSession(t, "old")
 	oldOwner, err := r.beginAttempt(name)
 	require.NoError(t, err)
@@ -301,7 +302,7 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 		defaultRegistry.states.Del(name)
 	})
 
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
 	// Seed a dead session so the first ping fails and every worker attempts a
 	// renewal.
@@ -374,7 +375,7 @@ func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
 		defaultRegistry.states.Del(name)
 	})
 
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
 	// 1. Initial connect registers the tool via the live publishSession seam
 	// (what defaultRegistry.initClient calls after establishing a session).
@@ -426,7 +427,7 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 		defaultRegistry.states.Del(name)
 	})
 
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
 	// Seed a dead session so the renewal path runs.
 	dead, _ := liveSession(t, "send_message")

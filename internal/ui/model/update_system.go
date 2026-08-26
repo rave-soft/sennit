@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	xstrings "github.com/charmbracelet/x/exp/strings"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
@@ -92,7 +92,7 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			}
 		}
 
-	case anim.StepMsg:
+	case spin.StepMsg:
 		if m.state != uiChat {
 			// Another screen is up (the landing screen of a session being
 			// created, say). Retry rather than drop: the chat's spinners
@@ -102,7 +102,7 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// AnimationLives is what stops the retry once the item is
 			// gone or done.
 			if m.chat.AnimationLives(msg.ID) {
-				cmds = append(cmds, anim.Retry(msg))
+				cmds = append(cmds, spin.Retry(msg))
 			}
 			break
 		}

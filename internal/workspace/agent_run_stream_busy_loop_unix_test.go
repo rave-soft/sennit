@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -78,7 +79,7 @@ func TestAppWorkspace_AgentRunStream_ClosedMessageChannelDoesNotBusyLoop(t *test
 	ch := make(chan pubsub.Event[message.Message])
 	a.SetMessagesForTest(&controlledMessagesService{ch: ch})
 
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
 	out, err := aw.AgentRunStream(t.Context(), "S1", "hello")
 	require.NoError(t, err)

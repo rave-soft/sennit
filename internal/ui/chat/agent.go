@@ -14,7 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -233,7 +233,7 @@ func (a *delegationToolMessageItem) Restyle() tea.Cmd {
 // parent's version. Without the bump, the list cache would serve the
 // previously rendered frame indefinitely and the spinner would appear
 // frozen.
-func (a *delegationToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+func (a *delegationToolMessageItem) Animate(msg spin.StepMsg) tea.Cmd {
 	if a.result != nil || a.Status() == ToolStatusCanceled {
 		return nil
 	}

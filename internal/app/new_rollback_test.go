@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -45,7 +46,7 @@ func TestNew_InitCoderAgentFailureRollsBackStartedResources(t *testing.T) {
 		Agents:    map[string]config.Agent{}, // deliberately no AgentCoder entry
 		Options:   &config.Options{DataDirectory: t.TempDir()},
 	}
-	store := config.NewTestStore(t, cfg, config.WithWorkingDir(t.TempDir()))
+	store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(t.TempDir()))
 	skillsMgr := skills.NewManager(nil, nil, nil)
 
 	a, err := New(context.Background(), conn, store, skillsMgr)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,7 +48,7 @@ func TestInitialize_ConnectsAndPopulatesCatalog(t *testing.T) {
 	r := NewRegistry()
 	r.ArmInit()
 
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{
 		disabled: {Type: config.MCPStdio, Disabled: true},
 	}})
 
@@ -90,7 +91,7 @@ func TestInitialize_ServerFailsToStart(t *testing.T) {
 	r := NewRegistry()
 	r.ArmInit()
 
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{
 		name: {Type: config.MCPStdio, Command: "/no/such/binary-sennit-test-xyz"},
 	}})
 
@@ -109,7 +110,7 @@ func TestInitialize_ServerFailsToStart(t *testing.T) {
 
 func TestInitializeSingle_UnknownServer(t *testing.T) {
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{})
+	cfg := configtest.NewStore(t, &config.Config{})
 	err := r.InitializeSingle(context.Background(), "does-not-exist", cfg)
 	require.Error(t, err)
 }
@@ -118,7 +119,7 @@ func TestRunTool_CallsToolOnConnectedSession(t *testing.T) {
 	const name = "runtool-server"
 	r := NewRegistry()
 	r.ping = func(context.Context, *ClientSession, time.Duration) error { return nil }
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	seedConnected(t, r, name, config.MCPConfig{Type: config.MCPStdio})
 
 	result, err := r.RunTool(context.Background(), cfg, name, "do_thing", `{}`)
@@ -129,7 +130,7 @@ func TestRunTool_CallsToolOnConnectedSession(t *testing.T) {
 
 func TestRunTool_InvalidJSONInput(t *testing.T) {
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{})
+	cfg := configtest.NewStore(t, &config.Config{})
 	_, err := r.RunTool(context.Background(), cfg, "whatever", "tool", `not json`)
 	require.Error(t, err)
 }
@@ -137,7 +138,7 @@ func TestRunTool_InvalidJSONInput(t *testing.T) {
 func TestRefreshTools_UpdatesCatalogAndCounts(t *testing.T) {
 	const name = "refresh-server"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	seedConnected(t, r, name, config.MCPConfig{Type: config.MCPStdio})
 
 	before := r.Version()
@@ -152,7 +153,7 @@ func TestRefreshTools_UpdatesCatalogAndCounts(t *testing.T) {
 
 func TestRefreshTools_NoSessionIsNoop(t *testing.T) {
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{})
+	cfg := configtest.NewStore(t, &config.Config{})
 	// Must not panic or hang when nothing is connected.
 	r.RefreshTools(context.Background(), cfg, "nothing-here")
 }
@@ -197,7 +198,7 @@ func TestReinitialize_RemovesServerGoneFromConfig(t *testing.T) {
 	const name = "reinit-removed"
 	r := NewRegistry()
 	seedConnected(t, r, name, config.MCPConfig{Type: config.MCPStdio})
-	cfg := config.NewTestStore(t, &config.Config{}) // the server no longer exists in config
+	cfg := configtest.NewStore(t, &config.Config{}) // the server no longer exists in config
 
 	r.Reinitialize(context.Background(), cfg)
 
@@ -212,7 +213,7 @@ func TestReinitialize_StartsNewlyAddedServer(t *testing.T) {
 	// Reinitialize returns.
 	const name = "reinit-new-fails"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{
 		name: {Type: config.MCPStdio, Command: "/no/such/binary-sennit-test-xyz"},
 	}})
 	subCtx, subCancel := context.WithCancel(context.Background())
@@ -236,7 +237,7 @@ func TestReinitialize_StartsNewlyAddedServer(t *testing.T) {
 
 func TestPendingAuthMCPs_ListsServersNeedingAuth(t *testing.T) {
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{
 		"needs-auth": {Type: config.MCPHttp, URL: "https://example.com/mcp", OAuth: true},
 	}})
 	r.updateState("needs-auth", StateNeedsAuth, nil, nil, Counts{})
@@ -285,7 +286,7 @@ func TestRegistry_ConcurrentAccessRace(t *testing.T) {
 	const name = "race-server"
 	r := NewRegistry()
 	r.ping = func(context.Context, *ClientSession, time.Duration) error { return nil }
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	seedConnected(t, r, name, config.MCPConfig{Type: config.MCPStdio})
 
 	var wg sync.WaitGroup

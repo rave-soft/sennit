@@ -77,7 +77,7 @@ func TestModelCache_ConcurrentAccess(t *testing.T) {
 // fired only once process-wide (instead of once per dbPath) would make the
 // second cache's first read/write fail with "no such table" — exactly the
 // bug class that bit SENNIT_GLOBAL_DATA isolation before (see
-// projects_test.go), and exactly what NewTestStore's per-test t.TempDir()
+// projects_test.go), and exactly what configtest.NewStore's per-test t.TempDir()
 // now relies on not happening.
 func TestModelCache_SchemaAppliedPerDatabaseFile(t *testing.T) {
 	path1 := filepath.Join(t.TempDir(), "sennit.json")

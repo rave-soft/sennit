@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -41,7 +41,7 @@ type ShellItem struct {
 	maxLineWidth    int // computed during render, used to clamp xOffset
 	sty             *styles.Styles
 	pending         bool
-	anim            *anim.Anim
+	anim            *spin.Anim
 	hovered         bool
 }
 
@@ -91,8 +91,8 @@ func NewPendingShellItem(sty *styles.Styles, command string) *ShellItem {
 // newAnim builds the "Running" animation from the item's current styles.
 // Construction and [ShellItem.Restyle] share it so a rebuilt animation
 // cannot drift from the original settings.
-func (s *ShellItem) newAnim() *anim.Anim {
-	return anim.New(anim.Settings{
+func (s *ShellItem) newAnim() *spin.Anim {
+	return spin.New(spin.Settings{
 		ID:         s.id,
 		Label:      "Running",
 		LabelColor: s.sty.WorkingLabelColor,
@@ -103,7 +103,7 @@ func (s *ShellItem) newAnim() *anim.Anim {
 		// glyphs say the opposite. The person's spinner preference
 		// governs the LLM-work spinners, which is where the choice is
 		// about how much motion they want to sit next to.
-		Mode: anim.ModeNone,
+		Mode: spin.ModeNone,
 	})
 }
 
@@ -153,7 +153,7 @@ func (s *ShellItem) StartAnimation() tea.Cmd {
 }
 
 // Animate advances the spinner animation for pending shell items.
-func (s *ShellItem) Animate(msg anim.StepMsg) tea.Cmd {
+func (s *ShellItem) Animate(msg spin.StepMsg) tea.Cmd {
 	if !s.pending {
 		return nil
 	}

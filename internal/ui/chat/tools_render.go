@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -46,7 +46,7 @@ func streamingArgsHint(sty *styles.Styles, streamedArgs int) string {
 // from a [ToolRenderOpts]. streamedArgs is how many bytes of the call's
 // arguments have arrived; pass 0 for a caller that has no streaming
 // arguments to report.
-func pendingToolLine(sty *styles.Styles, name string, anim *anim.Anim, nested bool, streamedArgs int) string {
+func pendingToolLine(sty *styles.Styles, name string, anim *spin.Anim, nested bool, streamedArgs int) string {
 	icon := sty.Tool.IconPending.Render()
 	nameStyle := sty.Tool.NameNormal
 	if nested {

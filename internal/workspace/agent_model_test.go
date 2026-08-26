@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,7 +15,7 @@ import (
 // AgentModel does not short-circuit) over a config selecting model.
 func modelTestWorkspace(t *testing.T, cfg *config.Config) *AppWorkspace {
 	t.Helper()
-	store := config.NewTestStore(t, cfg, config.WithLoadedPaths(t.TempDir()))
+	store := configtest.NewStore(t, cfg, configtest.WithLoadedPaths(t.TempDir()))
 	// AgentCoordinator now lives on App's unexported appServices grouping,
 	// so it cannot be named in a composite literal from outside the
 	// package; SetAgentCoordinatorForTest is the supported seam.

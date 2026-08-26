@@ -10,7 +10,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -81,9 +81,9 @@ func ThemeID(ws workspace.ConfigAccessor) string {
 // workspace, defaulting when there is no workspace or no config yet. An
 // unrecognised value resolves to the default here and is reported as a
 // config problem by the doctor, not by refusing to render.
-func SpinnerMode(ws workspace.ConfigAccessor) anim.Mode {
+func SpinnerMode(ws workspace.ConfigAccessor) spin.Mode {
 	if ws == nil {
-		return anim.ModeScramble
+		return spin.ModeScramble
 	}
 	mode, _ := ws.Config().SpinnerMode()
 	return styles.SpinnerMode(mode)

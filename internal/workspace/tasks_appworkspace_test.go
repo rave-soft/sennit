@@ -6,6 +6,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
@@ -38,19 +39,19 @@ func newAttachedTaskTestApp(t *testing.T, repo string) *app.App {
 func TestAppWorkspace_SupportsTasks(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 	a := newAttachedTaskTestApp(t, repo)
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	require.True(t, aw.SupportsTasks())
 
 	plain := app.NewForTest(t.Context())
 	t.Cleanup(plain.ShutdownForTest)
-	plainWS := NewAppWorkspace(plain, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
+	plainWS := NewAppWorkspace(plain, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 	require.False(t, plainWS.SupportsTasks())
 }
 
 func TestAppWorkspace_ListTasks(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 	a := newAttachedTaskTestApp(t, repo)
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	ctx := t.Context()
 
 	tasks, err := aw.ListTasks(ctx)
@@ -77,7 +78,7 @@ func TestAppWorkspace_ListTasks(t *testing.T) {
 func TestAppWorkspace_CancelTask(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 	a := newAttachedTaskTestApp(t, repo)
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	ctx := t.Context()
 
 	tm := a.TaskManager()
@@ -98,7 +99,7 @@ func TestAppWorkspace_CancelTask(t *testing.T) {
 func TestAppWorkspace_Tasks_NotSupported(t *testing.T) {
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
 	require.False(t, aw.SupportsTasks())
 	_, err := aw.ListTasks(t.Context())

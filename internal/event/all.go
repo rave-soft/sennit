@@ -1,5 +1,25 @@
 package event
 
+// sessionTelemetry adapts this package to session.TelemetrySink, the
+// narrow seam internal/session reports its lifecycle through. The
+// composition layer (internal/app and the session CLI commands) wires it
+// into the service.
+type sessionTelemetry struct{}
+
+// NewSessionTelemetry returns the session lifecycle sink backed by this
+// package's per-event no-ops.
+func NewSessionTelemetry() sessionTelemetry {
+	return sessionTelemetry{}
+}
+
+func (sessionTelemetry) SessionCreated() {
+	SessionCreated()
+}
+
+func (sessionTelemetry) SessionDeleted() {
+	SessionDeleted()
+}
+
 func AppInitialized() {
 	send("app initialized")
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
@@ -542,7 +542,7 @@ func (m *Chat) UpdateNestedToolIDs(containerID string) {
 // Animate animates items in the chat list. Only propagates animation messages
 // to visible items to save CPU. When items are not visible, their animation ID
 // is tracked so it can be restarted when they become visible again.
-func (m *Chat) Animate(msg anim.StepMsg) tea.Cmd {
+func (m *Chat) Animate(msg spin.StepMsg) tea.Cmd {
 	idx, ok := m.idInxMap[msg.ID]
 	if !ok {
 		return nil
@@ -572,7 +572,7 @@ func (m *Chat) Animate(msg anim.StepMsg) tea.Cmd {
 			delete(m.pausedAnimations, msg.ID)
 			return nil
 		}
-		return anim.Retry(msg)
+		return spin.Retry(msg)
 	}
 
 	// Item is visible - remove from paused set and animate.

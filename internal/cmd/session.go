@@ -126,7 +126,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	}
 
 	svc := &sessionServices{
-		sessions: session.NewService(queries, conn, cfg.WorkingDir()),
+		sessions: session.NewService(queries, conn, cfg.WorkingDir(), session.WithTelemetry(event.NewSessionTelemetry())),
 		messages: messagestore.NewService(queries),
 		cfg:      cfg,
 	}

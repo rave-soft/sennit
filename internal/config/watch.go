@@ -19,9 +19,9 @@ const externalChangePollInterval = 2 * time.Second
 
 // pollInterval returns how often WatchForExternalChanges should poll: the
 // store's override if one was set, otherwise externalChangePollInterval. A
-// non-positive override (including the zero value of a ConfigStore built
-// without going through Load or NewTestStore) falls back to the default
-// rather than handing time.NewTicker a duration it will panic on.
+// non-positive override (including the zero value of a ConfigStore assembled
+// directly) falls back to the default rather than handing time.NewTicker a
+// duration it will panic on.
 func (s *ConfigStore) pollInterval() time.Duration {
 	if s.externalChangePollInterval > 0 {
 		return s.externalChangePollInterval

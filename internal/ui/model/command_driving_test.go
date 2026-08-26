@@ -24,8 +24,8 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/stats"
-	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -534,7 +534,7 @@ func driveCmdStep(m *UI, cmd tea.Cmd) (tea.Msg, tea.Cmd) {
 // care about — and stop there.
 func selfPerpetuatingTick(msg tea.Msg) bool {
 	switch msg.(type) {
-	case spinner.TickMsg, anim.StepMsg:
+	case spinner.TickMsg, spin.StepMsg:
 		return true
 	default:
 		return false

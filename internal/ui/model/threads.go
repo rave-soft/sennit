@@ -14,7 +14,7 @@ package model
 // chrome that responds to a pointer is described in threads_admin.go.
 //
 // Statuses render as a colored cell rather than a live per-row spinner: an
-// anim.Anim only advances when something drives it with anim.StepMsg on a
+// spin.Anim only advances when something drives it with spin.StepMsg on a
 // ticker (see chat/assistant.go, driven by Chat.Animate from the main
 // Update loop), and this screen has no such driver, so an anim here would
 // render a permanently frozen first frame.

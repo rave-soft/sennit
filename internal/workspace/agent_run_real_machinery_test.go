@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
@@ -246,7 +247,7 @@ func TestAppWorkspace_AgentRun_QueuedPromptVisibleWhileFirstActive_RealMachinery
 	t.Cleanup(a.ShutdownForTest)
 	a.AgentCoordinator = coord
 
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
 	require.NoError(t, aw.AgentRun(t.Context(), sess.ID, "first"))
 
@@ -328,7 +329,7 @@ func TestAppWorkspace_AgentRun_CancelBetweenAcceptAndActive_RealMachinery(t *tes
 	t.Cleanup(a.ShutdownForTest)
 	a.AgentCoordinator = coord
 
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
 	require.NoError(t, aw.AgentRun(t.Context(), sess.ID, "hi"))
 

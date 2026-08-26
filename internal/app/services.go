@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/herdr"
 	"github.com/rave-soft/sennit/internal/history"
@@ -149,7 +150,7 @@ func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skil
 		skipPermissionsRequests = skipPermissionsRequests || configBypass
 	}
 	return &appServices{
-		sessions:         session.NewService(q, conn, store.WorkingDir()),
+		sessions:         session.NewService(q, conn, store.WorkingDir(), session.WithTelemetry(event.NewSessionTelemetry())),
 		messages:         messagestore.NewService(q),
 		queries:          q,
 		History:          history.NewService(q, conn),

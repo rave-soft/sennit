@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -33,16 +33,16 @@ func TestSpinnerModeComesFromConfig(t *testing.T) {
 
 	for _, tc := range []struct {
 		configured string
-		want       anim.Mode
+		want       spin.Mode
 	}{
-		{config.SpinnerScramble, anim.ModeScramble},
-		{config.SpinnerPulse, anim.ModePulse},
-		{config.SpinnerDots, anim.ModeDots},
-		{config.SpinnerNone, anim.ModeNone},
+		{config.SpinnerScramble, spin.ModeScramble},
+		{config.SpinnerPulse, spin.ModePulse},
+		{config.SpinnerDots, spin.ModeDots},
+		{config.SpinnerNone, spin.ModeNone},
 		// Unset means the default, and so does a value the UI does not
 		// know — the doctor reports the latter, rendering does not fail.
-		{"", anim.ModeScramble},
-		{"disco", anim.ModeScramble},
+		{"", spin.ModeScramble},
+		{"disco", spin.ModeScramble},
 	} {
 		ws := &spinnerWorkspace{countingWorkspace: &countingWorkspace{}, cfg: configWithSpinner(tc.configured)}
 		com := common.DefaultCommon(context.Background(), ws)
@@ -67,12 +67,12 @@ func TestThemeSwitchKeepsSpinnerMode(t *testing.T) {
 		countingWorkspace: &countingWorkspace{},
 		cfg:               configWithSpinner(config.SpinnerDots),
 	}
-	u.com.Styles.WorkingSpinner = anim.ModeDots
+	u.com.Styles.WorkingSpinner = spin.ModeDots
 
 	u.setTheme(styles.PaletteInkSage.ID)
 
 	require.Equal(t, styles.PaletteInkSage.Bg, u.com.Styles.Background,
 		"precondition: the theme actually changed")
-	require.Equal(t, anim.ModeDots, u.com.Styles.WorkingSpinner,
+	require.Equal(t, spin.ModeDots, u.com.Styles.WorkingSpinner,
 		"a theme switch must not reset the configured spinner motion")
 }

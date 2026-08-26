@@ -9,6 +9,7 @@ import (
 	"time"
 
 	sennitdb "github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
 
@@ -186,4 +187,63 @@ func TestRun_OrphanedWorktrees_OnlyExistingPaths(t *testing.T) {
 	require.Len(t, report.OrphanedWorktrees, 1)
 	require.False(t, threadExists(t, q, ids.WorktreeExists))
 	require.False(t, threadExists(t, q, ids.WorktreeGone), "the gone-worktree thread row is still deleted")
+}
+
+// TestTerminalStatusParityWithThread pins gc's local terminal classification
+// (persistedThreadStatus.terminal) against the domain classification
+// thread.Status.Terminal. gc deliberately keeps its own set of the persisted
+// statuses instead of importing the thread package (or the proto boundary),
+// so the two packages cannot share a type; this test is what stops the two
+// copies from drifting apart — a status a newer thread package calls terminal
+// that gc still treats as live (or vice versa) would otherwise change what
+// `sennit gc` deletes without a compiler error anywhere.
+func TestTerminalStatusParityWithThread(t *testing.T) {
+	t.Parallel()
+
+	domainStatuses := []thread.Status{
+		thread.StatusPending,
+		thread.StatusRunning,
+		thread.StatusIdle,
+		thread.StatusCompleted,
+		thread.StatusFailed,
+		thread.StatusInterrupted,
+		thread.StatusCancelled,
+		thread.StatusMerging,
+		thread.StatusMerged,
+		thread.StatusConflict,
+		thread.StatusMergeBlocked,
+	}
+	for _, status := range domainStatuses {
+		require.Equal(t, status.Terminal(), persistedThreadStatus(status).terminal(), "status %q", status)
+	}
+	for _, status := range []string{"", "brand-new-status"} {
+		require.False(t, persistedThreadStatus(status).terminal())
+		require.False(t, thread.Status(status).Terminal())
+	}
+}
+
+// TestPersistedTerminalStatusStrings pins the exact persisted strings gc's
+// classification keys on, so a typo in a constant (which would make that
+// status silently retained forever) fails here without touching the database.
+func TestPersistedTerminalStatusStrings(t *testing.T) {
+	t.Parallel()
+
+	require.ElementsMatch(t, []string{
+		"completed",
+		"merged",
+		"failed",
+		"cancelled",
+		"conflict",
+		"merge_blocked",
+		"interrupted",
+	}, []string{
+		string(persistedStatusCompleted),
+		string(persistedStatusMerged),
+		string(persistedStatusFailed),
+		string(persistedStatusCancelled),
+		string(persistedStatusConflict),
+		string(persistedStatusMergeBlocked),
+		string(persistedStatusInterrupted),
+	})
+	require.Equal(t, "thread", string(persistedKindThread))
 }

@@ -16,6 +16,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/toolmeta"
@@ -374,7 +375,7 @@ func testConfigStore(t *testing.T, dir string) *config.ConfigStore {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		MCP:       make(map[string]config.MCPConfig),
 	}
-	return config.NewTestStore(t, cfg, config.WithWorkingDir(dir))
+	return configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
 }
 
 // TestParallelFlagsMatchClassification is the unexpected-flag guard: for

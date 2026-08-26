@@ -104,7 +104,7 @@ func TestUpdatePreferredModel_PersistsModelAndRecents(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	store := NewTestStore(t, cfg, WithGlobalDataPath(filepath.Join(dir, "config.json")))
+	store := newTestStore(t, cfg, withGlobalDataPath(filepath.Join(dir, "config.json")))
 
 	sel := SelectedModel{Provider: "openai", Model: "gpt-4o"}
 	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, sel))
@@ -128,7 +128,7 @@ func TestUpdatePreferredModel_AddsToRecentsFront(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	store := NewTestStore(t, cfg, WithGlobalDataPath(filepath.Join(dir, "config.json")))
+	store := newTestStore(t, cfg, withGlobalDataPath(filepath.Join(dir, "config.json")))
 
 	first := SelectedModel{Provider: "openai", Model: "gpt-4o"}
 	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, first))

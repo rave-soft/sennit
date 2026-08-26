@@ -174,6 +174,54 @@ func TestDeleteRemovesDescendantSessions(t *testing.T) {
 	require.Equal(t, bystander.ID, survivor.ID)
 }
 
+// recordingSink is a [TelemetrySink] that counts the lifecycle reports it
+// receives, so tests can assert the service reports through the sink
+// rather than reaching into the telemetry package itself.
+type recordingSink struct {
+	created int
+	deleted int
+}
+
+func (s *recordingSink) SessionCreated() { s.created++ }
+func (s *recordingSink) SessionDeleted() { s.deleted++ }
+
+// TestCreateAndDeleteReportThroughTelemetrySink covers that the service
+// reports session creation and deletion through the wired sink, and that
+// the sink-less service (the zero sink every test build uses) is nil-safe:
+// no sink means no report, not a panic.
+func TestCreateAndDeleteReportThroughTelemetrySink(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := db.New(conn)
+
+	sink := &recordingSink{}
+	sessions := NewService(q, conn, dataDir, WithTelemetry(sink))
+
+	created, err := sessions.Create(t.Context(), "reported")
+	require.NoError(t, err)
+	require.Equal(t, 1, sink.created, "Create must report through the sink")
+	require.Zero(t, sink.deleted)
+
+	// Child creations are not lifecycle reports of their own.
+	_, err = sessions.CreateTaskSession(t.Context(), "child-1", created.ID, "delegation")
+	require.NoError(t, err)
+	require.Equal(t, 1, sink.created)
+
+	require.NoError(t, sessions.Delete(t.Context(), created.ID))
+	require.Equal(t, 1, sink.deleted, "Delete must report through the sink")
+
+	// A service built without a sink must be nil-safe.
+	silent := NewService(q, conn, dataDir)
+	_, err = silent.Create(t.Context(), "silent")
+	require.NoError(t, err)
+}
+
 func TestGetReportsMissingSessionAsErrNotFound(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(func() {

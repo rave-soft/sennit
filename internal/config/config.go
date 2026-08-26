@@ -190,10 +190,11 @@ const (
 	ScrollbarNever   = "never"   // Never show scrollbar
 )
 
-// Working-indicator motion options. The strings match [anim.Mode]; this
-// package deliberately does not import internal/ui/anim (config must not
-// depend on the TUI), so the pairing is held by TestSpinnerModeParity in
-// internal/ui/styles rather than by the type system.
+// Working-indicator motion options. The strings match spin.Mode; this
+// package deliberately does not import internal/spin (config must not
+// depend on the TUI or the spinner's rendering stack), so the pairing is
+// held by TestSpinnerModeParity in internal/ui/styles rather than by the
+// type system.
 const (
 	SpinnerScramble = "scramble" // Band of glyphs redrawn every frame
 	SpinnerPulse    = "pulse"    // Band of dots with one travelling highlight

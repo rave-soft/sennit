@@ -32,9 +32,9 @@ func dbPath(globalDataPath string) string {
 // schema applied, so a long-lived process (or a test suite exercising many
 // stores) doesn't re-run the CREATE TABLE on every cache read/write. Keyed
 // by database path rather than a single process-wide flag: two ConfigStores
-// can point at different data dirs (NewTestStore gives every test its own
-// t.TempDir()), and a shared flag would wrongly skip schema creation for
-// the second path. A key is only recorded after a successful ExecContext,
+// can point at different data dirs, and a shared flag would wrongly skip
+// schema creation for the second path. A key is only recorded after a
+// successful ExecContext,
 // so a transient failure (e.g. a briefly read-only disk) is retried on the
 // next call rather than silently wedging the cache forever.
 var modelCacheSchemaDone = struct {

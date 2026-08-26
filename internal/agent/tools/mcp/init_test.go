@@ -18,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/oauth"
 	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 	"github.com/rave-soft/sennit/internal/testenv"
@@ -896,7 +897,7 @@ func setDistinct(typ reflect.Type, field reflect.Value) {
 func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
 	const name = "hung-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	release := make(chan struct{})
 	started := make(chan struct{}, 2)
 	var sideEffects atomic.Int32
@@ -948,7 +949,7 @@ func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
 func TestBeginAuth_CancelSettlesExactStartingOwner(t *testing.T) {
 	const name = "cancel-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	started := make(chan struct{})
 	exited := make(chan struct{})
 	r.runAuth = func(ctx context.Context, _ ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
@@ -993,7 +994,7 @@ func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			const name = "stale-cancel"
 			r := NewRegistry()
-			cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+			cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 			started := make(chan struct{})
 			release := make(chan struct{})
 			r.runAuth = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID) error {
@@ -1035,7 +1036,7 @@ func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
 func TestBeginAuth_PanicClosesPublishedHandlerOnce(t *testing.T) {
 	const name = "panic-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	var closes atomic.Int32
 	r.runAuth = func(_ context.Context, _ ConfigProvider, name string, _ config.MCPConfig, owner attemptID) error {
 		auth := &ownedAuthHandler{closeFn: func() { closes.Add(1) }}
@@ -1061,7 +1062,7 @@ func TestBeginAuth_PanicClosesPublishedHandlerOnce(t *testing.T) {
 func TestAuthenticateMCP_NoTokenStartsInteractiveFlow(t *testing.T) {
 	const name = "auth-no-token"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
 	// A cancelled context makes createSession fail fast without network,
 	// exercising the full AuthenticateMCP → connectAndRegister → setAuthTerminal
 	// path. The handler is created and published before the connect attempt.
@@ -1086,7 +1087,7 @@ func TestAuthenticateMCP_NoTokenStartsInteractiveFlow(t *testing.T) {
 func TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth(t *testing.T) {
 	const name = "auth-cancel"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	err := r.AuthenticateMCP(ctx, cfg, name)
@@ -1103,7 +1104,7 @@ func TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth(t *testing.T)
 func TestInitClient_NonOAuthCancellationIsError(t *testing.T) {
 	const name = "non-oauth-cancel"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp"}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp"}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1140,7 +1141,7 @@ func TestPublishSessionFailureCleansDetachedAuthOnce(t *testing.T) {
 func TestOAuthTokenPersistenceCurrentOwnerPersistsOnce(t *testing.T) {
 	const name = "token-owner"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
@@ -1161,7 +1162,7 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 		t.Run(action, func(t *testing.T) {
 			const name = "token-owner"
 			r := NewRegistry()
-			cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+			cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
 			owner, err := r.beginAttempt(name)
 			require.NoError(t, err)
 			r.updateStateFor(name, owner, StateStarting, nil)
@@ -1205,7 +1206,7 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 func TestOAuthTokenPersistenceReservedWriteDelaysTeardown(t *testing.T) {
 	const name = "token-owner"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
@@ -1355,7 +1356,7 @@ func TestSuppressLockConcurrentAccess(t *testing.T) {
 func TestBeginAuth_FinishTimeoutRestoresStateNeedsAuth(t *testing.T) {
 	const name = "finish-timeout-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	started := make(chan struct{})
 	r.runAuth = func(ctx context.Context, _ ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
 		r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
@@ -1432,7 +1433,7 @@ func TestBuildHTTPTransportOAuth(t *testing.T) {
 			owner, err := r.beginAttempt(name)
 			require.NoError(t, err)
 			t.Cleanup(func() { r.detachAuth(name, owner, nil).Close() })
-			cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: tc.typ, URL: tc.wantURL, OAuth: true}}})
+			cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: tc.typ, URL: tc.wantURL, OAuth: true}}})
 			m := cfg.Config().MCP[name]
 			transport, handler, err := r.createTransportFor(t.Context(), cfg, name, m, owner.gen, owner.seq, cfg.Resolver())
 			require.NoError(t, err)
@@ -1455,7 +1456,7 @@ func TestBuildHTTPTransportOAuth(t *testing.T) {
 }
 
 func TestBeginAuth_UnknownServer(t *testing.T) {
-	cfg := config.NewTestStore(t, &config.Config{})
+	cfg := configtest.NewStore(t, &config.Config{})
 	_, _, err := BeginAuth(cfg, "missing")
 	require.ErrorContains(t, err, "not found")
 }
@@ -1463,7 +1464,7 @@ func TestBeginAuth_UnknownServer(t *testing.T) {
 // TestBeginAuth_NonOAuth proves BeginAuth rejects a server that does not use
 // OAuth over HTTP.
 func TestBeginAuth_NonOAuth(t *testing.T) {
-	cfg := config.NewTestStore(t, &config.Config{
+	cfg := configtest.NewStore(t, &config.Config{
 		MCP: config.MCPs{
 			"stdio": {Type: config.MCPStdio},
 			"plain": {Type: config.MCPHttp, URL: "https://example.com/mcp"},

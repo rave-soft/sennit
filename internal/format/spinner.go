@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 )
 
 // Spinner wraps the bubbles spinner for non-interactive mode
@@ -19,7 +19,7 @@ type Spinner struct {
 
 type model struct {
 	cancel context.CancelFunc
-	anim   *anim.Anim
+	anim   *spin.Anim
 }
 
 func (m model) Init() tea.Cmd  { return m.anim.Start() }
@@ -51,7 +51,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 		}
-	case anim.StepMsg:
+	case spin.StepMsg:
 		cmd := m.anim.Animate(msg)
 		return m, cmd
 	}
@@ -59,9 +59,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // NewSpinner creates a new spinner with the given message
-func NewSpinner(ctx context.Context, cancel context.CancelFunc, animSettings anim.Settings) *Spinner {
+func NewSpinner(ctx context.Context, cancel context.CancelFunc, animSettings spin.Settings) *Spinner {
 	m := model{
-		anim:   anim.New(animSettings),
+		anim:   spin.New(animSettings),
 		cancel: cancel,
 	}
 

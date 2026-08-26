@@ -4,7 +4,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 )
 
 // quickStyleWorking fills in the working-indicator gradient colors used by
@@ -24,7 +24,7 @@ func quickStyleWorking(s *Styles, o quickStyleOpts, _, _, _ lipgloss.Style) {
 	// colours it animates in. A palette has no opinion on motion, so
 	// every palette gets the same one; the person's own choice arrives
 	// afterwards through [Styles.WithSpinner].
-	s.WorkingSpinner = anim.ModeScramble
+	s.WorkingSpinner = spin.ModeScramble
 }
 
 // quickStyleHeader fills in Header, CompactDetails, ToolCallSuccess, and

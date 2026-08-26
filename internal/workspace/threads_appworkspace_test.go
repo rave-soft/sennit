@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -251,7 +252,7 @@ func newTestThreadAppWorkspace(t *testing.T) (*AppWorkspace, *thread.Manager) {
 	a.SetDelegationManagers(mgr, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
-	store := config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo))
+	store := configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo))
 	return NewAppWorkspace(a, store), mgr
 }
 
@@ -261,7 +262,7 @@ func TestAppWorkspace_SupportsThreads(t *testing.T) {
 
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
-	plain := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
+	plain := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 	require.False(t, plain.SupportsThreads())
 }
 
@@ -382,7 +383,7 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	// Handle returns nil (no runtime was ever installed).
 	require.Nil(t, mgr.Handle(created.ID))
 
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	attached, detach, err := aw.AttachThread(t.Context(), created.ID)
 	require.NoError(t, err, "AttachThread for completed thread should return a workspace")
 	require.NotNil(t, attached)
@@ -435,7 +436,7 @@ func TestAppWorkspace_AttachThread_LiveThread(t *testing.T) {
 	handle := mgr.Handle(st.ID)
 	require.NotNil(t, handle)
 
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	attached, detach, err := aw.AttachThread(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.NotNil(t, attached)
@@ -537,7 +538,7 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 
 	// Attach to the merged thread — reactivation is refused, so this
 	// falls back to a read-only workspace.
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	attached, detach, err := aw.AttachThread(t.Context(), created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, attached)
@@ -593,7 +594,7 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	attached, _, err := aw.AttachThread(t.Context(), created.ID)
 	require.NoError(t, err)
 
@@ -650,7 +651,7 @@ func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testin
 	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{Status: thread.StatusMerged})
 	require.NoError(t, err)
 
-	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	attached, _, err := aw.AttachThread(t.Context(), created.ID)
 	require.NoError(t, err)
 

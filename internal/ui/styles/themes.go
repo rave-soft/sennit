@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 )
 
 // Sennit's default brand colors, re-exported from the default palette for the
@@ -69,7 +69,7 @@ func Theme(id string) Styles {
 // of that choice is that a caller rebuilding Styles must re-apply the
 // mode; the /theme handler is the one place that does, and a test holds
 // it to that.
-func (s Styles) WithSpinner(mode anim.Mode) Styles {
+func (s Styles) WithSpinner(mode spin.Mode) Styles {
 	s.WorkingSpinner = mode
 	return s
 }
@@ -79,16 +79,16 @@ func (s Styles) WithSpinner(mode anim.Mode) Styles {
 // out of the TUI's packages: it names the modes as strings, and this
 // converts. An unrecognised string resolves to the default, the same
 // fallback config.SpinnerMode reports as a problem.
-func SpinnerMode(mode string) anim.Mode {
+func SpinnerMode(mode string) spin.Mode {
 	switch mode {
-	case string(anim.ModePulse):
-		return anim.ModePulse
-	case string(anim.ModeDots):
-		return anim.ModeDots
-	case string(anim.ModeNone):
-		return anim.ModeNone
+	case string(spin.ModePulse):
+		return spin.ModePulse
+	case string(spin.ModeDots):
+		return spin.ModeDots
+	case string(spin.ModeNone):
+		return spin.ModeNone
 	default:
-		return anim.ModeScramble
+		return spin.ModeScramble
 	}
 }
 

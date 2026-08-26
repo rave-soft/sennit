@@ -24,7 +24,7 @@ func TestMCPTokenMutationIsConditionalAndOwnerOrdered(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sennit.json")
 	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: &oauth.Token{AccessToken: "initial"}}
 	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
-	store := NewTestStore(t, &Config{MCP: MCPs{"server": mcp}})
+	store := newTestStore(t, &Config{MCP: MCPs{"server": mcp}})
 	store.globalDataPath = path
 
 	old, ok := store.ReserveMCPTokenMutation("server", mcp)
@@ -67,9 +67,9 @@ func TestMCPTokenMutationRejectsStaleStore(t *testing.T) {
 	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: initial}
 	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
 
-	staleStore := NewTestStore(t, &Config{MCP: MCPs{"server": mcp}})
+	staleStore := newTestStore(t, &Config{MCP: MCPs{"server": mcp}})
 	staleStore.globalDataPath = path
-	freshStore := NewTestStore(t, &Config{MCP: MCPs{"server": mcp}})
+	freshStore := newTestStore(t, &Config{MCP: MCPs{"server": mcp}})
 	freshStore.globalDataPath = path
 	stale, ok := staleStore.ReserveMCPTokenMutation("server", mcp)
 	require.True(t, ok)

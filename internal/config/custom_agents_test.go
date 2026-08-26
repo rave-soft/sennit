@@ -209,7 +209,7 @@ func TestReplaceInheritedAgentsPublishesNewSnapshot(t *testing.T) {
 	cfg.SetupAgentsWithInherited(map[string]Agent{
 		"reviewer": {ID: "reviewer", Name: "Reviewer", Prompt: "Review.", Description: "old"},
 	})
-	s := NewTestStore(t, cfg)
+	s := newTestStore(t, cfg)
 	before := s.Config()
 	versionBefore := s.Version()
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/stretchr/testify/require"
@@ -33,7 +34,7 @@ func newStore(t *testing.T, dir string) *config.ConfigStore {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{},
 	}
-	return config.NewTestStore(t, cfg, config.WithWorkingDir(dir))
+	return configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
 }
 
 func TestNewPrompt(t *testing.T) {
@@ -158,7 +159,7 @@ func TestBuild(t *testing.T) {
 			Providers: csync.NewMap[string, config.ProviderConfig](),
 			Options:   &config.Options{ContextPaths: []string{"NOTES.md"}},
 		}
-		store := config.NewTestStore(t, cfg, config.WithWorkingDir(dir))
+		store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
 
 		p, err := NewPrompt("t", "{{range .ContextFiles}}{{.Path}}={{.Content}}{{end}}")
 		require.NoError(t, err)
@@ -460,7 +461,7 @@ func TestPromptData(t *testing.T) {
 			Providers: csync.NewMap[string, config.ProviderConfig](),
 			Options:   &config.Options{SkillsPaths: []string{filepath.Join(dir, "myskills")}},
 		}
-		store := config.NewTestStore(t, cfg, config.WithWorkingDir(dir))
+		store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
 		p, err := NewPrompt("t", "")
 		require.NoError(t, err)
 
@@ -495,7 +496,7 @@ func TestPromptData_RelativeSkillsPathResolvesAgainstWorkspace(t *testing.T) {
 		// cwd.
 		Options: &config.Options{SkillsPaths: []string{"team-skills"}},
 	}
-	store := config.NewTestStore(t, cfg, config.WithWorkingDir(dir))
+	store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
 
 	p, err := NewPrompt("t", "")
 	require.NoError(t, err)

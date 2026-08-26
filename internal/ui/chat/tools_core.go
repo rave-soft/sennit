@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -82,7 +82,7 @@ type SpinningFunc func(state SpinningState) bool
 type ToolRenderOpts struct {
 	ToolCall   message.ToolCall
 	Result     *message.ToolResult
-	Anim       *anim.Anim
+	Anim       *spin.Anim
 	Compact    bool
 	IsSpinning bool
 	Status     ToolStatus
@@ -155,7 +155,7 @@ type baseToolMessageItem struct {
 	spinningFunc SpinningFunc
 
 	sty  *styles.Styles
-	anim *anim.Anim
+	anim *spin.Anim
 }
 
 // newBaseToolMessageItem is the internal constructor for base tool message items.
@@ -195,8 +195,8 @@ func newBaseToolMessageItem(
 // newAnim builds the pending-tool animation from the item's current styles.
 // Construction and [baseToolMessageItem.Restyle] share it so a rebuilt
 // animation cannot drift from the original settings.
-func (t *baseToolMessageItem) newAnim() *anim.Anim {
-	return anim.New(anim.Settings{
+func (t *baseToolMessageItem) newAnim() *spin.Anim {
+	return spin.New(spin.Settings{
 		ID:          t.toolCall.ID,
 		Size:        15,
 		GradColorA:  t.sty.WorkingGradFromColor,

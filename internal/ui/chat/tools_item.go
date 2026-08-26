@@ -5,7 +5,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -43,7 +43,7 @@ func (t *baseToolMessageItem) StartAnimation() tea.Cmd {
 // rendered frame indefinitely and the spinner would appear frozen.
 // The ID gate keeps unrelated ticks (routed here by a future change
 // to chat.Animate's dispatch) from churning the cache.
-func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+func (t *baseToolMessageItem) Animate(msg spin.StepMsg) tea.Cmd {
 	if !t.isSpinning() {
 		return nil
 	}

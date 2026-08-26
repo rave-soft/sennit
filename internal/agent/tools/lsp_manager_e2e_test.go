@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/stretchr/testify/require"
 )
@@ -96,7 +97,7 @@ func newLSPToolE2EManager(t *testing.T, root, scenario string) *lsp.Manager {
 	exe, err := os.Executable()
 	require.NoError(t, err)
 	autoLSP := false
-	store := config.NewTestStore(t, &config.Config{
+	store := configtest.NewStore(t, &config.Config{
 		Options: &config.Options{AutoLSP: &autoLSP},
 		LSP: config.LSPs{"gopls": {
 			Command:     exe,
@@ -106,7 +107,7 @@ func newLSPToolE2EManager(t *testing.T, root, scenario string) *lsp.Manager {
 			RootMarkers: []string{"go.mod"},
 			Timeout:     5,
 		}},
-	}, config.WithWorkingDir(root))
+	}, configtest.WithWorkingDir(root))
 	manager := lsp.NewManager(store)
 	t.Cleanup(func() { manager.StopAll(t.Context()) })
 	return manager

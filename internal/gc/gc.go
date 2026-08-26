@@ -14,7 +14,6 @@ import (
 	"sort"
 
 	sennitdb "github.com/rave-soft/sennit/internal/db"
-	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // Deps are the database handles Run needs. Queries and Conn must be bound
@@ -214,6 +213,49 @@ func selectSessions(ctx context.Context, q *sennitdb.Queries, cutoff int64, proj
 	return ids, nil
 }
 
+// persistedThreadStatus is a status value as it is persisted in the
+// threads table. gc keeps its own copy of the terminal set instead of
+// reaching for the domain (internal/thread) or the wire DTOs (internal/proto):
+// the collector only needs to know whether a row is finished, and must not
+// depend on either boundary for it. TestTerminalStatusParityWithThread pins
+// the set against the domain's, so a status a newer thread package calls
+// terminal (or live) can never silently change what `sennit gc` deletes.
+type persistedThreadStatus string
+
+// persistedThreadKind is a kind value as it is persisted in the threads
+// table; gc only distinguishes the kind that owns a git worktree.
+type persistedThreadKind string
+
+const (
+	persistedStatusCompleted    persistedThreadStatus = "completed"
+	persistedStatusMerged       persistedThreadStatus = "merged"
+	persistedStatusFailed       persistedThreadStatus = "failed"
+	persistedStatusCancelled    persistedThreadStatus = "cancelled"
+	persistedStatusConflict     persistedThreadStatus = "conflict"
+	persistedStatusMergeBlocked persistedThreadStatus = "merge_blocked"
+	persistedStatusInterrupted  persistedThreadStatus = "interrupted"
+	persistedKindThread         persistedThreadKind   = "thread"
+)
+
+// terminal reports whether status is a known terminal status. Unknown
+// statuses are neither active nor terminal and are deliberately retained
+// for forward compatibility: a status from a newer version sharing the
+// database is not finished as far as this binary knows.
+func (status persistedThreadStatus) terminal() bool {
+	switch status {
+	case persistedStatusCompleted,
+		persistedStatusMerged,
+		persistedStatusFailed,
+		persistedStatusCancelled,
+		persistedStatusConflict,
+		persistedStatusMergeBlocked,
+		persistedStatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
 // selectThreads returns the IDs of finished delegations (never
 // pending/running/merging) whose updated_at is strictly older than
 // cutoff, scoped to projectPath when non-empty, plus the worktree paths
@@ -243,17 +285,16 @@ func selectThreads(ctx context.Context, q *sennitdb.Queries, cutoff int64, proje
 		if projectPath != "" && r.ProjectPath != projectPath {
 			continue
 		}
-		// Unknown statuses are neither active nor terminal and are
-		// deliberately retained for forward compatibility (see
-		// thread.Status.Terminal).
-		if !thread.Status(r.Status).Terminal() {
+		// Unknown statuses are deliberately retained for forward
+		// compatibility rather than assumed terminal.
+		if !persistedThreadStatus(r.Status).terminal() {
 			continue
 		}
 		if r.UpdatedAt >= cutoff {
 			continue
 		}
 		ids = append(ids, r.ID)
-		if thread.Kind(r.Kind) == thread.KindThread && r.WorktreePath != "" {
+		if persistedThreadKind(r.Kind) == persistedKindThread && r.WorktreePath != "" {
 			if _, err := os.Stat(r.WorktreePath); err == nil {
 				orphaned = append(orphaned, r.WorktreePath)
 			}

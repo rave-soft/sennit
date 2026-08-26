@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestListResourcesStaleResultDoesNotRepublishAfterTeardown(t *testing.T) {
 	const name = "stale-resources"
 	r := NewRegistry()
-	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	old := liveSessionWithCapabilities(t, "old", "old", "res://old")
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)

@@ -16,7 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/format"
-	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/spf13/cobra"
@@ -190,7 +190,7 @@ func runAgent(
 		t := styles.Theme(ws.Config().ThemeID())
 		spinnerMode, _ := ws.Config().SpinnerMode()
 
-		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
+		spinner = format.NewSpinner(ctx, cancel, spin.Settings{
 			Size: 10,
 			// Starting label only: AgentRunEvent.Status replaces it with
 			// what the agent is actually doing as soon as the turn says
