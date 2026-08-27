@@ -57,8 +57,16 @@ func (a *testConfigAccessor) RecordAccount(scope config.Scope, providerID string
 	return config.RecordAccount(a.store, accStore, scope, providerID, cred)
 }
 
+// ListAccounts mirrors AppWorkspace.ListAccounts, including its
+// EnsureAccountMigrated call: an earlier revision of this test double
+// dropped that step, which is exactly the kind of silent divergence
+// between a mock and production this file now has a standing comment
+// against (see UpdateAccount/RemoveAccount below).
 func (a *testConfigAccessor) ListAccounts(providerID string) ([]accounts.Account, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	if err := config.EnsureAccountMigrated(a.store, accStore, providerID); err != nil {
+		return nil, err
+	}
 	return accStore.List(providerID)
 }
 
@@ -72,6 +80,23 @@ func (a *testConfigAccessor) ActivateAccount(scope config.Scope, providerID, acc
 		return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
 	}
 	return a.store.ActivateAccount(scope, providerID, account)
+}
+
+// UpdateAccount and RemoveAccount delegate to the same config.UpdateAccount
+// / config.RemoveAccount free functions AppWorkspace's own implementation
+// calls (app_workspace.go). This test double must not carry its own copy
+// of those rules: an earlier revision did, and every test built on this
+// accessor kept passing while the real AppWorkspace implementation was
+// sabotaged, because the tests were only ever exercising the copy here.
+
+func (a *testConfigAccessor) UpdateAccount(providerID string, account accounts.Account) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.UpdateAccount(a.store, accStore, providerID, account)
+}
+
+func (a *testConfigAccessor) RemoveAccount(scope config.Scope, providerID, accountID string) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.RemoveAccount(a.store, accStore, scope, providerID, accountID)
 }
 
 func (a *testConfigAccessor) SetConfigField(scope config.Scope, key string, value any) error {

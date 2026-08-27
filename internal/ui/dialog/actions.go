@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -239,6 +240,51 @@ type (
 		ProviderID string
 		Err        error
 	}
+	// ActionOpenAccountEdit is sent when "e" is pressed on the accounts
+	// list, to open [AccountForm] for the selected account.
+	ActionOpenAccountEdit struct {
+		ProviderID string
+		Account    accounts.Account
+		// Active is whether this account is providerID's current one —
+		// forwarded to AccountForm so it can refuse to let the user
+		// disable it (see AccountForm.submit).
+		Active bool
+	}
+	// ActionSubmitAccountForm is sent when the account edit form is
+	// submitted with valid input.
+	ActionSubmitAccountForm struct {
+		ProviderID string
+		Account    accounts.Account
+	}
+	// ActionAccountFormResult carries the outcome of the async
+	// UpdateAccount call kicked off by ActionSubmitAccountForm. Like
+	// ActionCustomProviderResult, it is addressed back to the still-open
+	// AccountForm dialog (see DialogID below), letting the form show a
+	// save error without closing.
+	ActionAccountFormResult struct {
+		ProviderID string
+		Err        error
+	}
+	// ActionAccountSaved is returned by AccountForm.HandleMsg once
+	// ActionAccountFormResult reports success. The caller closes the form
+	// and reloads the accounts list.
+	ActionAccountSaved struct {
+		ProviderID string
+	}
+	// ActionRequestAccountRemoval is sent when "d" is pressed on the
+	// accounts list, to open a confirmation dialog before actually
+	// removing the selected account.
+	ActionRequestAccountRemoval struct {
+		ProviderID string
+		Account    accounts.Account
+	}
+	// ActionRemoveAccountConfirmed is returned once the user confirms
+	// removing an account in [AccountRemoveConfirm]. The caller performs
+	// the actual removal and reloads the accounts list.
+	ActionRemoveAccountConfirmed struct {
+		ProviderID string
+		AccountID  string
+	}
 )
 
 // ActionCmd represents an action that carries a [tea.Cmd] to be passed to the
@@ -295,6 +341,9 @@ func (ActionAPIKeySaved) DialogID() string { return APIKeyInputID }
 
 // DialogID implements [DialogAddressed].
 func (ActionCustomProviderResult) DialogID() string { return ProviderFormID }
+
+// DialogID implements [DialogAddressed].
+func (ActionAccountFormResult) DialogID() string { return AccountFormID }
 
 // DialogID implements [DialogAddressed].
 func (ActionMCPAuthComplete) DialogID() string { return MCPAuthID }

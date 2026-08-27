@@ -303,6 +303,17 @@ type ConfigAccessor interface {
 	ListAccounts(providerID string) ([]accounts.Account, error)
 	// ActivateAccount makes accountID the provider's active account.
 	ActivateAccount(scope config.Scope, providerID, accountID string) error
+	// UpdateAccount saves user-editable fields of an existing account
+	// (Label, ProxyURL, Disabled). If account is the provider's currently
+	// active one, its credentials and effective proxy are republished to
+	// the running config too, exactly as ActivateAccount would — otherwise
+	// an edited proxy would sit unused until the next restart.
+	UpdateAccount(providerID string, account accounts.Account) error
+	// RemoveAccount deletes an account. Removing a provider's last
+	// account is refused (that's what `sennit logout` is for). Removing
+	// the active account first activates a replacement, so the provider
+	// never ends up pointing at a deleted account.
+	RemoveAccount(scope config.Scope, providerID, accountID string) error
 }
 
 // ProjectLifecycle covers first-run project initialization and skill

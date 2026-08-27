@@ -351,6 +351,72 @@ func TestAccounts_AddAccountItemAppendedToList(t *testing.T) {
 	require.Equal(t, addAccountItemID, last.ID())
 }
 
+// TestAccounts_EditKey_ReturnsActionOpenAccountEdit_NoIO covers ctrl+r: it
+// must return ActionOpenAccountEdit for the highlighted account, carrying
+// whether it's the active one, without touching the workspace.
+func TestAccounts_EditKey_ReturnsActionOpenAccountEdit_NoIO(t *testing.T) {
+	providerID := "openai"
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+		{ID: "acct-2", Label: "Personal"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+	dlg.sd.list.SetSelected(1)
+	require.Equal(t, "acct-2", dlg.sd.selectedID())
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Text: "ctrl+r"})
+	require.Zero(t, ws.activateCalls)
+
+	edit, ok := action.(ActionOpenAccountEdit)
+	require.True(t, ok, "expected ActionOpenAccountEdit, got %#v", action)
+	require.Equal(t, providerID, edit.ProviderID)
+	require.Equal(t, "acct-2", edit.Account.ID)
+	require.False(t, edit.Active)
+}
+
+// TestAccounts_EditKey_OnAddAccountItem_NoOp covers pressing ctrl+r while the
+// trailing "Add account…" sentinel is highlighted: there is no account to
+// edit, so nothing should happen.
+func TestAccounts_EditKey_OnAddAccountItem_NoOp(t *testing.T) {
+	providerID := "openai"
+	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+
+	dlg := loadedAccounts(t, com, providerID)
+	items := dlg.sd.list.FilteredItems()
+	dlg.sd.list.SetSelected(len(items) - 1)
+	require.Equal(t, addAccountItemID, dlg.sd.selectedID())
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Text: "ctrl+r"})
+	require.Nil(t, action)
+}
+
+// TestAccounts_DeleteKey_ReturnsActionRequestAccountRemoval_NoIO covers
+// ctrl+x: it must return ActionRequestAccountRemoval for the highlighted
+// account without removing anything itself — removal goes through a
+// confirmation dialog the caller opens.
+func TestAccounts_DeleteKey_ReturnsActionRequestAccountRemoval_NoIO(t *testing.T) {
+	providerID := "openai"
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+		{ID: "acct-2", Label: "Personal"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+	dlg.sd.list.SetSelected(1)
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Text: "ctrl+x"})
+	require.Zero(t, ws.activateCalls)
+
+	remove, ok := action.(ActionRequestAccountRemoval)
+	require.True(t, ok, "expected ActionRequestAccountRemoval, got %#v", action)
+	require.Equal(t, providerID, remove.ProviderID)
+	require.Equal(t, "acct-2", remove.Account.ID)
+}
+
 // TestAccounts_SelectAddAccount_ReturnsActionAddAccount_NoIO covers
 // selecting "Add account…": it must return ActionAddAccount for the
 // dialog's provider synchronously, without activating/switching any

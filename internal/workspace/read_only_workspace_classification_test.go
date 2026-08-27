@@ -64,6 +64,7 @@ var refusedMethods = []string{
 	"RecordAccount",
 	"RefreshMCPTools",
 	"RefreshOAuthToken",
+	"RemoveAccount",
 	"RemoveConfigField",
 	"RemoveThread",
 	"SaveSession",
@@ -73,6 +74,7 @@ var refusedMethods = []string{
 	"SetProviderAPIKey",
 	"Shutdown",
 	"Subscribe",
+	"UpdateAccount",
 	"UpdateAgentModel",
 	"UpdatePreferredModel",
 }
@@ -354,6 +356,14 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"ActivateAccount": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.ActivateAccount(config.ScopeWorkspace, "provider", "account")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"UpdateAccount": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.UpdateAccount("provider", accounts.Account{ID: "account"})
+			require.True(t, IsReadOnlyError(err))
+		},
+		"RemoveAccount": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.RemoveAccount(config.ScopeWorkspace, "provider", "account")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"Shutdown": func(_ *testing.T, ro *readOnlyWorkspace) {

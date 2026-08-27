@@ -260,6 +260,36 @@ func (m *UI) openAccountsDialog(providerID string) tea.Cmd {
 	return cmd
 }
 
+// reloadAccountsCmd re-reads providerID's accounts and delivers them to the
+// still-open Accounts dialog via [dialog.ActionAccountsLoaded] — the same
+// message NewAccounts' own load uses, so a refresh after an edit or removal
+// rebuilds the list exactly as the initial load does. It is addressed by ID
+// (see [dialog.DialogAddressed]), so it reaches Accounts wherever it sits
+// in the stack, including underneath the dialog that triggered the reload.
+func (m *UI) reloadAccountsCmd(providerID string) tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		accs, err := ws.ListAccounts(providerID)
+		return dialog.ActionAccountsLoaded{ProviderID: providerID, Accounts: accs, Err: err}
+	}
+}
+
+// removeAccountCmd calls RemoveAccount off-thread and, on success, reloads
+// the accounts list the same way reloadAccountsCmd does — a failure is
+// folded into the same [dialog.ActionAccountsLoaded] message rather than a
+// separate error path, so the Accounts dialog's existing error-state
+// handling (report + show) covers it without new plumbing.
+func (m *UI) removeAccountCmd(providerID, accountID string) tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		if err := ws.RemoveAccount(config.ScopeGlobal, providerID, accountID); err != nil {
+			return dialog.ActionAccountsLoaded{ProviderID: providerID, Err: err}
+		}
+		accs, err := ws.ListAccounts(providerID)
+		return dialog.ActionAccountsLoaded{ProviderID: providerID, Accounts: accs, Err: err}
+	}
+}
+
 // openProviderFormDialog opens the custom provider form dialog.
 func (m *UI) openProviderFormDialog() {
 	if m.dialog.ContainsDialog(dialog.ProviderFormID) {

@@ -33,8 +33,8 @@ func httpClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
 
 // ValidateProxy reports whether a proxy value is usable, so a UI can reject
 // it while the user is still looking at the field rather than at a failed
-// sign-in.
+// sign-in. It delegates to proxyhttp.ValidateProxy, the provider-neutral
+// copy of this same check, so codex and any other caller share one rule.
 func ValidateProxy(proxyURL string) error {
-	_, err := httpClient(proxyURL, time.Second)
-	return err
+	return proxyhttp.ValidateProxy(proxyURL)
 }

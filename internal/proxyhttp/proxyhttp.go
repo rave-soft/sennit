@@ -28,6 +28,18 @@ const Direct = "none"
 // explicitly nil'd out, forcing a direct connection even when the
 // environment names a proxy. http, https, socks5 and socks5h are all
 // supported natively by net/http's Transport.Proxy.
+// ValidateProxy reports whether proxyURL is usable, so a UI can reject it
+// while the user is still looking at the field rather than at a failed
+// request later. "" (inherit) and [Direct] both validate cleanly; anything
+// else goes through the same parse-and-scheme-check NewClient does.
+func ValidateProxy(proxyURL string) error {
+	if proxyURL == "" {
+		return nil
+	}
+	_, err := NewClient(proxyURL, time.Second)
+	return err
+}
+
 func NewClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
 	if proxyURL == Direct {
 		transport := http.DefaultTransport.(*http.Transport).Clone()

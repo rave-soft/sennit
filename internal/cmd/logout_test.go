@@ -49,6 +49,8 @@ func (s *stubConfigAccessor) RecordAccount(config.Scope, string, accounts.Legacy
 
 func (s *stubConfigAccessor) ListAccounts(string) ([]accounts.Account, error)    { return nil, nil }
 func (s *stubConfigAccessor) ActivateAccount(config.Scope, string, string) error { return nil }
+func (s *stubConfigAccessor) UpdateAccount(string, accounts.Account) error       { return nil }
+func (s *stubConfigAccessor) RemoveAccount(config.Scope, string, string) error   { return nil }
 
 func (s *stubConfigAccessor) ImportCopilot() (*oauth.Token, bool) { return nil, false }
 

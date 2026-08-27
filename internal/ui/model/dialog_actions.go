@@ -304,6 +304,24 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		}
 	case dialog.ActionOpenCustomProviderForm:
 		m.openProviderFormDialog()
+	case dialog.ActionOpenAccountEdit:
+		m.dialog.OpenDialog(dialog.NewAccountForm(m.com, msg.ProviderID, msg.Account, msg.Active))
+	case dialog.ActionSubmitAccountForm:
+		ws := m.com.Workspace
+		providerID := msg.ProviderID
+		account := msg.Account
+		cmds = append(cmds, func() tea.Msg {
+			err := ws.UpdateAccount(providerID, account)
+			return dialog.ActionAccountFormResult{ProviderID: providerID, Err: err}
+		})
+	case dialog.ActionAccountSaved:
+		m.dialog.CloseDialog(dialog.AccountFormID)
+		cmds = append(cmds, m.reloadAccountsCmd(msg.ProviderID))
+	case dialog.ActionRequestAccountRemoval:
+		m.dialog.OpenDialog(dialog.NewAccountRemoveConfirm(m.com, msg.ProviderID, msg.Account))
+	case dialog.ActionRemoveAccountConfirmed:
+		m.dialog.CloseDialog(dialog.AccountRemoveConfirmID)
+		cmds = append(cmds, m.removeAccountCmd(msg.ProviderID, msg.AccountID))
 	case dialog.ActionSubmitCustomProvider:
 		ws := m.com.Workspace
 		ctx := m.com.Context()

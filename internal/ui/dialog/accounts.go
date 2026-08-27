@@ -52,7 +52,9 @@ type Accounts struct {
 	state      accountsState
 	spinner    spinner.Model
 	err        error
-	sd         *selectDialog // built once accounts are loaded; nil until then
+	sd         *selectDialog      // built once accounts are loaded; nil until then
+	accs       []accounts.Account // last loaded set, kept for e/d's lookup by ID
+	keyMap     struct{ Edit, Delete key.Binding }
 }
 
 var _ Dialog = (*Accounts)(nil)
@@ -67,6 +69,22 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 		state:      accountsStateLoading,
 	}
 	m.spinner = newOAuthSpinner(com.Styles)
+	// ctrl+x for delete mirrors sessions.go's Delete binding — this list is
+	// filterable ("Type to filter"), so a bare letter would be stolen from
+	// the filter input, and "d" right next to it is the worst offender: a
+	// user typing "default" would trigger a removal dialog instead.
+	//
+	// Edit can't reuse sessions.go's own ctrl+r->rename pairing verbatim
+	// (ctrl+r is free here, but ctrl+e — the more obvious mnemonic — isn't:
+	// bubbles' textinput binds it to LineEnd by default, and the filter
+	// input inherits that, so ctrl+e would never reach this dialog while
+	// the filter has focus). ctrl+r is picked instead, deliberately
+	// matching sessions.go's rename key: editing an account's Label is the
+	// closest analogue to renaming a session, and reusing the same chord
+	// for the same kind of action keeps muscle memory between the two
+	// dialogs rather than adding a new arbitrary one.
+	m.keyMap.Edit = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "edit"))
+	m.keyMap.Delete = key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "delete"))
 	return m, tea.Batch(m.spinner.Tick, m.loadAccountsCmd())
 }
 
@@ -130,6 +148,7 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		return nil
 
 	case ActionAccountsLoaded:
+		m.accs = msg.Accounts
 		if msg.Err != nil {
 			m.state = accountsStateError
 			m.err = msg.Err
@@ -163,6 +182,18 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 
 	case tea.KeyPressMsg:
 		if m.state == accountsStateList {
+			switch {
+			case key.Matches(msg, m.keyMap.Edit):
+				if a, ok := m.selectedAccount(); ok {
+					return ActionOpenAccountEdit{ProviderID: m.providerID, Account: a, Active: a.ID == m.currentActiveAccountID()}
+				}
+				return nil
+			case key.Matches(msg, m.keyMap.Delete):
+				if a, ok := m.selectedAccount(); ok {
+					return ActionRequestAccountRemoval{ProviderID: m.providerID, Account: a}
+				}
+				return nil
+			}
 			return m.sd.HandleMsg(msg)
 		}
 		// Nothing to act on while loading, errored, or empty, besides leaving.
@@ -179,10 +210,7 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 // chosen one (refusing a no-op re-select of the active account, or a
 // disabled one) via [Accounts.activateAccountCmd].
 func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfig {
-	activeAccountID := ""
-	if pc, ok := m.com.Config().Providers.Get(m.providerID); ok {
-		activeAccountID = pc.Account
-	}
+	activeAccountID := m.currentActiveAccountID()
 	caps := accounts.CapabilitiesOf(m.providerID)
 	t := m.com.Styles
 	providerID := m.providerID
@@ -236,6 +264,35 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 		buildItems:    buildItems,
 		onSelect:      onSelect,
 	}
+}
+
+// currentActiveAccountID reads the provider's active account ID off the
+// already-loaded config — a cheap in-memory read, not IO, so it's fine to
+// call from HandleMsg directly (see internal/ui/AGENTS.md's dialog rules).
+func (m *Accounts) currentActiveAccountID() string {
+	if pc, ok := m.com.Config().Providers.Get(m.providerID); ok {
+		return pc.Account
+	}
+	return ""
+}
+
+// selectedAccount returns the account currently highlighted in the list,
+// looked up in the last loaded set by ID. It reports false for the
+// "Add account…" entry or when nothing is loaded yet.
+func (m *Accounts) selectedAccount() (accounts.Account, bool) {
+	if m.sd == nil {
+		return accounts.Account{}, false
+	}
+	id := m.sd.selectedID()
+	if id == "" || id == addAccountItemID {
+		return accounts.Account{}, false
+	}
+	for _, a := range m.accs {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return accounts.Account{}, false
 }
 
 // providerDisplayName resolves providerID to the name shown in the UI: the
@@ -312,7 +369,7 @@ func (m *Accounts) innerContent() string {
 func (m *Accounts) ShortHelp() []key.Binding {
 	switch m.state {
 	case accountsStateList:
-		return m.sd.ShortHelp()
+		return append(m.sd.ShortHelp(), m.keyMap.Edit, m.keyMap.Delete)
 	case accountsStateError, accountsStateEmpty:
 		return []key.Binding{CloseKey}
 	default:
@@ -324,7 +381,7 @@ func (m *Accounts) ShortHelp() []key.Binding {
 // FullHelp implements [help.KeyMap].
 func (m *Accounts) FullHelp() [][]key.Binding {
 	if m.state == accountsStateList {
-		return m.sd.FullHelp()
+		return append(m.sd.FullHelp(), []key.Binding{m.keyMap.Edit, m.keyMap.Delete})
 	}
 	return [][]key.Binding{m.ShortHelp()}
 }

@@ -372,6 +372,14 @@ func (w *readOnlyWorkspace) ActivateAccount(scope config.Scope, providerID, acco
 	return w.readOnlyError("ActivateAccount")
 }
 
+func (w *readOnlyWorkspace) UpdateAccount(providerID string, account accounts.Account) error {
+	return w.readOnlyError("UpdateAccount")
+}
+
+func (w *readOnlyWorkspace) RemoveAccount(scope config.Scope, providerID, accountID string) error {
+	return w.readOnlyError("RemoveAccount")
+}
+
 func (w *readOnlyWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.readOnlyError("SetConfigField")
 }

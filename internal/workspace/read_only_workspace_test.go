@@ -539,6 +539,16 @@ func (s *stubWorkspace) ActivateAccount(scope config.Scope, providerID, accountI
 	return nil
 }
 
+func (s *stubWorkspace) UpdateAccount(providerID string, account accounts.Account) error {
+	s.track("UpdateAccount")
+	return nil
+}
+
+func (s *stubWorkspace) RemoveAccount(scope config.Scope, providerID, accountID string) error {
+	s.track("RemoveAccount")
+	return nil
+}
+
 func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	s.track("SetConfigField")
 	return nil

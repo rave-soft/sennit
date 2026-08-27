@@ -783,6 +783,26 @@ func (w *AppWorkspace) ActivateAccount(scope config.Scope, providerID, accountID
 	return w.store.ActivateAccount(scope, providerID, a)
 }
 
+// UpdateAccount implements Workspace by delegating to config.UpdateAccount.
+// The account store is opened fresh here rather than cached on
+// AppWorkspace — see RecordAccount's comment above for why. The rules
+// themselves (upsert, then republish if active) live in config.UpdateAccount
+// so this stays a thin wrapper: see that function's doc comment for why a
+// second copy of the logic here would be the wrong shape.
+func (w *AppWorkspace) UpdateAccount(providerID string, account accounts.Account) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.UpdateAccount(w.store, accStore, providerID, account)
+}
+
+// RemoveAccount implements Workspace by delegating to config.RemoveAccount,
+// which owns the actual rules (refuse the last account, activate a
+// replacement before deleting the active one) — see its doc comment for
+// why those rules must not be duplicated here or in a test double.
+func (w *AppWorkspace) RemoveAccount(scope config.Scope, providerID, accountID string) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.RemoveAccount(w.store, accStore, scope, providerID, accountID)
+}
+
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.store.SetConfigField(scope, key, value)
 }

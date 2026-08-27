@@ -20,6 +20,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -95,6 +96,17 @@ type cmdDrivingWorkspace struct {
 	sessionsBySessionID map[string]session.Session
 	messagesBySessionID map[string][]message.Message
 	historyBySessionID  map[string][]history.File
+
+	// Account stubs
+	listAccountsCalls  int
+	accs               []accounts.Account
+	listAccountsErr    error
+	updateAccountCalls int
+	lastUpdatedAccount accounts.Account
+	updateAccountErr   error
+	removeAccountCalls int
+	lastRemovedID      string
+	removeAccountErr   error
 }
 
 func (w *cmdDrivingWorkspace) Config() *config.Config {
@@ -452,6 +464,23 @@ func (w *cmdDrivingWorkspace) QuestionCancel() bool {
 }
 func (w *cmdDrivingWorkspace) Subscribe(func(any)) {}
 func (w *cmdDrivingWorkspace) Shutdown()           {}
+
+func (w *cmdDrivingWorkspace) ListAccounts(string) ([]accounts.Account, error) {
+	w.listAccountsCalls++
+	return w.accs, w.listAccountsErr
+}
+
+func (w *cmdDrivingWorkspace) UpdateAccount(_ string, account accounts.Account) error {
+	w.updateAccountCalls++
+	w.lastUpdatedAccount = account
+	return w.updateAccountErr
+}
+
+func (w *cmdDrivingWorkspace) RemoveAccount(_ config.Scope, _, accountID string) error {
+	w.removeAccountCalls++
+	w.lastRemovedID = accountID
+	return w.removeAccountErr
+}
 
 // ---------------------------------------------------------------------------
 // cmdDrivenUI builds a UI over cmdDrivingWorkspace with all caches warm.

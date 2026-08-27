@@ -115,6 +115,100 @@ func RecordAccount(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 	return a, nil
 }
 
+// UpdateAccount saves account's user-editable fields (Label, ProxyURL,
+// Disabled) to accStore. When account is providerID's currently active
+// one, it additionally goes through ConfigStore.ActivateAccount: that is
+// the one call that republishes an account into the live ProviderConfig
+// (resolved credentials and effective proxy) that every outgoing request
+// actually reads, so an edited proxy takes effect immediately instead of
+// sitting unused until the next restart. A second, ad hoc publish path
+// here would risk drifting from the one ActivateAccount already
+// maintains — see its doc comment for why disk and memory have to be
+// written in that order.
+//
+// This is the single implementation callers (AppWorkspace and any test
+// double standing in for it) must go through — see the doc comment on
+// RemoveAccount below for why a duplicated copy is the wrong shape here.
+func UpdateAccount(store *ConfigStore, accStore accounts.Store, providerID string, account accounts.Account) error {
+	if err := accStore.Upsert(providerID, account); err != nil {
+		return fmt.Errorf("updating account %s for provider %s: %w", account.ID, providerID, err)
+	}
+	if pc, ok := store.Config().Providers.Get(providerID); ok && pc.Account == account.ID {
+		if err := store.ActivateAccount(ScopeGlobal, providerID, account); err != nil {
+			return fmt.Errorf("republishing updated active account %s for provider %s: %w", account.ID, providerID, err)
+		}
+	}
+	return nil
+}
+
+// RemoveAccount deletes an account, subject to two rules: the last account
+// for a provider can't be removed (that would leave credentials configured
+// with nowhere to point — see the error below, which names `sennit
+// logout` as the actual way to do that), and removing the active account
+// activates a replacement first so the provider is never left pointing at
+// a deleted one.
+//
+// This lives here — not duplicated in internal/workspace's AppWorkspace
+// and again in a test double standing in for it — because a hand-copied
+// second implementation of these rules is exactly the failure mode that
+// bit this feature once already: an earlier revision of AppWorkspace's
+// RemoveAccount and the workspace package's test-only ConfigAccessor each
+// carried their own copy of "refuse the last account, activate a
+// replacement before deleting," and the tests exercised only the copy in
+// the test double. Breaking the real implementation left every test green.
+// A single free function both call means there is only one place these
+// rules can live, and a test against a real ConfigStore (see
+// internal/config's own test for this) actually exercises what production
+// runs.
+func RemoveAccount(store *ConfigStore, accStore accounts.Store, scope Scope, providerID, accountID string) error {
+	existing, err := accStore.List(providerID)
+	if err != nil {
+		return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
+	}
+	if len(existing) <= 1 {
+		return fmt.Errorf("cannot remove the last account for provider %s: this would leave it signed in with no account to use — run `sennit logout` instead", providerID)
+	}
+
+	if pc, ok := store.Config().Providers.Get(providerID); ok && pc.Account == accountID {
+		next, ok := nextAccountAfterRemoval(existing, accountID)
+		if !ok {
+			return fmt.Errorf("no replacement account found for provider %s", providerID)
+		}
+		if err := store.ActivateAccount(scope, providerID, next); err != nil {
+			return fmt.Errorf("activating replacement account for provider %s: %w", providerID, err)
+		}
+	}
+
+	if err := accStore.Remove(providerID, accountID); err != nil {
+		return fmt.Errorf("removing account %s for provider %s: %w", accountID, providerID, err)
+	}
+	return nil
+}
+
+// nextAccountAfterRemoval picks the account RemoveAccount should activate
+// before deleting excludeID: the first non-disabled account other than
+// excludeID, or, if every other account is disabled, the first one
+// regardless. Preferring an enabled account keeps the provider usable
+// immediately; falling back to a disabled one still beats refusing the
+// removal, since the user is free to re-enable it afterward.
+func nextAccountAfterRemoval(existing []accounts.Account, excludeID string) (accounts.Account, bool) {
+	var fallback accounts.Account
+	haveFallback := false
+	for _, a := range existing {
+		if a.ID == excludeID {
+			continue
+		}
+		if !a.Disabled {
+			return a, true
+		}
+		if !haveFallback {
+			fallback = a
+			haveFallback = true
+		}
+	}
+	return fallback, haveFallback
+}
+
 // EnsureAccountMigrated makes sure providerID's pre-multi-account
 // credential, if any, has been folded into accStore as an account — the
 // read path's counterpart to RecordAccount's own migration step (see
