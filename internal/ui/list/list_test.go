@@ -288,6 +288,38 @@ func TestList_FrozenItem_SelectionDragUnfreeze(t *testing.T) {
 	require.Equal(t, 3, b.renderHits, "frozen after drag end")
 }
 
+// TestList_SetItems_PrunesStaleFreezeSuppressed is a regression test:
+// SetItems used to prune the cache map but leave freezeSuppressed
+// untouched, so an item dropped from the list mid-selection-drag stayed
+// reachable (and un-collectible) in freezeSuppressed until some later
+// EndSelectionDrag happened to clear the whole map. Both maps are keyed
+// by Item, so SetItems must prune them together, the way RemoveItem
+// already does.
+func TestList_SetItems_PrunesStaleFreezeSuppressed(t *testing.T) {
+	t.Parallel()
+
+	a := newTrackedItem("a", "alpha", true)
+	b := newTrackedItem("b", "bravo", true)
+	c := newTrackedItem("c", "charlie", true)
+
+	l := NewList(a, b, c)
+	l.SetSize(40, 10)
+
+	// Put a and b into an active selection drag's suppression set.
+	l.BeginSelectionDrag(0, 1)
+	require.Contains(t, l.freezeSuppressed, Item(a))
+	require.Contains(t, l.freezeSuppressed, Item(b))
+
+	// Replace the items wholesale, dropping b — a full refresh of the
+	// list rather than a targeted RemoveItem.
+	l.SetItems(a, c)
+
+	_, stale := l.freezeSuppressed[b]
+	require.False(t, stale, "SetItems must prune freezeSuppressed entries for items no longer in the list")
+	_, kept := l.freezeSuppressed[a]
+	require.True(t, kept, "SetItems must keep freezeSuppressed entries for items still in the list")
+}
+
 // TestList_RenderOutputStableAcrossDraws is the F6 byte-equality
 // invariant: rendering the same list multiple times must produce the
 // same bytes.

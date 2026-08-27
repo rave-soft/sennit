@@ -193,6 +193,18 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 		removeReserve = removeStr
 	}
 	maxItemWidth := lipgloss.Width(r.imageStyle.String() + r.normalStyle.Render(strings.Repeat("x", maxFilename)) + removeReserve)
+
+	// Invariant: the number of chips actually drawn plus the count the
+	// summary chip reports as hidden must always add up to
+	// len(attachments) — never more (an overstated summary), never less
+	// (a chip silently dropped with no accounting).
+	//
+	// When not even one chip's width fits in the row, drawing a partial
+	// chip would overflow it — the opposite of what the cap exists for
+	// — so collapse to a bare count instead of drawing anything.
+	if width < maxItemWidth {
+		return ansi.Truncate(fmt.Sprintf("%d attachments…", len(attachments)), width, "…")
+	}
 	fits := int(math.Floor(float64(width)/float64(maxItemWidth))) - 1
 
 	var offset int
@@ -252,8 +264,14 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 		// > i was true even for i == len(attachments)-1 — the last
 		// attachment, fully rendered above — which showed a bogus
 		// "1 more…" chip when nothing was in fact hidden.
+		//
+		// Chips 0..i (i+1 of them) have been drawn by this point, so the
+		// hidden count is len(attachments)-(i+1), not len(attachments)-fits
+		// (which overstated it by one: it counted the chip at i itself as
+		// still hidden).
 		if i == fits && i < len(attachments)-1 {
-			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", len(attachments)-fits)))
+			hidden := len(attachments) - i - 1
+			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", hidden)))
 			break
 		}
 	}

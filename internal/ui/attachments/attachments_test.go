@@ -2,6 +2,8 @@ package attachments
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -443,6 +445,76 @@ func TestRender_NoMoreChipWhenEverythingFits(t *testing.T) {
 	require.NotContains(t, out, "more…", "every attachment fit; no summary chip should appear")
 	for _, a := range atts {
 		require.Contains(t, out, a.FileName)
+	}
+}
+
+var moreOrCountRE = regexp.MustCompile(`(\d+) (?:more|attachments)…`)
+
+// TestRender_ChipsPlusHiddenCountEqualsTotal is a regression test for two
+// bugs in the overflow cap: (a) the "N more…" summary counted the chip at
+// the cutoff index as still hidden, overstating the true hidden count by
+// one; (b) when the row was narrower than a single chip, `fits` went
+// negative and the cap never triggered at all, so every chip rendered and
+// overflowed the row instead of collapsing.
+//
+// The invariant under test: at every width, the number of chips actually
+// drawn (one ✕ per chip) plus whatever count the summary reports as
+// hidden must equal the total number of attachments — never more, never
+// less. That invariant alone doesn't catch (b): drawing every chip with
+// no summary at all also happens to sum correctly (3 drawn + 0 hidden =
+// 3), even though the row overflows its width. So each case also pins
+// down exactly how many chips a correct implementation draws, which
+// fails on "exactly one chip's worth" (summary overstated the hidden
+// count by one) and "narrower than one chip" (nothing capped, so all
+// three chips drew) before the fix.
+func TestRender_ChipsPlusHiddenCountEqualsTotal(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	atts := []message.Attachment{
+		{FileName: "a.txt"},
+		{FileName: "b.txt"},
+		{FileName: "c.txt"},
+	}
+
+	removeReserve := r.removeStyle.String()
+	maxItemWidth := lipgloss.Width(r.imageStyle.String() + r.normalStyle.Render(strings.Repeat("x", maxFilename)) + removeReserve)
+
+	tests := []struct {
+		name       string
+		width      int
+		wantShown  int
+		wantHidden int
+	}{
+		{"comfortably wide", maxItemWidth * (len(atts) + 2), 3, 0},
+		{"exactly one chip's worth", maxItemWidth, 1, 2},
+		{"narrower than one chip", maxItemWidth - 1, 0, 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Render mutates the renderer's hit-test bounds, so each
+			// parallel subtest needs its own instance rather than
+			// sharing r.
+			out := newTestRenderer().Render(atts, false, true, tt.width)
+
+			shown := strings.Count(out, styles.RemoveIcon)
+
+			hidden := 0
+			if m := moreOrCountRE.FindStringSubmatch(out); m != nil {
+				n, err := strconv.Atoi(m[1])
+				require.NoError(t, err)
+				hidden = n
+			}
+
+			require.Equal(t, len(atts), shown+hidden,
+				"chips drawn (%d) plus hidden count (%d) must equal total attachments (%d)",
+				shown, hidden, len(atts))
+			require.Equal(t, tt.wantShown, shown, "unexpected number of chips drawn")
+			require.Equal(t, tt.wantHidden, hidden, "unexpected hidden count reported")
+		})
 	}
 }
 

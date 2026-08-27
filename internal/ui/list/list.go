@@ -459,11 +459,16 @@ func (l *List) InvalidateFrozen(item Item) {
 	delete(l.cache, item)
 }
 
-// retainCacheFor drops every cache entry whose key is not in the given
-// item set. Used by SetItems to keep entries for stable items while
-// dropping entries for removed ones.
+// retainCacheFor drops every cache and freezeSuppressed entry whose key
+// is not in the given item set. Used by SetItems to keep entries for
+// stable items while dropping entries for removed ones. Both maps are
+// keyed by Item, so an item dropped from the list must be pruned from
+// both or freezeSuppressed keeps it reachable (and, if a later
+// BeginSelectionDrag/EndSelectionDrag pair never touches that key again,
+// indefinitely) until some other path clears it. RemoveItem already
+// prunes both together; SetItems used to prune only the cache.
 func (l *List) retainCacheFor(items []Item) {
-	if len(l.cache) == 0 {
+	if len(l.cache) == 0 && len(l.freezeSuppressed) == 0 {
 		return
 	}
 	keep := make(map[Item]struct{}, len(items))
@@ -473,6 +478,11 @@ func (l *List) retainCacheFor(items []Item) {
 	for k := range l.cache {
 		if _, ok := keep[k]; !ok {
 			delete(l.cache, k)
+		}
+	}
+	for k := range l.freezeSuppressed {
+		if _, ok := keep[k]; !ok {
+			delete(l.freezeSuppressed, k)
 		}
 	}
 }
@@ -722,9 +732,9 @@ func (l *List) PrependItems(items ...Item) {
 	l.totalHeightValid = false
 }
 
-// SetItems sets the items in the list. Cache entries for items that
-// remain after the swap are preserved; entries for removed items are
-// dropped.
+// SetItems sets the items in the list. Cache and freezeSuppressed
+// entries for items that remain after the swap are preserved; entries
+// for removed items are dropped.
 func (l *List) SetItems(items ...Item) {
 	l.items = items
 	l.selectedIdx = min(l.selectedIdx, len(l.items)-1)
