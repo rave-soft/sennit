@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -118,6 +120,64 @@ func TestDirectoryListerDoesNotRetainWideTreeState(t *testing.T) {
 		kind := value.Field(i).Kind()
 		require.NotEqual(t, reflect.Map, kind, "directory lister must not retain per-directory maps")
 		require.NotEqual(t, reflect.Slice, kind, "directory lister must not retain per-directory slices")
+	}
+}
+
+// TestListDirectory_DoesNotFollowSymlinkedDir pins ListDirectory to the
+// same no-follow behavior as the glob path (globWithDoubleStar in
+// fileutil.go): a symlinked subdirectory shows up as a leaf entry, and
+// what is inside the real directory it points at is not listed a second
+// time under the symlink. Before this fix ListDirectory passed
+// fastwalk.Config{Follow: true}, so the same tree yielded different
+// results depending on whether the agent used the list tool or glob.
+func TestListDirectory_DoesNotFollowSymlinkedDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires elevated privileges on Windows")
+	}
+	t.Parallel()
+	tmp := t.TempDir()
+	real := filepath.Join(tmp, "real")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(real, "inside.txt"), []byte("x"), 0o644))
+	require.NoError(t, os.Symlink(real, filepath.Join(tmp, "link")))
+
+	files, truncated, err := ListDirectory(tmp, nil, -1, -1)
+	require.NoError(t, err)
+	require.False(t, truncated)
+	require.ElementsMatch(t, []string{
+		"real", "real/inside.txt", "link",
+	}, relPaths(t, files, tmp))
+}
+
+// TestListDirectory_SymlinkLoopDoesNotHang guards against the hang that
+// following symlinks (fastwalk.Config{Follow: true}) invites: a directory
+// that symlinks back to one of its own ancestors would otherwise send the
+// walk in circles forever. With symlinks not followed, ListDirectory must
+// return promptly and simply list the loop-forming symlink as a leaf.
+func TestListDirectory_SymlinkLoopDoesNotHang(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires elevated privileges on Windows")
+	}
+	t.Parallel()
+	tmp := t.TempDir()
+	sub := filepath.Join(tmp, "sub")
+	require.NoError(t, os.Mkdir(sub, 0o755))
+	require.NoError(t, os.Symlink(tmp, filepath.Join(sub, "loop")))
+
+	done := make(chan struct{})
+	var files []string
+	var err error
+	go func() {
+		defer close(done)
+		files, _, err = ListDirectory(tmp, nil, -1, -1)
+	}()
+
+	select {
+	case <-done:
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"sub", "sub/loop"}, relPaths(t, files, tmp))
+	case <-time.After(5 * time.Second):
+		t.Fatal("ListDirectory hung on a symlink loop")
 	}
 }
 

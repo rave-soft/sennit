@@ -2,11 +2,17 @@ package fsext
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/rave-soft/sennit/internal/lock"
 )
 
 type pathLock struct {
@@ -49,10 +55,58 @@ func lockMutationPath(path string) func() {
 	}
 }
 
+// conditionalReplaceLockDeadline bounds how long conditionalReplaceExisting
+// waits for the cross-process lock before giving up. A few seconds is
+// plenty for honest contention; longer suggests something is wedged.
+const conditionalReplaceLockDeadline = 5 * time.Second
+
+// conditionalReplaceLockDir holds the lock files that serialize
+// conditionalReplaceExisting against other processes, e.g. two sennit
+// instances editing the same file concurrently. It lives outside the
+// target file's own directory (unlike config's per-file ".lock", which
+// sits next to a single well-known path) because conditionalReplaceExisting
+// runs against arbitrary paths across a user's project tree, and a stray
+// "*.go.lock" next to every edited file would clutter `git status`.
+var conditionalReplaceLockDir = filepath.Join(os.TempDir(), "sennit-fsext-locks")
+
+// conditionalReplaceLockPath maps path to a lock file under
+// conditionalReplaceLockDir, keyed by content hash so unrelated paths never
+// collide and the lock file name never leaks the original path length or
+// characters into a shared temp directory.
+func conditionalReplaceLockPath(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return filepath.Join(conditionalReplaceLockDir, hex.EncodeToString(sum[:])+".lock")
+}
+
+// conditionalReplaceExisting replaces path's contents with data if and only
+// if path's current on-disk content still equals expected, returning
+// ErrFileChanged otherwise. This is the "existing file" half of
+// [AtomicWriteFileIfUnchanged]'s compare-and-swap.
+//
+// The read-compare-rename sequence is protected two ways: lockMutationPath
+// serializes callers within this process, and a flock (see
+// conditionalReplaceLockPath) serializes across processes — closing the
+// TOCTOU window where another process writes path between the compare and
+// the rename. This function's caller, the file-edit tool
+// (internal/agent/tools/filemutation.go), does not otherwise hold any
+// lock on path, unlike internal/config's store, which already wraps its
+// own writes in a flock (see configFile.atomicWrite) and does not go
+// through this function at all — it calls AtomicWriteFile directly.
 func conditionalReplaceExisting(path string, expected, data []byte, mode os.FileMode) error {
 	path = filepath.Clean(path)
 	unlock := lockMutationPath(path)
 	defer unlock()
+
+	if err := os.MkdirAll(conditionalReplaceLockDir, 0o700); err != nil {
+		return fmt.Errorf("create cross-process lock directory: %w", err)
+	}
+	lockCtx, cancel := context.WithTimeout(context.Background(), conditionalReplaceLockDeadline)
+	defer cancel()
+	releaseFlock, err := lock.File(lockCtx, conditionalReplaceLockPath(path))
+	if err != nil {
+		return fmt.Errorf("acquire cross-process lock: %w", err)
+	}
+	defer releaseFlock()
 
 	dir := filepath.Dir(path)
 	file, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")

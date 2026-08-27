@@ -8,7 +8,9 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
+	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -152,4 +154,47 @@ func TestAtomicWriteFileIfUnchangedCreateRaceHasSingleWinner(t *testing.T) {
 	}
 	require.Equal(t, 1, successes)
 	require.Equal(t, 1, conflicts)
+}
+
+// TestAtomicWriteFileIfUnchangedWaitsForCrossProcessLock pins the fix for
+// the cross-process TOCTOU in conditionalReplaceExisting: the file-edit
+// tool (internal/agent/tools/filemutation.go) is the only real caller and
+// holds no lock of its own, so conditionalReplaceExisting must take the
+// cross-process flock itself around its read-compare-rename sequence.
+// This simulates another process (or another sennit instance) holding
+// that same flock: the write must block until it is released, then land
+// cleanly rather than racing past it.
+func TestAtomicWriteFileIfUnchangedWaitsForCrossProcessLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o644))
+
+	release, err := lock.TryFile(conditionalReplaceLockPath(path))
+	require.NoError(t, err)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		release()
+	}()
+
+	start := time.Now()
+	err = AtomicWriteFileIfUnchanged(path, []byte("old"), []byte("new"), 0o644, true)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, time.Since(start), 150*time.Millisecond, "should have waited for the held flock")
+
+	content, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	require.Equal(t, "new", string(content))
+}
+
+// TestConditionalReplaceLockPath_StableAndDistinct pins the lock-file
+// naming scheme: the same path always maps to the same lock file (so
+// concurrent callers actually contend on it), and different paths never
+// collide.
+func TestConditionalReplaceLockPath_StableAndDistinct(t *testing.T) {
+	a := filepath.Join(t.TempDir(), "a")
+	b := filepath.Join(t.TempDir(), "b")
+
+	require.Equal(t, conditionalReplaceLockPath(a), conditionalReplaceLockPath(a))
+	require.NotEqual(t, conditionalReplaceLockPath(a), conditionalReplaceLockPath(b))
+	require.Equal(t, conditionalReplaceLockDir, filepath.Dir(conditionalReplaceLockPath(a)))
 }

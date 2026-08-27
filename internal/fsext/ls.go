@@ -332,7 +332,13 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 	slog.Debug("Listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
 
 	conf := fastwalk.Config{
-		Follow:   true,
+		// Do not follow symlinks: this must match the glob path
+		// (globWithDoubleStar, fileutil.go), which deliberately does not
+		// follow them either, so the two entry points agree on what one
+		// tree contains. Following would also let the walk escape
+		// initialPath (into module caches, the nix store, $HOME, etc.)
+		// and chase symlink cycles, which is slow and can hang.
+		Follow:   false,
 		ToSlash:  fastwalk.DefaultToSlash(),
 		Sort:     fastwalk.SortDirsFirst,
 		MaxDepth: depth,

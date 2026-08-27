@@ -12,6 +12,11 @@ import (
 // prevents concurrent readers from observing a partially-written file.
 var ErrFileChanged = errors.New("file changed")
 
+// linkFile is os.Link, indirected so tests can simulate a filesystem that
+// cannot hard-link (see isUnsupportedLinkError) without needing an actual
+// one.
+var linkFile = os.Link
+
 func AtomicWriteFileIfUnchanged(path string, expected, data []byte, mode os.FileMode, exists bool) error {
 	if exists {
 		return conditionalReplaceExisting(filepath.Clean(path), expected, data, mode)
@@ -50,12 +55,56 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Link(tmp, path); err != nil {
+	if err := linkFile(tmp, path); err != nil {
+		// os.ErrExist means path is already there — callers rely on
+		// that distinction (see AtomicWriteFileIfUnchanged's ErrFileChanged
+		// mapping) so it must pass through unchanged. Anything else that
+		// isUnsupportedLinkError recognizes means this filesystem cannot
+		// hard-link at all, so fall back to an exclusive create.
+		if !errors.Is(err, os.ErrExist) && isUnsupportedLinkError(err) {
+			fallbackErr := createFileExclusive(path, data, perm)
+			_ = os.Remove(tmp)
+			return fallbackErr
+		}
 		_ = os.Remove(tmp)
 		return err
 	}
 	_ = os.Remove(tmp)
 	syncDir(dir)
+	return nil
+}
+
+// createFileExclusive is AtomicCreateFile's fallback for filesystems that
+// cannot hard-link (see isUnsupportedLinkError). O_EXCL still refuses to
+// create over an existing file, so the create-only-if-absent guarantee
+// holds, but the write is no longer atomic with respect to the already
+// fully-written temp file: a crash partway through this function can
+// leave path partially written, which the hard-link path never allows.
+func createFileExclusive(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	syncDir(filepath.Dir(path))
 	return nil
 }
 
