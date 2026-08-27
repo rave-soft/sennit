@@ -23,6 +23,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -291,6 +292,13 @@ type ConfigAccessor interface {
 	RemoveConfigField(scope config.Scope, key string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
+	// RecordAccount stores cred as an account for providerID and makes it
+	// active, migrating any pre-existing single credential first; see
+	// config.RecordAccount. Unlike SetProviderAPIKey, a second call for
+	// the same provider adds an account instead of overwriting the first.
+	// Not supported in read-only views (accounts.Store is process-local
+	// file state with no client/server equivalent yet).
+	RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error)
 }
 
 // ProjectLifecycle covers first-run project initialization and skill

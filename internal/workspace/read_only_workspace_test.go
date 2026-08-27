@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -521,6 +522,11 @@ func (s *stubWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 func (s *stubWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
 	s.track("SetProviderAPIKey")
 	return nil
+}
+
+func (s *stubWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+	s.track("RecordAccount")
+	return accounts.Account{}, nil
 }
 
 func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error {

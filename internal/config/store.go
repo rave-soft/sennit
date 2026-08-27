@@ -271,18 +271,38 @@ type AccountCredential struct {
 // everything below it — see ResolveProxy's doc comment for why that
 // distinction matters. A plain string parameter could not carry "don't
 // touch" vs. "clear to provider default" — hence the pointer.
+//
+// A provider with no config entry yet is not an error here: it is the
+// ordinary state of a catalog provider (Codex, Copilot, ...) before its
+// first sign-in — sennit.json has nothing for it until credentials are
+// actually saved. This used to be a hard failure ("provider %s not
+// found"), which broke a brand-new install's very first `sennit login
+// codex`, since ActivateAccount (RecordAccount's caller) has no other
+// path to create the entry. providerConfigFromCatalogLocked fabricates it
+// from the embedded catalog exactly as SetProviderAPIKey's !exists branch
+// already did — see that function's doc comment for why the two must
+// share one implementation. A providerID that is not catalog-known
+// either — a typo, or a custom provider nobody has configured — still
+// fails, since there is nothing to fabricate an entry from.
 func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCredential) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
 	current := s.Config()
-	if current == nil || current.Providers == nil {
+	if current == nil {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
 	cfg := current.cloneForWrite()
+	if cfg.Providers == nil {
+		cfg.Providers = csync.NewMap[string, ProviderConfig]()
+	}
 	provider, ok := cfg.Providers.Get(providerID)
 	if !ok {
-		return fmt.Errorf("provider %s not found", providerID)
+		var err error
+		provider, err = s.providerConfigFromCatalogLocked(providerID)
+		if err != nil {
+			return fmt.Errorf("provider %s has no config entry and %w", providerID, err)
+		}
 	}
 	provider.APIKey = cred.APIKey
 	provider.OAuthToken = cred.Token
@@ -830,12 +850,55 @@ func (s *ConfigStore) findKnownProvider(providerID string) *catwalk.Provider {
 	// (each one runs before the write it is preparing for takes the lock).
 	s.writeMu.RLock()
 	defer s.writeMu.RUnlock()
+	return s.findKnownProviderLocked(providerID)
+}
+
+// findKnownProviderLocked is findKnownProvider's body, for callers that
+// already hold writeMu (in either mode) and would deadlock taking the
+// RLock again — UpdateProviderAccount, notably, which needs a catalog
+// lookup while already holding the exclusive lock for its clone-and-swap.
+func (s *ConfigStore) findKnownProviderLocked(providerID string) *catwalk.Provider {
 	for _, p := range s.knownProviders {
 		if string(p.ID) == providerID {
 			return &p
 		}
 	}
 	return nil
+}
+
+// providerConfigFromCatalogLocked builds a fresh ProviderConfig for a
+// catalog-known provider that has no config entry yet — the ordinary
+// state of any catalog provider (Codex, Copilot, ...) before its first
+// sign-in, not an exceptional one. Shared by SetProviderAPIKey and
+// UpdateProviderAccount, both of which have to fabricate this entry the
+// same way; letting the two copies drift is exactly how one of them
+// silently stopped handling "no entry yet" (see UpdateProviderAccount's
+// doc comment). Returns an error when providerID isn't a known provider
+// at all. Caller must hold writeMu (either mode).
+func (s *ConfigStore) providerConfigFromCatalogLocked(providerID string) (ProviderConfig, error) {
+	found := s.findKnownProviderLocked(providerID)
+	if found == nil {
+		return ProviderConfig{}, fmt.Errorf("provider with ID %s not found in known providers", providerID)
+	}
+	return ProviderConfig{
+		ID:           providerID,
+		Name:         found.Name,
+		BaseURL:      found.APIEndpoint,
+		Type:         found.Type,
+		Disable:      false,
+		ExtraHeaders: make(map[string]string),
+		ExtraParams:  make(map[string]string),
+		Models:       found.Models,
+	}, nil
+}
+
+// providerConfigFromCatalog is providerConfigFromCatalogLocked for callers
+// that do not already hold writeMu (SetProviderAPIKey, notably, which
+// computes this before taking the lock in its persist() closure).
+func (s *ConfigStore) providerConfigFromCatalog(providerID string) (ProviderConfig, error) {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
+	return s.providerConfigFromCatalogLocked(providerID)
 }
 
 // SetProviderAPIKey sets the API key for a provider and persists it.
@@ -849,19 +912,10 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	cfg := s.Config()
 	providerConfig, exists := cfg.Providers.Get(providerID)
 	if !exists {
-		foundProvider := s.findKnownProvider(providerID)
-		if foundProvider == nil {
-			return fmt.Errorf("provider with ID %s not found in known providers", providerID)
-		}
-		providerConfig = ProviderConfig{
-			ID:           providerID,
-			Name:         foundProvider.Name,
-			BaseURL:      foundProvider.APIEndpoint,
-			Type:         foundProvider.Type,
-			Disable:      false,
-			ExtraHeaders: make(map[string]string),
-			ExtraParams:  make(map[string]string),
-			Models:       foundProvider.Models,
+		var err error
+		providerConfig, err = s.providerConfigFromCatalog(providerID)
+		if err != nil {
+			return err
 		}
 	}
 

@@ -25,6 +25,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
@@ -737,6 +738,21 @@ func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, 
 	}
 	w.app.Credentials().SignalAuthComplete(providerID)
 	return nil
+}
+
+// RecordAccount implements Workspace by delegating to config.RecordAccount.
+// The account store is opened fresh on each call rather than cached on
+// AppWorkspace: FileStore is a thin, stateless wrapper over the file path
+// (see its doc comment — it holds no in-memory cache), so there is nothing
+// worth keeping alive between calls.
+func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	a, err := config.RecordAccount(w.store, accStore, scope, providerID, cred)
+	if err != nil {
+		return accounts.Account{}, err
+	}
+	w.app.Credentials().SignalAuthComplete(providerID)
+	return a, nil
 }
 
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {

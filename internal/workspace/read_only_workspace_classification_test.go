@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -59,6 +60,7 @@ var refusedMethods = []string{
 	"PermissionSetSkipRequests",
 	"QuestionAnswer",
 	"QuestionCancel",
+	"RecordAccount",
 	"RefreshMCPTools",
 	"RefreshOAuthToken",
 	"RemoveConfigField",
@@ -342,6 +344,10 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"SetProviderAPIKey": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.SetProviderAPIKey(config.ScopeWorkspace, "provider", "key")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"RecordAccount": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, err := ro.RecordAccount(config.ScopeWorkspace, "provider", accounts.LegacyCredential{})
 			require.True(t, IsReadOnlyError(err))
 		},
 		"Shutdown": func(_ *testing.T, ro *readOnlyWorkspace) {

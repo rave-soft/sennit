@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -60,10 +61,16 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 		return err
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, codex.ProviderID, token); err != nil {
-		return err
-	}
-	// Persisted so the model requests take the same route the sign-in did.
+	// Persisted first, so it lands in ConfiguredProxyURL — the provider-
+	// level default an account without a proxy of its own falls back to
+	// (see accounts.ResolveProxy) — before RecordAccount below resolves
+	// this account's effective route. The account itself is recorded with
+	// no proxy of its own (see the LegacyCredential below): were this
+	// account's ProxyURL set to the same value directly, a --proxy passed
+	// here would be indistinguishable from an override this ONE account
+	// happens to want, and a later "give this account no proxy" could no
+	// longer tell the two apart. Routing it only through the provider
+	// default keeps that one value in one place.
 	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
 	if proxyURL == "" {
 		if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {
@@ -73,11 +80,30 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 		return err
 	}
 
+	accountID := codex.AccountID(token.AccessToken)
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	// Counted before RecordAccount so the summary below can tell "a new
+	// account appeared" (this login, or the one-time migration of a
+	// pre-existing single credential, added an entry) from "the same
+	// count as before" (this login only refreshed an account already on
+	// file) — RecordAccount itself reports neither, only the resulting
+	// Account.
+	before, err := accStore.List(codex.ProviderID)
+	if err != nil {
+		return fmt.Errorf("listing existing Codex accounts: %w", err)
+	}
+	account, err := ws.RecordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+		Token:     token,
+		AccountID: accountID,
+	})
+	if err != nil {
+		return err
+	}
+
 	// Which models the account may use is per-plan, so the catalog entry
 	// ships without any and the list is fetched here. A failure is not fatal
 	// to the sign-in itself: the credentials are already saved, and the list
 	// can be refreshed later.
-	accountID := codex.AccountID(token.AccessToken)
 	models, err := codex.FetchModels(loginCtx, proxyURL, token.AccessToken, accountID)
 	if err != nil {
 		fmt.Println()
@@ -89,8 +115,22 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 		return err
 	}
 
+	after, err := accStore.List(codex.ProviderID)
+	if err != nil {
+		// The sign-in itself already succeeded; a failure to re-list
+		// afterward only costs the account count in the summary line.
+		after = before
+	}
+
 	fmt.Println()
-	fmt.Printf("You're now authenticated with OpenAI Codex (%d models available)!\n", len(models))
+	if len(after) > len(before) {
+		fmt.Printf("Added the Codex account %q (%d models available).\n", account.Label, len(models))
+	} else {
+		fmt.Printf("Updated the Codex account %q (%d models available).\n", account.Label, len(models))
+	}
+	if len(after) > 1 {
+		fmt.Printf("You now have %d Codex accounts.\n", len(after))
+	}
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -48,6 +49,11 @@ func (a *testConfigAccessor) SetCompactMode(scope config.Scope, enabled bool) er
 
 func (a *testConfigAccessor) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
 	return a.store.SetProviderAPIKey(scope, providerID, apiKey)
+}
+
+func (a *testConfigAccessor) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.RecordAccount(a.store, accStore, scope, providerID, cred)
 }
 
 func (a *testConfigAccessor) SetConfigField(scope config.Scope, key string, value any) error {

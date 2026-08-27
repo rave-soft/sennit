@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 )
@@ -361,6 +362,10 @@ func (w *readOnlyWorkspace) SetCompactMode(scope config.Scope, enabled bool) err
 
 func (w *readOnlyWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
 	return w.readOnlyError("SetProviderAPIKey")
+}
+
+func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+	return accounts.Account{}, w.readOnlyError("RecordAccount")
 }
 
 func (w *readOnlyWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
