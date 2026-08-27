@@ -3,6 +3,7 @@ package dialog
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,9 +14,14 @@ import (
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
+
+// errBrowserOpenTest stands in for whatever browser.OpenURL would return
+// on failure, for TestOAuthBrowserOpenFailure_DoesNotAbortSignIn.
+var errBrowserOpenTest = errors.New("no browser launcher available")
 
 // fakeCodexJWT builds an unsigned token carrying the chatgpt_account_id
 // claim OAuthCodex.accountID reads, mirroring
@@ -244,4 +250,45 @@ func TestOAuthEscStopsPollingBeforeClosing(t *testing.T) {
 			require.Equal(t, 1, stub.stopPollingCalls)
 		})
 	}
+}
+
+// TestOAuthBrowserOpenFailure_DoesNotAbortSignIn is the regression test
+// for a failed browser.OpenURL aborting the whole device-flow sign-in:
+// copyCodeAndOpenURL used to turn that failure into ActionOAuthErrored,
+// which drops the dialog into OAuthStateError and stops polling — even
+// though the code and verification URL are already on screen and the
+// user can still finish sign-in by opening the URL themselves. The fix
+// reports it as a warning instead and leaves state/polling untouched.
+func TestOAuthBrowserOpenFailure_DoesNotAbortSignIn(t *testing.T) {
+	s := styles.SennitDark()
+	com := &common.Common{Styles: &s}
+	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"}
+	stub := &stubOAuthProvider{}
+	dlg, _ := newOAuth(com, false, provider, nil, stub, false)
+
+	// Get into OAuthStateDisplay the same way a real flow does.
+	dlg.HandleMsg(ActionInitiateOAuth{
+		DeviceCode:      "dev",
+		UserCode:        "ABCD-1234",
+		VerificationURL: "https://example.com/activate",
+		ExpiresIn:       600,
+		Interval:        5,
+	})
+	require.Equal(t, OAuthStateDisplay, dlg.State)
+
+	// Simulate what copyCodeAndOpenURL's command produces when
+	// browser.OpenURL fails, without depending on an actual browser
+	// launcher behaving predictably in a test/CI environment.
+	action := dlg.HandleMsg(oauthBrowserOpenFailedMsg{err: errBrowserOpenTest})
+
+	require.Equal(t, OAuthStateDisplay, dlg.State, "a browser-open failure must not abort the sign-in flow")
+	require.Zero(t, stub.stopPollingCalls, "polling must keep running so the code can still be redeemed")
+
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected an ActionCmd carrying the warning, got %#v", action)
+	msg := cmdAction.Cmd()
+	warn, ok := msg.(util.InfoMsg)
+	require.True(t, ok, "expected an inline warning message, got %#v", msg)
+	require.Equal(t, util.InfoTypeWarn, warn.Type)
+	require.Contains(t, warn.Msg, "Open the URL")
 }

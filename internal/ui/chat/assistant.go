@@ -196,6 +196,15 @@ type AssistantMessageItem struct {
 	thinkingHash       uint64
 	thinkingHashLen    int
 	thinkingHashSample string
+	// thinkingHashFullRehashes counts calls to thinkingHashIncremental
+	// that took the full re-hash branch (first call, or the text
+	// shrank/diverged) rather than the incremental fast path. It has no
+	// effect on behavior — it exists so tests can catch a regression
+	// where the fast path silently stops being taken (e.g. thinkingKey
+	// getting called more than once per render pass, which starves it of
+	// the strict length growth it needs — see computeSectionKeys' doc
+	// comment) without depending on timing.
+	thinkingHashFullRehashes int
 
 	// Per-section render caches. Splitting these out means content
 	// streaming does not invalidate the (often expensive) thinking
@@ -296,8 +305,18 @@ func (a *AssistantMessageItem) ID() string {
 	return a.message.ID
 }
 
-// RawRender implements [MessageItem].
+// RawRender implements [MessageItem]. It computes the section cache keys
+// itself; renderRaw is the shared body so Render below can instead reuse
+// the keys it already computed for its own cache check (see renderRaw's
+// comment for why that matters).
 func (a *AssistantMessageItem) RawRender(width int) string {
+	return a.renderRaw(width, a.computeSectionKeys())
+}
+
+// renderRaw is RawRender's body, parameterized on already-computed section
+// keys so a caller that needs them anyway (Render, below) doesn't force a
+// second computation of thinkingKey/contentKey/errorKey per frame.
+func (a *AssistantMessageItem) renderRaw(width int, keys assistantSectionKeys) string {
 	cappedWidth := cappedMessageWidth(width)
 
 	var spinner string
@@ -305,7 +324,7 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 		spinner = a.renderSpinning()
 	}
 
-	content, height := a.renderMessageContent(cappedWidth)
+	content, height := a.renderMessageContent(cappedWidth, keys)
 	highlightedContent := a.renderHighlighted(content, cappedWidth, height)
 	if spinner != "" {
 		if highlightedContent != "" {
@@ -335,14 +354,46 @@ func (a *AssistantMessageItem) Render(width int) string {
 	// range is active (selection drag).
 	useCache := !a.isSpinning() && !a.isHighlighted()
 	cappedWidth := cappedMessageWidth(width)
-	key := a.prefixCacheKey(cappedWidth)
+	// Computed once and threaded through both the cache-key check and (on
+	// a miss) the actual render below — see renderRaw's comment.
+	keys := a.computeSectionKeys()
+	key := a.prefixCacheKey(cappedWidth, keys)
 	return a.renderCachedPrefixed(width, key, useCache, func() string {
 		prefix := a.sty.Messages.AssistantBlurred.Render()
 		if a.focused {
 			prefix = a.sty.Messages.AssistantFocused.Render()
 		}
-		return prefixLines(a.RawRender(width), prefix)
+		return prefixLines(a.renderRaw(width, keys), prefix)
 	})
+}
+
+// assistantSectionKeys bundles the (srcHash, extra) cache-key pair for each
+// of the three renderable sections, computed once per render pass by
+// computeSectionKeys. Threading this through renderRaw/renderMessageContent
+// instead of having prefixCacheKey and cachedThinking/cachedContent/
+// cachedError each call thinkingKey/contentKey/errorKey independently is
+// what keeps thinkingHashIncremental's fast path honest: that hash is
+// continued from saved state only when the text strictly grew since the
+// last call, and calling it twice within the same frame (once for the
+// cache check, once for the actual render) always failed that check on the
+// second call — forcing a full re-hash every single tick regardless of the
+// "incremental" bookkeeping.
+type assistantSectionKeys struct {
+	thinkSrc, thinkExtra     uint64
+	contentSrc, contentExtra uint64
+	errSrc, errExtra         uint64
+}
+
+// computeSectionKeys computes every section's cache key exactly once.
+func (a *AssistantMessageItem) computeSectionKeys() assistantSectionKeys {
+	thinkSrc, thinkExtra := a.thinkingKey()
+	contentSrc, contentExtra := a.contentKey()
+	errSrc, errExtra := a.errorKey()
+	return assistantSectionKeys{
+		thinkSrc: thinkSrc, thinkExtra: thinkExtra,
+		contentSrc: contentSrc, contentExtra: contentExtra,
+		errSrc: errSrc, errExtra: errExtra,
+	}
 }
 
 // prefixCacheKey builds the F3 prefixed-render cache key. We pack the
@@ -354,10 +405,7 @@ func (a *AssistantMessageItem) Render(width int) string {
 // folded in too because it controls the composition of
 // renderMessageContent (e.g. appending the constant "Canceled"
 // string) — that decision lives outside any section's own hash.
-func (a *AssistantMessageItem) prefixCacheKey(cappedWidth int) uint64 {
-	thinkSrc, thinkExtra := a.thinkingKey()
-	contentSrc, contentExtra := a.contentKey()
-	errSrc, errExtra := a.errorKey()
+func (a *AssistantMessageItem) prefixCacheKey(cappedWidth int, keys assistantSectionKeys) uint64 {
 	h := fnv.New64a()
 	var buf [8]byte
 	writeU64 := func(v uint64) {
@@ -367,12 +415,12 @@ func (a *AssistantMessageItem) prefixCacheKey(cappedWidth int) uint64 {
 		_, _ = h.Write(buf[:])
 	}
 	writeU64(uint64(cappedWidth))
-	writeU64(thinkSrc)
-	writeU64(thinkExtra)
-	writeU64(contentSrc)
-	writeU64(contentExtra)
-	writeU64(errSrc)
-	writeU64(errExtra)
+	writeU64(keys.thinkSrc)
+	writeU64(keys.thinkExtra)
+	writeU64(keys.contentSrc)
+	writeU64(keys.contentExtra)
+	writeU64(keys.errSrc)
+	writeU64(keys.errExtra)
 	writeU64(a.compositionKey())
 	fingerprint := h.Sum64()
 	var focusBit uint64
@@ -403,20 +451,20 @@ func (a *AssistantMessageItem) compositionKey() uint64 {
 // content, and finish reason. Each section is served from its own cache;
 // only the section whose source text or extras changed since the last
 // render is recomputed.
-func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
+func (a *AssistantMessageItem) renderMessageContent(width int, keys assistantSectionKeys) (string, int) {
 	var messageParts []string
 	thinking := strings.TrimSpace(a.message.ReasoningContent().Thinking)
 	content := strings.TrimSpace(a.message.Content().Text)
 
 	if thinking != "" {
-		messageParts = append(messageParts, a.cachedThinking(width))
+		messageParts = append(messageParts, a.cachedThinking(width, keys.thinkSrc, keys.thinkExtra))
 	}
 
 	if content != "" {
 		if thinking != "" {
 			messageParts = append(messageParts, "")
 		}
-		messageParts = append(messageParts, a.cachedContent(width))
+		messageParts = append(messageParts, a.cachedContent(width, keys.contentSrc, keys.contentExtra))
 	}
 
 	if a.message.IsFinished() {
@@ -424,7 +472,7 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 		case a.message.FinishReason() == message.FinishReasonCanceled:
 			messageParts = append(messageParts, a.sty.Messages.AssistantCanceled.Render("Canceled"))
 		case a.message.IsErrorLike():
-			messageParts = append(messageParts, a.cachedError(width))
+			messageParts = append(messageParts, a.cachedError(width, keys.errSrc, keys.errExtra))
 		}
 	}
 
@@ -494,6 +542,7 @@ func (a *AssistantMessageItem) thinkingHashIncremental(thinking string) uint64 {
 		return h
 	}
 	// Full re-hash (first call, or text diverged/shrank).
+	a.thinkingHashFullRehashes++
 	h := fnv64(thinking)
 	a.thinkingHash = h
 	a.thinkingHashLen = len(thinking)
@@ -530,9 +579,10 @@ func (a *AssistantMessageItem) errorKey() (uint64, uint64) {
 // cachedThinking returns the rendered thinking section, computing and
 // caching it on miss. The thinking-box height (used for click target
 // detection) is preserved across hits via assistantSection.aux so the
-// cached path never desyncs click detection.
-func (a *AssistantMessageItem) cachedThinking(width int) string {
-	srcHash, extra := a.thinkingKey()
+// cached path never desyncs click detection. srcHash/extra come from
+// computeSectionKeys — see its doc comment for why this takes them as
+// parameters instead of calling thinkingKey() itself.
+func (a *AssistantMessageItem) cachedThinking(width int, srcHash, extra uint64) string {
 	if a.thinkingSec.hit(width, srcHash, extra) {
 		a.thinkingBoxHeight = a.thinkingSec.aux
 		return a.thinkingSec.out
@@ -545,8 +595,8 @@ func (a *AssistantMessageItem) cachedThinking(width int) string {
 // cachedContent returns the rendered content section. The markdown body is
 // painted onto its own background block (see common.BlockBackground) so
 // the assistant's prose reads as a distinct panel in the transcript.
-func (a *AssistantMessageItem) cachedContent(width int) string {
-	srcHash, extra := a.contentKey()
+// srcHash/extra come from computeSectionKeys (see cachedThinking).
+func (a *AssistantMessageItem) cachedContent(width int, srcHash, extra uint64) string {
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
@@ -565,9 +615,9 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	return out
 }
 
-// cachedError returns the rendered error section.
-func (a *AssistantMessageItem) cachedError(width int) string {
-	srcHash, extra := a.errorKey()
+// cachedError returns the rendered error section. srcHash/extra come from
+// computeSectionKeys (see cachedThinking).
+func (a *AssistantMessageItem) cachedError(width int, srcHash, extra uint64) string {
 	if a.errorSec.hit(width, srcHash, extra) {
 		return a.errorSec.out
 	}
@@ -768,6 +818,7 @@ func (a *AssistantMessageItem) clearCache() {
 	a.thinkingHash = 0
 	a.thinkingHashLen = 0
 	a.thinkingHashSample = ""
+	a.thinkingHashFullRehashes = 0
 }
 
 // ToggleExpanded advances the F5 thinking view-mode cycle and returns

@@ -189,6 +189,33 @@ func (s *streamingMarkdown) findBoundaryAfter(content string) int {
 	return len(s.stablePrefix)
 }
 
+// Known limitation: a frozen stable prefix is never re-validated once
+// promoted. prefixHasOpenHazard's B3 rule (see its doc comment) only
+// refuses to freeze a prefix that itself contains a link reference
+// DEFINITION line — a forward reference, where the corresponding
+// "[text][label]" usage is still ahead in the unstreamed suffix, is
+// therefore always safe. The mirror case is not: a "[text][label]" USE
+// that already got frozen, followed much later by its "[label]: url"
+// definition arriving in a subsequent chunk. Both halves are correct
+// individually — deltaHasHTMLorRef refuses to freeze the chunk holding
+// the definition, so it always renders fresh as part of the trailing
+// text — but glamour resolves references per Render call, and the
+// already-cached stablePrefixRender was produced before the definition
+// existed, so its rendering of the reference stays literal text for the
+// rest of the stream. Catching this would mean reliably detecting
+// reference USES while scanning the prefix, which B3's own comment
+// already calls out as impractical (three ambiguous syntaxes:
+// "[text][label]", "[label][]", "[label]" — indistinguishable from
+// ordinary bracketed prose without a real parse). Re-validating on every
+// chunk that merely contains "]: " would also be no cheaper than
+// dropping the cache outright, defeating the reason this type exists.
+// So this divergence is accepted rather than chased: it self-corrects
+// the moment something already forces a full re-render — a width
+// change (Render's own check above) or an explicit Reset() (clearCache
+// on AssistantMessageItem, invalidated by a style change). Absent one
+// of those, a reference resolved after its usage was frozen stays
+// literal text for the rest of that message's life.
+
 // isSafeBoundaryIncremental validates a boundary candidate at
 // position p using the cached cumulative state plus a delta scan
 // of content[len(stablePrefix):p]. This avoids the O(n) re-scan

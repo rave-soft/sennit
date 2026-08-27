@@ -543,3 +543,73 @@ func TestAccounts_RefreshLimitsKey_HiddenAndInertForNonUsageProvider(t *testing.
 	require.Equal(t, accountsStateList, dlg.state)
 	_ = action // the filterable list may consume ctrl+l as ordinary filter input; only the no-refresh contract matters here.
 }
+
+// TestAccounts_SelectDialogHelpIncludesEditDeleteRefresh is the
+// regression test for Edit/Delete/Refresh never reaching the screen: Draw
+// delegates entirely to m.sd.Draw in list state (see Accounts.Draw), and
+// that method renders its help footer from the wrapped selectDialog's own
+// ShortHelp/FullHelp, not from Accounts.ShortHelp/FullHelp — so hints
+// defined only on the outer type never appeared in the dialog's help row,
+// no matter what Accounts.ShortHelp itself returned. The fix routes them
+// through selectDialogConfig.extraHelp so m.sd's own help — the help
+// Draw actually renders — includes them.
+func TestAccounts_SelectDialogHelpIncludesEditDeleteRefresh(t *testing.T) {
+	providerID := "codex" // accounts.CapabilitiesOf("codex").Usage == true
+	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+
+	dlg := loadedAccounts(t, com, providerID)
+
+	hasKey := func(bindings []key.Binding, k string) bool {
+		for _, b := range bindings {
+			if b.Help().Key == k {
+				return true
+			}
+		}
+		return false
+	}
+
+	sdShort := dlg.sd.ShortHelp()
+	require.True(t, hasKey(sdShort, "ctrl+r"), "the selectDialog Draw actually renders must include Edit")
+	require.True(t, hasKey(sdShort, "ctrl+x"), "the selectDialog Draw actually renders must include Delete")
+	require.True(t, hasKey(sdShort, "ctrl+l"), "the selectDialog Draw actually renders must include Refresh for a usage provider")
+
+	found := false
+	for _, row := range dlg.sd.FullHelp() {
+		if hasKey(row, "ctrl+r") && hasKey(row, "ctrl+x") {
+			found = true
+		}
+	}
+	require.True(t, found, "FullHelp must include an Edit/Delete row")
+}
+
+// TestAccounts_RefreshLimitsError_KeepsLastLoadedAccounts is the
+// regression test for ActionAccountsLoaded assigning m.accs before
+// checking msg.Err: a failed refresh (ctrl+l) used to overwrite the
+// already-loaded account list with whatever the failed call returned
+// (typically nil), even though the dialog only ever renders m.accs
+// through m.sd built from the earlier successful load. Losing that data
+// on a failure is the wrong invariant regardless of what the current
+// error-state view happens to render — a future retry/back-to-list path
+// would otherwise inherit an empty list for no reason.
+func TestAccounts_RefreshLimitsError_KeepsLastLoadedAccounts(t *testing.T) {
+	providerID := "codex" // accounts.CapabilitiesOf("codex").Usage == true
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	original := []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	ws.accs = original
+
+	dlg := loadedAccounts(t, com, providerID)
+	require.Equal(t, original, dlg.accs)
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok)
+
+	ws.refreshErr = errors.New("network down")
+	loaded := findMsg(t, cmdAction.Cmd, isAccountsLoaded)
+	require.NotNil(t, loaded)
+
+	dlg.HandleMsg(loaded)
+	require.Equal(t, accountsStateError, dlg.state)
+	require.Equal(t, original, dlg.accs, "a failed refresh must not wipe the last successfully loaded accounts")
+}

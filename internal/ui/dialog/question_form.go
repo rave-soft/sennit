@@ -85,6 +85,14 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 			comps[i] = NewMultiChoice(sty, req)
 		case question.TypeFreeText:
 			comps[i] = NewFreeText(sty, req)
+		default:
+			// Request.Validate rejects unknown types before a batch
+			// reaches here, so this should be unreachable in practice.
+			// Fall back to FreeText anyway rather than leaving comps[i]
+			// nil — a nil questionResponder would panic the first time
+			// any method (SetFocused, Draw, HandleKey, ...) is called on
+			// it, and a malformed question must never crash the TUI.
+			comps[i] = NewFreeText(sty, req)
 		}
 		if req.Label != "" {
 			labels[i] = req.Label
@@ -154,7 +162,7 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 		}
 	}
 
-	if len(comps) > 0 {
+	if len(comps) > 0 && comps[0] != nil {
 		comps[0].SetFocused(true)
 	}
 	return f

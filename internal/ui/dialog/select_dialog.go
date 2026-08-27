@@ -41,6 +41,15 @@ type selectDialogConfig struct {
 	// onto — highlighted, not chosen. The theme dialog uses it to preview
 	// a palette while the user walks the list.
 	onMove func(id string) Action
+
+	// extraHelp, when set, supplies additional key bindings to append to
+	// this dialog's own help footer. It exists for callers that wrap a
+	// selectDialog (accounts.go's Accounts, e.g.) and add their own keys
+	// on top of the shared navigation ones: Draw below is what actually
+	// renders the help row via renderDialogHelp, so a wrapper's own
+	// ShortHelp/FullHelp never reaches the screen unless it routes its
+	// extra bindings through here.
+	extraHelp func() []key.Binding
 }
 
 // selectDialog is the shared machinery behind the notification style and
@@ -347,22 +356,32 @@ func (d *selectDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (d *selectDialog) ShortHelp() []key.Binding {
-	return []key.Binding{
+	bindings := []key.Binding{
 		d.keyMap.UpDown,
 		d.keyMap.Select,
 		d.keyMap.Close,
 	}
+	if d.cfg.extraHelp != nil {
+		bindings = append(bindings, d.cfg.extraHelp()...)
+	}
+	return bindings
 }
 
-// FullHelp implements [help.KeyMap]. The four bindings always fit in one
-// help column (the help renderer computes column height from the row
-// count — see model/layout.go), so unlike sessions.go's FullHelp there's
-// no chunking to do.
+// FullHelp implements [help.KeyMap]. The four navigation bindings always
+// fit in one help column (the help renderer computes column height from
+// the row count — see model/layout.go); cfg.extraHelp, when set, is
+// rendered as its own additional row rather than folded into that one.
 func (d *selectDialog) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{
+	rows := [][]key.Binding{{
 		d.keyMap.Select,
 		d.keyMap.Next,
 		d.keyMap.Previous,
 		d.keyMap.Close,
 	}}
+	if d.cfg.extraHelp != nil {
+		if extra := d.cfg.extraHelp(); len(extra) > 0 {
+			rows = append(rows, extra)
+		}
+	}
+	return rows
 }

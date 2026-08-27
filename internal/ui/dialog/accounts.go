@@ -183,12 +183,19 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		return nil
 
 	case ActionAccountsLoaded:
-		m.accs = msg.Accounts
 		if msg.Err != nil {
+			// Keep the last good m.accs on failure. A refresh (ctrl+l)
+			// that errors currently switches straight to the error view
+			// regardless, but clobbering the already-loaded list here is
+			// still the wrong invariant to bake in — it would silently
+			// bite any future "retry"/"back to list" flow that expects
+			// m.accs to still hold what was on screen before the
+			// refresh was kicked off.
 			m.state = accountsStateError
 			m.err = msg.Err
 			return ActionCmd{util.ReportError(msg.Err)}
 		}
+		m.accs = msg.Accounts
 		if len(msg.Accounts) == 0 {
 			m.state = accountsStateEmpty
 			return nil
@@ -305,6 +312,18 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 		maxHeight:     accountsDialogMaxHeight,
 		buildItems:    buildItems,
 		onSelect:      onSelect,
+		// Draw delegates entirely to the built selectDialog (see
+		// Accounts.Draw), so Edit/Delete/Refresh must reach the screen
+		// through the selectDialog's own help footer via extraHelp —
+		// otherwise these hints are defined on Accounts.ShortHelp/FullHelp
+		// but never actually rendered.
+		extraHelp: func() []key.Binding {
+			bindings := []key.Binding{m.keyMap.Edit, m.keyMap.Delete}
+			if m.caps.Usage {
+				bindings = append(bindings, m.keyMap.Refresh)
+			}
+			return bindings
+		},
 	}
 }
 
@@ -407,15 +426,14 @@ func (m *Accounts) innerContent() string {
 		)
 }
 
-// ShortHelp implements [help.KeyMap].
+// ShortHelp implements [help.KeyMap]. In list state this defers entirely to
+// the wrapped selectDialog, which already folds in Edit/Delete/Refresh via
+// its extraHelp hook (see selectDialogConfig above) — the same bindings
+// Draw's help footer actually renders.
 func (m *Accounts) ShortHelp() []key.Binding {
 	switch m.state {
 	case accountsStateList:
-		bindings := append(m.sd.ShortHelp(), m.keyMap.Edit, m.keyMap.Delete)
-		if m.caps.Usage {
-			bindings = append(bindings, m.keyMap.Refresh)
-		}
-		return bindings
+		return m.sd.ShortHelp()
 	case accountsStateError, accountsStateEmpty:
 		return []key.Binding{CloseKey}
 	default:
@@ -424,14 +442,10 @@ func (m *Accounts) ShortHelp() []key.Binding {
 	}
 }
 
-// FullHelp implements [help.KeyMap].
+// FullHelp implements [help.KeyMap]. See ShortHelp's comment.
 func (m *Accounts) FullHelp() [][]key.Binding {
 	if m.state == accountsStateList {
-		bindings := []key.Binding{m.keyMap.Edit, m.keyMap.Delete}
-		if m.caps.Usage {
-			bindings = append(bindings, m.keyMap.Refresh)
-		}
-		return append(m.sd.FullHelp(), bindings)
+		return m.sd.FullHelp()
 	}
 	return [][]key.Binding{m.ShortHelp()}
 }

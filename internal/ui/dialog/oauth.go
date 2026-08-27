@@ -267,6 +267,17 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		cmd := tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(msg.Error))
 		return ActionCmd{cmd}
 
+	case oauthBrowserOpenFailedMsg:
+		// The code and URL are already on screen and polling is still
+		// running — a browser that failed to launch is not a reason to
+		// abort the sign-in. Surface it as a warning and let the user open
+		// the URL by hand instead of dropping into OAuthStateError, which
+		// would stop polling and throw away a code the user could still
+		// redeem.
+		return ActionCmd{util.ReportWarn(
+			fmt.Sprintf("Couldn't open the browser automatically (%v). Open the URL above to continue.", msg.err),
+		)}
+
 	case oauthSaveDoneMsg:
 		// Credential saved and models fetched. Present the confirmation
 		// screen; the actual model selection happens when the user
@@ -350,6 +361,18 @@ type oauthSaveErrMsg struct {
 
 // DialogID implements [DialogAddressed]; see oauthSaveDoneMsg.
 func (oauthSaveErrMsg) DialogID() string { return OAuthID }
+
+// oauthBrowserOpenFailedMsg is emitted when browser.OpenURL fails while the
+// device code and verification URL are already on screen. Unlike
+// ActionOAuthErrored, this does not abort the flow: the user can still
+// finish sign-in by opening the URL themselves, and polling for completion
+// keeps running.
+type oauthBrowserOpenFailedMsg struct {
+	err error
+}
+
+// DialogID implements [DialogAddressed]; see oauthSaveDoneMsg.
+func (oauthBrowserOpenFailedMsg) DialogID() string { return OAuthID }
 
 // View renders the device flow dialog.
 func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
@@ -648,7 +671,7 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 		// Nothing to copy: the URL is the whole authorization request.
 		return func() tea.Msg {
 			if err := browser.OpenURL(verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
+				return oauthBrowserOpenFailedMsg{err: err}
 			}
 			return nil
 		}
@@ -658,7 +681,7 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 		"Code copied and URL opened",
 		func() tea.Msg {
 			if err := browser.OpenURL(verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
+				return oauthBrowserOpenFailedMsg{err: err}
 			}
 			return nil
 		},

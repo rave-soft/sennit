@@ -111,3 +111,36 @@ func TestQuestionFormEscBlursFocusedFreeTextInsteadOfCancelling(t *testing.T) {
 	require.True(t, done)
 	require.True(t, cancelled)
 }
+
+// TestQuestionFormUnknownTypeDoesNotPanic is the regression test for an
+// unknown question.Type leaving comps[i] a nil questionResponder: the
+// constructor used to build one component per question by switching on
+// req.Type with no default arm, so a malformed/unrecognized type left that
+// slot nil, and comps[0].SetFocused(true) right after the loop panicked on
+// a nil interface the moment such a question landed in the first slot.
+//
+// question.Request.Validate rejects unknown types before a batch ever
+// reaches question.Service.Ask (see questionService.Ask in
+// internal/question/question.go), so this path is not reachable through
+// any current caller — this test guards the constructor defensively in
+// case that invariant is ever bypassed (a direct NewQuestionForm call, a
+// future caller, a test), matching the "a malformed question must never
+// crash the TUI" contract.
+func TestQuestionFormUnknownTypeDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	s := styles.SennitDark()
+	batch := question.Request{
+		ID: "batch1",
+		Questions: []question.Question{
+			{ID: "q1", Type: question.Type("bogus"), Text: "???"},
+			{ID: "q2", Type: question.TypeYesNo, Text: "Sure?"},
+		},
+		ConfirmTitle: "Confirm",
+	}
+
+	require.NotPanics(t, func() {
+		f := NewQuestionForm(&s, batch)
+		require.NotNil(t, f.questions[0], "an unknown type must not leave comps[i] nil")
+	})
+}

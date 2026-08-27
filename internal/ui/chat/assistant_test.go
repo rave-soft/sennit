@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -156,4 +157,48 @@ func TestAssistantMessageItemHoverMatchesClickTarget(t *testing.T) {
 	item.SetHovered(true)
 	require.True(t, item.hovered)
 	require.Greater(t, item.Version(), version)
+}
+
+// TestAssistantMessageItem_ThinkingHashIncrementalPathSurvivesRender is
+// the regression test for prefixCacheKey and cachedThinking each calling
+// thinkingKey() independently: thinkingHashIncremental's fast path only
+// engages when len(thinking) is strictly greater than the length it
+// last saw (see thinkingHashIncremental's comment on why the check must
+// be strict). Calling it twice within the same Render pass — once for
+// the prefix cache-key check, once again inside the actual render —
+// used to mean the second call always saw an unchanged length and fell
+// through to a full re-hash, on every single tick, regardless of the
+// "incremental" bookkeeping. Render is now built around
+// computeSectionKeys so each pass computes every section's key exactly
+// once; simulating a run of streaming ticks (each strictly extending the
+// previous thinking text) must therefore only ever take the full re-hash
+// branch on the very first tick.
+func TestAssistantMessageItem_ThinkingHashIncrementalPathSurvivesRender(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	const width = 60
+
+	// Kept comfortably over thinkingHashIncremental's 64-byte sample cap
+	// throughout every tick, including the first: below that cap
+	// sampleLen tracks the current (growing) text length rather than a
+	// pinned 64 bytes, so the divergence-sample comparison never lines
+	// up between ticks regardless of this bug — a separate, harmless
+	// quirk confined to a message's first 64 bytes of thinking text. That
+	// is not what this test is guarding; keeping every tick past the cap
+	// isolates the double-call regression on its own.
+	full := strings.Repeat("Let me think about this problem carefully. ", 5)
+	item := NewAssistantMessageItem(&sty, thinkingMessage("m-stream", full[:80], "")).(*AssistantMessageItem)
+
+	item.Render(width)
+	require.Equal(t, 1, item.thinkingHashFullRehashes, "the first tick always seeds via a full hash")
+
+	// Each subsequent tick strictly extends the previous thinking text,
+	// the same way real streaming deltas append-only grow it.
+	for n := 90; n <= len(full); n += 10 {
+		item.SetMessage(thinkingMessage("m-stream", full[:n], ""))
+		item.Render(width)
+	}
+	require.Equal(t, 1, item.thinkingHashFullRehashes,
+		"every tick after the first must take the incremental fast path, not re-hash the whole text")
 }

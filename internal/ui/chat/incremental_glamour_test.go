@@ -940,6 +940,47 @@ func TestStreamingMarkdown_LinkRefDefinition(t *testing.T) {
 	runProgressiveBoundaryRespectTest(t, doc, hazardOffset)
 }
 
+// TestStreamingMarkdown_LateLinkRefDefinitionStaysUnresolved
+// characterizes the known, accepted limitation documented on
+// findBoundaryAfter: a "[text][label]" reference USE that gets frozen
+// into the stable prefix before its "[label]: url" DEFINITION has
+// streamed in stays literal text for the rest of the message, because
+// the already-cached prefix render is never re-validated once promoted.
+// This is the mirror case of TestStreamingMarkdown_LinkRefDefinition
+// above (definition-before-use, which prefixHasOpenHazard's B3 rule
+// already handles by refusing to freeze past a definition line) — see
+// findBoundaryAfter's doc comment for why the reverse direction isn't
+// cheaply fixable.
+//
+// This test is not a regression test for a fix (there isn't one, by
+// design); it pins down today's actual divergent behavior so a change
+// to the freezing/hazard logic that alters it — for better or worse —
+// gets caught rather than silently drifting.
+func TestStreamingMarkdown_LateLinkRefDefinitionStaysUnresolved(t *testing.T) {
+	t.Parallel()
+
+	const width = 80
+	renderer := newTestRenderer(t, width)
+	var sm streamingMarkdown
+
+	// Enough content after the usage paragraph (a blank line, then more
+	// text) for findSafeMarkdownBoundary to promote a boundary past it,
+	// freezing the reference use before its definition ever arrives.
+	usedBeforeDefined := "Intro paragraph.\n\nSee [the example][ref] for details.\n\n"
+	sm.Render(usedBeforeDefined, width, renderer)
+	require.Equal(t, len(usedBeforeDefined), len(sm.stablePrefix),
+		"test setup: the usage paragraph must already be frozen before the definition streams in")
+
+	full := usedBeforeDefined + "More text.\n\n[ref]: http://example.com\n\nFinal paragraph.\n"
+	streamed := stripANSI(sm.Render(full, width, renderer))
+	fresh := stripANSI(freshRender(t, full))
+
+	require.Contains(t, streamed, "[the example][ref]",
+		"known limitation: a reference frozen before its definition arrives renders as literal text")
+	require.NotContains(t, fresh, "[the example][ref]",
+		"a fresh render of the complete document resolves the reference correctly")
+}
+
 // TestAssistantStreamingContent_ResetOnClearCache guards the
 // integration contract that ClearItemCaches (style change) drops
 // the streaming-markdown cache. Without this, a style change
