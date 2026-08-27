@@ -175,13 +175,18 @@ func applyDocumentChange(change protocol.DocumentChange, encoding powernap.Offse
 			return fmt.Errorf("invalid URI: %w", err)
 		}
 
-		if change.CreateFile.Options != nil {
-			if change.CreateFile.Options.Overwrite {
-				// Proceed with overwrite
-			} else if change.CreateFile.Options.IgnoreIfExists {
-				if _, err := os.Stat(path); err == nil {
-					return nil // File exists and we're ignoring it
+		// Per the LSP spec, overwrite wins over ignoreIfExists, and with
+		// neither set, creating over an existing file is not intended.
+		overwrite := change.CreateFile.Options != nil && change.CreateFile.Options.Overwrite
+		ignoreIfExists := change.CreateFile.Options != nil && change.CreateFile.Options.IgnoreIfExists
+		if !overwrite {
+			if _, err := os.Stat(path); err == nil {
+				if ignoreIfExists {
+					return nil // File exists and we're ignoring it.
 				}
+				return fmt.Errorf("target file already exists and overwrite is not allowed: %s", path)
+			} else if !os.IsNotExist(err) {
+				return fmt.Errorf("failed to stat file: %w", err)
 			}
 		}
 		if err := os.WriteFile(path, []byte(""), 0o644); err != nil {

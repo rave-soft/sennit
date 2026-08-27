@@ -1,6 +1,8 @@
 package util
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
@@ -314,6 +316,70 @@ func TestApplyTextEdit_UTF8(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyDocumentChange_CreateFile(t *testing.T) {
+	t.Parallel()
+
+	newChange := func(path string, opts *protocol.CreateFileOptions) protocol.DocumentChange {
+		return protocol.DocumentChange{
+			CreateFile: &protocol.CreateFile{
+				URI:     protocol.URIFromPath(path),
+				Options: opts,
+			},
+		}
+	}
+
+	t.Run("no options preserves an existing file", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "existing.txt")
+		require.NoError(t, os.WriteFile(path, []byte("keep me"), 0o644))
+
+		err := applyDocumentChange(newChange(path, nil), powernap.UTF16)
+		require.Error(t, err, "creating over an existing file with no options must fail, not truncate it")
+
+		content, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		require.Equal(t, "keep me", string(content))
+	})
+
+	t.Run("ignoreIfExists preserves an existing file", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "existing.txt")
+		require.NoError(t, os.WriteFile(path, []byte("keep me"), 0o644))
+
+		err := applyDocumentChange(newChange(path, &protocol.CreateFileOptions{IgnoreIfExists: true}), powernap.UTF16)
+		require.NoError(t, err)
+
+		content, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		require.Equal(t, "keep me", string(content))
+	})
+
+	t.Run("overwrite empties an existing file", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "existing.txt")
+		require.NoError(t, os.WriteFile(path, []byte("keep me"), 0o644))
+
+		err := applyDocumentChange(newChange(path, &protocol.CreateFileOptions{Overwrite: true}), powernap.UTF16)
+		require.NoError(t, err)
+
+		content, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		require.Empty(t, string(content))
+	})
+
+	t.Run("creates a genuinely new file", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "new.txt")
+
+		err := applyDocumentChange(newChange(path, nil), powernap.UTF16)
+		require.NoError(t, err)
+
+		content, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		require.Empty(t, string(content))
+	})
 }
 
 func TestRangesOverlap(t *testing.T) {
