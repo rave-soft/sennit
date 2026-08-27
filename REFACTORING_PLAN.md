@@ -95,74 +95,93 @@ JSONPath, инъекция опций git через имя ветки с вед
 | B9 | `fsext/atomicwrite.go:37-79`, `conditionalreplace.go:69-96` | Нет `fsync` перед `rename` | Сбой питания сразу после записи конфига/аккаунтов → пустой или нулевой файл на месте валидного | H |
 | B10 | `oauth/copilot/oauth.go:49,119,160` | Три захардкоженных `http.Client{Timeout:30s}` без прокси (Codex прокси поддерживает) | Логин Copilot за прокси невозможен | H |
 
-## 2. Баги — средние (открыто)
+## 2. Баги — средние — что осталось
+
+Закрытые пункты удалены (история в git, сводка в §0). Ложные срабатывания
+перечислены в §0 и сюда не возвращаются.
 
 ### agent
-- `agent/usage.go` `summarize` — read-modify-write всей строки сессии (`sessions.Get` → долгий стрим → `Save`); `AddCost` из завершающейся делегации (`delegation_finalizer.go:476`) или title-generation, попавшие в окно, затираются. Та же гонка уже: `turn.go:718-724`. Фикс в `delegation_finalizer.go:457-466` закрыл только child-сторону. **Лечить атомарным `UPDATE … SET cost = cost + ?` вместо Get/Save.**
-- `delegation_finalizer.go:172,668` — `OnAuthRefresh` для саб-агента передаёт `active=nil`; после 401 креды обновляются в main-агенте, но саб-агент продолжает с `t.model` со старым ключом (`runtime_builder.go:1424`) → повторный 401.
-- `agent.go:481-483` — `dispatchDecision` ставит `call.acceptSeq` на копии по значению; `finishTurn:770 → requeueContinuation` (`dispatch.go:498-509`) кладёт в очередь с `acceptSeq==0` → любой Cancel соседа (`canceledBySeq:440`) сбрасывает post-summary continuation.
-- `agent.go:752-753` — ошибка summarize в `finishTurn` → ранний return без `AgentFinished` и `drainNext`; очередь с RunID-промптами зависает, ожидающие `RunComplete` блокируются.
-- `tools/mcp/connection.go:181,401-436` — `context.Canceled` используется как сентинел «потеря ownership/ping failed»; реальные сбои классифицируются как отмена пользователем и пропускают `StateError`. `connection.go:55` сравнивает `err.Error() != "signal: killed"` строкой.
-- `tools/sennit_logs.go:684-692` — off-by-one в `lineStart` при `data` с завершающим `\n`; `alreadyReturned` (`:698`) никогда не срабатывает, курсорная пагинация «работает случайно».
-- `turn.go:715-743` — `t.sessionLock` держится через два обращения к БД и `RotateThreshold` (I/O + полная пересборка runtime).
+- `delegation_finalizer.go:172,668` — `OnAuthRefresh` саб-агента получает
+  `active=nil`; после 401 креды обновляются у главного агента, а саб-агент
+  продолжает со старым ключом, вшитым в провайдер при сборке
+  (`runtime_builder.go:1424`) → повторный 401.
+- `tools/sennit_logs.go:684-692` — off-by-one в `lineStart`, когда чанк
+  оканчивается на `\n`; `alreadyReturned` (`:698`) не срабатывает,
+  курсорная пагинация работает по случайности.
 
 ### thread / workspace / app
-- `threadspawn/services.go:42-49` — `Coordinator()` кеширует nil/устаревший координатор навсегда → `registerParent`/`DeliverTaskCompletion` (`manager.go:337,603,737`) бьют в nil; завершения задач теряются молча.
-- `app/services.go:302` ↔ `app/app.go:158`, `app_workspace.go:195-299` — поле `app.AgentCoordinator` пишется/читается без синхронизации (~15 читателей).
-- `thread/lifecycle.go:1010` + `manager.go:438, 1186-1211` — auto-merge поток, завершающийся во время Shutdown: `runtime` обнулён до `onRunSuccess`, `mergeAttempt` падает на отменённом `m.ctx`, строка остаётся `running` до следующего Recover.
-- `workspace/app_workspace.go:177-186` — ошибка `RunAndCaptureStream` возвращается только при `onProgress == nil`; стриминговый путь отдаёт нулевой результат как успех.
-- `workspace/app_workspace.go:421-532` — `AgentRunStream`: небуферизованный `out`, все send безусловные; потребитель, переставший читать (`cmd/run.go:214` при ошибке), навсегда блокирует горутину — `ctx.Done` не выбирается.
-- `thread/lifecycle.go:804-812` — отложенный `spawner.Release(ctx, …)` с ctx вызывающего; если ctx отменён, Release тоже падает → утекает целый App/БД (`:799` правильно использует `Background`).
-- `thread/manager.go:404-408` — `failCreate` на отменённом ctx оставляет строку `pending` до конца процесса.
-- `workspace/read_only_workspace.go` — `GetLastSession`, `UncommittedFiles`, `Stats` проксируют в родителя; `PrepareSessionChanges` (`:838`) помечает файлы потока «незакоммиченными» относительно родительского репо.
-- `message/store/service.go:184-206` — `Delete` vs идущий стрим: `Update` между 189-195 пересоздаёт `pending[id]`, запись никогда не вытесняется.
-- `message/content.go:390-401` — `AppendContent` дописывает дельту в **каждую** `TextContent`-часть (нет `return`) → дублирование текста.
-- `db/connect.go:74-86`, `datadirlock.go:364-377` — ключ пула канонизируется до `MkdirAll`; символическая ссылка на ещё не существующий data-dir даёт два `*sql.DB` на один файл (WAL multi-connection случай, о котором предупреждает сам код).
-- `app/shutdown.go:206-213` — nil-deref `p.app.agentDispatcher` при `p.app == nil` (пустой `&app.App{}` разрешён `app.go:41-44`).
-- `thread/tasks.go:263-269` — delegation parent регистрируется до `setStatus`, который может упасть; комментарий утверждает обратный порядок.
-- `threadspawn/attach.go:162-164` — события задач форвардятся только в git-workspace, хотя TaskManager есть всегда.
+- **Гонка на `app.AgentCoordinator`** (`app/services.go` ↔ `app/app.go:158`,
+  `app_workspace.go:195-299`, ~15 читателей без синхронизации). После B4
+  поле меняется в одном месте — чинить стало проще. Самый весомый из
+  оставшихся.
+- `threadspawn/services.go:42-49` — `Coordinator()` навсегда кеширует nil
+  или устаревший координатор → `registerParent`/`DeliverTaskCompletion`
+  бьют в nil, завершения задач теряются молча.
+- `thread/lifecycle.go:1010` + `manager.go:438,1186-1211` — auto-merge
+  поток, завершающийся во время Shutdown, остаётся в статусе `running` до
+  следующего `Recover`.
+- `workspace/read_only_workspace.go` — `GetLastSession`,
+  `UncommittedFiles`, `Stats` проксируют в родителя;
+  `PrepareSessionChanges` (`:838`) считает файлы потока незакоммиченными
+  относительно родительского репозитория.
+- `app/shutdown.go:206-213` — nil-deref `p.app.agentDispatcher` при
+  `p.app == nil` (пустой `&app.App{}` разрешён `app.go:41-44`).
+- `threadspawn/attach.go:162-164` — события задач форвардятся только в
+  git-workspace, хотя `TaskManager` есть всегда.
 
-### config / oauth / shell / cmd
-- `config/reload.go:777-797` — при бампе `credentialVersion` во время reload копируются только `APIKey`/`OAuthToken`; `Account`, `ProxyURL`, `APIKeyTemplate` из `UpdateProviderAccount` (`store.go:315-325`) теряются, `SetupCodex` не перезапускается (только Copilot, `:791`).
-- `config/store.go:1091-1095` — `RefreshLockPath` подставляет provider ID в имя файла без экранирования (`ProviderFieldKey` экранирует) → ID с `/` или `..` создаёт lock-файлы вне `locks/`.
-- `config/provider.go:869-975` — `TestConnection` глотает ошибки резолвера (`apiKey, _ =`), `&http.Client{}` игнорирует `ProxyURL`.
-- `config/credentials/credentials.go:488` — `ImportCopilot` ходит в сеть с `context.TODO()` без дедлайна на старте.
-- `config/store.go:946-958` — `SetProviderAPIKey` для токена вызывает только `SetupGitHubCopilot`, Codex-токен не получает заголовков (в отличие от `UpdateProviderAccount:326-331`).
-- `shellconfig/builder.go:62-84` — повторный `add` имени, затомбстоненного раньше, пишет флаги рядом с `__sennit_tombstone`; `ParseTombstone` (`:35`) отвергает конфиг.
-- `oauth/codex/oauth.go:174-176`, `oauth/mcp/handler.go:570-572` — `error=` в колбэке обрабатывается до проверки `state`: любой локальный запрос на loopback-порт срывает вход.
-- `cmd/login.go:1049` — утечка signal-handler'ов; `cmd/login_codex.go:74-101` — частичная запись при неудачном логине; `providers/accounts/rotator.go` `Pick` берёт отключённый единственный аккаунт; `providerload/loader.go:115-117` игнорирует ошибку `RemoveRuntimeConfigField`; `cmd/logout.go:71,145` осиротевшая ветка `"hyper"`.
-- `providers/accounts` `rotator.Pick`: используется отключённый единственный аккаунт.
+### config / oauth / cmd
+- `config/provider.go:869-975` — `TestConnection` глотает ошибки резолвера
+  (`apiKey, _ =`) и игнорирует `ProxyURL`: у пользователя за прокси
+  проверка падает с непонятным сообщением.
+- `config/credentials/credentials.go:488` — `ImportCopilot` ходит в сеть с
+  `context.TODO()` без дедлайна на старте.
+- `shellconfig/builder.go:62-84` — повторный `add` ранее затомбстоненного
+  имени пишет флаги рядом с `__sennit_tombstone`, и `ParseTombstone`
+  (`:35`) отвергает конфиг.
+- `oauth/codex/oauth.go:174-176`, `oauth/mcp/handler.go:570-572` — `error=`
+  в колбэке обрабатывается до проверки `state`: любой локальный запрос на
+  loopback-порт срывает вход.
+- `cmd/login.go:1049` — утечка signal-handler'ов;
+  `cmd/login_codex.go:74-101` — частичная запись при неудачном логине;
+  `cmd/logout.go:71,145` — осиротевшая ветка `"hyper"`.
 
-### lsp / hooks / discover / fsext / log / git
-- `hooks/hooks.go:183` — `sjson.SetRawBytes(out, k, v)` трактует ключи патча как пути: `"a.b"`, `*`, `#` вкладываются/падают вместо top-level merge.
-- `hooks/runner.go:197-209` — по таймауту хука горутина и дочерний процесс утекают навсегда.
-- `lsp/filesync.go:65-74` — Get/didOpen/Set неатомарны → дубли `didOpen`.
-- `lsp/util/edit.go:178-189` — `CreateFile` без `Overwrite` затирает существующий файл; `:82` `WriteFile 0o644` теряет исходные права.
-- `discover/ollama.go:59-70` — статус `/api/show` не проверяется; тело ошибки декодится в нули.
-- `fsext/atomicwrite.go:49` — `AtomicCreateFile` через `os.Link`; падает на ФС без hardlink. `conditionalreplace.go:86-96` — межпроцессный TOCTOU.
-- `log/http.go:38` — тело запроса буферизуется целиком вне зависимости от уровня; `:76-83,167-191` редакция пропускает `Cookie`/`Set-Cookie`, `key`, `credential`, `private_key`.
-- `git/git.go:243,497,515,566,615,630` — ref/branch передаются без `--` → инъекция опций при имени, начинающемся с `-`.
+### fsext / log
+- `fsext/atomicwrite.go:49` — `AtomicCreateFile` через `os.Link`, падает на
+  ФС без hardlink; `conditionalreplace.go:86-96` — межпроцессный TOCTOU.
 - `fsext/ls.go:335` — `ListDirectory` следует по симлинкам, glob — нет.
+- `log/http.go:38` — тело запроса буферизуется целиком независимо от
+  уровня логирования; `:76-83,167-191` — редакция пропускает
+  `Cookie`/`Set-Cookie`, `key`, `credential`, `private_key`. **Секреты в
+  логах — брать в первую очередь.**
 
 ### ui
-- `dialog/stats.go:693-699,767` — `errs[i]` не очищается при успешной перезагрузке → старая ошибка показывается вечно. `stats.go:559` — `StatsLoadedMsg` не `DialogAddressed`: диалог поверх Stats роняет сообщение, «Reading usage…» навсегда.
-- `dialog/mcp_auth.go:1448,1457` — `m.cancelAuth = nil` без вызова → утечка контекста из `startAuth` (`:1474`).
-- `chat/shell.go:623-625,715-716` — ширина вычитается дважды (`width-2` + `cappedMessageWidth`); вывод усечён на 2 колонки, `xOffset` clamp (`:787`) смещён.
-- `dialog/models.go:1335-1353` — `displayProvider := provider` делит backing array `Models`; каждое открытие мутирует общий каталог в `m.providers`.
-- `chat/assistant.go:473-507` — «инкрементальный» `thinkingKey` никогда не срабатывает (второй вызов за кадр не проходит строгий `>`), полный хеш reasoning-текста на каждом тике.
-- `chat/shell.go:617-622` — комментарий обещает кеш в `RawRender`, кеша нет; `HoverableAt` (`:644`) ре-триммит на каждое движение мыши.
-- `dialog/accounts.go:1153-1167` — `ShortHelp` никогда не рисуется; `:928` — `m.accs` затирается до проверки `Err`.
-- `dialog/oauth.go:265-268` — неудача `browser.OpenURL` останавливает polling, хотя код и URL на экране.
-- `model/chat.go:1205-1250` — `DelayedClickMsg.ItemIdx` сырой индекс; `RemoveMessage`/`AppendMessages` в 400-мс окне сдвигают его.
-- `chat/streaming_markdown.go:181-189` — замороженный префикс не ревалидируется при позднем `[ref]: url`.
-- `dialog/question_form.go:1105-1115,1185` — неизвестный `req.Type` → `comps[0].SetFocused` на nil.
-- `list/list.go:728-739` — `SetItems` чистит `cache`, но не `freezeSuppressed`.
-- `ui/attachments/attachments.go:196,255-256` — off-by-one в overflow-чипе: «3 more…» при 2 скрытых; при `width < maxItemWidth` `fits = -1`, лимит не срабатывает, чипы вылезают за строку. **(H)**
-- `model/keypress.go:386-394` — триггер `@`-completion берёт `len(curValue)` вместо позиции курсора; `@` в середине текста → `insertCompletionText` (`editor.go:114-127`) вставляет не туда.
-- `model/mcp_actions.go:11-37` — `runMCPPrompt` шлёт безусловный `closeDialogMsg`; если за это время открылся другой диалог (permission prompt), закроется он.
-- `model/threads.go:255-261,564` + `threads_cache.go:177` — `selected()` отдаёт указатель в `m.visible`, алиасящий `cache.value`; in-place delete в `applyEvent` сдвигает массив (латентно).
-- `model/editor_input.go:350,447` — байтовая длина смешана с rune-колонкой при фиксапе курсора.
-- `model/skills.go:105-108` — сортировка глобального `builtinSkillsCache.skills` in-place из render-пути.
+- `ui/attachments/attachments.go:196,255-256` — off-by-one в overflow-чипе;
+  при `width < maxItemWidth` `fits = -1`, лимит не срабатывает и чипы
+  вылезают за строку. **(H)**
+- `model/keypress.go:386-394` — триггер `@`-completion берёт
+  `len(curValue)` вместо позиции курсора: `@` в середине текста вставляет
+  не туда.
+- `model/mcp_actions.go:11-37` — безусловный `closeDialogMsg` закрывает
+  чужой диалог, если тот успел открыться.
+- `dialog/question_form.go:1105-1115,1185` — неизвестный `req.Type` →
+  `comps[0].SetFocused` на nil.
+- `model/chat.go:1205-1250` — `DelayedClickMsg.ItemIdx` сырой индекс,
+  сдвигается при `RemoveMessage`/`AppendMessages` в 400-мс окне.
+- `model/editor_input.go:350,447` — байтовая длина смешана с rune-колонкой.
+- `model/threads.go:255-261,564` — `selected()` отдаёт указатель в
+  массив, который `applyEvent` сдвигает in-place (латентно).
+- `model/skills.go:105-108` — сортировка глобального кеша in-place из
+  render-пути.
+- `dialog/accounts.go:928` — `m.accs` затирается до проверки `Err`;
+  `:1153-1167` — `ShortHelp` никогда не рисуется.
+- `dialog/oauth.go:265-268` — неудача `browser.OpenURL` останавливает
+  polling, хотя код и URL уже на экране.
+- `chat/assistant.go:473-507` — «инкрементальный» ключ не срабатывает,
+  полный хеш reasoning-текста на каждом тике (перф).
+- `chat/streaming_markdown.go:181-189` — замороженный префикс не
+  ревалидируется при позднем `[ref]: url`.
+- `list/list.go:728-739` — `SetItems` чистит `cache`, но не
+  `freezeSuppressed`.
 
 ---
 
