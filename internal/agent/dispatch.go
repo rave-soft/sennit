@@ -494,6 +494,36 @@ func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func())
 	defer d.notifyQueueChanged(call.SessionID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Stamp a fresh accept sequence, as if this continuation were a
+	// brand new call queued at this instant. Reusing call.Accepted.seq
+	// the way enqueueLocked does for its entries would not fix anything
+	// here: that seq was minted back when the original prompt was first
+	// accepted, before this turn's whole Stream call and summarize pass
+	// ran, and the accept sequence counter only ever grows - so that old
+	// seq is *always* at or below any mark a cancel records for this
+	// session from this point on, for this session or an unrelated
+	// sibling accepted call alike. canceledBySeq would then always read
+	// it as "queued before that cancel" and drop it, which is exactly
+	// what the acceptSeq == 0 bug did, just for a narrower set of
+	// cancels. A fresh stamp is only covered by a cancel recorded after
+	// this point, matching every other queue entry's "queued after a
+	// cancel survives" contract - and cancel() clears the queue outright
+	// for anything already sitting in it, so a cancel already resolved
+	// by the time this runs has no other way to reach a call that is
+	// only entering the queue now.
+	//
+	// acceptSeqGen lives under acceptedMu, not this session's own mu -
+	// see sessionState's doc comment - so this nests the two locks in
+	// the file's established order (mu, then acceptedMu) rather than
+	// going through BeginAccepted, which would also bump acceptedRuns
+	// and imply an accepted-but-not-yet-active reservation this call
+	// does not hold: it is going straight into the queue, not back
+	// through dispatchDecision.
+	d.acceptedMu.Lock()
+	d.acceptSeqGen++
+	call.acceptSeq = d.acceptSeqGen
+	d.acceptedMu.Unlock()
+	call.Accepted = nil
 	s.messageQueue = append(s.messageQueue, call)
 	onQueued()
 }

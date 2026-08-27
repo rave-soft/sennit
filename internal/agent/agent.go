@@ -477,10 +477,15 @@ type dispatchOutcome struct {
 // prompt — cannot both pass the busy check and start two runs on the same
 // session.
 func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCall) dispatchOutcome {
-	if call.Accepted != nil {
-		call.acceptSeq = call.Accepted.seq
-	}
-
+	// call.acceptSeq is deliberately not stamped here: this method
+	// receives call by value, and dispatchOutcome never hands the
+	// mutated copy back, so a write here would be silently discarded by
+	// runTurn's own call variable anyway. It also would not help: this
+	// call's original accept sequence, from whenever it was first
+	// dispatched, is stale by the time a post-summary continuation
+	// might need one - see requeueContinuation's own comment for why a
+	// continuation mints a fresh sequence instead of reusing this one.
+	//
 	// dispatched reports the branch taken to call.OnDispatch, at most once
 	// and from under the per-session dispatch mutex that took it - see
 	// SessionAgentCall.OnDispatch for why the timing is the point.
@@ -739,6 +744,10 @@ func (a *sessionAgent) finishTurn(
 	result *fantasy.AgentResult,
 	err error,
 ) (*fantasy.AgentResult, *SessionAgentCall, error) {
+	// summarizeFailed, when set below, is reported on this turn's own
+	// RunComplete rather than by returning early: see the shouldSummarize
+	// branch's comment.
+	var summarizeFailed error
 	if t.shouldSummarize {
 		// Hand our still-installed active-run slot straight to summarize
 		// via claim, rather than releasing it first: releasing here and
@@ -754,10 +763,23 @@ func (a *sessionAgent) finishTurn(
 		// triggered it.
 		summarizeCtx := WithRunID(genCtx, call.RunID)
 		if summarizeErr := a.summarize(summarizeCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, t.model, t.promptPrefix, call.ActiveRuntime, ac); summarizeErr != nil {
-			return nil, nil, summarizeErr
-		}
-		// If the agent wasn't done...
-		if len(t.currentAssistant.ToolCalls()) > 0 {
+			// Not fatal to this turn's completion bookkeeping: the turn
+			// itself already streamed successfully, and there is no
+			// summary to resume a continuation from, so log and fall
+			// through to the same release/notify/drain teardown every
+			// other turn gets - mirroring how handleStreamError treats a
+			// failed synthetic-tool-result write as non-fatal to reaching
+			// its own finish handling. Returning early here used to skip
+			// both the AgentFinished notification and the drainNext
+			// handoff, so a queued RunID-bearing prompt behind this
+			// session sat forever and its caller blocked on RunComplete
+			// indefinitely. summarizeFailed is reported below via this
+			// turn's own RunComplete instead.
+			slog.Error("Failed to summarize session after turn", "session_id", call.SessionID, "error", summarizeErr)
+			summarizeFailed = summarizeErr
+		} else if len(t.currentAssistant.ToolCalls()) > 0 {
+			// If the agent wasn't done...
+			//
 			// A continuation's prompt is not a prompt: it is the
 			// placeholder its own step 0 verifies and strips (see
 			// continuationPromptPlaceholder). Rewriting it broke that
@@ -811,6 +833,19 @@ func (a *sessionAgent) finishTurn(
 	// hang.
 	a.publishCanceledQueueDrops(canceledRunIDDrops)
 	if firstQueued == nil {
+		// Nothing queued behind this turn: report a summarize failure (if
+		// any) on this turn's own terminal event now, since there is no
+		// later turn under this RunID left to carry it. reporter.publish
+		// is a no-op when summarizeFailed is nil - runTurn's own deferred
+		// fallback publisher takes care of the normal case.
+		if summarizeFailed != nil {
+			complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID, Error: summarizeFailed.Error()}
+			if t.currentAssistant != nil {
+				complete.MessageID = t.currentAssistant.ID
+				complete.Text = t.currentAssistant.Content().String()
+			}
+			reporter.publish(ctx, complete)
+		}
 		return result, nil, err
 	}
 
@@ -839,6 +874,9 @@ func (a *sessionAgent) finishTurn(
 	}
 	if outerOwesRunComplete {
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		if summarizeFailed != nil {
+			complete.Error = summarizeFailed.Error()
+		}
 		if t.currentAssistant != nil {
 			complete.MessageID = t.currentAssistant.ID
 			complete.Text = t.currentAssistant.Content().String()

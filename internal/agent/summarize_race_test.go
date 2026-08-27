@@ -214,6 +214,16 @@ func TestRun_AutoSummarizeContinuationClearQueueCompletesOnce(t *testing.T) {
 	}
 }
 
+// TestRun_AutoSummarizeContinuationPreservesAcceptedSequence is the
+// regression test for a Cancel that lands on an unrelated accepted sibling
+// (cancelAnchor here) while "original" is busy summarizing: it must not
+// poison "original"'s own post-summary continuation. requeueContinuation
+// used to carry the continuation's acceptSeq forward as 0 ("untracked"),
+// which canceledBySeq treats as covered by *any* pending cancel mark - so
+// the continuation was silently dropped despite having nothing to do with
+// cancelAnchor. The fix stamps a fresh accept sequence when the
+// continuation is requeued, which the earlier cancel's mark cannot cover
+// since it was recorded before this call ever entered the queue.
 func TestRun_AutoSummarizeContinuationPreservesAcceptedSequence(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
@@ -260,10 +270,16 @@ func TestRun_AutoSummarizeContinuationPreservesAcceptedSequence(t *testing.T) {
 	require.NoError(t, <-runDone)
 	cancelAnchor.Close()
 
-	require.Equal(t, int32(4), model.streams.Load(), "the post-cancel enqueue must run while the continuation is dropped")
+	// [1] original's own turn, [2] its summarize pass, [3] "concurrent"'s
+	// turn, [4] "concurrent"'s own auto-summarize, [5] original's
+	// continuation resuming, [6] the continuation's own auto-summarize.
+	// A regression that let cancelAnchor's cancel poison the continuation
+	// again would stop at 4: the continuation would never get its own
+	// turn.
+	require.Equal(t, int32(6), model.streams.Load(), "the post-cancel enqueue must run and the continuation must still resume")
 	event := <-completion
 	require.Equal(t, "original", event.RunID)
-	require.True(t, event.Cancelled)
+	require.False(t, event.Cancelled, "the continuation completed on its own, unrelated to cancelAnchor's cancel")
 	select {
 	case duplicate := <-completion:
 		t.Fatalf("expected exactly one RunComplete for original RunID, got duplicate: %+v", duplicate)
@@ -300,10 +316,15 @@ func TestRun_AutoSummarizeDoesNotClobberConcurrentActiveRequest(t *testing.T) {
 		SessionID: sess.ID,
 		Prompt:    "hello",
 	})
-	// Summarize's own busy check observes the racer's entry and bails;
-	// this is the visible symptom that the racer's entry survived the
-	// shouldSummarize cleanup instead of being erased.
-	require.ErrorIs(t, err, ErrSessionBusy)
+	// Summarize's own busy check observes the racer's entry and bails with
+	// ErrSessionBusy - the visible symptom that the racer's entry survived
+	// the shouldSummarize cleanup instead of being erased. That failure is
+	// no longer fatal to the turn's own completion bookkeeping (finishTurn
+	// logs it and still tears down normally, see the summarize-failure
+	// fix), so the turn itself reports success here; ErrSessionBusy is
+	// only ever visible as the logged error and this turn's RunComplete,
+	// not as Run's returned error.
+	require.NoError(t, err)
 
 	got, ok := sa.getActiveForTest(sess.ID)
 	require.True(t, ok, "the concurrently-installed entry must survive this run's cleanup")
