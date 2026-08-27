@@ -55,7 +55,7 @@ func TestManager_ManualPolicyThreadDeliversCompletionToParentOnce(t *testing.T) 
 	require.Equal(t, thread.StatusCompleted, st.Status,
 		"a manual-policy thread rests at completed - no merge flow to hand off to")
 
-	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	parentCoord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 
 	// Nothing else touches this session, so the count is stable once
@@ -94,7 +94,7 @@ func TestManager_AutoMergeThreadDeliversOnceAcrossRunAndMerge(t *testing.T) {
 
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
-	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	parentCoord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 
 	// Give a wrongly-duplicated delivery (one at run-completion, one at
@@ -141,7 +141,7 @@ func TestManager_AutoMergeThreadConflictDeliversOnceNotAgainOnManualRetry(t *tes
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusConflict, st.Status)
 
-	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	parentCoord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 	require.Len(t, parentCoord.deliveredCompletions(), 1)
 	require.Equal(t, string(thread.StatusConflict), parentCoord.deliveredCompletions()[0].completion.Status)
@@ -185,7 +185,7 @@ func TestManager_ParentlessThreadDeliversNothing(t *testing.T) {
 		"a parentless thread's own lifecycle is otherwise unaffected by having nobody to deliver to")
 
 	time.Sleep(50 * time.Millisecond)
-	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	parentCoord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Empty(t, parentCoord.deliveredCompletions(),
 		"a thread created with no parent session must deliver nothing")
 }
@@ -208,14 +208,14 @@ func TestManager_CreateWithParentRegistersDelegationParent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ownCoord := spawner.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
+	ownCoord := spawner.appFor(st.WorktreePath).Coordinator().(*fakeCoordinator)
 	registered := ownCoord.registeredDelegationParents()
 	require.Len(t, registered, 1)
 	got := registered[0]
 
 	require.Equal(t, st.SessionID, got.sessionID,
 		"a thread's parent must be registered under its own child session id")
-	require.Equal(t, parentApp.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner,
+	require.Equal(t, parentApp.Coordinator(), got.parent.Parent.(*testCoordinatorAdapter).inner,
 		"a thread's Parent must resolve to the Manager's parentApp coordinator, not its own isolated one")
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
@@ -240,7 +240,7 @@ func TestManager_CreateWithoutParentRegistersNothing(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ownCoord := spawner.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
+	ownCoord := spawner.appFor(st.WorktreePath).Coordinator().(*fakeCoordinator)
 	require.Empty(t, ownCoord.registeredDelegationParents(),
 		"a thread created with no parent session must register nothing")
 }

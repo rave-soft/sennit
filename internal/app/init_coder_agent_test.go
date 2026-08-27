@@ -117,12 +117,12 @@ func TestInitCoderAgent_ClosesReplacedCoordinator(t *testing.T) {
 
 	require.NoError(t, a.InitCoderAgentNonInteractive(t.Context()))
 	require.Equal(t, 1, old.closeCalls, "the replaced coordinator must be closed exactly once")
-	require.NotSame(t, old, a.AgentCoordinator, "the field must now hold the newly built coordinator")
+	require.NotSame(t, old, a.Coordinator(), "the field must now hold the newly built coordinator")
 }
 
 // TestInitCoderAgent_FailedRebuildLeavesExistingCoordinatorInPlace proves
 // the ordering half of the fix: a NewCoordinator failure must not
-// overwrite app.AgentCoordinator with the error's nil (which is what the
+// overwrite the coordinator with the error's nil (which is what the
 // original `app.AgentCoordinator, err = agent.NewCoordinator(...)` did),
 // and must not close the coordinator that is still in use.
 func TestInitCoderAgent_FailedRebuildLeavesExistingCoordinatorInPlace(t *testing.T) {
@@ -138,6 +138,6 @@ func TestInitCoderAgent_FailedRebuildLeavesExistingCoordinatorInPlace(t *testing
 
 	err := a.InitCoderAgentNonInteractive(t.Context())
 	require.ErrorIs(t, err, buildErr)
-	require.Same(t, old, a.AgentCoordinator, "a failed rebuild must leave the existing coordinator in place")
+	require.Same(t, old, a.Coordinator(), "a failed rebuild must leave the existing coordinator in place")
 	require.Zero(t, old.closeCalls, "the still-in-use coordinator must not be closed")
 }

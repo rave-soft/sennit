@@ -23,7 +23,7 @@ func TestIdleWatchdog_EndsSilentTask(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "wedge", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	// One minute past the budget, measured from the task's own creation:
@@ -67,7 +67,7 @@ func TestIdleWatchdog_SparesTaskInsideBudget(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "slow but alive", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	tasks.SweepIdleTasksForTest(t.Context(), time.Unix(st.CreatedAt, 0).Add(thread.TaskIdleTimeoutForTest-time.Minute))
@@ -92,7 +92,7 @@ func TestIdleWatchdog_SparesTaskAwaitingPermission(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "needs approval", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	// Raise a real request tagged with this task's delegation identity,
@@ -130,7 +130,7 @@ func TestIdleWatchdog_IgnoresFinishedTask(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "done already", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 	require.Eventually(t, func() bool {

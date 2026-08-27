@@ -67,7 +67,7 @@ func TestAppWorkspace_AgentRun_ReturnsBeforeTurnCompletes(t *testing.T) {
 	t.Cleanup(a.ShutdownForTest)
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	a.AgentCoordinator = &blockingAgentRunCoordinator{entered: entered, release: release}
+	a.SetAgentCoordinatorForTest(&blockingAgentRunCoordinator{entered: entered, release: release})
 
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
@@ -104,10 +104,10 @@ func TestAppWorkspace_AgentRun_ValidationErrorIsSynchronous(t *testing.T) {
 
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
-	a.AgentCoordinator = &blockingAgentRunCoordinator{
+	a.SetAgentCoordinatorForTest(&blockingAgentRunCoordinator{
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
-	}
+	})
 
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
@@ -156,7 +156,7 @@ func TestAppWorkspace_Shutdown_JoinsRunDispatchedViaAgentRun(t *testing.T) {
 	a := app.NewForTest(t.Context())
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	a.AgentCoordinator = &blockingAgentRunCoordinator{entered: entered, release: release}
+	a.SetAgentCoordinatorForTest(&blockingAgentRunCoordinator{entered: entered, release: release})
 
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 

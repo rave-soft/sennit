@@ -31,7 +31,7 @@ func newAttachedTaskTestApp(t *testing.T, repo string) *app.App {
 	// Deterministic session/coordinator fakes, same as attach_test.go's
 	// task-manager tests, so a task's dispatch doesn't hit a real LLM.
 	a.SetSessionsForTest(newFakeThreadSessions())
-	a.AgentCoordinator = &fakeThreadCoordinator{}
+	a.SetAgentCoordinatorForTest(&fakeThreadCoordinator{})
 	threadspawn.Attach(t.Context(), a, repo, newFakeThreadSpawner(t))
 	return a
 }

@@ -128,7 +128,7 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, er
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
 	a.SetSessionsForTest(&fakeSessions{})
-	a.AgentCoordinator = &fakeCoordinator{}
+	a.SetAgentCoordinatorForTest(&fakeCoordinator{})
 	return &fakeHandle{id: path, app: a}, nil
 }
 

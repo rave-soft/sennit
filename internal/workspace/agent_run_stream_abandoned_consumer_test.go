@@ -65,7 +65,7 @@ func TestAppWorkspace_AgentRunStream_AbandonedConsumerDoesNotLeakGoroutine(t *te
 	// using require inside the coordinator goroutine, whose FailNow
 	// would be unsafe off the test's own goroutine.
 	published := make(chan error, 1)
-	a.AgentCoordinator = &streamingCoordinator{
+	a.SetAgentCoordinatorForTest(&streamingCoordinator{
 		publish: func() {
 			// A fresh, unfinished assistant message reports
 			// Working{Phase: PhaseWorking} ("Working"), which differs
@@ -78,7 +78,7 @@ func TestAppWorkspace_AgentRunStream_AbandonedConsumerDoesNotLeakGoroutine(t *te
 			})
 			published <- err
 		},
-	}
+	})
 
 	ignoreBaseline := goleak.IgnoreCurrent()
 

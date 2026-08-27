@@ -48,7 +48,7 @@ func TestManager_RunCompleteRecordsAndDeliversOnACanceledContext(t *testing.T) {
 	require.Equal(t, thread.StatusCompleted, got.Status,
 		"the terminal status must be recorded even though the context was canceled")
 
-	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	parentCoord := parentApp.Coordinator().(*fakeCoordinator)
 	delivered := parentCoord.deliveredCompletions()
 	require.Len(t, delivered, 1, "the parent must still be told its delegation ended")
 	require.Equal(t, "parent-sess", delivered[0].sessionID)

@@ -258,8 +258,8 @@ func forwardSkillsToThreads(ctx context.Context, parent *app.App, spawner *Local
 				threadApp.Skills.ReplaceInherited(inherited)
 				all, active, states := skills.DiscoverFromConfig(threadSkillsConfig(threadApp, inherited))
 				threadApp.Skills.ReplaceDiscovery(all, active, states)
-				if threadApp.AgentCoordinator != nil {
-					threadApp.AgentCoordinator.RefreshSkills(all, active)
+				if coord := threadApp.Coordinator(); coord != nil {
+					coord.RefreshSkills(all, active)
 				}
 			}
 			if len(threadApps) > 0 {

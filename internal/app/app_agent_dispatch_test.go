@@ -12,14 +12,14 @@ import (
 // TestApp_AgentDispatcher_NonNilConfiguredOrNot asserts that an App
 // built by New/NewForTest always hands back a usable dispatcher, even
 // before any coordinator exists — the unconfigured-project case New
-// handles by returning early. NewForTest never sets AgentCoordinator,
+// handles by returning early. NewForTest never installs a coordinator,
 // which is a stand-in for exactly that case.
 func TestApp_AgentDispatcher_NonNilConfiguredOrNot(t *testing.T) {
 	t.Parallel()
 
 	a := NewForTest(t.Context())
 	require.NotNil(t, a.AgentDispatcher())
-	require.Nil(t, a.AgentCoordinator)
+	require.Nil(t, a.Coordinator())
 
 	err := a.AgentDispatcher().Send("S1", "", "hi", nil)
 	require.ErrorIs(t, err, ErrCoordinatorNotInitialized)
@@ -34,7 +34,7 @@ func TestApp_AgentDispatcher_SendRefusedAfterMarkClosing(t *testing.T) {
 	t.Parallel()
 
 	a := NewForTest(t.Context())
-	a.AgentCoordinator = &stubDispatchCoordinator{}
+	a.SetAgentCoordinatorForTest(&stubDispatchCoordinator{})
 
 	a.AgentDispatcher().MarkClosing()
 
@@ -72,7 +72,7 @@ func TestApp_Shutdown_AgentDispatcherJoinedBeforeDBAndMCP(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	coord := &stubDispatchCoordinator{entered: entered, release: release}
-	a.AgentCoordinator = coord
+	a.SetAgentCoordinatorForTest(coord)
 
 	a.mcpClose = func(context.Context) error {
 		addOrder("mcp-closed")

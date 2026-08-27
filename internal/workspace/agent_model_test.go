@@ -76,3 +76,20 @@ func TestAgentModel_FallsBackToTheCoordinatorWithNoSelection(t *testing.T) {
 	require.Equal(t, "seeded", got.CatalogCfg.ID,
 		"with nothing selected the coordinator's own model is the only answer")
 }
+
+// An App that never had a coordinator installed (an unconfigured project,
+// or one still bootstrapping) must report "not ready" rather than panic —
+// every AgentXxx method on AppWorkspace nil-checks app.Coordinator() before
+// calling into it.
+func TestAgentIsReady_FalseWithNoCoordinatorInstalled(t *testing.T) {
+	store := configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir()))
+	a := &app.App{}
+	ws := NewAppWorkspace(a, store)
+
+	require.False(t, ws.AgentIsReady())
+	require.ErrorIs(t, ws.AgentReadyErr(), ErrAgentNotInitialized)
+	require.False(t, ws.AgentIsBusy())
+	require.False(t, ws.AgentIsSessionBusy("sess-1"))
+	require.Equal(t, 0, ws.AgentQueuedPrompts("sess-1"))
+	require.Nil(t, ws.AgentQueuedPromptsList("sess-1"))
+}

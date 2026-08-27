@@ -181,7 +181,7 @@ func (h *fakeThreadHandle) Workspace() thread.Workspace {
 }
 
 // fakeThreadSpawner spawns a real (but network/db-free) app.App per call
-// via app.NewForTest, wired with a fake Sessions/AgentCoordinator instead
+// via app.NewForTest, wired with a fake Sessions/coordinator instead
 // of the real ones a full bootstrap would build.
 type fakeThreadSpawner struct {
 	t *testing.T
@@ -201,7 +201,7 @@ func (s *fakeThreadSpawner) Spawn(ctx context.Context, path string) (thread.Hand
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
 	a.SetSessionsForTest(newFakeThreadSessions())
-	a.AgentCoordinator = &fakeThreadCoordinator{}
+	a.SetAgentCoordinatorForTest(&fakeThreadCoordinator{})
 
 	h := &fakeThreadHandle{id: path, app: a}
 	s.byPath[path] = h

@@ -643,7 +643,7 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, er
 	var coord *fakeCoordinator
 	if !s.noCoordinator {
 		coord = &fakeCoordinator{runErr: s.runErr}
-		a.AgentCoordinator = coord
+		a.SetAgentCoordinatorForTest(coord)
 	}
 
 	h := &fakeHandle{id: path, app: a}
@@ -798,7 +798,7 @@ const (
 
 func publishSuccess(t *testing.T, a *app.App, sessionID string) {
 	t.Helper()
-	coord := a.AgentCoordinator.(*fakeCoordinator)
+	coord := a.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() > 0 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	runID := coord.runs[len(coord.runs)-1].runID

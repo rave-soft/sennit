@@ -74,7 +74,7 @@ func TestAppWorkspace_AgentRunStream_ClosedMessageChannelDoesNotBusyLoop(t *test
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	a.AgentCoordinator = &blockingStreamCoordinator{entered: entered, release: release}
+	a.SetAgentCoordinatorForTest(&blockingStreamCoordinator{entered: entered, release: release})
 
 	ch := make(chan pubsub.Event[message.Message])
 	a.SetMessagesForTest(&controlledMessagesService{ch: ch})

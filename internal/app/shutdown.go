@@ -252,13 +252,13 @@ func (p *shutdownPhases) Shutdown() {
 		if !agentWorkStopped {
 			slog.Error("Agent work did not stop before shutdown deadline")
 		}
-	} else if app.AgentCoordinator != nil {
-		app.AgentCoordinator.CancelAll()
-		if app.AgentCoordinator.IsBusy() {
+	} else if coord := app.Coordinator(); coord != nil {
+		coord.CancelAll()
+		if coord.IsBusy() {
 			agentWorkStopped = false
 			slog.Error("Agent work did not stop before shutdown deadline")
 		}
-		if closer, ok := app.AgentCoordinator.(coordinatorCloser); ok {
+		if closer, ok := coord.(coordinatorCloser); ok {
 			if err := p.runShutdownCallback(closer.Close); err != nil {
 				agentWorkStopped = false
 				slog.Error("Failed to close agent coordinator readiness work", "error", err)

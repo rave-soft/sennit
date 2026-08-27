@@ -28,13 +28,14 @@ func (app *App) SetPermissionsForTest(p permission.Service) { app.permissions = 
 func (app *App) PermissionsForTest() permission.Service     { return app.permissions }
 
 // SetAgentCoordinatorForTest installs coordinator directly, bypassing
-// InitCoderAgent. AgentCoordinator itself stays a plain assignable field
-// (promoted from appServices), but a bare &App{} literal from outside this
-// package can no longer set it inline the way it could before appServices
-// existed, since appServices is unexported: construct the App with New or
-// NewForTest first (so appServices is non-nil), then call this.
+// InitCoderAgent. The underlying field is unexported and guarded by a
+// lock (see thread_workspace.go's Coordinator/setCoordinator), but a bare
+// &App{} literal from outside this package can no longer set it inline
+// the way it could before appServices existed, since appServices is
+// unexported: construct the App with New or NewForTest first (so
+// appServices is non-nil), then call this.
 func (app *App) SetAgentCoordinatorForTest(coordinator agent.Coordinator) {
-	app.AgentCoordinator = coordinator
+	app.setCoordinator(coordinator)
 }
 
 // SetConfigForTest installs store as this App's config store and rebuilds
@@ -62,8 +63,8 @@ func (app *App) SetConfigForTest(store *config.ConfigStore) {
 //   - An [App.agentNotifications] broker.
 //   - A non-nil [App.AgentDispatcher], the same as a production App, so
 //     tests can dispatch fire-and-forget runs against a fake
-//     agent.Coordinator assigned to AgentCoordinator and exercise
-//     [App.Shutdown]'s join ordering without booting a real one.
+//     agent.Coordinator installed via SetAgentCoordinatorForTest and
+//     exercise [App.Shutdown]'s join ordering without booting a real one.
 //
 // The caller owns lifetime: cancel ctx (or call [App.Shutdown]) to
 // tear down the fan-in goroutines and the events broker.
@@ -87,7 +88,7 @@ func NewForTest(ctx context.Context) *App {
 		globalCtx: ctx,
 	}
 	app.app = app
-	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() agent.Coordinator { return app.AgentCoordinator }, app.agentNotifications, app.runCompletions)
+	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() agent.Coordinator { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
 
 	eventsCtx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = eventsCtx

@@ -97,12 +97,12 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 
 	require.NoError(t, sendErr(mgr2.Send(t.Context(), st.ID, "resume message")))
 
-	ownCoord := spawner2.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
+	ownCoord := spawner2.appFor(st.WorktreePath).Coordinator().(*fakeCoordinator)
 	registered := ownCoord.registeredDelegationParents()
 	require.Len(t, registered, 1)
 	got := registered[0]
 	require.Equal(t, st.SessionID, got.sessionID)
-	require.Same(t, parentApp.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner)
+	require.Same(t, parentApp.Coordinator(), got.parent.Parent.(*testCoordinatorAdapter).inner)
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
 	require.Equal(t, string(thread.KindThread), got.parent.Kind)
@@ -135,12 +135,12 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 
 	require.NoError(t, sendErr(tasks2.Send(t.Context(), st.ID, "resume message")))
 
-	coord := parentApp2.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp2.Coordinator().(*fakeCoordinator)
 	registered := coord.registeredDelegationParents()
 	require.Len(t, registered, 1)
 	got := registered[0]
 	require.Equal(t, st.SessionID, got.sessionID)
-	require.Same(t, parentApp2.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner)
+	require.Same(t, parentApp2.Coordinator(), got.parent.Parent.(*testCoordinatorAdapter).inner)
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
 	require.Equal(t, string(thread.KindTask), got.parent.Kind)
@@ -189,7 +189,7 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 	require.False(t, ok, "a thread with no recorded parent must not resolve a delivery target after restart")
 
 	require.NoError(t, sendErr(mgr2.Send(t.Context(), st.ID, "resume message")))
-	ownCoord := spawner2.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
+	ownCoord := spawner2.appFor(st.WorktreePath).Coordinator().(*fakeCoordinator)
 	require.Empty(t, ownCoord.registeredDelegationParents(),
 		"a parentless thread resumed after restart must register nothing")
 }

@@ -33,8 +33,23 @@ import (
 // narrower interface than the manager, which is a different argument.
 
 // Coordinator returns this workspace's agent coordinator, or nil if it
-// has not been initialized yet (an unconfigured project).
-func (app *App) Coordinator() agent.Coordinator { return app.AgentCoordinator }
+// has not been initialized yet (an unconfigured project). Safe to call
+// concurrently with setCoordinator: initCoderAgent and
+// SetDelegationManagers can swap the coordinator from one goroutine while
+// AppWorkspace's request-handling methods read it from others.
+func (app *App) Coordinator() agent.Coordinator {
+	app.agentCoordinatorMu.RLock()
+	defer app.agentCoordinatorMu.RUnlock()
+	return app.agentCoordinator
+}
+
+// setCoordinator installs coordinator as this workspace's agent
+// coordinator. See Coordinator's doc for why this needs a lock.
+func (app *App) setCoordinator(coordinator agent.Coordinator) {
+	app.agentCoordinatorMu.Lock()
+	defer app.agentCoordinatorMu.Unlock()
+	app.agentCoordinator = coordinator
+}
 
 // Sessions returns this workspace's session service.
 func (app *App) Sessions() session.Service { return app.sessions }

@@ -227,7 +227,7 @@ func (s *attachTestSpawner) Spawn(ctx context.Context, path string) (thread.Hand
 	s.t.Cleanup(a.ShutdownForTest)
 	a.SetSessionsForTest(&attachFakeSessions{})
 	coord := &attachFakeCoordinator{}
-	a.AgentCoordinator = coord
+	a.SetAgentCoordinatorForTest(coord)
 
 	h := &attachTestHandle{id: path, app: a}
 	s.mu.Lock()

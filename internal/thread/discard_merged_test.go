@@ -67,7 +67,7 @@ func newTestManagerWithRealMessages(t *testing.T, repo string) (*thread.Manager,
 	t.Cleanup(parentApp.ShutdownForTest)
 	parentApp.SetSessionsForTest(sessions)
 	parentApp.SetMessagesForTest(messages)
-	parentApp.AgentCoordinator = &fakeCoordinator{}
+	parentApp.SetAgentCoordinatorForTest(&fakeCoordinator{})
 
 	spawner := newFakeSpawner(t)
 	mgr := thread.NewManager(thread.ManagerOptions{
@@ -219,7 +219,7 @@ func TestDiscardMerged_DeliversTheOutcomeBeforeRemovingTheRow(t *testing.T) {
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	requireDiscardedEventually(t, mgr, repo, st)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	delivered := coord.deliveredCompletions()
 	require.Len(t, delivered, 1, "the parent must still be told, exactly once")
 	require.Equal(t, string(thread.StatusMerged), delivered[0].completion.Status)

@@ -65,8 +65,8 @@ func (app *App) startExternalChangeWatchers(ctx context.Context) {
 				// alone only updates app.Skills, which buildTools does not
 				// read from directly.
 				active := app.Skills.ActiveSkills()
-				if app.AgentCoordinator != nil {
-					app.AgentCoordinator.RefreshSkills(app.Skills.AllSkills(), active)
+				if coord := app.Coordinator(); coord != nil {
+					coord.RefreshSkills(app.Skills.AllSkills(), active)
 				}
 				// Logged because a hot reload is otherwise invisible: a
 				// successful load is a Debug line, so nothing at the

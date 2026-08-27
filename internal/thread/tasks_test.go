@@ -33,7 +33,7 @@ func newTestParentApp(t *testing.T) *app.App {
 	a := app.NewForTest(context.Background())
 	t.Cleanup(a.ShutdownForTest)
 	a.SetSessionsForTest(&fakeSessions{})
-	a.AgentCoordinator = &fakeCoordinator{}
+	a.SetAgentCoordinatorForTest(&fakeCoordinator{})
 	return a
 }
 
@@ -67,7 +67,7 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app
 	t.Cleanup(parentApp.ShutdownForTest)
 	parentApp.SetSessionsForTest(sessions)
 	parentApp.SetMessagesForTest(messages)
-	parentApp.AgentCoordinator = &fakeCoordinator{}
+	parentApp.SetAgentCoordinatorForTest(&fakeCoordinator{})
 
 	tasks := thread.NewTaskManagerFromManager(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(messages))
 	return tasks, parentApp, sessions, messages
@@ -114,7 +114,7 @@ func TestTaskManager_CreateRunsToCompletion(t *testing.T) {
 	require.Equal(t, st.SessionID, created.ID)
 	require.Equal(t, "parent-sess", created.ParentSessionID)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 
@@ -143,7 +143,7 @@ func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 
@@ -182,7 +182,7 @@ func TestTaskManager_CreateRegistersDelegationParent(t *testing.T) {
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess", Depth: 2})
 	require.NoError(t, err)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	registered := coord.registeredDelegationParents()
 	require.Len(t, registered, 1)
 	got := registered[0]
@@ -212,7 +212,7 @@ func TestTaskManager_CompletionCarriesTerminalAtStamp(t *testing.T) {
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	before := time.Now()
@@ -249,7 +249,7 @@ func TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable(t *testin
 	require.True(t, ok)
 	require.Same(t, parentApp, ph.app)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 
@@ -275,7 +275,7 @@ func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	// Deliberately no RunComplete published: the run is left in flight,
 	// the way an equivalent thread shutdown test leaves a thread's run.
@@ -308,7 +308,7 @@ func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	coord.mu.Lock()
@@ -332,7 +332,7 @@ func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
 func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	// The user's own foreground turn, running in the same App a task
 	// shares. This is the work a blunt CancelAll would have caught.
@@ -360,7 +360,7 @@ func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T)
 // up sessionID's own run by id instead of assuming it is the last one.
 func publishSuccessForSession(t *testing.T, a *app.App, sessionID string) {
 	t.Helper()
-	coord := a.AgentCoordinator.(*fakeCoordinator)
+	coord := a.Coordinator().(*fakeCoordinator)
 	var runID string
 	require.Eventually(t, func() bool {
 		coord.mu.Lock()
@@ -385,7 +385,7 @@ func publishSuccessForSession(t *testing.T, a *app.App, sessionID string) {
 func TestTaskManager_CreateRefusedAtWorkspaceCap(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	var created []thread.Thread
 	for i := range thread.MaxActiveTasksPerWorkspaceForTest {
@@ -427,7 +427,7 @@ func TestTaskManager_PerParentCapIndependentOfWorkspaceCap(t *testing.T) {
 
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	for i := range thread.MaxActiveTasksPerParentTurnForTest {
 		_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
@@ -462,7 +462,7 @@ func TestTaskManager_PerParentCapIndependentOfWorkspaceCap(t *testing.T) {
 func TestTaskManager_InFlightTaskStillHoldsSlot(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	// One task, left running indefinitely (e.g. blocked on a permission
 	// prompt the user has not answered yet) - never completed.
@@ -497,7 +497,7 @@ func TestTaskManager_InFlightTaskStillHoldsSlot(t *testing.T) {
 func TestTaskManager_TerminalTasksDoNotOccupySlots(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	for i := range thread.MaxActiveTasksPerWorkspaceForTest {
 		st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
@@ -587,7 +587,7 @@ func TestTaskManager_GetRejectsThreadID(t *testing.T) {
 func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	_, err := coord.Run(t.Context(), "foreground-session", "the user's own prompt")
 	require.NoError(t, err)
@@ -613,7 +613,7 @@ func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing
 func TestTaskManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -632,7 +632,7 @@ func TestTaskManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 func TestTaskManager_CancelAlreadyFinishedIsNoop(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -674,7 +674,7 @@ func TestTaskManager_CancelRejectsThreadID(t *testing.T) {
 func TestTaskManager_SendReachesLiveTask(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -699,7 +699,7 @@ func TestTaskManager_SendReachesLiveTask(t *testing.T) {
 func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -733,7 +733,7 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 func TestTaskManager_SendReactivationPreservesCascadeDepth(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess", Depth: 2})
 	require.NoError(t, err)
@@ -760,7 +760,7 @@ func TestTaskManager_SendReactivationPreservesCascadeDepth(t *testing.T) {
 func TestTaskManager_SendRefusesCancelledTask(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -802,7 +802,7 @@ func seedMessage(t *testing.T, messages messagestore.Service, sessionID string, 
 // dropped, leaving only user/assistant text in order.
 func TestTaskManager_OutputReturnsUserAndAssistantTextOnly(t *testing.T) {
 	tasks, parentApp, sessions, messages := newTestTaskManagerWithRealMessages(t)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	parentSess, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
@@ -828,7 +828,7 @@ func TestTaskManager_OutputReturnsUserAndAssistantTextOnly(t *testing.T) {
 // a suspiciously-round-looking tail.
 func TestTaskManager_OutputReportsTruncation(t *testing.T) {
 	tasks, parentApp, sessions, messages := newTestTaskManagerWithRealMessages(t)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	parentSess, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
@@ -1059,7 +1059,7 @@ func TestTaskManager_CreateHonorsCallerSuppliedSessionID(t *testing.T) {
 func TestTaskManager_CancelFinalizesOnACanceledContext(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -1092,7 +1092,7 @@ func TestTaskManager_CancelFinalizesOnACanceledContext(t *testing.T) {
 func TestTaskManager_WaitingOnItsOwnDelegationIsNotFinished(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 
 	developer, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)

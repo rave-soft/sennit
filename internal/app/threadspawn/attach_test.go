@@ -218,7 +218,7 @@ func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
 	// per ParentAppSpawner) is deterministic instead of hitting a real
 	// LLM/session store.
 	a.SetSessionsForTest(&attachFakeSessions{})
-	a.AgentCoordinator = &attachFakeCoordinator{}
+	a.SetAgentCoordinatorForTest(&attachFakeCoordinator{})
 
 	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
 
@@ -271,7 +271,8 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 	repo := initRepo(t)
 	a := newAttachTestApp(t, repo)
 	a.SetSessionsForTest(&attachFakeSessions{})
-	a.AgentCoordinator = &attachFakeCoordinator{}
+	taskCoord := &attachFakeCoordinator{}
+	a.SetAgentCoordinatorForTest(taskCoord)
 
 	threadSpawner := newAttachTestSpawner(t)
 	Attach(t.Context(), a, repo, threadSpawner)
@@ -286,7 +287,6 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
-	taskCoord := a.AgentCoordinator.(*attachFakeCoordinator)
 	require.Eventually(t, func() bool { return taskCoord.runCount() == 1 }, time.Second, time.Millisecond)
 	threadCoord := threadSpawner.coordFor(threadSt.WorktreePath)
 	require.Eventually(t, func() bool { return threadCoord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -387,7 +387,7 @@ func TestAttach_SetPermissionsSkipReachesLiveThread(t *testing.T) {
 	repo := initRepo(t)
 	a := newAttachTestApp(t, repo)
 	a.SetSessionsForTest(&attachFakeSessions{})
-	a.AgentCoordinator = &attachFakeCoordinator{}
+	a.SetAgentCoordinatorForTest(&attachFakeCoordinator{})
 	spawner := newAttachTestSpawner(t)
 
 	Attach(t.Context(), a, repo, spawner)
@@ -425,7 +425,7 @@ func TestAttachNonGitWorkspacesGetTaskManagerWithoutThreadManager(t *testing.T) 
 	a := newAttachTestApp(t, dir)
 	a.SetSessionsForTest(&attachFakeSessions{})
 	coord := &attachFakeCoordinator{}
-	a.AgentCoordinator = coord
+	a.SetAgentCoordinatorForTest(coord)
 
 	Attach(t.Context(), a, dir, newAttachTestSpawner(t))
 
@@ -447,7 +447,7 @@ func TestAttachNestedGitSubdirectoryAttachesNothing(t *testing.T) {
 
 	a := newAttachTestApp(t, subdir)
 	coord := &attachFakeCoordinator{}
-	a.AgentCoordinator = coord
+	a.SetAgentCoordinatorForTest(coord)
 
 	Attach(t.Context(), a, subdir, newAttachTestSpawner(t))
 
@@ -468,7 +468,7 @@ func TestAttachGitRootHandsCoordinatorAdaptersFromPublishedPair(t *testing.T) {
 	a := newAttachTestApp(t, repo)
 	a.SetSessionsForTest(&attachFakeSessions{})
 	coord := &attachFakeCoordinator{}
-	a.AgentCoordinator = coord
+	a.SetAgentCoordinatorForTest(coord)
 
 	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
 

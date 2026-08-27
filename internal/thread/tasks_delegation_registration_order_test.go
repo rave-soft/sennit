@@ -58,7 +58,7 @@ func TestTaskManager_CreateDoesNotRegisterDelegationParentWhenStatusWriteFails(t
 	_, err := tasks.Create(ctx, thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.Error(t, err)
 
-	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Empty(t, coord.registeredDelegationParents(),
 		"a task whose setStatus write failed after SetSession must not leave a DelegationParent registered for a session that never started running")
 }

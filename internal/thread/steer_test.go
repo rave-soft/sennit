@@ -192,7 +192,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 // state a thread revived by hand is usually found in.
 func publishFailure(t *testing.T, a *app.App, sessionID, errText string) {
 	t.Helper()
-	coord := a.AgentCoordinator.(*fakeCoordinator)
+	coord := a.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() > 0 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	runID := coord.runs[len(coord.runs)-1].runID

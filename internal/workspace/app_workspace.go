@@ -208,9 +208,11 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	}
 
 	// Generate a title from the shell command if it was the first message.
-	if isFirstMessage && w.app.AgentCoordinator != nil {
-		titleCtx := context.WithoutCancel(ctx)
-		w.app.AgentCoordinator.GenerateTitle(titleCtx, sessionID, "$ "+command)
+	if isFirstMessage {
+		if coord := w.app.Coordinator(); coord != nil {
+			titleCtx := context.WithoutCancel(ctx)
+			coord.GenerateTitle(titleCtx, sessionID, "$ "+command)
+		}
 	}
 
 	return proto.ShellCommandResponse{
@@ -220,23 +222,25 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 }
 
 func (w *AppWorkspace) AgentCancel(sessionID string) {
-	if w.app.AgentCoordinator != nil {
-		w.app.AgentCoordinator.Cancel(sessionID)
+	if coord := w.app.Coordinator(); coord != nil {
+		coord.Cancel(sessionID)
 	}
 }
 
 func (w *AppWorkspace) AgentIsBusy() bool {
-	if w.app.AgentCoordinator == nil {
+	coord := w.app.Coordinator()
+	if coord == nil {
 		return false
 	}
-	return w.app.AgentCoordinator.IsBusy()
+	return coord.IsBusy()
 }
 
 func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) bool {
-	if w.app.AgentCoordinator == nil {
+	coord := w.app.Coordinator()
+	if coord == nil {
 		return false
 	}
-	return w.app.AgentCoordinator.IsSessionBusy(sessionID)
+	return coord.IsSessionBusy(sessionID)
 }
 
 // AgentModel reports the model the next turn will run on, which is the
@@ -254,12 +258,13 @@ func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) bool {
 // The coordinator remains the fallback for a config that selects nothing,
 // which is the state before onboarding picks a model.
 func (w *AppWorkspace) AgentModel() AgentModel {
-	if w.app.AgentCoordinator == nil {
+	coord := w.app.Coordinator()
+	if coord == nil {
 		return AgentModel{}
 	}
 	cfg := w.store.Config()
 	if cfg == nil || cfg.Model.Model == "" {
-		m := w.app.AgentCoordinator.Model()
+		m := coord.Model()
 		return AgentModel{CatalogCfg: m.CatalogCfg, ModelCfg: m.ModelCfg}
 	}
 	selected := cfg.Model
@@ -278,41 +283,44 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 }
 
 func (w *AppWorkspace) AgentIsReady() bool {
-	return w.app.AgentCoordinator != nil
+	return w.app.Coordinator() != nil
 }
 
 func (w *AppWorkspace) AgentReadyErr() error {
-	if w.app.AgentCoordinator == nil {
+	if w.app.Coordinator() == nil {
 		return ErrAgentNotInitialized
 	}
 	return nil
 }
 
 func (w *AppWorkspace) AgentQueuedPrompts(sessionID string) int {
-	if w.app.AgentCoordinator == nil {
+	coord := w.app.Coordinator()
+	if coord == nil {
 		return 0
 	}
-	return w.app.AgentCoordinator.QueuedPrompts(sessionID)
+	return coord.QueuedPrompts(sessionID)
 }
 
 func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) []string {
-	if w.app.AgentCoordinator == nil {
+	coord := w.app.Coordinator()
+	if coord == nil {
 		return nil
 	}
-	return w.app.AgentCoordinator.QueuedPromptsList(sessionID)
+	return coord.QueuedPromptsList(sessionID)
 }
 
 func (w *AppWorkspace) AgentClearQueue(sessionID string) {
-	if w.app.AgentCoordinator != nil {
-		w.app.AgentCoordinator.ClearQueue(sessionID)
+	if coord := w.app.Coordinator(); coord != nil {
+		coord.ClearQueue(sessionID)
 	}
 }
 
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
-	if w.app.AgentCoordinator == nil {
+	coord := w.app.Coordinator()
+	if coord == nil {
 		return errors.New("agent coordinator not initialized")
 	}
-	return w.app.AgentCoordinator.Summarize(ctx, sessionID)
+	return coord.Summarize(ctx, sessionID)
 }
 
 func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
@@ -323,7 +331,7 @@ func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 // contract; the checks below are in the order that makes each subsequent
 // one meaningful.
 func (w *AppWorkspace) ApplySessionModel(ctx context.Context, sessionID string) (bool, error) {
-	if w.app.AgentCoordinator == nil {
+	if w.app.Coordinator() == nil {
 		return false, ErrAgentNotInitialized
 	}
 	sess, err := w.app.Sessions().Get(ctx, sessionID)
@@ -388,7 +396,8 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 // text": no spinner, no progress bar, no stdout writer. Those stay
 // the caller's job (see cmd/run.go).
 func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
-	if w.app.AgentCoordinator == nil {
+	coord := w.app.Coordinator()
+	if coord == nil {
 		return nil, errors.New("agent coordinator not initialized")
 	}
 
@@ -398,7 +407,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	}
 
 	// Force-update agent models before running so MCP tools are loaded.
-	if err := w.app.AgentCoordinator.UpdateModels(ctx); err != nil {
+	if err := coord.UpdateModels(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update agent models: %w", err)
 	}
 
@@ -426,7 +435,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	messageEvents := w.app.Messages().Subscribe(ctx)
 
 	go func() {
-		result, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt)
+		result, err := coord.Run(ctx, sessionID, prompt)
 		if err != nil {
 			done <- response{err: fmt.Errorf("failed to start agent processing stream: %w", err)}
 			return

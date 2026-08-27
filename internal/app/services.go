@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 
 	"github.com/rave-soft/sennit/internal/agent"
@@ -53,7 +54,7 @@ type delegationManagerSnapshot struct {
 // coordinator, the LSP/MCP/skills managers, and this workspace's own
 // config/credentials state. It is embedded anonymously in App, so every
 // field here is promoted onto *App exactly as it was before this type
-// existed (app.sessions, app.MCP, app.AgentCoordinator, ...) — App is a
+// existed (app.sessions, app.MCP, app.Coordinator(), ...) — App is a
 // facade over this plus appEvents and shutdownPhases, not a new API.
 type appServices struct {
 	// The three service fields below are unexported with accessors on
@@ -73,7 +74,14 @@ type appServices struct {
 	// `sennit stat --by latency`.
 	Latency latency.Recorder
 
-	AgentCoordinator agent.Coordinator
+	// agentCoordinatorMu guards agentCoordinator: initCoderAgent (on the
+	// main goroutine, typically) and SetDelegationManagers's republish can
+	// swap it while workspace.AppWorkspace's many methods read it from
+	// request-handling goroutines. Read/write only through Coordinator()
+	// and setCoordinator (see thread_workspace.go) — never the field
+	// directly.
+	agentCoordinatorMu sync.RWMutex
+	agentCoordinator   agent.Coordinator
 
 	LSPManager *lsp.Manager
 
@@ -224,7 +232,7 @@ func (app *App) Credentials() *credentials.Manager {
 //
 // If a coordinator already exists, this also republishes the adapters to
 // it directly, so callers like Attach no longer need to reach into
-// app.AgentCoordinator themselves.
+// app.Coordinator() themselves.
 func (app *App) SetDelegationManagers(threadMgr *thread.Manager, taskMgr *thread.TaskManager, threadTools tools.ThreadManager, taskTools tools.TaskManager) {
 	app.delegationManagers.Store(&delegationManagerSnapshot{
 		thread:      threadMgr,
@@ -232,8 +240,8 @@ func (app *App) SetDelegationManagers(threadMgr *thread.Manager, taskMgr *thread
 		threadTools: threadTools,
 		taskTools:   taskTools,
 	})
-	if app.AgentCoordinator != nil {
-		app.AgentCoordinator.SetDelegationTools(threadTools, taskTools)
+	if coord := app.Coordinator(); coord != nil {
+		coord.SetDelegationTools(threadTools, taskTools)
 	}
 }
 
@@ -321,10 +329,11 @@ func (app *App) ReportCurrentSession(sessionID string) {
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {
-	if app.AgentCoordinator == nil {
+	coord := app.Coordinator()
+	if coord == nil {
 		return fmt.Errorf("agent configuration is missing")
 	}
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return coord.UpdateModels(ctx)
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {
@@ -387,8 +396,8 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		return err
 	}
 
-	old := app.AgentCoordinator
-	app.AgentCoordinator = newCoord
+	old := app.Coordinator()
+	app.setCoordinator(newCoord)
 	if old != nil {
 		if closer, ok := old.(coordinatorCloser); ok {
 			if err := closer.Close(ctx); err != nil {
