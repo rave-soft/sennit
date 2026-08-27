@@ -318,6 +318,11 @@ func (m *Models) setProviderItems() tea.Cmd {
 		}
 
 		displayProvider := provider
+		// provider.Models is a slice header copied by value; its backing
+		// array is still shared with m.providers. Clone it before writing
+		// through displayProvider.Models below, or these per-dialog name
+		// overrides and appended custom models corrupt the shared catalog.
+		displayProvider.Models = slices.Clone(provider.Models)
 		displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
 		modelIndex := make(map[string]int, len(displayProvider.Models))
 		for i, model := range displayProvider.Models {

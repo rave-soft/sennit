@@ -160,6 +160,62 @@ func TestSetProviderItems_EmptyStateShowsPlaceholderAndNoPanic(t *testing.T) {
 	})
 }
 
+// TestSetProviderItems_DoesNotMutateCatalog covers a shared-backing-array
+// bug: displayProvider := provider only copies the struct, not the Models
+// slice's backing array, so writing displayProvider.Models[idx].Name used to
+// corrupt the catalog held in m.providers. A provider config that renames an
+// existing catalog model must not leak that rename back into the catalog
+// copy the dialog opened with, and it must stay that way across a second
+// open-and-render of the dialog.
+func TestSetProviderItems_DoesNotMutateCatalog(t *testing.T) {
+	const catalogModelID = "claude-opus-5"
+	const catalogModelName = "Claude Opus 5"
+	const overrideName = "My Custom Opus"
+
+	cfg := newModelsTestConfig()
+	cfg.Providers.Set(string(catwalk.InferenceProviderAnthropic), config.ProviderConfig{
+		ID: string(catwalk.InferenceProviderAnthropic),
+		Models: []catwalk.Model{
+			{ID: catalogModelID, Name: overrideName},
+		},
+	})
+	com := newModelsTestCommon(t, cfg)
+
+	m, _, err := NewModels(com)
+	require.NoError(t, err)
+
+	var found bool
+	for _, p := range m.providers {
+		if p.ID != catwalk.InferenceProviderAnthropic {
+			continue
+		}
+		for _, model := range p.Models {
+			if model.ID != catalogModelID {
+				continue
+			}
+			found = true
+			require.Equal(t, catalogModelName, model.Name,
+				"the per-dialog rename must not overwrite the shared catalog entry")
+		}
+	}
+	require.True(t, found, "the catalog must still carry the model the override targeted")
+
+	// Opening and rendering the dialog again must not compound the
+	// corruption (the append path aliases the backing array intermittently
+	// depending on capacity).
+	_ = m.setProviderItems()
+	for _, p := range m.providers {
+		if p.ID != catwalk.InferenceProviderAnthropic {
+			continue
+		}
+		for _, model := range p.Models {
+			if model.ID == catalogModelID {
+				require.Equal(t, catalogModelName, model.Name)
+			}
+		}
+	}
+}
+
 func TestModelGroup_RenderNoLongerShowsConfiguredBadge(t *testing.T) {
 	t.Parallel()
 	s := styles.SennitDark()

@@ -159,7 +159,10 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		m.state = MCPAuthStateSuccess
-		m.cancelAuth = nil
+		// The flow finished; release the context startAuth created for it
+		// instead of just dropping the reference, or it leaks until the
+		// session ends.
+		m.CancelAuth()
 		return nil
 
 	case ActionMCPAuthErrored:
@@ -168,7 +171,9 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 		}
 		m.state = MCPAuthStateError
 		m.err = msg.Error
-		m.cancelAuth = nil
+		// Same as above: the failed attempt's context is done with, so
+		// cancel it rather than only forgetting the CancelFunc.
+		m.CancelAuth()
 		return nil
 	}
 	return nil
