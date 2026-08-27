@@ -3,6 +3,7 @@ package skills
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/charlievieth/fastwalk"
@@ -31,6 +32,7 @@ type skillFileSnapshot struct {
 // internal/config.
 func scanSkillFiles(paths []string) map[string]skillFileSnapshot {
 	snapshot := make(map[string]skillFileSnapshot)
+	var mu sync.Mutex
 	for _, base := range paths {
 		conf := fastwalk.Config{
 			Follow:  true,
@@ -44,7 +46,11 @@ func scanSkillFiles(paths []string) map[string]skillFileSnapshot {
 			if err != nil {
 				return nil
 			}
+			// fastwalk is concurrent, so we protect the shared snapshot
+			// map with mu.
+			mu.Lock()
 			snapshot[path] = skillFileSnapshot{size: info.Size(), modTime: info.ModTime().UnixNano()}
+			mu.Unlock()
 			return nil
 		})
 	}

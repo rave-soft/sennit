@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -175,4 +176,31 @@ func TestWatchForChanges_KeepsInheritedSkills(t *testing.T) {
 
 	requireSkillNamed(t, mgr, "local-skill", "the workspace's own")
 	requireSkillNamed(t, mgr, "parent-skill", "handed down")
+}
+
+// TestScanSkillFiles_ConcurrentWrites spreads enough SKILL.md files across
+// enough subdirectories that fastwalk hands them to multiple workers at
+// once, so a run under `go test -race` catches an unguarded concurrent
+// write into the snapshot map.
+func TestScanSkillFiles_ConcurrentWrites(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const numSkills = 50
+	want := make([]string, 0, numSkills)
+	for i := 0; i < numSkills; i++ {
+		skillDir := filepath.Join(root, "skill-"+strconv.Itoa(i))
+		require.NoError(t, os.MkdirAll(skillDir, 0o755))
+		path := filepath.Join(skillDir, SkillFileName)
+		require.NoError(t, os.WriteFile(path, []byte("SKILL.md contents"), 0o600))
+		want = append(want, path)
+	}
+
+	snapshot := scanSkillFiles([]string{root})
+
+	require.Len(t, snapshot, numSkills)
+	for _, path := range want {
+		_, ok := snapshot[path]
+		require.True(t, ok, "missing snapshot entry for %s", path)
+	}
 }
