@@ -586,12 +586,17 @@ type fakeSpawner struct {
 	// path was still on disk at the moment Release was called — see
 	// Release and releaseSawWorktreeAt.
 	releaseSawWorktree map[string]bool
-	spawnCount         int
-	spawnErr           error
-	runErr             error
-	blockSpawn         bool
-	spawnEntered       chan struct{}
-	spawnRelease       chan struct{}
+	// releaseCtxErr records, per id, ctx.Err() at the moment Release was
+	// called with it — for tests proving a deferred/detached Release is
+	// handed a context that survives the caller's own cancellation rather
+	// than the caller's dead ctx itself.
+	releaseCtxErr map[string]error
+	spawnCount    int
+	spawnErr      error
+	runErr        error
+	blockSpawn    bool
+	spawnEntered  chan struct{}
+	spawnRelease  chan struct{}
 	// sessionsErr, when set, is handed to every fakeSessions this spawner
 	// builds, so its Create/CreateTaskSession calls fail — for tests
 	// driving Manager.Create's rollback on a session-creation failure.
@@ -674,7 +679,20 @@ func (s *fakeSpawner) Release(ctx context.Context, id string) error {
 		s.releaseSawWorktree = make(map[string]bool)
 	}
 	s.releaseSawWorktree[id] = sawWorktree
+	if s.releaseCtxErr == nil {
+		s.releaseCtxErr = make(map[string]error)
+	}
+	s.releaseCtxErr[id] = ctx.Err()
 	return nil
+}
+
+// releaseCtxErrAt reports ctx.Err() as observed by Release for id, so a
+// test can prove Release was handed a live context even when the caller's
+// own context was already cancelled.
+func (s *fakeSpawner) releaseCtxErrAt(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.releaseCtxErr[id]
 }
 
 // releaseSawWorktreeAt reports whether the worktree at id was still present

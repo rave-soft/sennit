@@ -252,15 +252,6 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
 	st = newSt
-	// Register the parent here, right where sess.ID becomes durably
-	// associated with the task record: a task shares its parent's own
-	// App/Coordinator (see DelegationParent's doc comment), so this is
-	// the same coordinator instance startRun will later dispatch the
-	// task's turns through. Placing it before setStatus/startRun means
-	// no later error path in this function can leave a half-registered
-	// parent pointing at a session that never actually runs.
-	coord := handle.Workspace().Coordinator()
-	registerParent(coord, coord, st, args.Depth)
 
 	// Into runningSt, not st: setStatus returns the zero Thread on error,
 	// and failCreate below needs st's real ID (see SetSession's identical
@@ -270,6 +261,16 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
 	st = runningSt
+	// Register the parent only once nothing left in this function can
+	// fail: a task shares its parent's own App/Coordinator (see
+	// DelegationParent's doc comment), so this is the same coordinator
+	// instance startRun will dispatch the task's turns through.
+	// Registering any earlier — e.g. right after SetSession, before
+	// setStatus — would leave a stale registration pointing at a session
+	// that never actually runs whenever the step in between fails and
+	// this function returns via failCreate instead of reaching startRun.
+	coord := handle.Workspace().Coordinator()
+	registerParent(coord, coord, st, args.Depth)
 	// A task's tool calls hit the parent App's permission.Service — the
 	// same one the visible turn uses — so without a delegation tag, a
 	// prompt raised by the task's run would be indistinguishable from one

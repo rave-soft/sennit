@@ -402,7 +402,15 @@ func (m *Manager) releaseHandle(handle Handle) {
 // never turn a successful write into a failure, since failCreate's own
 // error is only logged.
 func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error {
-	if _, err := m.lc.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
+	// detachForTerminalWork, not ctx directly: cause is very often ctx
+	// having been cancelled, and a status write built on that same dead
+	// ctx would fail too, leaving the row stuck at its transient status
+	// (StatusPending or the short-lived StatusIdle/StatusRunning) until a
+	// restart's Recover reconciles it. See handleRunComplete, which
+	// solves this identical problem the same way.
+	writeCtx, cancel := detachForTerminalWork(ctx)
+	defer cancel()
+	if _, err := m.lc.setStatus(writeCtx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
 		slog.Error("Failed to record create failure", "component", "thread", "thread", st.ID, "error", err)
 	}
 	return cause

@@ -810,7 +810,14 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	owned := true
 	defer func() {
 		if owned {
-			_ = spawner.Release(ctx, handle.ID())
+			// detachForTerminalWork, not ctx directly: this defer can fire
+			// because setStatus below failed precisely because ctx was
+			// already cancelled, and a Release built on that same dead ctx
+			// would fail too, leaking the freshly spawned handle (and its
+			// App/DB connection) for the life of the process.
+			releaseCtx, cancel := detachForTerminalWork(ctx)
+			defer cancel()
+			_ = spawner.Release(releaseCtx, handle.ID())
 		}
 	}()
 
