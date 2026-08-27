@@ -22,6 +22,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/proxyhttp"
 )
 
 type ProviderConfig struct {
@@ -352,8 +353,12 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		providerID = catwalk.InferenceProvider(c.ID)
 		testURL    = ""
 		headers    = make(map[string]string)
-		apiKey, _  = resolver.ResolveValue(c.APIKey)
 	)
+
+	apiKey, err := resolver.ResolveValue(c.APIKey)
+	if err != nil {
+		return fmt.Errorf("failed to resolve API key for provider %s: %w", c.ID, err)
+	}
 
 	switch providerID {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
@@ -370,7 +375,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 	switch c.Type {
 	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL, err := resolver.ResolveValue(c.BaseURL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
+		}
 		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
 
 		switch providerID {
@@ -384,7 +392,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 		headers["Authorization"] = "Bearer " + apiKey
 	case catwalk.TypeAnthropic:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL, err := resolver.ResolveValue(c.BaseURL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
+		}
 		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
 
 		switch providerID {
@@ -397,7 +408,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL, err := resolver.ResolveValue(c.BaseURL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
+		}
 		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
 		// The key goes in a header, never the URL: a failed request wraps
 		// the full URL into the returned error (*url.Error), which ends up
@@ -423,7 +437,18 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	client := &http.Client{}
+	// Route through the same proxy the provider's real requests use — a
+	// plain client here would report a failure that has nothing to do
+	// with the credentials being tested.
+	var client *http.Client
+	if c.ProxyURL == "" {
+		client = &http.Client{Timeout: 5 * time.Second}
+	} else {
+		client, err = proxyhttp.NewClient(c.ProxyURL, 5*time.Second)
+		if err != nil {
+			return fmt.Errorf("failed to build proxy client for provider %s: %w", c.ID, err)
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)

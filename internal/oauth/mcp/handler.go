@@ -419,8 +419,15 @@ type callbackReceiver struct {
 // redirect is expected. It settles exactly once, whichever arrives first —
 // a result, an error, or the receiver shutting down.
 type authFlight struct {
-	done   chan struct{}
-	once   sync.Once
+	done chan struct{}
+	once sync.Once
+	// state is the "state" query parameter from the authorization URL
+	// this flight opened a browser for. It is set once, under begin's
+	// lock, before the browser opens, and never mutated after — so
+	// handleCallback can read it from another goroutine without its own
+	// lock. handleCallback checks a redirect's state against it before
+	// treating the redirect as this flight's outcome.
+	state  string
 	result *auth.AuthorizationResult
 	err    error
 }
@@ -440,7 +447,7 @@ func (f *authFlight) settle(result *auth.AuthorizationResult, err error) {
 // is over, for clearing it so a later authorization can start fresh. The
 // first (creating) caller also binds the callback listener; joiners wait
 // on the flight that is already serving.
-func (r *callbackReceiver) begin() (*authFlight, bool, error) {
+func (r *callbackReceiver) begin(state string) (*authFlight, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.flight != nil {
@@ -449,7 +456,7 @@ func (r *callbackReceiver) begin() (*authFlight, bool, error) {
 	if err := r.bindLocked(); err != nil {
 		return nil, false, err
 	}
-	r.flight = &authFlight{done: make(chan struct{})}
+	r.flight = &authFlight{done: make(chan struct{}), state: state}
 	return r.flight, true, nil
 }
 
@@ -556,6 +563,19 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 		ErrorDescription: query.Get("error_description"),
 	}
 
+	// A flight in progress must only be settled by its own redirect: check
+	// state before anything else, so an unrelated local request carrying
+	// an "error=" parameter cannot abort a real, in-flight authorization.
+	// A nil flight (tab reloaded or revisited after the flow finished)
+	// carries no state to compare against, so its query is rendered as-is
+	// below, same as before this check existed.
+	flight := r.current()
+	stateMismatch := flight != nil && query.Get("state") != flight.state
+	if stateMismatch {
+		result.ErrorCode = "invalid_state"
+		result.ErrorDescription = "The sign-in response did not match this request."
+	}
+
 	// Render the page BEFORE settling the flight. settle unblocks await,
 	// which releases the listener; settling first would close the connection
 	// out from under this write and show the user a browser error instead
@@ -564,10 +584,12 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 		slog.Warn("Failed to render OAuth callback page", "error", err)
 	}
 
-	// A redirect with no flight waiting means the tab was reloaded or
-	// revisited after the flow finished. The page above already described
-	// the outcome accurately, so do not disturb any later authorization.
-	if flight := r.current(); flight != nil {
+	if stateMismatch {
+		// Not this flight's redirect; leave its pending wait undisturbed.
+		return
+	}
+
+	if flight != nil {
 		if result.Failed() {
 			flight.settle(nil, fmt.Errorf("OAuth error: %s: %s", result.ErrorCode, result.ErrorDescription))
 		} else {
@@ -582,7 +604,7 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 }
 
 func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-	flight, owned, err := r.begin()
+	flight, owned, err := r.begin(authorizationState(args.URL))
 	if err != nil {
 		return nil, err
 	}
@@ -769,6 +791,19 @@ func isMetadataEndpoint(path string) bool {
 // authorization URL. Some authorization servers reject it in the
 // authorize request but accept it during token exchange. Based on Bruno
 // Krugel's fix from PR #3396.
+// authorizationState extracts the "state" query parameter the SDK put on
+// the authorization URL, so the flight can pin the value a redirect must
+// carry to be treated as this authorization's outcome. An unparsable URL
+// yields "", which a legitimate redirect (which always carries the real
+// state) can never match.
+func authorizationState(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("state")
+}
+
 func stripResourceParam(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {

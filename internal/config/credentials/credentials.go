@@ -476,6 +476,11 @@ func (m *Manager) loadTokenFromDisk(scope config.Scope, providerID string) (*oau
 	return &token, nil
 }
 
+// importCopilotTimeout bounds the network exchange in ImportCopilot. It is
+// a variable, rather than inlined, so tests can shrink it instead of
+// waiting out the real deadline.
+var importCopilotTimeout = 15 * time.Second
+
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (m *Manager) ImportCopilot() (*oauth.Token, bool) {
 	if m.store.HasConfigField(config.ScopeGlobal, "providers.copilot.api_key") || m.store.HasConfigField(config.ScopeGlobal, "providers.copilot.oauth") {
@@ -488,7 +493,15 @@ func (m *Manager) ImportCopilot() (*oauth.Token, bool) {
 	}
 
 	slog.Info("Found existing GitHub Copilot token on disk. Authenticating...")
-	token, err := copilot.RefreshToken(context.TODO(), m.providerProxy(string(catwalk.InferenceProviderCopilot)), diskToken)
+	// ImportCopilot is part of the workspace.Workspace interface, which
+	// has no context parameter, and it runs during startup/onboarding —
+	// a hung GitHub endpoint must not block that indefinitely. Bound it
+	// locally instead of passing context.TODO() through, and go via
+	// m.exchange so tests can substitute exchangeToken instead of hitting
+	// GitHub's real endpoint.
+	ctx, cancel := context.WithTimeout(context.Background(), importCopilotTimeout)
+	defer cancel()
+	token, err := m.exchange(ctx, string(catwalk.InferenceProviderCopilot), diskToken)
 	if err != nil {
 		slog.Error("Unable to import GitHub Copilot token", "error", err)
 		return nil, false

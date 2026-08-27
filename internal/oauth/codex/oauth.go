@@ -171,13 +171,16 @@ func (f *Flow) handleCallback(w http.ResponseWriter, req *http.Request) {
 		ErrorDescription: query.Get("error_description"),
 	}
 	code := query.Get("code")
+	stateMismatch := query.Get("state") != f.state
 	switch {
-	case result.Failed():
-	case query.Get("state") != f.state:
+	case stateMismatch:
 		// A mismatched state means this redirect belongs to some other
-		// authorization, not the one we started.
+		// authorization, not the one we started — checked before
+		// "error", so an unrelated local request carrying an "error="
+		// parameter cannot abort this flow's pending wait below.
 		result.ErrorCode = "invalid_state"
 		result.ErrorDescription = "The sign-in response did not match this request."
+	case result.Failed():
 	case code == "":
 		result.ErrorCode = "missing_code"
 		result.ErrorDescription = "The sign-in response carried no authorization code."
@@ -185,6 +188,11 @@ func (f *Flow) handleCallback(w http.ResponseWriter, req *http.Request) {
 
 	if err := callback.Serve(w, result); err != nil {
 		slog.Warn("Failed to render the Codex sign-in page", "error", err)
+	}
+
+	if stateMismatch {
+		// Not this flow's redirect; leave the pending wait undisturbed.
+		return
 	}
 
 	if result.Failed() {

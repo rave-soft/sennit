@@ -66,17 +66,28 @@ func (b *ConfigBuilder) addLocal(section map[string]any, kind, name string) map[
 	if b.local[kind] == nil {
 		b.local[kind] = make(map[string]bool)
 	}
-	if b.local[kind][name] {
-		return childMap(section, name)
-	}
+	// A tombstoned name's entry is the {TombstoneKey: Tombstone} wrapper,
+	// not a plain config map, on every call for that name — not just the
+	// first. Checking for it ahead of the local[kind][name] cache means a
+	// second addLocal for the same already-reset name (e.g. two flags set
+	// on one re-added entry) keeps writing into tombstone.Replacement
+	// instead of falling through to childMap, which would hand back the
+	// wrapper itself and land the new fields beside __sennit_tombstone —
+	// corrupting the entry so ParseTombstone rejects the whole config.
 	if marker, ok := section[name].(map[string]any); ok {
 		if tombstone, markerOK := marker[TombstoneKey].(Tombstone); markerOK {
+			if b.local[kind][name] {
+				return tombstone.Replacement
+			}
 			replacement := make(map[string]any)
 			tombstone.Replacement = replacement
 			marker[TombstoneKey] = tombstone
 			b.local[kind][name] = true
 			return replacement
 		}
+	}
+	if b.local[kind][name] {
+		return childMap(section, name)
 	}
 	delete(section, name)
 	b.local[kind][name] = true

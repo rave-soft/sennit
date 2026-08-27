@@ -77,7 +77,8 @@ func init() {
 }
 
 func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
-	loginCtx := getLoginContext()
+	loginCtx, stop := getLoginContext()
+	defer stop()
 
 	// A proxy already configured for this provider (e.g. set by hand in
 	// config, or left over from a previous sign-in) should route this
@@ -171,9 +172,13 @@ func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
 // in the flow, including the listener close that frees the fixed callback
 // port. NotifyContext stops trapping after the first signal, so a second
 // interrupt still ends the process immediately.
-func getLoginContext() context.Context {
-	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	return ctx
+//
+// The returned stop func must be deferred by the caller: NotifyContext
+// leaves its os/signal registration in place until stop is called, so a
+// caller that discarded it (as this used to) leaked a signal handler on
+// every login attempt in a process that runs more than one, e.g. tests.
+func getLoginContext() (context.Context, func()) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
 func waitEnter() {

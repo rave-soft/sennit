@@ -149,7 +149,12 @@ func TestStartFlowPortIsExclusive(t *testing.T) {
 }
 
 // TestFlowRejectsMismatchedState: a callback that does not carry this
-// flow's state belongs to some other authorization and must not settle it.
+// flow's state belongs to some other authorization and must not settle
+// this flow — the requester sees an invalid_state page, but the one-shot
+// settle slot stays open for the real redirect, which may still arrive.
+// Settling here (as this used to) would let any request to the loopback
+// port with the wrong state — not even an "error=" one — abort a sign-in
+// that was otherwise about to succeed.
 func TestFlowRejectsMismatchedState(t *testing.T) {
 	flow := startTestFlow(t, "")
 
@@ -157,9 +162,44 @@ func TestFlowRejectsMismatchedState(t *testing.T) {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, callbackPath+"?code=abc&state=not-the-state", nil)
 	flow.handleCallback(rec, req)
 
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "invalid_state")
+	select {
+	case res := <-flow.results:
+		t.Fatalf("a mismatched-state request settled the flow: %+v", res)
+	default:
+	}
+}
+
+// TestFlowIgnoresForgedErrorWithWrongState is the regression test for the
+// actual vulnerability: an unrelated local request carrying both a forged
+// "error=" and the wrong state must not be allowed to abort an in-flight
+// sign-in — before the fix, "error" was checked ahead of "state", so this
+// exact request settled the flow with the attacker's forged error message.
+// The real redirect, arriving afterward with the correct state and code,
+// must still be able to complete the sign-in.
+func TestFlowIgnoresForgedErrorWithWrongState(t *testing.T) {
+	flow := startTestFlow(t, "")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		callbackPath+"?error=access_denied&error_description=forged&state=not-the-state", nil)
+	flow.handleCallback(rec, req)
+
+	select {
+	case res := <-flow.results:
+		t.Fatalf("a forged error with the wrong state settled the flow: %+v", res)
+	default:
+	}
+
+	// The real redirect still completes the sign-in.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, callbackPath+"?code=abc&state="+flow.state, nil)
+	flow.handleCallback(rec, req)
+
 	res := <-flow.results
-	require.Error(t, res.err)
-	require.Empty(t, res.code)
+	require.NoError(t, res.err)
+	require.Equal(t, "abc", res.code)
 }
 
 // TestFlowIgnoresUnrelatedPaths: browsers fetch /favicon.ico against the

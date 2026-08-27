@@ -63,25 +63,11 @@ func (s *stubConfigAccessor) RefreshOAuthToken(context.Context, config.Scope, st
 	return nil
 }
 
-// TestLogoutHyper_RemovesBothFieldsAndReturnsFirstError guards the
-// cmp.Or -> explicit-checks rewrite in logoutHyper: both config fields must
-// still be removed even when the first removal fails (cmp.Or evaluated both
-// of its arguments unconditionally, and the rewrite must keep doing so), and
-// the first error must be the one returned.
-func TestLogoutHyper_RemovesBothFieldsAndReturnsFirstError(t *testing.T) {
-	t.Parallel()
-
-	wantErr := fmt.Errorf("boom")
-	ws := &stubConfigAccessor{errs: map[string]error{
-		"providers.hyper.api_key": wantErr,
-	}}
-
-	err := logoutHyper(ws)
-	require.ErrorIs(t, err, wantErr)
-	require.Equal(t, []string{"providers.hyper.api_key", "providers.hyper.oauth"}, ws.removed)
-}
-
-// TestLogoutCodex_RemovesAllFieldsAndReturnsFirstError does the same for
+// TestLogoutCodex_RemovesAllFieldsAndReturnsFirstError guards the
+// cmp.Or -> explicit-checks rewrite in logoutProvider: every field must
+// still be removed even when an earlier removal fails (cmp.Or evaluated
+// both of its arguments unconditionally, and the rewrite must keep doing
+// so), and the first error must be the one returned. It also covers
 // logoutCodex's three fields, checking that an error on the middle field
 // still lets the third removal run and that the middle field's error wins
 // over what would be a later error too.

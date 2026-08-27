@@ -1,12 +1,79 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
 )
+
+// failingResolver always fails, so TestConnection callers can assert the
+// resolver's error surfaces instead of being swallowed.
+type failingResolver struct{ err error }
+
+func (f failingResolver) ResolveValue(string) (string, error) {
+	return "", f.err
+}
+
+// TestProviderConfig_TestConnection_PropagatesAPIKeyResolverError pins the
+// fix for a resolver failure (e.g. an unset env var referenced by the API
+// key) being discarded and reported as a generic connection failure that
+// hides the real cause.
+func TestProviderConfig_TestConnection_PropagatesAPIKeyResolverError(t *testing.T) {
+	t.Parallel()
+
+	pc := &ProviderConfig{ID: "openai", Type: catwalk.TypeOpenAI, APIKey: "$MISSING"}
+	wantErr := errors.New("MISSING is not set")
+
+	err := pc.TestConnection(failingResolver{err: wantErr})
+	require.ErrorIs(t, err, wantErr)
+}
+
+// TestProviderConfig_TestConnection_PropagatesBaseURLResolverError covers
+// the same swallowed-error bug for the base URL resolver call.
+func TestProviderConfig_TestConnection_PropagatesBaseURLResolverError(t *testing.T) {
+	t.Parallel()
+
+	pc := &ProviderConfig{ID: "openai", Type: catwalk.TypeOpenAI, APIKey: "key", BaseURL: "$MISSING"}
+	wantErr := errors.New("MISSING is not set")
+
+	err := pc.TestConnection(baseURLFailingResolver{err: wantErr})
+	require.ErrorIs(t, err, wantErr)
+}
+
+// baseURLFailingResolver resolves the API key but fails on anything else,
+// isolating the base-URL resolution error path from the API-key one.
+type baseURLFailingResolver struct{ err error }
+
+func (b baseURLFailingResolver) ResolveValue(value string) (string, error) {
+	if value == "key" {
+		return value, nil
+	}
+	return "", b.err
+}
+
+// TestProviderConfig_TestConnection_UsesConfiguredProxy pins the fix for
+// TestConnection building a plain *http.Client that ignored ProxyURL: an
+// invalid proxy value must surface as a proxy-configuration error rather
+// than TestConnection silently connecting straight out.
+func TestProviderConfig_TestConnection_UsesConfiguredProxy(t *testing.T) {
+	t.Parallel()
+
+	pc := &ProviderConfig{
+		ID:       "openai",
+		Type:     catwalk.TypeOpenAI,
+		APIKey:   "key",
+		BaseURL:  "https://example.invalid/v1",
+		ProxyURL: "ftp://bad-scheme",
+	}
+
+	err := pc.TestConnection(IdentityResolver())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "proxy")
+}
 
 // TestProviders_PerConfigDisableDefaultProviders: Providers used to
 // memoize its result process-globally via sync.Once, so the first *Config

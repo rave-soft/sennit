@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"charm.land/lipgloss/v2"
 	"github.com/pkg/browser"
@@ -23,7 +24,8 @@ import (
 // model requests that follow: for a user who can only reach OpenAI through a
 // proxy, a token exchange that ignored it would fail on its own.
 func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error {
-	loginCtx := getLoginContext()
+	loginCtx, stop := getLoginContext()
+	defer stop()
 
 	if err := codex.ValidateProxy(proxyURL); err != nil {
 		return err
@@ -71,6 +73,19 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 	// happens to want, and a later "give this account no proxy" could no
 	// longer tell the two apart. Routing it only through the provider
 	// default keeps that one value in one place.
+	//
+	// Because this write lands before RecordAccount, a failure in either
+	// of the two steps below must roll it back — otherwise a login that
+	// ultimately failed would still leave the provider's proxy changed
+	// with no new account to show for it.
+	var previousProxyURL string
+	hadProxyURL := false
+	if cfg := ws.Config(); cfg != nil {
+		if pc, ok := cfg.Providers.Get(codex.ProviderID); ok {
+			previousProxyURL = pc.ConfiguredProxyURL
+			hadProxyURL = previousProxyURL != ""
+		}
+	}
 	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
 	if proxyURL == "" {
 		if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {
@@ -90,6 +105,7 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 	// Account.
 	before, err := accStore.List(codex.ProviderID)
 	if err != nil {
+		restoreCodexProxyField(ws, hadProxyURL, previousProxyURL)
 		return fmt.Errorf("listing existing Codex accounts: %w", err)
 	}
 	account, err := ws.RecordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
@@ -97,6 +113,7 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 		AccountID: accountID,
 	})
 	if err != nil {
+		restoreCodexProxyField(ws, hadProxyURL, previousProxyURL)
 		return err
 	}
 
@@ -132,6 +149,24 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 		fmt.Printf("You now have %d Codex accounts.\n", len(after))
 	}
 	return nil
+}
+
+// restoreCodexProxyField undoes loginCodex's provider-level proxy_url write
+// after a later step (listing accounts, recording the account) fails, so a
+// failed login does not leave the proxy setting changed with no new
+// account to show for it. Best effort: a failure here is logged rather
+// than returned, since the caller already has the real error to report.
+func restoreCodexProxyField(ws workspace.ConfigAccessor, hadProxyURL bool, previousProxyURL string) {
+	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
+	var err error
+	if hadProxyURL {
+		err = ws.SetConfigField(config.ScopeGlobal, proxyKey, previousProxyURL)
+	} else {
+		err = ws.RemoveConfigField(config.ScopeGlobal, proxyKey)
+	}
+	if err != nil {
+		slog.Error("Failed to roll back Codex proxy setting after a failed login", "error", err)
+	}
 }
 
 // codexToken obtains a token, preferring an existing Codex CLI login on disk

@@ -68,8 +68,6 @@ sennit logout codex
 		}
 
 		switch provider {
-		case "hyper":
-			return logoutHyper(ws)
 		case "copilot", "github", "github-copilot":
 			return logoutCopilot(ws)
 		case "codex", "chatgpt", "openai-codex":
@@ -113,10 +111,6 @@ func logoutProvider(ws workspace.ConfigAccessor, providerID, displayName string,
 	return nil
 }
 
-func logoutHyper(ws workspace.ConfigAccessor) error {
-	return logoutProvider(ws, "hyper", "Hyper")
-}
-
 func logoutCopilot(ws workspace.ConfigAccessor) error {
 	return logoutProvider(ws, "copilot", "GitHub Copilot")
 }
@@ -143,7 +137,6 @@ func pickLoggedInProvider(ws workspace.ConfigAccessor) string {
 	// Only OAuth-based providers support login/logout. Keep this list in sync
 	// with the switch in RunE and the login command.
 	oauthProviders := map[string]string{
-		"hyper":   "Hyper",
 		"copilot": "GitHub Copilot",
 		"codex":   "OpenAI Codex",
 	}

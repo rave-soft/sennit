@@ -49,6 +49,35 @@ mcp add github --command node`)
 	require.NotContains(t, replacement, TombstoneKey)
 }
 
+// TestMCPRemoveThenTwoAddsStaysFresh pins the fix for addLocal returning
+// the tombstone wrapper map itself on a second "add" of an already-reset
+// name: before the fix, this second call's fields landed beside
+// __sennit_tombstone inside the wrapper, which ParseTombstone then
+// rejects as an invalid tombstone (it requires exactly one field).
+func TestMCPRemoveThenTwoAddsStaysFresh(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `mcp remove github
+mcp add github --command node
+mcp add github --env FOO bar`)
+
+	entry := result["mcp"].(map[string]any)["github"].(map[string]any)
+	marker := entry[TombstoneKey].(map[string]any)
+	require.Len(t, marker, 3, "tombstone marker must only ever hold section/name/replacement")
+
+	replacement := marker["replacement"].(map[string]any)
+	require.Equal(t, "node", replacement["command"])
+	require.Equal(t, "bar", replacement["env"].(map[string]any)["FOO"])
+	require.NotContains(t, replacement, TombstoneKey)
+
+	// Confirm the whole document still parses as a valid tombstone —
+	// this is exactly what production's config loader does with it.
+	tombstone, ok, err := ParseTombstone(entry, "mcp", "github")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "node", tombstone.Replacement["command"])
+}
+
 func TestMCPOAuthFlags(t *testing.T) {
 	t.Parallel()
 

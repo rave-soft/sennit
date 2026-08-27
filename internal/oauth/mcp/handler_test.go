@@ -386,13 +386,17 @@ func TestHandler_AuthorizeError(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 
-	// Simulate the user denying consent: redirect back with an error.
+	// Simulate the user denying consent: redirect back with an error. A
+	// real authorization server always echoes the original state, so the
+	// synthetic redirect must too, or the flight's state check (state is
+	// validated before "error") ignores it as unrelated to this flow.
 	h.openURL = func(rawAuthURL string) error {
 		u, _ := url.Parse(rawAuthURL)
 		cb, _ := url.Parse(u.Query().Get("redirect_uri"))
 		q := cb.Query()
 		q.Set("error", "access_denied")
 		q.Set("error_description", "user said no")
+		q.Set("state", u.Query().Get("state"))
 		cb.RawQuery = q.Encode()
 		go func() {
 			resp, gerr := http.Get(cb.String()) //nolint:noctx
@@ -479,7 +483,7 @@ func TestCallbackReceiver_IgnoresNonCallbackPaths(t *testing.T) {
 
 	base := serveReceiver(t, r)
 
-	flight, owned, err := r.begin()
+	flight, owned, err := r.begin("xyz")
 	require.NoError(t, err)
 	require.True(t, owned)
 
@@ -516,7 +520,7 @@ func TestCallbackReceiver_RendersFailurePage(t *testing.T) {
 
 	base := serveReceiver(t, r)
 
-	flight, owned, err := r.begin()
+	flight, owned, err := r.begin("")
 	require.NoError(t, err)
 	require.True(t, owned)
 
@@ -535,6 +539,50 @@ func TestCallbackReceiver_RendersFailurePage(t *testing.T) {
 
 	<-flight.done
 	require.ErrorContains(t, flight.err, "access_denied")
+}
+
+// TestCallbackReceiver_ForgedErrorWithWrongStateDoesNotAbort is the
+// regression test for the actual vulnerability: an unrelated local
+// request carrying both a forged "error=" and the wrong state must not be
+// allowed to abort an in-flight authorization — before the fix, "error"
+// was checked ahead of "state", so this exact request settled the flight
+// with the attacker's forged error. The real redirect, arriving
+// afterward with the correct state and code, must still complete it.
+func TestCallbackReceiver_ForgedErrorWithWrongStateDoesNotAbort(t *testing.T) {
+	t.Parallel()
+
+	r := &callbackReceiver{serverName: "linear"}
+	t.Cleanup(r.close)
+
+	base := serveReceiver(t, r)
+
+	flight, owned, err := r.begin("xyz")
+	require.NoError(t, err)
+	require.True(t, owned)
+
+	forgedURL := base + callbackPath +
+		"?error=access_denied&error_description=forged&state=not-the-state"
+	resp, err := http.Get(forgedURL) //nolint:noctx
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	select {
+	case <-flight.done:
+		t.Fatalf("a forged error with the wrong state settled the flight: err=%v", flight.err)
+	default:
+	}
+
+	// The real redirect still completes the authorization.
+	realURL := base + callbackPath + "?code=abc&state=xyz"
+	resp, err = http.Get(realURL) //nolint:noctx
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	<-flight.done
+	require.NoError(t, flight.err)
+	require.Equal(t, "abc", flight.result.Code)
 }
 
 // TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab is a regression test
@@ -572,7 +620,11 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 	errs := make(chan error, callers)
 	for range callers {
 		wg.Go(func() {
-			result, ferr := r.fetchAuthorizationCode(t.Context(), &auth.AuthorizationArgs{URL: base + "/authorize"})
+			// state must match what the stand-in redirect above carries
+			// (state=xyz): the flight now pins the state its authorize
+			// URL was opened with and ignores any redirect that doesn't
+			// carry it back.
+			result, ferr := r.fetchAuthorizationCode(t.Context(), &auth.AuthorizationArgs{URL: base + "/authorize?state=xyz"})
 			results <- result
 			errs <- ferr
 		})
