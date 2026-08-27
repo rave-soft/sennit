@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/proxyhttp"
@@ -286,9 +291,14 @@ func authAddOAuth(ws workspace.ConfigAccessor, providerID string) error {
 func authAddAPIKey(ws workspace.ConfigAccessor, providerID, apiKey string) error {
 	if apiKey == "" {
 		fmt.Printf("API key for %s: ", providerID)
-		if _, err := fmt.Scanln(&apiKey); err != nil {
+		key, err := readSecretLine(os.Stdin)
+		if err != nil {
 			return fmt.Errorf("reading API key: %w", err)
 		}
+		apiKey = key
+	}
+	if apiKey == "" {
+		return fmt.Errorf("API key for %s must not be empty", providerID)
 	}
 	account, err := ws.RecordAccount(config.ScopeGlobal, providerID, accounts.LegacyCredential{
 		APIKey:          apiKey,
@@ -299,6 +309,28 @@ func authAddAPIKey(ws workspace.ConfigAccessor, providerID, apiKey string) error
 	}
 	fmt.Printf("Added the %s account %q.\n", providerID, account.Label)
 	return nil
+}
+
+// readSecretLine reads one line of secret input from in without echoing it
+// to the terminal. Unlike fmt.Scanln into a single string, it reads the
+// whole line, so a key containing spaces survives intact; only the trailing
+// newline and surrounding whitespace are trimmed. When in isn't a terminal
+// (piped input, CI), there's no echo to suppress, so it falls back to a
+// plain line read instead of failing.
+func readSecretLine(in *os.File) (string, error) {
+	if term.IsTerminal(in.Fd()) {
+		b, err := term.ReadPassword(in.Fd())
+		fmt.Println()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }
 
 // authListAll lists every provider with at least one stored account.

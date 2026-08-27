@@ -325,3 +325,39 @@ func TestAuthList_UsageOnlyForCapableProvider(t *testing.T) {
 	require.False(t, accounts.CapabilitiesOf("auth-test-provider").Usage,
 		"an api-key-style provider must not be treated as usage-reporting")
 }
+
+// TestReadSecretLine_NonTerminalPreservesSpaces pins the non-terminal
+// fallback path in readSecretLine: an os.Pipe is never a TTY, so this
+// exercises the same branch a piped `sennit accounts add` invocation would
+// take. Before the fix, authAddAPIKey used fmt.Scanln, which truncates at
+// the first space; readSecretLine must read the whole line instead.
+func TestReadSecretLine_NonTerminalPreservesSpaces(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+
+	_, err = w.WriteString("sk-has a space\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	got, err := readSecretLine(r)
+	require.NoError(t, err)
+	require.Equal(t, "sk-has a space", got)
+}
+
+// TestReadSecretLine_NonTerminalTrimsTrailingWhitespaceOnly pins that only
+// the trailing newline/whitespace is trimmed, not interior spaces, and that
+// a key with no trailing newline (EOF instead) still comes through.
+func TestReadSecretLine_NonTerminalTrimsTrailingWhitespaceOnly(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+
+	_, err = w.WriteString("  sk-abc 123  ")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	got, err := readSecretLine(r)
+	require.NoError(t, err)
+	require.Equal(t, "sk-abc 123", got)
+}
