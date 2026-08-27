@@ -3,6 +3,8 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -83,7 +85,11 @@ func (r *Runner) Hooks() []Hook {
 }
 
 // Run executes all matching hooks for the given event and tool, returning
-// an aggregated result.
+// an aggregated result. The returned error is non-nil only when a hook's
+// shell process failed to yield after cancellation and its goroutine had
+// to be abandoned (see runOne) — a resource-leak condition worth
+// surfacing on its own, distinct from an ordinary hook failure, which
+// aggregate folds into DecisionNone rather than an error.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
 	matching := r.matchingHooks(toolName)
 	if len(matching) == 0 {
@@ -111,13 +117,14 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
 
 	results := make([]HookResult, len(deduped))
+	errs := make([]error, len(deduped))
 	var wg sync.WaitGroup
 	wg.Add(len(deduped))
 
 	for i, h := range deduped {
 		go func(idx int, hook Hook) {
 			defer wg.Done()
-			results[idx] = r.runOne(ctx, hook, envVars, payload)
+			results[idx], errs[idx] = r.runOne(ctx, hook, envVars, payload)
 		}(i, h)
 	}
 	wg.Wait()
@@ -141,7 +148,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		"hooks", len(deduped),
 		"decision", agg.Decision.String(),
 	)
-	return agg, nil
+	return agg, errors.Join(errs...)
 }
 
 // matchingHooks returns hooks whose matcher matches the tool name (or has
@@ -156,7 +163,11 @@ func (r *Runner) matchingHooks(toolName string) []Hook {
 	return matched
 }
 
-// runOne executes a single hook command and returns its result.
+// runOne executes a single hook command and returns its result. The
+// returned error is non-nil only on the abandon path below — every other
+// outcome (deny, halt, timeout, non-zero exit) is reported through the
+// HookResult itself, matching how the rest of the hook pipeline treats a
+// misbehaving hook as data rather than a Go error.
 //
 // Execution goes through Sennit's embedded POSIX shell (shell.Run) so the
 // same interpreter, builtins, and coreutils are visible to hooks as to
@@ -172,7 +183,7 @@ func (r *Runner) matchingHooks(toolName string) []Hook {
 //     outer frame reads them;
 //   - on the abandon path, the goroutine may still be writing and the
 //     outer frame must not touch them again.
-func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, payload []byte) HookResult {
+func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, payload []byte) (HookResult, error) {
 	timeout := hook.TimeoutDuration()
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
@@ -206,7 +217,10 @@ func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, 
 			)
 			// The goroutine may still be writing to stdout/stderr; do
 			// not read either buffer below this point.
-			return HookResult{Decision: DecisionNone}
+			return HookResult{Decision: DecisionNone}, fmt.Errorf(
+				"hook %q did not yield after cancellation; goroutine abandoned",
+				hook.Command,
+			)
 		}
 	}
 
@@ -217,7 +231,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, 
 		} else {
 			slog.Warn("Hook timed out", "command", hook.Command, "timeout", timeout)
 		}
-		return HookResult{Decision: DecisionNone}
+		return HookResult{Decision: DecisionNone}, nil
 	}
 
 	if err != nil {
@@ -232,7 +246,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, 
 			return HookResult{
 				Decision: DecisionDeny,
 				Reason:   reason,
-			}
+			}, nil
 		case HaltExitCode:
 			// Exit code 49 = halt the whole turn. Stderr is the reason.
 			reason := strings.TrimSpace(stderr.String())
@@ -243,7 +257,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, 
 				Decision: DecisionDeny,
 				Halt:     true,
 				Reason:   reason,
-			}
+			}, nil
 		default:
 			// Other non-zero exits are non-blocking errors.
 			slog.Warn(
@@ -253,7 +267,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, 
 				"stderr", strings.TrimSpace(stderr.String()),
 				"error", err,
 			)
-			return HookResult{Decision: DecisionNone}
+			return HookResult{Decision: DecisionNone}, nil
 		}
 	}
 
@@ -264,5 +278,5 @@ func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, 
 		"command", hook.Command,
 		"decision", result.Decision.String(),
 	)
-	return result
+	return result, nil
 }

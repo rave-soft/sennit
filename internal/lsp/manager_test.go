@@ -229,6 +229,51 @@ func TestStartServer_ConcurrentStartsCreateOneClient(t *testing.T) {
 	require.Equal(t, StateReady, client.GetServerState())
 }
 
+// TestWorkspaceClients_ScopedToRoot pins the bug where WorkspaceClients
+// returned every client the Manager had ever started, ignoring the root
+// it was asked about. Two servers are configured, one for Go and one for
+// Python files; root only contains a .go file, so only the Go server is
+// relevant to it. A client for the Python server is already running
+// (started for some other file elsewhere), so it sits in mgr.clients
+// alongside the Go client. WorkspaceClients must return only the client
+// whose server actually handles something under root.
+func TestWorkspaceClients_ScopedToRoot(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
+
+	cfg := configtest.NewStore(t, &config.Config{
+		Options: &config.Options{},
+		LSP: config.LSPs{
+			"go-lsp": {
+				Command:   "go-lsp-binary",
+				FileTypes: []string{"go"},
+			},
+			"py-lsp": {
+				Command:   "py-lsp-binary",
+				FileTypes: []string{"py"},
+			},
+		},
+	}, configtest.WithWorkingDir(dir))
+
+	mgr := NewManager(cfg)
+
+	// Pre-populate both clients as already running, so startServer's
+	// fast path reuses them instead of trying to spawn a real process.
+	for _, name := range []string{"go-lsp", "py-lsp"} {
+		client := newTestClient()
+		client.name = name
+		client.SetServerState(StateReady)
+		mgr.clients.Set(name, client)
+	}
+
+	clients := mgr.WorkspaceClients(t.Context(), dir)
+
+	require.Len(t, clients, 1, "only the server relevant to root should be returned")
+	require.Equal(t, "go-lsp", clients[0].GetName())
+}
+
 // TestStartServer_StateRaceSafeUnderConcurrentUIReads pins the state
 // race: startServer writes the server state (Starting during Initialize,
 // Ready/Error afterwards) while a UI goroutine polls GetServerState. A

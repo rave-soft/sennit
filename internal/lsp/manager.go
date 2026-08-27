@@ -153,9 +153,11 @@ func (s *Manager) WorkspaceClients(ctx context.Context, root string) []*Client {
 		}
 		return nil
 	})
-	clients := make([]*Client, 0)
-	for _, client := range s.clients.Copy() {
-		clients = append(clients, client)
+	clients := make([]*Client, 0, len(found))
+	for name := range found {
+		if client, ok := s.clients.Get(name); ok {
+			clients = append(clients, client)
+		}
 	}
 	return clients
 }

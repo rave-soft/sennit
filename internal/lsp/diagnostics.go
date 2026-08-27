@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -313,7 +314,11 @@ func (d *diagnosticsStore) getFileDiagnostics(uri protocol.DocumentURI) []protoc
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	diags, _ := d.store.Get(uri)
-	return diags
+	// Clone: the slice we hand back aliases the store's backing array, so
+	// a caller mutating or appending to it (within capacity) would
+	// silently corrupt or observe changes to internal state. getDiagnostics
+	// copies for the same reason.
+	return slices.Clone(diags)
 }
 
 // GetDiagnostics returns all diagnostics for all files.

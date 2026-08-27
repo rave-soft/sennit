@@ -656,7 +656,9 @@ func TestRunnerAbandonRaceSafety(t *testing.T) {
 	result, err := r.Run(ctx, EventPreToolUse, "sess", "bash", `{}`)
 	elapsed := time.Since(start)
 
-	require.NoError(t, err)
+	// Abandoning the goroutine is a real failure (a leaked process),
+	// distinct from an ordinary hook decision, so Run reports it.
+	require.ErrorContains(t, err, "abandoned")
 	require.Equal(t, DecisionNone, result.Decision)
 	// Abandon must happen at ~timeout + abandonGrace. Allow generous
 	// slack so CI noise doesn't flake the test.
