@@ -724,3 +724,232 @@ func TestFastForwardNonFastForward(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNonFastForward))
 }
+
+// createRefAt points refs/heads/name at repo's current HEAD via update-ref,
+// bypassing "git branch"'s own name validation. Git's ref-format rules
+// permit a leading dash in a ref component (only the porcelain "branch"
+// command forbids it — see git-check-ref-format(1)), so a branch named this
+// way can genuinely exist; this is how a thread name arriving from outside
+// Sennit's own slug validation could reach these functions.
+func createRefAt(t *testing.T, ctx context.Context, repo, name string) {
+	t.Helper()
+	head, err := run(ctx, repo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "update-ref", "refs/heads/"+name, head)
+	require.NoError(t, err)
+}
+
+// A branch name beginning with "-" must be handled as a name, not parsed as
+// a git option. Before the fix, "worktree add -b -f path base" had "-f"
+// consumed as --force by worktree add's internal branch-creation step,
+// which then tried to force-update whatever base pointed at (see the
+// WorktreeAdd doc comment) instead of failing on an invalid branch name.
+func TestWorktreeAdd_LeadingDashBranchNameFailsClosed(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	// "victim" is not checked out anywhere, so nothing here stops
+	// "-D" from being honored as --D (force-delete) against it if it
+	// gets parsed as an option instead of a branch name — see the doc
+	// comment on WorktreeAdd. Before the fix, "git worktree add -b -D
+	// path victim" deleted "victim" outright and only then failed on
+	// checkout, so the branch was already gone by the time the error
+	// came back.
+	_, err := run(ctx, repo, "branch", "victim")
+	require.NoError(t, err)
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	err = WorktreeAdd(ctx, repo, wtPath, "-D", "victim")
+	require.Error(t, err)
+
+	exists, err := BranchExists(ctx, repo, "victim")
+	require.NoError(t, err)
+	require.True(t, exists, "the base branch must survive a rejected branch name")
+
+	require.NoDirExists(t, wtPath)
+}
+
+// A base ref beginning with "-" is treated as a name to check out from, not
+// as an option to "git branch"/"git worktree add".
+func TestWorktreeAdd_LeadingDashBase(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	createRefAt(t, ctx, repo, "-based")
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "-based"))
+
+	tip, err := run(ctx, repo, "rev-parse", "refs/heads/-based")
+	require.NoError(t, err)
+	featureTip, err := run(ctx, wtPath, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	require.Equal(t, tip, featureTip)
+}
+
+// WorktreeAdd is two git calls, not one: "git branch -- newBranch base"
+// followed by "git worktree add -- path newBranch" (see its doc comment for
+// why the atomic "-b" form can't be used). That opens a window a single
+// command never had: the branch call can succeed and the worktree call can
+// still fail, e.g. because path is already occupied. Without cleanup that
+// leaves newBranch behind, and thread creation's only real caller reuses
+// the same name on retry, so the branch would keep "already exists"-ing
+// forever.
+func TestWorktreeAdd_CleansUpBranchOnFailedCheckout(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	// A pre-existing, non-empty directory at path makes "worktree add"
+	// fail after "branch --" has already created the branch.
+	occupied := filepath.Join(t.TempDir(), "occupied")
+	require.NoError(t, os.MkdirAll(occupied, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(occupied, "x"), []byte("x"), 0o644))
+
+	err := WorktreeAdd(ctx, repo, occupied, "newbranch", "main")
+	require.Error(t, err)
+
+	exists, err := BranchExists(ctx, repo, "newbranch")
+	require.NoError(t, err)
+	require.False(t, exists, "a failed worktree add must not leave the branch behind")
+}
+
+// A worktree path beginning with "-" is removed as a path, not parsed as an
+// option to "git worktree remove".
+func TestWorktreeRemove_LeadingDashPath(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	wtPath := filepath.Join(t.TempDir(), "-weird")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+	require.NoError(t, WorktreeRemove(ctx, repo, wtPath, false))
+
+	require.NoDirExists(t, wtPath)
+}
+
+// A branch name beginning with "-" is deleted as a name, not parsed as a
+// second flag to "git branch -d/-D".
+func TestDeleteBranch_LeadingDashName(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	createRefAt(t, ctx, repo, "-weird")
+
+	require.NoError(t, DeleteBranch(ctx, repo, "-weird", true))
+
+	exists, err := BranchExists(ctx, repo, "-weird")
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	// "main" (this repo's checked-out branch) must be unaffected.
+	branch, err := CurrentBranch(ctx, repo)
+	require.NoError(t, err)
+	require.Equal(t, "main", branch)
+}
+
+// A ref beginning with "-" is looked up as a name in both positions of
+// "git merge-base --is-ancestor", not parsed as an option.
+func TestIsAncestor_LeadingDashRef(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	createRefAt(t, ctx, repo, "-weird")
+
+	isAncestor, err := IsAncestor(ctx, repo, "-weird", "main")
+	require.NoError(t, err)
+	require.True(t, isAncestor, "the dash-named ref points at the same commit as main")
+}
+
+// A ref beginning with "-" is merged as a name, not parsed as an option to
+// "git merge --no-edit".
+func TestMergeIntoWorktree_LeadingDashRef(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	// Advance a detached HEAD rather than the "-weird" ref itself (checking
+	// it out by its bare name hits the very option-parsing ambiguity this
+	// package works around, and is not what's under test here), then point
+	// refs/heads/-weird at the new commit directly.
+	head, err := run(ctx, repo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "checkout", "--detach", head)
+	require.NoError(t, err)
+	writeFile(t, repo, "feature.txt", "content\n")
+	committed, err := CommitAll(ctx, repo, "add feature.txt")
+	require.NoError(t, err)
+	require.True(t, committed)
+	newHead, err := run(ctx, repo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "update-ref", "refs/heads/-weird", newHead)
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "checkout", "main")
+	require.NoError(t, err)
+
+	result, err := MergeIntoWorktree(ctx, repo, "-weird")
+	require.NoError(t, err)
+	require.True(t, result.Merged)
+	require.FileExists(t, filepath.Join(repo, "feature.txt"))
+}
+
+// A ref beginning with "-" fast-forwards the checked-out branch as a name,
+// not parsed as an option to "git merge --ff-only".
+func TestMergeFFOnly_LeadingDashRef(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	// As in TestMergeIntoWorktree_LeadingDashRef, advance a detached HEAD
+	// and point refs/heads/-weird at it directly rather than checking out
+	// "-weird" by name, so the setup itself doesn't hit the ambiguity this
+	// package's fix works around.
+	head, err := run(ctx, repo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "checkout", "--detach", head)
+	require.NoError(t, err)
+	writeFile(t, repo, "feature.txt", "content\n")
+	committed, err := CommitAll(ctx, repo, "add feature.txt")
+	require.NoError(t, err)
+	require.True(t, committed)
+	newHead, err := run(ctx, repo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "update-ref", "refs/heads/-weird", newHead)
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "checkout", "main")
+	require.NoError(t, err)
+
+	require.NoError(t, MergeFFOnly(ctx, repo, "-weird"))
+	require.FileExists(t, filepath.Join(repo, "feature.txt"))
+}
+
+// A source branch name beginning with "-" survives FastForward's
+// push-based update: the combined "branch:ontoBase" refspec string starts
+// with whatever branch starts with, so this is the position that actually
+// exercises the option-parsing ambiguity (the target half sits after the
+// ":" and never leads the argument).
+func TestFastForward_LeadingDashBranch(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	// "-weird" is the fast-forward source, one commit ahead of "base3",
+	// neither of them checked out anywhere.
+	_, err := run(ctx, repo, "branch", "base3")
+	require.NoError(t, err)
+	head, err := run(ctx, repo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "checkout", "--detach", head)
+	require.NoError(t, err)
+	writeFile(t, repo, "feature.txt", "content\n")
+	committed, err := CommitAll(ctx, repo, "add feature.txt")
+	require.NoError(t, err)
+	require.True(t, committed)
+	newHead, err := run(ctx, repo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "update-ref", "refs/heads/-weird", newHead)
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "checkout", "main")
+	require.NoError(t, err)
+
+	require.NoError(t, FastForward(ctx, repo, "-weird", "base3"))
+
+	tip, err := run(ctx, repo, "rev-parse", "base3")
+	require.NoError(t, err)
+	require.Equal(t, newHead, tip)
+}

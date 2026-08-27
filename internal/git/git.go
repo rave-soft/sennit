@@ -239,8 +239,40 @@ func BranchExists(ctx context.Context, repo, name string) (bool, error) {
 
 // WorktreeAdd creates a new worktree at path, checking out a new branch
 // newBranch created from base.
+//
+// This is two git calls rather than the single "worktree add -b newBranch
+// path base" one might expect. "worktree add" re-derives its branch-creation
+// logic from newBranch without ever treating it as an end-of-options
+// boundary would: "worktree add -b -f path base" parses "-f" as --force and
+// tries to force-update whatever is checked out at base, and "-d" tries to
+// delete it, instead of failing on the branch name (verified against git
+// 2.53). "git branch -- newBranch base" does not have that problem — with
+// "--" in place it treats newBranch strictly as a name and rejects a
+// leading dash the same way it always rejects an invalid branch name, so
+// it fails closed instead of doing something unrelated to the caller's
+// request. The second call then just checks out the branch that already
+// exists.
+//
+// Two calls means a window the single-command form never had: if the first
+// succeeds and the second fails (path already occupied, a stale worktree
+// registration, the branch already checked out elsewhere, ...), newBranch
+// would otherwise be left behind even though no worktree exists for it. The
+// only production caller (thread creation) reuses the same branch name on
+// retry, so a leftover branch there would turn one transient failure into a
+// permanently stuck name via "branch already exists". Delete newBranch back
+// out on that path so failure here leaves nothing behind, matching what the
+// atomic single-command form would have left. The cleanup is best-effort:
+// its own failure is reported alongside the original error rather than
+// replacing it, since the original is what the caller actually needs to
+// see.
 func WorktreeAdd(ctx context.Context, repo, path, newBranch, base string) error {
-	if _, err := run(ctx, repo, "worktree", "add", "-b", newBranch, path, base); err != nil {
+	if _, err := run(ctx, repo, "branch", "--", newBranch, base); err != nil {
+		return fmt.Errorf("git: worktree add: %w", err)
+	}
+	if _, err := run(ctx, repo, "worktree", "add", "--", path, newBranch); err != nil {
+		if delErr := DeleteBranch(ctx, repo, newBranch, true); delErr != nil {
+			return fmt.Errorf("git: worktree add: %w (cleanup of branch %q also failed: %w)", err, newBranch, delErr)
+		}
 		return fmt.Errorf("git: worktree add: %w", err)
 	}
 	return nil
@@ -292,7 +324,8 @@ func WorktreeRemove(ctx context.Context, repo, path string, force bool) error {
 	if force {
 		args = append(args, "--force")
 	}
-	args = append(args, path)
+	// "--" keeps a path beginning with "-" from being parsed as an option.
+	args = append(args, "--", path)
 	if _, err := run(ctx, repo, args...); err != nil {
 		return fmt.Errorf("git: worktree remove: %w", err)
 	}
@@ -332,7 +365,7 @@ func deregisterMissingWorktree(ctx context.Context, repo, path string) error {
 	if !reg.registered || reg.main || reg.locked {
 		return nil
 	}
-	if _, err := run(ctx, repo, "worktree", "remove", path); err != nil {
+	if _, err := run(ctx, repo, "worktree", "remove", "--", path); err != nil {
 		return fmt.Errorf("git: worktree remove: %w", err)
 	}
 	return nil
@@ -494,7 +527,9 @@ func DeleteBranch(ctx context.Context, repo, name string, force bool) error {
 	if force {
 		flag = "-D"
 	}
-	if _, err := run(ctx, repo, "branch", flag, name); err != nil {
+	// "--" keeps a branch name beginning with "-" from being parsed as a
+	// second flag.
+	if _, err := run(ctx, repo, "branch", flag, "--", name); err != nil {
 		if exists, existsErr := BranchExists(ctx, repo, name); existsErr == nil && !exists {
 			return nil
 		}
@@ -512,7 +547,8 @@ func DeleteBranch(ctx context.Context, repo, name string, force bool) error {
 // one happens to be checked out. Ask about the two branches that actually
 // matter instead.
 func IsAncestor(ctx context.Context, repo, ref, other string) (bool, error) {
-	_, err := run(ctx, repo, "merge-base", "--is-ancestor", ref, other)
+	// "--" keeps a ref beginning with "-" from being parsed as an option.
+	_, err := run(ctx, repo, "merge-base", "--is-ancestor", "--", ref, other)
 	if err == nil {
 		return true, nil
 	}
@@ -563,7 +599,8 @@ type MergeResult struct {
 // conflict is an expected outcome for callers to handle, not a failure of
 // the git invocation itself. Any other git failure is returned as an error.
 func MergeIntoWorktree(ctx context.Context, worktree, ref string) (*MergeResult, error) {
-	_, mergeErr := run(ctx, worktree, "merge", "--no-edit", ref)
+	// "--" keeps a ref beginning with "-" from being parsed as an option.
+	_, mergeErr := run(ctx, worktree, "merge", "--no-edit", "--", ref)
 	if mergeErr == nil {
 		return &MergeResult{Merged: true}, nil
 	}
@@ -613,7 +650,8 @@ func ConflictedFiles(ctx context.Context, worktree string) ([]string, error) {
 // checked out in dir itself (e.g. the repository's primary worktree), where
 // the push-based update FastForward relies on cannot be used.
 func MergeFFOnly(ctx context.Context, dir, ref string) error {
-	if _, err := run(ctx, dir, "merge", "--ff-only", ref); err != nil {
+	// "--" keeps a ref beginning with "-" from being parsed as an option.
+	if _, err := run(ctx, dir, "merge", "--ff-only", "--", ref); err != nil {
 		return fmt.Errorf("git: fast-forward merge: %w", err)
 	}
 	return nil
@@ -627,7 +665,10 @@ func MergeFFOnly(ctx context.Context, dir, ref string) error {
 // react differently (e.g. fall back to a real merge vs. surface a
 // "someone's using that branch" error).
 func FastForward(ctx context.Context, repo, branch, ontoBase string) error {
-	_, err := run(ctx, repo, "push", ".", branch+":"+ontoBase)
+	// "--" keeps a refspec whose branch half begins with "-" (the
+	// combined "branch:ontoBase" string starts with whatever branch
+	// starts with) from being parsed as an option.
+	_, err := run(ctx, repo, "push", ".", "--", branch+":"+ontoBase)
 	if err == nil {
 		return nil
 	}
