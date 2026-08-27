@@ -287,7 +287,19 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			}
 			break
 		}
-		if cmd := m.configureProvider(msg.ProviderID); cmd != nil {
+		if cmd := m.configureProvider(msg.ProviderID, false); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionAddAccount:
+		// The accounts list was built at load time and won't reflect the
+		// new account once sign-in finishes, so rather than leaving it
+		// open and stale, close it now: configureProvider opens its own
+		// OAuth/API-key dialog on top, and the user is left there instead
+		// of back on outdated data. forceNewAccount is true here: the user
+		// explicitly chose to add a new account, not (re-)authenticate the
+		// one already active.
+		m.dialog.CloseDialog(dialog.AccountsID)
+		if cmd := m.configureProvider(msg.ProviderID, true); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionOpenCustomProviderForm:

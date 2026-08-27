@@ -30,8 +30,9 @@ func NewOAuthCodex(
 	isOnboarding bool,
 	provider catwalk.Provider,
 	model *config.SelectedModel,
+	forceNewAccount bool,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, &OAuthCodex{com: com})
+	return newOAuth(com, isOnboarding, provider, model, &OAuthCodex{com: com}, forceNewAccount)
 }
 
 type OAuthCodex struct {
@@ -58,10 +59,17 @@ var (
 	_ OAuthProvider        = (*OAuthCodex)(nil)
 	_ oauthPostSaver       = (*OAuthCodex)(nil)
 	_ oauthProxyConfigurer = (*OAuthCodex)(nil)
+	_ oauthAccountIDer     = (*OAuthCodex)(nil)
 )
 
 func (m *OAuthCodex) name() string {
 	return codex.ProviderName
+}
+
+// accountID implements [oauthAccountIDer]: Codex embeds the account
+// identity in the access token's JWT claims.
+func (m *OAuthCodex) accountID(token *oauth.Token) string {
+	return codex.AccountID(token.AccessToken)
 }
 
 // proxyURL prefills the step, in order of how much it is known to be what

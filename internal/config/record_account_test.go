@@ -218,3 +218,107 @@ func TestRecordAccount_ReloginPreservesAccountProxy(t *testing.T) {
 	require.Len(t, all, 1)
 	require.Equal(t, "http://account-proxy:8080", all[0].ProxyURL, "a relogin with no proxy opinion must not clear the account's proxy")
 }
+
+// TestRecordAccount_NoAccountIDReloginUpdatesActiveInPlace covers a
+// provider with no identity of its own to key logins on (e.g. Copilot).
+// Sennit forces re-authentication for these providers whenever a refresh
+// token is rejected, so a re-login through this path is routine, not a
+// deliberate "add a second account" — it must refresh the already-active
+// account in place rather than growing the list by one every time.
+func TestRecordAccount_NoAccountIDReloginUpdatesActiveInPlace(t *testing.T) {
+	t.Parallel()
+
+	store := newRecordAccountStore(t)
+	accStore := newTestAccountsStore(t)
+
+	firstToken := fakeCodexJWT(t, "")
+	first, err := RecordAccount(store, accStore, ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+		Token: &oauth.Token{AccessToken: firstToken},
+		Label: "My Account",
+	})
+	require.NoError(t, err)
+
+	all, err := accStore.List(codex.ProviderID)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+
+	secondToken := fakeCodexJWT(t, "")
+	second, err := RecordAccount(store, accStore, ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+		Token:    &oauth.Token{AccessToken: secondToken},
+		Label:    "Ignored on relogin",
+		ProxyURL: "",
+	})
+	require.NoError(t, err)
+
+	all, err = accStore.List(codex.ProviderID)
+	require.NoError(t, err)
+	require.Len(t, all, 1, "a forced re-login with no account identity must not create a duplicate")
+	require.Equal(t, first.ID, second.ID, "the account's ID must survive a relogin")
+	require.Equal(t, "My Account", all[0].Label, "the account's label must survive a relogin")
+	require.Equal(t, secondToken, all[0].Token.AccessToken, "the credential itself must be refreshed")
+
+	activeProvider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, secondToken, activeProvider.APIKey, "the account remains active")
+}
+
+// TestRecordAccount_ForceNewAccountCreatesSecondAccount covers "Add
+// account…" for a provider with no AccountID of its own: even though an
+// account is already active, ForceNewAccount tells RecordAccount this is
+// a deliberate new sign-in, so it must create a genuinely new account
+// rather than refreshing the existing one in place.
+func TestRecordAccount_ForceNewAccountCreatesSecondAccount(t *testing.T) {
+	t.Parallel()
+
+	store := newRecordAccountStore(t)
+	accStore := newTestAccountsStore(t)
+
+	firstToken := fakeCodexJWT(t, "")
+	first, err := RecordAccount(store, accStore, ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+		Token: &oauth.Token{AccessToken: firstToken},
+		Label: "First Account",
+	})
+	require.NoError(t, err)
+
+	all, err := accStore.List(codex.ProviderID)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+
+	secondToken := fakeCodexJWT(t, "")
+	second, err := RecordAccount(store, accStore, ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+		Token:           &oauth.Token{AccessToken: secondToken},
+		Label:           "Second Account",
+		ForceNewAccount: true,
+	})
+	require.NoError(t, err)
+
+	all, err = accStore.List(codex.ProviderID)
+	require.NoError(t, err)
+	require.Len(t, all, 2, "a deliberate add must create a new account, not update the existing one")
+	require.NotEqual(t, first.ID, second.ID)
+
+	activeProvider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, secondToken, activeProvider.APIKey, "the newly added account becomes active")
+}
+
+// TestRecordAccount_NoAccountIDNoActiveCreatesNew covers the first-ever
+// sign-in for a provider with no account identity: there is nothing active
+// yet to update in place, so a new account is created as usual.
+func TestRecordAccount_NoAccountIDNoActiveCreatesNew(t *testing.T) {
+	t.Parallel()
+
+	store := newRecordAccountStore(t)
+	accStore := newTestAccountsStore(t)
+
+	token := fakeCodexJWT(t, "")
+	account, err := RecordAccount(store, accStore, ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+		Token: &oauth.Token{AccessToken: token},
+	})
+	require.NoError(t, err)
+
+	all, err := accStore.List(codex.ProviderID)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	require.Equal(t, account.ID, all[0].ID)
+}

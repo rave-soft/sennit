@@ -16,6 +16,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -57,6 +58,15 @@ type OAuth struct {
 	model         *config.SelectedModel
 	oAuthProvider OAuthProvider
 
+	// ForceNewAccount records that this sign-in was started deliberately
+	// as "Add account…" rather than a routine (re-)login, so
+	// saveCredential can tell RecordAccount to always create a new
+	// account instead of possibly updating the active one in place — see
+	// accounts.LegacyCredential.ForceNewAccount for the full reasoning.
+	// Exported (like State) so the model package's dispatch can assert it
+	// was set correctly on the constructed dialog.
+	ForceNewAccount bool
+
 	State OAuthState
 
 	spinner spinner.Model
@@ -89,6 +99,7 @@ func newOAuth(
 	provider catwalk.Provider,
 	model *config.SelectedModel,
 	oAuthProvider OAuthProvider,
+	forceNewAccount bool,
 ) (*OAuth, tea.Cmd) {
 	t := com.Styles
 
@@ -99,6 +110,7 @@ func newOAuth(
 	m.provider = provider
 	m.model = model
 	m.oAuthProvider = oAuthProvider
+	m.ForceNewAccount = forceNewAccount
 	m.State = OAuthStateInitializing
 
 	m.spinner = newOAuthSpinner(t)
@@ -660,14 +672,33 @@ func (m *OAuth) saveCredential() tea.Cmd {
 	// Capture the fields the command needs so it does not race with
 	// dialog state.
 	var (
-		com      = m.com
-		provider = m.provider
-		token    = m.token
+		com             = m.com
+		provider        = m.provider
+		token           = m.token
+		forceNewAccount = m.ForceNewAccount
 	)
 	oAuthProvider := m.oAuthProvider
 	return func() tea.Msg {
-		if err := com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(provider.ID), token); err != nil {
-			return oauthSaveErrMsg{err: fmt.Errorf("failed to save API key: %w", err)}
+		// AccountID is left to providers that can derive one from the
+		// token itself (Codex, via a JWT claim); others record with no
+		// account identity, so a re-login always adds a new account
+		// rather than being recognized as an update to an existing one.
+		// ProxyURL is left empty too: any proxy the user entered during
+		// this sign-in is the provider's default, saved separately by
+		// [oauthPostSaver.afterSave] (see OAuthCodex.afterSave and
+		// loginCodex's comment in internal/cmd/login_codex.go) — recording
+		// it directly on the account here would make it indistinguishable
+		// from an override this one account wants.
+		var accountID string
+		if ider, ok := oAuthProvider.(oauthAccountIDer); ok {
+			accountID = ider.accountID(token)
+		}
+		if _, err := com.Workspace.RecordAccount(config.ScopeGlobal, string(provider.ID), accounts.LegacyCredential{
+			Token:           token,
+			AccountID:       accountID,
+			ForceNewAccount: forceNewAccount,
+		}); err != nil {
+			return oauthSaveErrMsg{err: fmt.Errorf("failed to save account: %w", err)}
 		}
 		// Some providers have more to store than the credential itself —
 		// Codex, whose model list is per-account and only readable once
@@ -685,6 +716,16 @@ func (m *OAuth) saveCredential() tea.Cmd {
 // providers that need to write more than the token once it is saved.
 type oauthPostSaver interface {
 	afterSave(ws workspace.ConfigAccessor, token *oauth.Token) error
+}
+
+// oauthAccountIDer is the optional half of [OAuthProvider], implemented by
+// providers whose account identity can be derived from the token itself
+// (Codex embeds it in the access token's JWT claims — see
+// OAuthCodex.accountID). A provider without this half records accounts
+// with an empty AccountID, so RecordAccount can never recognize a re-login
+// as an update to a specific existing account for it.
+type oauthAccountIDer interface {
+	accountID(token *oauth.Token) string
 }
 
 // confirmAndSelectModel is invoked when the user acknowledges the success

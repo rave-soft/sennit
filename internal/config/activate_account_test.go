@@ -214,6 +214,46 @@ func TestActivateAccount_ProxySurvivesReload(t *testing.T) {
 	require.False(t, gjson.GetBytes(data, "providers.codex.proxy_url").Exists(), "the account's proxy override must never be written to disk")
 }
 
+// TestActivateAccount_HandBuiltStorePublishesActiveAccountToMemory is the
+// regression test for the bug where UpdateProviderAccount never populated
+// ProviderConfig.Account in memory, only on disk: a hand-built store (no
+// workingDir, so autoReload never runs — see newActivateAccountTestStore)
+// must still see the active account ID in Config() immediately after
+// ActivateAccount returns, with no reload in between.
+func TestActivateAccount_HandBuiltStorePublishesActiveAccountToMemory(t *testing.T) {
+	t.Parallel()
+
+	store := newActivateAccountTestStore(t, "")
+	token := fakeCodexJWT(t, "acct-mem")
+	acct := accounts.Account{ID: "acct-mem-id", Token: &oauth.Token{AccessToken: token}}
+	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
+
+	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "acct-mem-id", provider.Account, "the active account ID must be published to memory, not just disk")
+}
+
+// TestActivateAccount_LoadedStorePublishesActiveAccountToMemoryAndDisk
+// covers the same guarantee on a real, disk-backed store (LoadData),
+// asserting the active account ID lands in memory immediately AND on
+// disk, without relying on autoReload's timing.
+func TestActivateAccount_LoadedStorePublishesActiveAccountToMemoryAndDisk(t *testing.T) {
+	globalDir := t.TempDir()
+	oldToken := fakeCodexJWT(t, "acct-old")
+	store := newLoadedActivateAccountStore(t, globalDir, oldToken)
+
+	newToken := fakeCodexJWT(t, "acct-new")
+	acct := accounts.Account{ID: "acct-loaded-id", Token: &oauth.Token{AccessToken: newToken}}
+	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
+
+	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "acct-loaded-id", provider.Account, "the active account ID must be in memory immediately, with no wait")
+
+	data := requireFile(t, store.globalDataPath)
+	require.Equal(t, "acct-loaded-id", gjson.GetBytes(data, "providers.codex.account").String())
+}
+
 func TestActivateAccount_InvalidAccountPublishesNothing(t *testing.T) {
 	t.Parallel()
 

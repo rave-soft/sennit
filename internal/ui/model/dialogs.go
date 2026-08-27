@@ -37,9 +37,9 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 
 	switch provider.ID {
 	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, &model)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, &model, false)
 	case catwalk.InferenceProvider(codex.ProviderID):
-		dlg, cmd = dialog.NewOAuthCodex(m.com, isOnboarding, provider, &model)
+		dlg, cmd = dialog.NewOAuthCodex(m.com, isOnboarding, provider, &model, false)
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, &model)
 	}
@@ -276,7 +276,14 @@ func (m *UI) openProviderFormDialog() {
 // otherwise), mirroring openAuthenticationDialog's dispatch. The API key
 // dialog is opened in its model-less mode (nil model) since this flow
 // isn't switching a model, just authenticating a provider.
-func (m *UI) configureProvider(providerID string) tea.Cmd {
+//
+// forceNewAccount distinguishes a deliberate "Add account…" sign-in from
+// an ordinary provider-configuration one: it is threaded down to the
+// OAuth dialog, which passes it along to RecordAccount so a provider with
+// no account identity of its own creates a new account instead of
+// refreshing the active one in place. It has no effect on the API-key
+// path, which calls SetProviderAPIKey rather than RecordAccount.
+func (m *UI) configureProvider(providerID string, forceNewAccount bool) tea.Cmd {
 	providers := config.Providers(m.com.Config())
 
 	idx := slices.IndexFunc(providers, func(p catwalk.Provider) bool {
@@ -295,9 +302,9 @@ func (m *UI) configureProvider(providerID string) tea.Cmd {
 	)
 	switch provider.ID {
 	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, nil)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, nil, forceNewAccount)
 	case catwalk.InferenceProvider(codex.ProviderID):
-		dlg, cmd = dialog.NewOAuthCodex(m.com, isOnboarding, provider, nil)
+		dlg, cmd = dialog.NewOAuthCodex(m.com, isOnboarding, provider, nil, forceNewAccount)
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, nil)
 	}

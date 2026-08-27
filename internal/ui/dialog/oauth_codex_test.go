@@ -33,7 +33,7 @@ func newCodexDialog(t *testing.T) *OAuth {
 	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
-	dlg, cmd := NewOAuthCodex(com, false, provider, nil)
+	dlg, cmd := NewOAuthCodex(com, false, provider, nil, false)
 	// The proxy step prefills asynchronously (see oauthProxyPrefillMsg) so
 	// the constructor never touches disk itself; run that cmd here to
 	// reach the same state the real event loop would.
@@ -64,7 +64,7 @@ func TestOAuthCopilotSkipsProxyStep(t *testing.T) {
 	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderCopilot, Name: "GitHub Copilot"}
-	dlg, _ := NewOAuthCopilot(com, false, provider, nil)
+	dlg, _ := NewOAuthCopilot(com, false, provider, nil, false)
 
 	require.Equal(t, OAuthStateInitializing, dlg.State)
 	require.Nil(t, dlg.proxyInput)
@@ -161,7 +161,7 @@ func TestNewOAuthCodex_DoesNotReadDiskInConstructor(t *testing.T) {
 	com := &common.Common{Styles: &s}
 	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
 
-	dlg, cmd := NewOAuthCodex(com, false, provider, nil)
+	dlg, cmd := NewOAuthCodex(com, false, provider, nil, false)
 	require.NotNil(t, cmd, "the disk read must be deferred to a tea.Cmd")
 	require.Equal(t, OAuthStateProxy, dlg.State)
 	require.Empty(t, dlg.proxyInput.Value(),
@@ -216,7 +216,7 @@ func TestOAuthCodexCursorDuringOnboarding(t *testing.T) {
 	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
-	dlg, _ := NewOAuthCodex(com, true, provider, nil)
+	dlg, _ := NewOAuthCodex(com, true, provider, nil, false)
 	for _, r := range "zzproxyzz" {
 		dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
 	}

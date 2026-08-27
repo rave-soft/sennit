@@ -34,6 +34,17 @@ type LegacyCredential struct {
 	// Label is the caller-supplied display name. A default is used
 	// when empty.
 	Label string
+	// ForceNewAccount tells config.RecordAccount that this credential is
+	// a deliberate new sign-in (e.g. "Add account…" from the accounts
+	// dialog), not a routine (re-)login. It only matters for a provider
+	// with no AccountID of its own: such a provider has no identity to
+	// recognize "the same sign-in" by, so it cannot otherwise distinguish
+	// a forced re-authentication (which should update the existing
+	// active account in place) from a deliberate second sign-in (which
+	// should create a new one) — only the caller, which knows the user's
+	// actual intent, can say which this is. Migrate ignores this field
+	// entirely; it only affects RecordAccount.
+	ForceNewAccount bool
 }
 
 // Migrate turns a provider's pre-existing single credential into the

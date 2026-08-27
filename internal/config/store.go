@@ -252,6 +252,14 @@ type AccountCredential struct {
 	// existed — see UpdateProviderAccount's doc comment for the full
 	// resolution rule.
 	ProxyURL *string
+	// ActiveAccountID is the account STORE's own ID for the account being
+	// activated (accounts.Account.ID) — not to be confused with
+	// accounts.Account.AccountID, which is the provider's own identifier
+	// for the account (e.g. Codex's chatgpt_account_id claim). An empty
+	// value means "don't touch ProviderConfig.Account". Set this so the
+	// in-memory config reflects which account is active immediately,
+	// without waiting on a disk reload to catch up.
+	ActiveAccountID string
 }
 
 // UpdateProviderAccount publishes a full account switch: credentials and,
@@ -312,6 +320,9 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 	if cred.ProxyURL != nil {
 		provider.ProxyURL = accounts.ResolveProxy(*cred.ProxyURL, provider.ConfiguredProxyURL)
 	}
+	if cred.ActiveAccountID != "" {
+		provider.Account = cred.ActiveAccountID
+	}
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
 		provider.SetupGitHubCopilot()
@@ -346,7 +357,7 @@ func (s *ConfigStore) ActivateAccount(scope Scope, providerID string, a accounts
 		return fmt.Errorf("account for provider %s is invalid: %w", providerID, err)
 	}
 
-	cred := AccountCredential{ProxyURL: &a.ProxyURL}
+	cred := AccountCredential{ProxyURL: &a.ProxyURL, ActiveAccountID: a.ID}
 	fields := map[string]any{
 		ProviderFieldKey(providerID, "account"): a.ID,
 	}

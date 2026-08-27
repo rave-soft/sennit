@@ -25,6 +25,12 @@ const (
 	accountsDialogMaxHeight = 20
 )
 
+// addAccountItemID is the sentinel ID for the "Add account…" entry
+// appended to the account list, mirroring providers.go's
+// customProviderItemID. It can never collide with a real account.Account
+// ID, which is always a machine-generated accounts.NextID value.
+const addAccountItemID = "__add_account__"
+
 // accountsState tracks the load-then-list lifecycle: ListAccounts is a
 // file read, so the dialog opens on a spinner and only becomes the
 // [selectDialog] once the accounts are in.
@@ -88,6 +94,13 @@ type ActionAccountsLoaded struct {
 
 // DialogID implements [DialogAddressed].
 func (ActionAccountsLoaded) DialogID() string { return AccountsID }
+
+// ActionAddAccount is sent when "Add account…" is chosen from the accounts
+// list, to start a fresh sign-in for ProviderID rather than switching to
+// one already on file.
+type ActionAddAccount struct {
+	ProviderID string
+}
 
 // accountActivatedMsg carries the outcome of the async ActivateAccount call
 // kicked off when the user picks a different account. Like
@@ -175,7 +188,7 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 	providerID := m.providerID
 
 	buildItems := func() ([]list.FilterableItem, int, error) {
-		items := make([]list.FilterableItem, 0, len(accs))
+		items := make([]list.FilterableItem, 0, len(accs)+1)
 		startIndex := 0
 		for i, a := range accs {
 			active := a.ID == activeAccountID
@@ -190,10 +203,14 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 				startIndex = i
 			}
 		}
+		items = append(items, &AddAccountItem{BaseItem: list.NewBaseItem(), t: t})
 		return items, startIndex, nil
 	}
 
 	onSelect := func(id string) Action {
+		if id == addAccountItemID {
+			return ActionAddAccount{ProviderID: providerID}
+		}
 		if id == activeAccountID {
 			return nil
 		}
@@ -363,4 +380,31 @@ func (a *AccountItem) Render(width int) string {
 
 	st := defaultListItemStyles(a.t)
 	return renderItem(st, title, info, a.Focused(), width, a.Cache(), a.Match())
+}
+
+// AddAccountItem is the "Add account…" entry appended to the account list,
+// mirroring ProviderItem's "Custom provider…" entry in providers.go.
+// Selecting it starts a fresh sign-in for the dialog's provider rather than
+// switching to an existing account.
+type AddAccountItem struct {
+	list.BaseItem
+	t *styles.Styles
+}
+
+var _ ListItem = (*AddAccountItem)(nil)
+
+// Filter implements ListItem.
+func (a *AddAccountItem) Filter() string {
+	return "Add account…"
+}
+
+// ID implements ListItem.
+func (a *AddAccountItem) ID() string {
+	return addAccountItemID
+}
+
+// Render implements ListItem.
+func (a *AddAccountItem) Render(width int) string {
+	st := defaultListItemStyles(a.t)
+	return renderItem(st, "Add account…", "", a.Focused(), width, a.Cache(), a.Match())
 }

@@ -28,9 +28,19 @@ import (
 //  2. If an existing account already carries the same non-empty AccountID
 //     as cred, this is a re-login to that account (e.g. a refreshed
 //     token), not a new one: it is updated in place, keeping its ID and
-//     Label, rather than growing a duplicate.
-//  3. Otherwise a new account is created with accounts.NextID.
-//  4. The account is upserted into accStore, then made active via
+//     Label, rather than growing a duplicate. This match wins regardless
+//     of cred.ForceNewAccount — two logins to the literal same account
+//     are the same account no matter which UI path the user took.
+//  3. Otherwise, if cred.ForceNewAccount is set, the caller has already
+//     decided this is a deliberate new sign-in (e.g. "Add account…" in
+//     the accounts dialog), so step 4 below is skipped entirely and a new
+//     account is always created.
+//  4. Otherwise, if cred has no AccountID at all (the provider has no
+//     identity of its own to key on) and the provider already has an
+//     active account, that active account is updated in place instead of
+//     creating a new one — see the comment on step 4 below for why.
+//  5. Otherwise a new account is created with accounts.NextID.
+//  6. The account is upserted into accStore, then made active via
 //     ActivateAccount.
 func RecordAccount(store *ConfigStore, accStore accounts.Store, scope Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
 	if _, _, err := accounts.Migrate(accStore, providerID, legacyCredentialFromProvider(store, providerID)); err != nil {
@@ -43,6 +53,27 @@ func RecordAccount(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 	}
 
 	a, isUpdate := findByAccountID(existing, cred.AccountID)
+	if !isUpdate && cred.AccountID == "" && !cred.ForceNewAccount {
+		// A provider with no AccountID gives us nothing to recognize "the
+		// same sign-in" by. Re-authentication is not rare for these
+		// providers — Sennit itself triggers it whenever a refresh token
+		// is rejected (see retryAfterUnauthorized in
+		// internal/agent/runtime_builder.go), and the user just walks
+		// back through this same login flow. Treating every such
+		// re-login as a brand new account would silently grow the list
+		// by one entry per forced re-auth, which is strictly worse than
+		// the pre-accounts behavior (a re-login used to just overwrite
+		// the one credential there was). So when there's an active
+		// account already and no identity to tell logins apart, assume
+		// this is that same account being refreshed and update it in
+		// place. A deliberate second account for such a provider is
+		// still possible — that's what "Add account…" is for, and it
+		// sets cred.ForceNewAccount to skip this branch, since it can't
+		// otherwise be told apart from a re-login.
+		if id := activeAccountID(store, providerID); id != "" {
+			a, isUpdate = findByID(existing, id)
+		}
+	}
 	if isUpdate {
 		// A re-login to an account we already know: keep its identity,
 		// replace only what this sign-in actually refreshed. A login
@@ -128,6 +159,35 @@ func findByAccountID(existing []accounts.Account, accountID string) (accounts.Ac
 		}
 	}
 	return accounts.Account{}, false
+}
+
+// findByID looks for an account with the given account store ID (not to be
+// confused with the provider-side AccountID findByAccountID matches on).
+func findByID(existing []accounts.Account, id string) (accounts.Account, bool) {
+	for _, a := range existing {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return accounts.Account{}, false
+}
+
+// activeAccountID returns providerID's currently active account ID, or ""
+// if none is set. It reads the in-memory config: ActivateAccount publishes
+// the active account ID to ProviderConfig.Account via UpdateProviderAccount
+// (through AccountCredential.ActiveAccountID) in the same call that
+// persists it to disk, so this is up to date immediately, with no reload
+// required.
+func activeAccountID(store *ConfigStore, providerID string) string {
+	cfg := store.Config()
+	if cfg == nil || cfg.Providers == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return ""
+	}
+	return pc.Account
 }
 
 // legacyCredentialFromProvider builds the accounts.LegacyCredential that
