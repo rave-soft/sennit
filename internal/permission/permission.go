@@ -88,6 +88,18 @@ type Service interface {
 	// for subscribers that need to recover one they did not see
 	// published. See the implementation for why this is needed at all.
 	ActiveRequest() (PermissionRequest, bool)
+	// AwaitingAnswer reports whether a request raised by the delegation
+	// identified by delegationID is outstanding right now — either shown
+	// to the user or queued behind another request.
+	//
+	// It exists for the delegation idle watchdog (internal/thread), which
+	// ends a background run that has stopped producing anything. A run
+	// blocked on a permission prompt has stopped producing anything and
+	// is nonetheless perfectly healthy: it is waiting for a person, which
+	// is a wait with no upper bound by design (see the note on
+	// [Service.Request] blocking). Without this the watchdog would kill
+	// exactly the delegations the user was about to approve.
+	AwaitingAnswer(delegationID string) bool
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 	// ConfineToWorkingDir marks this workspace as one that may not write
@@ -447,6 +459,28 @@ func (s *permissionService) ActiveRequest() (PermissionRequest, bool) {
 		return PermissionRequest{}, false
 	}
 	return s.currentReq, true
+}
+
+// AwaitingAnswer reports whether delegationID has a request outstanding.
+// Both halves of the one-at-a-time dispatch count: the request currently
+// shown, and every one still queued behind it — a delegation waiting for
+// its turn at the dialog is just as blocked as the one holding it.
+//
+// Read under dialogMu, the same lock that maintains both, so the answer
+// is a consistent snapshot rather than two reads a dispatch could slip
+// between.
+func (s *permissionService) AwaitingAnswer(delegationID string) bool {
+	if delegationID == "" {
+		return false
+	}
+	s.dialogMu.Lock()
+	defer s.dialogMu.Unlock()
+	if s.current != "" && s.currentReq.Delegation.ID == delegationID {
+		return true
+	}
+	return slices.ContainsFunc(s.queue, func(p PermissionRequest) bool {
+		return p.Delegation.ID == delegationID
+	})
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {

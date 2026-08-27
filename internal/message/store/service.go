@@ -46,6 +46,20 @@ type Service interface {
 	ListBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]message.Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListAllUserMessages(ctx context.Context) ([]message.Message, error)
+	// LastActivity returns when any message in sessionID was last written,
+	// or the zero time for a session with no messages. It is a liveness
+	// probe, not a history read: every streaming delta updates its
+	// message row, so a session whose last activity is minutes old is one
+	// where nothing is arriving — which is what the delegation idle
+	// watchdog (internal/thread) needs to know, and what it would be
+	// wasteful to answer by listing a whole session's history.
+	//
+	// It reads through to the database, so a value can lag the newest
+	// in-memory delta by the debounce window (tens of milliseconds).
+	// Irrelevant at the minutes-scale question it exists to answer; a
+	// caller that needs exactness must Flush first, as [Service.List]'s
+	// contract already says.
+	LastActivity(ctx context.Context, sessionID string) (time.Time, error)
 	// ListUnfinishedAssistantMessages returns the assistant messages in
 	// projectPath that never recorded a message.Finish, oldest first. Every path
 	// that ends a turn writes one, and every such path runs inside the
@@ -598,6 +612,21 @@ func (s *service) List(ctx context.Context, sessionID string) ([]message.Message
 		return nil, err
 	}
 	return messagesFrom(dbMessages, s.fromDBItem)
+}
+
+func (s *service) LastActivity(ctx context.Context, sessionID string) (time.Time, error) {
+	at, err := s.q.LastMessageActivity(ctx, sessionID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	// Zero is the query's "no messages at all", not the epoch: a session
+	// that has not been written to yet has no activity to report, and
+	// handing back 1970 would read as "idle for fifty years" to a caller
+	// comparing against now.
+	if at == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(at, 0), nil
 }
 
 func (s *service) ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]message.Message, error) {

@@ -2,6 +2,7 @@ package thread_test
 
 import (
 	"context"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/thread"
 
@@ -127,6 +128,18 @@ func (m *testMessageService) List(ctx context.Context, sessionID string) ([]thre
 		out = append(out, thread.Message{Role: thread.MessageRole(msg.Role), Text: msg.Content().Text})
 	}
 	return out, nil
+}
+
+func (m *testMessageService) LastActivity(ctx context.Context, sessionID string) (time.Time, error) {
+	// app.NewForTest deliberately leaves Messages nil, and most task tests
+	// never touch it (see newTestParentApp). "No message service" is the
+	// same answer as "nothing has been written yet" for the one caller
+	// that asks — the idle sweep, which then measures from the task's own
+	// creation instead.
+	if m.full == nil {
+		return time.Time{}, nil
+	}
+	return m.full.LastActivity(ctx, sessionID)
 }
 
 // NewTestSessionService adapts a real session service to the domain's

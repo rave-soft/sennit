@@ -69,6 +69,15 @@ type Querier interface {
 	// ListThreads instead.
 	GetThread(ctx context.Context, id string) (Thread, error)
 	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
+	// The most recent write to any message in the session, as a Unix
+	// timestamp. Every streaming delta the assistant produces updates its
+	// message row (debounced by tens of milliseconds, see
+	// internal/message/store), so this is the cheapest honest "is this session
+	// still producing anything" signal there is - and the one the delegation
+	// idle watchdog reads. Covered by
+	// idx_messages_session_id. Zero means "no messages at all", which the
+	// caller reads as "no activity recorded" rather than "the epoch".
+	LastMessageActivity(ctx context.Context, sessionID string) (int64, error)
 	ListAllAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAllAssistantMessagesSinceRow, error)
 	ListAllDelegationOutcomesSince(ctx context.Context, createdAt int64) ([]ListAllDelegationOutcomesSinceRow, error)
 	ListAllLatencyEventsSince(ctx context.Context, createdAt int64) ([]ListAllLatencyEventsSinceRow, error)

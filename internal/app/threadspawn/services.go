@@ -3,6 +3,7 @@ package threadspawn
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/message"
@@ -145,6 +146,10 @@ func (a *MessageAdapter) List(ctx context.Context, sessionID string) ([]thread.M
 		})
 	}
 	return out, nil
+}
+
+func (a *MessageAdapter) LastActivity(ctx context.Context, sessionID string) (time.Time, error) {
+	return a.full.LastActivity(ctx, sessionID)
 }
 
 // NewMessageService adapts a real message service to the thread domain's

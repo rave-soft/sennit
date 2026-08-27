@@ -71,11 +71,17 @@ const (
 //     error - the consumer stopped ranging early, or the provider closed the
 //     stream short. This is NOT a success: no terminal finish means the
 //     provider never completed the response.
+//   - stalled  the stream went silent past its budget and the stall watchdog
+//     ended it (see provider_stall.go). Distinct from canceled, which means
+//     someone asked for the attempt to stop, and from error, which means the
+//     provider said something went wrong: a stall is neither - nothing was
+//     said at all.
 const (
 	outcomeSuccess  = "success"
 	outcomeError    = "error"
 	outcomeCanceled = "canceled"
 	outcomeAborted  = "aborted"
+	outcomeStalled  = "stalled"
 )
 
 // providerCorrelation is the stable identity of one provider attempt, captured
@@ -148,6 +154,14 @@ type instrumentedModel struct {
 	// local model's line would happily carry a Codex figure it had
 	// nothing to do with.
 	codex bool
+	// firstPartTimeout and stallTimeout are this attempt's silence
+	// budgets, copied from the package constants at construction rather
+	// than read from them at use. Copying is what lets a test drive the
+	// watchdog on a timescale a test can wait for, without making the
+	// production values mutable global state that any code path could
+	// quietly change. See provider_stall.go.
+	firstPartTimeout time.Duration
+	stallTimeout     time.Duration
 }
 
 // newInstrumentedModel wraps inner so its Stream is logged. startedAt is taken
@@ -156,10 +170,12 @@ type instrumentedModel struct {
 // measured from it.
 func newInstrumentedModel(inner fantasy.LanguageModel, corr providerCorrelation, providerID string) *instrumentedModel {
 	return &instrumentedModel{
-		inner:     inner,
-		corr:      corr,
-		startedAt: time.Now(),
-		codex:     providerID == codex.ProviderID,
+		inner:            inner,
+		corr:             corr,
+		startedAt:        time.Now(),
+		codex:            providerID == codex.ProviderID,
+		firstPartTimeout: providerStreamFirstPartTimeout,
+		stallTimeout:     providerStreamStallTimeout,
 	}
 }
 
@@ -196,8 +212,22 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 		"model", m.inner.Model(),
 	)...)
 
-	stream, err := m.inner.Stream(ctx, call)
+	// The stream runs on a context of the watchdog's own, so a stall ends
+	// this attempt and nothing wider — see provider_stall.go for why a
+	// silent stream has to be ended at all.
+	streamCtx, watchdog := newStreamStallWatchdog(ctx, m.firstPartTimeout, m.stallTimeout)
+
+	stream, err := m.inner.Stream(streamCtx, call)
 	if err != nil {
+		watchdog.stop()
+		// A stall is reported as itself, not as the cancellation it used to
+		// unblock the read: the caller must see a retryable timeout, and a
+		// bare context.Canceled would read as "someone asked to stop" to
+		// both fantasy's retry classifier and anyone reading the log.
+		if stall := watchdog.stall(); stall != nil {
+			m.logFinished(outcomeStalled, "", "", fantasy.Usage{})
+			return nil, stall
+		}
 		// The stream was never created: the attempt failed at the boundary.
 		// If the context is already done, the cancellation is what failed the
 		// creation (the transport returns the context error on abort), so the
@@ -212,6 +242,7 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 	}
 
 	return func(yield func(fantasy.StreamPart) bool) {
+		defer watchdog.stop()
 		usage := fantasy.Usage{}
 		finishReason := fantasy.FinishReason("")
 		// sawFinish is true once the terminal finish part has been observed;
@@ -231,6 +262,9 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 		}()
 
 		for part := range stream {
+			// Every part, of any kind, is proof the provider is still
+			// talking; the watchdog only cares that something arrived.
+			watchdog.beat()
 			switch part.Type {
 			case fantasy.StreamPartTypeFinish:
 				usage = part.Usage
@@ -238,6 +272,15 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 				sawFinish = true
 			case fantasy.StreamPartTypeError:
 				streamErr = part.Error
+				// A tripped watchdog is the real cause of whatever the
+				// provider reported here: cancelling its context is how the
+				// stall was broken, so the transport's context.Canceled is
+				// the symptom. Substitute the stall so the consumer retries
+				// it instead of treating it as an abort.
+				if stall := watchdog.stall(); stall != nil {
+					streamErr = stall
+					part.Error = stall
+				}
 			}
 			if !yield(part) {
 				// The consumer stopped ranging before the stream was
@@ -247,6 +290,16 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 				return
 			}
 		}
+
+		// A stalled stream does not always announce itself with an error
+		// part: cancelling its context can simply end the iteration, which
+		// would otherwise be indistinguishable from a provider closing the
+		// stream short. Surface the stall explicitly, so the step fails with
+		// a retryable error rather than an empty response.
+		if stall := watchdog.stall(); stall != nil && !sawFinish && streamErr == nil {
+			streamErr = stall
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: stall})
+		}
 	}, nil
 }
 
@@ -254,6 +307,10 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 // finished line's (outcome, error_category). It is pure so the mapping is
 // unit-testable without a log capture. The precedence is deliberate:
 //
+//  0. the stall watchdog ended the attempt -> stalled. First, because a stall
+//     reaches here disguised: the cancellation it used to break the silence
+//     would otherwise classify as canceled, hiding the one outcome that says
+//     the provider stopped talking on its own.
 //  1. an explicit cancellation error part -> canceled (no category),
 //  2. another explicit error part -> error + its category (a provider failure
 //     is the most specific outcome),
@@ -266,6 +323,11 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 //     early, without a terminal finish and without an error).
 func (m *instrumentedModel) attemptOutcome(ctx context.Context, sawFinish bool, streamErr error) (string, string) {
 	switch {
+	case isProviderStall(streamErr):
+		// No error_category, for the same reason canceled carries none: the
+		// outcome already names what happened, and there is no provider
+		// fault to categorize.
+		return outcomeStalled, ""
 	case errors.Is(streamErr, context.Canceled):
 		return outcomeCanceled, ""
 	case streamErr != nil:
@@ -379,6 +441,12 @@ func codexWindowLogFields(prefix string, window codex.UsageWindow) []any {
 func errorCategory(err error) string {
 	if err == nil {
 		return ""
+	}
+	// Checked before context.Canceled so a stall keeps its own category:
+	// the two travel together (a stall is broken by a cancellation), and
+	// "canceled" would say the opposite of what happened.
+	if isProviderStall(err) {
+		return "stalled"
 	}
 	if errors.Is(err, context.Canceled) {
 		return "canceled"

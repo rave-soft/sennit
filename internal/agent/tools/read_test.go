@@ -370,6 +370,8 @@ func (m *mockReadPermissionService) ActiveRequest() (permission.PermissionReques
 	return permission.PermissionRequest{}, false
 }
 
+func (m *mockReadPermissionService) AwaitingAnswer(string) bool { return false }
+
 func (*mockReadPermissionService) ConfineToWorkingDir() {}
 func (*mockReadPermissionService) ConfinedDir() string  { return "" }
 

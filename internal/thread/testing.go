@@ -1,6 +1,9 @@
 package thread
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // MaxActiveTasksPerWorkspaceForTest and MaxActiveTasksPerParentTurnForTest
 // re-export tasks.go's own maxActiveTasksPerWorkspace/
@@ -13,6 +16,13 @@ const (
 	MaxActiveTasksPerWorkspaceForTest  = maxActiveTasksPerWorkspace
 	MaxActiveTasksPerParentTurnForTest = maxActiveTasksPerParentTurn
 )
+
+// TaskIdleTimeoutForTest re-exports the idle watchdog's silence budget,
+// on the same terms as the caps above: the constant stays unexported
+// (see watchdog.go for why it is not configuration), and this only lets a
+// test outside the package position a clock relative to the real value
+// instead of hardcoding a second copy of it.
+const TaskIdleTimeoutForTest = taskIdleTimeout
 
 // NewTaskManagerFromManager constructs a TaskManager sharing mgr's own
 // lifecycle and context — exactly the wiring threadspawn.Attach performs
@@ -120,4 +130,13 @@ func (m *Manager) ShutdownStartedForTest() <-chan struct{} {
 // context is exactly the case the terminal bookkeeping has to survive.
 func (m *Manager) HandleRunCompleteForTest(ctx context.Context, id string, rc RunComplete) {
 	m.lc.handleRunComplete(ctx, id, rc)
+}
+
+// SweepIdleTasksForTest drives exactly one pass of the idle watchdog at
+// the instant now, for tests outside this package. The production sweep
+// runs on a ticker against the wall clock (see startIdleWatchdog), which
+// a test can neither hurry nor position precisely; this is the same
+// function that ticker calls, with the clock handed in.
+func (t *TaskManager) SweepIdleTasksForTest(ctx context.Context, now time.Time) {
+	t.sweepIdleTasks(ctx, now)
 }

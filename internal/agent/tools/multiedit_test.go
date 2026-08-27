@@ -325,5 +325,7 @@ func (m *mockPermissionService) ActiveRequest() (permission.PermissionRequest, b
 	return permission.PermissionRequest{}, false
 }
 
+func (m *mockPermissionService) AwaitingAnswer(string) bool { return false }
+
 func (*mockPermissionService) ConfineToWorkingDir() {}
 func (*mockPermissionService) ConfinedDir() string  { return "" }

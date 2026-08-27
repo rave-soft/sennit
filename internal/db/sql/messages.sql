@@ -133,3 +133,16 @@ WHERE s.project_path = ?
   AND m.role = 'assistant'
   AND m.finished_at IS NULL
 ORDER BY m.created_at ASC, m.id ASC;
+
+-- name: LastMessageActivity :one
+-- The most recent write to any message in the session, as a Unix
+-- timestamp. Every streaming delta the assistant produces updates its
+-- message row (debounced by tens of milliseconds, see
+-- internal/message/store), so this is the cheapest honest "is this session
+-- still producing anything" signal there is - and the one the delegation
+-- idle watchdog reads. Covered by
+-- idx_messages_session_id. Zero means "no messages at all", which the
+-- caller reads as "no activity recorded" rather than "the epoch".
+SELECT CAST(COALESCE(MAX(updated_at), 0) AS INTEGER) AS last_activity
+FROM messages
+WHERE session_id = ?;

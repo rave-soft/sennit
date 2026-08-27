@@ -197,6 +197,27 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 	return i, err
 }
 
+const lastMessageActivity = `-- name: LastMessageActivity :one
+SELECT CAST(COALESCE(MAX(updated_at), 0) AS INTEGER) AS last_activity
+FROM messages
+WHERE session_id = ?
+`
+
+// The most recent write to any message in the session, as a Unix
+// timestamp. Every streaming delta the assistant produces updates its
+// message row (debounced by tens of milliseconds, see
+// internal/message/store), so this is the cheapest honest "is this session
+// still producing anything" signal there is - and the one the delegation
+// idle watchdog reads. Covered by
+// idx_messages_session_id. Zero means "no messages at all", which the
+// caller reads as "no activity recorded" rather than "the epoch".
+func (q *Queries) LastMessageActivity(ctx context.Context, sessionID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, lastMessageActivity, sessionID)
+	var last_activity int64
+	err := row.Scan(&last_activity)
+	return last_activity, err
+}
+
 const listAllUserMessages = `-- name: ListAllUserMessages :many
 SELECT messages.id, messages.session_id, messages.role, messages.parts, messages.model, messages.created_at, messages.updated_at, messages.finished_at, messages.provider, messages.is_summary_message, messages.origin
 FROM messages

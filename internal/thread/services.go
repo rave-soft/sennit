@@ -1,6 +1,9 @@
 package thread
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // SessionService is the slice of the workspace's session service a
 // delegation's lifecycle calls: creating the child session a thread or
@@ -45,6 +48,16 @@ type MessageService interface {
 	Create(ctx context.Context, sessionID string, role MessageRole, parts []ContentPart) error
 	// List returns the session's messages in order.
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	// LastActivity returns when sessionID's history was last written to,
+	// or the zero time when nothing has been written yet. It is the
+	// liveness signal [TaskManager]'s idle watchdog runs on: a delegation
+	// whose session has been silent far longer than any real step takes is
+	// one whose run is never going to end on its own.
+	//
+	// Deliberately not "read the history and look at the last message":
+	// this is asked repeatedly, about sessions whose histories are the
+	// largest in the workspace, and the answer is one number.
+	LastActivity(ctx context.Context, sessionID string) (time.Time, error)
 }
 
 // MessageRole is the domain's view of a message's authorship category.

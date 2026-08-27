@@ -133,7 +133,13 @@ type TaskManager struct {
 // parent's own message store, not a separate one, so [TaskManager.Output]
 // reads it directly rather than through any task-specific plumbing.
 func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *lifecycle, ctx context.Context) *TaskManager {
-	return &TaskManager{store: store, spawner: spawner, messages: messages, ctx: ctx, lc: lc}
+	t := &TaskManager{store: store, spawner: spawner, messages: messages, ctx: ctx, lc: lc}
+	// Started here rather than left to the caller: a task manager without
+	// its idle sweep silently loses the slot every wedged run costs, and
+	// nothing about the construction site makes that omission visible.
+	// See watchdog.go for what it watches and why.
+	t.startIdleWatchdog()
+	return t
 }
 
 // Create records a task, gives it a child session under

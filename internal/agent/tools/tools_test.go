@@ -159,5 +159,7 @@ func (s *stubPermissionService) ActiveRequest() (permission.PermissionRequest, b
 	return permission.PermissionRequest{}, false
 }
 
+func (s *stubPermissionService) AwaitingAnswer(string) bool { return false }
+
 func (*stubPermissionService) ConfineToWorkingDir() {}
 func (*stubPermissionService) ConfinedDir() string  { return "" }
