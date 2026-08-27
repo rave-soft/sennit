@@ -177,10 +177,6 @@ func (d *delegationFinalizer) resolveWebSearchBackend() (tools.SearchBackend, er
 	return d.builder.webSearchBackend()
 }
 
-func (d *delegationFinalizer) authRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
-	return d.builder.makeAuthRefreshCallback(providerCfg, nil, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
-}
-
 func (d *delegationFinalizer) newSubAgent(ctx context.Context, p *prompt.Prompt, agentCfg config.Agent) (SessionAgent, error) {
 	return d.buildAgent(ctx, p, agentCfg, true)
 }
@@ -652,6 +648,18 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
 	}
 
+	// A sub-agent's turn dispatches through t.model (see modelProvider in
+	// turn.go) unless its call carries an ActiveRuntime that a refresh has
+	// populated. Without one, a 401 mid-delegation refreshed the
+	// credential in config but kept retrying with the provider instance
+	// built from the *old* one - the delegation died on an expiry the
+	// top-level agent recovers from cleanly. active starts empty and is
+	// only ever populated by a successful refresh (see
+	// makeAuthRefreshCallback); it is local to this call and discarded
+	// with it, so it cannot leak into the parent's turn or a later
+	// delegation.
+	active := newActiveRuntime(nil)
+
 	// Run the agent. Takes its context explicitly - the non-detached path
 	// below runs it with ctx directly, the detachable path with a child
 	// context that can outlive ctx.
@@ -672,9 +680,8 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
 			NonInteractive:   true,
-			// Sub-agents don't track an active runtime of their own, so
-			// there's nothing for a refresh to update.
-			OnAuthRefresh: d.authRefreshCallback(providerCfg),
+			ActiveRuntime:    active,
+			OnAuthRefresh:    d.makeAuthRefreshCallback(providerCfg, active),
 		}
 		if runtimeAgent, ok := params.Agent.(interface {
 			runWithStreamRuntime(context.Context, SessionAgentCall, streamRuntime) (*fantasy.AgentResult, error)
