@@ -18,7 +18,7 @@
 Проверка после работ: `go build ./...`, `gofmt`, `go mod tidy -diff`,
 `golangci-lint` (0 замечаний), `./scripts/check_log_capitalization.sh`,
 `./scripts/check_cross_platform.sh` (windows/darwin/linux) и
-`go test -race -failfast -count=1 ./...` — всё зелёное. Не закоммичено.
+`go test -race -failfast -count=1 ./...` — всё зелёное.
 
 Найдено по ходу и **не** починено (отдельные решения):
 
