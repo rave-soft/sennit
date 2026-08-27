@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -13,7 +12,6 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 var errClientShutdown = errors.New("lsp client is shut down")
@@ -245,18 +243,12 @@ func (c *Client) HandlesFile(path string) bool {
 	if c == nil {
 		return false
 	}
-	if !fsext.HasPrefix(path, c.runtime.cwd) {
-		slog.Debug("File outside workspace", "name", c.runtime.name, "file", path, "workDir", c.runtime.cwd)
-		return false
-	}
-	return handlesFiletype(c.runtime.name, c.fileTypes, path)
+	return c.files.handlesFile(path)
 }
 
-// OpenFile opens a file in the LSP server.
+// OpenFile opens a file in the LSP server. handlesFile is checked inside
+// files.openFile, so it is not duplicated here.
 func (c *Client) OpenFile(ctx context.Context, filepath string) error {
-	if !c.HandlesFile(filepath) {
-		return nil
-	}
 	return c.files.openFile(ctx, filepath)
 }
 

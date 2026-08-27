@@ -56,22 +56,15 @@ func applyLlamacppMeta(models []catwalk.Model, modelsResp llamacppModelsResponse
 		metaByID[m.ID] = m.Meta
 	}
 
-	for i := range models {
-		meta, ok := metaByID[models[i].ID]
-		if !ok {
-			continue
-		}
-
+	return applyModelMeta(models, metaByID, func(model *catwalk.Model, meta llamacppMeta) {
 		// Context window: prefer configured n_ctx, fall back to
 		// the model's trained maximum.
-		if models[i].ContextWindow == 0 {
+		if model.ContextWindow == 0 {
 			if meta.NCtx > 0 {
-				models[i].ContextWindow = meta.NCtx
+				model.ContextWindow = meta.NCtx
 			} else if meta.NCtxTrain > 0 {
-				models[i].ContextWindow = meta.NCtxTrain
+				model.ContextWindow = meta.NCtxTrain
 			}
 		}
-	}
-
-	return models
+	})
 }

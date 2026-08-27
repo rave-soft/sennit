@@ -327,6 +327,11 @@ func TestClient_HandlesFile_RejectsURIAcceptsPath(t *testing.T) {
 	c := newTestClient()
 	c.runtime.cwd = dir
 	c.fileTypes = []string{"go"}
+	// HandlesFile delegates to files.handlesFile, which keeps its own copy
+	// of cwd/fileTypes (set once from the same config at construction
+	// time) rather than reading c.runtime's — update both here.
+	c.files.cwd = dir
+	c.files.fileTypes = []string{"go"}
 
 	uri := string(protocol.URIFromPath(filePath))
 	require.False(t, c.HandlesFile(uri), "HandlesFile must reject a raw URI")

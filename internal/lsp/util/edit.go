@@ -98,6 +98,12 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 		endLine = len(lines) - 1
 	}
 
+	// startLineContent/endLineContent are the two line slices every branch
+	// below needs — the encoding switch to compute byte offsets, and the
+	// prefix/suffix extraction after it — so fetch each once and reuse it.
+	startLineContent := lines[startLine]
+	endLineContent := lines[endLine]
+
 	var startChar, endChar int
 	switch encoding {
 	case powernap.UTF8:
@@ -106,14 +112,10 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 		endChar = int(edit.Range.End.Character)
 	case powernap.UTF16:
 		// UTF-16 (default): Convert to byte offset
-		startLineContent := lines[startLine]
-		endLineContent := lines[endLine]
 		startChar = powernap.PositionToByteOffset(startLineContent, edit.Range.Start.Character)
 		endChar = powernap.PositionToByteOffset(endLineContent, edit.Range.End.Character)
 	default:
 		// UTF-32: Character offset is codepoint count, convert to byte offset
-		startLineContent := lines[startLine]
-		endLineContent := lines[endLine]
 		startChar = utf32ToByteOffset(startLineContent, edit.Range.Start.Character)
 		endChar = utf32ToByteOffset(endLineContent, edit.Range.End.Character)
 	}
@@ -125,14 +127,12 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 	result = append(result, lines[:startLine]...)
 
 	// Get the prefix of the start line
-	startLineContent := lines[startLine]
 	if startChar < 0 || startChar > len(startLineContent) {
 		startChar = len(startLineContent)
 	}
 	prefix := startLineContent[:startChar]
 
 	// Get the suffix of the end line
-	endLineContent := lines[endLine]
 	if endChar < 0 || endChar > len(endLineContent) {
 		endChar = len(endLineContent)
 	}

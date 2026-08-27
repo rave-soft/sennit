@@ -25,6 +25,23 @@ type Enricher interface {
 	EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) []catwalk.Model
 }
 
+// applyModelMeta walks models, looks each one up in metaByID by its ID,
+// and — when found — hands the model and its metadata to apply for
+// mutation in place. It factors out the lookup-and-mutate loop shared by
+// the per-provider applyXMeta functions (litellm, llamacpp, lmstudio,
+// omlx), which otherwise differ only in how metaByID is built and what
+// apply does with a match.
+func applyModelMeta[M any](models []catwalk.Model, metaByID map[string]M, apply func(model *catwalk.Model, meta M)) []catwalk.Model {
+	for i := range models {
+		meta, ok := metaByID[models[i].ID]
+		if !ok {
+			continue
+		}
+		apply(&models[i], meta)
+	}
+	return models
+}
+
 // enrichers maps provider type strings to their enrichment
 // implementations. Each enricher self-registers via init() so that
 // adding a new provider requires only a new file — no changes to

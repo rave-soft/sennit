@@ -192,6 +192,23 @@ var skipAutoStartCommands = map[string]bool{
 	"tflint":  true,
 }
 
+// reusableClient looks up the client registered for name and reports
+// whether it is in a state startServer can hand straight back to its
+// caller (StateReady, StateStarting, StateDisabled) instead of replacing.
+// It returns a nil client when none is registered.
+func (s *Manager) reusableClient(name string) (client *Client, reusable bool) {
+	client, ok := s.clients.Get(name)
+	if !ok {
+		return nil, false
+	}
+	switch client.GetServerState() {
+	case StateReady, StateStarting, StateDisabled:
+		return client, true
+	default:
+		return client, false
+	}
+}
+
 func (s *Manager) startServer(name, filepath string, server *powernapconfig.ServerConfig) {
 	var (
 		isUserConfigured = s.isUserConfigured(name)
@@ -209,13 +226,10 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 
 	// Fast path: reuse an already-usable client without taking the
 	// per-name lock.
-	if client, ok := s.clients.Get(name); ok {
-		switch client.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			s.callback(name, client)
-			// already done, return
-			return
-		}
+	if client, reusable := s.reusableClient(name); reusable {
+		s.callback(name, client)
+		// already done, return
+		return
 	}
 
 	// handles/canAutoStart don't touch shared mutable state, so run them
@@ -236,9 +250,8 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	mu.Lock()
 	defer mu.Unlock()
 
-	if client, ok := s.clients.Get(name); ok {
-		switch client.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
+	if client, reusable := s.reusableClient(name); client != nil {
+		if reusable {
 			s.callback(name, client)
 			return
 		}

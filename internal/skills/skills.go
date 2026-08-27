@@ -219,6 +219,40 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 	return frontmatter, body, nil
 }
 
+// walkSkillFiles walks each of paths looking for SKILL.md files, the shared
+// traversal DiscoverWithStates and scanSkillFiles both need.
+//
+// We use fastwalk with Follow: true instead of filepath.WalkDir because
+// WalkDir doesn't follow symlinked directories at any depth—only entry
+// points. This ensures skills in symlinked subdirectories are discovered.
+// fastwalk is concurrent, so visit and onWalkErr must guard any shared state
+// they touch.
+//
+// visit is called once per SKILL.md file found (err nil) and once per
+// traversal error fastwalk reports for an entry (err non-nil, d may be nil);
+// onWalkErr, if non-nil, is called when Walk itself returns a non-"not
+// exist" error for a base path.
+func walkSkillFiles(paths []string, visit func(base, path string, d os.DirEntry, err error) error, onWalkErr func(base string, err error)) {
+	for _, base := range paths {
+		conf := fastwalk.Config{
+			Follow:  true,
+			ToSlash: fastwalk.DefaultToSlash(),
+		}
+		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return visit(base, path, d, err)
+			}
+			if d.IsDir() || d.Name() != SkillFileName {
+				return nil
+			}
+			return visit(base, path, d, nil)
+		})
+		if err != nil && !os.IsNotExist(err) && onWalkErr != nil {
+			onWalkErr(base, err)
+		}
+	}
+}
+
 // Discover finds all valid skills in the given paths.
 func Discover(paths []string) []*Skill {
 	skills, _ := DiscoverWithStates(paths)
@@ -244,53 +278,39 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 		mu.Unlock()
 	}
 
-	for _, base := range paths {
-		// We use fastwalk with Follow: true instead of filepath.WalkDir because
-		// WalkDir doesn't follow symlinked directories at any depth—only entry
-		// points. This ensures skills in symlinked subdirectories are discovered.
-		// fastwalk is concurrent, so we protect shared state (seen, skills) with mu.
-		conf := fastwalk.Config{
-			Follow:  true,
-			ToSlash: fastwalk.DefaultToSlash(),
-		}
-		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				slog.Warn("Failed to walk skills path entry", "base", base, "path", path, "error", err)
-				addState("", path, StateError, err)
-				return nil
-			}
-			if d.IsDir() || d.Name() != SkillFileName {
-				return nil
-			}
-			mu.Lock()
-			if seen[path] {
-				mu.Unlock()
-				return nil
-			}
-			seen[path] = true
-			mu.Unlock()
-			skill, err := Parse(path)
-			if err != nil {
-				slog.Warn("Failed to parse skill file", "path", path, "error", err)
-				addState("", path, StateError, err)
-				return nil
-			}
-			if err := skill.Validate(); err != nil {
-				slog.Warn("Skill validation failed", "path", path, "error", err)
-				addState(skill.Name, path, StateError, err)
-				return nil
-			}
-			slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
-			mu.Lock()
-			skills = append(skills, skill)
-			mu.Unlock()
-			addState(skill.Name, path, StateNormal, nil)
+	walkSkillFiles(paths, func(base, path string, d os.DirEntry, err error) error {
+		if err != nil {
+			slog.Warn("Failed to walk skills path entry", "base", base, "path", path, "error", err)
+			addState("", path, StateError, err)
 			return nil
-		})
-		if err != nil && !os.IsNotExist(err) {
-			slog.Warn("Failed to walk skills path", "path", base, "error", err)
 		}
-	}
+		mu.Lock()
+		if seen[path] {
+			mu.Unlock()
+			return nil
+		}
+		seen[path] = true
+		mu.Unlock()
+		skill, err := Parse(path)
+		if err != nil {
+			slog.Warn("Failed to parse skill file", "path", path, "error", err)
+			addState("", path, StateError, err)
+			return nil
+		}
+		if err := skill.Validate(); err != nil {
+			slog.Warn("Skill validation failed", "path", path, "error", err)
+			addState(skill.Name, path, StateError, err)
+			return nil
+		}
+		slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
+		mu.Lock()
+		skills = append(skills, skill)
+		mu.Unlock()
+		addState(skill.Name, path, StateNormal, nil)
+		return nil
+	}, func(base string, err error) {
+		slog.Warn("Failed to walk skills path", "path", base, "error", err)
+	})
 
 	// fastwalk traversal order is non-deterministic, so sort for stable output.
 	// Sort by path first, then alphabetically by name within each path.

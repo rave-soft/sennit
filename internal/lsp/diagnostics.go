@@ -48,7 +48,7 @@ type diagnosticsStore struct {
 	active        *clientGeneration
 	stop          bool
 	done          chan struct{}
-	hook          func()
+	hook          func() // test seam: lets a test step the dispatch loop deterministically
 	beforeEnqueue func() // test-only deterministic publish/shutdown interleaving
 	store         *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
 	counts        DiagnosticCounts
@@ -295,6 +295,8 @@ func (d *diagnosticsStore) SetDiagnosticsCallback(callback func(name string, cou
 
 // waitForDrain blocks until the dispatcher has executed every event queued
 // before the call, so a test (or caller) can observe settled state.
+//
+// test seam: only client_test.go calls this today.
 func (d *diagnosticsStore) waitForDrain() {
 	done := make(chan struct{})
 	if !d.enqueue(diagnosticEvent{run: func() { close(done) }}) {
@@ -323,6 +325,11 @@ func (d *diagnosticsStore) getDiagnostics() map[protocol.DocumentURI][]protocol.
 
 // reset clears all diagnostics. It must only be called as part of a
 // generation swap, never concurrently with publishes.
+//
+// test seam: production code reaches the same effect through resetLocked
+// under its own already-held mu (see publishSwap and the constructor);
+// reset is the mutex-acquiring wrapper client_test.go uses directly since
+// its tests don't already hold d.mu.
 func (d *diagnosticsStore) reset() {
 	d.mu.Lock()
 	d.resetLocked()

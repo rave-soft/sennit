@@ -55,24 +55,18 @@ func applyLitellmMeta(models []catwalk.Model, infoResp litellmModelInfoResponse)
 		metaByID[entry.ModelName] = entry.ModelInfo
 	}
 
-	for i := range models {
-		meta, ok := metaByID[models[i].ID]
-		if !ok {
-			continue
+	return applyModelMeta(models, metaByID, func(model *catwalk.Model, meta litellmModelMeta) {
+		if model.ContextWindow == 0 && meta.MaxInputTokens != nil {
+			model.ContextWindow = *meta.MaxInputTokens
 		}
-		if models[i].ContextWindow == 0 && meta.MaxInputTokens != nil {
-			models[i].ContextWindow = *meta.MaxInputTokens
+		if model.DefaultMaxTokens == 0 && meta.MaxOutputTokens != nil {
+			model.DefaultMaxTokens = *meta.MaxOutputTokens
 		}
-		if models[i].DefaultMaxTokens == 0 && meta.MaxOutputTokens != nil {
-			models[i].DefaultMaxTokens = *meta.MaxOutputTokens
+		if model.CostPer1MIn == 0 && meta.InputCostPerToken != nil {
+			model.CostPer1MIn = *meta.InputCostPerToken * 1_000_000
 		}
-		if models[i].CostPer1MIn == 0 && meta.InputCostPerToken != nil {
-			models[i].CostPer1MIn = *meta.InputCostPerToken * 1_000_000
+		if model.CostPer1MOut == 0 && meta.OutputCostPerToken != nil {
+			model.CostPer1MOut = *meta.OutputCostPerToken * 1_000_000
 		}
-		if models[i].CostPer1MOut == 0 && meta.OutputCostPerToken != nil {
-			models[i].CostPer1MOut = *meta.OutputCostPerToken * 1_000_000
-		}
-	}
-
-	return models
+	})
 }

@@ -5,8 +5,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"github.com/charlievieth/fastwalk"
 )
 
 // ChangePollInterval is how often WatchForChanges checks discovery paths
@@ -33,27 +31,21 @@ type skillFileSnapshot struct {
 func scanSkillFiles(paths []string) map[string]skillFileSnapshot {
 	snapshot := make(map[string]skillFileSnapshot)
 	var mu sync.Mutex
-	for _, base := range paths {
-		conf := fastwalk.Config{
-			Follow:  true,
-			ToSlash: fastwalk.DefaultToSlash(),
-		}
-		_ = fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() || d.Name() != SkillFileName {
-				return nil
-			}
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			// fastwalk is concurrent, so we protect the shared snapshot
-			// map with mu.
-			mu.Lock()
-			snapshot[path] = skillFileSnapshot{size: info.Size(), modTime: info.ModTime().UnixNano()}
-			mu.Unlock()
+	walkSkillFiles(paths, func(_, path string, d os.DirEntry, err error) error {
+		if err != nil {
 			return nil
-		})
-	}
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		// fastwalk is concurrent, so we protect the shared snapshot
+		// map with mu.
+		mu.Lock()
+		snapshot[path] = skillFileSnapshot{size: info.Size(), modTime: info.ModTime().UnixNano()}
+		mu.Unlock()
+		return nil
+	}, nil)
 	return snapshot
 }
 

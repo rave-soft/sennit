@@ -49,18 +49,12 @@ func applyOmlxMeta(models []catwalk.Model, statusResp omlxModelsStatusResponse) 
 		metaByID[m.ID] = m
 	}
 
-	for i := range models {
-		meta, ok := metaByID[models[i].ID]
-		if !ok {
-			continue
+	return applyModelMeta(models, metaByID, func(model *catwalk.Model, meta omlxModelStatus) {
+		if model.ContextWindow == 0 && meta.MaxContextWindow != nil {
+			model.ContextWindow = *meta.MaxContextWindow
 		}
-		if models[i].ContextWindow == 0 && meta.MaxContextWindow != nil {
-			models[i].ContextWindow = *meta.MaxContextWindow
+		if model.DefaultMaxTokens == 0 && meta.MaxTokens != nil {
+			model.DefaultMaxTokens = *meta.MaxTokens
 		}
-		if models[i].DefaultMaxTokens == 0 && meta.MaxTokens != nil {
-			models[i].DefaultMaxTokens = *meta.MaxTokens
-		}
-	}
-
-	return models
+	})
 }

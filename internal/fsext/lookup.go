@@ -137,34 +137,9 @@ func lookupAll(targets []string, walk func(walkFn func(cwd string, owner int) er
 // It passes absolute path of current directory and staring directory owner ID
 // to callback function. It is up to user to check ownership.
 func traverseUp(dir string, walkFn func(dir string, owner int) error) error {
-	cwd, err := filepath.Abs(dir)
-	if err != nil {
-		return fmt.Errorf("cannot convert CWD to absolute path: %w", err)
-	}
-
-	owner, err := Owner(dir)
-	if err != nil {
-		return fmt.Errorf("cannot get ownership: %w", err)
-	}
-
-	for {
-		err := walkFn(cwd, owner)
-		if err == nil || errors.Is(err, filepath.SkipDir) {
-			parent := filepath.Dir(cwd)
-			if parent == cwd {
-				return nil
-			}
-
-			cwd = parent
-			continue
-		}
-
-		if errors.Is(err, filepath.SkipAll) {
-			return nil
-		}
-
-		return err
-	}
+	// atStop never fires, so the shared loop's parent-equals-cwd check at
+	// the filesystem root is the only way this walk ends.
+	return traverseUpCore(dir, func(string) bool { return false }, walkFn)
 }
 
 // traverseUpBounded walks up from dir, visiting each ancestor up to and
@@ -193,6 +168,19 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 	}
 	canonStop := Canonical(stop)
 
+	return traverseUpCore(dir, func(cwd string) bool { return Canonical(cwd) == canonStop }, walkFn)
+}
+
+// traverseUpCore is the walk loop shared by traverseUp and
+// traverseUpBounded: it climbs from dir toward the filesystem root,
+// invoking walkFn at each level and stopping either when atStop reports
+// the current directory or when the root is reached (parent == cwd).
+func traverseUpCore(dir string, atStop func(cwd string) bool, walkFn func(dir string, owner int) error) error {
+	cwd, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("cannot convert CWD to absolute path: %w", err)
+	}
+
 	owner, err := Owner(dir)
 	if err != nil {
 		return fmt.Errorf("cannot get ownership: %w", err)
@@ -201,7 +189,7 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 	for {
 		err := walkFn(cwd, owner)
 		if err == nil || errors.Is(err, filepath.SkipDir) {
-			if Canonical(cwd) == canonStop {
+			if atStop(cwd) {
 				return nil
 			}
 

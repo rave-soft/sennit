@@ -78,34 +78,27 @@ func applyLmstudioMeta(cfg Config, models []catwalk.Model, modelsResp lmstudioMo
 		existing[m.ID] = struct{}{}
 	}
 
-	for i := range models {
-		meta, ok := metaByKey[models[i].ID]
-		if !ok {
-			continue
-		}
-
+	return applyModelMeta(models, metaByKey, func(model *catwalk.Model, meta lmstudioModelEntry) {
 		// Context window: prefer loaded instance config, fall back
 		// to the model-level max.
-		if models[i].ContextWindow == 0 {
+		if model.ContextWindow == 0 {
 			if len(meta.LoadedInstances) > 0 && meta.LoadedInstances[0].Config.ContextLength > 0 {
-				models[i].ContextWindow = meta.LoadedInstances[0].Config.ContextLength
+				model.ContextWindow = meta.LoadedInstances[0].Config.ContextLength
 			} else if meta.MaxContextLength > 0 {
-				models[i].ContextWindow = meta.MaxContextLength
+				model.ContextWindow = meta.MaxContextLength
 			}
 		}
 
 		// Display name if not already set by user.
-		if models[i].Name == models[i].ID && meta.DisplayName != "" {
-			models[i].Name = meta.DisplayName
+		if model.Name == model.ID && meta.DisplayName != "" {
+			model.Name = meta.DisplayName
 		}
 
 		// Vision support from capabilities -- only for models the user
 		// didn't already specify; see the Enricher contract note on
 		// existing above.
-		if _, userSpecified := existing[models[i].ID]; !userSpecified {
-			models[i].SupportsImages = meta.Capabilities.Vision
+		if _, userSpecified := existing[model.ID]; !userSpecified {
+			model.SupportsImages = meta.Capabilities.Vision
 		}
-	}
-
-	return models
+	})
 }

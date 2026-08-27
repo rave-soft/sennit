@@ -45,12 +45,14 @@ type runtime struct {
 	// setState reports state transitions to the façade.
 	setState func(ServerState)
 
-	// Hooks the orchestrator wires up so the lifecycle never depends on
-	// the diagnostics component directly.
-	onDiagnosticsPublish   func(gen *clientGeneration, params json.RawMessage)
-	beforePublish          func()
+	// onDiagnosticsPublish is the hook the orchestrator wires up so the
+	// lifecycle never depends on the diagnostics component directly.
+	onDiagnosticsPublish func(gen *clientGeneration, params json.RawMessage)
+
+	// afterGenerationPublish is a test seam: production code never sets
+	// it, but client_test.go assigns it to observe exactly when a new
+	// generation becomes current.
 	afterGenerationPublish func()
-	beforeReopen           func()
 
 	// genMu guards gen. Readers (requests, notifications, diagnostics
 	// handlers) hold a generation value taken under this mutex; a
@@ -355,32 +357,20 @@ func (r *runtime) restart(
 	defer cancelInit()
 
 	if _, err := r.initialize(initCtx, gen); err != nil {
-		gen.client.Kill()
-		gen.markDead()
-		r.reportState(StateError)
-		return err
+		return r.failCandidate(gen, err)
 	}
 
 	// Synchronize the unpublished candidate before it is declared ready.
 	// prepareFiles keeps its changes in a candidate overlay until publication;
 	// a failure rolls back candidate notifications while preserving the current
 	// generation's shared user-file snapshot for retry.
-	if r.beforeReopen != nil {
-		r.beforeReopen()
-	}
 	commitFiles, err := prepareFiles(initCtx, gen)
 	if err != nil {
-		gen.client.Kill()
-		gen.markDead()
-		r.reportState(StateError)
-		return err
+		return r.failCandidate(gen, err)
 	}
 	if err := r.waitForServerReady(initCtx, gen, false); err != nil {
-		gen.client.Kill()
-		gen.markDead()
 		slog.Error("Server failed to become ready after restart", "name", r.name, "error", err)
-		r.reportState(StateError)
-		return err
+		return r.failCandidate(gen, err)
 	}
 
 	// The candidate is fully up. Swap it in together with the diagnostics
@@ -389,13 +379,23 @@ func (r *runtime) restart(
 	// canceled in the same critical section as the swap, so it is dead
 	// exactly when it stops being current, and can never outlive its
 	// process or leak a live context.
-	if r.beforePublish != nil {
-		r.beforePublish()
-	}
 	r.publishSwap(gen, diags, oldGen, StateReady)
 	commitFiles()
 
 	return nil
+}
+
+// failCandidate marks a restart candidate generation dead, kills its
+// process, and reports StateError, returning err unchanged so call sites
+// can `return r.failCandidate(gen, err)`. It is the shared failure arm for
+// restart's three candidate-setup steps (initialize, prepareFiles,
+// waitForServerReady): each fails the same way once the candidate itself
+// is bad, differing only in whether they log first.
+func (r *runtime) failCandidate(gen *clientGeneration, err error) error {
+	gen.client.Kill()
+	gen.markDead()
+	r.reportState(StateError)
+	return err
 }
 
 // close closes all tracked files (via closeFiles, if set) and performs the

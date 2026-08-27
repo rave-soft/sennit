@@ -130,6 +130,14 @@ func (f *filesync) closeAllFiles(ctx context.Context, gen *clientGeneration) {
 // prepareRestart snapshots user-open files before the old generation is
 // closed. Markers are candidate-only bootstrap documents and are never added
 // to this snapshot. Candidate notifications remain isolated until publish.
+//
+// The two-layer closure is intentional, not incidental: prepareRestart
+// itself must run — and take its userFiles snapshot — before the old
+// generation is torn down, while the closure it returns runs later,
+// against the new candidate generation, only once that candidate has
+// initialized. Flattening the two into one call would force the snapshot
+// to happen at candidate-ready time instead, after the old generation (and
+// the files it had open) may already be gone.
 func (f *filesync) prepareRestart() func(context.Context, *clientGeneration) (func(), error) {
 	userFiles := make(map[string]*OpenFileInfo)
 	for uri, info := range f.files.Seq2() {

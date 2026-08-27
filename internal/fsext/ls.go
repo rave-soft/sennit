@@ -178,23 +178,35 @@ func (dl *directoryLister) getCombinedMatcher(dir string) gitignore.Matcher {
 	return gitignore.NewMatcher(allPatterns)
 }
 
+// matchesFastIgnore reports whether base should be ignored purely from its
+// name — the O(1) common-directory lookup and the caller-supplied glob
+// patterns — without consulting any gitignore matcher. Both
+// directoryLister.shouldIgnore and directoryVisitState.shouldIgnore start
+// with this same check; they diverge only in how they then consult
+// gitignore, since each maintains ancestor patterns differently to suit
+// its own traversal (directoryLister rebuilds a combined matcher per
+// parent directory on demand, directoryVisitState maintains an explicit
+// push/pop pattern stack as the walk descends and ascends), so that part
+// is not merged.
+func matchesFastIgnore(base string, isDir bool, ignorePatterns []string) bool {
+	if isDir && fastIgnoreDirs[base] {
+		return true
+	}
+	for _, pattern := range ignorePatterns {
+		if matched, err := filepath.Match(pattern, base); err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
 // shouldIgnore checks if a path should be ignored based on gitignore rules.
 // This uses a combined matcher containing all ancestor patterns.
 func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, isDir bool) bool {
 	base := filepath.Base(path)
 
-	// Fast path: O(1) lookup for commonly ignored directories.
-	if isDir && fastIgnoreDirs[base] {
+	if matchesFastIgnore(base, isDir, ignorePatterns) {
 		return true
-	}
-
-	// Check explicit ignore patterns.
-	if len(ignorePatterns) > 0 {
-		for _, pattern := range ignorePatterns {
-			if matched, err := filepath.Match(pattern, base); err == nil && matched {
-				return true
-			}
-		}
 	}
 
 	// Don't apply gitignore rules to the root directory itself.
@@ -306,13 +318,8 @@ func (s *directoryVisitState) enter(dir string) {
 
 func (s *directoryVisitState) shouldIgnore(path string, ignorePatterns []string, isDir bool) bool {
 	base := filepath.Base(path)
-	if isDir && fastIgnoreDirs[base] {
+	if matchesFastIgnore(base, isDir, ignorePatterns) {
 		return true
-	}
-	for _, pattern := range ignorePatterns {
-		if matched, err := filepath.Match(pattern, base); err == nil && matched {
-			return true
-		}
 	}
 	if path == s.rootPath {
 		return false

@@ -112,13 +112,13 @@ func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
 
 // GlobGitignoreAware globs files respecting gitignore.
 func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(context.Background(), pattern, cwd, limit, true)
+	return globWithDoubleStar(context.Background(), pattern, cwd, limit)
 }
 
 // GlobGitignoreAwareCtx is like [GlobGitignoreAware] but stops early when ctx
 // is cancelled (e.g. on timeout), returning whatever was found so far.
 func GlobGitignoreAwareCtx(ctx context.Context, pattern, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(ctx, pattern, cwd, limit, true)
+	return globWithDoubleStar(ctx, pattern, cwd, limit)
 }
 
 // VisitGlobGitignoreAware streams every matching path without retaining the
@@ -163,7 +163,7 @@ func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, vi
 	return nil
 }
 
-func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
+func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
 	// Normalize pattern to forward slashes on Windows so their config can use
 	// backslashes
 	pattern = filepath.ToSlash(pattern)
@@ -189,11 +189,11 @@ func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit i
 
 		isDir := d.IsDir()
 		if isDir {
-			if gitignore && walker.ShouldSkipDir(path) {
+			if walker.ShouldSkipDir(path) {
 				return filepath.SkipDir
 			}
 		} else {
-			if gitignore && walker.ShouldSkip(path) {
+			if walker.ShouldSkip(path) {
 				return nil
 			}
 		}
