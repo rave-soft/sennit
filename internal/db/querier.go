@@ -221,6 +221,15 @@ type Querier interface {
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
+	// Same fields as UpdateSession, except cost: this accumulates a delta
+	// onto the existing value (cost = cost + ?) instead of overwriting it
+	// with the caller's whole running total. Used by a writer whose
+	// read-to-write window spans an entire provider stream (summarize):
+	// writing back a total computed at the start of that window would
+	// silently discard a concurrent AddSessionCost (e.g. a delegation
+	// finishing against this same session) that landed while the stream was
+	// still in flight.
+	UpdateSessionUsage(ctx context.Context, arg UpdateSessionUsageParams) (Session, error)
 	UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (Thread, error)
 	UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (Thread, error)
 }

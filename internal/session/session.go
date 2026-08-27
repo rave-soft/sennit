@@ -125,6 +125,15 @@ type Service interface {
 	List(ctx context.Context) ([]Session, error)
 	ValidateSessionIDsInTree(ctx context.Context, rootSessionID string, sessionIDs []string) ([]string, error)
 	Save(ctx context.Context, session Session) (Session, error)
+	// SaveUsage persists sess's title/token/summary/todo fields the way
+	// Save does, but ignores sess.Cost: costDelta is accumulated onto the
+	// session's existing cost with a single atomic UPDATE (cost = cost +
+	// costDelta) instead of writing back a whole total. Use this over
+	// Save when the caller's read of sess happened long enough ago that
+	// another writer (e.g. AddCost, from a delegation finishing against
+	// this same session) could plausibly have landed in between —
+	// summarize's provider stream is the case this exists for.
+	SaveUsage(ctx context.Context, sess Session, costDelta float64) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	// SetModel pins the model sessionID runs on. A zero ModelRef clears
@@ -352,6 +361,40 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	session.EstimatedUsage = estimatedUsage
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
+}
+
+// SaveUsage folds costDelta onto sess's cost with a single atomic UPDATE
+// rather than writing back sess.Cost as a whole total. See the interface.
+func (s *service) SaveUsage(ctx context.Context, sess Session, costDelta float64) (Session, error) {
+	todosJSON, err := marshalTodos(sess.Todos)
+	if err != nil {
+		return Session{}, err
+	}
+
+	dbSession, err := s.q.UpdateSessionUsage(ctx, db.UpdateSessionUsageParams{
+		ID:               sess.ID,
+		Title:            sess.Title,
+		PromptTokens:     sess.PromptTokens,
+		CompletionTokens: sess.CompletionTokens,
+		SummaryMessageID: sql.NullString{
+			String: sess.SummaryMessageID,
+			Valid:  sess.SummaryMessageID != "",
+		},
+		Cost: costDelta,
+		Todos: sql.NullString{
+			String: todosJSON,
+			Valid:  todosJSON != "",
+		},
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	estimatedUsage := sess.EstimatedUsage
+	s.setEstimatedUsageState(sess.ID, estimatedUsage)
+	result := s.fromDBItem(dbSession)
+	result.EstimatedUsage = estimatedUsage
+	s.Publish(pubsub.UpdatedEvent, result)
+	return result, nil
 }
 
 // AddCost accumulates delta onto the session's cost. See the interface.

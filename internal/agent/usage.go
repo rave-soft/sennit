@@ -335,7 +335,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	// read/creation). We do not log a second finished line here - that was
 	// the duplicate the audit caught.
 
-	a.updateSessionUsage(model, &currentSession, resp.TotalUsage, a.openrouterTotal(resp.Steps), false)
+	costDelta := a.updateSessionUsage(model, &currentSession, resp.TotalUsage, a.openrouterTotal(resp.Steps), false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -343,7 +343,14 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
 	currentSession.PromptTokens = 0
 	currentSession.EstimatedUsage = usageIsZero(usage)
-	_, err = a.sessions.Save(genCtx, currentSession)
+	// SaveUsage, not Save: this pass's Get happened before an entire
+	// provider stream ran, long enough for another writer (a delegation
+	// finishing against this same session, say) to have landed its own
+	// AddCost in between. Save would write back currentSession.Cost - a
+	// total computed from the stale read - and silently erase that
+	// write; SaveUsage instead folds costDelta onto whatever cost is
+	// there now, in one atomic UPDATE.
+	_, err = a.sessions.SaveUsage(genCtx, currentSession, costDelta)
 	if err != nil {
 		return err
 	}
@@ -411,7 +418,12 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
+// updateSessionUsage folds usage into session in place (cost accumulated,
+// token counters set to the request's own values - see
+// updateSessionTokenCounters) and returns the cost delta this call added,
+// for a caller whose write-back cannot simply persist session.Cost as a
+// whole total (see SaveUsage).
+func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) float64 {
 	if !usageIsZero(usage) {
 		session.EstimatedUsage = estimated
 	}
@@ -438,6 +450,7 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 	session.Cost += cost
 	updateSessionTokenCounters(session, usage)
+	return cost
 }
 
 func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {

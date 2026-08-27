@@ -518,3 +518,65 @@ func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSess
 	)
 	return err
 }
+
+const updateSessionUsage = `-- name: UpdateSessionUsage :one
+UPDATE sessions
+SET
+    title = ?,
+    prompt_tokens = ?,
+    completion_tokens = ?,
+    summary_message_id = ?,
+    cost = cost + ?,
+    todos = ?
+WHERE id = ?
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id, model_provider, model_id
+`
+
+type UpdateSessionUsageParams struct {
+	Title            string         `json:"title"`
+	PromptTokens     int64          `json:"prompt_tokens"`
+	CompletionTokens int64          `json:"completion_tokens"`
+	SummaryMessageID sql.NullString `json:"summary_message_id"`
+	Cost             float64        `json:"cost"`
+	Todos            sql.NullString `json:"todos"`
+	ID               string         `json:"id"`
+}
+
+// Same fields as UpdateSession, except cost: this accumulates a delta
+// onto the existing value (cost = cost + ?) instead of overwriting it
+// with the caller's whole running total. Used by a writer whose
+// read-to-write window spans an entire provider stream (summarize):
+// writing back a total computed at the start of that window would
+// silently discard a concurrent AddSessionCost (e.g. a delegation
+// finishing against this same session) that landed while the stream was
+// still in flight.
+func (q *Queries) UpdateSessionUsage(ctx context.Context, arg UpdateSessionUsageParams) (Session, error) {
+	row := q.db.QueryRowContext(ctx, updateSessionUsage,
+		arg.Title,
+		arg.PromptTokens,
+		arg.CompletionTokens,
+		arg.SummaryMessageID,
+		arg.Cost,
+		arg.Todos,
+		arg.ID,
+	)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ParentSessionID,
+		&i.Title,
+		&i.MessageCount,
+		&i.PromptTokens,
+		&i.CompletionTokens,
+		&i.Cost,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SummaryMessageID,
+		&i.Todos,
+		&i.ProjectPath,
+		&i.AgentID,
+		&i.ModelProvider,
+		&i.ModelID,
+	)
+	return i, err
+}

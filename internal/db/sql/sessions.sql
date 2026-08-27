@@ -73,6 +73,26 @@ SET
 WHERE id = ?
 RETURNING *;
 
+-- name: UpdateSessionUsage :one
+-- Same fields as UpdateSession, except cost: this accumulates a delta
+-- onto the existing value (cost = cost + ?) instead of overwriting it
+-- with the caller's whole running total. Used by a writer whose
+-- read-to-write window spans an entire provider stream (summarize):
+-- writing back a total computed at the start of that window would
+-- silently discard a concurrent AddSessionCost (e.g. a delegation
+-- finishing against this same session) that landed while the stream was
+-- still in flight.
+UPDATE sessions
+SET
+    title = ?,
+    prompt_tokens = ?,
+    completion_tokens = ?,
+    summary_message_id = ?,
+    cost = cost + ?,
+    todos = ?
+WHERE id = ?
+RETURNING *;
+
 -- name: UpdateSessionTitleAndUsage :exec
 UPDATE sessions
 SET
