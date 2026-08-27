@@ -150,7 +150,7 @@ const diskAuthProviderJSON = `{"providers":{"test-openai-compat":{"id":"test-ope
 func TestMakeRateLimitCallback_Disabled_ReturnsNil(t *testing.T) {
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
-	cb := b.makeRateLimitCallback(config.ProviderConfig{ID: "p"}, nil)
+	cb := b.makeRateLimitCallback(config.ProviderConfig{ID: "p"}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -160,7 +160,7 @@ func TestMakeRateLimitCallback_NonRateLimitProvider_ReturnsNil(t *testing.T) {
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
 	cfg := config.ProviderConfig{ID: codex.ProviderID, Account: "a", Rotation: &config.RotationConfig{Enabled: true}}
-	cb := b.makeRateLimitCallback(cfg, nil)
+	cb := b.makeRateLimitCallback(cfg, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -181,7 +181,7 @@ func TestMakeRateLimitCallback_SingleAccount_NoOp(t *testing.T) {
 
 	providerCfg, _ := co.cfg.Config().Providers.Get(authProviderID)
 	providerCfg.Account = "only"
-	cb := co.builder.makeRateLimitCallback(providerCfg, nil)
+	cb := co.builder.makeRateLimitCallback(providerCfg, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 
 	err := cb(t.Context(), rateLimitErr(nil))
@@ -267,7 +267,7 @@ func TestMakeRateLimitCallback_AllExhausted_SurfacesOriginalError(t *testing.T) 
 	require.True(t, ok)
 	beforeVersion := co.cfg.CredentialVersion()
 
-	cb := co.builder.makeRateLimitCallback(providerCfg, nil)
+	cb := co.builder.makeRateLimitCallback(providerCfg, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 
 	// acct-a is the only enabled account, and it is the one being marked
@@ -310,7 +310,7 @@ func TestMakeRateLimitCallback_HonorsRetryAfterHeader(t *testing.T) {
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
 
-	cb := co.builder.makeRateLimitCallback(providerCfg, nil)
+	cb := co.builder.makeRateLimitCallback(providerCfg, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 
 	// First 429 rotates a -> b (debounce then blocks a second rotation).
@@ -359,7 +359,7 @@ func codexProviderConfig(account string, enabled bool) config.ProviderConfig {
 func TestMakeThresholdRotateCallback_Disabled_ReturnsNil(t *testing.T) {
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
-	cb := b.makeThresholdRotateCallback(codexProviderConfig("a", false), nil)
+	cb := b.makeThresholdRotateCallback(codexProviderConfig("a", false), nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -370,7 +370,7 @@ func TestMakeThresholdRotateCallback_NonThresholdProvider_ReturnsNil(t *testing.
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
 	cfg := config.ProviderConfig{ID: "some-other-provider", Rotation: &config.RotationConfig{Enabled: true}}
-	cb := b.makeThresholdRotateCallback(cfg, nil)
+	cb := b.makeThresholdRotateCallback(cfg, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -394,7 +394,7 @@ func TestMakeThresholdRotateCallback_BelowThreshold_NoOp(t *testing.T) {
 		accStore: codexAccountStore(apiKeyAccount("acct-below", "key-a"), apiKeyAccount("acct-b", "key-b")),
 	}
 
-	cb := b.makeThresholdRotateCallback(providerCfg, nil)
+	cb := b.makeThresholdRotateCallback(providerCfg, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 	cb(t.Context())
 
@@ -422,7 +422,7 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 		accStore: codexAccountStore(apiKeyAccount("acct-over", "key-a"), apiKeyAccount("acct-c", "key-c")),
 	}
 
-	cb := b.makeThresholdRotateCallback(providerCfg, nil)
+	cb := b.makeThresholdRotateCallback(providerCfg, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 	cb(t.Context())
 

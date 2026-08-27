@@ -58,7 +58,7 @@ https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-EFGH`,
 func TestRefreshAWSCredentials_Headless_ReturnsErrNoInteractiveAuth(t *testing.T) {
 	t.Parallel()
 	c := &runtimeBuilder{}
-	err := c.refreshAWSCredentials(t.Context(), config.ProviderConfig{ID: "bedrock", AWSAuthRefresh: "aws sso login"})
+	err := c.refreshAWSCredentials(t.Context(), config.ProviderConfig{ID: "bedrock", AWSAuthRefresh: "aws sso login"}, runtimeOperationPort{})
 	require.ErrorIs(t, err, errNoInteractiveAuth,
 		"with no notifier available, refreshAWSCredentials must not attempt to run the refresh command")
 }
@@ -76,7 +76,7 @@ func TestRefreshAWSCredentials_Success_PublishesURLAndRetries(t *testing.T) {
 
 	logs := captureLogs(t)
 	ctx := WithRunID(context.WithValue(t.Context(), tools.SessionIDContextKey, "aws-session"), "aws-run")
-	err := co.builder.refreshAWSCredentials(ctx, providerCfg)
+	err := co.builder.refreshAWSCredentials(ctx, providerCfg, runtimeOperationPort{})
 	require.NoError(t, err)
 	require.Contains(t, logs.String(), "event=invalidate")
 	require.Contains(t, logs.String(), "reason=aws_auth_refresh")
@@ -108,7 +108,7 @@ func TestRefreshAWSCredentials_CommandFailure_ReturnsErrorWithStderr(t *testing.
 	co := authTestCoordinator(t, withNotify(notifier))
 	providerCfg := config.ProviderConfig{ID: "bedrock", AWSAuthRefresh: "echo login-failed-detail 1>&2; exit 7"}
 
-	err := co.builder.refreshAWSCredentials(t.Context(), providerCfg)
+	err := co.builder.refreshAWSCredentials(t.Context(), providerCfg, runtimeOperationPort{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "login-failed-detail")
 
@@ -131,7 +131,7 @@ func TestRefreshAWSCredentials_CallerCancelled_ReturnsCallerCtxErr(t *testing.T)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err := co.builder.refreshAWSCredentials(ctx, providerCfg)
+	err := co.builder.refreshAWSCredentials(ctx, providerCfg, runtimeOperationPort{})
 	require.ErrorIs(t, err, context.Canceled)
 }
 

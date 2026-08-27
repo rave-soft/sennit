@@ -18,7 +18,7 @@ import (
 // wait. A continuation fires long after the turn that started the
 // delegation, which is exactly when those matter.
 func TestStartContinuationGoesThroughTheCoordinatorWhenWired(t *testing.T) {
-	a := &sessionAgent{dispatch: newDispatcher()}
+	a := &sessionAgent{dispatcher: newDispatcher()}
 
 	called := make(chan string, 1)
 	a.continuationRunner = func(_ context.Context, sessionID string) error {
@@ -40,7 +40,7 @@ func TestStartContinuationGoesThroughTheCoordinatorWhenWired(t *testing.T) {
 // wired to the new path: a runner that fails still counts against the
 // attempt budget.
 func TestStartContinuationRecordsTheRunnersFailure(t *testing.T) {
-	a := &sessionAgent{dispatch: newDispatcher()}
+	a := &sessionAgent{dispatcher: newDispatcher()}
 	a.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})
 
 	failed := make(chan struct{}, 1)

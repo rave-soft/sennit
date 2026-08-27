@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -40,7 +39,6 @@ type turnDispatcher struct {
 	delegation  *delegationFinalizer
 
 	agentPort *coordinatorAgentPort
-	agents    map[string]SessionAgent
 
 	lifecycle *readinessLifecycle
 }
@@ -73,17 +71,25 @@ func (d *turnDispatcher) Close(ctx context.Context) error {
 // what a config reload or credential refresh uses to pick up the new
 // generation.
 func (d *turnDispatcher) runUpdateModels(ctx context.Context, agent SessionAgent) error {
-	runtime, err := d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
-	if errors.Is(err, errRuntimeChanged) {
-		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
+	return d.builder.UpdateModels(ctx, agent, d.delegation.runtimeInputs())
+}
+
+// refreshRuntimeToken refreshes an expired OAuth token for runtime's
+// provider and, if that refresh landed a new generation, re-resolves
+// runtime so the caller proceeds on it instead of the one it already
+// compiled. A refresh failure is logged under logMsg rather than
+// returned: every call site proceeds with the existing token exactly as
+// it did before this was extracted, only a re-resolve failure is
+// reported to the caller.
+func (d *turnDispatcher) refreshRuntimeToken(ctx context.Context, runtime *compiledRuntime, logMsg string) (*compiledRuntime, error) {
+	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
+		slog.Error(logMsg, "error", err)
+		return runtime, nil
 	}
-	if err != nil {
-		return err
+	if d.builder.runtimeKey() == runtime.key {
+		return runtime, nil
 	}
-	agent.SetModel(runtime.model)
-	agent.SetTools(runtime.tools)
-	agent.SetSystemPrompt(runtime.systemPrompt)
-	return nil
+	return d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
 }
 
 // Summarize implements Coordinator: it resolves the runtime the summary
@@ -94,13 +100,9 @@ func (d *turnDispatcher) Summarize(ctx context.Context, sessionID string) error 
 	if err != nil {
 		return err
 	}
-	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
-		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
-	} else if d.builder.runtimeKey() != runtime.key {
-		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
-		if err != nil {
-			return err
-		}
+	runtime, err = d.refreshRuntimeToken(ctx, runtime, "Failed to refresh OAuth2 token before summarize. Proceeding with existing token.")
+	if err != nil {
+		return err
 	}
 	active := newActiveRuntime(runtime)
 
@@ -161,13 +163,9 @@ func (d *turnDispatcher) runContinuation(ctx context.Context, sessionID string) 
 	if err != nil {
 		return fmt.Errorf("failed to prepare agent runtime: %w", err)
 	}
-	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
-		slog.Error("Failed to refresh OAuth2 token for a continuation. Proceeding with existing token.", "error", err)
-	} else if d.builder.runtimeKey() != runtime.key {
-		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
-		if err != nil {
-			return fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
-		}
+	runtime, err = d.refreshRuntimeToken(ctx, runtime, "Failed to refresh OAuth2 token for a continuation. Proceeding with existing token.")
+	if err != nil {
+		return fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
 	}
 	active := newActiveRuntime(runtime)
 
@@ -232,15 +230,11 @@ func (d *turnDispatcher) run(ctx context.Context, accept *AcceptedRun, sessionID
 		return nil, fmt.Errorf("failed to prepare agent runtime: %w", err)
 	}
 
-	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
-		// We don't return here because the event handling to ask the user to reauthenticate
-		// depends on the flow below. If refresh fails, proceed with the token we have.
-		slog.Error("Failed to refresh OAuth2 token. Proceeding with existing token.", "error", err)
-	} else if d.builder.runtimeKey() != runtime.key {
-		runtime, err = d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
-		if err != nil {
-			return nil, fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
-		}
+	// We don't return here because the event handling to ask the user to reauthenticate
+	// depends on the flow below. If refresh fails, proceed with the token we have.
+	runtime, err = d.refreshRuntimeToken(ctx, runtime, "Failed to refresh OAuth2 token. Proceeding with existing token.")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
 	}
 	active := newActiveRuntime(runtime)
 

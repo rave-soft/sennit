@@ -332,12 +332,11 @@ type sessionAgent struct {
 	// each sub-agent build gets a group of its own.
 	subReady *errgroup.Group
 
-	// dispatch owns the accept/queue/cancel protocol state shared by Run
-	// and Summarize's dispatch handoffs. Embedded (via the dispatch
-	// alias) so dispatcher's pure pass-through methods are promoted onto
-	// SessionAgent's method set without a forwarding wrapper for each -
-	// see dispatch.go.
-	*dispatch
+	// dispatcher owns the accept/queue/cancel protocol state shared by Run
+	// and Summarize's dispatch handoffs. Embedded so dispatcher's pure
+	// pass-through methods are promoted onto SessionAgent's method set
+	// without a forwarding wrapper for each - see dispatch.go.
+	*dispatcher
 }
 
 type SessionAgentOptions struct {
@@ -379,7 +378,7 @@ func NewSessionAgent(
 		runComplete:          opts.RunComplete,
 		mcp:                  opts.MCP,
 		latency:              opts.Latency,
-		dispatch:             newDispatcher(),
+		dispatcher:           newDispatcher(),
 	}
 	// Wired after construction since the hook closes over a: dispatch
 	// itself must stay free of any dependency on a or on pubsub (see
@@ -635,15 +634,13 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 
 // buildStreamAgent constructs the fantasy agent from an already assembled
 // runtime. It deliberately does not read mutable agent or MCP state.
-func (a *sessionAgent) buildStreamAgent(runtime streamRuntime) (streamAgent fantasy.Agent, model Model, agentTools []fantasy.AgentTool, promptPrefix string, summarize summarizePolicy) {
-	streamAgent = fantasy.NewAgent(
+func (a *sessionAgent) buildStreamAgent(runtime streamRuntime) fantasy.Agent {
+	return fantasy.NewAgent(
 		runtime.model.Model,
 		fantasy.WithSystemPrompt(runtime.systemPrompt),
 		fantasy.WithTools(runtime.tools...),
 		fantasy.WithUserAgent(userAgent),
 	)
-	return streamAgent, runtime.model, runtime.tools, runtime.systemPromptPrefix,
-		summarizePolicy{disabled: runtime.disableAutoSummarize, at: runtime.autoSummarizeAt}
 }
 
 type streamRuntime struct {
@@ -655,14 +652,21 @@ type streamRuntime struct {
 	autoSummarizeAt      int64
 }
 
-// effectiveStreamRuntime is the single source of the per-turn prompt and tool
-// snapshot. Budgeting uses the same assembly so it cannot reserve for tools or
-// instructions that differ from the eventual Stream call.
-// snapshotStreamRuntime captures the immutable runtime after readiness.
+// snapshotStreamRuntime captures the immutable runtime after readiness. It
+// looks like a pointless forward to effectiveStreamRuntime, but it exists as
+// an override seam: stream_runtime_snapshot_test.go's
+// snapshotMutatingSessionAgent embeds *sessionAgent and shadows this method
+// to mutate agent state between the snapshot and the provider call, which is
+// what TestRunSubAgentUsesOneRuntimeSnapshotForBudgetAndProvider uses to
+// prove a delegation's budget and provider request come from the same
+// snapshot. Do not delete it or inline it into effectiveStreamRuntime.
 func (a *sessionAgent) snapshotStreamRuntime(call SessionAgentCall) streamRuntime {
 	return a.effectiveStreamRuntime(call)
 }
 
+// effectiveStreamRuntime is the single source of the per-turn prompt and tool
+// snapshot. Budgeting uses the same assembly so it cannot reserve for tools or
+// instructions that differ from the eventual Stream call.
 func (a *sessionAgent) effectiveStreamRuntime(call SessionAgentCall) streamRuntime {
 	if call.streamRuntime != nil {
 		runtime := *call.streamRuntime
@@ -685,7 +689,7 @@ func (a *sessionAgent) effectiveStreamRuntime(call SessionAgentCall) streamRunti
 		runtime.disableAutoSummarize = call.Runtime.disableAutoSummarize
 		runtime.autoSummarizeAt = call.Runtime.autoSummarizeAt
 	}
-	runtime.tools = withoutUnusableParentTool(runtime.tools, a.dispatch, call.SessionID)
+	runtime.tools = withoutUnusableParentTool(runtime.tools, a.dispatcher, call.SessionID)
 
 	var instructions strings.Builder
 	// a.mcp is nil for session agents built outside app.New; treat it as no MCP.
@@ -962,7 +966,9 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	}()
 
 	runtime := a.effectiveStreamRuntime(call)
-	streamAgent, model, agentTools, promptPrefix, summarize := a.buildStreamAgent(runtime)
+	streamAgent := a.buildStreamAgent(runtime)
+	model, agentTools, promptPrefix := runtime.model, runtime.tools, runtime.systemPromptPrefix
+	summarize := summarizePolicy{disabled: runtime.disableAutoSummarize, at: runtime.autoSummarizeAt}
 
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {

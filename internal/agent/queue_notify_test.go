@@ -165,7 +165,7 @@ func TestQueueChanged_NotPublishedUnderDispatchLock(t *testing.T) {
 		Sessions: env.sessions,
 		Messages: env.messages,
 	}).(*sessionAgent)
-	notifier := &lockReentryNotifier{dispatch: sa.dispatch, sessionID: sessionID}
+	notifier := &lockReentryNotifier{dispatch: sa.dispatcher, sessionID: sessionID}
 	sa.notify = notifier
 
 	// Seed a non-empty queue directly so cancel's tail actually clears

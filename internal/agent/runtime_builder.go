@@ -531,22 +531,15 @@ type runtimeOperationPort struct {
 	inputs runtimeToolInputs
 }
 
-func runtimePort(port []runtimeOperationPort) (SessionAgent, runtimeToolInputs) {
-	if len(port) == 0 {
-		return nil, runtimeToolInputs{}
-	}
-	return port[0].agent, port[0].inputs
-}
-
 // --- credential refresh -------------------------------------------------
 
 // refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
-func (b *runtimeBuilder) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig, port ...runtimeOperationPort) error {
+func (b *runtimeBuilder) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
 	if providerCfg.OAuthToken == nil || !providerCfg.OAuthToken.IsExpired() {
 		return nil
 	}
 	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
-	return b.refreshOAuth2Token(ctx, providerCfg, port...)
+	return b.refreshOAuth2Token(ctx, providerCfg, port)
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after an auth error
@@ -554,11 +547,11 @@ func (b *runtimeBuilder) refreshTokenIfExpired(ctx context.Context, providerCfg 
 // refresh token is revoked, and for Bedrock providers whose AWS SSO session
 // has expired, it triggers interactive re-authentication and blocks until the
 // user completes it (or the context is cancelled).
-func (b *runtimeBuilder) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, port ...runtimeOperationPort) error {
+func (b *runtimeBuilder) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
 	switch {
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-		if err := b.refreshOAuth2Token(ctx, providerCfg, port...); err != nil {
+		if err := b.refreshOAuth2Token(ctx, providerCfg, port); err != nil {
 			// If the refresh token was revoked, trigger interactive
 			// re-auth and wait for the user to complete it.
 			var exchangeErr *oauth.TokenExchangeError
@@ -568,16 +561,16 @@ func (b *runtimeBuilder) retryAfterUnauthorized(ctx context.Context, providerCfg
 					Type:       notify.TypeReAuthenticate,
 					ProviderID: providerCfg.ID,
 				})
-				return b.waitForInteractiveReauth(ctx, providerCfg.ID, port...)
+				return b.waitForInteractiveReauth(ctx, providerCfg.ID, port)
 			}
 			return err
 		}
 		return nil
 	case providerCfg.AWSAuthRefresh != "":
-		return b.refreshAWSCredentials(ctx, providerCfg, port...)
+		return b.refreshAWSCredentials(ctx, providerCfg, port)
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
-		return b.refreshApiKeyTemplate(ctx, providerCfg, port...)
+		return b.refreshApiKeyTemplate(ctx, providerCfg, port)
 	default:
 		return nil
 	}
@@ -593,8 +586,8 @@ var errNoInteractiveAuth = errors.New("interactive authentication unavailable")
 // provider completes (signalled via SignalAuthComplete) or the context is
 // cancelled, then rebuilds models so the next attempt picks up fresh
 // credentials. Returns nil when the caller should retry.
-func (b *runtimeBuilder) waitForInteractiveReauth(ctx context.Context, providerID string, port ...runtimeOperationPort) error {
-	agent, inputs := runtimePort(port)
+func (b *runtimeBuilder) waitForInteractiveReauth(ctx context.Context, providerID string, port runtimeOperationPort) error {
+	agent, inputs := port.agent, port.inputs
 	// Use a detached context with a generous timeout so the wait survives
 	// agent run cancellation. The user needs time to complete browser-based
 	// authentication.
@@ -629,15 +622,15 @@ func (b *runtimeBuilder) waitForInteractiveReauth(ctx context.Context, providerI
 // nil if no refresh mechanism is configured for the provider. If active is
 // non-nil, it is refreshed with the recompiled runtime after a successful
 // credential refresh; pass nil when there is no active runtime to track.
-func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConfig, active *activeRuntime, port ...runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
-	_, inputs := runtimePort(port)
+func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConfig, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
+	inputs := port.inputs
 	if providerCfg.OAuthToken == nil &&
 		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
-		if err := b.retryAfterUnauthorized(ctx, providerCfg, port...); err != nil {
+		if err := b.retryAfterUnauthorized(ctx, providerCfg, port); err != nil {
 			return err
 		}
 		if active != nil {
@@ -715,12 +708,12 @@ func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID strin
 // over quota on a single-account setup - the user keeps using the current
 // (over-threshold) account rather than losing the step's own result over
 // a rotation that didn't work out.
-func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.ProviderConfig, active *activeRuntime, port ...runtimeOperationPort) func(context.Context) {
+func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.ProviderConfig, active *activeRuntime, port runtimeOperationPort) func(context.Context) {
 	rotator := b.rotatorFor(providerCfg)
 	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateThreshold {
 		return nil
 	}
-	_, inputs := runtimePort(port)
+	inputs := port.inputs
 	return func(ctx context.Context) {
 		// RotateThreshold is Codex-only today (see capabilities.go), so
 		// reading its usage snapshot straight from the codex package is
@@ -801,12 +794,12 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 // treats as "rotation didn't help" - normal backoff resumes and the
 // ORIGINAL 429 (not this error) is what a caller ultimately sees; see
 // RetryWithExponentialBackoffRespectingRetryHeaders and runTurn.handleStreamError.
-func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig, active *activeRuntime, port ...runtimeOperationPort) fantasy.OnRateLimitFunc {
+func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig, active *activeRuntime, port runtimeOperationPort) fantasy.OnRateLimitFunc {
 	rotator := b.rotatorFor(providerCfg)
 	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateRateLimit {
 		return nil
 	}
-	_, inputs := runtimePort(port)
+	inputs := port.inputs
 	return func(ctx context.Context, providerErr *fantasy.ProviderError) error {
 		rotator.MarkRateLimited(providerCfg.Account, retryAfterFromHeaders(providerErr))
 
@@ -882,8 +875,8 @@ func retryAfterFromHeaders(err *fantasy.ProviderError) time.Duration {
 	return 0
 }
 
-func (b *runtimeBuilder) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig, port ...runtimeOperationPort) error {
-	agent, inputs := runtimePort(port)
+func (b *runtimeBuilder) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
+	agent, inputs := port.agent, port.inputs
 	if err := b.credentials.RefreshOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID); err != nil {
 		slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
@@ -894,8 +887,8 @@ func (b *runtimeBuilder) refreshOAuth2Token(ctx context.Context, providerCfg con
 	return b.UpdateModels(ctx, agent, inputs)
 }
 
-func (b *runtimeBuilder) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig, port ...runtimeOperationPort) error {
-	agent, inputs := runtimePort(port)
+func (b *runtimeBuilder) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
+	agent, inputs := port.agent, port.inputs
 	newAPIKey, err := b.cfg.Resolve(providerCfg.APIKeyTemplate)
 	if err != nil {
 		slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", err)
@@ -920,8 +913,8 @@ func (b *runtimeBuilder) refreshApiKeyTemplate(ctx context.Context, providerCfg 
 //
 // The command runs here, in the coordinator, rather than in the UI dialog so
 // the refreshed credentials land where the model calls are made.
-func (b *runtimeBuilder) refreshAWSCredentials(ctx context.Context, providerCfg config.ProviderConfig, port ...runtimeOperationPort) error {
-	agent, inputs := runtimePort(port)
+func (b *runtimeBuilder) refreshAWSCredentials(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
+	agent, inputs := port.agent, port.inputs
 	if b.notify == nil {
 		return errNoInteractiveAuth
 	}

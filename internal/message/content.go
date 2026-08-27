@@ -387,17 +387,19 @@ func (m *Message) IsThinking() bool {
 	return false
 }
 
+// AppendContent grows the message's text, targeting the same part
+// [Message.Content] reads: the first TextContent. That keeps the two in
+// sync — a delta written anywhere else would never show up through
+// Content, which callers (IsThinking, the TUI) rely on for "what has the
+// assistant said so far".
 func (m *Message) AppendContent(delta string) {
-	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
 			m.Parts[i] = TextContent{Text: c.Text + delta}
-			found = true
+			return
 		}
 	}
-	if !found {
-		m.Parts = append(m.Parts, TextContent{Text: delta})
-	}
+	m.Parts = append(m.Parts, TextContent{Text: delta})
 }
 
 // AppendReasoningContent and the four writers below it all take a copy of

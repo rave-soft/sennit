@@ -81,7 +81,7 @@ func TestRunSubAgentReportsChildSessionBusyWhileRunning(t *testing.T) {
 func TestSubSessionBusyCountsConcurrentDelegations(t *testing.T) {
 	coord := &coordinator{}
 	coord.newCoordinatorComponents()
-	coord.dispatcher.agentPort.set(&sessionAgent{dispatch: newDispatcher()})
+	coord.dispatcher.agentPort.set(&sessionAgent{dispatcher: newDispatcher()})
 
 	releaseFirst := coord.delegation.markSubSessionBusy("child")
 	releaseSecond := coord.delegation.markSubSessionBusy("child")
@@ -128,6 +128,6 @@ func newSubAgentBusyTestCoordinator(t *testing.T) *coordinator {
 		background:  shell.NewBackgroundShellManager(),
 	}
 	c.newCoordinatorComponents()
-	c.dispatcher.agentPort.set(&sessionAgent{dispatch: newDispatcher()})
+	c.dispatcher.agentPort.set(&sessionAgent{dispatcher: newDispatcher()})
 	return c
 }

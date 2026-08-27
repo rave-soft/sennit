@@ -151,6 +151,60 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	require.Empty(t, msg.Parts)
 }
 
+// TestAppendContentNoTextPartYetAppendsOne pins the "no text part yet"
+// path: the first delta on a message with no TextContent creates one.
+func TestAppendContentNoTextPartYetAppendsOne(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.AppendContent("hello")
+
+	require.Equal(t, "hello", msg.Content().Text)
+	require.Len(t, msg.Parts, 1)
+}
+
+// TestAppendContentSingleTextPartGrowsIt pins the common streaming case:
+// repeated deltas on a message with one TextContent part accumulate onto
+// that same part rather than creating new ones.
+func TestAppendContentSingleTextPartGrowsIt(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.AppendContent("hello")
+	msg.AppendContent(" world")
+
+	require.Equal(t, "hello world", msg.Content().Text)
+	require.Len(t, msg.Parts, 1)
+}
+
+// TestAppendContentTwoTextPartsUpdatesOnlyTheFirst is the regression test:
+// a message with two TextContent parts must have a delta land on exactly
+// one of them, not both. Before the fix, AppendContent's loop had no
+// break, so it wrote the delta into every TextContent part in the
+// message, duplicating (and compounding) the streamed text. The target is
+// the first part, matching Content(), which also returns the first
+// TextContent match — the two must stay in sync, or a delta could be
+// invisible to every caller (IsThinking, the TUI) that reads text through
+// Content().
+func TestAppendContentTwoTextPartsUpdatesOnlyTheFirst(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Parts: []ContentPart{
+			TextContent{Text: "first "},
+			TextContent{Text: "second "},
+		},
+	}
+
+	msg.AppendContent("delta")
+
+	require.Equal(t, "first delta", msg.Parts[0].(TextContent).Text,
+		"the delta should land on the first text part")
+	require.Equal(t, "second ", msg.Parts[1].(TextContent).Text,
+		"the second text part must be untouched")
+	require.Len(t, msg.Parts, 2, "no new text part should be created")
+}
+
 // TestPromptWithTextAttachmentsLabelsPastesAsPastes covers the agent going
 // off to read paste_3.txt: a pasted buffer has no path, and saying it does
 // sends the read tool after a file that never existed.

@@ -38,8 +38,6 @@ var (
 )
 
 type Coordinator interface {
-	// Not used yet; for when there are multiple agents.
-	// SetMainAgent(string)
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -173,7 +171,6 @@ func (c *coordinator) newCoordinatorComponents() {
 		runComplete: c.runComplete,
 		mcp:         c.mcp,
 		latency:     c.latency,
-		agents:      make(map[string]SessionAgent),
 		agentPort:   agentPort,
 		lifecycle:   lifecycle,
 	}
@@ -320,7 +317,6 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 	c.dispatcher.agentPort.set(agent)
-	c.dispatcher.agents[config.AgentCoder] = agent
 	// An auto-woken continuation is a real turn and needs a real turn's
 	// runtime — see runContinuation. Wired here rather than inside
 	// buildAgent because only the coordinator's own agent ever runs one.

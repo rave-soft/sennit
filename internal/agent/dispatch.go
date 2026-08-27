@@ -193,16 +193,6 @@ type dispatcher struct {
 	userInputMu sync.Mutex
 }
 
-// dispatch is a plain alias for dispatcher, used only so sessionAgent can
-// embed *dispatcher anonymously while keeping the field's promoted name
-// "dispatch" (Go names an embedded field after the identifier written at
-// the embed site) - preserving every existing a.X call site
-// verbatim while also promoting dispatcher's exported pass-through
-// methods (BeginAccepted, IsBusy, IsSessionBusy, QueuedPrompts,
-// QueuedPromptsList, RegisterDelegationParent) straight onto
-// SessionAgent's method set, with no forwarding wrapper needed.
-type dispatch = dispatcher
-
 func newDispatcher() *dispatcher {
 	return &dispatcher{
 		states:            csync.NewMap[string, *sessionState](),
@@ -922,8 +912,8 @@ func (d *dispatcher) QueuedPromptsList(sessionID string) []string {
 // QueuedPrompts, QueuedPromptsList, RegisterDelegationParent,
 // drainQueueForStep, requeueDrained, enqueueCall, and the completion-inbox
 // equivalents in completion_inbox.go) needs no such wrapper: sessionAgent
-// embeds *dispatcher (via the dispatch alias below) so those are promoted
-// straight onto SessionAgent's method set.
+// embeds *dispatcher directly so those are promoted straight onto
+// SessionAgent's method set.
 
 // publishCanceledQueueDrops emits a terminal cancelled RunComplete for
 // every dropped queued call that carries a RunID. A queued prompt removed
