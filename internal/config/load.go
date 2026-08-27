@@ -439,10 +439,6 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return &Config{}, nil
 	}
 
-	if _, err := jsons.Merge(configs); err != nil {
-		return nil, err
-	}
-
 	data := []byte(`{}`)
 	masked := map[string]map[string]bool{"mcp": {}, "lsp": {}}
 	for _, layer := range configs {

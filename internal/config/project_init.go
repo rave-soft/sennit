@@ -20,10 +20,6 @@ const (
 	InitFlagFilename = "init"
 )
 
-type ProjectInitFlag struct {
-	Initialized bool `json:"initialized"`
-}
-
 func ProjectNeedsInitialization(store *ConfigStore) (bool, error) {
 	if store == nil {
 		return false, fmt.Errorf("config not loaded")

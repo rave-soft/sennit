@@ -2,7 +2,6 @@ package shellconfig
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 )
@@ -22,22 +21,9 @@ import (
 // "add" defines or updates an MCP server; repeated calls with the same <name>
 // update the same entry. "remove" deletes it.
 func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := configBuilderFromCtx(ctx)
-	if b == nil {
-		return nil
-	}
-	if len(args) < 2 {
-		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [flags] | mcp remove <name>")
-	}
-
-	switch args[1] {
-	case "add":
-		return mcpAdd(b, args, stderr)
-	case "remove", "rm":
-		return mcpRemove(b, args, stderr)
-	default:
-		return usage(stderr, fmt.Sprintf("mcp: unknown subcommand %q (expected add or remove)", args[1]))
-	}
+	return dispatchAddRemove(ctx, args, stderr,
+		"mcp", "usage: mcp add <name> --type stdio|sse|http [flags] | mcp remove <name>",
+		mcpAdd, mcpRemove)
 }
 
 // mcpAddFlags is the declarative flag surface for `mcp add`.
@@ -83,8 +69,6 @@ func mcpRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
 		return usage(stderr, "usage: mcp remove <name>")
 	}
-	name := args[2]
-	b.removeLocal(b.section("mcp"), "mcp", name)
-	slog.Info("MCP server removed in shell config", "name", name)
+	removeNamedEntry(b, "mcp", "MCP server", args[2])
 	return nil
 }

@@ -110,6 +110,12 @@ type delegationFinalizer struct {
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
+	// skillsGen counts RefreshSkills calls. runtimeInputsCache keys its
+	// cached skills snapshot on this rather than on allSkills/activeSkills
+	// themselves, since RefreshSkills always installs new slice headers —
+	// comparing slices for identity would never hit, and comparing
+	// contents would redo the sameSkills work RefreshSkills already did.
+	skillsGen uint64
 	// skillsMgr is the workspace's own skills manager, kept only to read
 	// the discovery state snapshot (which SKILL.md files failed to parse
 	// or validate) for sennit_info's [problems] section. It is read live
@@ -122,17 +128,69 @@ type delegationFinalizer struct {
 	skillsMgr *skills.Manager
 
 	agentPort *coordinatorAgentPort
+
+	// runtimeInputsMu guards runtimeInputsCache, the memoized result of
+	// assembling runtimeInputs(). Building that value means constructing
+	// the agent/agentic_fetch/custom-agent tool adapters and reading a
+	// config snapshot, and runtimeInputs() is called several times per
+	// turn (every credential-refresh path and every runtimeFor call goes
+	// through it — see turn_dispatcher.go), so redoing that work on every
+	// call was pure waste whenever nothing it depends on had changed.
+	//
+	// The cache is valid only while every signal it depends on is
+	// unchanged: the config version (bumped by every config reload AND
+	// every credential/account update, e.g. an OAuth refresh or a
+	// rate-limit rotation — see config.ConfigStore.Version), the skills
+	// generation (bumped by RefreshSkills), and the delegationTools
+	// generation pointer (swapped by SetDelegationTools). Any one of
+	// those changing forces a rebuild on the very next call, so a stale
+	// tool set or skills snapshot is never handed to a build. Because
+	// config version also changes on ordinary credential churn, this
+	// mostly buys back the repeated calls within a single turn rather
+	// than across turns — that is still the majority of the 20+ calls
+	// this was written against.
+	//
+	// skillStates() is deliberately never cached here (see its own doc
+	// comment on why it is read live) — every return, cached or not, is
+	// refreshed with a live call before being handed back.
+	runtimeInputsMu    sync.Mutex
+	runtimeInputsCache *runtimeInputsCacheEntry
+}
+
+// runtimeInputsCacheEntry is one memoized runtimeInputs() result, along
+// with the exact signal values it was built from (see
+// delegationFinalizer.runtimeInputsMu).
+type runtimeInputsCacheEntry struct {
+	configVersion   uint64
+	skillsGen       uint64
+	delegationTools *delegationToolsSnapshot
+	inputs          runtimeToolInputs
 }
 
 func (d *delegationFinalizer) runtimeInputs() runtimeToolInputs {
-	allSkills, activeSkills, skillTracker := d.skillsSnapshot()
+	allSkills, activeSkills, skillTracker, skillsGen := d.skillsSnapshotWithGen()
+	delegationTools := d.delegationTools.Load()
+	var configVersion uint64
+	if d.cfg != nil {
+		configVersion = d.cfg.Version()
+	}
+
+	if inputs, ok := d.cachedRuntimeInputs(configVersion, skillsGen, delegationTools); ok {
+		inputs.skillStates = d.skillStates()
+		return inputs
+	}
+
 	backgroundAgentsOn := true
 	if d.cfg != nil {
 		backgroundAgentsOn = d.backgroundAgentsEnabled()
 	}
+	var delegationToolsVal delegationToolsSnapshot
+	if delegationTools != nil {
+		delegationToolsVal = *delegationTools
+	}
 	inputs := runtimeToolInputs{
 		allSkills: allSkills, activeSkills: activeSkills, skillTracker: skillTracker,
-		delegationTools: d.delegationToolsForRead(), backgroundAgentsOn: backgroundAgentsOn,
+		delegationTools: delegationToolsVal, backgroundAgentsOn: backgroundAgentsOn,
 		permissions: d.permissions, questions: d.questions, lspManager: d.lspManager,
 		history: d.history, filetracker: d.filetracker, background: d.background,
 		sessions: d.sessions, skillStates: d.skillStates(),
@@ -162,7 +220,35 @@ func (d *delegationFinalizer) runtimeInputs() runtimeToolInputs {
 		"ask_parent": tools.NewAskParentTool(d),
 	}
 	inputs.customAgentToolsBuilt = customAgentTools
+
+	// Only a successful build is worth remembering: a transient failure
+	// (e.g. the web_search backend construction erroring) should be
+	// retried on the very next call, not stuck until an unrelated signal
+	// changes.
+	d.storeRuntimeInputsCache(configVersion, skillsGen, delegationTools, inputs)
 	return inputs
+}
+
+// cachedRuntimeInputs returns the cached runtimeInputs() result if it was
+// built from exactly this (configVersion, skillsGen, delegationTools)
+// combination, and reports whether it did.
+func (d *delegationFinalizer) cachedRuntimeInputs(configVersion, skillsGen uint64, delegationTools *delegationToolsSnapshot) (runtimeToolInputs, bool) {
+	d.runtimeInputsMu.Lock()
+	defer d.runtimeInputsMu.Unlock()
+	cached := d.runtimeInputsCache
+	if cached == nil || cached.configVersion != configVersion || cached.skillsGen != skillsGen || cached.delegationTools != delegationTools {
+		return runtimeToolInputs{}, false
+	}
+	return cached.inputs, true
+}
+
+func (d *delegationFinalizer) storeRuntimeInputsCache(configVersion, skillsGen uint64, delegationTools *delegationToolsSnapshot, inputs runtimeToolInputs) {
+	d.runtimeInputsMu.Lock()
+	d.runtimeInputsCache = &runtimeInputsCacheEntry{
+		configVersion: configVersion, skillsGen: skillsGen,
+		delegationTools: delegationTools, inputs: inputs,
+	}
+	d.runtimeInputsMu.Unlock()
 }
 
 func (d *delegationFinalizer) invalidate(ctx context.Context, reason string, mutate func() bool) {
@@ -365,6 +451,11 @@ func (d *delegationFinalizer) RefreshSkills(allSkills, activeSkills []*skills.Sk
 		changed := !sameSkills(d.allSkills, allSkills) || !sameSkills(d.activeSkills, activeSkills)
 		d.allSkills = allSkills
 		d.activeSkills = activeSkills
+		// Bumped on every call, not only when changed: RefreshSkills
+		// always installs new slice headers, so runtimeInputs' cache (keyed
+		// on this) must treat every call as a potential change too, even
+		// one sameSkills would call a no-op.
+		d.skillsGen++
 		// The tracker itself is not replaced: UpdateActiveSkills mutates it
 		// in place under its own lock, keeping loaded state for names still
 		// active rather than wiping it (see UpdateActiveSkills).
@@ -393,9 +484,17 @@ func (d *delegationFinalizer) skillStates() []*skills.SkillState {
 // skillsMu, for callers (buildTools, Run) that need a consistent read
 // while RefreshSkills may be running concurrently.
 func (d *delegationFinalizer) skillsSnapshot() (allSkills, activeSkills []*skills.Skill, tracker *skills.Tracker) {
+	allSkills, activeSkills, tracker, _ = d.skillsSnapshotWithGen()
+	return allSkills, activeSkills, tracker
+}
+
+// skillsSnapshotWithGen is skillsSnapshot plus skillsGen, read under the
+// same lock so the two can never observe two different RefreshSkills
+// calls (see runtimeInputs' cache, the only caller that needs gen).
+func (d *delegationFinalizer) skillsSnapshotWithGen() (allSkills, activeSkills []*skills.Skill, tracker *skills.Tracker, gen uint64) {
 	d.skillsMu.RLock()
 	defer d.skillsMu.RUnlock()
-	return d.allSkills, d.activeSkills, d.skillTracker
+	return d.allSkills, d.activeSkills, d.skillTracker, d.skillsGen
 }
 
 // delegationToolsForRead returns a complete adapter generation.

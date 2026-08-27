@@ -335,37 +335,7 @@ func (b *runtimeBuilder) buildAgentModel(ctx context.Context, isSubAgent bool) (
 		return Model{}, errModelProviderNotConfigured
 	}
 
-	provider, err := b.buildProvider(providerCfg, modelCfg, isSubAgent)
-	if err != nil {
-		return Model{}, err
-	}
-
-	var catalogModel *catwalk.Model
-	for _, m := range providerCfg.Models {
-		if m.ID == modelCfg.Model {
-			catalogModel = &m
-		}
-	}
-	if catalogModel == nil {
-		return Model{}, errModelNotFound
-	}
-
-	modelID := modelCfg.Model
-	if modelCfg.Provider == openrouter.Name && isExactoSupported(modelID) {
-		modelID += ":exacto"
-	}
-
-	languageModel, err := provider.LanguageModel(ctx, modelID)
-	if err != nil {
-		return Model{}, err
-	}
-
-	return Model{
-		Model:      languageModel,
-		CatalogCfg: *catalogModel,
-		ModelCfg:   modelCfg,
-		FlatRate:   providerCfg.FlatRate,
-	}, nil
+	return b.buildModel(ctx, providerCfg, modelCfg, isSubAgent)
 }
 
 // buildCustomAgentModel builds the Model for an agent whose Model field
@@ -390,24 +360,37 @@ func (b *runtimeBuilder) buildCustomAgentModel(ctx context.Context, agent config
 
 	selected := config.SelectedModel{Provider: match.Provider, Model: match.ModelID}
 
+	model, err := b.buildModel(ctx, providerCfg, selected, isSubAgent)
+	if errors.Is(err, errModelNotFound) {
+		return Model{}, fmt.Errorf("agent %q model %q: model not found in provider config", agent.Name, agent.Model)
+	}
+	if err != nil {
+		return Model{}, err
+	}
+	return model, nil
+}
+
+// buildModel resolves selected's provider, catalog entry, and language
+// model, and assembles the result. Shared by buildAgentModel (the app's
+// main model) and buildCustomAgentModel (an agent's own
+// "provider/model-id"): both need the same provider-build ->
+// catalog-lookup -> openrouter ":exacto" suffix -> language-model steps,
+// and only differ in how they arrive at providerCfg/selected and in how
+// they word a not-found error, which is why each keeps that part to
+// itself and reports a bare errModelNotFound here for the caller to wrap.
+func (b *runtimeBuilder) buildModel(ctx context.Context, providerCfg config.ProviderConfig, selected config.SelectedModel, isSubAgent bool) (Model, error) {
 	provider, err := b.buildProvider(providerCfg, selected, isSubAgent)
 	if err != nil {
 		return Model{}, err
 	}
 
-	var catwalkModel *catwalk.Model
-	for _, m := range providerCfg.Models {
-		if m.ID == match.ModelID {
-			catwalkModel = &m
-			break
-		}
-	}
-	if catwalkModel == nil {
-		return Model{}, fmt.Errorf("agent %q model %q: model not found in provider config", agent.Name, agent.Model)
+	catalogModel := findCatalogModel(providerCfg, selected.Model)
+	if catalogModel == nil {
+		return Model{}, errModelNotFound
 	}
 
-	modelID := match.ModelID
-	if match.Provider == openrouter.Name && isExactoSupported(modelID) {
+	modelID := selected.Model
+	if selected.Provider == openrouter.Name && isExactoSupported(modelID) {
 		modelID += ":exacto"
 	}
 
@@ -418,10 +401,26 @@ func (b *runtimeBuilder) buildCustomAgentModel(ctx context.Context, agent config
 
 	return Model{
 		Model:      languageModel,
-		CatalogCfg: *catwalkModel,
+		CatalogCfg: *catalogModel,
 		ModelCfg:   selected,
 		FlatRate:   providerCfg.FlatRate,
 	}, nil
+}
+
+// findCatalogModel returns the first entry in providerCfg.Models whose ID
+// matches modelID, or nil if none matches. First match wins: if a
+// provider's Models ever ends up with two entries sharing an ID (a
+// duplicate that nothing today rejects at config-load time), the earlier
+// entry is authoritative rather than whichever happened to be seen last —
+// deterministic and matching how ResolveModelString itself expects a model
+// ID to name exactly one entry.
+func findCatalogModel(providerCfg config.ProviderConfig, modelID string) *catwalk.Model {
+	for _, m := range providerCfg.Models {
+		if m.ID == modelID {
+			return &m
+		}
+	}
+	return nil
 }
 
 func isExactoSupported(modelID string) bool {

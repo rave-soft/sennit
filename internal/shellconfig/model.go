@@ -97,13 +97,7 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	// Re-adding a model id replaces the existing entry, matching the
 	// update-in-place behavior of `provider add` and `lsp add`.
 	modelsArr, _ := p["models"].([]any)
-	kept := make([]any, 0, len(modelsArr)+1)
-	for _, item := range modelsArr {
-		if m, ok := item.(map[string]any); ok && m["id"] == id {
-			continue
-		}
-		kept = append(kept, item)
-	}
+	kept := filterOutByField(modelsArr, "id", id)
 	p["models"] = append(kept, model)
 
 	slog.Info("Model added in shell config", "provider", provider, "model", id)
@@ -125,15 +119,7 @@ func modelRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 		return nil
 	}
 	modelsArr, _ := p["models"].([]any)
-	kept := make([]any, 0, len(modelsArr))
-	for _, item := range modelsArr {
-		m, ok := item.(map[string]any)
-		if ok && m["id"] == id {
-			continue
-		}
-		kept = append(kept, item)
-	}
-	p["models"] = kept
+	p["models"] = filterOutByField(modelsArr, "id", id)
 
 	slog.Info("Model removed in shell config", "provider", provider, "model", id)
 	return nil

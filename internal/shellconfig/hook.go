@@ -2,7 +2,6 @@ package shellconfig
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 )
@@ -19,22 +18,9 @@ import (
 // whole event when no --name is given. Only named hooks can be removed
 // individually; give a hook a --name if you intend to remove it later.
 func handleHook(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := configBuilderFromCtx(ctx)
-	if b == nil {
-		return nil
-	}
-	if len(args) < 2 {
-		return usage(stderr, "usage: hook add <event> --command CMD [flags] | hook remove <event> [--name NAME]")
-	}
-
-	switch args[1] {
-	case "add":
-		return hookAdd(b, args, stderr)
-	case "remove", "rm":
-		return hookRemove(b, args, stderr)
-	default:
-		return usage(stderr, fmt.Sprintf("hook: unknown subcommand %q (expected add or remove)", args[1]))
-	}
+	return dispatchAddRemove(ctx, args, stderr,
+		"hook", "usage: hook add <event> --command CMD [flags] | hook remove <event> [--name NAME]",
+		hookAdd, hookRemove)
 }
 
 // hookAddFlags is the declarative flag surface for `hook add`.
@@ -97,14 +83,7 @@ func hookRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 
 	// Name given: drop matching hooks, keeping the rest.
 	arr, _ := hooks[event].([]any)
-	kept := make([]any, 0, len(arr))
-	for _, item := range arr {
-		if m, ok := item.(map[string]any); ok && m["name"] == name {
-			continue
-		}
-		kept = append(kept, item)
-	}
-	hooks[event] = kept
+	hooks[event] = filterOutByField(arr, "name", name)
 
 	slog.Info("Hook removed in shell config", "event", event, "name", name)
 	return nil

@@ -2,7 +2,6 @@ package shellconfig
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 )
@@ -20,22 +19,9 @@ import (
 // "add" defines or updates an LSP server; repeated calls with the same <name>
 // update the same entry. "remove" deletes it.
 func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := configBuilderFromCtx(ctx)
-	if b == nil {
-		return nil
-	}
-	if len(args) < 2 {
-		return usage(stderr, "usage: lsp add <name> --command CMD [flags] | lsp remove <name>")
-	}
-
-	switch args[1] {
-	case "add":
-		return lspAdd(b, args, stderr)
-	case "remove", "rm":
-		return lspRemove(b, args, stderr)
-	default:
-		return usage(stderr, fmt.Sprintf("lsp: unknown subcommand %q (expected add or remove)", args[1]))
-	}
+	return dispatchAddRemove(ctx, args, stderr,
+		"lsp", "usage: lsp add <name> --command CMD [flags] | lsp remove <name>",
+		lspAdd, lspRemove)
 }
 
 // lspAddFlags is the declarative flag surface for `lsp add`.
@@ -71,8 +57,6 @@ func lspRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
 		return usage(stderr, "usage: lsp remove <name>")
 	}
-	name := args[2]
-	b.removeLocal(b.section("lsp"), "lsp", name)
-	slog.Info("LSP server removed in shell config", "name", name)
+	removeNamedEntry(b, "lsp", "LSP server", args[2])
 	return nil
 }
