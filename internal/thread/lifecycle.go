@@ -352,13 +352,19 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 	// Coordinator() is documented as possibly nil (a workspace with no
 	// agent configured). Dispatching into it would panic in a worker
 	// goroutine and take the process with it, so this ends the run the
-	// way any other pre-execution failure ends it.
+	// way any other pre-execution failure ends it — via handleRunComplete
+	// on a worker goroutine, exactly like the RunAccepted failure path
+	// below. handleRunComplete takes c.opMu itself, and startRun's own
+	// caller is still holding that lock: calling it inline here would
+	// deadlock against that non-reentrant mutex.
 	coord := handle.Workspace().Coordinator()
 	if coord == nil {
-		l.handleRunComplete(ctx, id, RunComplete{
-			SessionID: sessionID,
-			RunID:     runID,
-			Error:     "workspace has no agent coordinator",
+		l.goWorker(func() {
+			l.handleRunComplete(ctx, id, RunComplete{
+				SessionID: sessionID,
+				RunID:     runID,
+				Error:     "workspace has no agent coordinator",
+			})
 		})
 		return
 	}

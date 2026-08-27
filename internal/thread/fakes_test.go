@@ -73,10 +73,14 @@ func (w *testAppWorkspace) Coordinator() thread.Coordinator {
 		// Mirror the production adapter's nil handling (see
 		// threadspawn.NewCoordinatorAdapter): an App that never initialized
 		// a coordinator presents a nil Coordinator, not a non-nil adapter
-		// wrapping nil.
-		if c := w.app.Coordinator(); c != nil {
-			w.co = &testCoordinatorAdapter{inner: c}
+		// wrapping nil. Returning w.co directly here would wrap that nil
+		// *testCoordinatorAdapter in a non-nil thread.Coordinator interface
+		// value (a typed nil), so the explicit nil return below is required.
+		c := w.app.Coordinator()
+		if c == nil {
+			return nil
 		}
+		w.co = &testCoordinatorAdapter{inner: c}
 	}
 	return w.co
 }
@@ -598,6 +602,11 @@ type fakeSpawner struct {
 	// caller's next ctx.Err() check (Manager.Create/Activate), which
 	// nothing else can time deterministically.
 	afterSpawn func(path string)
+	// noCoordinator, when set, leaves the spawned App's AgentCoordinator
+	// nil instead of installing a fakeCoordinator — for tests exercising
+	// the "workspace with no agent configured" path (Workspace.Coordinator
+	// returning nil).
+	noCoordinator bool
 }
 
 func newFakeSpawner(t *testing.T) *fakeSpawner {
@@ -626,8 +635,11 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, er
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
 	a.SetSessionsForTest(&fakeSessions{createErr: s.sessionsErr})
-	coord := &fakeCoordinator{runErr: s.runErr}
-	a.AgentCoordinator = coord
+	var coord *fakeCoordinator
+	if !s.noCoordinator {
+		coord = &fakeCoordinator{runErr: s.runErr}
+		a.AgentCoordinator = coord
+	}
 
 	h := &fakeHandle{id: path, app: a}
 	s.byPath[path] = h

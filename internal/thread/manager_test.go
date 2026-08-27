@@ -1085,6 +1085,53 @@ func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
 	}, eventuallyTimeout, eventuallyTick)
 }
 
+// TestManager_CreateWithNilCoordinatorCompletesInsteadOfDeadlocking guards
+// against a regression where startRun's nil-coordinator branch (a workspace
+// with no agent configured, e.g. Coordinator() returning nil) called
+// handleRunComplete synchronously from within Create. Create holds the
+// thread's opMu across the whole call, and handleRunComplete takes that
+// same non-reentrant mutex itself, so the inline call deadlocked forever
+// with opMu held, wedging every later operation on the thread. Without the
+// fix (dispatching the completion via l.goWorker instead), this test hangs
+// until its own timeout rather than failing cleanly, which is why Create is
+// driven from a goroutine here.
+func TestManager_CreateWithNilCoordinatorCompletesInsteadOfDeadlocking(t *testing.T) {
+	repo := initRepo(t)
+	spawner := newFakeSpawner(t)
+	spawner.noCoordinator = true
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       thread.NewStoreForTest(t),
+		Spawner:     spawner,
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	shutdownManagerOnCleanup(t, mgr)
+
+	type createResult struct {
+		st  thread.Thread
+		err error
+	}
+	done := make(chan createResult, 1)
+	go func() {
+		st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "no-coordinator", Goal: "go", MergePolicy: thread.MergeManual})
+		done <- createResult{st, err}
+	}()
+
+	var res createResult
+	select {
+	case res = <-done:
+	case <-time.After(eventuallyTimeout):
+		t.Fatal("Create did not return: startRun's nil-coordinator branch deadlocked on opMu")
+	}
+	require.NoError(t, res.err)
+
+	require.Eventually(t, func() bool {
+		got, err := mgr.Get(t.Context(), res.st.ID)
+		return err == nil && got.Status == thread.StatusFailed &&
+			strings.Contains(got.Error, "workspace has no agent coordinator")
+	}, eventuallyTimeout, eventuallyTick)
+}
+
 func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
 	repo := initRepo(t)
 	spawner := newFakeSpawner(t)
