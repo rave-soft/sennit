@@ -887,6 +887,13 @@ func (m *Chat) RemoveMessage(id string) {
 		return
 	}
 
+	// A pending DelayedClickMsg (see HandleMouseDown) carries a raw list
+	// index captured at click time. Removing a row shifts every index
+	// after it, so a click resolving after this would land on whatever
+	// now sits at that index instead of what the user actually clicked —
+	// invalidate it the same way SetMessages/ClearMessages do.
+	m.ClearMouse()
+
 	// Remove from list
 	m.list.RemoveItem(idx)
 

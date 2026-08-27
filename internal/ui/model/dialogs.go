@@ -16,8 +16,14 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
-// closeDialogMsg is sent to close the current dialog.
-type closeDialogMsg struct{}
+// closeDialogMsg is sent to close a specific dialog by ID, rather than
+// whatever happens to be on top when the message arrives — e.g. a
+// permission prompt raised while an MCP prompt call was in flight must
+// not be swept away by that call's own completion. An empty id falls back
+// to closing the front dialog.
+type closeDialogMsg struct {
+	id string
+}
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	action := m.dialog.Update(msg)

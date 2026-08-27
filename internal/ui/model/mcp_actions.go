@@ -25,12 +25,22 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 		}
 	}
 
+	// Snapshot which dialog is in front before the (potentially slow)
+	// GetMCPPrompt round trip starts. If something else — a permission
+	// prompt, most plausibly — gets pushed to front while it's in
+	// flight, the close below must still target this dialog specifically
+	// rather than whatever now sits on top.
+	var frontID string
+	if front := m.dialog.DialogLast(); front != nil {
+		frontID = front.ID()
+	}
+
 	var cmds []tea.Cmd
 	if cmd := m.dialog.StartLoading(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	cmds = append(cmds, load, func() tea.Msg {
-		return closeDialogMsg{}
+		return closeDialogMsg{id: frontID}
 	})
 
 	return tea.Sequence(cmds...)

@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -384,7 +385,10 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 
 	// Check for @ trigger before passing to textarea.
 	curValue := m.editor.textarea.Value()
-	curIdx := len(curValue)
+	// The cursor position, not len(curValue): typing "@" mid-buffer must
+	// check the character actually preceding the cursor and anchor the
+	// completion at that spot, not at the end of the text.
+	curIdx := m.editor.textareaCursorOffset()
 
 	// Trigger completions on @. Suppressed in bang mode: "@" is
 	// just a character in a shell command (e.g. "git log @{u}"),
@@ -444,7 +448,11 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 		line := m.editor.textarea.Line()
 		stripped := trimmedNew[1:] // ok: ascii — strips the literal "!" bang prefix
 		m.editor.textarea.SetValue(stripped)
-		m.editor.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
+		// col is a rune column (SetCursorColumn's units); the stripped
+		// prefix must be measured the same way, or a multi-byte rune in
+		// the leading whitespace throws the cursor off.
+		prefixRunes := utf8.RuneCountInString(newVal) - utf8.RuneCountInString(stripped)
+		m.editor.textarea.SetCursorColumn(max(0, col-prefixRunes))
 		_ = line // cursor line doesn't change; prefix removed
 		m.setEditorPrompt(m.yoloModeCached())
 	} else if m.editor.bangMode && newVal == "" && curValue != "" {

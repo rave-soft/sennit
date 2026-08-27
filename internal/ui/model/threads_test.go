@@ -546,6 +546,39 @@ func TestThreadsDashboardSelectionSurvivesRefresh(t *testing.T) {
 	require.Equal(t, "t2", m.selected().ID)
 }
 
+// TestSelectedSurvivesConcurrentCacheDelete covers a regression: selected()
+// used to return &m.visible[idx], which under the All filter aliases the
+// threadListCache's backing array directly (see filterThreads). applyEvent's
+// DeletedEvent handler removes from that array in place with
+// append(value[:i], value[i+1:]...), which shifts every element after the
+// deleted one down by one slot — silently overwriting whatever a
+// previously-taken pointer into a later index pointed at, without ever
+// assigning through that pointer. selected() must hand back a copy instead.
+func TestSelectedSurvivesConcurrentCacheDelete(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t,
+		proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
+		proto.Thread{ID: "t2", Name: "two", Kind: "thread", Status: "running"},
+		proto.Thread{ID: "t3", Name: "three", Kind: "thread", Status: "running"},
+	)
+	m.list.SetSelected(1)
+	sel := m.selected()
+	require.Equal(t, "t2", sel.ID)
+
+	// Deleting the entry *before* the selected one shifts every later
+	// element (t3) down by one slot in the cache's backing array. If sel
+	// aliases that array, its target is now t3's data even though nothing
+	// ever assigned through sel.
+	m.cache.applyEvent(pubsub.Event[proto.Thread]{
+		Type:    pubsub.DeletedEvent,
+		Payload: proto.Thread{ID: "t1", Kind: "thread"},
+	})
+
+	require.Equal(t, "t2", sel.ID,
+		"a pointer returned by selected() must not change out from under the caller")
+}
+
 // TestComputeThreadsColumnsDropsColumnsWhenNarrow proves the table sheds
 // columns from the right as the terminal narrows, so name and status —
 // the two fields the screen is scanned by — always survive.

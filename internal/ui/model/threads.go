@@ -252,12 +252,21 @@ func (m *threadsDashboard) detailHeight() int {
 
 // selected returns the thread under the list's selection, or nil when the
 // (filtered) list is empty.
+//
+// Returns a pointer to a copy, not &m.visible[idx]: under filterAll,
+// m.visible aliases the cache's backing array (see filterThreads), and
+// threadListCache.applyEvent deletes from that array in place on a
+// DeletedEvent, shifting elements under any pointer taken into it. No
+// current caller holds the result across such a mutation, but returning
+// an alias into shared, mutable storage is a structural landmine — copy
+// out here instead of relying on every call site to stay careful.
 func (m *threadsDashboard) selected() *proto.Thread {
 	idx := m.list.Selected()
 	if idx < 0 || idx >= len(m.visible) {
 		return nil
 	}
-	return &m.visible[idx]
+	t := m.visible[idx]
+	return &t
 }
 
 // SetSize resizes the dashboard, leaving room for the chrome around the

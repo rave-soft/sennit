@@ -102,7 +102,11 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 		})
 	}
 
-	builtin := cachedBuiltinSkills()
+	// Clone before sorting: cachedBuiltinSkills returns the process-global
+	// memoized slice, and this runs from a render path — sorting it in
+	// place would mutate shared state every other reader of the cache
+	// also sees.
+	builtin := slices.Clone(cachedBuiltinSkills())
 	slices.SortStableFunc(builtin, func(a, b *skills.Skill) int {
 		return strings.Compare(a.Name, b.Name)
 	})

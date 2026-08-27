@@ -24,7 +24,11 @@ import (
 func (m *UI) updatePrompts(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case closeDialogMsg:
-		m.dialog.CloseFrontDialog()
+		if msg.id != "" {
+			m.dialog.CloseDialog(msg.id)
+		} else {
+			m.dialog.CloseFrontDialog()
+		}
 
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {

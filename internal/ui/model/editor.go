@@ -109,6 +109,27 @@ func (e *editorState) textareaWord() string {
 	return e.textarea.Word()
 }
 
+// textareaCursorOffset returns the byte offset of the cursor within
+// Value(). Line() gives the row and Column() a rune index into that row,
+// so the row is re-sliced by rune to translate that into a byte count —
+// using len() on the row directly would double-count any multi-byte rune
+// before the cursor.
+func (e *editorState) textareaCursorOffset() int {
+	value := e.textarea.Value()
+	lines := strings.Split(value, "\n")
+	line := min(max(e.textarea.Line(), 0), len(lines)-1)
+	if line < 0 {
+		return 0
+	}
+	offset := 0
+	for i := range line {
+		offset += len(lines[i]) + 1 // +1 for the newline joining rows.
+	}
+	row := []rune(lines[line])
+	col := min(e.textarea.Column(), len(row))
+	return offset + len(string(row[:col]))
+}
+
 // insertCompletionText replaces the @query in the textarea with the given text.
 // Returns false if the replacement cannot be performed.
 func (e *editorState) insertCompletionText(text string) bool {

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -347,7 +348,11 @@ func (m *UI) checkBangModeAfterPaste() {
 	stripped := trimmed[1:] // ok: ascii — strips the literal "!" bang prefix
 	m.editor.textarea.SetValue(stripped)
 	col := m.editor.textarea.Column()
-	m.editor.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
+	// col is a rune column (SetCursorColumn's units); the stripped prefix
+	// must be measured the same way, or a multi-byte rune in the leading
+	// whitespace throws the cursor off.
+	prefixRunes := utf8.RuneCountInString(val) - utf8.RuneCountInString(stripped)
+	m.editor.textarea.SetCursorColumn(max(0, col-prefixRunes))
 	m.setEditorPrompt(m.yoloModeCached())
 }
 
