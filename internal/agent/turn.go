@@ -712,20 +712,37 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 	// do NOT log a second finished line here - that was the duplicate the
 	// audit caught. onStepFinish still owns the session usage accounting and
 	// latency recording below.
+	// Only the stepMessages read below needs sessionLock: it's the field the
+	// lock protects, along with currentSession (see the field doc). The
+	// Get/SaveUsage round trip and the RotateThreshold call that follow are
+	// both I/O - Get/SaveUsage into a local variable, not the shared field,
+	// and RotateThreshold can itself do file I/O and rebuild the whole
+	// runtime - so none of that belongs inside the critical section.
 	t.sessionLock.Lock()
-	defer t.sessionLock.Unlock()
+	stepMessages := t.stepMessages
+	t.sessionLock.Unlock()
 
 	updatedSession, getSessionErr := t.agent.sessions.Get(t.ctx, t.call.SessionID)
 	if getSessionErr != nil {
 		return getSessionErr
 	}
-	usage, estimated := fallbackStepUsage(t.stepMessages, stepResult)
-	t.agent.updateSessionUsage(t.model, &updatedSession, usage, t.agent.openrouterCost(stepResult.ProviderMetadata), estimated)
-	_, sessionErr := t.agent.sessions.Save(t.ctx, updatedSession)
+	usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+	costDelta := t.agent.updateSessionUsage(t.model, &updatedSession, usage, t.agent.openrouterCost(stepResult.ProviderMetadata), estimated)
+	// SaveUsage, not Save: Get above can race a concurrent writer (a
+	// delegation finishing against this same session, say) landing its own
+	// cost update in between. Save would write back updatedSession.Cost - a
+	// total computed from the stale read - and silently erase that write;
+	// SaveUsage instead folds costDelta onto whatever cost is there now, in
+	// one atomic UPDATE (see usage.go's summarize for the same pattern).
+	_, sessionErr := t.agent.sessions.SaveUsage(t.ctx, updatedSession, costDelta)
 	if sessionErr != nil {
 		return sessionErr
 	}
+
+	t.sessionLock.Lock()
 	t.currentSession = updatedSession
+	t.sessionLock.Unlock()
+
 	if err := t.agent.messages.Update(t.genCtx, *t.currentAssistant); err != nil {
 		return err
 	}
