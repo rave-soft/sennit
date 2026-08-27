@@ -247,6 +247,19 @@ func (m *UI) openProvidersDialog() tea.Cmd {
 	return nil
 }
 
+// openAccountsDialog opens the accounts dialog for providerID, letting the
+// user switch between stored credentialed accounts.
+func (m *UI) openAccountsDialog(providerID string) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.AccountsID) {
+		m.dialog.BringToFront(dialog.AccountsID)
+		return nil
+	}
+
+	accountsDialog, cmd := dialog.NewAccounts(m.com, providerID)
+	m.dialog.OpenDialog(accountsDialog)
+	return cmd
+}
+
 // openProviderFormDialog opens the custom provider form dialog.
 func (m *UI) openProviderFormDialog() {
 	if m.dialog.ContainsDialog(dialog.ProviderFormID) {

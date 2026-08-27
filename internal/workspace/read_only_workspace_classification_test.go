@@ -26,6 +26,7 @@ import (
 // added a mutating method and forgot to override it" back into a build/test
 // failure instead of a silent write-through.
 var refusedMethods = []string{
+	"ActivateAccount",
 	"ActivateThread",
 	"AgentCancel",
 	"AgentClearQueue",
@@ -103,6 +104,7 @@ var readOnlySafeMethods = []string{
 	"InitializePrompt",
 	"LSPGetDiagnosticCounts",
 	"LSPGetStates",
+	"ListAccounts",
 	"ListAllUserMessages",
 	"ListMCPPrompts",
 	"ListMessages",
@@ -348,6 +350,10 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"RecordAccount": func(t *testing.T, ro *readOnlyWorkspace) {
 			_, err := ro.RecordAccount(config.ScopeWorkspace, "provider", accounts.LegacyCredential{})
+			require.True(t, IsReadOnlyError(err))
+		},
+		"ActivateAccount": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.ActivateAccount(config.ScopeWorkspace, "provider", "account")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"Shutdown": func(_ *testing.T, ro *readOnlyWorkspace) {

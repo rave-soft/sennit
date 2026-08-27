@@ -755,6 +755,34 @@ func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred
 	return a, nil
 }
 
+// ListAccounts implements Workspace by delegating to the account store.
+// See RecordAccount's comment for why the store is opened fresh here
+// rather than cached on AppWorkspace. It first folds any pre-existing
+// single credential into the store (config.EnsureAccountMigrated), so a
+// user who authenticated before the multi-account feature existed sees
+// their own account here instead of an empty list.
+func (w *AppWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	if err := config.EnsureAccountMigrated(w.store, accStore, providerID); err != nil {
+		return nil, err
+	}
+	return accStore.List(providerID)
+}
+
+// ActivateAccount implements Workspace by looking up accountID and
+// delegating the switch to config.ConfigStore.ActivateAccount.
+func (w *AppWorkspace) ActivateAccount(scope config.Scope, providerID, accountID string) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	a, ok, err := accStore.Get(providerID, accountID)
+	if err != nil {
+		return fmt.Errorf("looking up account %s for provider %s: %w", accountID, providerID, err)
+	}
+	if !ok {
+		return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
+	}
+	return w.store.ActivateAccount(scope, providerID, a)
+}
+
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.store.SetConfigField(scope, key, value)
 }

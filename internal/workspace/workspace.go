@@ -299,6 +299,10 @@ type ConfigAccessor interface {
 	// Not supported in read-only views (accounts.Store is process-local
 	// file state with no client/server equivalent yet).
 	RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error)
+	// ListAccounts returns the accounts stored for providerID.
+	ListAccounts(providerID string) ([]accounts.Account, error)
+	// ActivateAccount makes accountID the provider's active account.
+	ActivateAccount(scope config.Scope, providerID, accountID string) error
 }
 
 // ProjectLifecycle covers first-run project initialization and skill

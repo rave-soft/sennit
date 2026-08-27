@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -65,6 +66,25 @@ func FormatPlanUsage(plan string, windows []PlanWindow) string {
 		parts = append(parts, limit)
 	}
 	return strings.Join(parts, " · ")
+}
+
+// AccountUsageWindows converts an account's stored rate-limit snapshot
+// into the shape FormatPlanUsage takes. Mirrors the model package's
+// conversion for codex.Usage (see sidebar.go's planWindows) — same shape,
+// different type, so there is no shared function to call instead.
+func AccountUsageWindows(u accounts.Usage) []PlanWindow {
+	var windows []PlanWindow
+	for _, w := range []accounts.UsageWindow{u.Primary, u.Secondary} {
+		if !w.Known() {
+			continue
+		}
+		windows = append(windows, PlanWindow{
+			UsedPercent:   w.UsedPercent,
+			WindowMinutes: w.WindowMinutes,
+			ResetsAt:      w.ResetsAt,
+		})
+	}
+	return windows
 }
 
 // planWindowName names a window by its length, in the words a plan is sold

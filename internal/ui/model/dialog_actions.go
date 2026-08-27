@@ -277,6 +277,16 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 	switch msg := action.(type) {
 	// Providers configuration dialog messages.
 	case dialog.ActionConfigureProvider:
+		// A provider that already has credentials offers to switch
+		// between its stored accounts instead of starting the auth flow
+		// over again. Both checks are pure in-memory reads, so onboarding
+		// and a fresh (never-configured) provider are unaffected.
+		if pc, ok := m.com.Config().Providers.Get(msg.ProviderID); ok && (pc.APIKey != "" || pc.OAuthToken != nil) {
+			if cmd := m.openAccountsDialog(msg.ProviderID); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			break
+		}
 		if cmd := m.configureProvider(msg.ProviderID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

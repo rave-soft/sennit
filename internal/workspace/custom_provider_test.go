@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -54,6 +55,23 @@ func (a *testConfigAccessor) SetProviderAPIKey(scope config.Scope, providerID st
 func (a *testConfigAccessor) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
 	return config.RecordAccount(a.store, accStore, scope, providerID, cred)
+}
+
+func (a *testConfigAccessor) ListAccounts(providerID string) ([]accounts.Account, error) {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return accStore.List(providerID)
+}
+
+func (a *testConfigAccessor) ActivateAccount(scope config.Scope, providerID, accountID string) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	account, ok, err := accStore.Get(providerID, accountID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
+	}
+	return a.store.ActivateAccount(scope, providerID, account)
 }
 
 func (a *testConfigAccessor) SetConfigField(scope config.Scope, key string, value any) error {

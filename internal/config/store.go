@@ -325,28 +325,31 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 }
 
 // ActivateAccount makes the given account the provider's active one: it
-// publishes the account's credentials and proxy to the running config and
-// persists the choice so the next start comes back to the same account.
+// persists the account's credentials and the "account" pointer to disk,
+// then publishes the account's resolved credentials and effective proxy
+// to the running config.
 //
-// It publishes to memory before persisting to disk, deliberately the
-// opposite order from most of this file's other credential writers (which
-// write-then-reload). Reversed here because the two failure modes are not
-// symmetric: if the disk write fails after the in-memory publish already
-// landed, the process runs on the right account until it restarts, then
-// falls back to whatever was last durably chosen — annoying, but the same
-// account it would have picked before this call. If the disk write
-// succeeded first and the in-memory publish then failed, the persisted
-// choice would claim an account the running process never actually
-// switched to, and nothing would tell the caller to retry the switch that
-// matters right now. In-memory-first makes the failure the caller actually
-// sees (a returned error) the one that still leaves the account it can act
-// on immediately.
+// Disk goes first, deliberately, because SetConfigFields's own reload
+// rebuilds in-memory ProviderConfig from whatever is on disk at the time
+// it runs. If the in-memory publish happened first (as this used to do),
+// that reload — which knows nothing about the account switch, only
+// about the file — would immediately overwrite the freshly-published
+// credentials with whatever was on disk before this call, silently
+// reverting the switch while the "account" pointer on disk kept pointing
+// at the new account. Publishing after the reload is what makes the two
+// stay in sync: the reload already picked up the raw api_key/oauth this
+// call wrote, and the publish step adds the two things that never go to
+// disk at all — the *resolved* API key (disk only ever gets the
+// template) and the account's effective proxy override.
 func (s *ConfigStore) ActivateAccount(scope Scope, providerID string, a accounts.Account) error {
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("account for provider %s is invalid: %w", providerID, err)
 	}
 
 	cred := AccountCredential{ProxyURL: &a.ProxyURL}
+	fields := map[string]any{
+		ProviderFieldKey(providerID, "account"): a.ID,
+	}
 	switch {
 	case a.Token != nil:
 		// Mirrors SetProviderAPIKey's *oauth.Token case: the access
@@ -354,6 +357,8 @@ func (s *ConfigStore) ActivateAccount(scope Scope, providerID string, a accounts
 		// provider, alongside the full token for refresh.
 		cred.APIKey = a.Token.AccessToken
 		cred.Token = a.Token
+		fields[ProviderFieldKey(providerID, "api_key")] = a.Token.AccessToken
+		fields[ProviderFieldKey(providerID, "oauth")] = a.Token
 	default:
 		resolved, err := s.Resolve(a.APIKey)
 		if err != nil {
@@ -364,16 +369,21 @@ func (s *ConfigStore) ActivateAccount(scope Scope, providerID string, a accounts
 		}
 		cred.APIKey = resolved
 		cred.APIKeyTemplate = a.APIKey
+		// Account.APIKey is the unresolved template the user configured
+		// (see its doc comment) — write that to disk, never the resolved
+		// secret, which stays memory-only via cred.APIKey below.
+		fields[ProviderFieldKey(providerID, "api_key")] = a.APIKey
 	}
 
-	if err := s.UpdateProviderAccount(providerID, cred); err != nil {
-		return err
-	}
-
-	if err := s.SetConfigField(scope, ProviderFieldKey(providerID, "account"), a.ID); err != nil {
+	if err := s.SetConfigFields(scope, fields); err != nil {
 		return fmt.Errorf("persisting active account for provider %s: %w", providerID, err)
 	}
-	return nil
+
+	// Runs after the reload SetConfigFields just triggered, so its
+	// publish of the resolved API key and effective proxy (neither of
+	// which the reload could reconstruct from disk alone) is what the
+	// running process ends up with, rather than being clobbered by it.
+	return s.UpdateProviderAccount(providerID, cred)
 }
 
 // WorkingDir returns the current working directory.

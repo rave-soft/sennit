@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,4 +75,34 @@ func TestFormatPlanUsage(t *testing.T) {
 			require.Equal(t, tt.want, FormatPlanUsage(tt.plan, tt.windows))
 		})
 	}
+}
+
+func TestAccountUsageWindows(t *testing.T) {
+	t.Parallel()
+
+	resetAt := time.Now().Add(3 * time.Hour)
+
+	t.Run("both windows known", func(t *testing.T) {
+		t.Parallel()
+		u := accounts.Usage{
+			Plan: "plus",
+			Primary: accounts.UsageWindow{
+				UsedPercent: 10, WindowMinutes: 10080, ResetsAt: resetAt,
+			},
+			Secondary: accounts.UsageWindow{
+				UsedPercent: 40, WindowMinutes: 300, ResetsAt: resetAt,
+			},
+		}
+		got := AccountUsageWindows(u)
+		require.Equal(t, []PlanWindow{
+			{UsedPercent: 10, WindowMinutes: 10080, ResetsAt: resetAt},
+			{UsedPercent: 40, WindowMinutes: 300, ResetsAt: resetAt},
+		}, got)
+	})
+
+	t.Run("neither window known", func(t *testing.T) {
+		t.Parallel()
+		got := AccountUsageWindows(accounts.Usage{Plan: "plus"})
+		require.Empty(t, got)
+	})
 }

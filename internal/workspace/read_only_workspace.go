@@ -368,6 +368,10 @@ func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string,
 	return accounts.Account{}, w.readOnlyError("RecordAccount")
 }
 
+func (w *readOnlyWorkspace) ActivateAccount(scope config.Scope, providerID, accountID string) error {
+	return w.readOnlyError("ActivateAccount")
+}
+
 func (w *readOnlyWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.readOnlyError("SetConfigField")
 }

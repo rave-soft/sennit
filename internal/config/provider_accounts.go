@@ -84,6 +84,35 @@ func RecordAccount(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 	return a, nil
 }
 
+// EnsureAccountMigrated makes sure providerID's pre-multi-account
+// credential, if any, has been folded into accStore as an account — the
+// read path's counterpart to RecordAccount's own migration step (see
+// that function's doc comment, step 1). accounts.Migrate is a no-op once
+// the provider already has at least one account on record (it checks
+// store.List first), so calling this on every ListAccounts read is safe,
+// not redundant work repeated every time.
+//
+// Unlike RecordAccount, a fresh migration here also has to mark the
+// migrated account active: RecordAccount's caller always follows up with
+// a real ActivateAccount call, but a bare read has no such step, and
+// without this the provider's ProviderConfig.Account field would stay
+// empty even though the provider's live APIKey/OAuthToken ARE that
+// account's credentials — the UI would show a single account belonging
+// to nobody, active marker on nothing.
+func EnsureAccountMigrated(store *ConfigStore, accStore accounts.Store, providerID string) error {
+	a, migrated, err := accounts.Migrate(accStore, providerID, legacyCredentialFromProvider(store, providerID))
+	if err != nil {
+		return fmt.Errorf("migrating existing credential for provider %s: %w", providerID, err)
+	}
+	if !migrated {
+		return nil
+	}
+	if err := store.SetConfigField(ScopeGlobal, ProviderFieldKey(providerID, "account"), a.ID); err != nil {
+		return fmt.Errorf("marking migrated account active for provider %s: %w", providerID, err)
+	}
+	return nil
+}
+
 // findByAccountID looks for an account already carrying the given
 // provider-side AccountID. An empty accountID never matches — providers
 // with nothing to key on (plain API keys) always get a new account rather

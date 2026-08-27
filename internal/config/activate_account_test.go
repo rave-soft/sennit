@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -100,6 +101,117 @@ func TestActivateAccount_SwitchingToAccountWithoutProxyFallsBackToProvider(t *te
 	provider, ok = store.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider:8080", provider.ProxyURL, "must fall back to the provider's proxy, not the previous account's")
+}
+
+// newLoadedActivateAccountStore builds a real, disk-backed ConfigStore via
+// LoadData (not the hand-built stores above) so autoReload actually runs —
+// the thing the hand-built-store tests above never exercise. The global
+// config seeds a codex provider entry with oldToken as its oauth
+// credential, "disable_default_providers" so nothing else in the catalog
+// gets pulled in, and a "mock" provider so the model list required by
+// config validation is satisfied without touching a real endpoint.
+func newLoadedActivateAccountStore(t *testing.T, globalDir string, oldToken string) *ConfigStore {
+	t.Helper()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
+
+	seed := fmt.Sprintf(`{
+  "options": {"disable_default_providers": true},
+  "providers": {
+    "mock": {"id": "mock", "name": "Mock", "type": "openai",
+      "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
+      "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192}]},
+    "codex": {"id": "codex", "name": "Codex", "type": "openai",
+      "base_url": "http://127.0.0.1:9/v1", "api_key": %q,
+      "oauth": {"access_token": %q},
+      "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192}]}
+  },
+  "models": {"large": {"provider": "mock", "model": "mock-model"},
+             "small": {"provider": "mock", "model": "mock-model"}}
+}`, oldToken, oldToken)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(seed), 0o644))
+
+	workingDir := t.TempDir()
+	store, err := LoadData(workingDir, "", false)
+	require.NoError(t, err)
+	return store
+}
+
+// TestActivateAccount_OAuthSwitchPersistsToDiskAndMemory is the regression
+// test for the bug where ActivateAccount published the new account's
+// credentials to memory before persisting them to disk: SetConfigFields'
+// own reload then rebuilt ProviderConfig from disk, which still had the
+// OLD credentials, silently reverting the switch in memory while the
+// "account" pointer on disk kept pointing at the new account.
+func TestActivateAccount_OAuthSwitchPersistsToDiskAndMemory(t *testing.T) {
+	globalDir := t.TempDir()
+	oldToken := fakeCodexJWT(t, "acct-old")
+	store := newLoadedActivateAccountStore(t, globalDir, oldToken)
+
+	newToken := fakeCodexJWT(t, "acct-new")
+	acct := accounts.Account{ID: "acct-new", Token: &oauth.Token{AccessToken: newToken}}
+	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
+
+	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, newToken, provider.APIKey, "the new account's token must survive the reload")
+	require.Equal(t, newToken, provider.OAuthToken.AccessToken)
+
+	data := requireFile(t, store.globalDataPath)
+	require.Equal(t, newToken, gjson.GetBytes(data, "providers.codex.api_key").String(), "the new token must be on disk, not just in memory")
+	require.Equal(t, newToken, gjson.GetBytes(data, "providers.codex.oauth.access_token").String())
+	require.Equal(t, "acct-new", gjson.GetBytes(data, "providers.codex.account").String())
+
+	// A fresh process (a second store built from the same directory)
+	// must come back to the new account, not the old one — this is the
+	// exact scenario the bug broke, since disk never actually got the
+	// new credentials before.
+	restarted, err := LoadData(t.TempDir(), "", false)
+	require.NoError(t, err)
+	restartedProvider, ok := restarted.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, newToken, restartedProvider.APIKey, "a restarted process must see the new account's credentials")
+}
+
+// TestActivateAccount_APIKeySwitchWritesTemplateNotResolvedSecret ensures
+// the disk write carries the unresolved api_key template (what the user
+// configured), never the resolved secret it expands to, while memory gets
+// the resolved value.
+func TestActivateAccount_APIKeySwitchWritesTemplateNotResolvedSecret(t *testing.T) {
+	globalDir := t.TempDir()
+	oldToken := fakeCodexJWT(t, "acct-old")
+	store := newLoadedActivateAccountStore(t, globalDir, oldToken)
+
+	t.Setenv("MY_TEST_VAR", "the-resolved-secret")
+	acct := accounts.Account{ID: "acct-key", APIKey: "$MY_TEST_VAR"}
+	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
+
+	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "the-resolved-secret", provider.APIKey, "memory must carry the resolved value")
+
+	data := requireFile(t, store.globalDataPath)
+	require.Equal(t, "$MY_TEST_VAR", gjson.GetBytes(data, "providers.codex.api_key").String(), "disk must carry the raw template, never the resolved secret")
+}
+
+// TestActivateAccount_ProxySurvivesReload ensures the account's effective
+// proxy (memory-only, never written to disk) survives SetConfigFields'
+// reload, which only knows about disk state.
+func TestActivateAccount_ProxySurvivesReload(t *testing.T) {
+	globalDir := t.TempDir()
+	oldToken := fakeCodexJWT(t, "acct-old")
+	store := newLoadedActivateAccountStore(t, globalDir, oldToken)
+
+	t.Setenv("MY_TEST_VAR2", "another-secret")
+	acct := accounts.Account{ID: "acct-proxy", APIKey: "$MY_TEST_VAR2", ProxyURL: "http://account-proxy:9090"}
+	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
+
+	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "http://account-proxy:9090", provider.ProxyURL, "the account's proxy override must survive the reload")
+
+	data := requireFile(t, store.globalDataPath)
+	require.False(t, gjson.GetBytes(data, "providers.codex.proxy_url").Exists(), "the account's proxy override must never be written to disk")
 }
 
 func TestActivateAccount_InvalidAccountPublishesNothing(t *testing.T) {
