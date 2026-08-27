@@ -89,6 +89,11 @@ const (
 	AgentNotificationAWSSSOAuth     AgentNotificationType = "aws_sso_auth"
 	AgentNotificationAWSSSOResult   AgentNotificationType = "aws_sso_auth_result"
 	AgentNotificationQueueChanged   AgentNotificationType = "queue_changed"
+	// AgentNotificationAccountRotated and AgentNotificationAccountRotationExhausted
+	// mirror notify.TypeAccountRotated / notify.TypeAccountRotationExhausted
+	// (internal/agent/notify) - see those for what triggers each.
+	AgentNotificationAccountRotated           AgentNotificationType = "account_rotated"
+	AgentNotificationAccountRotationExhausted AgentNotificationType = "account_rotation_exhausted"
 )
 
 type AgentNotification struct {

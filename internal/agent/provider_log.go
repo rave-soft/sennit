@@ -48,6 +48,11 @@ const (
 	// refresh, so the first attempt of that pass is this cause (distinct from
 	// a plain retry, which is a re-attempt of a transiently-failed request).
 	reasonAuthRefresh = "auth_refresh"
+	// reasonAccountRotated is a re-attempt made after a 429 was resolved
+	// by a successful OnRateLimit account rotation (plan §5.5). Like
+	// reasonAuthRefresh, it labels the immediate retry the rotation hook
+	// triggers, distinct from a plain backoff retry.
+	reasonAccountRotated = "account_rotated"
 )
 
 // Request outcomes for the "Provider request finished" line. outcome is a

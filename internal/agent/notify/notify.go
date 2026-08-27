@@ -34,6 +34,19 @@ const (
 	// queue's contents, and a dropped event must still self-heal from
 	// that backstop.
 	TypeQueueChanged Type = "queue_changed"
+	// TypeAccountRotated indicates automatic account rotation (see
+	// internal/providers/accounts) switched a provider to a different
+	// stored account, either because the active one crossed its usage
+	// threshold or because it was rate-limited. Message carries a
+	// human-readable summary naming the accounts involved.
+	TypeAccountRotated Type = "account_rotated"
+	// TypeAccountRotationExhausted indicates a provider's rotation ran
+	// out of usable accounts (every candidate disabled, cooling down, or
+	// over threshold) and the request is proceeding un-rotated - the
+	// original error the request failed with is unaffected. Message
+	// carries a human-readable summary, including the reset time when
+	// known.
+	TypeAccountRotationExhausted Type = "account_rotation_exhausted"
 )
 
 // Notification represents a domain event published by the agent.

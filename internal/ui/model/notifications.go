@@ -249,6 +249,16 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
 	case workspace.AgentNotificationAWSSSOResult:
 		return m.handleAWSSSOAuthResult(n.Message)
+	case workspace.AgentNotificationAccountRotated:
+		// Informational only, not a busy->idle edge: the turn keeps
+		// running on the newly activated account, so there is nothing
+		// here for the busy/queue caches below to re-probe.
+		return util.ReportInfo(n.Message)
+	case workspace.AgentNotificationAccountRotationExhausted:
+		// Also informational: the original provider error (already
+		// surfaced through the normal error path) is what actually
+		// ends the turn, this just explains why rotation couldn't help.
+		return util.ReportWarn(n.Message)
 	case workspace.AgentNotificationQueueChanged:
 		// Not a busy→idle edge (the session may still be busy, or may
 		// never have been) - only the queue pill is stale, so refresh

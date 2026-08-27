@@ -532,6 +532,32 @@ func (t *runTurn) onAuthRefresh(ctx context.Context, err *fantasy.ProviderError)
 	return nil
 }
 
+// onRateLimit wraps the call's OnRateLimit (the coordinator's account
+// rotation, plan §5.5) so a *successful* rotation labels the retried
+// attempt and resets streamed content before it, mirroring onAuthRefresh.
+//
+// The reset matters specifically here: fantasy's OnRateLimit contract says
+// OnRetry does NOT fire for the attempt OnRateLimit handles successfully
+// (see RetryOptions.OnRateLimit's doc comment) - it skips the backoff
+// delay and retries immediately - so onRetry's own ResetStreamedContent
+// never runs on this path. Without the reset here, the retried account's
+// response would concatenate onto the rate-limited attempt's partial
+// output instead of replacing it.
+func (t *runTurn) onRateLimit(ctx context.Context, err *fantasy.ProviderError) error {
+	if t.call.OnRateLimit == nil {
+		return nil
+	}
+	if rotateErr := t.call.OnRateLimit(ctx, err); rotateErr != nil {
+		return rotateErr
+	}
+	t.pendingReason = reasonAccountRotated
+	t.currentAssistant.ResetStreamedContent()
+	if updateErr := t.agent.messages.Update(t.genCtx, *t.currentAssistant); updateErr != nil {
+		slog.Error("Failed to reset message after rate-limit rotation", "error", updateErr)
+	}
+	return nil
+}
+
 // modelProvider is the turn's fantasy.AgentStreamCall.ModelProvider. It is
 // called on each retry attempt, but deliberately returns this turn's runtime
 // model rather than the coordinator's mutable agent model. A config reload or
@@ -704,6 +730,17 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 		return err
 	}
 	t.acknowledgePendingCompletions()
+	// Threshold rotation (plan §5.5, Codex): fires here and only here -
+	// onStepFinish runs strictly after processStepStream has fully
+	// drained the step's stream and strictly before the next step's
+	// stream is created (see fantasy's agent.go Stream loop), so this is
+	// provably between steps, never mid-stream. nil whenever rotation is
+	// disabled or the provider isn't a RotateThreshold one (see
+	// runtimeBuilder.makeThresholdRotateCallback) - it never fails the
+	// turn, so its own errors are handled and logged internally.
+	if t.call.RotateThreshold != nil {
+		t.call.RotateThreshold(t.ctx)
+	}
 	return nil
 }
 

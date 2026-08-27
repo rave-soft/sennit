@@ -125,6 +125,26 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+	// OnRateLimit, when non-nil, is called by fantasy when a stream fails
+	// with a 429 (rate limit) response, mirroring OnAuthRefresh but for
+	// the reactive rotation trigger (plan §5.5, "все остальные"): the
+	// callback marks the exhausted account cooling down, picks another
+	// via the provider's Rotator, and applies it. Returning nil retries
+	// immediately with the new account's credentials; returning an error
+	// (accounts.ErrAllExhausted) surfaces the original 429 unchanged. See
+	// runtimeBuilder.makeRateLimitCallback. When the call carries no
+	// rotation callback (rotation disabled, or a RotateThreshold
+	// provider), this stays nil and fantasy never engages the hook.
+	OnRateLimit func(ctx context.Context, err *fantasy.ProviderError) error
+	// RotateThreshold, when non-nil, is called once per finished step
+	// (runTurn.onStepFinish) for the proactive rotation trigger (plan
+	// §5.5, Codex): it checks the active account's usage snapshot and
+	// switches to another account if it has crossed the configured
+	// threshold. It never fails the turn - errors are logged and
+	// swallowed internally, exactly like today's no-rotation behavior
+	// when a request happens to run over quota. nil when rotation is
+	// disabled or the provider isn't a RotateThreshold one.
+	RotateThreshold func(ctx context.Context)
 	// Runtime carries the model and tools selected by the coordinator for
 	// this lifecycle. It is preserved across queued continuations.
 	Runtime       *compiledRuntime
@@ -1008,6 +1028,15 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	if call.OnAuthRefresh != nil {
 		turnOnAuthRefresh = t.onAuthRefresh
 	}
+	// Same pattern as turnOnAuthRefresh above: only wire the wrapper when
+	// the coordinator actually configured a rotation callback (rotation
+	// enabled for a RotateRateLimit provider), so fantasy's OnRateLimit
+	// hook stays nil - and therefore never even inspected in the retry
+	// loop - whenever rotation is off. See runtimeBuilder.rotatorFor.
+	var turnOnRateLimit fantasy.OnRateLimitFunc
+	if call.OnRateLimit != nil {
+		turnOnRateLimit = t.onRateLimit
+	}
 	defer func() {
 		if t != nil {
 			t.requeuePendingCompletions()
@@ -1034,6 +1063,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		OnToolInputDelta: t.onToolInputDelta,
 		OnRetry:          t.onRetry,
 		OnAuthRefresh:    turnOnAuthRefresh,
+		OnRateLimit:      turnOnRateLimit,
 		ModelProvider:    t.modelProvider,
 		OnToolCall:       t.onToolCall,
 		OnToolResult:     t.onToolResult,

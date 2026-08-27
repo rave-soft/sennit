@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +48,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
@@ -98,6 +100,72 @@ type runtimeBuilder struct {
 	// publication of each local generation with its exact invalidation reason.
 	// Runtime builds never hold it.
 	runtimeInvalidationMu sync.Mutex
+
+	// rotatorsMu guards rotators. Plain map + mutex, not csync.Map: the
+	// map is built lazily and every test that constructs a bare
+	// &runtimeBuilder{} (see runtime_builder_test.go and friends) must
+	// keep working with rotators left at its nil zero value, which a
+	// csync.Map field would not survive uninitialized.
+	rotatorsMu sync.Mutex
+	// rotators holds one *accounts.Rotator per provider, for the
+	// process's lifetime: cooldown state (accounts.Rotator's doc
+	// comment) lives only in memory and must survive across requests, so
+	// it cannot be rebuilt per-turn the way a compiledRuntime is. Built
+	// lazily by rotatorFor, and only for providers with rotation
+	// enabled - see rotatorFor for why a disabled provider never gets an
+	// entry here at all.
+	rotators map[string]*accounts.Rotator
+
+	// accStoreOnce/accStore lazily construct the shared accounts.Store
+	// used to list a provider's candidates for Pick. Lazy (rather than
+	// set in the coordinator's struct literal) for the same reason as
+	// rotators: several tests build a bare &runtimeBuilder{}, and a
+	// production build gets exactly the same accounts.NewFileStore(...)
+	// internal/workspace/app_workspace.go already constructs at its own
+	// call sites, just constructed once here instead of per-call.
+	accStoreOnce sync.Once
+	accStore     accounts.Store
+}
+
+// accountStore returns the builder's shared accounts.Store, constructing
+// it on first use. A test may pre-set b.accStore (e.g. to a fake) before
+// this is ever called; production code never does, so it always resolves
+// to accounts.NewFileStore(config.GlobalAccountsFile()).
+func (b *runtimeBuilder) accountStore() accounts.Store {
+	b.accStoreOnce.Do(func() {
+		if b.accStore == nil {
+			b.accStore = accounts.NewFileStore(config.GlobalAccountsFile())
+		}
+	})
+	return b.accStore
+}
+
+// rotatorFor returns providerCfg's Rotator, building it on first use, or
+// nil when rotation is disabled for this provider (no Rotation config, or
+// Rotation.Enabled false).
+//
+// This is the single switch that makes rotation a complete no-op when
+// disabled: every rotation call site (makeThresholdRotateCallback,
+// makeRateLimitCallback) starts here and returns nil itself as soon as
+// this does, so a disabled provider never gets a Rotator constructed, never
+// consults accountStore, and never wires an OnRateLimit/RotateThreshold
+// callback onto a call at all - behavior is provably identical to before
+// rotation existed, not merely "happens to be a no-op" once invoked.
+func (b *runtimeBuilder) rotatorFor(providerCfg config.ProviderConfig) *accounts.Rotator {
+	if providerCfg.Rotation == nil || !providerCfg.Rotation.Enabled {
+		return nil
+	}
+	b.rotatorsMu.Lock()
+	defer b.rotatorsMu.Unlock()
+	if r, ok := b.rotators[providerCfg.ID]; ok {
+		return r
+	}
+	if b.rotators == nil {
+		b.rotators = make(map[string]*accounts.Rotator)
+	}
+	r := accounts.NewRotator(providerCfg.Rotation.ToPolicy())
+	b.rotators[providerCfg.ID] = r
+	return r
 }
 
 // waitForMCPInit blocks until this builder's MCP registry finishes
@@ -581,6 +649,237 @@ func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConf
 		}
 		return nil
 	}
+}
+
+// accountLabel returns a's display name for a rotation notification:
+// its user-editable Label when set, its bookkeeping ID otherwise.
+func accountLabel(a accounts.Account) string {
+	if a.Label != "" {
+		return a.Label
+	}
+	return a.ID
+}
+
+// worstKnownRemainingPercent returns 100 minus the highest UsedPercent
+// among a's known usage windows - the remaining allowance on whichever
+// window is closest to exhausted, which is the one that actually tripped
+// ShouldRotate. Returns -1 when neither window is known (nothing to
+// report; callers omit the percent from their message in that case).
+func worstKnownRemainingPercent(u accounts.Usage) int {
+	worst := -1
+	for _, w := range []accounts.UsageWindow{u.Primary, u.Secondary} {
+		if w.Known() && w.UsedPercent > worst {
+			worst = w.UsedPercent
+		}
+	}
+	if worst < 0 {
+		return -1
+	}
+	return 100 - worst
+}
+
+// applyRotationPick activates picked as providerID's active account and,
+// when active is non-nil, rebuilds and stores the runtime so the next
+// request actually uses the new credentials - the same two steps
+// makeAuthRefreshCallback takes after a successful credential refresh
+// (plan §5.2: activation is projected into the live ProviderConfig, never
+// touching the provider build path itself).
+func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID string, picked accounts.Account, active *activeRuntime, inputs runtimeToolInputs) error {
+	if err := b.cfg.ActivateAccount(config.ScopeGlobal, providerID, picked); err != nil {
+		return fmt.Errorf("activating rotated account %s for provider %s: %w", picked.ID, providerID, err)
+	}
+	if active == nil {
+		return nil
+	}
+	runtime, err := b.runtimeFor(ctx, inputs)
+	if err != nil {
+		return fmt.Errorf("rebuilding runtime after rotating provider %s to account %s: %w", providerID, picked.ID, err)
+	}
+	active.store(runtime)
+	return nil
+}
+
+// makeThresholdRotateCallback returns the RotateThreshold hook (plan
+// §5.5's proactive trigger, Codex today): called once per finished step,
+// it checks the active account's last usage snapshot and, if
+// accounts.Rotator.ShouldRotate says the account is over threshold,
+// switches to the next usable one.
+//
+// Returns nil - meaning "nothing to do here, ever" - when rotation is
+// disabled for providerCfg (rotatorFor's nil check) or the provider isn't
+// a RotateThreshold one, so a RotateRateLimit or RotateNever provider
+// never even gets this hook wired onto a call.
+//
+// The returned function never fails the turn: every error path logs and
+// returns, exactly matching what happens today when a request simply runs
+// over quota on a single-account setup - the user keeps using the current
+// (over-threshold) account rather than losing the step's own result over
+// a rotation that didn't work out.
+func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.ProviderConfig, active *activeRuntime, port ...runtimeOperationPort) func(context.Context) {
+	rotator := b.rotatorFor(providerCfg)
+	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateThreshold {
+		return nil
+	}
+	_, inputs := runtimePort(port)
+	return func(ctx context.Context) {
+		// RotateThreshold is Codex-only today (see capabilities.go), so
+		// reading its usage snapshot straight from the codex package is
+		// deliberate, not a layering slip - a future non-Codex threshold
+		// provider would need this coupling broken out (e.g. a small
+		// per-provider usage-lookup registry) before it could reuse this
+		// path.
+		usage, ok := codex.UsageFor(providerCfg.Account)
+		if !ok {
+			return
+		}
+		all, err := b.accountStore().List(providerCfg.ID)
+		if err != nil {
+			slog.Warn("Threshold rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
+			return
+		}
+		active_ := accounts.Account{ID: providerCfg.Account, Usage: usage.Snapshot()}
+		for i, a := range all {
+			if a.ID == providerCfg.Account {
+				active_ = a
+				active_.Usage = usage.Snapshot()
+				// Pick reads exhaustion off its own candidates list, not
+				// off active_ separately (unlike ShouldRotate, which
+				// takes active_ directly) - without this, Pick would see
+				// the store's possibly-stale Usage for the active
+				// account and, finding it "unknown" rather than
+				// exhausted, could pick the very account this callback
+				// is trying to rotate away from.
+				all[i] = active_
+				break
+			}
+		}
+		if !rotator.ShouldRotate(active_, all) {
+			return
+		}
+		picked, err := rotator.Pick(providerCfg.ID, active_.ID, all)
+		if err != nil {
+			slog.Warn("Threshold rotation: no usable account", "provider", providerCfg.ID, "error", err)
+			return
+		}
+		if picked.ID == active_.ID {
+			return
+		}
+		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, inputs); err != nil {
+			slog.Warn("Threshold rotation: failed to apply picked account", "provider", providerCfg.ID, "error", err)
+			return
+		}
+		if b.notify != nil {
+			remaining := worstKnownRemainingPercent(active_.Usage)
+			msg := fmt.Sprintf("%s: switched to %q", providerCfg.Name, accountLabel(picked))
+			if remaining >= 0 {
+				msg = fmt.Sprintf("%s, %q had %d%% left", msg, accountLabel(active_), remaining)
+			}
+			b.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				Type:       notify.TypeAccountRotated,
+				ProviderID: providerCfg.ID,
+				Message:    msg,
+			})
+		}
+	}
+}
+
+// makeRateLimitCallback returns the fantasy OnRateLimitFunc for the
+// reactive rotation trigger (plan §5.5, every RotateRateLimit provider):
+// on a 429, it marks the active account cooling down, picks the next
+// usable one via the provider's Rotator, and applies it exactly like
+// makeThresholdRotateCallback (§5.2 projection + runtime rebuild).
+//
+// Returns nil when rotation is disabled for providerCfg or the provider
+// isn't a RotateRateLimit one, mirroring makeAuthRefreshCallback's own
+// "no mechanism configured" nil return - fantasy never engages an unset
+// hook, so a disabled/non-matching provider's retry behavior is untouched.
+//
+// On success, the returned function returns nil so fantasy retries
+// immediately with the new account's credentials (RetryOptions.OnRateLimit's
+// contract). When every candidate is exhausted, it returns the
+// *accounts.ErrAllExhausted from Pick unchanged, which RetryOptions.OnRateLimit
+// treats as "rotation didn't help" - normal backoff resumes and the
+// ORIGINAL 429 (not this error) is what a caller ultimately sees; see
+// RetryWithExponentialBackoffRespectingRetryHeaders and runTurn.handleStreamError.
+func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig, active *activeRuntime, port ...runtimeOperationPort) fantasy.OnRateLimitFunc {
+	rotator := b.rotatorFor(providerCfg)
+	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateRateLimit {
+		return nil
+	}
+	_, inputs := runtimePort(port)
+	return func(ctx context.Context, providerErr *fantasy.ProviderError) error {
+		rotator.MarkRateLimited(providerCfg.Account, retryAfterFromHeaders(providerErr))
+
+		all, err := b.accountStore().List(providerCfg.ID)
+		if err != nil {
+			slog.Warn("Rate-limit rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
+			return err
+		}
+		picked, err := rotator.Pick(providerCfg.ID, providerCfg.Account, all)
+		if err != nil {
+			var exhausted *accounts.ErrAllExhausted
+			if errors.As(err, &exhausted) && b.notify != nil {
+				msg := fmt.Sprintf("%s: all accounts exhausted", providerCfg.Name)
+				if !exhausted.ResetsAt.IsZero() {
+					msg = fmt.Sprintf("%s, resets at %s", msg, exhausted.ResetsAt.Format("15:04"))
+				}
+				b.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					Type:       notify.TypeAccountRotationExhausted,
+					ProviderID: providerCfg.ID,
+					Message:    msg,
+				})
+			}
+			return err
+		}
+		if picked.ID == providerCfg.Account {
+			// Pick found nothing better to switch to (single-account
+			// provider, or debounced back onto the same still-usable
+			// account) - applying it would be a no-op ActivateAccount
+			// call for no reason, exactly what a single-account setup
+			// must never do.
+			return nil
+		}
+		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, inputs); err != nil {
+			slog.Warn("Rate-limit rotation: failed to apply picked account", "provider", providerCfg.ID, "error", err)
+			return err
+		}
+		if b.notify != nil {
+			b.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				Type:       notify.TypeAccountRotated,
+				ProviderID: providerCfg.ID,
+				Message:    fmt.Sprintf("%s: switched to %q after a rate limit", providerCfg.Name, accountLabel(picked)),
+			})
+		}
+		return nil
+	}
+}
+
+// retryAfterFromHeaders extracts the Retry-After delay from a
+// *fantasy.ProviderError's response headers, for MarkRateLimited. This
+// deliberately duplicates the couple of lines third_party/fantasy/retry.go's
+// unexported getRetryDelayInMs already does (retry-after-ms, then
+// Retry-After as seconds or an HTTP date) rather than exporting that
+// helper across the vendor boundary for one small caller - see plan §9
+// risk 6 on keeping the fork's surface area minimal.
+func retryAfterFromHeaders(err *fantasy.ProviderError) time.Duration {
+	if err == nil || err.ResponseHeaders == nil {
+		return 0
+	}
+	h := err.ResponseHeaders
+	if ms, ok := h["retry-after-ms"]; ok {
+		if v, parseErr := strconv.ParseFloat(ms, 64); parseErr == nil {
+			return time.Duration(v) * time.Millisecond
+		}
+	}
+	if ra, ok := h["retry-after"]; ok {
+		if secs, parseErr := strconv.ParseFloat(ra, 64); parseErr == nil {
+			return time.Duration(secs) * time.Second
+		}
+		if t, parseErr := time.Parse(time.RFC1123, ra); parseErr == nil {
+			return time.Until(t)
+		}
+	}
+	return 0
 }
 
 func (b *runtimeBuilder) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig, port ...runtimeOperationPort) error {

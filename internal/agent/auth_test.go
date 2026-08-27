@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -27,9 +29,11 @@ const (
 
 // authCoordSettings collects authTestCoordinator's optional dependencies.
 type authCoordSettings struct {
-	notify        pubsub.Publisher[notify.Notification]
-	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
-	configureProv func(*config.ProviderConfig)
+	notify           pubsub.Publisher[notify.Notification]
+	exchangeToken    func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
+	configureProv    func(*config.ProviderConfig)
+	globalConfigJSON string
+	globalDataJSON   string
 }
 
 type authCoordOpt func(*authCoordSettings)
@@ -58,6 +62,37 @@ func withProvider(configure func(*config.ProviderConfig)) authCoordOpt {
 	return func(s *authCoordSettings) { s.configureProv = configure }
 }
 
+// withGlobalDataJSON seeds config.GlobalConfigData()'s file (the "data"
+// config layer ConfigStore.ActivateAccount's ScopeGlobal writes actually
+// land in - see atomicWrite) with json, instead of leaving it absent.
+//
+// ActivateAccount's SetConfigFields patches only a few fields
+// (providers.<id>.account, .api_key, ...) onto whatever is already at
+// that path via sjson.Set, which preserves sibling fields already there
+// but does NOT deep-merge across config layers on reload: the data layer
+// takes precedence over the plain global config layer per provider
+// object, wholesale, not field-by-field (see globalConfigPaths' doc
+// comment on layer priority). So a provider seeded only in the plain
+// global config layer (the default "{}" this helper's caller would
+// otherwise leave at the data layer) ends up, after ActivateAccount's own
+// reload, replaced by a data-layer object holding just the two patched
+// fields - missing type/base_url/models - which provider validation then
+// drops entirely. Seeding the FULL provider here instead means
+// SetConfigFields' patch lands on top of a complete object, and reload
+// sees a complete, valid provider both before and after.
+//
+// json is currently always diskAuthProviderJSON at every call site in
+// this package - still a parameter, not a constant option, because the
+// shape genuinely varies per caller in principle (a different provider
+// ID, base URL, or model set); a future test exercising e.g. a second
+// provider's rotation would pass its own JSON here rather than growing a
+// second near-identical helper.
+//
+//nolint:unparam // general-purpose test helper API, see doc comment above
+func withGlobalDataJSON(json string) authCoordOpt {
+	return func(s *authCoordSettings) { s.globalDataJSON = json }
+}
+
 // authTestCoordinator builds a fully production-wired *coordinator (through
 // the real NewCoordinator constructor, exactly like production wiring)
 // pointed at a hermetic, empty global config, so the credential-refresh
@@ -79,7 +114,16 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 		apply(&s)
 	}
 
-	writeGlobalConfig(t, "{}")
+	globalConfigJSON := s.globalConfigJSON
+	if globalConfigJSON == "" {
+		globalConfigJSON = "{}"
+	}
+	writeGlobalConfig(t, globalConfigJSON)
+	if s.globalDataJSON != "" {
+		dataPath := config.GlobalConfigData()
+		require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
+		require.NoError(t, os.WriteFile(dataPath, []byte(s.globalDataJSON), 0o644))
+	}
 	env := testEnv(t)
 
 	cfg, err := configruntime.Load(env.workingDir, "", false)

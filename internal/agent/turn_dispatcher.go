@@ -195,7 +195,16 @@ func (d *turnDispatcher) makeRunCall(call SessionAgentCall) SessionAgentCall {
 	call.TopK = runtime.topK
 	call.FrequencyPenalty = runtime.frequencyPenalty
 	call.PresencePenalty = runtime.presencePenalty
-	call.OnAuthRefresh = d.builder.makeAuthRefreshCallback(runtime.providerCfg, call.ActiveRuntime, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()})
+	port := runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}
+	call.OnAuthRefresh = d.builder.makeAuthRefreshCallback(runtime.providerCfg, call.ActiveRuntime, port)
+	// Both rotation triggers (plan §5.5) are wired here, at the primary
+	// per-turn call site: an interactive turn hitting a 429 mid-conversation,
+	// or crossing its usage threshold between steps, is exactly the case
+	// rotation exists for. Each returns nil when rotation is disabled or
+	// the provider's RotateOn doesn't match (see rotatorFor), so this is a
+	// complete no-op for every call until a provider opts in.
+	call.OnRateLimit = d.builder.makeRateLimitCallback(runtime.providerCfg, call.ActiveRuntime, port)
+	call.RotateThreshold = d.builder.makeThresholdRotateCallback(runtime.providerCfg, call.ActiveRuntime, port)
 	return call
 }
 
