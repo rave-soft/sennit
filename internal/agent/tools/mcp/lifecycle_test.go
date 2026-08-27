@@ -239,13 +239,16 @@ func TestUpdateState_ErrorClearsPromptsAndResources(t *testing.T) {
 	require.False(t, ok, "errored session's resources must be cleared")
 }
 
-// TestGetOrRenewClient_SerializesConcurrentRenewals is the concurrency
-// regression the production renew path needs: when several tool calls observe
-// the same dead session at once they must not each rebuild it. Without
-// serialization, concurrent renewals close a session another goroutine just
-// registered or overwrite and leak a live replacement. With the per-server
-// lock only the first arrival rebuilds; the rest re-check and reuse the
-// healthy session, so exactly one new session is created.
+// TestGetOrRenewClient_StalePingCannotReplaceNewSession pins the
+// re-check-before-renew path: a caller that started pinging an old session
+// before it was superseded by a fresh one must re-ping the current session
+// rather than blindly rebuilding over it. Here the fresh session's own ping
+// also fails (via the mock), which is a genuine connection failure, not the
+// stale caller merely losing a race to someone else's healthy session — it
+// must surface as errPingFailed and drive the server to StateError (which
+// tears the failed session down), not be swallowed as a
+// lost-ownership/cancellation condition that leaves a known-broken session
+// sitting in the registry as if nothing happened.
 func TestGetOrRenewClient_StalePingCannotReplaceNewSession(t *testing.T) {
 	const name = "test-stale-ping"
 	r := NewRegistry()
@@ -276,7 +279,7 @@ func TestGetOrRenewClient_StalePingCannotReplaceNewSession(t *testing.T) {
 	<-pingStarted
 
 	r.teardown(name)
-	fresh, _ := liveSession(t, "fresh")
+	fresh, freshCtx := liveSession(t, "fresh")
 	freshOwner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	r.publishMu.Lock()
@@ -284,10 +287,66 @@ func TestGetOrRenewClient_StalePingCannotReplaceNewSession(t *testing.T) {
 	r.sessionOwners[name] = freshOwner
 	r.publishMu.Unlock()
 	close(releasePing)
-	require.ErrorIs(t, <-result, context.Canceled)
-	published, ok := r.sessions.Get(name)
+	require.ErrorIs(t, <-result, errPingFailed)
+	info, ok := r.states.Get(name)
 	require.True(t, ok)
-	require.Same(t, fresh, published)
+	require.Equal(t, StateError, info.State)
+	// StateError's cleanup takes and closes the failed session; it must not
+	// be left behind as if the failure had never happened.
+	_, ok = r.sessions.Get(name)
+	require.False(t, ok, "failed session must not remain published")
+	require.ErrorIs(t, freshCtx.Err(), context.Canceled, "failed session must be closed")
+}
+
+// TestGetOrRenewClient_CancelledContextTakesQuietPath is the counterpart to
+// TestGetOrRenewClient_StalePingCannotReplaceNewSession: when the caller's
+// own context is what caused the re-check ping to fail, that is genuine user
+// cancellation, not a broken connection, and must still take the quiet path
+// (propagate context.Canceled, leave the session alone) rather than being
+// promoted to errPingFailed/StateError.
+func TestGetOrRenewClient_CancelledContextTakesQuietPath(t *testing.T) {
+	const name = "test-cancel-quiet"
+	r := NewRegistry()
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	old, _ := liveSession(t, "old")
+	oldOwner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.publishMu.Lock()
+	r.sessions.Set(name, old)
+	r.sessionOwners[name] = oldOwner
+	r.publishMu.Unlock()
+
+	fresh, freshCtx := liveSession(t, "fresh")
+	t.Cleanup(func() { _ = fresh.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// The first ping (against the old, observed session) simulates another
+	// attempt taking over the server while it was in flight, so the second
+	// ping below (under the renew lock) runs against a session this call
+	// never observed, exercising the re-check branch.
+	var pingCalls atomic.Int32
+	r.ping = func(context.Context, *ClientSession, time.Duration) error {
+		if pingCalls.Add(1) == 1 {
+			r.teardown(name)
+			freshOwner, err := r.beginAttempt(name)
+			require.NoError(t, err)
+			r.publishMu.Lock()
+			r.sessions.Set(name, fresh)
+			r.sessionOwners[name] = freshOwner
+			r.publishMu.Unlock()
+		}
+		return context.Canceled
+	}
+
+	_, err = r.getOrRenewClient(ctx, cfg, name)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, errPingFailed)
+	if info, ok := r.states.Get(name); ok {
+		require.NotEqual(t, StateError, info.State, "genuine cancellation must not surface as a connection failure")
+	}
+	require.NoError(t, freshCtx.Err(), "cancellation must not tear down the session")
 }
 
 func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {

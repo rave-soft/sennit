@@ -19,6 +19,17 @@ import (
 	"github.com/rave-soft/sennit/internal/version"
 )
 
+// errLostOwnership means a concurrent teardown, renewal, or auth flow
+// already took over a server before the current attempt could finish; it is
+// not a failure, just this attempt losing a race. Callers treat it like a
+// cancelled ctx and back off quietly instead of surfacing an error.
+var errLostOwnership = errors.New("mcp: lost ownership of connection")
+
+// errPingFailed means a keepalive ping to an existing session came back with
+// an error, i.e. the connection itself is broken. Unlike errLostOwnership
+// this is a genuine failure and must drive the server to StateError.
+var errPingFailed = errors.New("mcp: ping failed")
+
 // connectionManager owns per-server connection lifecycle: creating and
 // renewing sessions, the initial connect/reconnect/reconcile paths, and
 // disabling a server. It does not hold a lock of its own over ownership
@@ -52,11 +63,20 @@ func (cm *connectionManager) closeSessionContext(ctx context.Context, name strin
 	go func() { done <- s.Close() }()
 	select {
 	case err := <-done:
-		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && err.Error() != "signal: killed" {
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !processKilledBySignal(err) {
 			slog.Warn("Error closing MCP session", "name", name, "error", err)
 		}
 	case <-ctx.Done():
 	}
+}
+
+// processKilledBySignal reports whether err is the *exec.ExitError produced
+// when a stdio MCP server's child process was terminated by a signal rather
+// than exiting on its own (closing a session kills the process on
+// cancellation) — an expected outcome, not a failure worth warning about.
+func processKilledBySignal(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ProcessState != nil && !exitErr.Exited()
 }
 
 func (cm *connectionManager) closeSession(name string, s *ClientSession) {
@@ -178,7 +198,7 @@ func (cm *connectionManager) createSession(ctx context.Context, cfg ConfigProvid
 		if auth == nil {
 			cancel()
 			_ = session.Close()
-			return nil, context.Canceled
+			return nil, errLostOwnership
 		}
 	}
 	return &ClientSession{
@@ -255,7 +275,7 @@ func (cm *connectionManager) InitializeSingle(ctx context.Context, name string, 
 func (cm *connectionManager) initClient(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver) error {
 	defer cm.reg.detachAuth(name, owner, nil).Close()
 	if usesOAuth(m) && !cm.reg.reserveTokenMutation(cfg, name, m, owner) {
-		return context.Canceled
+		return errLostOwnership
 	}
 	// OAuth MCPs without a usable cached token require user interaction
 	// (browser auth). If a cached token exists with an access token
@@ -306,7 +326,7 @@ func (cm *connectionManager) initClient(ctx context.Context, cfg ConfigProvider,
 // mid-connect converge on the latest config rather than a stale one.
 func (cm *connectionManager) connectAndRegister(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) error {
 	if usesOAuth(m) && !cm.reg.reserveTokenMutation(cfg, name, m, owner) {
-		return context.Canceled
+		return errLostOwnership
 	}
 	session, err := cm.createSession(ctx, cfg, name, m, owner, resolver, channelOptIn)
 	if err != nil {
@@ -398,7 +418,18 @@ func (cm *connectionManager) getOrRenewClient(ctx context.Context, cfg ConfigPro
 	}
 	if !observed || owner != observedOwner || session != observedSession {
 		if err := cm.ping(ctx, session, timeout); err != nil {
-			return nil, context.Canceled
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// The caller's own context was cancelled; that is genuine
+				// user cancellation, not a broken connection, so propagate
+				// it quietly instead of failing the server.
+				return nil, ctxErr
+			}
+			// This is the current session for the server, and it just
+			// failed a keepalive ping: a genuine connection failure, not
+			// this attempt losing a race, so it must surface as StateError
+			// rather than being swallowed like a lost-ownership condition.
+			cm.reg.failStateForSession(name, owner, session, maybeTimeoutErr(err, timeout))
+			return nil, errPingFailed
 		}
 		cm.reg.publishMu.Lock()
 		current := cm.reg.ownsSessionLocked(name, owner, session)
@@ -406,15 +437,15 @@ func (cm *connectionManager) getOrRenewClient(ctx context.Context, cfg ConfigPro
 		if current {
 			return session, nil
 		}
-		return nil, context.Canceled
+		return nil, errLostOwnership
 	}
 
 	renewal, ok := cm.reg.beginRenewal(name, observedOwner, observedSession, maybeTimeoutErr(pingErr, timeout))
 	if !ok {
-		return nil, context.Canceled
+		return nil, errLostOwnership
 	}
 	if usesOAuth(m) && !cm.reg.reserveTokenMutation(cfg, name, m, renewal) {
-		return nil, context.Canceled
+		return nil, errLostOwnership
 	}
 	newSess, err := cm.newSession(ctx, cfg, name, m, renewal, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
