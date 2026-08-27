@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // NewHTTPClient creates an HTTP client with debug logging enabled when debug mode is on.
@@ -33,20 +34,23 @@ const maxLoggedBody = 64 * 1024
 
 // RoundTrip implements http.RoundTripper interface with logging.
 func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, error) {
-	var err error
-	var save io.ReadCloser
-	save, req.Body, err = drainBody(req.Body)
-	if err != nil {
-		slog.Error(
-			"HTTP request failed",
-			"method", req.Method,
-			"url", req.URL,
-			"error", err,
-		)
-		return nil, err
-	}
-
+	// Only drain (and thus buffer) the request body when debug logging would
+	// actually use it. A drained-but-discarded body still costs memory equal
+	// to its full size, so a large upload should never pay for that when the
+	// level would drop the log record anyway.
 	if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
+		save, body, err := drainBody(req.Body)
+		if err != nil {
+			slog.Error(
+				"HTTP request failed",
+				"method", req.Method,
+				"url", req.URL,
+				"error", err,
+			)
+			return nil, err
+		}
+		req.Body = body
+
 		slog.Debug(
 			"HTTP Request",
 			"method", req.Method,
@@ -160,28 +164,75 @@ func indentJSON(src []byte) string {
 	return b.String()
 }
 
-// sensitiveBodyFields matches JSON string fields whose value is a
-// credential, wherever they appear in a logged body. Headers are already
-// redacted by formatHeaders; bodies carry the same secrets on OAuth
-// token-exchange and API-key endpoints, so they get the same treatment.
-var sensitiveBodyFields = regexp.MustCompile(
-	`(?i)("(?:access_token|refresh_token|id_token|token|api_key|apikey|client_secret|secret|password|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"`,
-)
+// sensitiveNameWords are the last "word" of a header or JSON field name that
+// mark it as carrying a credential. Matching is on the last word rather than
+// any substring so that a compound name like "token_type" or "max_tokens"
+// (metadata *about* a credential, not the credential itself) is left alone,
+// while "access_token", "x-api-key", "apiKey", "private_key", "Set-Cookie"
+// and "client_secret" are all caught without enumerating every spelling.
+// "apikey" and "privatekey" are listed whole because, unlike the others,
+// they're commonly written as one word with no separator to split on.
+var sensitiveNameWords = map[string]bool{
+	"authorization": true,
+	"token":         true,
+	"secret":        true,
+	"password":      true,
+	"cookie":        true,
+	"credential":    true,
+	"credentials":   true,
+	"key":           true,
+	"apikey":        true,
+	"privatekey":    true,
+}
 
+// isSensitiveName reports whether a header or JSON field name should be
+// redacted before logging. It splits the name on non-alphanumeric
+// separators and camelCase boundaries, then checks the last resulting word
+// against sensitiveNameWords — e.g. "X-Api-Key" and "client_secret" both
+// end in a sensitive word, but "keyboard" and "monkey" (one word, not
+// "key") and "token_type"/"max_tokens" (last word "type"/"tokens", not
+// "token") do not.
+func isSensitiveName(name string) bool {
+	var b strings.Builder
+	for i, r := range name {
+		if i > 0 && unicode.IsUpper(r) {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(r)
+	}
+	words := strings.FieldsFunc(strings.ToLower(b.String()), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	if len(words) == 0 {
+		return false
+	}
+	return sensitiveNameWords[words[len(words)-1]]
+}
+
+// jsonStringField matches a JSON object field with a string value, so
+// redactBody can inspect each field name in turn.
+var jsonStringField = regexp.MustCompile(`"([A-Za-z0-9_-]+)"(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+
+// redactBody replaces the value of every sensitive-looking string field in
+// a logged JSON body. It shares isSensitiveName with formatHeaders so a
+// credential is caught the same way whether it travels in a header or the
+// body.
 func redactBody(s string) string {
-	return sensitiveBodyFields.ReplaceAllString(s, `$1"[REDACTED]"`)
+	return jsonStringField.ReplaceAllStringFunc(s, func(m string) string {
+		sub := jsonStringField.FindStringSubmatch(m)
+		name, sep := sub[1], sub[2]
+		if !isSensitiveName(name) {
+			return m
+		}
+		return `"` + name + `"` + sep + `"[REDACTED]"`
+	})
 }
 
 // formatHeaders formats HTTP headers for logging, filtering out sensitive information.
 func formatHeaders(headers http.Header) map[string][]string {
 	filtered := make(map[string][]string)
 	for key, values := range headers {
-		lowerKey := strings.ToLower(key)
-		// Filter out sensitive headers
-		if strings.Contains(lowerKey, "authorization") ||
-			strings.Contains(lowerKey, "api-key") ||
-			strings.Contains(lowerKey, "token") ||
-			strings.Contains(lowerKey, "secret") {
+		if isSensitiveName(key) {
 			filtered[key] = []string{"[REDACTED]"}
 		} else {
 			filtered[key] = values
