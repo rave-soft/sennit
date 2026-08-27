@@ -285,6 +285,37 @@ type (
 		ProviderID string
 		AccountID  string
 	}
+	// ActionOpenProviderSettings is sent when "Provider settings…" is
+	// chosen from the accounts list, to open [ProviderSettings] for the
+	// dialog's provider.
+	ActionOpenProviderSettings struct {
+		ProviderID string
+	}
+	// ActionSubmitProviderSettings is sent when the provider settings
+	// form is submitted with valid input. Rotation is nil for a provider
+	// whose accounts.CapabilitiesOf(...).RotateOn is accounts.RotateNever
+	// — there is nothing to save for it.
+	ActionSubmitProviderSettings struct {
+		ProviderID string
+		Proxy      string
+		Rotation   *config.RotationConfig
+	}
+	// ActionProviderSettingsResult carries the outcome of the async
+	// SetProviderProxy/SetConfigField calls kicked off by
+	// ActionSubmitProviderSettings. Like ActionAccountFormResult, it is
+	// addressed back to the still-open ProviderSettings dialog (see
+	// DialogID below), letting the form show a save error without
+	// closing.
+	ActionProviderSettingsResult struct {
+		ProviderID string
+		Err        error
+	}
+	// ActionProviderSettingsSaved is returned by ProviderSettings.HandleMsg
+	// once ActionProviderSettingsResult reports success. The caller
+	// closes the form.
+	ActionProviderSettingsSaved struct {
+		ProviderID string
+	}
 )
 
 // ActionCmd represents an action that carries a [tea.Cmd] to be passed to the
@@ -344,6 +375,9 @@ func (ActionCustomProviderResult) DialogID() string { return ProviderFormID }
 
 // DialogID implements [DialogAddressed].
 func (ActionAccountFormResult) DialogID() string { return AccountFormID }
+
+// DialogID implements [DialogAddressed].
+func (ActionProviderSettingsResult) DialogID() string { return ProviderSettingsID }
 
 // DialogID implements [DialogAddressed].
 func (ActionMCPAuthComplete) DialogID() string { return MCPAuthID }

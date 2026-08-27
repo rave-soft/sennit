@@ -322,6 +322,27 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 	case dialog.ActionRemoveAccountConfirmed:
 		m.dialog.CloseDialog(dialog.AccountRemoveConfirmID)
 		cmds = append(cmds, m.removeAccountCmd(msg.ProviderID, msg.AccountID))
+	case dialog.ActionOpenProviderSettings:
+		m.dialog.OpenDialog(dialog.NewProviderSettings(m.com, msg.ProviderID))
+	case dialog.ActionSubmitProviderSettings:
+		ws := m.com.Workspace
+		providerID := msg.ProviderID
+		proxy := msg.Proxy
+		rotation := msg.Rotation
+		cmds = append(cmds, func() tea.Msg {
+			if err := ws.SetProviderProxy(providerID, proxy); err != nil {
+				return dialog.ActionProviderSettingsResult{ProviderID: providerID, Err: err}
+			}
+			if rotation != nil {
+				key := config.ProviderFieldKey(providerID, "rotation")
+				if err := ws.SetConfigField(config.ScopeGlobal, key, rotation); err != nil {
+					return dialog.ActionProviderSettingsResult{ProviderID: providerID, Err: err}
+				}
+			}
+			return dialog.ActionProviderSettingsResult{ProviderID: providerID}
+		})
+	case dialog.ActionProviderSettingsSaved:
+		m.dialog.CloseDialog(dialog.ProviderSettingsID)
 	case dialog.ActionSubmitCustomProvider:
 		ws := m.com.Workspace
 		ctx := m.com.Context()

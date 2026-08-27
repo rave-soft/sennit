@@ -107,6 +107,10 @@ type cmdDrivingWorkspace struct {
 	removeAccountCalls int
 	lastRemovedID      string
 	removeAccountErr   error
+
+	setProviderProxyCalls int
+	lastSetProviderProxy  string
+	setProviderProxyErr   error
 }
 
 func (w *cmdDrivingWorkspace) Config() *config.Config {
@@ -474,6 +478,12 @@ func (w *cmdDrivingWorkspace) UpdateAccount(_ string, account accounts.Account) 
 	w.updateAccountCalls++
 	w.lastUpdatedAccount = account
 	return w.updateAccountErr
+}
+
+func (w *cmdDrivingWorkspace) SetProviderProxy(_, proxy string) error {
+	w.setProviderProxyCalls++
+	w.lastSetProviderProxy = proxy
+	return w.setProviderProxyErr
 }
 
 func (w *cmdDrivingWorkspace) RemoveAccount(_ config.Scope, _, accountID string) error {

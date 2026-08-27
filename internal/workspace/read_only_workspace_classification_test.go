@@ -72,6 +72,7 @@ var refusedMethods = []string{
 	"SetCompactMode",
 	"SetConfigField",
 	"SetProviderAPIKey",
+	"SetProviderProxy",
 	"Shutdown",
 	"Subscribe",
 	"UpdateAccount",
@@ -364,6 +365,10 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"RemoveAccount": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.RemoveAccount(config.ScopeWorkspace, "provider", "account")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"SetProviderProxy": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.SetProviderProxy("provider", "http://proxy.example:8080")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"Shutdown": func(_ *testing.T, ro *readOnlyWorkspace) {

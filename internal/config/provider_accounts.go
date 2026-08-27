@@ -141,6 +141,64 @@ func UpdateAccount(store *ConfigStore, accStore accounts.Store, providerID strin
 	return nil
 }
 
+// SetProviderProxy sets providerID's provider-level proxy — the base
+// UpdateAccount/ActivateAccount resolve an account's effective proxy
+// against, exposed on disk as providers.<id>.proxy_url and in memory as
+// ProviderConfig.ConfiguredProxyURL — and republishes the active account's
+// effective proxy so the change is live immediately.
+//
+// Without the republish step, a provider whose active account has no
+// proxy of its own would keep sending requests through the OLD provider
+// proxy (whatever ConfiguredProxyURL/ProxyURL happened to hold in memory)
+// until the next full reload, even though the file on disk already has
+// the new value — the same staleness UpdateProviderAccount's doc comment
+// warns about for account switches. Passing an empty proxy removes the
+// field entirely rather than writing an empty string, mirroring
+// OAuthCodex.afterSave: an absent proxy_url and a present-but-empty one
+// both mean "no provider proxy," but only the former is what a fresh
+// config file would ever contain.
+func SetProviderProxy(store *ConfigStore, accStore accounts.Store, providerID, proxy string) error {
+	key := ProviderFieldKey(providerID, "proxy_url")
+	var err error
+	if proxy == "" {
+		err = store.RemoveConfigField(ScopeGlobal, key)
+	} else {
+		err = store.SetConfigField(ScopeGlobal, key, proxy)
+	}
+	if err != nil {
+		return fmt.Errorf("setting proxy for provider %s: %w", providerID, err)
+	}
+
+	pc, ok := store.Config().Providers.Get(providerID)
+	if !ok || pc.Account == "" {
+		// No active account to republish for yet (e.g. the provider
+		// hasn't been signed into) — the reload SetConfigField already
+		// triggered picked up the new ConfiguredProxyURL, and that's all
+		// there is to do.
+		return nil
+	}
+	account, ok, err := accStore.Get(providerID, pc.Account)
+	if err != nil {
+		return fmt.Errorf("looking up active account for provider %s: %w", providerID, err)
+	}
+	if !ok {
+		return nil
+	}
+	// Re-activating the already-active account is the existing, correct
+	// way to recompute its effective proxy against the just-updated
+	// ConfiguredProxyURL: ActivateAccount republishes credentials AND
+	// proxy together via UpdateProviderAccount, which is exactly what's
+	// needed here too — a call carrying only a proxy override would have
+	// to reconstruct the resolved API key/token itself (see
+	// UpdateProviderAccount's unconditional
+	// provider.APIKey = cred.APIKey), duplicating logic ActivateAccount
+	// already owns.
+	if err := store.ActivateAccount(ScopeGlobal, providerID, account); err != nil {
+		return fmt.Errorf("republishing effective proxy for provider %s: %w", providerID, err)
+	}
+	return nil
+}
+
 // RemoveAccount deletes an account, subject to two rules: the last account
 // for a provider can't be removed (that would leave credentials configured
 // with nowhere to point — see the error below, which names `sennit

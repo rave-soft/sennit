@@ -380,6 +380,10 @@ func (w *readOnlyWorkspace) RemoveAccount(scope config.Scope, providerID, accoun
 	return w.readOnlyError("RemoveAccount")
 }
 
+func (w *readOnlyWorkspace) SetProviderProxy(providerID, proxy string) error {
+	return w.readOnlyError("SetProviderProxy")
+}
+
 func (w *readOnlyWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.readOnlyError("SetConfigField")
 }

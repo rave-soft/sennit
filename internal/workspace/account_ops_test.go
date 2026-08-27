@@ -184,3 +184,62 @@ func accountsStoreFor(t *testing.T) accounts.Store {
 	t.Helper()
 	return accounts.NewFileStore(config.GlobalAccountsFile())
 }
+
+// TestSetProviderProxy_ReachesEffectiveProxyForAccountWithoutOwnProxy is
+// the regression the task calls out by name: a provider-level proxy
+// change must be live for the active account immediately, through the
+// same accounts.ResolveProxy path an account switch uses — not just
+// written to ConfiguredProxyURL and left for the active account's
+// (already-resolved) ProxyURL to go stale until the next reload.
+func TestSetProviderProxy_ReachesEffectiveProxyForAccountWithoutOwnProxy(t *testing.T) {
+	ws, providerID, _, second := setupTwoAccountProvider(t)
+
+	pc, ok := ws.Config().Providers.Get(providerID)
+	require.True(t, ok)
+	require.Equal(t, second.ID, pc.Account)
+	require.Empty(t, second.ProxyURL, "the active account has no proxy of its own")
+	require.Empty(t, pc.ProxyURL)
+
+	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
+
+	pc, ok = ws.Config().Providers.Get(providerID)
+	require.True(t, ok)
+	require.Equal(t, "http://provider-proxy.example:8080", pc.ConfiguredProxyURL)
+	require.Equal(t, "http://provider-proxy.example:8080", pc.ProxyURL, "the effective proxy must pick up the new provider proxy immediately")
+}
+
+// TestSetProviderProxy_AccountOwnProxyStillWins covers the priority rule
+// (accounts.ResolveProxy): an account with its own proxy override must
+// keep using it even after the provider-level proxy changes underneath.
+func TestSetProviderProxy_AccountOwnProxyStillWins(t *testing.T) {
+	ws, providerID, _, second := setupTwoAccountProvider(t)
+
+	updated := second
+	updated.ProxyURL = "http://account-proxy.example:9090"
+	require.NoError(t, ws.UpdateAccount(providerID, updated))
+
+	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
+
+	pc, ok := ws.Config().Providers.Get(providerID)
+	require.True(t, ok)
+	require.Equal(t, "http://provider-proxy.example:8080", pc.ConfiguredProxyURL, "the provider-level base still updates")
+	require.Equal(t, "http://account-proxy.example:9090", pc.ProxyURL, "the account's own proxy still wins as the effective one")
+}
+
+// TestSetProviderProxy_EmptyClearsProviderProxy covers removing a
+// provider-level proxy entirely, falling back to the environment for an
+// account with no proxy of its own.
+func TestSetProviderProxy_EmptyClearsProviderProxy(t *testing.T) {
+	ws, providerID, _, _ := setupTwoAccountProvider(t)
+
+	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
+	pc, ok := ws.Config().Providers.Get(providerID)
+	require.True(t, ok)
+	require.Equal(t, "http://provider-proxy.example:8080", pc.ProxyURL)
+
+	require.NoError(t, ws.SetProviderProxy(providerID, ""))
+	pc, ok = ws.Config().Providers.Get(providerID)
+	require.True(t, ok)
+	require.Empty(t, pc.ConfiguredProxyURL)
+	require.Empty(t, pc.ProxyURL)
+}

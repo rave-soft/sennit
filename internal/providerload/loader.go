@@ -57,6 +57,13 @@ func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config
 	if err := l.validateCustomProviders(cfg, knownNames, resolver, results, input.GlobalDataPath); err != nil {
 		return config.RuntimeResult{}, err
 	}
+	// Rotation settings are validated last, once every provider entry —
+	// catalog-backed (mergeCatalogProviders, above) and custom
+	// (validateCustomProviders, just above) alike — has been written into
+	// cfg.Providers. This is the one point in the load path where a
+	// single loop over cfg.Providers reaches both kinds; validating
+	// inside either merge function on its own would miss the other.
+	l.validateRotationConfigs(cfg)
 	if cfg.Providers.Len() == 0 && cfg.Options.DisableDefaultProviders {
 		return config.RuntimeResult{}, fmt.Errorf("default providers are disabled and no custom providers are configured")
 	}

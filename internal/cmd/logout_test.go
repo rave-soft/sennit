@@ -51,6 +51,7 @@ func (s *stubConfigAccessor) ListAccounts(string) ([]accounts.Account, error)   
 func (s *stubConfigAccessor) ActivateAccount(config.Scope, string, string) error { return nil }
 func (s *stubConfigAccessor) UpdateAccount(string, accounts.Account) error       { return nil }
 func (s *stubConfigAccessor) RemoveAccount(config.Scope, string, string) error   { return nil }
+func (s *stubConfigAccessor) SetProviderProxy(string, string) error              { return nil }
 
 func (s *stubConfigAccessor) ImportCopilot() (*oauth.Token, bool) { return nil, false }
 

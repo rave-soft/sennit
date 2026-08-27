@@ -31,6 +31,10 @@ const (
 // ID, which is always a machine-generated accounts.NextID value.
 const addAccountItemID = "__add_account__"
 
+// providerSettingsItemID is the sentinel ID for the "Provider settings…"
+// entry appended to the account list, alongside addAccountItemID.
+const providerSettingsItemID = "__provider_settings__"
+
 // accountsState tracks the load-then-list lifecycle: ListAccounts is a
 // file read, so the dialog opens on a spinner and only becomes the
 // [selectDialog] once the accounts are in.
@@ -232,12 +236,16 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 			}
 		}
 		items = append(items, &AddAccountItem{BaseItem: list.NewBaseItem(), t: t})
+		items = append(items, &ProviderSettingsItem{BaseItem: list.NewBaseItem(), t: t})
 		return items, startIndex, nil
 	}
 
 	onSelect := func(id string) Action {
 		if id == addAccountItemID {
 			return ActionAddAccount{ProviderID: providerID}
+		}
+		if id == providerSettingsItemID {
+			return ActionOpenProviderSettings{ProviderID: providerID}
 		}
 		if id == activeAccountID {
 			return nil
@@ -464,4 +472,31 @@ func (a *AddAccountItem) ID() string {
 func (a *AddAccountItem) Render(width int) string {
 	st := defaultListItemStyles(a.t)
 	return renderItem(st, "Add account…", "", a.Focused(), width, a.Cache(), a.Match())
+}
+
+// ProviderSettingsItem is the "Provider settings…" entry appended to the
+// account list, after AddAccountItem. Selecting it opens
+// [ProviderSettings] for the dialog's provider (proxy, and — where the
+// provider supports it — automatic account rotation).
+type ProviderSettingsItem struct {
+	list.BaseItem
+	t *styles.Styles
+}
+
+var _ ListItem = (*ProviderSettingsItem)(nil)
+
+// Filter implements ListItem.
+func (p *ProviderSettingsItem) Filter() string {
+	return "Provider settings…"
+}
+
+// ID implements ListItem.
+func (p *ProviderSettingsItem) ID() string {
+	return providerSettingsItemID
+}
+
+// Render implements ListItem.
+func (p *ProviderSettingsItem) Render(width int) string {
+	st := defaultListItemStyles(p.t)
+	return renderItem(st, "Provider settings…", "", p.Focused(), width, p.Cache(), p.Match())
 }

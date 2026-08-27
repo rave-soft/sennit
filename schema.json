@@ -688,6 +688,10 @@
           "type": "string",
           "description": "ID of the active account for this provider"
         },
+        "rotation": {
+          "$ref": "#/$defs/RotationConfig",
+          "description": "Automatic account rotation settings for this provider"
+        },
         "system_prompt_prefix": {
           "type": "string",
           "description": "Custom prefix to add to system prompts for this provider"
@@ -726,6 +730,37 @@
           },
           "type": "array",
           "description": "List of models available from this provider"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "RotationConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Automatically rotate to another account for this provider",
+          "default": false
+        },
+        "min_remaining_percent": {
+          "type": "integer",
+          "maximum": 99,
+          "minimum": 1,
+          "description": "Rotate once remaining allowance drops below this percentage (1-99); only valid for providers that report remaining allowance"
+        },
+        "cooldown": {
+          "type": "string",
+          "description": "How long to treat a rate-limited account as exhausted before retrying it, as a Go duration (e.g. 10m); only valid for providers with no remaining-allowance reporting",
+          "examples": [
+            "10m"
+          ]
+        },
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Account IDs in the order rotation should try them; empty means the order they were added in"
         }
       },
       "additionalProperties": false,

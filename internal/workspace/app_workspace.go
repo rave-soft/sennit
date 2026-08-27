@@ -803,6 +803,13 @@ func (w *AppWorkspace) RemoveAccount(scope config.Scope, providerID, accountID s
 	return config.RemoveAccount(w.store, accStore, scope, providerID, accountID)
 }
 
+// SetProviderProxy implements Workspace by delegating to
+// config.SetProviderProxy, exactly like UpdateAccount/RemoveAccount above.
+func (w *AppWorkspace) SetProviderProxy(providerID, proxy string) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.SetProviderProxy(w.store, accStore, providerID, proxy)
+}
+
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.store.SetConfigField(scope, key, value)
 }

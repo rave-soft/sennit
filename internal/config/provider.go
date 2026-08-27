@@ -21,6 +21,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 )
 
 type ProviderConfig struct {
@@ -70,9 +71,17 @@ type ProviderConfig struct {
 	// whose credentials this provider entry currently carries. The
 	// APIKey/OAuthToken/ProxyURL fields above are a projection of that
 	// account onto this config entry, not independent state; a provider
-	// with only one account may leave this empty. Nothing reads or writes
-	// this field yet — account switching is wired up in a later change.
+	// with only one account may leave this empty. Written by
+	// ConfigStore.ActivateAccount and read wherever the active account
+	// has to be identified (see internal/config/provider_accounts.go).
 	Account string `json:"account,omitempty" jsonschema:"description=ID of the active account for this provider, if it has more than one"`
+
+	// Rotation configures automatic switching between this provider's
+	// stored accounts (see internal/providers/accounts). It is a pointer
+	// so "not configured" (nil, rotation off, no fields to validate) and
+	// "configured with every field at its zero value" stay
+	// distinguishable — the same reasoning as OAuthToken above.
+	Rotation *RotationConfig `json:"rotation,omitempty" jsonschema:"description=Automatic account rotation settings for this provider"`
 
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
@@ -137,6 +146,66 @@ const (
 	// or from a previous load via the global model-discovery cache.
 	ModelsSourceCache ModelsSource = "cache"
 )
+
+// RotationConfig configures automatic switching between a provider's
+// stored accounts (see internal/providers/accounts) once the active one
+// runs low or gets rate-limited. This step only stores and validates the
+// setting — the rotator that actually acts on it is a later change.
+//
+// Which fields apply depends on accounts.CapabilitiesOf(providerID).RotateOn:
+// a threshold provider (Codex: it reports remaining allowance) rotates
+// when the active account's remaining allowance drops below
+// MinRemainingPercent; a rate-limit provider (everyone else) has no
+// number to compare against and instead rotates reactively on HTTP 429,
+// waiting Cooldown before trying an account again if the response carried
+// no Retry-After header. Setting the field that doesn't apply to a given
+// provider is a config error — see providerload's rotation validation.
+type RotationConfig struct {
+	// Enabled turns automatic rotation on for this provider. Meaningful
+	// for both RotateOn kinds.
+	Enabled bool `json:"enabled,omitempty" jsonschema:"description=Automatically rotate to another account for this provider,default=false"`
+	// MinRemainingPercent is the remaining-allowance threshold that
+	// triggers rotation, as a percentage (1-99). Valid only for
+	// providers whose RotateOn is accounts.RotateThreshold; zero means
+	// "use accounts.DefaultMinRemainingPercent" (see
+	// EffectiveMinRemainingPercent).
+	MinRemainingPercent int `json:"min_remaining_percent,omitempty" jsonschema:"description=Rotate once remaining allowance drops below this percentage (1-99); only valid for providers that report remaining allowance,minimum=1,maximum=99"`
+	// Cooldown is how long an account is treated as exhausted after a
+	// 429 with no Retry-After header, as a Go duration string (e.g.
+	// "10m"). Valid only for providers whose RotateOn is
+	// accounts.RotateRateLimit; empty means "use accounts.DefaultCooldown"
+	// (see EffectiveCooldown).
+	Cooldown string `json:"cooldown,omitempty" jsonschema:"description=How long to treat a rate-limited account as exhausted before retrying it\\, as a Go duration (e.g. 10m); only valid for providers with no remaining-allowance reporting,example=10m"`
+	// Order lists account IDs in the order rotation should try them.
+	// Empty means "the order accounts were added in."
+	Order []string `json:"order,omitempty" jsonschema:"description=Account IDs in the order rotation should try them; empty means the order they were added in"`
+}
+
+// EffectiveMinRemainingPercent returns the threshold rotation should use:
+// r.MinRemainingPercent when set, otherwise
+// accounts.DefaultMinRemainingPercent. Safe to call on a nil r.
+func (r *RotationConfig) EffectiveMinRemainingPercent() int {
+	if r == nil || r.MinRemainingPercent == 0 {
+		return accounts.DefaultMinRemainingPercent
+	}
+	return r.MinRemainingPercent
+}
+
+// EffectiveCooldown returns the cooldown rotation should use: r.Cooldown
+// parsed as a duration when set, otherwise accounts.DefaultCooldown. Safe
+// to call on a nil r. An unparseable Cooldown also falls back to the
+// default rather than erroring — providerload's validation is what keeps
+// a bad value from ever reaching here in practice.
+func (r *RotationConfig) EffectiveCooldown() time.Duration {
+	if r == nil || r.Cooldown == "" {
+		return accounts.DefaultCooldown
+	}
+	d, err := time.ParseDuration(r.Cooldown)
+	if err != nil || d <= 0 {
+		return accounts.DefaultCooldown
+	}
+	return d
+}
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
 func (c *ProviderConfig) ToProvider() catwalk.Provider {

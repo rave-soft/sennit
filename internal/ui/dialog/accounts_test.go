@@ -118,10 +118,11 @@ func TestAccounts_ListsAccountsAndMarksActive(t *testing.T) {
 
 	dlg := loadedAccounts(t, com, providerID)
 
-	// 2 accounts plus the trailing "Add account…" sentinel; see
-	// TestAccounts_AddAccountItemAppendedToList for that entry itself.
+	// 2 accounts plus the trailing "Add account…" and "Provider
+	// settings…" sentinels; see TestAccounts_AddAccountItemAppendedToList
+	// for those entries themselves.
 	items := dlg.sd.list.FilteredItems()
-	require.Len(t, items, 3)
+	require.Len(t, items, 4)
 
 	var foundActive, foundInactive bool
 	for _, it := range items {
@@ -158,9 +159,10 @@ func TestAccounts_UsageShownOnlyForCapableProvider(t *testing.T) {
 		}
 		dlg := loadedAccounts(t, com, providerID)
 
-		// 1 account plus the trailing "Add account…" sentinel.
+		// 1 account plus the trailing "Add account…" and "Provider
+		// settings…" sentinels.
 		items := dlg.sd.list.FilteredItems()
-		require.Len(t, items, 2)
+		require.Len(t, items, 3)
 		rendered := items[0].(*AccountItem).Render(60)
 		require.Contains(t, rendered, "%")
 	})
@@ -175,9 +177,10 @@ func TestAccounts_UsageShownOnlyForCapableProvider(t *testing.T) {
 		}
 		dlg := loadedAccounts(t, com, providerID)
 
-		// 1 account plus the trailing "Add account…" sentinel.
+		// 1 account plus the trailing "Add account…" and "Provider
+		// settings…" sentinels.
 		items := dlg.sd.list.FilteredItems()
-		require.Len(t, items, 2)
+		require.Len(t, items, 3)
 		rendered := items[0].(*AccountItem).Render(60)
 		require.NotContains(t, rendered, "%")
 	})
@@ -332,8 +335,8 @@ func TestAccounts_SelectDisabledAccount_WarnsAndDoesNotActivate(t *testing.T) {
 }
 
 // TestAccounts_AddAccountItemAppendedToList covers the sentinel "Add
-// account…" entry appended after the real accounts, mirroring
-// providers.go's "Custom provider…" entry.
+// account…" and "Provider settings…" entries appended after the real
+// accounts, mirroring providers.go's "Custom provider…" entry.
 func TestAccounts_AddAccountItemAppendedToList(t *testing.T) {
 	providerID := "openai"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
@@ -345,10 +348,13 @@ func TestAccounts_AddAccountItemAppendedToList(t *testing.T) {
 	dlg := loadedAccounts(t, com, providerID)
 
 	items := dlg.sd.list.FilteredItems()
-	require.Len(t, items, 3)
-	last, ok := items[len(items)-1].(*AddAccountItem)
-	require.True(t, ok, "expected the last item to be an AddAccountItem, got %#v", items[len(items)-1])
-	require.Equal(t, addAccountItemID, last.ID())
+	require.Len(t, items, 4)
+	addItem, ok := items[len(items)-2].(*AddAccountItem)
+	require.True(t, ok, "expected the second-to-last item to be an AddAccountItem, got %#v", items[len(items)-2])
+	require.Equal(t, addAccountItemID, addItem.ID())
+	settingsItem, ok := items[len(items)-1].(*ProviderSettingsItem)
+	require.True(t, ok, "expected the last item to be a ProviderSettingsItem, got %#v", items[len(items)-1])
+	require.Equal(t, providerSettingsItemID, settingsItem.ID())
 }
 
 // TestAccounts_EditKey_ReturnsActionOpenAccountEdit_NoIO covers ctrl+r: it
@@ -386,7 +392,7 @@ func TestAccounts_EditKey_OnAddAccountItem_NoOp(t *testing.T) {
 
 	dlg := loadedAccounts(t, com, providerID)
 	items := dlg.sd.list.FilteredItems()
-	dlg.sd.list.SetSelected(len(items) - 1)
+	dlg.sd.list.SetSelected(len(items) - 2)
 	require.Equal(t, addAccountItemID, dlg.sd.selectedID())
 
 	action := dlg.HandleMsg(tea.KeyPressMsg{Text: "ctrl+r"})
@@ -431,7 +437,7 @@ func TestAccounts_SelectAddAccount_ReturnsActionAddAccount_NoIO(t *testing.T) {
 	dlg := loadedAccounts(t, com, providerID)
 
 	items := dlg.sd.list.FilteredItems()
-	dlg.sd.list.SetSelected(len(items) - 1)
+	dlg.sd.list.SetSelected(len(items) - 2)
 	require.Equal(t, addAccountItemID, dlg.sd.selectedID())
 
 	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -440,4 +446,29 @@ func TestAccounts_SelectAddAccount_ReturnsActionAddAccount_NoIO(t *testing.T) {
 	addAction, ok := action.(ActionAddAccount)
 	require.True(t, ok, "expected ActionAddAccount, got %#v", action)
 	require.Equal(t, providerID, addAction.ProviderID)
+}
+
+// TestAccounts_SelectProviderSettings_ReturnsActionOpenProviderSettings_NoIO
+// covers selecting "Provider settings…": it must return
+// ActionOpenProviderSettings for the dialog's provider synchronously,
+// without touching the workspace.
+func TestAccounts_SelectProviderSettings_ReturnsActionOpenProviderSettings_NoIO(t *testing.T) {
+	providerID := "openai"
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+
+	items := dlg.sd.list.FilteredItems()
+	dlg.sd.list.SetSelected(len(items) - 1)
+	require.Equal(t, providerSettingsItemID, dlg.sd.selectedID())
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Zero(t, ws.activateCalls, "selecting Provider settings must not activate/switch accounts")
+
+	settingsAction, ok := action.(ActionOpenProviderSettings)
+	require.True(t, ok, "expected ActionOpenProviderSettings, got %#v", action)
+	require.Equal(t, providerID, settingsAction.ProviderID)
 }

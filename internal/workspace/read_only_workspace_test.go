@@ -549,6 +549,11 @@ func (s *stubWorkspace) RemoveAccount(scope config.Scope, providerID, accountID 
 	return nil
 }
 
+func (s *stubWorkspace) SetProviderProxy(providerID, proxy string) error {
+	s.track("SetProviderProxy")
+	return nil
+}
+
 func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	s.track("SetConfigField")
 	return nil

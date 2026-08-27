@@ -314,6 +314,14 @@ type ConfigAccessor interface {
 	// the active account first activates a replacement, so the provider
 	// never ends up pointing at a deleted account.
 	RemoveAccount(scope config.Scope, providerID, accountID string) error
+	// SetProviderProxy sets providerID's provider-level proxy (the base
+	// UpdateAccount/ActivateAccount resolve an account's effective proxy
+	// against, see accounts.ResolveProxy) and republishes the active
+	// account's effective proxy so the change is live immediately. An
+	// empty proxy clears the provider-level override entirely. Global
+	// scope only — providers are a global-only config key (see
+	// internal/config/globalonly.go).
+	SetProviderProxy(providerID, proxy string) error
 }
 
 // ProjectLifecycle covers first-run project initialization and skill
