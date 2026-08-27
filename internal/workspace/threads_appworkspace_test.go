@@ -249,7 +249,7 @@ func newTestThreadAppWorkspace(t *testing.T) (*AppWorkspace, *thread.Manager) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetDelegationManagers(mgr, nil)
+	a.SetDelegationManagers(mgr, nil, nil, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	store := configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo))
@@ -355,7 +355,7 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetDelegationManagers(mgr, nil)
+	a.SetDelegationManagers(mgr, nil, nil, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	// Pre-populate the fake session store so the attached workspace
@@ -421,7 +421,7 @@ func TestAppWorkspace_AttachThread_LiveThread(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetDelegationManagers(mgr, nil)
+	a.SetDelegationManagers(mgr, nil, nil, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	// Create via manager to get a real handle.
@@ -512,7 +512,7 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetDelegationManagers(mgr, nil)
+	a.SetDelegationManagers(mgr, nil, nil, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	// Pre-populate the fake session store.
@@ -574,7 +574,7 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetDelegationManagers(mgr, nil)
+	a.SetDelegationManagers(mgr, nil, nil, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	_, err := fs.Create(t.Context(), "readonly-check")
@@ -634,7 +634,7 @@ func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testin
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetDelegationManagers(mgr, nil)
+	a.SetDelegationManagers(mgr, nil, nil, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	_, err := fs.Create(t.Context(), "reason-check")

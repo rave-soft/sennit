@@ -168,10 +168,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 		threadMgr = mgr
 		threadTools = AsAgentToolManager(mgr)
 	}
-	a.SetDelegationManagers(threadMgr, tasks)
-	if a.AgentCoordinator != nil {
-		a.AgentCoordinator.SetDelegationTools(threadTools, AsAgentToolTaskManager(tasks))
-	}
+	a.SetDelegationManagers(threadMgr, tasks, threadTools, AsAgentToolTaskManager(tasks))
 	if isGitWorkspace {
 		if local, ok := spawner.(*LocalSpawner); ok {
 			go forwardSkillsToThreads(ctx, a, local)

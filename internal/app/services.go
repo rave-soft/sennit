@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
@@ -30,14 +31,21 @@ import (
 
 // delegationManagerSnapshot is the single ownership representation of this
 // workspace's delegation managers: the concrete thread manager (nil for
-// non-git workspaces) and the concrete task manager. It is published
-// atomically as one value, so a reader never observes a thread manager and
-// a task manager from different attach generations. The tool-facing
-// adapters derived from this pair are not stored here: Attach builds them
-// and hands them to the agent coordinator at attachment time.
+// non-git workspaces), the concrete task manager, and the tool-facing
+// adapters Attach derives from that pair. It is published atomically as
+// one value, so a reader never observes a mix of a manager and an adapter
+// from different attach generations.
+//
+// The adapters live here — not only handed to the agent coordinator once,
+// at attachment time, the way this used to work — because a coordinator
+// built or rebuilt after Attach ran (initCoderAgent's non-interactive
+// path, in particular) has no other way to recover them; see
+// initCoderAgent's use of delegationToolAdapters.
 type delegationManagerSnapshot struct {
-	thread *thread.Manager
-	task   *thread.TaskManager
+	thread      *thread.Manager
+	task        *thread.TaskManager
+	threadTools tools.ThreadManager
+	taskTools   tools.TaskManager
 }
 
 // appServices groups the domain services and workspace-scoped resources
@@ -200,11 +208,47 @@ func (app *App) Credentials() *credentials.Manager {
 	return app.credentials
 }
 
-// SetDelegationManagers publishes one consistent concrete delegation pair.
-// Tool adapters are deliberately not accepted or stored here: Attach derives
-// them from this same pair and publishes them to the coordinator separately.
-func (app *App) SetDelegationManagers(threadMgr *thread.Manager, taskMgr *thread.TaskManager) {
-	app.delegationManagers.Store(&delegationManagerSnapshot{thread: threadMgr, task: taskMgr})
+// SetDelegationManagers publishes one consistent delegation snapshot: the
+// concrete thread/task manager pair together with the tool adapters Attach
+// derived from them.
+//
+// Earlier, the adapters were deliberately not accepted or stored here —
+// Attach derived them from this same pair and published them to the
+// coordinator separately, on the theory that App never needed them again.
+// That fell apart the moment a coordinator could be built or rebuilt after
+// Attach ran: initCoderAgent's non-interactive path had no way to recover
+// the adapters it had already lost, so `sennit run` silently built a
+// coordinator with no thread_*/task tools. Storing the adapters here lets
+// initCoderAgent (via delegationToolAdapters) hand them to a freshly built
+// coordinator up front instead.
+//
+// If a coordinator already exists, this also republishes the adapters to
+// it directly, so callers like Attach no longer need to reach into
+// app.AgentCoordinator themselves.
+func (app *App) SetDelegationManagers(threadMgr *thread.Manager, taskMgr *thread.TaskManager, threadTools tools.ThreadManager, taskTools tools.TaskManager) {
+	app.delegationManagers.Store(&delegationManagerSnapshot{
+		thread:      threadMgr,
+		task:        taskMgr,
+		threadTools: threadTools,
+		taskTools:   taskTools,
+	})
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.SetDelegationTools(threadTools, taskTools)
+	}
+}
+
+// delegationToolAdapters returns the tool adapters from the current
+// delegation snapshot, for handing to a coordinator at construction time
+// (see initCoderAgent). Both are nil-safe on the CoordinatorOptions side,
+// so a workspace with no delegation managers wired yet (or none at all,
+// e.g. a non-git workspace) simply builds a coordinator with no
+// thread_*/task tools, same as before this existed.
+func (app *App) delegationToolAdapters() (tools.ThreadManager, tools.TaskManager) {
+	s := app.delegationManagers.Load()
+	if s == nil {
+		return nil, nil
+	}
+	return s.threadTools, s.taskTools
 }
 
 // ThreadManager returns this workspace's concrete thread manager from the
@@ -293,13 +337,32 @@ func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return app.initCoderAgent(ctx, false)
 }
 
+// newCoordinator builds the agent coordinator. It is a variable — rather
+// than initCoderAgent calling agent.NewCoordinator directly — so tests can
+// substitute a fake constructor and verify initCoderAgent's option wiring
+// and its replace/close ordering without booting a real coordinator's
+// readiness work; see internal/app/threadspawn's attachDeps for the same
+// pattern.
+var newCoordinator = agent.NewCoordinator
+
+// initCoderAgent (re)builds the coder agent coordinator. It re-applies
+// whatever delegation tool adapters are already published (see
+// delegationToolAdapters) so that a rebuild — InitCoderAgentNonInteractive
+// running after InitCoderAgent already ran and Attach already published
+// the thread/task tools, as `sennit run` does — never leaves the new
+// coordinator without them.
+//
+// The old coordinator, if any, is only replaced and closed once the new
+// one is built successfully: a failed NewCoordinator must leave the
+// existing coordinator in place and working, not overwrite the field with
+// the error's nil.
 func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
-	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+	threadTools, taskTools := app.delegationToolAdapters()
+	newCoord, err := newCoordinator(ctx, agent.CoordinatorOptions{
 		Config:           app.config,
 		Credentials:      app.credentials,
 		Sessions:         app.sessions,
@@ -316,10 +379,22 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		MCP:              app.MCP,
 		BackgroundShells: app.BackgroundShells,
 		Latency:          app.Latency,
+		Threads:          threadTools,
+		Tasks:            taskTools,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
+	}
+
+	old := app.AgentCoordinator
+	app.AgentCoordinator = newCoord
+	if old != nil {
+		if closer, ok := old.(coordinatorCloser); ok {
+			if err := closer.Close(ctx); err != nil {
+				slog.Error("Failed to close previous agent coordinator", "err", err)
+			}
+		}
 	}
 	return nil
 }
