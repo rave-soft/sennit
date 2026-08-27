@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,7 +16,6 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -323,12 +323,7 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 	if cred.ActiveAccountID != "" {
 		provider.Account = cred.ActiveAccountID
 	}
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
-		provider.SetupGitHubCopilot()
-	case codex.ProviderID:
-		provider.SetupCodex()
-	}
+	provider.ApplyPostCredentialSetup(providerID)
 	cfg.Providers.Set(providerID, provider)
 	s.credentialVersion.Add(1)
 	s.setConfig(cfg)
@@ -977,9 +972,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		isToken = true
 		providerConfig.APIKey = v.AccessToken
 		providerConfig.OAuthToken = v
-		if providerID == string(catwalk.InferenceProviderCopilot) {
-			providerConfig.SetupGitHubCopilot()
-		}
+		providerConfig.ApplyPostCredentialSetup(providerID)
 		fields[ProviderFieldKey(providerID, "api_key")] = v.AccessToken
 		fields[ProviderFieldKey(providerID, "oauth")] = v
 	default:
@@ -1005,9 +998,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 			}
 			current.APIKey = providerConfig.APIKey
 			current.OAuthToken = providerConfig.OAuthToken
-			if providerID == string(catwalk.InferenceProviderCopilot) {
-				current.SetupGitHubCopilot()
-			}
+			current.ApplyPostCredentialSetup(providerID)
 			cfg.Providers.Set(providerID, current)
 			return fields
 		})
@@ -1114,10 +1105,21 @@ func (s *ConfigStore) withRefreshLock(providerID string, fn func() error) error 
 // data dir so they do not clutter the config directory. The file is created
 // on demand by lock.File and is never removed (flock keys on inode, not
 // path).
+//
+// providerID is untrusted the same way ProviderFieldKey's is (see its doc
+// comment): a custom provider's ID is free text, with nothing upstream
+// restricting it to filesystem-safe characters. url.PathEscape neutralizes
+// '/' (and any other separator) before it reaches filepath.Join, so a
+// provider ID like "../../evil" can no longer walk the result out of the
+// locks directory — with no literal separator left in the string, a lone
+// ".." is just three dots inside one filename, not a parent-directory
+// reference. Ordinary IDs (letters, digits, '.', '-', '_') round-trip
+// unescaped, so this does not change the lock path for any provider ID in
+// normal use.
 func (s *ConfigStore) RefreshLockPath(providerID string) string {
 	dir := filepath.Join(filepath.Dir(s.globalDataPath), "locks")
 	_ = os.MkdirAll(dir, 0o755)
-	return filepath.Join(dir, fmt.Sprintf("%s.refresh.lock", providerID))
+	return filepath.Join(dir, fmt.Sprintf("%s.refresh.lock", url.PathEscape(providerID)))
 }
 
 // nextRecentModels computes the recent-models list after recording the

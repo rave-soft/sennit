@@ -280,6 +280,27 @@ func (c *ProviderConfig) SetupCodex() {
 	maps.Copy(c.ExtraHeaders, codex.Headers(accountID))
 }
 
+// ApplyPostCredentialSetup re-runs the per-vendor header setup a provider
+// needs after its credentials change. Copilot's and Codex's extra headers
+// both derive from the credential just published, so every call site that
+// writes new credentials into a ProviderConfig must re-run this or leave a
+// stale (or missing) header behind. The provider ID is taken as a parameter
+// rather than read from c.ID because callers cannot assume c.ID is always
+// populated (a provider fetched from the config map is keyed by ID, but the
+// field itself is not guaranteed set on every path that builds one).
+// Centralizing the switch here means the store.go call sites
+// (UpdateProviderAccount, SetProviderAPIKey) and reload.go's mid-reload
+// race-preservation path all stay in sync — a provider added to one can't
+// be forgotten in another.
+func (c *ProviderConfig) ApplyPostCredentialSetup(providerID string) {
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
+		c.SetupGitHubCopilot()
+	case codex.ProviderID:
+		c.SetupCodex()
+	}
+}
+
 // Providers returns the provider catalog for cfg.
 //
 // It used to memoize the result process-globally via sync.Once, but that

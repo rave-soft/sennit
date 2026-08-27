@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-
-	"charm.land/catwalk/pkg/catwalk"
 )
 
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
@@ -152,11 +150,19 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 				if !ok {
 					continue
 				}
+				// Preserve the whole published-credential set, not just
+				// APIKey/OAuthToken: UpdateProviderAccount can also publish
+				// Account, ProxyURL, and APIKeyTemplate, and a reload that
+				// only copied the first two used to leave those three
+				// pointing at whatever the disk read produced — a stale
+				// combination (new key, old proxy/account) that fails at
+				// request time in a way the user can't diagnose.
 				provider.APIKey = currentProvider.APIKey
 				provider.OAuthToken = currentProvider.OAuthToken
-				if id == string(catwalk.InferenceProviderCopilot) {
-					provider.SetupGitHubCopilot()
-				}
+				provider.Account = currentProvider.Account
+				provider.ProxyURL = currentProvider.ProxyURL
+				provider.APIKeyTemplate = currentProvider.APIKeyTemplate
+				provider.ApplyPostCredentialSetup(id)
 				cfg.Providers.Set(id, provider)
 			}
 		}
