@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -90,4 +91,30 @@ func TestAgenticFetchSubAgentView_OutsideWorkdirRequiresPermission(t *testing.T)
 		t.Fatal("view tool did not return after permission was denied")
 	}
 	require.True(t, deniedResp, "denied out-of-workdir view should surface as an error response")
+}
+
+// TestAgenticFetchTool_SharesClientAcrossCalls guards the fix for
+// agenticFetchTool cloning a fresh *http.Transport (and its idle-connection
+// pool) on every call: two calls with client == nil must resolve to the
+// same *http.Client, and a caller-supplied client must still be used as-is
+// without ever populating the shared one.
+func TestAgenticFetchTool_SharesClientAcrossCalls(t *testing.T) {
+	t.Parallel()
+
+	d := &delegationFinalizer{}
+
+	_, err := d.agenticFetchTool(t.Context(), nil)
+	require.NoError(t, err)
+	first := d.fetchClient
+	require.NotNil(t, first, "agenticFetchTool(nil) must build a shared client")
+
+	_, err = d.agenticFetchTool(t.Context(), nil)
+	require.NoError(t, err)
+	require.Same(t, first, d.fetchClient, "a second nil-client call must reuse the same *http.Client")
+
+	other := &delegationFinalizer{}
+	custom := &http.Client{}
+	_, err = other.agenticFetchTool(t.Context(), custom)
+	require.NoError(t, err)
+	require.Nil(t, other.fetchClient, "a caller-supplied client must be used as-is, not replaced by the shared one")
 }

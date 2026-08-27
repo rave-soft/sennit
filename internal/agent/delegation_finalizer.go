@@ -60,6 +60,15 @@ type delegationFinalizer struct {
 
 	lifecycle *readinessLifecycle
 
+	// fetchClientOnce/fetchClient lazily construct the *http.Client the
+	// agentic-fetch tool falls back to when no caller-supplied client is
+	// given. Built once and reused: cloning a transport per call (as
+	// agenticFetchTool used to) leaks that clone's idle-connection pool
+	// forever and starts every fetch cold instead of reusing warm
+	// connections from a shared pool.
+	fetchClientOnce sync.Once
+	fetchClient     *http.Client
+
 	// parentCostMu serializes updateParentSessionCost's read-modify-write
 	// of a parent session's cost. Sub-agents of the same parent can
 	// finish concurrently (e.g. several "agent" tool calls from the same
@@ -799,14 +808,25 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig) (fan
 	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
 }
 
-//nolint:unparam // matches the (tool, error) signature of the other buildTools helpers
-func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
-	if client == nil {
+// sharedFetchClient returns the delegationFinalizer's shared *http.Client
+// for the agentic-fetch tool, constructing it on first use. An *http.Client
+// is safe for concurrent use, so every caller after the first gets the same
+// instance and shares its connection pool.
+func (d *delegationFinalizer) sharedFetchClient() *http.Client {
+	d.fetchClientOnce.Do(func() {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
 		transport.MaxIdleConnsPerHost = 10
 		transport.IdleConnTimeout = 90 * time.Second
-		client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+		d.fetchClient = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	})
+	return d.fetchClient
+}
+
+//nolint:unparam // matches the (tool, error) signature of the other buildTools helpers
+func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
+	if client == nil {
+		client = d.sharedFetchClient()
 	}
 	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
