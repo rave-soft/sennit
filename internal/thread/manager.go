@@ -446,7 +446,19 @@ func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, 
 	m.lc.goWorker(func() {
 		c.opMu.Lock()
 		defer c.opMu.Unlock()
-		if err := m.mergeAttempt(ctx, st.ID, true, resultText); err != nil && !errors.Is(err, context.Canceled) {
+		// ctx is handleRunComplete's followUpCtx: the manager's own
+		// long-lived context, kept alive past that call's return so this
+		// goroutine can outlive it — but that also means a Shutdown
+		// concurrent with this run's completion has already cancelled it
+		// (m.cancel, see Shutdown), which would fail mergeAttempt
+		// silently and strand the row at StatusRunning until the next
+		// process's Recover. Detach so a shutdown in progress still gets
+		// a finished merge (or a deliberately recorded outcome) instead
+		// of a stranded row; shutdownPhases already joins this worker via
+		// m.lc.wait(), so bounding it here is what makes that join finite.
+		mergeCtx, cancel := detachForTerminalWork(ctx)
+		defer cancel()
+		if err := m.mergeAttempt(mergeCtx, st.ID, true, resultText); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("Auto-merge failed", "component", "thread", "thread", st.ID, "error", err)
 		}
 		// The run finishing is not this thread's useful terminal event —
@@ -456,11 +468,11 @@ func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, 
 		// (merged cleanly, hit a conflict, or got blocked) is still
 		// pending. Deliver once mergeAttempt has landed on whichever of
 		// those three it reached instead.
-		m.deliverMergeOutcome(ctx, st.ID)
+		m.deliverMergeOutcome(mergeCtx, st.ID)
 		// Strictly after delivery: discardMerged deletes the store row,
 		// and deliverMergeOutcome re-reads that row to learn which of the
 		// three outcomes the attempt reached.
-		m.discardMerged(ctx, st.ID)
+		m.discardMerged(mergeCtx, st.ID)
 	})
 	return true
 }

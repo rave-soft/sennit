@@ -196,6 +196,21 @@ func TestApp_Shutdown_IsIdempotent(t *testing.T) {
 	require.Equal(t, shutdownStateDone, a.shutdownState)
 }
 
+// TestApp_Shutdown_NilAppDoesNotPanic pins app.go's sanctioned bare &App{}
+// literal (see its doc comment on the embedded groupings): shutdownPhases.app
+// is nil until New/NewForTest sets it, and Shutdown must degrade to a no-op
+// rather than dereference it.
+func TestApp_Shutdown_NilAppDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	a := &App{}
+	require.NotPanics(t, a.Shutdown)
+	require.Equal(t, shutdownStateDone, a.shutdownState)
+
+	// Idempotent like the populated case above.
+	require.NotPanics(t, a.Shutdown)
+}
+
 // TestApp_Shutdown_Concurrent waits for multiple concurrent callers to
 // return together after a single teardown.
 func TestApp_Shutdown_Concurrent(t *testing.T) {

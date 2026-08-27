@@ -204,6 +204,15 @@ func (p *shutdownPhases) Shutdown() {
 	p.shutdownMu.Unlock()
 
 	app := p.app
+	if app == nil {
+		// A bare &App{} that skipped both New and NewForTest (sanctioned by
+		// app.go's doc comment) has nothing any phase below could touch.
+		p.shutdownMu.Lock()
+		p.shutdownState = shutdownStateDone
+		p.shutdownMu.Unlock()
+		close(p.shutdownDone)
+		return
+	}
 
 	// 0. Latch the dispatcher's accept gate before any teardown phase
 	// runs: a Send that lands after this point must be refused rather

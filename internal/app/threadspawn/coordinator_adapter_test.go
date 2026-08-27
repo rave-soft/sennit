@@ -52,6 +52,34 @@ func TestWorkspace_NilCoordinatorDoesNotPanicOnCancel(t *testing.T) {
 	}
 }
 
+// TestWorkspace_CoordinatorRefreshesAfterLateInit pins the fix for a
+// stranded-completion bug: an unconfigured project's App has no
+// coordinator when Attach first builds its AppWorkspaceAdapter (see
+// Coordinator's doc comment), and the coordinator arrives later — once the
+// user finishes onboarding, or a rebuild replaces it. A version of
+// Coordinator that cached its first result would freeze on that initial
+// nil forever, so every later registerParent/DeliverTaskCompletion call
+// would silently target nothing.
+func TestWorkspace_CoordinatorRefreshesAfterLateInit(t *testing.T) {
+	a := app.NewForTest(context.Background())
+	t.Cleanup(a.ShutdownForTest)
+
+	ws := NewAppWorkspaceAdapter(a)
+	require.Nil(t, ws.Coordinator(), "no coordinator installed yet")
+
+	a.SetAgentCoordinatorForTest(&attachFakeCoordinator{})
+	require.NotNil(t, ws.Coordinator(),
+		"Coordinator must observe a coordinator installed after the adapter's first call")
+
+	// A rebuild (initCoderAgent runs again, e.g. after a model change) must
+	// be observed too, not frozen on the first non-nil coordinator either.
+	second := &attachFakeCoordinator{}
+	a.SetAgentCoordinatorForTest(second)
+	got, ok := ws.Coordinator().(*coordinatorAdapter)
+	require.True(t, ok)
+	require.Same(t, second, got.inner)
+}
+
 // TestRunCompletionBrokerAdapter_SubscribeCancelsWithoutLeaking is the
 // concurrency regression test for the run-completion bridge: the pump that
 // forwards events from the underlying broker onto the domain-facing channel

@@ -159,9 +159,16 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 
 	// Publish only once shutdown and database cleanup are both registered:
 	// consumers must never observe a manager whose dependencies can leak.
-	if isGitWorkspace {
-		deps.forwardEvents(a, mgr)
-	}
+	//
+	// Unconditional, unlike the git-only blocks around it: mgr's broker is
+	// the same event source tasks publish onto (TaskManager shares mgr's
+	// own lifecycle, see the comment above), and a task has no worktree
+	// requirement, so it runs in a non-git workspace too. Gating this on
+	// isGitWorkspace would silently drop task status from the UI there.
+	// Thread-kind events can never appear on this broker in a non-git
+	// workspace: threadMgr and threadTools, the only way to reach mgr's
+	// thread-creating methods, stay nil below when !isGitWorkspace.
+	deps.forwardEvents(a, mgr)
 	var threadMgr *thread.Manager
 	var threadTools tools.ThreadManager
 	if isGitWorkspace {

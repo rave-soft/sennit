@@ -35,17 +35,26 @@ type AppWorkspaceAdapter struct {
 	App *app.App
 
 	mu sync.Mutex
-	co thread.Coordinator
 	rc thread.RunCompletionBroker
 }
 
+// Coordinator wraps a.App's current coordinator on every call rather than
+// caching it: a.App.Coordinator() is a single RWMutex read, cheap enough
+// that caching buys nothing, and caching cost correctness. An App that has
+// not run InitCoderAgent yet (an unconfigured project) reports a nil
+// coordinator until the user finishes setup and it runs for the first
+// time (see ui/model's initAgentAndReportModel); initCoderAgent can also
+// rebuild the coordinator later (a model change, or the interactive
+// rebuild InitCoderAgentNonInteractive's doc describes) and replace the
+// field with a new instance. A cached wrapper would freeze on whichever
+// coordinator was live at the first call — nil before setup, or a
+// coordinator a later rebuild has since closed — and every later
+// registerParent/DeliverTaskCompletion call would target that dead
+// reference, losing a task's completion with no error anywhere. Wrapping
+// fresh each time means every caller always reaches whichever coordinator
+// is actually live right now.
 func (a *AppWorkspaceAdapter) Coordinator() thread.Coordinator {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.co == nil {
-		a.co = NewCoordinatorAdapter(a.App.Coordinator())
-	}
-	return a.co
+	return NewCoordinatorAdapter(a.App.Coordinator())
 }
 
 func (a *AppWorkspaceAdapter) Sessions() thread.SessionService {

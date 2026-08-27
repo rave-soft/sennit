@@ -436,6 +436,53 @@ func TestAttachNonGitWorkspacesGetTaskManagerWithoutThreadManager(t *testing.T) 
 	require.NotNil(t, tasksAdapter)
 }
 
+// TestAttachForwardsTaskEventsInNonGitWorkspace pins the fix for task
+// status silently failing to reach the UI outside a git repository: a
+// TaskManager is built unconditionally (see
+// TestAttachNonGitWorkspacesGetTaskManagerWithoutThreadManager), and it
+// shares mgr's own event broker, but forwarding that broker onto
+// a.Events() used to be gated on isGitWorkspace right alongside the
+// thread-only wiring around it. Thread-kind events are legitimately
+// git-only (a thread needs a worktree), but a task does not, so this must
+// forward regardless of isGitWorkspace.
+func TestAttachForwardsTaskEventsInNonGitWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	a := newAttachTestApp(t, dir)
+	ch := a.Events(t.Context())
+
+	var mgr *thread.Manager
+	deps := ProductionAttachDeps()
+	deps.newManager = func(opts thread.ManagerOptions) *thread.Manager {
+		mgr = thread.NewManager(opts)
+		return mgr
+	}
+	AttachWithDeps(t.Context(), a, dir, newAttachTestSpawner(t), deps)
+	require.Nil(t, a.ThreadManager(), "precondition: a non-git workspace owns no thread manager")
+	require.NotNil(t, a.TaskManager())
+	require.NotNil(t, mgr)
+
+	// Let ForwardEvents subscribe before publishing, as the git-workspace
+	// counterpart (TestAttachPublishesEventsAndReleasesStoreOnShutdown) does.
+	time.Sleep(10 * time.Millisecond)
+	mgr.PublishForTest(thread.EventStatusChanged, thread.Thread{
+		Delegation: thread.Delegation{ID: "task-1", Name: "one", Kind: thread.KindTask},
+	})
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-ch:
+			forwarded, ok := event.Payload.(pubsub.Event[thread.Event])
+			if !ok {
+				continue
+			}
+			require.Equal(t, "task-1", forwarded.Payload.Thread.ID)
+			return
+		case <-timeout:
+			t.Fatal("timed out waiting for a task event forwarded from a non-git workspace")
+		}
+	}
+}
+
 // TestAttachNestedGitSubdirectoryAttachesNothing covers the case easily
 // confused with the one above: a subdirectory inside a repository is not
 // the repository root, so Attach performs no attachment at all — no task
