@@ -35,10 +35,18 @@ A task isn't polled for its result. Once it finishes, its outcome is
 delivered back automatically and shows up as a report at the next step of
 whatever turn created it.
 
+If that turn has already ended, the report waits: a session you drive is
+never restarted by a task finishing in the background. It reaches the model
+at the top of your next turn in that session, ahead of what you typed — so
+a task that finishes while you are elsewhere costs you nothing and surprises
+you with nothing. A delegation's *own* session is the exception, since
+nobody is sitting in it to type: it is woken by its own completions, which
+is how an agent that started sub-delegations resumes once they answer.
+
 A workspace allows at most 4 tasks running at once, and at most 2 of those
 started by any one turn — past either limit, starting another is refused
-rather than queued. A task waking a follow-up turn that starts another task
-is capped at 3 levels deep.
+rather than queued. A chain of delegations starting further delegations is
+capped at 3 levels deep.
 
 Turn the feature off entirely with `options.background_agents: false` in
 `sennit.json`: the model can no longer start a background task and the

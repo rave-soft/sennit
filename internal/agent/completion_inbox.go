@@ -79,7 +79,8 @@ type TaskCompletion struct {
 
 // enqueueCompletion appends completion to sessionID's completion inbox
 // and reports whether the session is now eligible for an auto-wake
-// attempt (idle, not left canceled by the user). It never interrupts a
+// attempt (a delegation's own session - never a person's - that is idle
+// and not left canceled by the user). It never interrupts a
 // running turn itself - eligible only ever means "the caller may attempt
 // a continuation," never "this call drained anything." The actual
 // consumption happens later, atomically, in whichever turn's own
@@ -108,6 +109,11 @@ func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompleti
 	// user's own work (or the delegation's own words) and must not end
 	// up in a log that outlives the session.
 	slog.Info("Completion enqueued", "delegation", completion.DelegationID, "kind", completion.Kind, "status", completion.Status, "is_message", completion.IsMessage, "session", sessionID, "inbox_size", len(s.completionInbox))
+	if !d.isDelegationSession(sessionID) {
+		// A person's own session is never woken by something finishing
+		// in the background - see isDelegationSession.
+		return false
+	}
 	return d.wakeEligibleLocked(s)
 }
 
@@ -231,11 +237,44 @@ func (d *dispatcher) dropCompletions(sessionID string) {
 // startContinuation for why a separate pre-drain step would reintroduce
 // exactly the "fabricated user message" problem this design avoids.
 func (d *dispatcher) wakeEligible(sessionID string) bool {
+	if !d.isDelegationSession(sessionID) {
+		return false
+	}
 	s, release := d.session(sessionID)
 	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return d.wakeEligibleLocked(s)
+}
+
+// isDelegationSession reports whether sessionID is a delegation's own
+// session (a task or thread the agent is running) rather than a session a
+// person drives directly. It is what confines the wake path to work the
+// person already asked for.
+//
+// A session a person drives must never start a turn nobody asked for:
+// they leave it, a delegation they started an hour ago finishes, and the
+// session picks the conversation back up on its own - spending tokens,
+// editing files, possibly starting further delegations - while they are
+// looking at something else entirely. The completion is not lost; it
+// waits in the inbox and is folded into their next turn (see
+// drainCompletionsForStep), which is the first moment they are actually
+// there to read it.
+//
+// A delegation's own session is the opposite case: it is not a
+// conversation, it is a unit of work the person explicitly started and is
+// waiting on. It has no one to type into it, so if it did not wake
+// itself, a delegation that ended a turn to wait on delegations of its
+// own (internal/thread's park branch - see lifecycle.handleRunComplete)
+// would sit at StatusRunning forever, holding one of the workspace's
+// concurrency slots, and its parent would never be told anything.
+//
+// The registry read here is registered once at delegation-create time by
+// internal/thread and outlives every individual turn, so this answer does
+// not depend on when in a delegation's life it is asked.
+func (d *dispatcher) isDelegationSession(sessionID string) bool {
+	_, ok := d.delegationParents.Get(sessionID)
+	return ok
 }
 
 // wakeEligibleLocked is wakeEligible's body. Callers must hold s.mu -

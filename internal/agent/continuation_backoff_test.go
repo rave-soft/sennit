@@ -15,6 +15,7 @@ import (
 // writes and error logs for as long as the process lived.
 func TestWakeStopsAfterRepeatedContinuationFailures(t *testing.T) {
 	d := newDispatcher()
+	markDelegationSession(d, "s1")
 
 	d.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})
 	require.True(t, d.wakeEligible("s1"), "a queued completion on an idle session wakes it")
@@ -38,6 +39,7 @@ func TestWakeStopsAfterRepeatedContinuationFailures(t *testing.T) {
 // arriving is an external event, not another go at the one that failed.
 func TestANewCompletionGivesTheWakePathItsAttemptsBack(t *testing.T) {
 	d := newDispatcher()
+	markDelegationSession(d, "s1")
 	boom := errors.New("boom")
 
 	d.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})
@@ -87,4 +89,17 @@ func TestDropCompletionsClearsAnUndeliverableInbox(t *testing.T) {
 
 	require.Empty(t, d.drainCompletionsForStep("s1"))
 	require.False(t, d.wakeEligible("s1"))
+}
+
+// markDelegationSession makes sessionID look like a delegation's own
+// session to the dispatcher, which is what the wake path requires (see
+// isDelegationSession): a session a person drives is never woken by
+// something finishing in the background, so a dispatcher-level test of
+// the wake path has to say which kind of session it is testing.
+func markDelegationSession(d *dispatcher, sessionID string) {
+	d.RegisterDelegationParent(sessionID, DelegationParent{
+		ParentSessionID: "parent-of-" + sessionID,
+		DelegationID:    "delegation-" + sessionID,
+		Kind:            "task",
+	})
 }

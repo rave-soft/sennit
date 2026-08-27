@@ -58,8 +58,12 @@ func promptContains(prompt fantasy.Prompt, substr string) bool {
 // TestSendToParent_WakesIdleParentAndDeliversOnce proves the core
 // SendToParent path end to end: a mid-run ask reaches the parent
 // session's next step via an idle-wake continuation (mirroring
-// TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce), attributed with
-// the delegation's id/kind/name, and exactly once.
+// TestDeliverTaskCompletion_WakesIdleDelegationExactlyOnce), attributed
+// with the delegation's id/kind/name, and exactly once.
+//
+// The parent here is itself a delegation - a nested chain, the case that
+// has to keep waking, since no one is sitting in it to type. The
+// person-parent case is TestSendToParent_PersonsSessionIsNeverWoken.
 func TestSendToParent_WakesIdleParentAndDeliversOnce(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
@@ -79,6 +83,8 @@ func TestSendToParent_WakesIdleParentAndDeliversOnce(t *testing.T) {
 
 	const childSessionID = "child-session-ask"
 	registerSelfParent(sa, childSessionID, parentSess.ID)
+	// The parent is a delegation of its own, one level further up.
+	registerSelfParent(sa, parentSess.ID, "grandparent-session")
 
 	err = sa.SendToParent(t.Context(), childSessionID, "ask-marker-text")
 	require.NoError(t, err)
@@ -261,4 +267,42 @@ func TestSendToParent_NoRegisteredParentReturnsError(t *testing.T) {
 	err := sa.SendToParent(t.Context(), "no-such-session", "orphan-message")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no-such-session")
+}
+
+// TestSendToParent_PersonsSessionIsNeverWoken is the ask-side half of the
+// wake gate: a delegation speaking up mid-run must not restart the
+// conversation of the person who started it while they are elsewhere.
+// The ask waits in their inbox and is delivered on their next turn.
+func TestSendToParent_PersonsSessionIsNeverWoken(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &promptRecordingModel{text: "done"}
+	sa := testSessionAgent(env, model, "system").(*sessionAgent)
+
+	parentSess, err := env.sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), parentSess.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
+	})
+	require.NoError(t, err)
+
+	// The child is a delegation; its parent is not - it is the person's
+	// own session, so no registerSelfParent call for it.
+	const childSessionID = "child-session-ask-person"
+	registerSelfParent(sa, childSessionID, parentSess.ID)
+
+	require.NoError(t, sa.SendToParent(t.Context(), childSessionID, "ask-waits-for-the-person"))
+
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, model.count(), "an ask must never start a turn in a session a person drives")
+
+	_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: parentSess.ID, Prompt: "hello"})
+	require.NoError(t, runErr)
+
+	prompts := model.snapshotPrompts()
+	require.Len(t, prompts, 1, "exactly one turn must have reached the model")
+	require.True(t, promptContains(prompts[0], "ask-waits-for-the-person"),
+		"the queued ask must reach the model on the person's next turn")
+	require.Empty(t, sa.drainCompletionsForStep(parentSess.ID), "that turn must have drained the inbox")
 }
