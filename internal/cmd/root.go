@@ -55,6 +55,7 @@ func init() {
 		logoutCmd,
 		schemaCmd,
 		loginCmd,
+		accountsCmd,
 		statCmd,
 		sessionCmd,
 		threadsCmd,

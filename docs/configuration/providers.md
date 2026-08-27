@@ -47,6 +47,10 @@ has since produced over spending the refresh token itself. Which models the acco
 the Codex backend at sign-in and written to `providers.codex.models`; re-run
 `sennit login codex -f` to refresh that list after a plan change.
 
+Signing in again adds another Codex account rather than replacing the
+current one; see [Accounts](accounts.md) for managing several, switching
+between them, and per-account proxies.
+
 Because the plan is flat-rate, the sidebar shows what it costs you instead
 of a running total: the tier and how much of the current allowance is gone,
 e.g. `Plus · 6% of weekly limit, resets in 3d`. The figures ride along on

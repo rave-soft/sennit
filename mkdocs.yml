@@ -43,6 +43,7 @@ nav:
       - configuration/index.md
       - sennitrc reference: configuration/sennitrc.md
       - Providers and models: configuration/providers.md
+      - Accounts: configuration/accounts.md
       - Context files: configuration/context.md
       - Permissions: configuration/permissions.md
       - Environment and paths: configuration/environment.md

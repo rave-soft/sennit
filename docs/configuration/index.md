@@ -61,6 +61,8 @@ and `sennit doctor` reports problems in what was loaded.
 - [sennitrc reference](sennitrc.md) — every command and flag.
 - [Providers and models](providers.md) — connecting to models, including
   local and OpenAI-compatible servers.
+- [Accounts](accounts.md) — giving a provider more than one credential, and
+  switching between them.
 - [Context files](context.md) — `AGENTS.md`, `SENNIT.md`, and what gets
   loaded into every session.
 - [Permissions](permissions.md) — allowing, denying and yolo mode.
