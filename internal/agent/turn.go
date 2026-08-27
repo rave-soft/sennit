@@ -906,6 +906,9 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			Content:    content,
 			IsError:    true,
 		}
+		// Not fatal either: the AddFinish and Update below still need to
+		// run so the assistant message ends up with a finish reason instead
+		// of being left looking "still running" forever.
 		_, createErr := t.agent.messages.Create(cleanupCtx, t.currentAssistant.SessionID, message.CreateMessageParams{
 			Role: message.Tool,
 			Parts: []message.ContentPart{
@@ -913,7 +916,13 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			},
 		})
 		if createErr != nil {
-			return nil, createErr
+			slog.Error(
+				"Failed to persist a synthetic tool result while closing an interrupted turn",
+				"session_id", t.currentAssistant.SessionID,
+				"tool_call_id", tc.ID,
+				"error", createErr,
+			)
+			continue
 		}
 	}
 	var fantasyErr *fantasy.Error
