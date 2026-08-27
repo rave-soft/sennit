@@ -232,6 +232,50 @@ func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField(t *testing.T) {
 	require.Zero(t, notifications)
 }
 
+// TestWatchForExternalChanges_IgnoresOwnRuntimeConfigWrites verifies that
+// WriteRuntimeConfigFields and RemoveRuntimeConfigField, like SetConfigFields
+// and RemoveConfigField, refresh the staleness snapshot atomically with
+// their write. Before this, the two runtime mutators wrote the file without
+// ever touching the snapshot (they deliberately skip autoReload, so nothing
+// else refreshed it either), so a poll landing after the write read it as an
+// external change and fired a spurious reload/notification.
+func TestWatchForExternalChanges_IgnoresOwnRuntimeConfigWrites(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	configPath := filepath.Join(dir, "sennit.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"options": {"debug": true}}`), 0o600))
+
+	store, err := loadRuntimeForTest(dir, "", false)
+	require.NoError(t, err)
+	const pollInterval = 100 * time.Millisecond
+	store.externalChangePollInterval = pollInterval
+
+	var notifications int
+	notified := make(chan struct{}, 8)
+	store.OnExternalChange(func() {
+		notifications++
+		notified <- struct{}{}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go store.WatchForExternalChanges(ctx)
+
+	store.WriteRuntimeConfigFields(ScopeGlobal, map[string]any{"options.contextPaths": []string{"a"}})
+	store.RemoveRuntimeConfigField(ScopeGlobal, "options.debug")
+
+	// Give the poll loop a few cycles to (not) fire.
+	select {
+	case <-notified:
+		t.Fatalf("WatchForExternalChanges fired for this process's own runtime config write:%s",
+			describeExternalChange(t, store))
+	case <-time.After(3 * pollInterval):
+	}
+	require.Zero(t, notifications)
+}
+
 // describeExternalChange reports why externalChangeDetected() is true, so a
 // failure on a platform we cannot run locally arrives with the answer
 // attached instead of sending us back for another CI round. Three rounds of

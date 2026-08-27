@@ -522,12 +522,23 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 	return s.file.atomicWrite(path, fn)
 }
 
-// ConfigPath returns the file path for the given scope.
+// RemoveRuntimeConfigField deletes key from the runtime config files that
+// apply to scope.
+//
+// Like SetConfigFields, the writes and the staleness-snapshot refresh happen
+// under one stalenessMu section so a concurrent ConfigStaleness() cannot
+// mistake one of these writes for an external change. See SetConfigFields
+// for the full rationale. Unlike SetConfigFields, this deliberately skips
+// autoReload: these are "runtime" writes callers do not want reflected back
+// into in-memory config.
 func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 	paths := []string{s.globalDataPath}
 	if scope == ScopeGlobal {
 		paths = globalConfigPaths()
 	}
+	s.stalenessMu.Lock()
+	defer s.stalenessMu.Unlock()
+	var wrote bool
 	for _, path := range paths {
 		if _, err := os.Stat(path); err != nil {
 			continue
@@ -543,16 +554,31 @@ func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 			return []byte(value), nil
 		}); err != nil {
 			slog.Warn("Failed to remove runtime config field", "key", key, "path", path, "error", err)
+		} else {
+			wrote = true
 		}
+	}
+	if wrote {
+		s.refreshStalenessSnapshotLocked(nil)
 	}
 }
 
+// WriteRuntimeConfigFields writes fields to the config file for the given
+// scope without reloading in-memory state. See RemoveRuntimeConfigField for
+// why the staleness snapshot is still refreshed under stalenessMu.
 func (s *ConfigStore) WriteRuntimeConfigFields(scope Scope, fields map[string]any) {
-	if err := s.writeConfigFields(scope, fields); err != nil {
+	s.stalenessMu.Lock()
+	err := s.writeConfigFields(scope, fields)
+	if err == nil {
+		s.refreshStalenessSnapshotLocked(nil)
+	}
+	s.stalenessMu.Unlock()
+	if err != nil {
 		slog.Warn("Failed to write runtime config fields", "error", err)
 	}
 }
 
+// ConfigPath returns the file path for the given scope.
 func (s *ConfigStore) ConfigPath(scope Scope) (string, error) {
 	switch scope {
 	case ScopeWorkspace:
