@@ -320,12 +320,12 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// Provider is configured after import: proceed to UpdatePreferredModel.
 		capturedModel := msg.model
 		generation := msg.generation
-		cmds = append(cmds, func() tea.Msg {
-			if err := ws.UpdatePreferredModel(config.ScopeGlobal, capturedModel); err != nil {
+		cmds = append(cmds, updatePreferredModelCmd(ws, capturedModel, func(err error) tea.Msg {
+			if err != nil {
 				return modelSelectResult{Err: err, generation: generation}
 			}
 			return modelSelectResult{Onboarding: msg.isOnboarding, Model: capturedModel, generation: generation}
-		})
+		}))
 		return cmds, true
 	}
 	return cmds, false

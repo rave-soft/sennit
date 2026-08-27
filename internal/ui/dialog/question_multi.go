@@ -158,9 +158,13 @@ func (d *MultiChoice) ShortHelp() []key.Binding {
 }
 
 func (d *MultiChoice) Height(width int) int { return d.height(width, d.choiceItemContent) }
-func (d *MultiChoice) HeightChanged() bool  { return d.heightChanged() }
-func (d *MultiChoice) SetFocused(f bool)    { d.setFocused(f) }
-func (d *MultiChoice) SetHover(x, y int)    { d.setHover(x, y) }
+
+// HeightChanged always reports false: choiceList's height is a pure
+// function of width and content (see choiceList.height), so it never moves
+// on its own between draws the way a growing textarea's height would.
+func (d *MultiChoice) HeightChanged() bool { return false }
+func (d *MultiChoice) SetFocused(f bool)   { d.setFocused(f) }
+func (d *MultiChoice) SetHover(x, y int)   { d.setHover(x, y) }
 func (d *MultiChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	return d.handlePaste(msg)
 }

@@ -471,10 +471,6 @@ func (c *choiceList) height(width int, itemFn choiceItemRenderer) int {
 	return len(c.buildLines(innerWidth, "> ", itemFn))
 }
 
-func (c *choiceList) heightChanged() bool {
-	return false // height is deterministic
-}
-
 func (c *choiceList) setFocused(focused bool) {
 	c.focused = focused
 }

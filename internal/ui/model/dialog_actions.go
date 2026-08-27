@@ -15,6 +15,21 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
+// updatePreferredModelCmd returns a tea.Cmd that sets model as the
+// workspace's preferred model off the Update goroutine, then hands the
+// resulting error (nil on success) to onResult to build whichever message
+// the caller's flow continues with. Factors out the "set the model or
+// report why not" tea.Cmd shape shared by ActionToggleThinking,
+// ActionSelectReasoningEffort, and ActionProviderConfigured below, and by
+// importCopilotResult's follow-up in update_settings.go — they differ only
+// in what happens next on success (some also call UpdateAgentModel) and in
+// which message type carries the result, both of which onResult captures.
+func updatePreferredModelCmd(ws workspace.Workspace, model config.SelectedModel, onResult func(err error) tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		return onResult(ws.UpdatePreferredModel(config.ScopeGlobal, model))
+	}
+}
+
 // applyDialogAction executes a [dialog.Action] regardless of where it came
 // from: a dialog's HandleMsg (the usual path, via handleDialogMsg) or a
 // command selected directly from the editor's "/" completion popup, which
@@ -100,14 +115,14 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.ops.modelOperationLoading = true
 		m.ops.modelOperationGeneration++
 		generation := m.ops.modelOperationGeneration
-		workspace := m.com.Workspace
+		ws := m.com.Workspace
 		ctx := m.com.Context()
-		cmds = append(cmds, func() tea.Msg {
-			if err := workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
+		cmds = append(cmds, updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
+			if err != nil {
 				return modelSettingUpdatedMsg{Err: err, generation: generation}
 			}
-			return modelSettingUpdatedMsg{Err: workspace.UpdateAgentModel(ctx), Info: "Thinking mode " + status, generation: generation}
-		})
+			return modelSettingUpdatedMsg{Err: ws.UpdateAgentModel(ctx), Info: "Thinking mode " + status, generation: generation}
+		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
 		if m.ops.transparentLoading {
@@ -173,14 +188,14 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.ops.modelOperationLoading = true
 		m.ops.modelOperationGeneration++
 		generation := m.ops.modelOperationGeneration
-		workspace := m.com.Workspace
+		ws := m.com.Workspace
 		ctx := m.com.Context()
-		cmds = append(cmds, func() tea.Msg {
-			if err := workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
+		cmds = append(cmds, updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
+			if err != nil {
 				return modelSettingUpdatedMsg{Err: err, generation: generation}
 			}
-			return modelSettingUpdatedMsg{Err: workspace.UpdateAgentModel(ctx), Info: "Reasoning effort set to " + effort, generation: generation}
-		})
+			return modelSettingUpdatedMsg{Err: ws.UpdateAgentModel(ctx), Info: "Reasoning effort set to " + effort, generation: generation}
+		}))
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	default:
 		return nil, false
@@ -201,14 +216,10 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.requestSessionLoad(msg.Session.ID))
 	case dialog.ActionNewSession:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-			break
+		var started bool
+		if cmds, started = m.startNewSessionGuarded(cmds); started {
+			m.dialog.CloseDialog(dialog.CommandsID)
 		}
-		if cmd := m.newSession(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -403,12 +414,12 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.ops.modelOperationGeneration++
 		generation := m.ops.modelOperationGeneration
 		capturedModel := model
-		cmds = append(cmds, func() tea.Msg {
-			if err := ws.UpdatePreferredModel(config.ScopeGlobal, capturedModel); err != nil {
+		cmds = append(cmds, updatePreferredModelCmd(ws, capturedModel, func(err error) tea.Msg {
+			if err != nil {
 				return providerConfiguredResult{Err: err, generation: generation}
 			}
 			return providerConfiguredResult{Model: capturedModel, Onboarding: true, generation: generation}
-		})
+		}))
 	default:
 		return nil, false
 	}
@@ -468,16 +479,10 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
-			break
+		var started bool
+		if cmds, started = m.openExternalEditorGuarded(cmds); started {
+			m.dialog.CloseDialog(dialog.CommandsID)
 		}
-		editorValue := m.editor.textarea.Value()
-		if m.editor.bangMode {
-			editorValue = "!" + editorValue
-		}
-		cmds = append(cmds, m.openEditor(editorValue))
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -488,11 +493,7 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 		cmds = append(cmds, m.disableDockerMCPCmd())
 	case dialog.ActionOpenThreadsDashboard:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		if !m.com.Workspace.SupportsThreads() {
-			cmds = append(cmds, util.ReportInfo("This workspace doesn't support threads."))
-			break
-		}
-		cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
+		cmds = m.openThreadsDashboardGuarded(cmds)
 
 	case dialog.ActionFilePickerSelected:
 		m.dialog.CloseDialog(dialog.FilePickerID)

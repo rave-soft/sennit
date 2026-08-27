@@ -452,13 +452,6 @@ func (l *List) Invalidate(item Item) {
 	delete(l.cache, item)
 }
 
-// InvalidateFrozen drops the frozen flag (and stored content) for the
-// given item. Equivalent to Invalidate but exposed under the F6
-// frozen-items vocabulary so external callers can express intent.
-func (l *List) InvalidateFrozen(item Item) {
-	delete(l.cache, item)
-}
-
 // retainCacheFor drops every cache and freezeSuppressed entry whose key
 // is not in the given item set. Used by SetItems to keep entries for
 // stable items while dropping entries for removed ones. Both maps are

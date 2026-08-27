@@ -19,6 +19,7 @@ package model
 import (
 	"fmt"
 	"image"
+	"strconv"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -262,15 +263,24 @@ func renderSessionTodoLine(todo session.Todo, inProgressIcon string, sty *styles
 	})
 }
 
-// sessionPanelTodosHeaderText renders the todos header row's plain text:
-// "todos <completed>/<total>" plus a disclosure triangle — ▸ collapsed, ▾
-// expanded. No inline current-task preview, unlike the old todoPill.
-func sessionPanelTodosHeaderText(completed, total int, expanded bool) string {
+// panelSectionHeaderText renders a section header's plain text: label, then
+// count, then a disclosure triangle — ▸ collapsed, ▾ expanded. Shared by the
+// todos, threads, and agents headers, which differ only in the label and how
+// their count is formatted (todos has a completed/total ratio; threads and
+// agents each have a single live count).
+func panelSectionHeaderText(label, count string, expanded bool) string {
 	chevron := "▸"
 	if expanded {
 		chevron = "▾"
 	}
-	return fmt.Sprintf("todos %d/%d %s", completed, total, chevron)
+	return label + " " + count + " " + chevron
+}
+
+// sessionPanelTodosHeaderText renders the todos header row's plain text:
+// "todos <completed>/<total>" plus a disclosure triangle. No inline
+// current-task preview, unlike the old todoPill.
+func sessionPanelTodosHeaderText(completed, total int, expanded bool) string {
+	return panelSectionHeaderText("todos", fmt.Sprintf("%d/%d", completed, total), expanded)
 }
 
 // shedPanelBlocks drops whole two-row blocks until the plan fits
@@ -302,14 +312,9 @@ func shedPanelBlocks(threads []proto.Thread, more, over int) ([]proto.Thread, in
 }
 
 // sessionPanelThreadsHeaderText renders the threads header row's plain
-// text: "threads <active>" plus the same disclosure triangle the todos
-// header uses — ▸ collapsed, ▾ expanded.
+// text: "threads <active>" plus the disclosure triangle.
 func sessionPanelThreadsHeaderText(active int, expanded bool) string {
-	chevron := "▸"
-	if expanded {
-		chevron = "▾"
-	}
-	return fmt.Sprintf("threads %d %s", active, chevron)
+	return panelSectionHeaderText("threads", strconv.Itoa(active), expanded)
 }
 
 // delegationBlockStatusText builds one delegation's status text for its
@@ -358,14 +363,9 @@ func (m *UI) delegationBlockName(t proto.Thread) string {
 const defaultDelegationBlockName = "agent"
 
 // sessionPanelAgentsHeaderText renders the agents header row's plain text:
-// "agents <live>" plus the same disclosure triangle the other section
-// headers use — ▸ collapsed, ▾ expanded.
+// "agents <live>" plus the disclosure triangle.
 func sessionPanelAgentsHeaderText(live int, expanded bool) string {
-	chevron := "▸"
-	if expanded {
-		chevron = "▾"
-	}
-	return fmt.Sprintf("agents %d %s", live, chevron)
+	return panelSectionHeaderText("agents", strconv.Itoa(live), expanded)
 }
 
 // renderSessionQueueLines renders one truncated line per queued prompt,
@@ -384,6 +384,50 @@ func renderSessionQueueLines(items []string, sty *styles.Styles, width int) []st
 		lines = append(lines, ansi.Truncate(line, width, "…"))
 	}
 	return lines
+}
+
+// panelSection is what planPanelSection computes for one of the panel's two
+// live-block sections (agents, threads) before budget shedding runs. The
+// agents and threads sections used to compute this shape twice, independently,
+// differing only in their source items and their collapse flag; this type
+// and planPanelSection are the one place that logic lives now, and
+// sessionPanelPlan copies the result into its own agents*/threads* fields
+// (kept as separate fields, rather than two panelSection-typed fields, so
+// existing callers and tests keep reading plan.threadsRows/plan.agents/etc.
+// unchanged).
+type panelSection struct {
+	items    []proto.Thread // nil while collapsed
+	rows     int            // 0 while collapsed
+	expanded bool
+	active   int // count of live items, regardless of collapse state
+}
+
+// planPanelSection builds a panelSection from a section's live items and its
+// collapse flag. Collapsing a section is header-only: it hides the blocks
+// (items/rows go empty) but keeps reporting how many are active, which is
+// what the header renders.
+func planPanelSection(items []proto.Thread, collapsed bool) panelSection {
+	section := panelSection{active: len(items), expanded: !collapsed}
+	if section.expanded {
+		// Neither section caps how many items it plans: the row budget
+		// below sheds whole blocks (shedPanelBlocks) only when the
+		// terminal is genuinely too short, never up front.
+		section.items = items
+		section.rows = len(items) * 2
+	}
+	return section
+}
+
+// panelSectionHeaderRows reports whether a section's header row should be
+// painted: yes whenever the section has rows to paint, and also when it was
+// collapsed by hand (it still needs a header to click to expand it again) —
+// but not when it was shed to zero by the row budget, since that is the
+// budget reclaiming space rather than a user hiding content.
+func panelSectionHeaderRows(rows int, expanded bool, active int) int {
+	if rows > 0 || (!expanded && active > 0) {
+		return 1
+	}
+	return 0
 }
 
 // sessionPanelPlan is what sessionPanelPlan computes for a given row budget:
@@ -493,34 +537,21 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	}
 
 	if m.panelSurfacesThreads() {
-		active := activeDockThreads(m.threadList.cache.value)
-		plan.threadsActive = len(active)
-		plan.threadsExpanded = !m.panel.threadsCollapsed
-		if plan.threadsExpanded {
-			// The dock shows every active thread here — no fixed cap. The
-			// panel is the live view of what is running right now, and a
-			// running thread the panel refuses to name is exactly the one a
-			// user goes looking for. Fitting the list on screen is the row
-			// budget's job: shedPanelBlocks below sheds thread blocks (and
-			// sets plan.threadsMore) only after todos and the queue, i.e.
-			// only in a genuinely short terminal.
-			plan.threads = active
-			plan.threadsRows = len(active) * 2
-		}
-	}
+		// Neither section caps how many live items it plans — see
+		// planPanelSection's doc comment — so shedPanelBlocks below is the
+		// only place either list gets trimmed, and only in a genuinely
+		// short terminal.
+		threads := planPanelSection(activeDockThreads(m.threadList.cache.value), m.panel.threadsCollapsed)
+		plan.threadsActive = threads.active
+		plan.threadsExpanded = threads.expanded
+		plan.threads = threads.items
+		plan.threadsRows = threads.rows
 
-	if m.panelSurfacesThreads() {
-		live := sessionDelegations(m.agentList.cache.value, m.sess.current.ID)
-		plan.agentsLive = len(live)
-		plan.agentsExpanded = !m.panel.agentsCollapsed
-		if plan.agentsExpanded {
-			// Every live delegation, uncapped, for the same reason threads
-			// are uncapped: the one the panel refuses to name is the one
-			// somebody goes looking for. The row budget below sheds blocks
-			// if the terminal is genuinely too short.
-			plan.agents = live
-			plan.agentsRows = len(live) * 2
-		}
+		agents := planPanelSection(sessionDelegations(m.agentList.cache.value, m.sess.current.ID), m.panel.agentsCollapsed)
+		plan.agentsLive = agents.active
+		plan.agentsExpanded = agents.expanded
+		plan.agents = agents.items
+		plan.agentsRows = agents.rows
 	}
 
 	todos := m.sess.current.Todos
@@ -566,23 +597,10 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	// section is shed to zero, which shrinks over() by exactly the row it
 	// would otherwise still be charging for.
 	threadsHeaderRows := func() int {
-		// A collapsed section keeps its header: it is the only thing left
-		// to click to get the threads back, and it still reports how many
-		// are active. Shedding to zero rows still drops it, since that is
-		// the budget reclaiming space rather than a user hiding content.
-		if plan.threadsRows > 0 || (!plan.threadsExpanded && plan.threadsActive > 0) {
-			return 1
-		}
-		return 0
+		return panelSectionHeaderRows(plan.threadsRows, plan.threadsExpanded, plan.threadsActive)
 	}
 	agentsHeaderRows := func() int {
-		// Same rule as the threads header: a section collapsed by hand
-		// keeps the row that says so and lets it back, a section shed to
-		// zero by the budget does not.
-		if plan.agentsRows > 0 || (!plan.agentsExpanded && plan.agentsLive > 0) {
-			return 1
-		}
-		return 0
+		return panelSectionHeaderRows(plan.agentsRows, plan.agentsExpanded, plan.agentsLive)
 	}
 	queueHeaderRows := func() int {
 		if len(plan.queue) > 0 {
@@ -711,6 +729,28 @@ type panelRowLayout struct {
 	todosList     uv.Rectangle
 }
 
+// layoutPanelSectionRows lays out one live-block section's header and block
+// rows starting at *row, advancing *row past whatever it claims. Shared by
+// the agents and threads sections in sessionPanelRowLayout, which used to
+// duplicate this exact row-advancing math for each.
+func layoutPanelSectionRows(row *uv.Rectangle, area uv.Rectangle, headerRows, rows, itemCount int) (header uv.Rectangle, blocks []uv.Rectangle) {
+	if headerRows > 0 && row.Min.Y < area.Max.Y {
+		header = *row
+		header.Max.Y = min(row.Min.Y+1, area.Max.Y)
+		row.Min.Y = min(row.Min.Y+headerRows, area.Max.Y)
+		row.Max.Y = row.Min.Y
+	}
+	if rows > 0 && row.Min.Y < area.Max.Y {
+		sectionArea := area
+		sectionArea.Min.Y = row.Min.Y
+		sectionArea.Max.Y = min(row.Min.Y+rows, area.Max.Y)
+		blocks = panelBlockGeometry(sectionArea, itemCount)
+		row.Min.Y = sectionArea.Max.Y
+		row.Max.Y = row.Min.Y
+	}
+	return header, blocks
+}
+
 // sessionPanelRowLayout is the single source of truth for where each
 // hit-testable row of the session panel lands, given an area and a plan —
 // pure geometry, no drawing. Both drawSessionPanel (which paints from it)
@@ -730,38 +770,11 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (layout pan
 
 	// The header is laid out independently of the blocks: a collapsed
 	// section has no blocks but still owns its header row, and that row
-	// is the only hit target left for expanding it again.
-	if plan.agentsHeaderRows > 0 && row.Min.Y < area.Max.Y {
-		layout.agentsHeader = row
-		layout.agentsHeader.Min.Y = row.Min.Y
-		layout.agentsHeader.Max.Y = min(row.Min.Y+1, area.Max.Y)
-		row.Min.Y = min(row.Min.Y+plan.agentsHeaderRows, area.Max.Y)
-		row.Max.Y = row.Min.Y
-	}
-	if plan.agentsRows > 0 && row.Min.Y < area.Max.Y {
-		agentsArea := area
-		agentsArea.Min.Y = row.Min.Y
-		agentsArea.Max.Y = min(row.Min.Y+plan.agentsRows, area.Max.Y)
-		layout.agentBlocks = panelBlockGeometry(agentsArea, len(plan.agents))
-		row.Min.Y = agentsArea.Max.Y
-		row.Max.Y = row.Min.Y
-	}
-
-	if plan.threadsHeaderRows > 0 && row.Min.Y < area.Max.Y {
-		layout.threadsHeader = row
-		layout.threadsHeader.Min.Y = row.Min.Y
-		layout.threadsHeader.Max.Y = min(row.Min.Y+1, area.Max.Y)
-		row.Min.Y = min(row.Min.Y+plan.threadsHeaderRows, area.Max.Y)
-		row.Max.Y = row.Min.Y
-	}
-	if plan.threadsRows > 0 && row.Min.Y < area.Max.Y {
-		threadsArea := area
-		threadsArea.Min.Y = row.Min.Y
-		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
-		layout.threadBlocks = panelBlockGeometry(threadsArea, len(plan.threads))
-		row.Min.Y = threadsArea.Max.Y
-		row.Max.Y = row.Min.Y
-	}
+	// is the only hit target left for expanding it again. Agents are laid
+	// out before threads, matching the draw order and the shedding
+	// priority in sessionPanelPlan.
+	layout.agentsHeader, layout.agentBlocks = layoutPanelSectionRows(&row, area, plan.agentsHeaderRows, plan.agentsRows, len(plan.agents))
+	layout.threadsHeader, layout.threadBlocks = layoutPanelSectionRows(&row, area, plan.threadsHeaderRows, plan.threadsRows, len(plan.threads))
 
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
 		layout.todosHeader = row
@@ -838,6 +851,44 @@ type panelBlockDrawSpec struct {
 	name   func(index int) string
 	task   func(index int) string
 	line2  func(index int) string
+}
+
+// drawPanelSectionHeader paints one section-separator header row — text
+// styled and, while hover is true, hover-lit — the way the todos, threads,
+// and agents headers all render theirs.
+func (m *UI) drawPanelSectionHeader(scr uv.Screen, headerRow uv.Rectangle, text string, hover bool) {
+	t := m.com.Styles
+	width := headerRow.Dx()
+	headerView := common.SectionStyled(t, t.Section.Title, text, width)
+	if hover {
+		headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
+	}
+	uv.NewStyledString(headerView).Draw(scr, headerRow)
+}
+
+// drawPanelLiveSection paints one live-block section (agents or threads) —
+// its header row (if any) via drawPanelSectionHeader, then its blocks via
+// drawPanelBlocks — and advances *row past whatever it painted.
+// drawSessionPanel used to run this same header-then-blocks-then-advance
+// sequence twice, once for each section, differing only in
+// headerRect/hover/spec; this is the one place it lives now.
+func (m *UI) drawPanelLiveSection(scr uv.Screen, area uv.Rectangle, row *uv.Rectangle, headerRows, rows int, headerText string, hover bool, headerRect *uv.Rectangle, hoveredIdx int, spec panelBlockDrawSpec) []uv.Rectangle {
+	if headerRows > 0 {
+		hr := area
+		hr.Min.Y = row.Min.Y
+		hr.Max.Y = row.Min.Y + 1
+		m.drawPanelSectionHeader(scr, hr, headerText, hover)
+		*headerRect = hr
+		row.Min.Y++
+		row.Max.Y = row.Min.Y
+	}
+	sectionArea := area
+	sectionArea.Min.Y = row.Min.Y
+	sectionArea.Max.Y = min(row.Min.Y+rows, area.Max.Y)
+	rects := m.drawPanelBlocks(scr, sectionArea, hoveredIdx, spec)
+	row.Min.Y = sectionArea.Max.Y
+	row.Max.Y = row.Min.Y
+	return rects
 }
 
 // drawPanelBlocks paints two-line panel blocks and returns their hit-test
@@ -943,25 +994,9 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	row := area
 	row.Max.Y = row.Min.Y
 
-	if plan.agentsHeaderRows > 0 || plan.agentsRows > 0 {
-		if plan.agentsHeaderRows > 0 {
-			headerView := common.SectionStyled(t, t.Section.Title,
-				sessionPanelAgentsHeaderText(plan.agentsLive, plan.agentsExpanded), width)
-			if m.panel.agentsHover {
-				headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
-			}
-			headerRow := area
-			headerRow.Min.Y = row.Min.Y
-			headerRow.Max.Y = row.Min.Y + 1
-			uv.NewStyledString(headerView).Draw(scr, headerRow)
-			m.panel.agentsHeaderRect = headerRow
-			row.Min.Y++
-			row.Max.Y = row.Min.Y
-		}
-		agentsArea := area
-		agentsArea.Min.Y = row.Min.Y
-		agentsArea.Max.Y = min(row.Min.Y+plan.agentsRows, area.Max.Y)
-		m.panel.agentRects = m.drawPanelBlocks(scr, agentsArea, m.panel.hoveredAgent, panelBlockDrawSpec{
+	m.panel.agentRects = m.drawPanelLiveSection(scr, area, &row, plan.agentsHeaderRows, plan.agentsRows,
+		sessionPanelAgentsHeaderText(plan.agentsLive, plan.agentsExpanded), m.panel.agentsHover, &m.panel.agentsHeaderRect,
+		m.panel.hoveredAgent, panelBlockDrawSpec{
 			count: len(plan.agents), more: plan.agentsMore, footer: "…and %d more agents",
 			name: func(i int) string { return m.delegationBlockName(plan.agents[i]) },
 			task: func(i int) string { return threadDockGoalFirstLine(plan.agents[i].Goal) },
@@ -974,33 +1009,14 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(delegationBlockStatusText(item))
 			},
 		})
-		m.panel.agents = plan.agents
-		row.Min.Y = agentsArea.Max.Y
-		row.Max.Y = row.Min.Y
-	}
+	m.panel.agents = plan.agents
 
-	if plan.threadsHeaderRows > 0 || plan.threadsRows > 0 {
-		if plan.threadsHeaderRows > 0 {
-			// Styled and hover-lit like the todos header rather than a
-			// plain separator: this row is clickable now, and a row that
-			// responds to a click has to look like it does.
-			headerView := common.SectionStyled(t, t.Section.Title,
-				sessionPanelThreadsHeaderText(plan.threadsActive, plan.threadsExpanded), width)
-			if m.panel.threadsHover {
-				headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
-			}
-			headerRow := area
-			headerRow.Min.Y = row.Min.Y
-			headerRow.Max.Y = row.Min.Y + 1
-			uv.NewStyledString(headerView).Draw(scr, headerRow)
-			m.panel.threadsHeaderRect = headerRow
-			row.Min.Y++
-			row.Max.Y = row.Min.Y
-		}
-		threadsArea := area
-		threadsArea.Min.Y = row.Min.Y
-		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
-		m.panel.threadRects = m.drawPanelBlocks(scr, threadsArea, m.panel.hoveredThread, panelBlockDrawSpec{
+	// Styled and hover-lit like the todos header rather than a plain
+	// separator: both header rows are clickable, and a row that responds to
+	// a click has to look like it does.
+	m.panel.threadRects = m.drawPanelLiveSection(scr, area, &row, plan.threadsHeaderRows, plan.threadsRows,
+		sessionPanelThreadsHeaderText(plan.threadsActive, plan.threadsExpanded), m.panel.threadsHover, &m.panel.threadsHeaderRect,
+		m.panel.hoveredThread, panelBlockDrawSpec{
 			count: len(plan.threads), more: plan.threadsMore, footer: "…and %d more threads",
 			name: func(i int) string {
 				item := plan.threads[i]
@@ -1027,23 +1043,14 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].value))
 			},
 		})
-		m.panel.threads = plan.threads
-		row.Min.Y = threadsArea.Max.Y
-		row.Max.Y = row.Min.Y
-	}
+	m.panel.threads = plan.threads
 
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
 		headerRow := layout.todosHeader
-		header := sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded)
 		// The todos header is the same section-separator style as
 		// threads/agents/queue. Its full row is clickable, so hover paints the
 		// full row rather than only changing the title.
-		titleStyle := t.Section.Title
-		headerView := common.SectionStyled(t, titleStyle, header, width)
-		if m.panel.todosHover {
-			headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
-		}
-		uv.NewStyledString(headerView).Draw(scr, headerRow)
+		m.drawPanelSectionHeader(scr, headerRow, sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded), m.panel.todosHover)
 		m.panel.todosHeaderRect = headerRow
 		m.panel.todosListRect = layout.todosList
 		row.Min.Y++

@@ -12,6 +12,68 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
+// openExternalEditorGuarded appends the command that opens the external
+// editor with the textarea's current value (bang-prefixed in bang mode),
+// or a busy warning instead when the agent is working. started reports
+// which happened, for callers that only take a further action (closing a
+// dialog) on success. Shared by the Editor.OpenEditor key binding and the
+// commands palette's ActionExternalEditor.
+func (m *UI) openExternalEditorGuarded(cmds []tea.Cmd) (out []tea.Cmd, started bool) {
+	if m.isAgentBusy() {
+		return append(cmds, util.ReportWarn("Agent is working, please wait...")), false
+	}
+	editorValue := m.editor.textarea.Value()
+	if m.editor.bangMode {
+		editorValue = "!" + editorValue
+	}
+	return append(cmds, m.openEditor(editorValue)), true
+}
+
+// openThreadsDashboardGuarded appends the command that opens the threads
+// dashboard, or an info message instead when the workspace doesn't support
+// threads at all. Shared by the Threads key binding and the commands
+// palette's ActionOpenThreadsDashboard.
+func (m *UI) openThreadsDashboardGuarded(cmds []tea.Cmd) []tea.Cmd {
+	if !m.com.Workspace.SupportsThreads() {
+		return append(cmds, util.ReportInfo("This workspace doesn't support threads."))
+	}
+	return append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
+}
+
+// scrollChatUpAndKeepSelectionVisible scrolls the chat up one line,
+// animated, and — when that scroll left the selected item outside the
+// viewport — moves the selection to the previous item and scrolls it back
+// into view. Shared by the Chat.Up key binding and the mouse hover-scroll
+// zone at the top of the chat viewport (mouse.go).
+func (m *UI) scrollChatUpAndKeepSelectionVisible(cmds []tea.Cmd) []tea.Cmd {
+	if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if !m.chat.SelectedItemInView() {
+		m.chat.SelectPrev()
+		if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
+
+// scrollChatDownAndKeepSelectionVisible mirrors
+// scrollChatUpAndKeepSelectionVisible for the Chat.Down key binding and the
+// mouse hover-scroll zone at the bottom of the chat viewport.
+func (m *UI) scrollChatDownAndKeepSelectionVisible(cmds []tea.Cmd) []tea.Cmd {
+	if cmd := m.chat.ScrollByAndAnimate(1); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if !m.chat.SelectedItemInView() {
+		m.chat.SelectNext()
+		if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
+
 // handleKeyPressMsg is the top-level key event router. It handles the
 // global guards (quit, dialog routing, inline editor routing, cancel), then
 // dispatches to the state/focus-specific handlers below.
@@ -116,11 +178,7 @@ func (m *UI) handleGlobalKeys(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cmd, b
 		}
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Threads):
-		if !m.com.Workspace.SupportsThreads() {
-			cmds = append(cmds, util.ReportInfo("This workspace doesn't support threads."))
-			return cmds, true
-		}
-		cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
+		cmds = m.openThreadsDashboardGuarded(cmds)
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Chat.Details) && m.lay.isCompact:
 		m.lay.detailsOpen = !m.lay.detailsOpen
@@ -275,23 +333,9 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 		if !m.hasSession() {
 			break
 		}
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-			break
-		}
-		if cmd := m.newSession(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		cmds, _ = m.startNewSessionGuarded(cmds)
 	case key.Matches(msg, m.keyMap.Editor.OpenEditor):
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
-			break
-		}
-		editorValue := m.editor.textarea.Value()
-		if m.editor.bangMode {
-			editorValue = "!" + editorValue
-		}
-		cmds = append(cmds, m.openEditor(editorValue))
+		cmds, _ = m.openExternalEditorGuarded(cmds)
 	case key.Matches(msg, m.keyMap.Editor.Newline):
 		prevHeight := m.editor.textarea.Height()
 		m.editor.textarea.InsertRune('\n')
@@ -526,13 +570,9 @@ func (m *UI) handleMainKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cmd {
 		if !m.hasSession() {
 			break
 		}
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-			break
-		}
-		m.focus = uiFocusEditor
-		if cmd := m.newSession(); cmd != nil {
-			cmds = append(cmds, cmd)
+		var started bool
+		if cmds, started = m.startNewSessionGuarded(cmds); started {
+			m.focus = uiFocusEditor
 		}
 	case key.Matches(msg, m.keyMap.Chat.Expand):
 		m.chat.ToggleExpandedSelectedItem()
@@ -555,25 +595,9 @@ func (m *UI) handleMainKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case key.Matches(msg, m.keyMap.Chat.Up):
-		if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if !m.chat.SelectedItemInView() {
-			m.chat.SelectPrev()
-			if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
+		cmds = m.scrollChatUpAndKeepSelectionVisible(cmds)
 	case key.Matches(msg, m.keyMap.Chat.Down):
-		if cmd := m.chat.ScrollByAndAnimate(1); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if !m.chat.SelectedItemInView() {
-			m.chat.SelectNext()
-			if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
+		cmds = m.scrollChatDownAndKeepSelectionVisible(cmds)
 	case key.Matches(msg, m.keyMap.Chat.UpOneItem):
 		m.chat.SelectPrev()
 		if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {

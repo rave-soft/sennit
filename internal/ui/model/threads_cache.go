@@ -31,23 +31,14 @@ package model
 //     refresh landed empty, until an event invalidated it. Kept: that
 //     optimization, folded into staleRefreshCmd below.
 //
-// Follows the ttlCache idiom used throughout this package (see
-// ttl_cache.go and workspace_cache.go):
-//   - threadListCache holds the memoized value plus ttlCache bookkeeping.
-//   - dispatchRefresh fetches off-thread and returns a threadsLoadedMsg; it
-//     no-ops while a fetch is already in flight.
-//   - applyLoaded writes the result through on the Update goroutine,
-//     discarding and re-dispatching stale (gen-mismatched) results, and
-//     backing off after a failure.
-//   - invalidate and applyEvent react to pubsub.Event[proto.Thread] edges:
-//     the latter also upserts/removes the event's row optimistically so
-//     every consumer's view updates before the next refresh lands.
-//   - staleRefreshCmd is the TTL backstop, called unconditionally whenever
-//     any consumer needs the list current (the header badge always does;
-//     see UI.threadViewsRefreshCmds).
+// The dispatchRefresh/applyLoaded/applyEvent/staleRefreshCmd machinery
+// itself now lives in list_cache.go, shared with agentListCache
+// (agents_cache.go); this file only supplies what's specific to threads —
+// the ListThreads call, the SupportsThreads gate, the ThreadKindThread
+// filter, and the threadsLoadedMsg shape.
 
 import (
-	"log/slog"
+	"context"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -55,6 +46,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // threadsCacheTTL bounds how long the memoized thread list may go without a
@@ -78,34 +70,34 @@ type threadsLoadedMsg struct {
 	err     error
 }
 
+// ops builds the listCacheOps that plug threads' specifics (fetch call,
+// support gate, Kind filter, log label) into the shared machinery in
+// list_cache.go. Threads only: tasks share the Kind-discriminated table and
+// this list used to merge them in as "live work", but a task is the `agent`
+// tool's own delegation — it already renders inline in the chat that
+// started it, is never merged, and nothing ever removed a finished one, so
+// they only accumulated here, burying the threads this cache is about.
+func (c *threadListCache) ops() listCacheOps[threadsLoadedMsg] {
+	return listCacheOps[threadsLoadedMsg]{
+		label:    "threads",
+		ttl:      threadsCacheTTL,
+		kind:     proto.ThreadKindThread,
+		supports: func(ws workspace.Workspace) bool { return ws.SupportsThreads() },
+		fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListThreads(ctx) },
+		wrap: func(gen uint64, items []proto.Thread, err error) threadsLoadedMsg {
+			return threadsLoadedMsg{gen: gen, threads: items, err: err}
+		},
+		unwrap: func(msg threadsLoadedMsg) (uint64, []proto.Thread, error) {
+			return msg.gen, msg.threads, msg.err
+		},
+	}
+}
+
 // dispatchRefresh returns a command that lists threads off the Update
 // goroutine, delivering a threadsLoadedMsg. It returns nil while a fetch is
-// already in flight, or if the workspace doesn't support threads. The
-// closure captures only locals (never the cache or *common.Common) so it is
-// safe off-thread; state is applied by applyLoaded on the Update goroutine.
+// already in flight, or if the workspace doesn't support threads.
 func (c *threadListCache) dispatchRefresh(com *common.Common) tea.Cmd {
-	if c.cache.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
-		return nil
-	}
-	gen, started := c.cache.begin()
-	if !started {
-		return nil
-	}
-	ws := com.Workspace
-	ctx := com.Context()
-	return func() tea.Msg {
-		// Threads only. Tasks share the Kind-discriminated table and this
-		// list used to merge them in as "live work", but a task is the
-		// `agent` tool's own delegation: it already renders inline in the
-		// chat that started it, it is never merged, and nothing ever
-		// removed a finished one — so they only accumulated here, burying
-		// the threads this cache is about.
-		threads, err := ws.ListThreads(ctx)
-		if err != nil {
-			slog.Error("Failed to list threads", "error", err)
-		}
-		return threadsLoadedMsg{gen: gen, threads: threads, err: err}
-	}
+	return dispatchListRefresh(&c.cache, com, c.ops())
 }
 
 // applyLoaded stores an off-thread fetch result. Runs on the Update
@@ -115,28 +107,7 @@ func (c *threadListCache) dispatchRefresh(com *common.Common) tea.Cmd {
 // the dock's activityGen, say) check it instead of re-deriving the same
 // generation logic themselves.
 func (c *threadListCache) applyLoaded(com *common.Common, msg threadsLoadedMsg) (cmds []tea.Cmd, applied bool) {
-	if msg.err != nil {
-		if !c.cache.fail(msg.gen) {
-			// Started before a newer state transition; discard and
-			// re-dispatch so the authoritative refresh isn't lost.
-			if cmd := c.dispatchRefresh(com); cmd != nil {
-				return []tea.Cmd{cmd}, false
-			}
-		}
-		return nil, false
-	}
-	if !c.cache.complete(msg.gen) {
-		// This fetch started before a newer state transition (invalidation,
-		// event edge). Discard its result and re-dispatch so the
-		// authoritative refresh is not lost merely because this older
-		// request was in flight.
-		if cmd := c.dispatchRefresh(com); cmd != nil {
-			return []tea.Cmd{cmd}, false
-		}
-		return nil, false
-	}
-	c.cache.set(msg.threads)
-	return nil, true
+	return applyListLoaded(&c.cache, com, c.ops(), msg)
 }
 
 // invalidate marks the cached list stale and bumps the generation so any
@@ -153,61 +124,14 @@ func (c *threadListCache) invalidate() {
 // refresh, then invalidates the TTL so a background refresh eventually
 // reconciles with the authoritative list.
 func (c *threadListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
-	// Threads only, matching the list this cache is refreshed from. Tasks
-	// share the delegations table and the lifecycle that publishes these
-	// events, so without this a task's own create/status event wrote a row
-	// straight into the cache — around the kind-scoped query, and staying
-	// until a full refresh replaced the slice. Filtering the fetch alone
-	// was not enough.
-	//
-	// An empty kind reads as a thread: it is an additive field (see
-	// proto.Thread.Kind), and a payload that predates it describes a
-	// thread. A removal is not filtered — dropping a row this cache does
-	// not hold is already a no-op, and refusing to drop one it somehow
-	// does hold would strand it.
-	if evt.Type != pubsub.DeletedEvent &&
-		evt.Payload.Kind != "" &&
-		proto.ThreadKind(evt.Payload.Kind) != proto.ThreadKindThread {
-		return
-	}
-	switch evt.Type {
-	case pubsub.DeletedEvent:
-		for i := range c.cache.value {
-			if c.cache.value[i].ID == evt.Payload.ID {
-				c.cache.value = append(c.cache.value[:i], c.cache.value[i+1:]...)
-				break
-			}
-		}
-	default: // CreatedEvent, UpdatedEvent
-		found := false
-		for i := range c.cache.value {
-			if c.cache.value[i].ID == evt.Payload.ID {
-				c.cache.value[i] = evt.Payload
-				found = true
-				break
-			}
-		}
-		if !found {
-			c.cache.value = append(c.cache.value, evt.Payload)
-		}
-	}
-	c.invalidate()
+	applyListEvent(&c.cache, proto.ThreadKindThread, evt)
 }
 
 // staleRefreshCmd is the TTL backstop: while active and the memoized list
 // has outlived its TTL, it schedules an off-thread re-probe. It never does
 // IO itself.
 func (c *threadListCache) staleRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	if !active || c.cache.fresh(threadsCacheTTL) || c.cache.backingOff(threadsRefreshBackoff) {
-		return nil
-	}
-	// A fetched-and-empty list stays empty until a thread event invalidates
-	// it (the timestamp is zeroed then) — don't re-poll ListThreads forever
-	// for projects that have no threads at all.
-	if len(c.cache.value) == 0 && !c.cache.timestamp.IsZero() {
-		return nil
-	}
-	return c.dispatchRefresh(com)
+	return staleListRefreshCmd(&c.cache, com, active, c.ops())
 }
 
 // activeThreadCount reports how many of threads are pending, running, or

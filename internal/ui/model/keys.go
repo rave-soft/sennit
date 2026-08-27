@@ -33,9 +33,7 @@ type KeyMap struct {
 
 	Chat struct {
 		NewSession     key.Binding
-		AddAttachment  key.Binding
 		Cancel         key.Binding
-		Tab            key.Binding
 		Details        key.Binding
 		TogglePills    key.Binding
 		Down           key.Binding
@@ -53,8 +51,6 @@ type KeyMap struct {
 		Copy           key.Binding
 		ClearHighlight key.Binding
 		Expand         key.Binding
-		ScrollLeft     key.Binding
-		ScrollRight    key.Binding
 
 		// Sub-agent session navigation.
 		EnterChildSession key.Binding
@@ -195,17 +191,9 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 		key.WithKeys("ctrl+n"),
 		key.WithHelp("ctrl+n", "new session"),
 	)
-	km.Chat.AddAttachment = key.NewBinding(
-		key.WithKeys("ctrl+f"),
-		key.WithHelp("ctrl+f", "add attachment"),
-	)
 	km.Chat.Cancel = key.NewBinding(
 		key.WithKeys("esc", "alt+esc"),
 		key.WithHelp("esc", "cancel"),
-	)
-	km.Chat.Tab = key.NewBinding(
-		key.WithKeys("tab"),
-		key.WithHelp("tab", ""),
 	)
 	km.Chat.Details = key.NewBinding(
 		key.WithKeys("ctrl+d"),
@@ -275,14 +263,6 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 	km.Chat.Expand = key.NewBinding(
 		key.WithKeys("space"),
 		key.WithHelp("space", "expand/collapse"),
-	)
-	km.Chat.ScrollLeft = key.NewBinding(
-		key.WithKeys("shift+left", "H"),
-		key.WithHelp("shift+←/H", "scroll left"),
-	)
-	km.Chat.ScrollRight = key.NewBinding(
-		key.WithKeys("shift+right", "L"),
-		key.WithHelp("shift+→/L", "scroll right"),
 	)
 	// Subagent navigation lives on ctrl+arrows; the old alt+arrow keys
 	// stay as hidden aliases so existing muscle memory keeps working.
@@ -381,9 +361,7 @@ func (k *KeyMap) bindings() map[string]*key.Binding {
 		"editor.scroll_page_up":         &k.Editor.ScrollPageUp,
 		"editor.scroll_page_down":       &k.Editor.ScrollPageDown,
 		"chat.new_session":              &k.Chat.NewSession,
-		"chat.add_attachment":           &k.Chat.AddAttachment,
 		"chat.cancel":                   &k.Chat.Cancel,
-		"chat.tab":                      &k.Chat.Tab,
 		"chat.details":                  &k.Chat.Details,
 		"chat.toggle_pills":             &k.Chat.TogglePills,
 		"chat.down":                     &k.Chat.Down,
@@ -401,8 +379,6 @@ func (k *KeyMap) bindings() map[string]*key.Binding {
 		"chat.copy":                     &k.Chat.Copy,
 		"chat.clear_highlight":          &k.Chat.ClearHighlight,
 		"chat.expand":                   &k.Chat.Expand,
-		"chat.scroll_left":              &k.Chat.ScrollLeft,
-		"chat.scroll_right":             &k.Chat.ScrollRight,
 		"chat.enter_child_session":      &k.Chat.EnterChildSession,
 		"chat.exit_child_session":       &k.Chat.ExitChildSession,
 		"chat.prev_child_session":       &k.Chat.PrevChildSession,

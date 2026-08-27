@@ -17,12 +17,14 @@ package model
 // that cache is Kind-scoped to threads on both its fetch and its event path,
 // for good reasons documented there (a task has no worktree, is never
 // merged, and used to accumulate in the list and bury the threads). This is
-// the mirror image of it, scoped the other way, sharing the same ttlCache
-// idiom — dispatchRefresh off-thread, applyLoaded on the Update goroutine,
-// applyEvent for the pubsub edge, staleRefreshCmd as the TTL backstop.
+// the mirror image of it, scoped the other way. Both share the
+// dispatchRefresh/applyLoaded/applyEvent/staleRefreshCmd machinery in
+// list_cache.go; this file only supplies what's specific to delegations —
+// the ListTasks call, the SupportsTasks gate, the ThreadKindTask filter, and
+// the agentsLoadedMsg shape.
 
 import (
-	"log/slog"
+	"context"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,6 +32,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // agentsCacheTTL bounds how long the memoized task list may go without a
@@ -55,27 +58,22 @@ type agentsLoadedMsg struct {
 	err    error
 }
 
-// dispatchRefresh returns a command that lists delegations off the Update
-// goroutine, delivering an agentsLoadedMsg. It returns nil while a fetch is
-// already in flight, or if the workspace has no task manager (see
-// AppWorkspace.SupportsTasks). The closure captures only locals, never the
-// cache or *common.Common, so it is safe off-thread.
-func (c *agentListCache) dispatchRefresh(com *common.Common) tea.Cmd {
-	if c.cache.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsTasks() {
-		return nil
-	}
-	gen, started := c.cache.begin()
-	if !started {
-		return nil
-	}
-	ws := com.Workspace
-	ctx := com.Context()
-	return func() tea.Msg {
-		agents, err := ws.ListTasks(ctx)
-		if err != nil {
-			slog.Error("Failed to list delegations", "error", err)
-		}
-		return agentsLoadedMsg{gen: gen, agents: agents, err: err}
+// ops builds the listCacheOps that plug delegations' specifics (fetch call,
+// support gate, Kind filter, log label) into the shared machinery in
+// list_cache.go.
+func (c *agentListCache) ops() listCacheOps[agentsLoadedMsg] {
+	return listCacheOps[agentsLoadedMsg]{
+		label:    "delegations",
+		ttl:      agentsCacheTTL,
+		kind:     proto.ThreadKindTask,
+		supports: func(ws workspace.Workspace) bool { return ws.SupportsTasks() },
+		fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListTasks(ctx) },
+		wrap: func(gen uint64, items []proto.Thread, err error) agentsLoadedMsg {
+			return agentsLoadedMsg{gen: gen, agents: items, err: err}
+		},
+		unwrap: func(msg agentsLoadedMsg) (uint64, []proto.Thread, error) {
+			return msg.gen, msg.agents, msg.err
+		},
 	}
 }
 
@@ -83,31 +81,7 @@ func (c *agentListCache) dispatchRefresh(com *common.Common) tea.Cmd {
 // goroutine. applied reports whether msg was written through, as opposed to
 // discarded for a stale generation or a failure.
 func (c *agentListCache) applyLoaded(com *common.Common, msg agentsLoadedMsg) (cmds []tea.Cmd, applied bool) {
-	if msg.err != nil {
-		if !c.cache.fail(msg.gen) {
-			if cmd := c.dispatchRefresh(com); cmd != nil {
-				return []tea.Cmd{cmd}, false
-			}
-		}
-		return nil, false
-	}
-	if !c.cache.complete(msg.gen) {
-		// Began before a newer state transition; discard and re-dispatch so
-		// the authoritative refresh is not lost to an older request being
-		// in flight.
-		if cmd := c.dispatchRefresh(com); cmd != nil {
-			return []tea.Cmd{cmd}, false
-		}
-		return nil, false
-	}
-	c.cache.set(msg.agents)
-	return nil, true
-}
-
-// invalidate marks the cached list stale and bumps the generation so any
-// in-flight result is discarded when it lands.
-func (c *agentListCache) invalidate() {
-	c.cache.invalidate()
+	return applyListLoaded(&c.cache, com, c.ops(), msg)
 }
 
 // applyEvent reacts to a delegation pubsub event: it upserts (Created,
@@ -116,37 +90,9 @@ func (c *agentListCache) invalidate() {
 // eventually reconciles with the authoritative list.
 //
 // Tasks only, the mirror of threadListCache.applyEvent's thread-only filter:
-// the two kinds share one table and one lifecycle publisher. An empty kind
-// reads as a thread there (an additive field, so a payload predating it
-// describes a thread), and for the same reason it is not a task here. A
-// removal is not filtered — dropping a row this cache does not hold is
-// already a no-op, and refusing to drop one it does hold would strand it.
+// the two kinds share one table and one lifecycle publisher.
 func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
-	if evt.Type != pubsub.DeletedEvent && proto.ThreadKind(evt.Payload.Kind) != proto.ThreadKindTask {
-		return
-	}
-	switch evt.Type {
-	case pubsub.DeletedEvent:
-		for i := range c.cache.value {
-			if c.cache.value[i].ID == evt.Payload.ID {
-				c.cache.value = append(c.cache.value[:i], c.cache.value[i+1:]...)
-				break
-			}
-		}
-	default: // CreatedEvent, UpdatedEvent
-		found := false
-		for i := range c.cache.value {
-			if c.cache.value[i].ID == evt.Payload.ID {
-				c.cache.value[i] = evt.Payload
-				found = true
-				break
-			}
-		}
-		if !found {
-			c.cache.value = append(c.cache.value, evt.Payload)
-		}
-	}
-	c.invalidate()
+	applyListEvent(&c.cache, proto.ThreadKindTask, evt)
 }
 
 // staleRefreshCmd is the TTL backstop: while active and the memoized list
@@ -158,13 +104,7 @@ func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 // does: a session that never delegates anything must not re-list forever,
 // and a delegation's own create event is what starts the section moving.
 func (c *agentListCache) staleRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	if !active || c.cache.fresh(agentsCacheTTL) || c.cache.backingOff(threadsRefreshBackoff) {
-		return nil
-	}
-	if len(c.cache.value) == 0 && !c.cache.timestamp.IsZero() {
-		return nil
-	}
-	return c.dispatchRefresh(com)
+	return staleListRefreshCmd(&c.cache, com, active, c.ops())
 }
 
 // sessionDelegations filters agents down to the live delegations of

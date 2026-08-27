@@ -80,12 +80,11 @@ type SpinningFunc func(state SpinningState) bool
 
 // ToolRenderOpts contains the data needed to render a tool call.
 type ToolRenderOpts struct {
-	ToolCall   message.ToolCall
-	Result     *message.ToolResult
-	Anim       *spin.Anim
-	Compact    bool
-	IsSpinning bool
-	Status     ToolStatus
+	ToolCall message.ToolCall
+	Result   *message.ToolResult
+	Anim     *spin.Anim
+	Compact  bool
+	Status   ToolStatus
 	// Expanded reports the item's click-to-expand state for renderers
 	// that show a collapsible body (currently only Bash).
 	Expanded bool

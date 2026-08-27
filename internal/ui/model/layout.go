@@ -108,6 +108,31 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 	)
 }
 
+// drawEditorArea draws the message editor area: an active inline dialog (a
+// paste preview, a question form, ...) when one is set, or the plain
+// textarea view otherwise. Shared by the uiLanding and uiChat draw paths in
+// Draw, which used to duplicate this exact branch and differ only in the
+// width passed to renderEditorView (uiChat reserves room for the sidebar;
+// see editorContentWidth).
+func (m *UI) drawEditorArea(scr uv.Screen, area uv.Rectangle, editorWidth int) {
+	if m.activeInline != nil {
+		m.activeInline.SetFocused(m.focus == uiFocusEditor)
+		if m.focus == uiFocusEditor {
+			m.inlineCursor = m.activeInline.Draw(scr, area)
+		} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+			qf.DrawCollapsed(scr, area)
+			m.inlineCursor = nil
+		} else {
+			m.inlineCursor = m.activeInline.Draw(scr, area)
+		}
+		return
+	}
+	editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+	editor.Draw(scr, area)
+	m.drawGhostText(scr)
+	m.inlineCursor = nil
+}
+
 // Draw implements [uv.Drawable] and draws the UI model.
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
@@ -142,22 +167,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
-		if m.activeInline != nil {
-			m.activeInline.SetFocused(m.focus == uiFocusEditor)
-			if m.focus == uiFocusEditor {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
-				qf.DrawCollapsed(scr, layout.editor)
-				m.inlineCursor = nil
-			} else {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			}
-		} else {
-			editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
-			editor.Draw(scr, layout.editor)
-			m.drawGhostText(scr)
-			m.inlineCursor = nil
-		}
+		m.drawEditorArea(scr, layout.editor, scr.Bounds().Dx())
 
 	case uiChat:
 		if m.lay.isCompact {
@@ -178,21 +188,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			// uiFocusMain for the duration).
 			m.drawChildSessionPanel(scr, layout.editor)
 			m.inlineCursor = nil
-		} else if m.activeInline != nil {
-			m.activeInline.SetFocused(m.focus == uiFocusEditor)
-			if m.focus == uiFocusEditor {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
-				qf.DrawCollapsed(scr, layout.editor)
-				m.inlineCursor = nil
-			} else {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			}
 		} else {
-			editor := uv.NewStyledString(m.renderEditorView(m.editorContentWidth()))
-			editor.Draw(scr, layout.editor)
-			m.drawGhostText(scr)
-			m.inlineCursor = nil
+			m.drawEditorArea(scr, layout.editor, m.editorContentWidth())
 		}
 		// Draw the input separators after the editor so its content cannot
 		// cover the reserved boundary rows.
@@ -379,6 +376,36 @@ func (m *UI) updateSize() {
 	}
 }
 
+// splitMainMinusEditorAndPanel takes mainRect — the content area left after
+// the header/sidebar split — and carves out the editor strip (editorHeight
+// rows, with the one-row top/bottom padding the compact and sidebar
+// branches both reserve), then, from what's left, the session panel's rows
+// when it wants any. Returns the (possibly panel-shrunk) chat rect, the
+// editor rect, and the panel rect (zero when the panel has nothing to
+// show). Shared by generateLayout's compact and sidebar uiChat branches,
+// which used to duplicate this exact split.
+func (m *UI) splitMainMinusEditorAndPanel(mainRect image.Rectangle, editorHeight int) (main, editor, panel image.Rectangle) {
+	var editorRect image.Rectangle
+	layout.Vertical(
+		layout.Len(max(0, mainRect.Dy()-editorHeight-2)),
+		layout.Len(1),
+		layout.Len(editorHeight),
+		layout.Len(1),
+	).Split(mainRect).Assign(&mainRect, new(image.Rectangle), &editorRect, new(image.Rectangle))
+	mainRect.Max.X -= 1 // Add padding right
+
+	panelHeight := m.sessionPanelHeight(mainRect.Dy() + 2)
+	if panelHeight <= 0 {
+		return mainRect, editorRect, image.Rectangle{}
+	}
+	var chatRect, panelRect image.Rectangle
+	layout.Vertical(
+		layout.Len(mainRect.Dy()-panelHeight),
+		layout.Fill(1),
+	).Split(mainRect).Assign(&chatRect, &panelRect)
+	return chatRect, editorRect, panelRect
+}
+
 // generateLayout calculates the layout rectangles for all UI components based
 // on the current UI state and terminal dimensions.
 func (m *UI) generateLayout(w, h int) uiLayout {
@@ -519,29 +546,8 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			uiLayout.sessionDetails.Min.Y += compactHeaderHeight // adjust for header
 			// Add one line gap between header and main content
 			mainRect.Min.Y += 1
-			var editorRect image.Rectangle
-			layout.Vertical(
-				layout.Len(max(0, mainRect.Dy()-editorHeight-2)),
-				layout.Len(1),
-				layout.Len(editorHeight),
-				layout.Len(1),
-			).Split(mainRect).Assign(&mainRect, new(image.Rectangle), &editorRect, new(image.Rectangle))
-			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.header = headerRect
-			panelHeight := m.sessionPanelHeight(mainRect.Dy() + 2)
-			if panelHeight > 0 {
-				var chatRect, panelRect image.Rectangle
-				layout.Vertical(
-					layout.Len(mainRect.Dy()-panelHeight),
-					layout.Fill(1),
-				).Split(mainRect).Assign(&chatRect, &panelRect)
-				uiLayout.main = chatRect
-				uiLayout.panel = panelRect
-			} else {
-				uiLayout.main = mainRect
-				uiLayout.panel = image.Rectangle{}
-			}
-			uiLayout.editor = editorRect
+			uiLayout.main, uiLayout.editor, uiLayout.panel = m.splitMainMinusEditorAndPanel(mainRect, editorHeight)
 		} else {
 			// Layout
 			//
@@ -559,29 +565,8 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(appRect).Assign(&mainRect, &sideRect)
 			// Add padding left
 			sideRect.Min.X += 1
-			var editorRect image.Rectangle
-			layout.Vertical(
-				layout.Len(max(0, mainRect.Dy()-editorHeight-2)),
-				layout.Len(1),
-				layout.Len(editorHeight),
-				layout.Len(1),
-			).Split(mainRect).Assign(&mainRect, new(image.Rectangle), &editorRect, new(image.Rectangle))
-			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.sidebar = sideRect
-			panelHeight := m.sessionPanelHeight(mainRect.Dy() + 2)
-			if panelHeight > 0 {
-				var chatRect, panelRect image.Rectangle
-				layout.Vertical(
-					layout.Len(mainRect.Dy()-panelHeight),
-					layout.Fill(1),
-				).Split(mainRect).Assign(&chatRect, &panelRect)
-				uiLayout.main = chatRect
-				uiLayout.panel = panelRect
-			} else {
-				uiLayout.main = mainRect
-				uiLayout.panel = image.Rectangle{}
-			}
-			uiLayout.editor = editorRect
+			uiLayout.main, uiLayout.editor, uiLayout.panel = m.splitMainMinusEditorAndPanel(mainRect, editorHeight)
 		}
 	}
 

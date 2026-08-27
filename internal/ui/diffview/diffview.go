@@ -476,6 +476,54 @@ func (dv *DiffView) resizeCodeWidth() {
 	dv.fullCodeWidth = dv.codeWidth + leadingSymbolsSize
 }
 
+// contentAndLeadingEllipsis renders one line's code content — highlighted,
+// scrolled by dv.xOffset, then truncated to dv.codeWidth — and reports
+// whether that scroll clipped visible text off the left edge (a leading
+// ellipsis is owed). Shared by renderUnified and renderSplit, which used to
+// each define this as an identical closure.
+func (dv *DiffView) contentAndLeadingEllipsis(in string, ls LineStyle) (content string, leadingEllipsis bool) {
+	content = strings.TrimSuffix(in, "\n")
+	content = dv.highlightCode(content, ls.Code.GetBackground())
+	content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
+	content = truncateCode(content, dv.codeWidth, ls)
+	leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
+	return content, leadingEllipsis
+}
+
+// unifiedHeaderLine renders one header row for the unified layout: fixed
+// "…" line-number placeholders (when line numbers are shown) followed by
+// text styled with sty and truncated to dv.fullCodeWidth. Shared by the
+// filename row (first hunk only) and the hunk divider row (every hunk), in
+// both renderUnified and renderWrappedUnified.
+func (dv *DiffView) unifiedHeaderLine(sty LineStyle, text string) string {
+	var row strings.Builder
+	if dv.lineNumbers {
+		row.WriteString(sty.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+		row.WriteString(sty.LineNumber.Render(pad("…", dv.afterNumDigits)))
+	}
+	row.WriteString(sty.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate(text, dv.fullCodeWidth, "…")))
+	return row.String()
+}
+
+// splitHeaderLine is unifiedHeaderLine for the split (side-by-side)
+// layout: the header spans only the "before" column, followed by the
+// "after" column's own line-number placeholder and a blank filler cell so
+// the row's total width still matches a normal split line. Shared by the
+// filename row (first hunk only) and the hunk divider row (every hunk), in
+// both renderSplit and renderWrappedSplit.
+func (dv *DiffView) splitHeaderLine(sty LineStyle, text string) string {
+	var row strings.Builder
+	if dv.lineNumbers {
+		row.WriteString(sty.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+	}
+	row.WriteString(sty.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate(text, dv.fullCodeWidth, "…")))
+	if dv.lineNumbers {
+		row.WriteString(sty.LineNumber.Render(pad("…", dv.afterNumDigits)))
+	}
+	row.WriteString(sty.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
+	return row.String()
+}
+
 // renderUnified renders the unified diff view as a string.
 func (dv *DiffView) renderUnified() string {
 	var b strings.Builder
@@ -484,39 +532,18 @@ func (dv *DiffView) renderUnified() string {
 	printedLines := -dv.yOffset
 	shouldWrite := func() bool { return printedLines >= 0 }
 
-	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.TrimSuffix(in, "\n")
-		content = dv.highlightCode(content, ls.Code.GetBackground())
-		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
-		content = truncateCode(content, dv.codeWidth, ls)
-		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
-		return content, leadingEllipsis
-	}
-
 outer:
 	for i, h := range dv.unified.Hunks {
 		// Render file name header before the first hunk.
 		if i == 0 && dv.fileName != "" {
 			if shouldWrite() {
-				ls := dv.style.Filename
-				if dv.lineNumbers {
-					b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-					b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
-				}
-				content := ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…")
-				b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
+				b.WriteString(dv.unifiedHeaderLine(dv.style.Filename, "  "+dv.fileName))
 				b.WriteString("\n")
 			}
 			printedLines++
 		}
 		if shouldWrite() {
-			ls := dv.style.DividerLine
-			if dv.lineNumbers {
-				b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-				b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
-			}
-			content := ansi.Truncate(dv.hunkLineFor(h), dv.fullCodeWidth, "…")
-			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
+			b.WriteString(dv.unifiedHeaderLine(dv.style.DividerLine, dv.hunkLineFor(h)))
 			b.WriteString("\n")
 		}
 		printedLines++
@@ -548,7 +575,7 @@ outer:
 			case udiff.Equal:
 				if shouldWrite() {
 					ls := dv.style.EqualLine
-					content, leadingEllipsis := getContent(l.Content, ls)
+					content, leadingEllipsis := dv.contentAndLeadingEllipsis(l.Content, ls)
 					if dv.lineNumbers {
 						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
@@ -562,7 +589,7 @@ outer:
 			case udiff.Insert:
 				if shouldWrite() {
 					ls := dv.style.InsertLine
-					content, leadingEllipsis := getContent(l.Content, ls)
+					content, leadingEllipsis := dv.contentAndLeadingEllipsis(l.Content, ls)
 					if dv.lineNumbers {
 						b.WriteString(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
 						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
@@ -576,7 +603,7 @@ outer:
 			case udiff.Delete:
 				if shouldWrite() {
 					ls := dv.style.DeleteLine
-					content, leadingEllipsis := getContent(l.Content, ls)
+					content, leadingEllipsis := dv.contentAndLeadingEllipsis(l.Content, ls)
 					if dv.lineNumbers {
 						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 						b.WriteString(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
@@ -645,21 +672,9 @@ func (dv *DiffView) renderWrappedUnified() string {
 	var rows []string
 	for i, h := range dv.unified.Hunks {
 		if i == 0 && dv.fileName != "" {
-			ls := dv.style.Filename
-			row := ""
-			if dv.lineNumbers {
-				row += ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
-				row += ls.LineNumber.Render(pad("…", dv.afterNumDigits))
-			}
-			rows = append(rows, row+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…")))
+			rows = append(rows, dv.unifiedHeaderLine(dv.style.Filename, "  "+dv.fileName))
 		}
-		ls := dv.style.DividerLine
-		row := ""
-		if dv.lineNumbers {
-			row += ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
-			row += ls.LineNumber.Render(pad("…", dv.afterNumDigits))
-		}
-		rows = append(rows, row+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate(dv.hunkLineFor(h), dv.fullCodeWidth, "…")))
+		rows = append(rows, dv.unifiedHeaderLine(dv.style.DividerLine, dv.hunkLineFor(h)))
 
 		beforeLine, afterLine := h.FromLine, h.ToLine
 		for _, l := range h.Lines {
@@ -711,21 +726,9 @@ func (dv *DiffView) renderWrappedSplit() string {
 	var rows []string
 	for i, h := range dv.splitHunks {
 		if i == 0 && dv.fileName != "" {
-			ls := dv.style.Filename
-			left, right := "", ""
-			if dv.lineNumbers {
-				left = ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
-				right = ls.LineNumber.Render(pad("…", dv.afterNumDigits))
-			}
-			rows = append(rows, left+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…"))+right+ls.Code.Width(dv.fullCodeWidth+btoi(dv.extraColOnAfter)).Render(" "))
+			rows = append(rows, dv.splitHeaderLine(dv.style.Filename, "  "+dv.fileName))
 		}
-		ls := dv.style.DividerLine
-		left, right := "", ""
-		if dv.lineNumbers {
-			left = ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
-			right = ls.LineNumber.Render(pad("…", dv.afterNumDigits))
-		}
-		rows = append(rows, left+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate(dv.hunkLineFor(dv.unified.Hunks[i]), dv.fullCodeWidth, "…"))+right+ls.Code.Width(dv.fullCodeWidth+btoi(dv.extraColOnAfter)).Render(" "))
+		rows = append(rows, dv.splitHeaderLine(dv.style.DividerLine, dv.hunkLineFor(dv.unified.Hunks[i])))
 
 		beforeLine, afterLine := h.fromLine, h.toLine
 		for _, l := range h.lines {
@@ -801,45 +804,18 @@ func (dv *DiffView) renderSplit() string {
 	printedLines := -dv.yOffset
 	shouldWrite := func() bool { return printedLines >= 0 }
 
-	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.TrimSuffix(in, "\n")
-		content = dv.highlightCode(content, ls.Code.GetBackground())
-		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
-		content = truncateCode(content, dv.codeWidth, ls)
-		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
-		return content, leadingEllipsis
-	}
-
 outer:
 	for i, h := range dv.splitHunks {
 		// Render file name header before the first hunk.
 		if i == 0 && dv.fileName != "" {
 			if shouldWrite() {
-				ls := dv.style.Filename
-				if dv.lineNumbers {
-					b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-				}
-				content := ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…")
-				b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
-				if dv.lineNumbers {
-					b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
-				}
-				b.WriteString(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
+				b.WriteString(dv.splitHeaderLine(dv.style.Filename, "  "+dv.fileName))
 				b.WriteRune('\n')
 			}
 			printedLines++
 		}
 		if shouldWrite() {
-			ls := dv.style.DividerLine
-			if dv.lineNumbers {
-				b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-			}
-			content := ansi.Truncate(dv.hunkLineFor(dv.unified.Hunks[i]), dv.fullCodeWidth, "…")
-			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
-			if dv.lineNumbers {
-				b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
-			}
-			b.WriteString(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
+			b.WriteString(dv.splitHeaderLine(dv.style.DividerLine, dv.hunkLineFor(dv.unified.Hunks[i])))
 			b.WriteRune('\n')
 		}
 		printedLines++
@@ -893,7 +869,7 @@ outer:
 			case l.before.Kind == udiff.Equal:
 				if shouldWrite() {
 					ls := dv.style.EqualLine
-					content, leadingEllipsis := getContent(l.before.Content, ls)
+					content, leadingEllipsis := dv.contentAndLeadingEllipsis(l.before.Content, ls)
 					if dv.lineNumbers {
 						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 					}
@@ -905,7 +881,7 @@ outer:
 			case l.before.Kind == udiff.Delete:
 				if shouldWrite() {
 					ls := dv.style.DeleteLine
-					content, leadingEllipsis := getContent(l.before.Content, ls)
+					content, leadingEllipsis := dv.contentAndLeadingEllipsis(l.before.Content, ls)
 					if dv.lineNumbers {
 						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 					}
@@ -931,7 +907,7 @@ outer:
 			case l.after.Kind == udiff.Equal:
 				if shouldWrite() {
 					ls := dv.style.EqualLine
-					content, leadingEllipsis := getContent(l.after.Content, ls)
+					content, leadingEllipsis := dv.contentAndLeadingEllipsis(l.after.Content, ls)
 					if dv.lineNumbers {
 						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 					}
@@ -943,7 +919,7 @@ outer:
 			case l.after.Kind == udiff.Insert:
 				if shouldWrite() {
 					ls := dv.style.InsertLine
-					content, leadingEllipsis := getContent(l.after.Content, ls)
+					content, leadingEllipsis := dv.contentAndLeadingEllipsis(l.after.Content, ls)
 					if dv.lineNumbers {
 						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 					}

@@ -74,14 +74,13 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	if !ok || t.isSpinning() {
 		t.syncAnimLabel()
 		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
-			ToolCall:   t.toolCall,
-			Result:     t.result,
-			Anim:       t.anim,
-			Compact:    t.isCompact,
-			IsSpinning: t.isSpinning(),
-			Status:     t.computeStatus(),
-			Expanded:   t.expanded,
-			Hovered:    t.hovered,
+			ToolCall: t.toolCall,
+			Result:   t.result,
+			Anim:     t.anim,
+			Compact:  t.isCompact,
+			Status:   t.computeStatus(),
+			Expanded: t.expanded,
+			Hovered:  t.hovered,
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.

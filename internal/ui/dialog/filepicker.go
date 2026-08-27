@@ -146,11 +146,6 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 			return f.preparePreviewAction()
 		}
 		return ActionCmd{}
-	case tea.WindowSizeMsg:
-		if f.setPreviewSize(update.Width, update.Height) {
-			f.invalidatePreview()
-			previewChanged = true
-		}
 	}
 	var cmds []tea.Cmd
 	var cmd tea.Cmd

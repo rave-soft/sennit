@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"runtime"
 	"time"
 
@@ -572,6 +573,96 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 	}
 }
 
+// updateGroupFn is the contract every update* handler dispatched through
+// updateGroups already has: try to consume msg, returning the possibly
+// grown cmd slice and whether it was handled. done ends Update immediately
+// with cmds batched, exactly like the switch cases this table replaces.
+type updateGroupFn func(m *UI, msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool)
+
+// updateGroups maps a message's concrete type to the update* handler that
+// owns it. It used to be nine separate multi-type case clauses in Update's
+// switch — wiring a new message type into one of these handlers meant
+// finding its case list in that switch and adding to it. Now it's one
+// reflect.TypeFor line in buildUpdateGroups. Lookup is by exact
+// reflect.Type rather than sequential case matching, so — unlike a type
+// switch — entry order can never matter; that's safe here because every
+// type below belongs to exactly one handler (verified: none of these types
+// appears in more than one of buildUpdateGroups' groups, nor in Update's
+// remaining bespoke cases).
+var updateGroups = buildUpdateGroups()
+
+// buildUpdateGroups constructs updateGroups once at package init. Each
+// group lists exactly the message types Update's switch used to name in
+// one case clause for that handler.
+func buildUpdateGroups() map[reflect.Type]updateGroupFn {
+	g := make(map[reflect.Type]updateGroupFn, 64)
+	register := func(fn updateGroupFn, types ...reflect.Type) {
+		for _, t := range types {
+			g[t] = fn
+		}
+	}
+
+	register((*UI).updateSystem,
+		reflect.TypeFor[tea.EnvMsg](), reflect.TypeFor[tea.ModeReportMsg](),
+		reflect.TypeFor[uv.UnknownOscEvent](), reflect.TypeFor[tea.FocusMsg](),
+		reflect.TypeFor[tea.BlurMsg](), reflect.TypeFor[tea.WindowSizeMsg](),
+		reflect.TypeFor[tea.KeyboardEnhancementsMsg](), reflect.TypeFor[spin.StepMsg](),
+		reflect.TypeFor[scrollbarHideMsg](), reflect.TypeFor[chatWarmMsg](),
+		reflect.TypeFor[sidebarScrollbarHideMsg](), reflect.TypeFor[spinner.TickMsg](),
+		reflect.TypeFor[uv.KittyGraphicsEvent]())
+
+	register((*UI).updateSession,
+		reflect.TypeFor[sessionsLoadedMsg](), reflect.TypeFor[busyStateMsg](),
+		reflect.TypeFor[promptQueueMsg](), reflect.TypeFor[agentRunSubmittedMsg](),
+		reflect.TypeFor[loadSessionMsg](), reflect.TypeFor[requestSessionLoad](),
+		reflect.TypeFor[sessionFilesUpdatesMsg](), reflect.TypeFor[sendMessageMsg](),
+		reflect.TypeFor[pubsub.Event[session.Session]](), reflect.TypeFor[pubsub.Event[message.Message]](),
+		reflect.TypeFor[pubsub.Event[history.File]](), reflect.TypeFor[sendMessageErrorMsg](),
+		reflect.TypeFor[sendPendingQueueMsg](), reflect.TypeFor[bangSessionCreatedMsg](),
+		reflect.TypeFor[createSessionMsg]())
+
+	register((*UI).updateIntegrations,
+		reflect.TypeFor[lspStatesMsg](), reflect.TypeFor[userCommandsLoadedMsg](),
+		reflect.TypeFor[mcpStateChangedMsg](), reflect.TypeFor[mcpPromptsLoadedMsg](),
+		reflect.TypeFor[promptHistoryLoadedMsg](), reflect.TypeFor[pubsub.Event[workspace.LSPEvent]](),
+		reflect.TypeFor[pubsub.Event[skills.Event]](), reflect.TypeFor[dialog.ActionMCPAuthStarted](),
+		reflect.TypeFor[dialog.ActionMCPAuthComplete](), reflect.TypeFor[dialog.ActionMCPAuthErrored](),
+		reflect.TypeFor[pubsub.Event[workspace.MCPEvent]](), reflect.TypeFor[accountLabelsLoadedMsg]())
+
+	register((*UI).updatePrompts,
+		reflect.TypeFor[closeDialogMsg](), reflect.TypeFor[pubsub.Event[permission.PermissionRequest]](),
+		reflect.TypeFor[pubsub.Event[permission.PermissionNotification]](), reflect.TypeFor[pubsub.Event[question.Request]](),
+		reflect.TypeFor[pubsub.Event[question.Notification]]())
+
+	register((*UI).updateSettings,
+		reflect.TypeFor[providerConfiguredResult](), reflect.TypeFor[modelSelectResult](),
+		reflect.TypeFor[agentModelInitializedMsg](), reflect.TypeFor[modelSettingUpdatedMsg](),
+		reflect.TypeFor[transparentToggledMsg](), reflect.TypeFor[themeSetMsg](),
+		reflect.TypeFor[compactModeToggledMsg](), reflect.TypeFor[notificationStyleSetMsg](),
+		reflect.TypeFor[permissionResponseMsg](), reflect.TypeFor[yoloToggledMsg](),
+		reflect.TypeFor[notificationSentMsg](), reflect.TypeFor[importCopilotResult]())
+
+	register((*UI).updateMouse,
+		reflect.TypeFor[DelayedClickMsg](), reflect.TypeFor[tea.MouseClickMsg](),
+		reflect.TypeFor[tea.MouseMotionMsg](), reflect.TypeFor[tea.MouseReleaseMsg](),
+		reflect.TypeFor[common.CoalescedWheelMsg]())
+
+	register((*UI).updateShell,
+		reflect.TypeFor[openEditorMsg](), reflect.TypeFor[shellStreamMsg](),
+		reflect.TypeFor[shellResultMsg]())
+
+	register((*UI).updateStatus,
+		reflect.TypeFor[util.InfoMsg](), reflect.TypeFor[util.ClearStatusMsg](),
+		reflect.TypeFor[pubsub.Event[proto.ServerNotice]](), reflect.TypeFor[workspace.UpdateAvailableMsg](),
+		reflect.TypeFor[pubsub.Event[workspace.AgentNotification]](), reflect.TypeFor[cancelTimerExpiredMsg]())
+
+	register((*UI).updateThreads,
+		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[threadsLoadedMsg](),
+		reflect.TypeFor[threadDockActivityLoadedMsg]())
+
+	return g
+}
+
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -590,108 +681,70 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	switch msg := msg.(type) {
-	case tea.EnvMsg, tea.ModeReportMsg, uv.UnknownOscEvent, tea.FocusMsg, tea.BlurMsg, tea.WindowSizeMsg, tea.KeyboardEnhancementsMsg, spin.StepMsg, scrollbarHideMsg, chatWarmMsg, sidebarScrollbarHideMsg, spinner.TickMsg, uv.KittyGraphicsEvent:
+	if fn, ok := updateGroups[reflect.TypeOf(msg)]; ok {
 		var done bool
-		if cmds, done = m.updateSystem(msg, cmds); done {
+		if cmds, done = fn(m, msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case sessionsLoadedMsg, busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, loadSessionMsg, requestSessionLoad, sessionFilesUpdatesMsg, sendMessageMsg, pubsub.Event[session.Session], pubsub.Event[message.Message], pubsub.Event[history.File], sendMessageErrorMsg, sendPendingQueueMsg, bangSessionCreatedMsg, createSessionMsg:
-		var done bool
-		if cmds, done = m.updateSession(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case lspStatesMsg, userCommandsLoadedMsg, mcpStateChangedMsg, mcpPromptsLoadedMsg, promptHistoryLoadedMsg, pubsub.Event[workspace.LSPEvent], pubsub.Event[skills.Event], dialog.ActionMCPAuthStarted, dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored, pubsub.Event[workspace.MCPEvent], accountLabelsLoadedMsg:
-		var done bool
-		if cmds, done = m.updateIntegrations(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case agentModelChangedMsg:
-		// The coordinator model changed (selection, thinking, reasoning):
-		// re-fetch the memoized ready/model state off-thread.
-		m.invalidateBusyCaches()
-		if cmd := m.dispatchBusyRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case closeDialogMsg, pubsub.Event[permission.PermissionRequest], pubsub.Event[permission.PermissionNotification], pubsub.Event[question.Request], pubsub.Event[question.Notification]:
-		var done bool
-		if cmds, done = m.updatePrompts(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case providerConfiguredResult, modelSelectResult, agentModelInitializedMsg, modelSettingUpdatedMsg, transparentToggledMsg, themeSetMsg, compactModeToggledMsg, notificationStyleSetMsg, permissionResponseMsg, yoloToggledMsg, notificationSentMsg, importCopilotResult:
-		var done bool
-		if cmds, done = m.updateSettings(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case tea.TerminalVersionMsg:
-		return m.updateTerminalVersion(msg)
-	case copyChatHighlightMsg:
-		cmds = append(cmds, m.copyChatHighlight())
-	case clearChatMouseMsg:
-		m.chat.ClearMouse()
-	case fileCompletionMsg:
-		m.sess.fileReads = append(m.sess.fileReads, msg.absPath)
-		_ = m.editor.attachments.Update(msg.attachment)
-	case pasteFilesCheckedMsg:
-		if cmd := m.applyPasteFilesChecked(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case openEditorReadyMsg:
-		cmds = append(cmds, m.execEditorCmd(msg))
-	case DelayedClickMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
-		var done bool
-		if cmds, done = m.updateMouse(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case tea.KeyPressMsg:
-		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case tea.PasteMsg:
-		if m.activeInline != nil && m.focus == uiFocusEditor {
-			if p, ok := m.activeInline.(dialog.PasteableEditor); ok {
-				if cmd := p.HandlePaste(msg); cmd != nil {
+	} else {
+		switch msg := msg.(type) {
+		case agentModelChangedMsg:
+			// The coordinator model changed (selection, thinking, reasoning):
+			// re-fetch the memoized ready/model state off-thread.
+			m.invalidateBusyCaches()
+			if cmd := m.dispatchBusyRefresh(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case tea.TerminalVersionMsg:
+			return m.updateTerminalVersion(msg)
+		case copyChatHighlightMsg:
+			cmds = append(cmds, m.copyChatHighlight())
+		case clearChatMouseMsg:
+			m.chat.ClearMouse()
+		case fileCompletionMsg:
+			m.sess.fileReads = append(m.sess.fileReads, msg.absPath)
+			_ = m.editor.attachments.Update(msg.attachment)
+		case pasteFilesCheckedMsg:
+			if cmd := m.applyPasteFilesChecked(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case openEditorReadyMsg:
+			cmds = append(cmds, m.execEditorCmd(msg))
+		case tea.KeyPressMsg:
+			if cmd := m.handleKeyPressMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case tea.PasteMsg:
+			if m.activeInline != nil && m.focus == uiFocusEditor {
+				if p, ok := m.activeInline.(dialog.PasteableEditor); ok {
+					if cmd := p.HandlePaste(msg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					return m, tea.Batch(cmds...)
+				}
+			}
+			if cmd := m.handlePasteMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case richPasteMsg:
+			if cmd := m.handleRichPaste(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case completions.CompletionItemsLoadedMsg:
+			if m.editor.completionsOpen {
+				m.editor.completions.SetItems(msg.Files, msg.Resources)
+			}
+		case fimage.PreviewPreparedMsg:
+			if action := m.dialog.UpdateDialog(dialog.FilePickerID, msg); action != nil {
+				if cmd := m.applyDialogAction(action); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-				return m, tea.Batch(cmds...)
 			}
-		}
-		if cmd := m.handlePasteMsg(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case richPasteMsg:
-		if cmd := m.handleRichPaste(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case openEditorMsg, shellStreamMsg, shellResultMsg:
-		var done bool
-		if cmds, done = m.updateShell(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case util.InfoMsg, util.ClearStatusMsg, pubsub.Event[proto.ServerNotice], workspace.UpdateAvailableMsg, pubsub.Event[workspace.AgentNotification], cancelTimerExpiredMsg:
-		var done bool
-		if cmds, done = m.updateStatus(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case pubsub.Event[proto.Thread], threadsLoadedMsg, threadDockActivityLoadedMsg:
-		var done bool
-		if cmds, done = m.updateThreads(msg, cmds); done {
-			return m, tea.Batch(cmds...)
-		}
-	case completions.CompletionItemsLoadedMsg:
-		if m.editor.completionsOpen {
-			m.editor.completions.SetItems(msg.Files, msg.Resources)
-		}
-	case fimage.PreviewPreparedMsg:
-		if action := m.dialog.UpdateDialog(dialog.FilePickerID, msg); action != nil {
-			if cmd := m.applyDialogAction(action); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-	default:
-		if m.dialog.HasDialogs() {
-			if cmd := m.handleDialogMsg(msg); cmd != nil {
-				cmds = append(cmds, cmd)
+		default:
+			if m.dialog.HasDialogs() {
+				if cmd := m.handleDialogMsg(msg); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	}
@@ -1195,13 +1248,6 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 	}
 }
 
-// sendAfterSessionLoaded first loads the session and then sends the captured
-// message.  It works by chaining through messages so that the command-driving
-// harness sees each intermediate step.
-
-// sendMessageErrorMsg carries an error from a sendMessage cmd. The Update
-// handler converts it into a util.InfoMsg and clears the optimistic busy
-// state (already done inside the cmd).
 type importCopilotResult struct {
 	providerID   string
 	model        config.SelectedModel
@@ -1209,6 +1255,9 @@ type importCopilotResult struct {
 	generation   uint64
 }
 
+// sendMessageErrorMsg carries an error from a sendMessage cmd. The Update
+// handler converts it into a util.InfoMsg and clears the optimistic busy
+// state (already done inside the cmd).
 type sendMessageErrorMsg struct {
 	Err            error
 	generation     uint64
@@ -1238,6 +1287,24 @@ type sessionsLoadedMsg struct {
 	sessions          []session.Session
 	selectedSessionID string
 	err               error
+}
+
+// startNewSessionGuarded appends m.newSession()'s command unless the agent
+// is busy, in which case it appends a warning instead. started reports
+// which happened, for callers (handleMainKeyPress) that need to do
+// something else — moving focus — only on the path that actually started a
+// session. Shared by the three places "start a new session" can be
+// triggered (the Chat.NewSession key binding from both focus states, and
+// the commands palette's ActionNewSession) so the busy guard and its
+// wording can't drift between them.
+func (m *UI) startNewSessionGuarded(cmds []tea.Cmd) (out []tea.Cmd, started bool) {
+	if m.isAgentBusy() {
+		return append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session...")), false
+	}
+	if cmd := m.newSession(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return cmds, true
 }
 
 // newSession clears the current session state and prepares for a new session.

@@ -713,23 +713,6 @@ func TestList_Invalidate_DropsSingleEntry(t *testing.T) {
 	require.Equal(t, 1, b.renderHits, "untouched item must stay cached")
 }
 
-// TestList_InvalidateFrozen_DropsEntry covers the InvalidateFrozen
-// wrapper — same effect as Invalidate, exposed under a different
-// name for the frozen-items vocabulary.
-func TestList_InvalidateFrozen_DropsEntry(t *testing.T) {
-	t.Parallel()
-
-	a := newTrackedItem("a", "alpha", true)
-	l := NewList(a)
-	l.SetSize(20, 5)
-	_ = l.Render()
-	require.Equal(t, 1, a.renderHits)
-
-	l.InvalidateFrozen(a)
-	_ = l.Render()
-	require.Equal(t, 2, a.renderHits)
-}
-
 // invalidatableItem is a test double for InvalidateAll: it exposes an
 // Invalidate() method (the interface List.InvalidateAll probes for)
 // separately from the render-cache invalidation, so the test can
