@@ -98,7 +98,7 @@ func wrapStreamError(err error) *fantasy.ProviderError {
 		Message:        cmp.Or(message, payload),
 		Cause:          err,
 		ResponseBody:   []byte(payload),
-		TransientError: fantasy.TransientStreamErrorTypes[errType],
+		TransientError: fantasy.IsTransientStreamError(errType, message),
 	}
 }
 

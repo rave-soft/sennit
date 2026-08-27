@@ -1277,11 +1277,17 @@ func responsesErrorStreamError(message, code string) error {
 	return responsesStreamFailureError("response error", message, code)
 }
 
+// responsesStreamFailureError reports the failure the provider declared
+// in-band. A declared failure rides inside an already-successful 200
+// response, so the payload's code - or, when the backend sends none, its
+// message - is the only signal for whether a retry may succeed; transient
+// ones are flagged so the retry middleware re-runs the step.
 func responsesStreamFailureError(title, message, code string) error {
+	transient := fantasy.IsTransientStreamError(code, message)
 	if code != "" {
 		message = fmt.Sprintf("%s (code: %s)", message, code)
 	}
-	return &fantasy.Error{Title: title, Message: message}
+	return &fantasy.ProviderError{Title: title, Message: message, TransientError: transient}
 }
 
 // toWebSearchToolParam converts a ProviderDefinedTool with ID
