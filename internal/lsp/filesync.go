@@ -57,21 +57,27 @@ func (f *filesync) handlesFile(path string) bool {
 	return handlesFiletype(f.name, f.fileTypes, path)
 }
 
-// OpenFile opens a user document and records it only after didOpen succeeds.
+// OpenFile opens a user document. The claim on the map entry happens before
+// didOpen is sent, so two concurrent callers for the same path can't both
+// observe it missing and both send didOpen: GetOrSet atomically decides
+// which caller's placeholder wins, and only that caller sends the
+// notification. The entry is removed again if didOpen fails, so a later
+// call can retry.
 func (f *filesync) openFile(ctx context.Context, path string) error {
 	if !f.handlesFile(path) {
 		return nil
 	}
 	uri := string(protocol.URIFromPath(path))
-	if _, exists := f.files.Get(uri); exists {
-		return nil
+	candidate := &OpenFileInfo{URI: protocol.DocumentURI(uri)}
+	info := f.files.GetOrSet(uri, func() *OpenFileInfo { return candidate })
+	if info != candidate {
+		return nil // Already open or being opened by another caller.
 	}
 	if err := f.didOpen(ctx, path, f.gen()); err != nil {
+		f.files.Del(uri)
 		return err
 	}
-	info := &OpenFileInfo{URI: protocol.DocumentURI(uri)}
 	info.Version.Store(1)
-	f.files.Set(uri, info)
 	return nil
 }
 
