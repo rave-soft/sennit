@@ -62,6 +62,10 @@ func getRetryDelayInMs(err error, exponentialBackoffDelay time.Duration) time.Du
 // retry pass runs again with a fresh budget; on failure the original auth
 // error is returned. At most one refresh is attempted, so a credential that
 // stays invalid cannot spin.
+//
+// OnRateLimit, if set, engages earlier and separately: it fires from inside
+// the retry pass itself, at the first HTTP 429, instead of waiting for the
+// pass to exhaust its backoff budget. See RetryOptions.OnRateLimit.
 func RetryWithExponentialBackoffRespectingRetryHeaders[T any](options RetryOptions) RetryFunction[T] {
 	return func(ctx context.Context, fn RetryFn[T]) (T, error) {
 		result, err := retryWithExponentialBackoff(ctx, fn, options, nil)
@@ -94,7 +98,44 @@ type RetryOptions struct {
 	// a one-shot human-in-the-loop step and a second attempt would not fare
 	// better.
 	OnAuthRefresh OnAuthRefreshFunc
+
+	// OnRateLimit is called at the first HTTP 429 encountered within a
+	// retry pass, before the retry delay for that attempt elapses. This is
+	// a Sennit fork addition: unlike OnAuthRefresh (which only engages once
+	// the entire backoff budget is spent), a 429 is treated as an ordinary
+	// retryable error by the existing exponential-backoff path, and account
+	// rotation needs to react to the FIRST 429 rather than sleep through a
+	// backoff budget sized for a single account.
+	//
+	// If it returns nil, the caller is assumed to have rotated credentials:
+	// the backoff delay for that attempt is skipped and the next attempt
+	// runs immediately, though the attempt still counts against MaxRetries.
+	// If it returns an error, the retry pass proceeds exactly as it would
+	// with OnRateLimit unset: normal backoff, and OnRetry (if set) fires for
+	// that attempt, with the eventual error being the original 429 chain
+	// rather than the hook's error.
+	//
+	// At most one call is made per retry pass, regardless of outcome — a
+	// further 429 in the same pass always falls through to the normal
+	// backoff path, since a credential still rate-limited immediately after
+	// rotating would not fare better a second time. OnRetry does NOT fire
+	// for the attempt OnRateLimit handles successfully: there is no delay
+	// and nothing to report.
+	OnRateLimit OnRateLimitFunc
+
+	// rateLimitHookFired tracks, within a single retry pass, whether
+	// OnRateLimit has already been called. It is unexported so it cannot be
+	// set from outside the package by a struct literal; the recursive calls
+	// in retryWithExponentialBackoff carry it forward the same way
+	// InitialDelayIn already is. Sennit fork addition; DefaultRetryOptions
+	// leaves it at its zero value (false).
+	rateLimitHookFired bool
 }
+
+// OnRateLimitFunc is called when an operation fails with an HTTP 429 (rate
+// limit) response. Sennit fork addition; see RetryOptions.OnRateLimit for
+// the full contract.
+type OnRateLimitFunc func(ctx context.Context, err *ProviderError) error
 
 // OnRetryCallback is called before each retry attempt, after the retry
 // delay is chosen but before it elapses. err is the failure that triggered
@@ -143,9 +184,26 @@ func retryWithExponentialBackoff[T any](ctx context.Context, fn RetryFn[T], opti
 
 	var providerErr *ProviderError
 	if isRetryableError(err) && tryNumber <= options.MaxRetries {
+		errors.As(err, &providerErr)
 		delay := getRetryDelayInMs(err, options.InitialDelayIn)
+
+		newOptions := options
+		newOptions.InitialDelayIn = time.Duration(float64(options.InitialDelayIn) * options.BackoffFactor)
+
+		// Sennit fork addition: give OnRateLimit first crack at a 429,
+		// before the backoff delay for this attempt elapses, so a caller
+		// can rotate accounts and retry immediately instead of waiting out
+		// a budget sized for a single account. See RetryOptions.OnRateLimit.
+		if options.OnRateLimit != nil && !options.rateLimitHookFired && providerErr != nil && isRateLimitError(providerErr) {
+			newOptions.rateLimitHookFired = true
+			if hookErr := options.OnRateLimit(ctx, providerErr); hookErr == nil {
+				return retryWithExponentialBackoff(ctx, fn, newOptions, newErrors)
+			}
+			// Rotation failed: fall through to the normal backoff path
+			// below with the original 429 chain intact.
+		}
+
 		if options.OnRetry != nil {
-			errors.As(err, &providerErr)
 			options.OnRetry(providerErr, delay)
 		}
 
@@ -155,9 +213,6 @@ func retryWithExponentialBackoff[T any](ctx context.Context, fn RetryFn[T], opti
 		case <-ctx.Done():
 			return zero, ctx.Err()
 		}
-
-		newOptions := options
-		newOptions.InitialDelayIn = time.Duration(float64(options.InitialDelayIn) * options.BackoffFactor)
 
 		return retryWithExponentialBackoff(ctx, fn, newOptions, newErrors)
 	}
@@ -173,6 +228,13 @@ func retryWithExponentialBackoff[T any](ctx context.Context, fn RetryFn[T], opti
 // caller-supplied OnAuthRefresh hook may be able to resolve.
 func isAuthError(err *ProviderError) bool {
 	return err.StatusCode == http.StatusUnauthorized || err.AuthError
+}
+
+// isRateLimitError reports whether the error is an HTTP 429 that a
+// caller-supplied OnRateLimit hook may be able to resolve by rotating to a
+// different account. Sennit fork addition.
+func isRateLimitError(err *ProviderError) bool {
+	return err.StatusCode == http.StatusTooManyRequests
 }
 
 // isRetryableError reports whether the error should be retried.
