@@ -14,13 +14,6 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
-// runtimeState tracks the in-memory bookkeeping for an entity whose
-// workspace is currently spawned: the handle to release on removal, the
-// Spawner that produced it (kept per-runtime rather than per-lifecycle,
-// since threads and tasks share one lifecycle but use different Spawners —
-// releasing via the wrong one is exactly the kind of mistake that would
-// either leak a workspace or, for a task, tear down its parent App), and
-// the cancel function for its RunComplete watcher goroutine.
 // terminalBookkeepingTimeout bounds the detached context
 // handleRunComplete does its terminal work on. The work is local store
 // I/O and a worktree release, so this is a backstop against a wedged
@@ -41,6 +34,13 @@ func detachForTerminalWork(ctx context.Context) (context.Context, context.Cancel
 	return context.WithTimeout(context.WithoutCancel(ctx), terminalBookkeepingTimeout)
 }
 
+// runtimeState tracks the in-memory bookkeeping for an entity whose
+// workspace is currently spawned: the handle to release on removal, the
+// Spawner that produced it (kept per-runtime rather than per-lifecycle,
+// since threads and tasks share one lifecycle but use different Spawners —
+// releasing via the wrong one is exactly the kind of mistake that would
+// either leak a workspace or, for a task, tear down its parent App), and
+// the cancel function for its RunComplete watcher goroutine.
 type runtimeState struct {
 	handle      Handle
 	spawner     Spawner
@@ -449,52 +449,6 @@ func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner S
 	return rt
 }
 
-// forwardPermissions relays a delegation workspace's permission traffic
-// into the parent workspace's event stream, for as long as that workspace
-// is live.
-//
-// A thread runs in an isolated app.App with its own permission service and
-// its own event broker. The user's TUI is subscribed to the parent
-// workspace, so without this relay a prompt raised inside a thread reaches
-// nobody: permission.Service.Request blocks on its response channel with
-// no timeout, and the thread hangs there forever with no visible sign of
-// why. Anything that needs approval - bash, above all - stops the thread
-// dead.
-//
-// Requests carry their delegation's identity (see withDelegation), which
-// is what lets the parent both label the prompt and route the answer back
-// to the service that is actually waiting for it - see
-// [Manager.PermissionsFor].
-//
-// Bound to the runtime's watch context, so the relay stops when the
-// workspace is released. A task needs none of this: its handle wraps the
-// parent's own App, so its prompts are already on the stream the user is
-// watching.
-func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
-	if l.parentApp == nil {
-		return
-	}
-	a := handle.Workspace()
-	if a == nil || a == l.parentApp {
-		return
-	}
-	forwardInto(ctx, l, a.Permissions().Subscribe)
-	forwardInto(ctx, l, a.Permissions().SubscribeNotifications)
-
-	// A request already waiting when the relay starts was published
-	// before anything was listening, and a request is announced exactly
-	// once - so without this it would sit there unanswerable, which is
-	// the failure this whole relay exists to prevent. Reachable whenever
-	// a workspace is re-installed under a delegation that still has a
-	// prompt outstanding.
-	if req, ok := a.Permissions().ActiveRequest(); ok {
-		l.parentApp.SendEvent(pubsub.Event[permission.PermissionRequest]{
-			Type:    pubsub.CreatedEvent,
-			Payload: req,
-		})
-	}
-}
-
 // steer dispatches the person's own message into a live delegation's
 // session as a steering follow-up: if a turn is already in flight the
 // message folds into that turn's next step instead of waiting for it to
@@ -518,11 +472,19 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 // opMu — which is what keeps handleRunComplete (which takes opMu too)
 // from acting on the older run's completion in between.
 func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, msg, runID string, attachments []Attachment, disp SendDisposition) (SendDisposition, error) {
-	var (
-		decided = make(chan DispatchOutcome, 1)
-		failed  = make(chan error, 1)
-		ranOwn  atomic.Bool
-	)
+	decided, failed := l.steerDispatch(bgCtx, rt, id, sessionID, msg, runID, attachments)
+	return l.steerAwait(bgCtx, c, rt, id, sessionID, runID, disp, decided, failed)
+}
+
+// steerDispatch reserves acceptance and dispatches the steering call to the
+// coordinator on its own goroutine, reporting the coordinator's eventual
+// dispatch decision on the returned decided channel and any RunAccepted
+// error on failed. Both are buffered by one so the goroutine below never
+// blocks handing its result off.
+func (l *lifecycle) steerDispatch(bgCtx context.Context, rt *runtimeState, id, sessionID, msg, runID string, attachments []Attachment) (decided chan DispatchOutcome, failed chan error) {
+	decided = make(chan DispatchOutcome, 1)
+	failed = make(chan error, 1)
+	var ranOwn atomic.Bool
 	steerCtx := WithSteering(WithRunID(bgCtx, runID), func(outcome DispatchOutcome) {
 		ranOwn.Store(outcome == DispatchRan)
 		select {
@@ -561,54 +523,62 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 			l.handleRunComplete(bgCtx, id, RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
 		}
 	})
+	return decided, failed
+}
 
-	// applyDecision is the reaction to a dispatch outcome, shared by the
-	// two branches below: a decision and a dispatch error can become
-	// ready in the same instant, and Go picks between ready cases at
-	// random. Reached through the error branch, that would have thrown
-	// away a decision that had in fact been made.
-	applyDecision := func(outcome DispatchOutcome) (SendDisposition, error) {
-		switch outcome {
-		case DispatchFolded:
-			// Folded into the turn in flight: that turn's completion is
-			// still the one this entity ends on, so leave rt.runID alone.
-			return SendDisposition{Steered: true}, nil
-		case DispatchCancelled:
-			// A cancel got here first. Nothing ran, nothing folded, and
-			// nothing is owed an owner — which is exactly what reserving
-			// acceptance buys: this is a definite answer, not a run that
-			// may or may not still appear.
-			//
-			// The caller moved the delegation to running before dispatching
-			// (it had no way to know this would happen), and since no run
-			// exists, no completion will ever move it back. Rest it here
-			// instead: a live workspace with nothing in flight is idle.
-			l.restIdleAfterPersonTurn(bgCtx, id, RunComplete{SessionID: sessionID})
-			return SendDisposition{}, nil
-		}
-		// It became the active turn, so it owns the workspace from here.
-		// Still under opMu, so the run it displaced (if any) has not been
-		// reacted to yet, and once it is its RunID will no longer match.
-		// Marked as the person's: it ends by resting the delegation at
-		// idle with its workspace intact, not by settling and merging it
-		// — see handleRunComplete.
-		c.mu.Lock()
-		rt.runID = runID
-		rt.person = true
-		rt.awaitingDelegations = false
-		c.mu.Unlock()
+// steerApplyDecision reacts to the coordinator's dispatch outcome for a
+// steering call, shared by both branches steerAwait may reach it from: a
+// decision and a dispatch error can become ready in the same instant, and
+// Go picks between ready cases at random, so both branches funnel through
+// here rather than duplicating the reaction.
+func (l *lifecycle) steerApplyDecision(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, runID string, outcome DispatchOutcome) (SendDisposition, error) {
+	switch outcome {
+	case DispatchFolded:
+		// Folded into the turn in flight: that turn's completion is
+		// still the one this entity ends on, so leave rt.runID alone.
+		return SendDisposition{Steered: true}, nil
+	case DispatchCancelled:
+		// A cancel got here first. Nothing ran, nothing folded, and
+		// nothing is owed an owner — which is exactly what reserving
+		// acceptance buys: this is a definite answer, not a run that
+		// may or may not still appear.
+		//
+		// The caller moved the delegation to running before dispatching
+		// (it had no way to know this would happen), and since no run
+		// exists, no completion will ever move it back. Rest it here
+		// instead: a live workspace with nothing in flight is idle.
+		l.restIdleAfterPersonTurn(bgCtx, id, RunComplete{SessionID: sessionID})
 		return SendDisposition{}, nil
 	}
+	// It became the active turn, so it owns the workspace from here.
+	// Still under opMu, so the run it displaced (if any) has not been
+	// reacted to yet, and once it is its RunID will no longer match.
+	// Marked as the person's: it ends by resting the delegation at
+	// idle with its workspace intact, not by settling and merging it
+	// — see handleRunComplete.
+	c.mu.Lock()
+	rt.runID = runID
+	rt.person = true
+	rt.awaitingDelegations = false
+	c.mu.Unlock()
+	return SendDisposition{}, nil
+}
 
+// steerAwait waits for steerDispatch's outcome — or, failing that, its
+// RunAccepted error — and reacts via steerApplyDecision, all while still
+// holding opMu (the caller's caller, send, holds it across this whole
+// call): that is what keeps handleRunComplete (which takes opMu too) from
+// acting on the older run's completion in between.
+func (l *lifecycle) steerAwait(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, runID string, disp SendDisposition, decided chan DispatchOutcome, failed chan error) (SendDisposition, error) {
 	select {
 	case outcome := <-decided:
-		return applyDecision(outcome)
+		return l.steerApplyDecision(bgCtx, c, rt, id, sessionID, runID, outcome)
 	case err := <-failed:
 		// A decision may have landed in the same instant the dispatch
 		// returned; it is the more specific answer, so take it first.
 		select {
 		case outcome := <-decided:
-			return applyDecision(outcome)
+			return l.steerApplyDecision(bgCtx, c, rt, id, sessionID, runID, outcome)
 		default:
 		}
 		// The dispatch failed before reaching a decision (a coordinator
@@ -628,30 +598,6 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 		// before the dispatch rather than inventing an outcome.
 		return disp, nil
 	}
-}
-
-// forwardInto pumps one of a delegation workspace's event sources onto the
-// parent App's fan-in, republishing each event unchanged so a subscriber
-// cannot tell it apart from one the parent raised itself - which is the
-// point: the TUI's permission handling should not need to know that the
-// asking workspace is somewhere else.
-//
-// A free function rather than a method because Go has no generic methods.
-func forwardInto[T any](ctx context.Context, l *lifecycle, subscribe func(context.Context) <-chan pubsub.Event[T]) {
-	sub := subscribe(ctx)
-	l.goWorker(func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev, ok := <-sub:
-				if !ok {
-					return
-				}
-				l.parentApp.SendEvent(ev)
-			}
-		}
-	})
 }
 
 // withDelegation tags ctx with id's identity so every permission request
@@ -831,6 +777,35 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	return SendDisposition{Resumed: true}, nil
 }
 
+// releaseRuntime is the teardown sequence shared by every path that retires
+// a live runtime: stop its watch loop, cancel its dispatched run (if any),
+// optionally cancel its session on its own workspace coordinator, and
+// release its handle through its own spawner. rt.runCancel is nil for every
+// runtime this package starts via startRun (only startFactoryRun's task
+// runs set it), so calling it unconditionally here is a no-op for those
+// callers, not a behavior change.
+//
+// Callers differ in three things this does not try to unify: which ctx the
+// release itself runs on (a caller's own, or a detached/background one for
+// terminal work — see detachForTerminalWork), whether cancelSession should
+// be true at all (Manager.Remove only cancels on force; handleRunComplete's
+// own call never cancels — the run already ended on its own), and how a
+// non-nil error should be logged (each caller's message names its own
+// reason for tearing the runtime down). Callers own the context, the
+// cancelSession decision, and the logging; this owns only the sequence.
+func releaseRuntime(ctx context.Context, rt *runtimeState, sessionID string, cancelSession bool) error {
+	rt.watchCancel()
+	if rt.runCancel != nil {
+		rt.runCancel()
+	}
+	if cancelSession {
+		if a := rt.handle.Workspace(); a != nil && a.Coordinator() != nil {
+			a.Coordinator().Cancel(sessionID)
+		}
+	}
+	return rt.spawner.Release(ctx, rt.handle.ID())
+}
+
 // cancel is the generic body behind [TaskManager.Cancel] and
 // [Manager.Cancel]: it stops st's in-flight run and rests it at
 // [StatusCancelled] with reason recorded as its Error — a real status
@@ -878,14 +853,7 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 		return nil
 	}
 
-	rt.watchCancel()
-	if rt.runCancel != nil {
-		rt.runCancel()
-	}
-	if a := rt.handle.Workspace(); a != nil && a.Coordinator() != nil {
-		a.Coordinator().Cancel(st.SessionID)
-	}
-	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
+	if err := releaseRuntime(ctx, rt, st.SessionID, true); err != nil {
 		slog.Error("Failed to release cancelled workspace", "component", "thread", "id", st.ID, "kind", st.Kind, "error", err)
 	}
 
@@ -920,7 +888,7 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 // is the example — is onRunSuccess's job.
 //
 // Once a terminal status is actually recorded, this also delivers to the
-// entity's parent session (see deliverCompletion) — for every kind
+// entity's parent session (see deliverStoredCompletion) — for every kind
 // resolveDelivery covers. The one deliberate exception is a thread whose
 // successful run onRunSuccess (Manager's auto-merge overlay) takes over:
 // that returns before reaching the delivery call below, because an
@@ -936,7 +904,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	// long-lived one, and a cancellation is exactly what cancels those:
 	// the run a person interrupted arrives here with err ==
 	// context.Canceled and a dead ctx, so the store.Get failed, the status
-	// was "left stale" at StatusRunning, and deliverCompletion was never
+	// was "left stale" at StatusRunning, and deliverStoredCompletion was never
 	// reached — the parent was never told its delegation had ended. Detach
 	// so the bookkeeping still lands, with a deadline so a wedged store
 	// cannot hold shutdown (which joins these workers) forever.
@@ -956,11 +924,34 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	}
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
+
+	rt, matched := l.matchRunComplete(ctx, c, id, rc)
+	if !matched {
+		return
+	}
+
+	if l.parkIfAwaitingDelegations(ctx, c, rt, id, rc) {
+		return
+	}
+
+	l.finalizeRunComplete(ctx, followUpCtx, c, rt, id, rc)
+}
+
+// matchRunComplete is handleRunComplete's first step: it reads c's current
+// runtime, matches rc against the run it currently owns, and — if this is a
+// hand-driven person turn ending — rests the entity back at idle itself.
+// matched=false in every case (no runtime, a stale run/session id, or an
+// already-settled person turn) means handleRunComplete has nothing left to
+// do and must return immediately.
+//
+// Called with c.opMu already held by handleRunComplete; this step only ever
+// takes and releases c.mu, exactly as it did inlined.
+func (l *lifecycle) matchRunComplete(ctx context.Context, c *threadControl, id string, rc RunComplete) (rt *runtimeState, matched bool) {
 	c.mu.Lock()
-	rt := c.runtime
+	rt = c.runtime
 	if rt == nil {
 		c.mu.Unlock()
-		return
+		return nil, false
 	}
 	// A parked delegation (see the park branch below) has no run id to
 	// match: what resumes it is an auto-woken continuation, which carries
@@ -968,11 +959,11 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	// checked against it below, once the row is loaded.
 	if !rt.awaitingDelegations && (rc.RunID == "" || rc.RunID != rt.runID) {
 		c.mu.Unlock()
-		return
+		return nil, false
 	}
 	if rt.awaitingDelegations && rc.SessionID != rt.parkedSession {
 		c.mu.Unlock()
-		return
+		return nil, false
 	}
 	if rt.person {
 		// A turn the person drove by hand ends where it started: the
@@ -987,47 +978,59 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 		rt.person = false
 		c.mu.Unlock()
 		l.restIdleAfterPersonTurn(ctx, id, rc)
-		return
+		return nil, false
 	}
 	c.mu.Unlock()
+	return rt, true
+}
 
-	// A delegation that ended its turn to wait for delegations of its own
-	// is not finished — that is how an agent waits, and its own
-	// completion inbox will wake it to carry on. Finalizing here told the
-	// parent its delegation had answered, and a pipeline that starts a
-	// reviewer the moment the developer "finishes" then ran the review
-	// against work that was still being written.
-	//
-	// So park instead: the workspace stays live, the row stays running
-	// (which is what task_result reports), and nothing is delivered. The
-	// continuation that resumes the session ends in this same function,
-	// and finalizes there — or parks again, for as many rounds as the
-	// delegation needs.
-	//
-	// Only for a run that ended cleanly: an error or a cancel is this
-	// delegation's own outcome, and no child's result changes it.
-	if !rc.Cancelled && rc.Error == "" && l.awaitsOwnDelegations(ctx, rc.SessionID) {
-		c.mu.Lock()
-		if c.runtime == rt {
-			rt.runID = ""
-			rt.awaitingDelegations = true
-			rt.parkedSession = rc.SessionID
-		}
-		c.mu.Unlock()
-		slog.Info("Delegation is waiting on delegations of its own; not finalizing yet",
-			"component", "thread", "id", id, "session_id", rc.SessionID)
-		return
+// parkIfAwaitingDelegations is handleRunComplete's second step: a
+// delegation that ended its turn to wait for delegations of its own is not
+// finished — that is how an agent waits, and its own completion inbox will
+// wake it to carry on. Finalizing here told the parent its delegation had
+// answered, and a pipeline that starts a reviewer the moment the developer
+// "finishes" then ran the review against work that was still being
+// written.
+//
+// So park instead: the workspace stays live, the row stays running (which
+// is what task_result reports), and nothing is delivered. The continuation
+// that resumes the session ends in this same function, and finalizes there
+// — or parks again, for as many rounds as the delegation needs.
+//
+// Only for a run that ended cleanly: an error or a cancel is this
+// delegation's own outcome, and no child's result changes it. Returns true
+// when it parked, in which case handleRunComplete must return without
+// finalizing.
+func (l *lifecycle) parkIfAwaitingDelegations(ctx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) bool {
+	if rc.Cancelled || rc.Error != "" || !l.awaitsOwnDelegations(ctx, rc.SessionID) {
+		return false
 	}
+	c.mu.Lock()
+	if c.runtime == rt {
+		rt.runID = ""
+		rt.awaitingDelegations = true
+		rt.parkedSession = rc.SessionID
+	}
+	c.mu.Unlock()
+	slog.Info("Delegation is waiting on delegations of its own; not finalizing yet",
+		"component", "thread", "id", id, "session_id", rc.SessionID)
+	return true
+}
 
+// finalizeRunComplete is handleRunComplete's last step: it releases rt's
+// workspace, loads the entity's current row, and — if the completion still
+// applies to the session this entity currently owns — records its terminal
+// status and delivers it to the parent. followUpCtx is the caller's own,
+// undetached context, passed through only to onRunSuccess (see
+// handleRunComplete's own doc comment for why that hook needs it).
+//
+// Called with c.opMu already held by handleRunComplete.
+func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) {
 	c.mu.Lock()
 	c.runtime = nil
 	depth := c.depth
 	c.mu.Unlock()
-	rt.watchCancel()
-	if rt.runCancel != nil {
-		rt.runCancel()
-	}
-	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
+	if err := releaseRuntime(ctx, rt, "", false); err != nil {
 		slog.Error("Failed to release completed workspace", "component", "thread", "thread", id, "error", err)
 	}
 	st, err := l.store.Get(ctx, id)
@@ -1079,7 +1082,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	}
 
 	slog.Info("Delegation reached terminal status", "id", id, "kind", finalSt.Kind, "status", finalSt.Status)
-	l.deliverCompletion(ctx, rt.handle, finalSt, depth)
+	l.deliverStoredCompletion(ctx, rt.handle, finalSt, depth)
 }
 
 // restIdleAfterPersonTurn records the end of a hand-driven turn: back to
@@ -1107,27 +1110,6 @@ func (l *lifecycle) restIdleAfterPersonTurn(ctx context.Context, id string, rc R
 	}
 }
 
-// deliverCompletion pushes st (a delegation that just reached a terminal
-// status) into its parent session's completion inbox, so the parent's
-// next step sees the outcome ahead of any steering message queued at the
-// same time — see agent.TaskCompletion and runTurn.prepareStep.
-//
-// Where to deliver is entirely resolveDelivery's call — see
-// Manager.resolveDeliveryTarget for how a task (which shares its
-// parent's own App via threadspawn's ParentAppSpawner) and a thread
-// (which spawns a wholly separate one via LocalSpawner) resolve
-// differently. ok=false
-// (no resolver configured, no overlay claims st.Kind, or no resolvable
-// parent) is a clean no-op: st's own terminal status is already recorded
-// and still pollable regardless of whether anything is listening for it.
-//
-// depth is the cascade depth the creating turn stamped on this entity at
-// Create (threadControl.depth, read by the caller before releasing
-// c.mu) — carried onto the event so an auto-woken continuation can run
-// one level deeper, and refuse to cascade further once the hard limit
-// is reached (see agent.TaskCompletion.Depth and the "agent" tool's
-// background mode). Always 0 for a thread today: the cascade limiter
-// only ever applies to tasks created through the "agent" tool.
 func (l *lifecycle) finalizeTask(ctx context.Context, st Thread, status Status, errText, result string, completedAt int64, depth int) (Thread, error) {
 	store, ok := l.store.(TaskFinalizationStore)
 	if !ok {
@@ -1178,10 +1160,27 @@ func (l *lifecycle) awaitsOwnDelegations(ctx context.Context, sessionID string) 
 	return false
 }
 
-func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
-	l.deliverStoredCompletion(ctx, handle, st, depth)
-}
-
+// deliverStoredCompletion pushes st (a delegation that just reached a
+// terminal status) into its parent session's completion inbox, so the
+// parent's next step sees the outcome ahead of any steering message queued
+// at the same time — see agent.TaskCompletion and runTurn.prepareStep.
+//
+// Where to deliver is entirely resolveDelivery's call — see
+// Manager.resolveDeliveryTarget for how a task (which shares its
+// parent's own App via threadspawn's ParentAppSpawner) and a thread
+// (which spawns a wholly separate one via LocalSpawner) resolve
+// differently. ok=false
+// (no resolver configured, no overlay claims st.Kind, or no resolvable
+// parent) is a clean no-op: st's own terminal status is already recorded
+// and still pollable regardless of whether anything is listening for it.
+//
+// depth is the cascade depth the creating turn stamped on this entity at
+// Create (threadControl.depth, read by the caller before releasing
+// c.mu) — carried onto the event so an auto-woken continuation can run
+// one level deeper, and refuse to cascade further once the hard limit
+// is reached (see agent.TaskCompletion.Depth and the "agent" tool's
+// background mode). Always 0 for a thread today: the cascade limiter
+// only ever applies to tasks created through the "agent" tool.
 func (l *lifecycle) deliverStoredCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
 	if l.resolveDelivery == nil {
 		return
