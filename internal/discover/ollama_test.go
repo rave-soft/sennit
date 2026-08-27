@@ -82,6 +82,32 @@ func TestOllamaEnricher(t *testing.T) {
 		require.Equal(t, int64(16384), result[0].ContextWindow)
 	})
 
+	t.Run("ignores an error response instead of decoding it as a real answer", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			// A well-formed body that happens to decode cleanly into
+			// ollamaShowResponse, paired with a non-200 status: without a
+			// status check this looks exactly like a real answer, so the
+			// enricher would wrongly apply it.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(ollamaShowResponse{
+				ModelInfo: map[string]any{
+					"llama.context_length": float64(8192),
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-ollama", BaseURL: srv.URL}
+		models := []catwalk.Model{{ID: "llama3:latest", Name: "llama3:latest"}}
+
+		e := &ollamaEnricher{}
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.Equal(t, int64(0), result[0].ContextWindow,
+			"a non-200 /api/show response must not be decoded as a real model description")
+	})
+
 	t.Run("skips /api/show call when context window already set", func(t *testing.T) {
 		t.Parallel()
 		calls := 0

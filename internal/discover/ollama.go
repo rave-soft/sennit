@@ -64,6 +64,14 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 			}
 			defer resp.Body.Close()
 
+			// An error body decodes to a zero-value ollamaShowResponse,
+			// which would otherwise look like a real (empty) model
+			// description instead of a failed lookup — skip it, matching
+			// fetchJSON's convention elsewhere in this package.
+			if resp.StatusCode != http.StatusOK {
+				return
+			}
+
 			var showResp ollamaShowResponse
 			if err := json.NewDecoder(resp.Body).Decode(&showResp); err != nil {
 				return
