@@ -42,6 +42,10 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 		cleanup()
 		return err
 	}
+	if err := f.Sync(); err != nil {
+		cleanup()
+		return err
+	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
 		return err
@@ -51,6 +55,7 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	_ = os.Remove(tmp)
+	syncDir(dir)
 	return nil
 }
 
@@ -72,6 +77,11 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmp) // best-effort cleanup; the chmod error above is what matters
 		return err
 	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		_ = os.Remove(tmp) // best-effort cleanup; the sync error above is what matters
+		return err
+	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp) // best-effort cleanup; the close error above is what matters
 		return err
@@ -80,7 +90,21 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmp) // best-effort cleanup; the rename error above is what matters
 		return err
 	}
+	syncDir(dir)
 	return nil
+}
+
+// syncDir flushes a directory entry so a completed rename survives a
+// crash. Best-effort: some filesystems and platforms (notably Windows) do
+// not permit opening a directory for sync, and a failure here does not
+// invalidate the write that already landed.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
 
 // renameRetryBudget bounds how long renameFile keeps retrying transient

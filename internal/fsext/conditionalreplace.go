@@ -72,6 +72,9 @@ func conditionalReplaceExisting(path string, expected, data []byte, mode os.File
 	if err := file.Chmod(mode); err != nil {
 		return err
 	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
 	if err := file.Close(); err != nil {
 		return err
 	}
@@ -96,5 +99,6 @@ func conditionalReplaceExisting(path string, expected, data []byte, mode os.File
 	if err := rename(tempPath, path); err != nil {
 		return err
 	}
+	syncDir(dir)
 	return nil
 }

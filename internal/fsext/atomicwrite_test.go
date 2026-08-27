@@ -27,6 +27,44 @@ func TestAtomicWriteFile(t *testing.T) {
 	require.Equal(t, "test.json", entries[0].Name())
 }
 
+func TestAtomicWriteFile_SyncedContentAndMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support Unix file permissions")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "write.json")
+
+	require.NoError(t, AtomicWriteFile(path, []byte(`{"a":1}`), 0o640))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, `{"a":1}`, string(data))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+}
+
+func TestAtomicCreateFile_SyncedContentAndMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support Unix file permissions")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "create.json")
+
+	require.NoError(t, AtomicCreateFile(path, []byte(`{"b":2}`), 0o600))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, `{"b":2}`, string(data))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
 func TestAtomicWriteFile_PermissionsApplied(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not support Unix file permissions")
