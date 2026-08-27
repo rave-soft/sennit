@@ -95,149 +95,38 @@ JSONPath, инъекция опций git через имя ветки с вед
 | B9 | `fsext/atomicwrite.go:37-79`, `conditionalreplace.go:69-96` | Нет `fsync` перед `rename` | Сбой питания сразу после записи конфига/аккаунтов → пустой или нулевой файл на месте валидного | H |
 | B10 | `oauth/copilot/oauth.go:49,119,160` | Три захардкоженных `http.Client{Timeout:30s}` без прокси (Codex прокси поддерживает) | Логин Copilot за прокси невозможен | H |
 
-## 2. Баги — средние — что осталось
+## 2. Баги — средние — закрыто
 
-Закрытые пункты удалены (история в git, сводка в §0). Ложные срабатывания
-перечислены в §0 и сюда не возвращаются.
+Все пункты закрыты (2026-08-27/28), каждый с регрессионным тестом, про
+который проверено, что он падает без фикса. История в git.
 
-### agent
-- `delegation_finalizer.go:172,668` — `OnAuthRefresh` саб-агента получает
-  `active=nil`; после 401 креды обновляются у главного агента, а саб-агент
-  продолжает со старым ключом, вшитым в провайдер при сборке
-  (`runtime_builder.go:1424`) → повторный 401.
-- `tools/sennit_logs.go:684-692` — off-by-one в `lineStart`, когда чанк
-  оканчивается на `\n`; `alreadyReturned` (`:698`) не срабатывает,
-  курсорная пагинация работает по случайности.
+Не «починено», а осознанно задокументировано:
 
-### thread / workspace / app
-- **Гонка на `app.AgentCoordinator`** (`app/services.go` ↔ `app/app.go:158`,
-  `app_workspace.go:195-299`, ~15 читателей без синхронизации). После B4
-  поле меняется в одном месте — чинить стало проще. Самый весомый из
-  оставшихся.
-- `threadspawn/services.go:42-49` — `Coordinator()` навсегда кеширует nil
-  или устаревший координатор → `registerParent`/`DeliverTaskCompletion`
-  бьют в nil, завершения задач теряются молча.
-- `thread/lifecycle.go:1010` + `manager.go:438,1186-1211` — auto-merge
-  поток, завершающийся во время Shutdown, остаётся в статусе `running` до
-  следующего `Recover`.
-- `workspace/read_only_workspace.go` — `GetLastSession`,
-  `UncommittedFiles`, `Stats` проксируют в родителя;
-  `PrepareSessionChanges` (`:838`) считает файлы потока незакоммиченными
-  относительно родительского репозитория.
-- `app/shutdown.go:206-213` — nil-deref `p.app.agentDispatcher` при
-  `p.app == nil` (пустой `&app.App{}` разрешён `app.go:41-44`).
-- `threadspawn/attach.go:162-164` — события задач форвардятся только в
-  git-workspace, хотя `TaskManager` есть всегда.
-
-### config / oauth / cmd
-- `config/provider.go:869-975` — `TestConnection` глотает ошибки резолвера
-  (`apiKey, _ =`) и игнорирует `ProxyURL`: у пользователя за прокси
-  проверка падает с непонятным сообщением.
-- `config/credentials/credentials.go:488` — `ImportCopilot` ходит в сеть с
-  `context.TODO()` без дедлайна на старте.
-- `shellconfig/builder.go:62-84` — повторный `add` ранее затомбстоненного
-  имени пишет флаги рядом с `__sennit_tombstone`, и `ParseTombstone`
-  (`:35`) отвергает конфиг.
-- `oauth/codex/oauth.go:174-176`, `oauth/mcp/handler.go:570-572` — `error=`
-  в колбэке обрабатывается до проверки `state`: любой локальный запрос на
-  loopback-порт срывает вход.
-- `cmd/login.go:1049` — утечка signal-handler'ов;
-  `cmd/login_codex.go:74-101` — частичная запись при неудачном логине;
-  `cmd/logout.go:71,145` — осиротевшая ветка `"hyper"`.
-
-### fsext / log
-- `fsext/atomicwrite.go:49` — `AtomicCreateFile` через `os.Link`, падает на
-  ФС без hardlink; `conditionalreplace.go:86-96` — межпроцессный TOCTOU.
-- `fsext/ls.go:335` — `ListDirectory` следует по симлинкам, glob — нет.
-- `log/http.go:38` — тело запроса буферизуется целиком независимо от
-  уровня логирования; `:76-83,167-191` — редакция пропускает
-  `Cookie`/`Set-Cookie`, `key`, `credential`, `private_key`. **Секреты в
-  логах — брать в первую очередь.**
-
-### ui
-- `ui/attachments/attachments.go:196,255-256` — off-by-one в overflow-чипе;
-  при `width < maxItemWidth` `fits = -1`, лимит не срабатывает и чипы
-  вылезают за строку. **(H)**
-- `model/keypress.go:386-394` — триггер `@`-completion берёт
-  `len(curValue)` вместо позиции курсора: `@` в середине текста вставляет
-  не туда.
-- `model/mcp_actions.go:11-37` — безусловный `closeDialogMsg` закрывает
-  чужой диалог, если тот успел открыться.
-- `dialog/question_form.go:1105-1115,1185` — неизвестный `req.Type` →
-  `comps[0].SetFocused` на nil.
-- `model/chat.go:1205-1250` — `DelayedClickMsg.ItemIdx` сырой индекс,
-  сдвигается при `RemoveMessage`/`AppendMessages` в 400-мс окне.
-- `model/editor_input.go:350,447` — байтовая длина смешана с rune-колонкой.
-- `model/threads.go:255-261,564` — `selected()` отдаёт указатель в
-  массив, который `applyEvent` сдвигает in-place (латентно).
-- `model/skills.go:105-108` — сортировка глобального кеша in-place из
-  render-пути.
-- `dialog/accounts.go:928` — `m.accs` затирается до проверки `Err`;
-  `:1153-1167` — `ShortHelp` никогда не рисуется.
-- `dialog/oauth.go:265-268` — неудача `browser.OpenURL` останавливает
-  polling, хотя код и URL уже на экране.
-- `chat/assistant.go:473-507` — «инкрементальный» ключ не срабатывает,
-  полный хеш reasoning-текста на каждом тике (перф).
-- `chat/streaming_markdown.go:181-189` — замороженный префикс не
-  ревалидируется при позднем `[ref]: url`.
-- `list/list.go:728-739` — `SetItems` чистит `cache`, но не
-  `freezeSuppressed`.
+- `chat/streaming_markdown.go` — замороженный префикс не ревалидируется при
+  позднем `[ref]: url`. Ревалидация стоит дороже выигрыша от заморозки;
+  ограничение описано в коде вместо того, чтобы притворяться, что его нет.
+- `hooks/runner.go` — брошенная по таймауту горутина остаётся осознанным
+  компромиссом, но теперь `Run` хотя бы **сообщает** об этом ошибкой.
 
 ---
 
-## 3. План рефакторинга (SOLID / DRY / KISS / YAGNI)
+## 3. Рефакторинг (SOLID / DRY / KISS / YAGNI) — выполнено
 
-Порядок — по соотношению «риск/выигрыш». Каждый этап — отдельный PR (или серия), не смешивать с багфиксами из §1-2.
+| Этап | Результат |
+|---|---|
+| 1. DRY в `agent` | Схлопнут дубль `UpdateModels`, извлечён общий resolve-refresh-retry, вариадик → явный параметр, снят алиас `dispatch`, один `buildModel` для обоих путей, `runtimeInputs` кешируется с инвалидацией по версии конфига/поколению скиллов/идентичности адаптеров |
+| 2. God-файлы `agent` | `agent.go` **1374 → 285 строк**: выделены `session_call.go`, `run_turn.go`, `cancel.go`; четыре функции >100 строк разбиты на шаги |
+| 3. `thread` + `workspace` | Слияние → `merge.go`, permission-relay → `permissions.go`, пять копий teardown → `releaseRuntime`. **`Workspace` разбит на 14 ролевых интерфейсов**, `app_workspace.go` ~1100 → каркас + 11 файлов по ролям, `readOnlyWorkspace` инвертирован на default-deny |
+| 4. `config` + `oauth` | Кредитная половина `ConfigStore` → `store_credentials.go` (−450 строк), убран двойной merge, дедуплицирован dispatch в `shellconfig` |
+| 5. UI | Три копипаст-секции панели → `panelSection`, две кеш-машины → generic `listCache`, 25-case switch → таблица, дедупликация guard'ов, `diffview` |
+| 6. `lsp`/`discover`/`skills`/`fsext` | Один обход fastwalk, generic-энричер, `failCandidate`, `reusableClient`, объединён `traverseUp` |
 
-### ~~Этап 0. Багфиксы §1 (B1-B10)~~ — выполнено (см. §0)
-
-### Этап 1. DRY в `internal/agent` (низкий риск, чистый выигрыш)
-1. Удалить дубли: `runtime_builder.go:515-527 UpdateModels` ≡ `turn_dispatcher.go:75-87 runUpdateModels`; `buildAgentModel:327-369` ≡ `buildCustomAgentModel:380-425` (у одного нет `break` на `:344-348` — разное поведение при нескольких совпадениях, выбрать одно). 
-2. Блок «runtimeFor → refreshTokenIfExpired → key changed? → runtimeFor → newActiveRuntime» ×3 (`turn_dispatcher.go:93-105,156-172,226-245`) → один метод.
-3. Шесть `buildXProvider` (`runtime_builder.go:1081-1390`) различаются только типом опций → generic/таблица.
-4. **`runtimeInputs()` — вычислять лениво один раз и кешировать** в `delegationFinalizer` (закрывает B5); `runtimeToolInputs` (`:71-87`) перестаёт таскать `toolBuildErr` в данных.
-5. YAGNI: `runtimeOperationPort ...` variadic + `[0]` (`:529-539`) → указатель; `buildStreamAgent` (5 return-значений, 4 pass-through); `snapshotStreamRuntime` = алиас `effectiveStreamRuntime`; лестницы type-assertion в `runSubAgent:572-620,670-675` — единственная реализация `*sessionAgent` → конкретный тип или один маленький интерфейс; `coordinatorAgentPort`, алиас `dispatch = dispatcher`.
-6. Мёртвый код: `sennit_logs.go:206-248` (`runSennitLogsText`, `stripMetaFooter`, `readLastLines`), `logRecord.size`, `coordinator.go:41-42`, `turn_dispatcher.go:43 agents`.
-
-### Этап 2. Разрезать god-файлы `internal/agent` (SRP/ISP)
-- `agent.go` (1330): `session_call.go` (типы), `run_turn.go` (`runTurn` 230 строк, `finishTurn`, `dispatchDecision`), `agent.go` — конструктор + интерфейс. Интерфейс `SessionAgent` (20 методов) → разбить: `Steer`, `BeginAccepted`, `RegisterDelegationParent`, `SendToParent`, `GenerateTitle` имеют по одному вызывающему.
-- `dispatch.go:916-1097` — persistence/pubsub-методы (`persistCanceledTurn`, `Cancel`, `CancelAll`) противоречат заголовку файла → в `agent.go`. `CancelAll` — polling 10 мс → `sync.Cond`/done-канал.
-- Функции >100 строк: `handleStreamError` (turn.go:810-965), `runSubAgent` (545-694), `agenticFetchTool` (803-898, замыкание в 3 уровня), `scanBackward` (sennit_logs.go:612-805), `NewBashTool`, `buildTools` (runtime_builder.go:202-312).
-- `usage.go summarize` (~250 строк) — вынести вычисление usage из транзакции сессии (см. гонку в §2).
-
-### Этап 3. `internal/thread` + `workspace` + `app`
-1. `thread/manager.go` (1454) + `lifecycle.go` (1310): `merge.go` (`mergeAttempt/finishMerge/discardMerged/keepMergedBranch/recordDiscardNotice`, `manager.go:808-1009`), `permissions.go` (`lifecycle.go:442-490,634-649`); `steer` (`:514-625`) и `handleRunComplete` (`:918-1070`) → match/park/finalize.
-2. Единый `lifecycle.releaseRuntime(ctx, c, sessionID, cancelRun bool)` вместо пяти копий teardown (`manager.go:878-898, 1047-1059, 1186-1211`, `lifecycle.go:868-877, 1013-1019`). Заодно чинит бегущие с `m.ctx`/caller-ctx Release'ы (§2).
-3. `m.registerThreadParent(handle, st)` вместо трёх копий (`manager.go:334-338, 598-604, 731-740`).
-4. **`AppWorkspace` — фасад на ~100 методов, интерфейс на 94 (`workspace.go:489-504`)** — ISP-нарушение №1 в проекте. Разбить на role-структуры (sessions, agent, MCP, accounts, config), встроить. `readOnlyWorkspace` с ~60 override'ами и reflection-тестом → default-deny. `accountStore()` вместо шести `accounts.NewFileStore(config.GlobalAccountsFile())` (`app_workspace.go:749-818`).
-5. `app/shutdown.go:169-418` `Shutdown` (~250 строк) → функция на фазу; `tasks.go:162-305 Create` (~145).
-6. `app/events.go:94-125` ≡ `151-177`; `thread/store.go` три конвертера `[]db.Thread→[]Thread`; `message/content.go:412-521` семь «найти первую часть типа T» → generic; `store/service.go:250-264` N round-trip'ов при наличии `DeleteSessionMessages`; `lock/lock.go` `File`/`TryFile`.
-7. YAGNI: `deliverCompletion` (обёртка в одну строку), `threadControl.parentSessionID` дублирует колонку БД, `AttachDeps`/`AttachWithDeps` только для тестов, `services.go:231-239` тестовый accessor в prod, `SetCurrentSessionGeneration` игнорирует аргументы.
-
-### Этап 4. `internal/config` + `oauth` + `shellconfig`
-1. `ConfigStore` (7 мьютексов, staleness, agents snapshot, MCP epochs): `store_credentials.go` (`UpdateProviderAccount`, `ActivateAccount`, `SetProviderAPIKey`, `PersistRefreshedToken`, `withRefreshLock`); agent-snapshot из `watch.go` в свой тип.
-2. `applyProviderSetup(id, *ProviderConfig)` вместо четырёх копий Copilot/Codex-switch (`store.go:326,954,982`, `reload.go:791`) — закрывает два бага §2. Дубль «собрать ProviderConfig + записать api_key/oauth» (`store.go:355-398` vs `932-1011`).
-3. `load.go:536/562` — `jsons.Merge` дважды (O(n²) marshal), убрать первый.
-4. `oauth`: loopback-сервер дублируется (`codex/oauth.go:97-204`, `mcp/handler.go:384-667`) → общий пакет; Copilot перевести на `postToken`/`httpClient` Codex (закрывает B10).
-5. `shellconfig`: одинаковый dispatch в `hook.go:21`, `lsp.go:22`, `mcp.go:24`, `provider.go:23`, `model.go:32`; `lspRemove`==`mcpRemove`; три «filter []any by id/name».
-6. `cmd`: switch алиасов провайдеров ×3 (accounts/login/logout), style-переменные ×2, discovery+enrich ×2 (`models.go`, `providerload/discover.go`), `refreshCmd.RunE` ~140 строк, `session.go` 679 строк.
-7. Мёртвое: `project_init.go ProjectInitFlag`, `shell/shell.go:29-36 ShellType`, `BackgroundShellInfo`, `WaitContext`, `mcp/handler.go:479 bind()`, `codex/http.go:38 ValidateProxy`, `codex/usage.go:135 RecordUsage`, `loader.go` pass-through обёртки и `cmp` import-keeper, `import.go kinds`.
-
-### Этап 5. `internal/ui`
-1. `session_panel.go`: секции agents/threads — копипаста в `sessionPanelPlan` (495-524), `sessionPanelRowLayout` (734-764), `drawSessionPanel` (946-1033) + три header-функции + тройки hover/rect → тип `panelSection`.
-2. `model/ui.go`: `UI` — 20+ под-состояний в одной структуре; `Update` (576-727) — 25-case type switch, уже делегирующий в `update*` → таблица. `updateSession` (339 строк), `keyMapForPlatform` (265), `generateLayout` (211).
-3. `chat/agent.go` (1115) → item / render contexts / status renderers; `RenderTool` Agent vs AgenticFetch (455-515 vs 599-645); `chat/file.go` Edit/MultiEdit (224-271 vs 306-362); `tools_copy.go formatParametersForCopy` 15 case → таблица.
-4. `diffview.go`: `getContent` ×2, header-блок ×4, `renderUnified`/`renderSplit` общий скелет.
-5. `dialog`: `permissions.go` списки имён инструментов ×4 (364/562/581/655) → из реестра; spinner-boilerplate ×2; `stats.go` три breakdown-рендерера; `question_form.go Draw` (253 строки); `batchActions` (312).
-6. `model/chat.go`: «RawRender-or-Render» ×3, `SelectFirst/Last/Next/Prev` → один `walk(step)`.
-7. Кеш-идиома ×3: `threads_cache.go:86-211` ≡ `agents_cache.go:63-168` ≡ `threads_dock.go:153-273` → generic `listCache[T]`. Model-update замыкания ×4 (`dialog_actions.go:80-111,145-184,399-411`, `update_settings.go:321-328`) → `updatePreferredModelCmd`. Busy-guard новой сессии ×3, внешний редактор ×2, scroll+follow (`mouse.go:257-277` ≡ `keypress.go:549-568`). `layout.go`: inline-editor ×2, compact split ×2, `Draw` мутирует layout (`:115-118`) — перенести в Update. `updateSession`, `applyChromeDialogAction`, `handleEditorBindingKeyPress` → таблицы обработчиков.
-8. Мёртвое: `ActionToggleNotifications`, `choiceList.heightChanged`, `ToolRenderOpts.IsSpinning`, комментарии на несуществующие `sendAfterSessionLoaded`/`toolOutputMarkdownContent`, `list.go:699` self-assign, `InvalidateFrozen`≡`Invalidate`, `filepicker.go:1267`, `key.NewBinding` в каждом `ShortHelp`; `keys.go` биндинги без `key.Matches` (`Chat.Tab`, `AddAttachment`, `ScrollLeft/Right`, `Editor.Commands`, `MentionFile`); `requestSessionLoad` — обёртка; `keys.go:324-334` на darwin маппит `ctrl+c`→`super+c` (проверить намерение).
-
-### Этап 6. `lsp` / `hooks` / `discover` / `fsext`
-- Один обход fastwalk вместо `skills.go:247` / `watch.go:34` (закрывает B3).
-- `apply*Meta` ×4 в `discover` (litellm/llamacpp/lmstudio/omlx) → generic.
-- `lsp`: дубль `handlesFile` (`client.go:244`/`filesync.go:52`); `lifecycle.go:303-399 restart` → `failCandidate`; `runtime` с 6 func-hook полями (половина тестовые) → интерфейс; `prepareRestart` closure-returning-closure для первого старта.
-- `fsext`: одна temp-write последовательность вместо трёх (`atomicwrite.go:28-84`, `conditionalreplace.go:57-77`) с fsync (закрывает B9); `shouldIgnore` ×2 (`ls.go:183-225`/`307-325`); `traverseUp`/`traverseUpBounded`; всегда-true `gitignore` в `globWithDoubleStar`.
+Не сделано намеренно, с обоснованием: обобщение шести `buildXProvider`
+(у Anthropic своя логика — против KISS), объединение двух loopback-серверов
+OAuth (разные контракты: одноразовый против конкурентного), замена 10-мс
+поллинга в `CancelAll` на condvar (потребовала бы менять дисциплину
+блокировок), вынос мутации layout из `Draw` (сломало тест — откачено),
+сегментация интерфейса `SessionAgent` (одна прод-реализация, моки в пакете).
 
 ---
 
