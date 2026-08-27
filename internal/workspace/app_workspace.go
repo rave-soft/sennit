@@ -35,6 +35,16 @@ import (
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
+// runAndCaptureStream and runAndPersist are indirected through package
+// vars, rather than called directly on shell.*, so a test can substitute
+// a failing stand-in without needing a shell command that actually fails
+// to start (RunAndCaptureStream folds every real failure into
+// CaptureResult.ExitCode and never itself returns a non-nil error).
+var (
+	runAndCaptureStream = shell.RunAndCaptureStream
+	runAndPersist       = shell.RunAndPersist
+)
+
 // AppWorkspace implements the Workspace interface by delegating
 // directly to an in-process [app.App] instance.
 type AppWorkspace struct {
@@ -175,12 +185,18 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	var err error
 
 	if onProgress != nil {
-		result, err = shell.RunAndCaptureStream(ctx, opts, onProgress)
+		result, err = runAndCaptureStream(ctx, opts, onProgress)
 	} else {
-		result, err = shell.RunAndPersist(ctx, opts, persist)
+		result, err = runAndPersist(ctx, opts, persist)
 	}
 
-	if err != nil && onProgress == nil {
+	// Both paths report failure the same way: skip persistence and
+	// surface the error, matching RunAndPersist's own convention of
+	// returning early on error without calling persist. A streamed
+	// command that fails to start left result at its zero value, and
+	// persisting a zero/partial result under this command's name would
+	// misrepresent it as having produced empty, successful output.
+	if err != nil {
 		return proto.ShellCommandResponse{}, err
 	}
 
@@ -422,14 +438,30 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 		defer cancel()
 		defer close(out)
 
+		// send delivers ev unless the caller has gone away. It reports
+		// whether the stream should keep going: a consumer that stopped
+		// reading leaves this goroutine blocked on an unbuffered send
+		// forever, and with it the deferred cancel and close, so every
+		// send has to be able to give up.
+		send := func(ev AgentRunEvent) bool {
+			select {
+			case out <- ev:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
 		readBytes := make(map[string]int)
 		var printed bool
 		var lastStatus string
 
 		// emit turns one message event into a text delta and/or a status
-		// change, or reports that the stream must end. Shared by the live
-		// loop and the drain after the run finishes, so both produce
-		// identical output.
+		// change, or reports that the stream must end — either because
+		// the message content is corrupt (fail != nil) or because the
+		// consumer went away mid-send (stop, with fail == nil). Shared by
+		// the live loop and the drain after the run finishes, so both
+		// produce identical output.
 		emit := func(ev pubsub.Event[message.Message]) (stop bool, fail error) {
 			msg := ev.Payload
 			if msg.SessionID != sessionID || msg.Role != message.Assistant {
@@ -443,7 +475,9 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			// the longest silence of the turn.
 			if status := msg.Working().Label(); status != "" && status != lastStatus {
 				lastStatus = status
-				out <- AgentRunEvent{Status: status}
+				if !send(AgentRunEvent{Status: status}) {
+					return true, nil
+				}
 			}
 			if len(msg.Parts) == 0 {
 				return false, nil
@@ -467,7 +501,9 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 				return false, nil
 			}
 			printed = true
-			out <- AgentRunEvent{TextDelta: part}
+			if !send(AgentRunEvent{TextDelta: part}) {
+				return true, nil
+			}
 			return false, nil
 		}
 
@@ -483,7 +519,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 					if !ok {
 						return nil
 					}
-					if _, err := emit(ev); err != nil {
+					if stop, err := emit(ev); stop {
 						return err
 					}
 				default:
@@ -497,17 +533,17 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			case result := <-done:
 				if result.err != nil {
 					if errors.Is(result.err, context.Canceled) {
-						out <- AgentRunEvent{Done: true}
+						send(AgentRunEvent{Done: true})
 						return
 					}
-					out <- AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)}
+					send(AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)})
 					return
 				}
 				if err := drain(); err != nil {
-					out <- AgentRunEvent{Done: true, Err: err}
+					send(AgentRunEvent{Done: true, Err: err})
 					return
 				}
-				out <- AgentRunEvent{Done: true}
+				send(AgentRunEvent{Done: true})
 				return
 
 			case ev, ok := <-messageEvents:
@@ -519,13 +555,15 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 					messageEvents = nil
 					continue
 				}
-				if _, err := emit(ev); err != nil {
-					out <- AgentRunEvent{Done: true, Err: err}
+				if stop, err := emit(ev); stop {
+					if err != nil {
+						send(AgentRunEvent{Done: true, Err: err})
+					}
 					return
 				}
 
 			case <-ctx.Done():
-				out <- AgentRunEvent{Done: true, Err: ctx.Err()}
+				send(AgentRunEvent{Done: true, Err: ctx.Err()})
 				return
 			}
 		}
