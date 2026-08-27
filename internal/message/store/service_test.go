@@ -1107,3 +1107,122 @@ func TestCloseStopsTimersSoNothingWritesAfterwards(t *testing.T) {
 	require.Equal(t, "hello", stored.Content().Text,
 		"Close must stop the service arming new debounced work")
 }
+
+// TestDeleteVersusInFlightUpdate_NoPendingLeak reproduces the leak where
+// an Update from an in-flight stream, landing during or any time after
+// Delete, recreates pending[id] with nothing left to ever remove it --
+// one leaked pendingState per message deleted mid-stream, for the life
+// of the process. On the pre-fix code the concurrent race below does
+// not reproduce it reliably: Update has no I/O of its own, so it
+// typically loses the race entirely and Delete's cleanup, running
+// after, catches whatever it left behind. The leak needs Update's
+// critical section to run strictly after Delete's has already
+// completed -- which a stream that has not yet learned its message was
+// deleted will eventually do simply by calling Update again. The
+// unconditional post-race Update below models exactly that "late"
+// caller and is what actually pins the fix: on the code before this
+// fix it deterministically resurrects pending[id] (verified locally by
+// checking out the pre-fix service.go and confirming this failed with
+// "pending entry must not be resurrected"). The concurrent race is
+// still exercised, under -race, for the fix's locking itself.
+func TestDeleteVersusInFlightUpdate_NoPendingLeak(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithDebounce(time.Hour))
+	impl := svc.(*service)
+
+	assertNoLiveEntry := func(id, label string) {
+		t.Helper()
+		impl.mu.Lock()
+		p, ok := impl.pending[id]
+		live := ok && !p.deleted
+		impl.mu.Unlock()
+		require.False(t, live, "a live pending entry must not survive %s", label)
+	}
+
+	for i := 0; i < 50; i++ {
+		msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		start := make(chan struct{})
+		go func() {
+			defer wg.Done()
+			<-start
+			m := msg
+			m.AppendContent("streamed")
+			_ = svc.Update(t.Context(), m)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			require.NoError(t, svc.Delete(t.Context(), msg.ID))
+		}()
+		close(start)
+		wg.Wait()
+
+		assertNoLiveEntry(msg.ID, "Delete racing an in-flight Update")
+
+		// The deterministic case: a stream delta that arrives strictly
+		// after Delete has already returned. Nothing in the old code
+		// ever cleared such a resurrected entry.
+		late := msg
+		late.AppendContent("late")
+		require.NoError(t, svc.Update(t.Context(), late))
+		assertNoLiveEntry(msg.ID, "a late Update arriving after Delete returned")
+
+		// A late flush of whatever the race left behind must not
+		// resurrect the row or crash.
+		require.NoError(t, svc.FlushAll(t.Context()))
+		_, err = svc.Get(t.Context(), msg.ID)
+		require.Error(t, err, "deleted message must stay deleted after FlushAll (iteration %d)", i)
+	}
+}
+
+// TestDeleteSessionMessages_PublishesDeletedEventPerMessage pins that
+// batching the SQL delete in DeleteSessionMessages (see the generated
+// DeleteSessionMessages query) did not change the pubsub contract:
+// callers that relied on one DeletedEvent per message, in list order,
+// must keep seeing exactly that.
+func TestDeleteSessionMessages_PublishesDeletedEventPerMessage(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	var created []Message
+	for i := 0; i < 3; i++ {
+		m, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: User})
+		require.NoError(t, err)
+		created = append(created, m)
+	}
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := svc.Subscribe(subCtx)
+
+	require.NoError(t, svc.DeleteSessionMessages(t.Context(), sessionID))
+
+	var deletedIDs []string
+	for range created {
+		select {
+		case ev := <-sub:
+			require.Equal(t, pubsub.DeletedEvent, ev.Type)
+			deletedIDs = append(deletedIDs, ev.Payload.ID)
+		case <-time.After(time.Second):
+			t.Fatal("expected a DeletedEvent per deleted message")
+		}
+	}
+
+	want := make([]string, len(created))
+	for i, m := range created {
+		want[i] = m.ID
+	}
+	require.Equal(t, want, deletedIDs,
+		"DeletedEvent must fire once per message, in the same order as before")
+
+	for _, m := range created {
+		_, err := svc.Get(t.Context(), m.ID)
+		require.Error(t, err, "message row must actually be gone")
+	}
+}

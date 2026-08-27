@@ -135,6 +135,18 @@ type pendingState struct {
 	// treated as a real prior state.
 	hasFlushed bool
 
+	// deleted tombstones an ID whose row Delete (or DeleteSessionMessages)
+	// has removed from SQL. Update checks this before creating or reusing
+	// an entry, so a stream's in-flight Update racing the delete -- or
+	// arriving any time afterward, since nothing else would ever clear
+	// this entry -- cannot resurrect pending[id]; flushOne and FlushAll
+	// skip it too. The entry itself is left in the map rather than
+	// deleted, so a late Update has something to check: cheaper than the
+	// pendingState it replaced (no buffered message.Message, no timer),
+	// but not literally freed. Accepted tradeoff against widening the
+	// lock across the DB delete or keeping a second, ever-growing map.
+	deleted bool
+
 	// flushDone is created fresh each time flushing flips true and
 	// closed when that flush attempt ends (success or error). A
 	// waiter that finds flushing == true grabs a reference to this
@@ -181,28 +193,39 @@ func NewService(q db.Querier, opts ...ServiceOption) Service {
 	return s
 }
 
-func (s *service) Delete(ctx context.Context, id string) error {
-	message, err := s.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	err = s.q.DeleteMessage(ctx, message.ID)
-	if err != nil {
-		return err
-	}
-	// Drop any pending coalesced state for this ID. We never want to
-	// flush back over a deleted row.
+// evictAndPublishDeleted tombstones msg's pending entry (see
+// pendingState.deleted) and publishes [pubsub.DeletedEvent]. Split out
+// of Delete so [Service.DeleteSessionMessages] can issue one bulk SQL
+// delete while keeping this per-message work -- pubsub fan-out and
+// pending eviction -- exactly as it ran per message before.
+func (s *service) evictAndPublishDeleted(msg message.Message) {
 	s.mu.Lock()
-	if p, ok := s.pending[id]; ok {
-		if p.timer != nil {
-			p.timer.Stop()
-		}
-		delete(s.pending, id)
+	p, ok := s.pending[msg.ID]
+	if !ok {
+		p = &pendingState{}
+		s.pending[msg.ID] = p
 	}
+	if p.timer != nil {
+		p.timer.Stop()
+		p.timer = nil
+	}
+	p.deleted = true
+	p.dirty = false
 	s.mu.Unlock()
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.DeletedEvent, message.Clone())
+	s.Publish(pubsub.DeletedEvent, msg.Clone())
+}
+
+func (s *service) Delete(ctx context.Context, id string) error {
+	msg, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.q.DeleteMessage(ctx, msg.ID); err != nil {
+		return err
+	}
+	s.evictAndPublishDeleted(msg)
 	return nil
 }
 
@@ -247,18 +270,23 @@ func (s *service) Create(ctx context.Context, sessionID string, params message.C
 	return msg, nil
 }
 
+// DeleteSessionMessages implements [Service.DeleteSessionMessages] with a
+// single bulk delete (the generated DeleteSessionMessages query shares
+// DeleteMessage's WHERE-clause semantics -- no FK references messages by
+// id, only by session_id, so cascade behaviour is identical) instead of
+// one round trip per message. The per-message work Delete also did --
+// evicting pending state and publishing [pubsub.DeletedEvent] -- still
+// runs once per message, in the same order, via evictAndPublishDeleted.
 func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) error {
 	messages, err := s.List(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	for _, message := range messages {
-		if message.SessionID == sessionID {
-			err = s.Delete(ctx, message.ID)
-			if err != nil {
-				return err
-			}
-		}
+	if err := s.q.DeleteSessionMessages(ctx, sessionID); err != nil {
+		return err
+	}
+	for _, msg := range messages {
+		s.evictAndPublishDeleted(msg)
 	}
 	return nil
 }
@@ -275,6 +303,14 @@ func (s *service) Update(ctx context.Context, msg message.Message) error {
 	if s.debounce <= 0 {
 		s.mu.Lock()
 		p, ok := s.pending[msg.ID]
+		if ok && p.deleted {
+			// The message was deleted -- possibly by a stream landing
+			// mid-delete, possibly long since. Either way, a late
+			// Update for a deleted message is a no-op, not a
+			// resurrection of pending[id].
+			s.mu.Unlock()
+			return nil
+		}
 		if !ok {
 			p = &pendingState{}
 			s.pending[msg.ID] = p
@@ -288,6 +324,12 @@ func (s *service) Update(ctx context.Context, msg message.Message) error {
 
 	s.mu.Lock()
 	p, ok := s.pending[msg.ID]
+	if ok && p.deleted {
+		// See the debounce<=0 branch above: a deleted message's stream
+		// must not resurrect its pending entry.
+		s.mu.Unlock()
+		return nil
+	}
 	if !ok {
 		p = &pendingState{}
 		s.pending[msg.ID] = p
@@ -340,6 +382,9 @@ func (s *service) FlushAll(ctx context.Context) error {
 	s.mu.Lock()
 	ids := make([]string, 0, len(s.pending))
 	for id, p := range s.pending {
+		if p.deleted {
+			continue
+		}
 		if p.dirty || p.flushing {
 			ids = append(ids, id)
 		}
@@ -387,7 +432,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 	for {
 		s.mu.Lock()
 		p, ok := s.pending[id]
-		if !ok {
+		if !ok || p.deleted {
 			s.mu.Unlock()
 			return nil
 		}
@@ -514,7 +559,7 @@ func (s *service) rearmFlushTimer(id string, p *pendingState) {
 	if s.closed {
 		return
 	}
-	if cur, ok := s.pending[id]; ok && cur == p && cur.dirty && !cur.flushing && cur.timer == nil {
+	if cur, ok := s.pending[id]; ok && cur == p && !cur.deleted && cur.dirty && !cur.flushing && cur.timer == nil {
 		cur.timer = time.AfterFunc(s.debounce, func() {
 			_ = s.flushOne(context.Background(), id, false)
 		})
