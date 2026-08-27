@@ -619,6 +619,7 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 	done := false
 	reachedStart := false
 	incomplete := false // an oversized line was discarded without being fully read
+	firstChunk := true  // true only for the very first chunk read by this call
 	// bytesScanned counts every byte examined from the scan start (page and
 	// behind alike). It is the budget: once it reaches maxScanBytes the scan
 	// stops, so a pathological file cannot run the tool forever and match_count
@@ -682,6 +683,23 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 		// carried head), which is the correct absolute file position whether or
 		// not the head was discarded.
 		lineEnd := chunkStart + int64(len(data))
+		if firstChunk {
+			// On every later iteration, lineEnd's base is the absolute position
+			// the previous iteration's carried remainder implicitly recorded,
+			// which is correct by construction. The very first chunk of the
+			// call has no such history: start is either the file size or a
+			// cursor offset, and both land one byte past the newline that
+			// terminates the newest line in scope - not on the newline itself -
+			// unless the file/cursor boundary has no trailing newline (a file
+			// with no final newline, or start == 0), in which case start is
+			// already the correct boundary. Back lineEnd up by one only when
+			// the read data actually ends in that newline, so the newest
+			// line's derived lineStart lands one past it, not on it.
+			if len(data) > 0 && data[len(data)-1] == '\n' {
+				lineEnd--
+			}
+			firstChunk = false
+		}
 		for i := len(lines) - 1; i >= 0; i-- {
 			line := lines[i]
 			if len(line) == 0 {
@@ -691,10 +709,18 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 			lineStart := lineEnd - int64(len(line))
 			lineEnd = lineStart - 1 // include the separator newline in the gap
 
-			// alreadyReturned is the single line the cursor points at: the
-			// previous page's oldest entry, at offset == boundary. It was
-			// already rendered, so the continuation skips it (no dup). With no
-			// cursor (boundary < 0) nothing is pre-returned.
+			// alreadyReturned is meant to guard against re-rendering the single
+			// line the cursor points at (the previous page's oldest entry, at
+			// offset == boundary). In practice it is provably unreachable: a
+			// continuation reads chunks covering [chunkStart, pos) with pos
+			// initialized to start (== boundary), so every lineStart derived
+			// from bytes this scan ever reads is strictly less than boundary -
+			// the boundary line itself sits just outside the read window by
+			// construction, appends included. Verified empirically (a
+			// two-call pagination walk never observes lineStart == boundary)
+			// both before and after the firstChunk fix above, so this is
+			// long-standing defensive dead code, not something the fix
+			// revives. Left in place as a harmless safety net.
 			alreadyReturned := boundary >= 0 && lineStart == boundary
 
 			// parseRecord parses + classifies the line. ok is false on a skip
