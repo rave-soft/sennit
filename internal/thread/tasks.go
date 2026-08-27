@@ -370,7 +370,14 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID strin
 // failCreate records cause as the task's terminal failure and returns it
 // to Create's caller.
 func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) error {
-	if _, err := t.lc.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
+	// detachForTerminalWork, not ctx directly: cause is very often ctx
+	// having been cancelled, and a status write built on that same dead
+	// ctx would fail too, leaving the row stuck at its transient status
+	// until a restart's Recover reconciles it. See [Manager.failCreate],
+	// which solves this identical problem the same way.
+	writeCtx, cancel := detachForTerminalWork(ctx)
+	defer cancel()
+	if _, err := t.lc.setStatus(writeCtx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
 		slog.Error("Failed to record task create failure", "component", "thread", "task", st.ID, "error", err)
 	}
 	return cause

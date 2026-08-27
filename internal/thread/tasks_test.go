@@ -942,6 +942,44 @@ func TestTaskManager_CreateFailsThroughFailCreateWhenSetStatusRunningErrors(t *t
 	require.Contains(t, got.Error, setStatusErr.Error())
 }
 
+// cancelOnSetSessionStore wraps a real Store and, on the SetSession call
+// TaskManager.Create makes right after CreateTaskSession, cancels the
+// caller's own ctx and fails with ctx.Err() - reproducing the case
+// failCreate must handle: the cause of the failure IS the context that
+// just got cancelled, not some unrelated store error.
+type cancelOnSetSessionStore struct {
+	thread.Store
+	cancel context.CancelFunc
+}
+
+func (s *cancelOnSetSessionStore) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
+	s.cancel()
+	return thread.Thread{}, ctx.Err()
+}
+
+// TestTaskManager_FailCreateRecordsFailureOnCancelledContext pins
+// TaskManager.failCreate against the same shape of bug already fixed in
+// [Manager.failCreate] and handleRunComplete: writing the terminal
+// failure status with the same ctx that just got cancelled means that
+// write fails too, leaving the task row stuck at its transient status
+// (StatusPending here) forever instead of being recorded as failed.
+func TestTaskManager_FailCreateRecordsFailureOnCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	store := &cancelOnSetSessionStore{Store: thread.NewStoreForTest(t), cancel: cancel}
+	_, tasks, _ := newTestTaskManager(t, store)
+
+	_, err := tasks.Create(ctx, thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.Error(t, err)
+
+	all, listErr := store.ListAll(t.Context())
+	require.NoError(t, listErr)
+	require.Len(t, all, 1)
+
+	got := all[0]
+	require.Equal(t, thread.StatusFailed, got.Status,
+		"the terminal failure must be recorded even though the context that caused it was already cancelled")
+}
+
 // flakyGetStore wraps a real Store and fails the first failsLeft calls to
 // Get(id) before letting the real store answer, for driving
 // handleRunComplete's post-teardown store.Get retry.
