@@ -79,10 +79,17 @@ func init() {
 func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
 	loginCtx := getLoginContext()
 
-	if !force {
-		cfg := ws.Config()
-		if cfg != nil {
-			if pc, ok := cfg.Providers.Get("copilot"); ok && pc.OAuthToken != nil {
+	// A proxy already configured for this provider (e.g. set by hand in
+	// config, or left over from a previous sign-in) should route this
+	// sign-in too: the model calls it will make afterwards use it, and a
+	// sign-in that ignored it would fail while the provider looked
+	// correctly configured.
+	var proxyURL string
+	cfg := ws.Config()
+	if cfg != nil {
+		if pc, ok := cfg.Providers.Get("copilot"); ok {
+			proxyURL = pc.ProxyURL
+			if !force && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to GitHub Copilot.")
 				fmt.Println("Use --force to re-authenticate.")
 				return nil
@@ -97,14 +104,14 @@ func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
 	case hasDiskToken:
 		fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
 
-		t, err := copilot.RefreshToken(loginCtx, diskToken)
+		t, err := copilot.RefreshToken(loginCtx, proxyURL, diskToken)
 		if err != nil {
 			return fmt.Errorf("unable to refresh token from disk: %w", err)
 		}
 		token = t
 	default:
 		fmt.Println("Requesting device code from GitHub...")
-		dc, err := copilot.RequestDeviceCode(loginCtx)
+		dc, err := copilot.RequestDeviceCode(loginCtx, proxyURL)
 		if err != nil {
 			return err
 		}
@@ -126,7 +133,7 @@ func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
 
 		fmt.Println("Waiting for authorization...")
 
-		t, err := copilot.PollForToken(loginCtx, dc)
+		t, err := copilot.PollForToken(loginCtx, proxyURL, dc)
 		if errors.Is(err, copilot.ErrNotAvailable) {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")

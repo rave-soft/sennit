@@ -32,8 +32,9 @@ type DeviceCode struct {
 	Interval        int    `json:"interval"`
 }
 
-// RequestDeviceCode initiates the device code flow with GitHub.
-func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
+// RequestDeviceCode initiates the device code flow with GitHub. proxyURL
+// routes the request, and may be empty for none.
+func RequestDeviceCode(ctx context.Context, proxyURL string) (*DeviceCode, error) {
 	data := url.Values{}
 	data.Set("client_id", clientID)
 	data.Set("scope", "read:user")
@@ -46,7 +47,10 @@ func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", userAgent)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client, err := httpClient(proxyURL, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -66,7 +70,9 @@ func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 }
 
 // PollForToken polls GitHub for the access token after user authorization.
-func PollForToken(ctx context.Context, dc *DeviceCode) (*oauth.Token, error) {
+// proxyURL routes the poll and the subsequent Copilot token exchange, and
+// may be empty for none.
+func PollForToken(ctx context.Context, proxyURL string, dc *DeviceCode) (*oauth.Token, error) {
 	interval := max(dc.Interval, 5)
 	deadline := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
@@ -79,7 +85,7 @@ func PollForToken(ctx context.Context, dc *DeviceCode) (*oauth.Token, error) {
 		case <-ticker.C:
 		}
 
-		token, err := tryGetToken(ctx, dc.DeviceCode)
+		token, err := tryGetToken(ctx, proxyURL, dc.DeviceCode)
 		if errors.Is(err, errPending) {
 			continue
 		}
@@ -102,7 +108,7 @@ var (
 	errSlowDown = fmt.Errorf("slow_down")
 )
 
-func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
+func tryGetToken(ctx context.Context, proxyURL, deviceCode string) (*oauth.Token, error) {
 	data := url.Values{}
 	data.Set("client_id", clientID)
 	data.Set("device_code", deviceCode)
@@ -116,7 +122,10 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", userAgent)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client, err := httpClient(proxyURL, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -136,7 +145,7 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 		if result.AccessToken == "" {
 			return nil, errPending
 		}
-		return getCopilotToken(ctx, result.AccessToken)
+		return getCopilotToken(ctx, proxyURL, result.AccessToken)
 	case "authorization_pending":
 		return nil, errPending
 	case "slow_down":
@@ -146,7 +155,7 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 	}
 }
 
-func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, error) {
+func getCopilotToken(ctx context.Context, proxyURL, githubToken string) (*oauth.Token, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", copilotTokenURL, nil)
 	if err != nil {
 		return nil, err
@@ -157,7 +166,10 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 		req.Header.Set(k, v)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client, err := httpClient(proxyURL, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -194,7 +206,8 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 	return copilotToken, nil
 }
 
-// RefreshToken refreshes the Copilot token using the GitHub token.
-func RefreshToken(ctx context.Context, githubToken string) (*oauth.Token, error) {
-	return getCopilotToken(ctx, githubToken)
+// RefreshToken refreshes the Copilot token using the GitHub token. proxyURL
+// routes the request, and may be empty for none.
+func RefreshToken(ctx context.Context, proxyURL, githubToken string) (*oauth.Token, error) {
+	return getCopilotToken(ctx, proxyURL, githubToken)
 }

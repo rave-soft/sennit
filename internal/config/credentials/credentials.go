@@ -378,7 +378,10 @@ func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string)
 	}
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
-		return copilot.RefreshToken(ctx, refreshToken)
+		// Copilot is reachable only through a proxy for some users, and a
+		// refresh that ignored the one the provider is configured with
+		// would fail while every model call kept working.
+		return copilot.RefreshToken(ctx, m.providerProxy(providerID), refreshToken)
 	case codex.ProviderID:
 		// An imported login shares the Codex CLI's refresh token, and that
 		// token is single-use: spending it here logs the CLI out. The CLI
@@ -485,7 +488,7 @@ func (m *Manager) ImportCopilot() (*oauth.Token, bool) {
 	}
 
 	slog.Info("Found existing GitHub Copilot token on disk. Authenticating...")
-	token, err := copilot.RefreshToken(context.TODO(), diskToken)
+	token, err := copilot.RefreshToken(context.TODO(), m.providerProxy(string(catwalk.InferenceProviderCopilot)), diskToken)
 	if err != nil {
 		slog.Error("Unable to import GitHub Copilot token", "error", err)
 		return nil, false
