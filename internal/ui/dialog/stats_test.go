@@ -182,6 +182,64 @@ func TestStatsBar_NonZeroAlwaysVisible(t *testing.T) {
 	require.Equal(t, strings.Repeat("█", statsBarWidth), statsBar(100, 100))
 }
 
+// A transient failure must not stick: once a retry of the same tab
+// succeeds, the old error must not still be shown alongside (or instead
+// of) the fresh data.
+func TestStats_SuccessfulReloadClearsEarlierError(t *testing.T) {
+	t.Parallel()
+
+	ws := &statsTestWorkspace{err: errors.New("database is locked")}
+	d := newStatsTestDialog(t, ws, "sess-1")
+	d.HandleMsg(d.LoadCmd()())
+	require.Contains(t, drawStats(t, d), "database is locked")
+
+	// Simulate switching away and back: loadTab only re-queries because
+	// the failed attempt never marked the tab loaded.
+	ws.err = nil
+	ws.snap = sampleSnapshot()
+	cmd := d.loadTab(d.active)
+	require.NotNil(t, cmd, "a tab that failed to load must be retried")
+	d.HandleMsg(cmd())
+
+	out := drawStats(t, d)
+	require.NotContains(t, out, "database is locked", "a successful reload must clear the earlier error")
+	require.Contains(t, out, "By model")
+}
+
+// statsFrontDialog stands in for whatever might open over Stats while its
+// queries are in flight — a permission prompt raised by the sweep itself
+// is the realistic case. It never handles StatsLoadedMsg, so if the
+// message were routed to whichever dialog is on top instead of by
+// address, it would be silently dropped here.
+type statsFrontDialog struct{}
+
+func (statsFrontDialog) ID() string                               { return "stats-front-test" }
+func (statsFrontDialog) HandleMsg(tea.Msg) Action                 { return nil }
+func (statsFrontDialog) Draw(uv.Screen, uv.Rectangle) *tea.Cursor { return nil }
+
+var _ Dialog = statsFrontDialog{}
+
+// A load result must reach Stats even when another dialog has opened on
+// top of it before the result arrives, so the tab does not get stuck on
+// "Reading usage…" forever.
+func TestStats_LoadedMsgReachesDialogBehindAnotherOne(t *testing.T) {
+	t.Parallel()
+
+	ws := &statsTestWorkspace{snap: sampleSnapshot()}
+	d := newStatsTestDialog(t, ws, "sess-1")
+	cmd := d.LoadCmd()
+	require.NotNil(t, cmd)
+
+	var overlay Overlay
+	overlay.OpenDialog(d)
+	overlay.OpenDialog(statsFrontDialog{})
+
+	overlay.Update(cmd())
+
+	out := drawStats(t, d)
+	require.Contains(t, out, "By model", "the result must reach Stats even though another dialog is in front")
+}
+
 // The same model id served by two providers is two rows with two costs.
 // Naming only the model would print what looks like the same row twice,
 // so the provider is appended exactly where it tells them apart.

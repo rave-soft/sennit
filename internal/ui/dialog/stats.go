@@ -55,6 +55,27 @@ type StatsLoadedMsg struct {
 	Err      error
 }
 
+// DialogID implements [DialogAddressed]: gathering runs while the dialog
+// is open, and a permission prompt raised by the sweep itself (or any
+// other dialog) can open over Stats before the result lands. Without an
+// address the result would go to whatever dialog is on top instead, and
+// the tab it belongs to would be stuck "Reading usage…" forever.
+func (StatsLoadedMsg) DialogID() string { return StatsID }
+
+// statsTabState is everything the dialog tracks for one tab. Keeping
+// these three facts in one value instead of three parallel maps means a
+// tab can't end up with, say, a stale error surviving a load that then
+// succeeds — every place that changes one field owns the whole state.
+type statsTabState struct {
+	snapshot stats.Snapshot
+	// loaded is true once a query for this tab has completed
+	// successfully. Snapshot alone can't carry that: an empty snapshot is
+	// a valid, loaded result.
+	loaded  bool
+	err     error
+	loading bool
+}
+
 // Stats is the /stats screen: recorded token, cost, time, and delegation
 // usage, in three scopes selected by tabs.
 //
@@ -71,13 +92,10 @@ type Stats struct {
 	sessionID string
 
 	active int
-	// snapshots, errs, and loading are keyed by tab index rather than
-	// scope so a tab is exactly one cell in each: the dialog keeps every
-	// tab it has loaded, so switching back is instant and does not
-	// re-query.
-	snapshots map[int]stats.Snapshot
-	errs      map[int]error
-	loading   map[int]bool
+	// tabs is keyed by tab index rather than scope so a tab is exactly one
+	// entry: the dialog keeps every tab it has loaded, so switching back
+	// is instant and does not re-query.
+	tabs map[int]statsTabState
 
 	help   help.Model
 	keyMap struct {
@@ -98,9 +116,7 @@ func NewStats(com *common.Common, sessionID string) *Stats {
 		Base:      NewBase(com, statsDialogMaxWidth),
 		com:       com,
 		sessionID: sessionID,
-		snapshots: make(map[int]stats.Snapshot, len(statsTabs)),
-		errs:      make(map[int]error, len(statsTabs)),
-		loading:   make(map[int]bool, len(statsTabs)),
+		tabs:      make(map[int]statsTabState, len(statsTabs)),
 	}
 	// Open on Project: a session's own numbers are already on the
 	// sidebar, so the first thing this screen can say that nothing else
@@ -140,10 +156,11 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 	if i < 0 || i >= len(statsTabs) {
 		return nil
 	}
-	if _, ok := d.snapshots[i]; ok {
+	st := d.tabs[i]
+	if st.loaded {
 		return nil
 	}
-	if d.loading[i] {
+	if st.loading {
 		return nil
 	}
 	scope := statsTabs[i].scope
@@ -154,7 +171,8 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 		return nil
 	}
 
-	d.loading[i] = true
+	st.loading = true
+	d.tabs[i] = st
 	ws := d.com.Workspace
 	req := stats.Request{Scope: scope}
 	switch scope {
@@ -183,12 +201,21 @@ func (d *Stats) HandleMsg(msg tea.Msg) Action {
 			if tab.scope != msg.Scope {
 				continue
 			}
-			d.loading[i] = false
+			st := d.tabs[i]
+			st.loading = false
 			if msg.Err != nil {
-				d.errs[i] = msg.Err
+				st.err = msg.Err
+				d.tabs[i] = st
 				break
 			}
-			d.snapshots[i] = msg.Snapshot
+			// A successful load clears any earlier error: a transient
+			// failure (a timeout) must not stick around once a retry
+			// works, and loaded/err/loading now change together so they
+			// can't disagree.
+			st.err = nil
+			st.snapshot = msg.Snapshot
+			st.loaded = true
+			d.tabs[i] = st
 			break
 		}
 		return nil
@@ -257,16 +284,17 @@ func (d *Stats) renderBody(width int) string {
 	t := d.com.Styles
 	i := d.active
 
-	if err, ok := d.errs[i]; ok {
-		return t.Status.ErrorMessage.Render("Could not read usage: " + err.Error())
+	st := d.tabs[i]
+	if st.err != nil {
+		return t.Status.ErrorMessage.Render("Could not read usage: " + st.err.Error())
 	}
 	if statsTabs[i].scope == stats.ScopeSession && d.sessionID == "" {
 		return t.Resource.AdditionalText.Render("No active session yet — start one and its usage shows up here.")
 	}
-	snap, ok := d.snapshots[i]
-	if !ok {
+	if !st.loaded {
 		return t.Resource.AdditionalText.Render("Reading usage…")
 	}
+	snap := st.snapshot
 	if snap.Empty() {
 		return t.Resource.AdditionalText.Render("Nothing recorded in this scope yet.")
 	}
