@@ -704,3 +704,29 @@ func TestSessionWriter_NonTerminalStdoutUsesPlainWriter(t *testing.T) {
 	require.False(t, usingPager)
 	require.NotNil(t, w)
 }
+
+// TestPagerCommand covers the $PAGER cases that used to reach
+// sessionWriter's exec.CommandContext(ctx, parts[0], ...) directly:
+// PAGER="" (unset) and PAGER=" " (whitespace-only) must both fall back to
+// the "less -R" default instead of leaving parts empty and panicking on
+// parts[0], and a normal PAGER must pass through untouched.
+func TestPagerCommand(t *testing.T) {
+	tests := []struct {
+		name  string
+		pager string
+		want  []string
+	}{
+		{name: "unset falls back to default", pager: "", want: []string{"less", "-R"}},
+		{name: "whitespace-only falls back to default", pager: " ", want: []string{"less", "-R"}},
+		{name: "normal pager passes through", pager: "less", want: []string{"less"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PAGER", tt.pager)
+			require.NotPanics(t, func() {
+				got := pagerCommand(os.Getenv("PAGER"))
+				require.Equal(t, tt.want, got)
+			})
+		})
+	}
+}

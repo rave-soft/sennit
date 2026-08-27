@@ -473,6 +473,17 @@ func isBrokenPipe(err error) bool {
 	return strings.Contains(err.Error(), "broken pipe")
 }
 
+// pagerCommand splits $PAGER into a command and its arguments, falling back
+// to "less -R" whenever pager has no fields — that covers both an unset
+// $PAGER and a whitespace-only one, which strings.Fields would otherwise
+// turn into an empty slice and panic the parts[0] lookup in sessionWriter.
+func pagerCommand(pager string) []string {
+	if parts := strings.Fields(pager); len(parts) > 0 {
+		return parts
+	}
+	return []string{"less", "-R"}
+}
+
 // sessionWriter returns a writer, cleanup function, and a bool indicating if a pager is used.
 // When the content fits within the terminal (or stdout is not a TTY), it returns
 // a colorprofile.Writer wrapping stdout. When content exceeds terminal height,
@@ -491,12 +502,7 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	// Detect color profile from stderr since stdout is piped to the pager.
 	profile := colorprofile.Detect(os.Stderr, os.Environ())
 
-	pager := os.Getenv("PAGER")
-	if pager == "" {
-		pager = "less -R"
-	}
-
-	parts := strings.Fields(pager)
+	parts := pagerCommand(os.Getenv("PAGER"))
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...) //nolint:gosec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
