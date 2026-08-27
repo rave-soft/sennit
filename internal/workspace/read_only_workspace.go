@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -16,6 +18,9 @@ import (
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/stats"
 )
 
 // ErrReadOnlyOperation is returned by a read-only workspace when a
@@ -44,21 +49,28 @@ func (e *ErrReadOnlyOperation) Error() string {
 // so the TUI can inspect persisted session data without risking
 // accidental writes or tearing down the parent workspace.
 //
-// It embeds Workspace rather than hand-writing a stub for all 94 methods:
-// everything not overridden below is the embedded workspace's own
-// behavior, unchanged. That inverts the old failure mode. Before, a
-// forgotten stub was a compile error the moment Workspace grew a method.
-// Now, a forgotten override compiles fine and silently forwards whatever
-// that method does to the underlying workspace - which is worse for a
-// mutation, since read-only is a safety property. What closes that gap is
-// TestReadOnlyWorkspace_MethodClassificationIsComplete: it reflects over
-// Workspace's method set and fails whenever a method is not accounted for
-// in either refusedMethods or readOnlySafeMethods (see
-// read_only_workspace_classification_test.go), so a new mutating method
-// must be classified - and, if refused, given an override here - before
-// that test passes again.
+// It holds the wrapped Workspace in an unexported field (ws) rather than
+// embedding it, so nothing is promoted: every method Workspace declares
+// must be implemented explicitly below, or the compile-time assertion
+// `var _ Workspace = (*readOnlyWorkspace)(nil)` at the bottom of this file
+// fails. That is a default-deny design - a method Workspace grows that
+// this type does not yet implement is a compile error, not a method that
+// silently forwards to the wrapped workspace's real, possibly mutating,
+// state. Most of the explicit methods below refuse a mutation outright;
+// the rest ("-- Safe pass-through reads --") are pure reads that simply
+// forward to w.ws, spelled out here instead of inherited so a future
+// mutating method can never join them by accident.
+//
+// TestReadOnlyWorkspace_MethodClassificationIsComplete (see
+// read_only_workspace_classification_test.go) still reflects over
+// Workspace's method set and requires every method to be listed in either
+// refusedMethods or readOnlySafeMethods. The compiler now guarantees
+// completeness on its own, but the classification test remains valuable as
+// living documentation of which methods were deliberately judged safe to
+// read through versus refused, and TestReadOnlyWorkspace_RefusesEveryMutatingMethod
+// still proves the refusals behave correctly rather than merely compile.
 type readOnlyWorkspace struct {
-	Workspace
+	ws         Workspace
 	workingDir string
 	sessionID  string
 	reason     string
@@ -75,7 +87,7 @@ func (w *readOnlyWorkspace) readOnlyError(op string) error {
 // workspace returns - see ErrReadOnlyOperation.Reason. Pass "" when there
 // is nothing to explain.
 func newReadOnlyWorkspace(ws Workspace, workingDir, sessionID, reason string) *readOnlyWorkspace {
-	return &readOnlyWorkspace{Workspace: ws, workingDir: workingDir, sessionID: sessionID, reason: reason}
+	return &readOnlyWorkspace{ws: ws, workingDir: workingDir, sessionID: sessionID, reason: reason}
 }
 
 // allowsSession permits the thread's root session and genuine agent-tool
@@ -86,13 +98,13 @@ func (w *readOnlyWorkspace) allowsSession(ctx context.Context, id string) (bool,
 	if id == w.sessionID {
 		return true, nil
 	}
-	if _, _, ok := w.ParseAgentToolSessionID(id); !ok {
+	if _, _, ok := w.ws.ParseAgentToolSessionID(id); !ok {
 		return false, nil
 	}
 
 	seen := map[string]struct{}{id: {}}
 	for id != w.sessionID {
-		sess, err := w.Workspace.GetSession(ctx, id)
+		sess, err := w.ws.GetSession(ctx, id)
 		if err != nil {
 			return false, err
 		}
@@ -103,7 +115,7 @@ func (w *readOnlyWorkspace) allowsSession(ctx context.Context, id string) (bool,
 		if parentID == w.sessionID {
 			return true, nil
 		}
-		if _, _, ok := w.ParseAgentToolSessionID(parentID); !ok {
+		if _, _, ok := w.ws.ParseAgentToolSessionID(parentID); !ok {
 			return false, nil
 		}
 		if _, alreadySeen := seen[parentID]; alreadySeen {
@@ -133,7 +145,7 @@ func (w *readOnlyWorkspace) GetSession(ctx context.Context, sessionID string) (s
 	if !allowed {
 		return session.Session{}, w.scopeError(sessionID)
 	}
-	return w.Workspace.GetSession(ctx, sessionID)
+	return w.ws.GetSession(ctx, sessionID)
 }
 
 func (w *readOnlyWorkspace) ListSessions(ctx context.Context) ([]session.Session, error) {
@@ -191,7 +203,7 @@ func (w *readOnlyWorkspace) ListMessages(ctx context.Context, sessionID string) 
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.Workspace.ListMessages(ctx, sessionID)
+	return w.ws.ListMessages(ctx, sessionID)
 }
 
 func (w *readOnlyWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -202,18 +214,18 @@ func (w *readOnlyWorkspace) ListUserMessages(ctx context.Context, sessionID stri
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.Workspace.ListUserMessages(ctx, sessionID)
+	return w.ws.ListUserMessages(ctx, sessionID)
 }
 
 func (w *readOnlyWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
-	return w.Workspace.ListUserMessages(ctx, w.sessionID)
+	return w.ws.ListUserMessages(ctx, w.sessionID)
 }
 
 func (w *readOnlyWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error) {
 	if rootSessionID != w.sessionID {
 		return nil, w.scopeError(rootSessionID)
 	}
-	return w.Workspace.ListMessagesBySessionIDs(ctx, w.sessionID, generation, sessionIDs)
+	return w.ws.ListMessagesBySessionIDs(ctx, w.sessionID, generation, sessionIDs)
 }
 
 // -- Agent --
@@ -330,7 +342,7 @@ func (w *readOnlyWorkspace) FileTrackerLastReadTime(ctx context.Context, session
 	if err != nil || !allowed {
 		return time.Time{}
 	}
-	return w.Workspace.FileTrackerLastReadTime(ctx, sessionID, path)
+	return w.ws.FileTrackerLastReadTime(ctx, sessionID, path)
 }
 
 func (w *readOnlyWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
@@ -341,7 +353,7 @@ func (w *readOnlyWorkspace) FileTrackerListReadFiles(ctx context.Context, sessio
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.Workspace.FileTrackerListReadFiles(ctx, sessionID)
+	return w.ws.FileTrackerListReadFiles(ctx, sessionID)
 }
 
 // -- History --
@@ -354,7 +366,7 @@ func (w *readOnlyWorkspace) ListSessionHistory(ctx context.Context, sessionID st
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.Workspace.ListSessionHistory(ctx, sessionID)
+	return w.ws.ListSessionHistory(ctx, sessionID)
 }
 
 // -- LSP (mutations only) --
@@ -535,6 +547,150 @@ func (w *readOnlyWorkspace) Subscribe(send func(any)) {
 func (w *readOnlyWorkspace) Shutdown() {
 	// No-op: shutting down a read-only workspace must NOT affect
 	// the parent workspace. It is safe to call multiple times.
+}
+
+// -- Safe pass-through reads --
+//
+// Everything below is a pure read with no thread-scoping of its own to
+// apply, forwarded to w.ws unchanged. These used to be inherited for free
+// by embedding Workspace; they are spelled out individually now so that
+// readOnlyWorkspace's method set is exactly what this file says it is, and
+// nothing more (see the struct's doc comment above).
+
+func (w *readOnlyWorkspace) AgentIsBusy() bool {
+	return w.ws.AgentIsBusy()
+}
+
+func (w *readOnlyWorkspace) AgentIsReady() bool {
+	return w.ws.AgentIsReady()
+}
+
+func (w *readOnlyWorkspace) AgentIsSessionBusy(sessionID string) bool {
+	return w.ws.AgentIsSessionBusy(sessionID)
+}
+
+func (w *readOnlyWorkspace) AgentModel() AgentModel {
+	return w.ws.AgentModel()
+}
+
+func (w *readOnlyWorkspace) AgentQueuedPrompts(sessionID string) int {
+	return w.ws.AgentQueuedPrompts(sessionID)
+}
+
+func (w *readOnlyWorkspace) AgentQueuedPromptsList(sessionID string) []string {
+	return w.ws.AgentQueuedPromptsList(sessionID)
+}
+
+func (w *readOnlyWorkspace) AgentReadyErr() error {
+	return w.ws.AgentReadyErr()
+}
+
+func (w *readOnlyWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+	return w.ws.BackgroundJobCounts()
+}
+
+func (w *readOnlyWorkspace) Config() *config.Config {
+	return w.ws.Config()
+}
+
+func (w *readOnlyWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
+	return w.ws.CreateAgentToolSessionID(messageID, toolCallID)
+}
+
+func (w *readOnlyWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
+	return w.ws.GetMCPPrompt(clientID, promptID, args)
+}
+
+func (w *readOnlyWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
+	return w.ws.GetThread(ctx, id)
+}
+
+func (w *readOnlyWorkspace) InitializePrompt() (string, error) {
+	return w.ws.InitializePrompt()
+}
+
+func (w *readOnlyWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+	return w.ws.LSPGetDiagnosticCounts(name)
+}
+
+func (w *readOnlyWorkspace) LSPGetStates() map[string]LSPClientInfo {
+	return w.ws.LSPGetStates()
+}
+
+func (w *readOnlyWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
+	return w.ws.ListAccounts(providerID)
+}
+
+func (w *readOnlyWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
+	return w.ws.ListMCPPrompts(ctx)
+}
+
+func (w *readOnlyWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
+	return w.ws.ListSkills(ctx)
+}
+
+func (w *readOnlyWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
+	return w.ws.ListTasks(ctx)
+}
+
+func (w *readOnlyWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) {
+	return w.ws.ListThreads(ctx)
+}
+
+func (w *readOnlyWorkspace) MCPAuthURL(name string) string {
+	return w.ws.MCPAuthURL(name)
+}
+
+func (w *readOnlyWorkspace) MCPGetStates() map[string]MCPClientInfo {
+	return w.ws.MCPGetStates()
+}
+
+func (w *readOnlyWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
+	return w.ws.MCPPendingAuth()
+}
+
+func (w *readOnlyWorkspace) MCPResources() []MCPResourceInfo {
+	return w.ws.MCPResources()
+}
+
+func (w *readOnlyWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
+	return w.ws.ParseAgentToolSessionID(sessionID)
+}
+
+func (w *readOnlyWorkspace) PermissionSkipRequests() bool {
+	return w.ws.PermissionSkipRequests()
+}
+
+func (w *readOnlyWorkspace) ProjectNeedsInitialization() (bool, error) {
+	return w.ws.ProjectNeedsInitialization()
+}
+
+func (w *readOnlyWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
+	return w.ws.ReadMCPResource(ctx, name, uri)
+}
+
+func (w *readOnlyWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	return w.ws.ReadSkill(ctx, skillID)
+}
+
+func (w *readOnlyWorkspace) Resolver() config.VariableResolver {
+	return w.ws.Resolver()
+}
+
+func (w *readOnlyWorkspace) Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error) {
+	return w.ws.Stats(ctx, req)
+}
+
+func (w *readOnlyWorkspace) SupportsTasks() bool {
+	return w.ws.SupportsTasks()
+}
+
+func (w *readOnlyWorkspace) SupportsThreads() bool {
+	return w.ws.SupportsThreads()
+}
+
+func (w *readOnlyWorkspace) WaitForMCPInit(ctx context.Context) error {
+	return w.ws.WaitForMCPInit(ctx)
 }
 
 // Compile-time check that readOnlyWorkspace implements Workspace.

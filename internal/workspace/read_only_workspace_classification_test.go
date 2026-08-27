@@ -141,10 +141,11 @@ var readOnlySafeMethods = []string{
 
 // TestReadOnlyWorkspace_MethodClassificationIsComplete is the crux of the
 // safety property: it fails, loudly, the moment Workspace grows a method
-// that is not yet in refusedMethods or readOnlySafeMethods above. Without
-// this, embedding Workspace in readOnlyWorkspace turns "forgot to add a
-// stub" from a compile error into a method that silently forwards whatever
-// it does - reads and mutations alike - to the real workspace.
+// that is not yet in refusedMethods or readOnlySafeMethods above.
+// readOnlyWorkspace no longer embeds a Workspace, so a missing method is
+// already a compile error - but a new method that someone wires straight
+// through to the real workspace without deciding whether it is safe would
+// not be. Classifying every method is what forces that decision.
 func TestReadOnlyWorkspace_MethodClassificationIsComplete(t *testing.T) {
 	t.Parallel()
 

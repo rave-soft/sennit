@@ -85,7 +85,7 @@ type childLoad struct {
 	tools     []chat.ToolMessageItem
 }
 
-func loadNestedToolCalls(ctx context.Context, ws workspace.Workspace, sty *styles.Styles, cfg *config.Config, rootSessionID string, generation uint64, items []chat.MessageItem) error {
+func loadNestedToolCalls(ctx context.Context, ws workspace.SessionStore, sty *styles.Styles, cfg *config.Config, rootSessionID string, generation uint64, items []chat.MessageItem) error {
 	var children []childLoad
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
