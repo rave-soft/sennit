@@ -165,6 +165,26 @@ func TestShellItemHoverableAtMatchesRawRenderLineCount(t *testing.T) {
 		"HoverableAt must agree with RawRender about whether the block can expand")
 }
 
+// TestShellItemRenderUsesFullWidthOnce pins that Render hands RawRender
+// the raw item width unreduced, so cappedMessageWidth subtracts
+// MessageLeftPaddingTotal exactly once. Render used to pre-subtract it
+// before calling RawRender, which applies cappedMessageWidth itself,
+// leaving shell output (and the xOffset scroll clamp derived from it)
+// two columns narrower than the space actually available.
+func TestShellItemRenderUsesFullWidthOnce(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewPendingShellItem(&sty, "cat wide.txt")
+	item.Complete(strings.Repeat("x", 200)+"\n", 0)
+
+	const width = 80
+	_ = item.Render(width)
+
+	require.Equal(t, 200-cappedMessageWidth(width), item.maxLineWidth,
+		"maxLineWidth must be derived from a single cappedMessageWidth(width) subtraction")
+}
+
 func TestShellOutputWindows(t *testing.T) {
 	t.Parallel()
 

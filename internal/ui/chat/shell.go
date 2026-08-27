@@ -162,14 +162,22 @@ func (s *ShellItem) Animate(msg spin.StepMsg) tea.Cmd {
 }
 
 // Render implements MessageItem. Unlike the other item types, this does
-// not go through the prefixed-render cache: ShellItem's own RawRender
-// already caches the expensive part (output remapping, truncation,
-// scroll clamping), and the hovered/focused state driving the prefix
-// here changes often enough on mouse movement that caching it would
-// mostly just track hover, not save work.
+// not go through the prefixed-render cache, and RawRender itself is
+// uncached too: it depends on width, xOffset, expandedContent, hovered,
+// focused, and the streamed output, and while pending it also changes
+// every animation frame. A getCachedRender(width) key, the only kind
+// cachedMessageItem offers, cannot capture that without every mutator
+// (AppendOutput, ScrollHorizontal, SetHovered, ToggleExpanded, the
+// spinner tick, ...) remembering to invalidate it — a stale frame here
+// would show scrolled-away or already-replaced output, which is worse
+// than the recompute cost of a plain-text remap.
 func (s *ShellItem) Render(width int) string {
-	innerWidth := max(0, width-MessageLeftPaddingTotal)
-	content := s.RawRender(innerWidth)
+	// RawRender applies cappedMessageWidth itself (see tools_item.go's
+	// RawRender for the same contract): it takes the raw item width, not
+	// one already reduced by MessageLeftPaddingTotal. Pre-subtracting
+	// here used to make output and the xOffset scroll clamp two columns
+	// narrower than the space actually available.
+	content := s.RawRender(width)
 
 	var prefix string
 	if s.focused {
