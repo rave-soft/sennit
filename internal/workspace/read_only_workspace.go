@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
@@ -141,6 +142,17 @@ func (w *readOnlyWorkspace) ListSessions(ctx context.Context) ([]session.Session
 		return nil, err
 	}
 	return []session.Session{sess}, nil
+}
+
+// GetLastSession must not forward to the embedded Workspace: that
+// workspace is the parent AppWorkspace (see AttachThread's read-only
+// fallback), and its GetLastSession answers "the most recently updated
+// top-level session in the parent's project" - some other thread, or the
+// parent's own session, never this one. A read-only thread view has
+// exactly one top-level session, already known as w.sessionID, so that is
+// what it reports.
+func (w *readOnlyWorkspace) GetLastSession(ctx context.Context) (session.Session, error) {
+	return w.GetSession(ctx, w.sessionID)
 }
 
 func (w *readOnlyWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
@@ -279,6 +291,14 @@ func (w *readOnlyWorkspace) QuestionCancel() bool {
 	return false
 }
 
+// PrepareSessionChanges must not delegate to the embedded Workspace's own
+// PrepareSessionChanges: that method (AppWorkspace's) closes over its own
+// UncommittedFiles, which reads the parent's working directory - not this
+// wrapper's overridden one. Calling it here would compute the thread's
+// file diff against the parent's repository, marking every file the
+// thread touched as "uncommitted" relative to a tree it does not belong
+// to. Using this wrapper's own ListSessionHistory and UncommittedFiles
+// keeps everything scoped to the thread's own worktree.
 func (w *readOnlyWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]SessionFile, error) {
 	allowed, err := w.allowsSession(ctx, sessionID)
 	if err != nil {
@@ -287,11 +307,16 @@ func (w *readOnlyWorkspace) PrepareSessionChanges(ctx context.Context, sessionID
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	preparer, ok := w.Workspace.(SessionChangePreparer)
-	if !ok {
-		return nil, errors.New("session change preparer is unavailable")
-	}
-	return preparer.PrepareSessionChanges(ctx, sessionID)
+	return prepareSessionChanges(ctx, sessionID, w.ListSessionHistory, w.UncommittedFiles)
+}
+
+// UncommittedFiles must not forward to the embedded Workspace: that
+// workspace is the parent AppWorkspace, and its UncommittedFiles diffs the
+// parent's own working directory, not this thread's worktree. w.workingDir
+// is the thread's worktree path (see newReadOnlyWorkspace), so that is
+// what gets diffed here.
+func (w *readOnlyWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
+	return git.UncommittedFiles(ctx, w.workingDir)
 }
 
 // -- FileTracker --

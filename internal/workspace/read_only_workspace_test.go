@@ -2,6 +2,9 @@ package workspace
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -184,10 +187,15 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	historyFiles, err := ro.ListSessionHistory(t.Context(), "sess-1")
 	require.NoError(t, err)
 	require.Empty(t, historyFiles)
+	// PrepareSessionChanges is computed from this wrapper's own
+	// ListSessionHistory and UncommittedFiles, not delegated to the
+	// embedded (parent) workspace's PrepareSessionChanges — see
+	// TestReadOnlyWorkspace_PrepareSessionChangesScopedToThreadWorktree for
+	// the case that actually has files to aggregate.
 	changes, err := ro.PrepareSessionChanges(t.Context(), "sess-1")
 	require.NoError(t, err)
-	require.Equal(t, []SessionFile{{FirstVersion: history.File{Path: "sess-1"}}}, changes)
-	require.Contains(t, stub.calls, "PrepareSessionChanges")
+	require.Empty(t, changes)
+	require.NotContains(t, stub.calls, "PrepareSessionChanges")
 
 	// Project lifecycle reads pass through.
 	needs, err := ro.ProjectNeedsInitialization()
@@ -301,6 +309,17 @@ type stubWorkspace struct {
 	importCopilotCalls int
 	getSessionCalls    int
 	batchRoots         []string
+	// lastSession, when set, is returned by GetLastSession in place of the
+	// fixed "sess-1" default — used to stand in for "the parent's own last
+	// session", distinct from any session in the sessions map.
+	lastSession *session.Session
+	// uncommitted, when set, is returned by UncommittedFiles in place of
+	// the default empty slice — used to stand in for "the parent's own
+	// working directory diff".
+	uncommitted []git.FileChange
+	// historyFiles, when set, is returned by ListSessionHistory in place
+	// of the default empty slice.
+	historyFiles []history.File
 	// calls counts invocations of the mutating methods instrumented with
 	// track, by name. Used to prove a refused call never reaches the
 	// underlying workspace at all (not just that readOnlyWorkspace
@@ -340,6 +359,9 @@ func (s *stubWorkspace) ListSessions(ctx context.Context) ([]session.Session, er
 }
 
 func (s *stubWorkspace) GetLastSession(ctx context.Context) (session.Session, error) {
+	if s.lastSession != nil {
+		return *s.lastSession, nil
+	}
 	return session.Session{ID: "sess-1"}, nil
 }
 
@@ -465,7 +487,7 @@ func (s *stubWorkspace) QuestionCancel() bool { s.track("QuestionCancel"); retur
 
 // FileServices
 func (s *stubWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
-	return nil, nil
+	return s.uncommitted, nil
 }
 
 func (s *stubWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
@@ -482,7 +504,7 @@ func (s *stubWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID 
 
 // History
 func (s *stubWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
-	return nil, nil
+	return s.historyFiles, nil
 }
 
 func (s *stubWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]SessionFile, error) {
@@ -746,4 +768,114 @@ func TestSupportsThreadAttach_ReadOnlyRefusesUpFront(t *testing.T) {
 	_, _, err := ro.AttachThread(t.Context(), "thread-1")
 	require.True(t, IsReadOnlyError(err),
 		"the capability answer must match what the call actually does")
+}
+
+// requireGit skips the test if git is not on PATH.
+func requireGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+}
+
+// initGitRepo creates a scratch git repo in a fresh temp dir, with local
+// user.email/user.name config and one commit so a later uncommitted change
+// has something to diff against.
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	requireGit(t)
+
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o644))
+	runGit(t, dir, "add", "-A")
+	runGit(t, dir, "commit", "-m", "initial commit")
+	return dir
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "git %v: %s", args, out)
+}
+
+// TestReadOnlyWorkspace_GetLastSessionReportsThreadsOwnSession pins the fix
+// for GetLastSession: it must report the thread's own root session, not
+// whatever the embedded (parent) workspace's GetLastSession answers. Before
+// the fix this forwarded straight to the parent and returned parentLast.
+func TestReadOnlyWorkspace_GetLastSessionReportsThreadsOwnSession(t *testing.T) {
+	t.Parallel()
+
+	parentLast := session.Session{ID: "parent-last-session"}
+	stub := &stubWorkspace{
+		lastSession: &parentLast,
+		sessions: map[string]session.Session{
+			"root": {ID: "root"},
+		},
+	}
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root", "")
+
+	sess, err := ro.GetLastSession(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "root", sess.ID,
+		"GetLastSession must report the thread's own root session, not the parent's")
+}
+
+// TestReadOnlyWorkspace_UncommittedFilesScopedToThreadWorktree pins the fix
+// for UncommittedFiles: it must diff the thread's own worktree
+// (workingDir), not whatever the embedded (parent) workspace's
+// UncommittedFiles answers. Before the fix this forwarded straight to the
+// parent and reported the parent's own uncommitted files.
+func TestReadOnlyWorkspace_UncommittedFilesScopedToThreadWorktree(t *testing.T) {
+	t.Parallel()
+
+	threadDir := initGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(threadDir, "thread-only.txt"), []byte("mine\n"), 0o644))
+
+	parentDir := initGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(parentDir, "parent-only.txt"), []byte("theirs\n"), 0o644))
+	parentChanges, err := git.UncommittedFiles(t.Context(), parentDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, parentChanges)
+
+	// Stand in for a parent AppWorkspace whose own UncommittedFiles diffs
+	// its own working directory.
+	stub := &stubWorkspace{uncommitted: parentChanges}
+	ro := newReadOnlyWorkspace(stub, threadDir, "root", "")
+
+	files, err := ro.UncommittedFiles(t.Context())
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, filepath.Join(threadDir, "thread-only.txt"), files[0].Path)
+}
+
+// TestReadOnlyWorkspace_PrepareSessionChangesScopedToThreadWorktree pins the
+// fix for PrepareSessionChanges: it must compute the uncommitted diff
+// against the thread's own worktree using this wrapper's own
+// UncommittedFiles, not by delegating straight to the embedded (parent)
+// workspace's PrepareSessionChanges — which would diff the parent's
+// repository instead.
+func TestReadOnlyWorkspace_PrepareSessionChangesScopedToThreadWorktree(t *testing.T) {
+	t.Parallel()
+
+	threadDir := initGitRepo(t)
+	changedPath := filepath.Join(threadDir, "changed.txt")
+	require.NoError(t, os.WriteFile(changedPath, []byte("mine\n"), 0o644))
+
+	stub := &stubWorkspace{
+		historyFiles: []history.File{{Path: changedPath, SessionID: "root"}},
+	}
+	ro := newReadOnlyWorkspace(stub, threadDir, "root", "")
+
+	files, err := ro.PrepareSessionChanges(t.Context(), "root")
+	require.NoError(t, err)
+	require.Zero(t, stub.calls["PrepareSessionChanges"],
+		"must not delegate to the parent's PrepareSessionChanges")
+	require.Len(t, files, 1)
+	require.Equal(t, changedPath, files[0].FirstVersion.Path)
+	require.True(t, files[0].Uncommitted)
 }
