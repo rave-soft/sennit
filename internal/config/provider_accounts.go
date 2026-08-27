@@ -8,7 +8,10 @@ package config
 
 import (
 	"cmp"
+	"context"
 	"fmt"
+	"log/slog"
+	"sync"
 
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -197,6 +200,93 @@ func SetProviderProxy(store *ConfigStore, accStore accounts.Store, providerID, p
 		return fmt.Errorf("republishing effective proxy for provider %s: %w", providerID, err)
 	}
 	return nil
+}
+
+// refreshAccountLimitsConcurrency bounds how many accounts' usage is
+// fetched at once. A provider rarely has more than a handful of accounts,
+// but nothing stops a "refresh limits" press from firing off dozens of
+// concurrent requests without a cap.
+const refreshAccountLimitsConcurrency = 4
+
+// accountUsageFetcher matches codex.FetchUsage's signature. RefreshAccountLimits
+// takes it as a parameter (rather than calling codex.FetchUsage directly)
+// so a test can substitute a fake and exercise the concurrency/partial-
+// failure behavior without a real HTTP round trip; production always calls
+// through refreshAccountLimits with codex.FetchUsage itself.
+type accountUsageFetcher func(ctx context.Context, proxyURL, accessToken, accountID string) (codex.Usage, bool, error)
+
+// RefreshAccountLimits fetches a fresh rate-limit snapshot for every OAuth
+// account of providerID and persists it into accStore, then returns the
+// provider's accounts reflecting whatever was learned. Providers that
+// don't report usage (accounts.CapabilitiesOf(providerID).Usage false)
+// are a no-op: their accounts are returned unchanged.
+//
+// See refreshAccountLimits for the concurrency and failure-handling
+// contract; this just wires it to the real codex.FetchUsage.
+func RefreshAccountLimits(ctx context.Context, store *ConfigStore, accStore accounts.Store, providerID string) ([]accounts.Account, error) {
+	return refreshAccountLimits(ctx, store, accStore, providerID, codex.FetchUsage)
+}
+
+// refreshAccountLimits does the actual work behind RefreshAccountLimits.
+//
+// Accounts are refreshed concurrently, bounded by
+// refreshAccountLimitsConcurrency, each against its own effective proxy
+// (accounts.ResolveProxy) and its own access token. A fetch that errors or
+// comes back with no usage headers (fetch's own (Usage{}, false, nil)
+// case — including a 401 from a token that needs refreshing, which is out
+// of scope here) leaves that account's stored snapshot untouched instead
+// of failing the whole refresh: the point of this call is comparing
+// accounts, and one bad account must not hide the others' numbers. Only a
+// failure to even list the provider's accounts is reported as an error.
+//
+// Only OAuth accounts (accounts.AuthOAuth) have a bearer token to send;
+// an API-key account is skipped. Today the only Usage provider (Codex) is
+// also the only OAuth one, so this is not specially guarded — a provider
+// combining Usage with a non-OAuth AuthKind would simply have nothing to
+// refresh.
+func refreshAccountLimits(ctx context.Context, store *ConfigStore, accStore accounts.Store, providerID string, fetch accountUsageFetcher) ([]accounts.Account, error) {
+	if !accounts.CapabilitiesOf(providerID).Usage {
+		return accStore.List(providerID)
+	}
+
+	existing, err := accStore.List(providerID)
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
+	}
+
+	var providerProxy string
+	if pc, ok := store.Config().Providers.Get(providerID); ok {
+		providerProxy = pc.ConfiguredProxyURL
+	}
+
+	sem := make(chan struct{}, refreshAccountLimitsConcurrency)
+	var wg sync.WaitGroup
+	for _, a := range existing {
+		if a.Token == nil {
+			continue // api-key account: no bearer token to fetch usage with
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(a accounts.Account) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			proxy := accounts.ResolveProxy(a.ProxyURL, providerProxy)
+			u, ok, err := fetch(ctx, proxy, a.Token.AccessToken, a.AccountID)
+			if err != nil || !ok {
+				return // leave the stored snapshot untouched
+			}
+			if err := accStore.RecordUsage(providerID, a.ID, u.Snapshot()); err != nil {
+				// The fetch worked and the numbers are simply lost:
+				// worth a line, but not worth failing a refresh whose
+				// other accounts may well have been written.
+				slog.Warn("Failed to store refreshed account limits",
+					"provider", providerID, "account", a.ID, "error", err)
+			}
+		}(a)
+	}
+	wg.Wait()
+
+	return accStore.List(providerID)
 }
 
 // RemoveAccount deletes an account, subject to two rules: the last account

@@ -42,14 +42,22 @@ type PlanWindow struct {
 // FormatPlanUsage renders a one-line summary of a subscription and what is
 // left of it, e.g. "Plus · 6% of weekly limit, resets in 3d".
 //
+// label is the active account's display name, shown right after the plan
+// when the provider has more than one account on file (e.g. "Plus ·
+// Личный Plus · 42% of weekly limit") — empty for a single-account
+// provider, so that case renders exactly as before this parameter existed.
+//
 // A plan with several windows is summarised by the fullest one: that is the
 // one about to run out, and the sidebar has a line, not a table. Windows
 // are named by their length rather than by "primary"/"secondary", which
 // mean nothing to whoever is reading.
-func FormatPlanUsage(plan string, windows []PlanWindow) string {
+func FormatPlanUsage(plan string, windows []PlanWindow, label string) string {
 	var parts []string
 	if plan != "" {
 		parts = append(parts, cases.Title(language.English).String(plan))
+	}
+	if label != "" {
+		parts = append(parts, label)
 	}
 
 	var fullest PlanWindow

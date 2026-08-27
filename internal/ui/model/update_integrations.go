@@ -101,6 +101,9 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
 
+	case accountLabelsLoadedMsg:
+		m.applyAccountLabelsLoaded(msg)
+
 	case promptHistoryLoadedMsg:
 		m.editor.promptHistory.messages = msg.messages
 		m.editor.promptHistory.index = -1

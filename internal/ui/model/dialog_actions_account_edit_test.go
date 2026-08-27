@@ -95,7 +95,10 @@ func TestApplyProviderDialogAction_AccountSaved_ClosesFormAndReloadsList(t *test
 	require.False(t, m.dialog.ContainsDialog(dialog.AccountFormID), "the form must close on save")
 	require.NotNil(t, cmd)
 
-	msg := cmd()
+	msg := findAccountsMsg(t, cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(dialog.ActionAccountsLoaded)
+		return ok
+	})
 	loaded, ok := msg.(dialog.ActionAccountsLoaded)
 	require.True(t, ok, "expected ActionAccountsLoaded, got %#v", msg)
 	require.Equal(t, 1, ws.listAccountsCalls)
@@ -138,7 +141,10 @@ func TestApplyProviderDialogAction_RemoveAccountConfirmed_RemovesAndReloadsList(
 	require.Zero(t, ws.removeAccountCalls, "RemoveAccount must not run synchronously")
 	require.NotNil(t, cmd)
 
-	msg := cmd()
+	msg := findAccountsMsg(t, cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(dialog.ActionAccountsLoaded)
+		return ok
+	})
 	loaded, ok := msg.(dialog.ActionAccountsLoaded)
 	require.True(t, ok, "expected ActionAccountsLoaded, got %#v", msg)
 	require.Equal(t, 1, ws.removeAccountCalls)

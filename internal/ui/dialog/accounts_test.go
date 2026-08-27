@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"errors"
 	"image"
 	"testing"
@@ -35,6 +36,11 @@ type accountsTestWorkspace struct {
 	lastActivatedID string
 	lastProviderID  string
 	lastScope       config.Scope
+
+	refreshCalls            int
+	refreshErr              error
+	refreshedAccs           []accounts.Account
+	lastRefreshedProviderID string
 }
 
 func (w *accountsTestWorkspace) SupportsThreads() bool { return false }
@@ -51,6 +57,15 @@ func (w *accountsTestWorkspace) ActivateAccount(scope config.Scope, providerID, 
 	w.lastProviderID = providerID
 	w.lastActivatedID = accountID
 	return w.activateErr
+}
+
+func (w *accountsTestWorkspace) RefreshAccountLimits(_ context.Context, providerID string) ([]accounts.Account, error) {
+	w.refreshCalls++
+	w.lastRefreshedProviderID = providerID
+	if w.refreshErr != nil {
+		return nil, w.refreshErr
+	}
+	return w.refreshedAccs, nil
 }
 
 func newAccountsTestCommon(t *testing.T, providerID, activeAccountID string) (*common.Common, *accountsTestWorkspace) {
@@ -237,7 +252,7 @@ func TestAccounts_SelectNonActiveAccount_NoIOInHandleMsg(t *testing.T) {
 	require.Equal(t, config.ScopeGlobal, ws.lastScope)
 
 	closeAction := dlg.HandleMsg(msg)
-	require.Equal(t, ActionClose{}, closeAction)
+	require.Equal(t, ActionAccountActivated{ProviderID: providerID}, closeAction)
 }
 
 func TestAccounts_SelectActiveAccount_NoOp(t *testing.T) {
@@ -471,4 +486,60 @@ func TestAccounts_SelectProviderSettings_ReturnsActionOpenProviderSettings_NoIO(
 	settingsAction, ok := action.(ActionOpenProviderSettings)
 	require.True(t, ok, "expected ActionOpenProviderSettings, got %#v", action)
 	require.Equal(t, providerID, settingsAction.ProviderID)
+}
+
+// TestAccounts_RefreshLimitsKey_UsageProvider_RefreshesOffThread covers
+// ctrl+l for a provider that reports usage: it must not call
+// RefreshAccountLimits synchronously, show the loading state while the
+// async call is in flight, and rebuild the list from its result through
+// the same ActionAccountsLoaded round-trip the initial load uses.
+func TestAccounts_RefreshLimitsKey_UsageProvider_RefreshesOffThread(t *testing.T) {
+	providerID := "codex" // accounts.CapabilitiesOf("codex").Usage == true
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+
+	dlg := loadedAccounts(t, com, providerID)
+	require.True(t, dlg.caps.Usage)
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	require.Zero(t, ws.refreshCalls, "HandleMsg must not call RefreshAccountLimits synchronously")
+	require.Equal(t, accountsStateLoading, dlg.state, "the dialog should show progress while refreshing")
+
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected ActionCmd carrying the async refresh, got %#v", action)
+
+	ws.refreshedAccs = []accounts.Account{
+		{ID: "acct-1", Label: "Work", Usage: accounts.Usage{Plan: "plus", Primary: accounts.UsageWindow{UsedPercent: 7, WindowMinutes: 10080}}},
+	}
+	loaded := findMsg(t, cmdAction.Cmd, isAccountsLoaded)
+	require.NotNil(t, loaded, "expected ActionAccountsLoaded from the refresh cmd")
+	require.Equal(t, 1, ws.refreshCalls)
+	require.Equal(t, providerID, ws.lastRefreshedProviderID)
+
+	require.Nil(t, dlg.HandleMsg(loaded))
+	require.Equal(t, accountsStateList, dlg.state)
+	items := dlg.sd.list.FilteredItems()
+	require.Contains(t, items[0].(*AccountItem).Render(60), "7%")
+}
+
+// TestAccounts_RefreshLimitsKey_HiddenAndInertForNonUsageProvider covers a
+// provider that doesn't report usage (accounts.CapabilitiesOf(...).Usage
+// false, e.g. a plain api-key provider): "refresh limits" must not appear
+// in the help line, and the key must not trigger a refresh.
+func TestAccounts_RefreshLimitsKey_HiddenAndInertForNonUsageProvider(t *testing.T) {
+	providerID := "openai" // not in accounts' capability registry
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+
+	dlg := loadedAccounts(t, com, providerID)
+	require.False(t, dlg.caps.Usage)
+
+	for _, b := range dlg.ShortHelp() {
+		require.NotContains(t, b.Help().Key, "refresh", "refresh limits must not be offered for a provider with no usage capability")
+	}
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	require.Zero(t, ws.refreshCalls, "ctrl+l must not refresh limits for a provider with no usage capability")
+	require.Equal(t, accountsStateList, dlg.state)
+	_ = action // the filterable list may consume ctrl+l as ordinary filter input; only the no-refresh contract matters here.
 }

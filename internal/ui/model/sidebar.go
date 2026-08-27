@@ -89,6 +89,7 @@ type sidebarSig struct {
 	lspVersion    int
 	mcpVersion    int
 	skillsVersion int
+	labelsVersion int
 
 	// theme is the palette the cached content was rendered in. Every
 	// other field here is model state; this one is not, and it is the
@@ -115,6 +116,7 @@ func (m *UI) computeSidebarSig() sidebarSig {
 		lspVersion:    m.lsp.version,
 		mcpVersion:    m.mcpVersion,
 		skillsVersion: m.skillsVersion,
+		labelsVersion: m.labelsVersion,
 	}
 
 	model := m.viewedModel()
@@ -227,7 +229,7 @@ func (m *UI) planInfo(model *mcp.AgentModel) string {
 	if !ok {
 		return ""
 	}
-	return common.FormatPlanUsage(usage.Plan, planWindows(usage))
+	return common.FormatPlanUsage(usage.Plan, planWindows(usage), m.accountLabelFor(model.ModelCfg.Provider))
 }
 
 // planWindows converts the account's rate-limit windows into the shape the

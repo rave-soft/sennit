@@ -172,6 +172,11 @@ type UI struct {
 	// chat sidebar. See sidebar.go.
 	sidebar sidebarState
 
+	// accountLabelsState caches each provider's active-account display
+	// label for the sidebar's plan line, so rendering it never has to do
+	// the file read ListAccounts implies. See account_label.go.
+	accountLabelsState
+
 	// notifyState holds desktop-notification backend/focus/per-thread
 	// status state. See notifications.go.
 	notifyState
@@ -466,6 +471,15 @@ func (m *UI) Init() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	cmds = append(cmds, m.checkPendingMCPAuth())
+	// Prime the sidebar's account-label cache for whatever model/provider
+	// this UI already knows about at construction time (see
+	// account_label.go). refreshAccountLabelCmd is nil for a nil model,
+	// so this is a no-op during onboarding.
+	if model := m.viewedModel(); model != nil {
+		if cmd := m.refreshAccountLabelCmd(model.ModelCfg.Provider); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	if cmd := m.checkConfigProblems(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -587,7 +601,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmds, done = m.updateSession(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case lspStatesMsg, userCommandsLoadedMsg, mcpStateChangedMsg, mcpPromptsLoadedMsg, promptHistoryLoadedMsg, pubsub.Event[workspace.LSPEvent], pubsub.Event[skills.Event], dialog.ActionMCPAuthStarted, dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored, pubsub.Event[workspace.MCPEvent]:
+	case lspStatesMsg, userCommandsLoadedMsg, mcpStateChangedMsg, mcpPromptsLoadedMsg, promptHistoryLoadedMsg, pubsub.Event[workspace.LSPEvent], pubsub.Event[skills.Event], dialog.ActionMCPAuthStarted, dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored, pubsub.Event[workspace.MCPEvent], accountLabelsLoadedMsg:
 		var done bool
 		if cmds, done = m.updateIntegrations(msg, cmds); done {
 			return m, tea.Batch(cmds...)

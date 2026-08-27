@@ -58,7 +58,8 @@ type Accounts struct {
 	err        error
 	sd         *selectDialog      // built once accounts are loaded; nil until then
 	accs       []accounts.Account // last loaded set, kept for e/d's lookup by ID
-	keyMap     struct{ Edit, Delete key.Binding }
+	caps       accounts.Capabilities
+	keyMap     struct{ Edit, Delete, Refresh key.Binding }
 }
 
 var _ Dialog = (*Accounts)(nil)
@@ -71,6 +72,7 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 		com:        com,
 		providerID: providerID,
 		state:      accountsStateLoading,
+		caps:       accounts.CapabilitiesOf(providerID),
 	}
 	m.spinner = newOAuthSpinner(com.Styles)
 	// ctrl+x for delete mirrors sessions.go's Delete binding — this list is
@@ -89,6 +91,20 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 	// dialogs rather than adding a new arbitrary one.
 	m.keyMap.Edit = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "edit"))
 	m.keyMap.Delete = key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "delete"))
+	// ctrl+l for "refresh limits" (l for limits): free in both bubbles'
+	// textinput.DefaultKeyMap (which this filterable list's filter input
+	// inherits — the chords it claims are ctrl+f/b, alt+left/right,
+	// ctrl+left/right, alt+f/b/d, alt+backspace/delete, ctrl+w/k/u/h/d,
+	// home/end, ctrl+a/e, ctrl+v, tab, up/down, ctrl+n/p — none of them
+	// ctrl+l) and in this dialog's own select_dialog.go (enter, ctrl+y,
+	// up/down, ctrl+n/p), on top of the ctrl+r/ctrl+x this file already
+	// claims above. ctrl+l is also bound globally to "switch model"
+	// (model/keys.go), but that binding is unreachable while any dialog
+	// is open — handleKeyPressMsg routes every key to the dialog stack
+	// first (see internal/ui/model/keypress.go) — which is exactly the
+	// precedent ctrl+r/ctrl+y already set here and in select_dialog.go
+	// for their own globally-bound chords.
+	m.keyMap.Refresh = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "refresh limits"))
 	return m, tea.Batch(m.spinner.Tick, m.loadAccountsCmd())
 }
 
@@ -100,6 +116,21 @@ func (m *Accounts) loadAccountsCmd() tea.Cmd {
 	providerID := m.providerID
 	return func() tea.Msg {
 		accs, err := com.Workspace.ListAccounts(providerID)
+		return ActionAccountsLoaded{ProviderID: providerID, Accounts: accs, Err: err}
+	}
+}
+
+// refreshLimitsCmd asks the workspace to refresh every account's rate-limit
+// snapshot off the Update loop, reusing [ActionAccountsLoaded] — the exact
+// message loadAccountsCmd's own load delivers — so the resulting list
+// rebuilds the same way an initial load or an edit/removal reload does.
+// com and providerID are captured by value so this closure doesn't race
+// with the dialog being mutated concurrently.
+func (m *Accounts) refreshLimitsCmd() tea.Cmd {
+	com := m.com
+	providerID := m.providerID
+	return func() tea.Msg {
+		accs, err := com.Workspace.RefreshAccountLimits(com.Context(), providerID)
 		return ActionAccountsLoaded{ProviderID: providerID, Accounts: accs, Err: err}
 	}
 }
@@ -182,7 +213,7 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		if msg.err != nil {
 			return ActionCmd{util.ReportError(msg.err)}
 		}
-		return ActionClose{}
+		return ActionAccountActivated{ProviderID: m.providerID}
 
 	case tea.KeyPressMsg:
 		if m.state == accountsStateList {
@@ -197,6 +228,9 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 					return ActionRequestAccountRemoval{ProviderID: m.providerID, Account: a}
 				}
 				return nil
+			case m.caps.Usage && key.Matches(msg, m.keyMap.Refresh):
+				m.state = accountsStateLoading
+				return ActionCmd{tea.Batch(m.spinner.Tick, m.refreshLimitsCmd())}
 			}
 			return m.sd.HandleMsg(msg)
 		}
@@ -377,7 +411,11 @@ func (m *Accounts) innerContent() string {
 func (m *Accounts) ShortHelp() []key.Binding {
 	switch m.state {
 	case accountsStateList:
-		return append(m.sd.ShortHelp(), m.keyMap.Edit, m.keyMap.Delete)
+		bindings := append(m.sd.ShortHelp(), m.keyMap.Edit, m.keyMap.Delete)
+		if m.caps.Usage {
+			bindings = append(bindings, m.keyMap.Refresh)
+		}
+		return bindings
 	case accountsStateError, accountsStateEmpty:
 		return []key.Binding{CloseKey}
 	default:
@@ -389,7 +427,11 @@ func (m *Accounts) ShortHelp() []key.Binding {
 // FullHelp implements [help.KeyMap].
 func (m *Accounts) FullHelp() [][]key.Binding {
 	if m.state == accountsStateList {
-		return append(m.sd.FullHelp(), []key.Binding{m.keyMap.Edit, m.keyMap.Delete})
+		bindings := []key.Binding{m.keyMap.Edit, m.keyMap.Delete}
+		if m.caps.Usage {
+			bindings = append(bindings, m.keyMap.Refresh)
+		}
+		return append(m.sd.FullHelp(), bindings)
 	}
 	return [][]key.Binding{m.ShortHelp()}
 }
@@ -436,7 +478,7 @@ func (a *AccountItem) Render(width int) string {
 	}
 	if a.caps.Usage {
 		if a.account.Usage.Known() {
-			parts = append(parts, common.FormatPlanUsage(a.account.Usage.Plan, common.AccountUsageWindows(a.account.Usage)))
+			parts = append(parts, common.FormatPlanUsage(a.account.Usage.Plan, common.AccountUsageWindows(a.account.Usage), ""))
 		} else {
 			parts = append(parts, "limits unknown")
 		}

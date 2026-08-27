@@ -17,6 +17,7 @@ func TestFormatPlanUsage(t *testing.T) {
 		name    string
 		plan    string
 		windows []PlanWindow
+		label   string
 		want    string
 	}{
 		{
@@ -24,6 +25,19 @@ func TestFormatPlanUsage(t *testing.T) {
 			plan:    "plus",
 			windows: []PlanWindow{{UsedPercent: 6, WindowMinutes: 10080, ResetsAt: in(80 * time.Hour)}},
 			want:    "Plus · 6% of weekly limit, resets in 3d",
+		},
+		{
+			name:    "a label goes between the plan and the usage figure",
+			plan:    "plus",
+			windows: []PlanWindow{{UsedPercent: 42, WindowMinutes: 10080}},
+			label:   "Личный Plus",
+			want:    "Plus · Личный Plus · 42% of weekly limit",
+		},
+		{
+			name:  "a label with no known usage still renders",
+			plan:  "plus",
+			label: "Личный Plus",
+			want:  "Plus · Личный Plus",
 		},
 		{
 			name: "the fullest window is the one worth showing",
@@ -72,7 +86,7 @@ func TestFormatPlanUsage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, FormatPlanUsage(tt.plan, tt.windows))
+			require.Equal(t, tt.want, FormatPlanUsage(tt.plan, tt.windows, tt.label))
 		})
 	}
 }

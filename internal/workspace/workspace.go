@@ -322,6 +322,13 @@ type ConfigAccessor interface {
 	// scope only — providers are a global-only config key (see
 	// internal/config/globalonly.go).
 	SetProviderProxy(providerID, proxy string) error
+	// RefreshAccountLimits fetches a fresh rate-limit snapshot for every
+	// OAuth account of providerID that reports usage
+	// (accounts.CapabilitiesOf(providerID).Usage) and persists what was
+	// learned, returning the provider's accounts. A single account's
+	// fetch failing does not fail the call — see config.RefreshAccountLimits
+	// for the full contract.
+	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
 }
 
 // ProjectLifecycle covers first-run project initialization and skill

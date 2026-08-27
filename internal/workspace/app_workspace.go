@@ -810,6 +810,14 @@ func (w *AppWorkspace) SetProviderProxy(providerID, proxy string) error {
 	return config.SetProviderProxy(w.store, accStore, providerID, proxy)
 }
 
+// RefreshAccountLimits implements Workspace by delegating to
+// config.RefreshAccountLimits, exactly like UpdateAccount/RemoveAccount
+// above.
+func (w *AppWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.RefreshAccountLimits(ctx, w.store, accStore, providerID)
+}
+
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.store.SetConfigField(scope, key, value)
 }

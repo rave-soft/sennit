@@ -384,6 +384,10 @@ func (w *readOnlyWorkspace) SetProviderProxy(providerID, proxy string) error {
 	return w.readOnlyError("SetProviderProxy")
 }
 
+func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+	return nil, w.readOnlyError("RefreshAccountLimits")
+}
+
 func (w *readOnlyWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.readOnlyError("SetConfigField")
 }

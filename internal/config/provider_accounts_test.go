@@ -1,13 +1,18 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"os"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 )
 
 // TestEnsureAccountMigrated_MigratesLegacyCredentialAndActivatesIt is the
@@ -80,4 +85,78 @@ func TestEnsureAccountMigrated_NoCredentialNoOp(t *testing.T) {
 	all, err := accStore.List(codex.ProviderID)
 	require.NoError(t, err)
 	require.Empty(t, all)
+}
+
+// TestRefreshAccountLimits_PersistsSuccessAndSkipsFailure is the core
+// contract of the "refresh limits" action: every OAuth account is asked,
+// a successful fetch is persisted, and a failing one leaves the account's
+// existing snapshot alone instead of failing the whole call or clobbering
+// it with a blank one.
+func TestRefreshAccountLimits_PersistsSuccessAndSkipsFailure(t *testing.T) {
+	t.Parallel()
+
+	store := newRecordAccountStore(t)
+	accStore := newTestAccountsStore(t)
+
+	staleUsage := accounts.Usage{Plan: "stale", Primary: accounts.UsageWindow{UsedPercent: 50, WindowMinutes: 60 * 24 * 7}}
+	require.NoError(t, accStore.Upsert(codex.ProviderID, accounts.Account{
+		ID: "good", AccountID: "acct-good", Token: &oauth.Token{AccessToken: "tok-good"},
+	}))
+	require.NoError(t, accStore.Upsert(codex.ProviderID, accounts.Account{
+		ID: "bad", AccountID: "acct-bad", Token: &oauth.Token{AccessToken: "tok-bad"}, Usage: staleUsage,
+	}))
+	require.NoError(t, accStore.Upsert(codex.ProviderID, accounts.Account{
+		ID: "keyed", AccountID: "acct-keyed", APIKey: "sk-does-not-matter",
+	}))
+
+	fetch := func(_ context.Context, _, accessToken, _ string) (codex.Usage, bool, error) {
+		switch accessToken {
+		case "tok-good":
+			return codex.Usage{Plan: "plus", Primary: codex.UsageWindow{UsedPercent: 42, WindowMinutes: 60 * 24 * 7}}, true, nil
+		case "tok-bad":
+			return codex.Usage{}, false, errors.New("boom")
+		default:
+			t.Fatalf("fetch called for unexpected token %q — api-key accounts must be skipped", accessToken)
+			return codex.Usage{}, false, nil
+		}
+	}
+
+	got, err := refreshAccountLimits(t.Context(), store, accStore, codex.ProviderID, fetch)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+
+	byID := make(map[string]accounts.Account, len(got))
+	for _, a := range got {
+		byID[a.ID] = a
+	}
+	require.Equal(t, "plus", byID["good"].Usage.Plan, "a successful fetch must be persisted")
+	require.Equal(t, 42, byID["good"].Usage.Primary.UsedPercent)
+	require.Equal(t, staleUsage, byID["bad"].Usage, "a failed fetch must leave the stored snapshot untouched")
+	require.False(t, byID["keyed"].Usage.Known(), "an api-key account has nothing to fetch")
+}
+
+// TestRefreshAccountLimits_NoUsageCapabilityIsNoOp covers a provider that
+// doesn't report usage at all (accounts.CapabilitiesOf(...).Usage false):
+// the accounts are returned unchanged and fetch is never called.
+func TestRefreshAccountLimits_NoUsageCapabilityIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	store := newRecordAccountStore(t)
+	accStore := newTestAccountsStore(t)
+	const providerID = "no-usage-provider"
+
+	require.NoError(t, accStore.Upsert(providerID, accounts.Account{
+		ID: "only", Token: &oauth.Token{AccessToken: "tok"},
+	}))
+
+	var calls atomic.Int32
+	fetch := func(context.Context, string, string, string) (codex.Usage, bool, error) {
+		calls.Add(1)
+		return codex.Usage{}, false, nil
+	}
+
+	got, err := refreshAccountLimits(t.Context(), store, accStore, providerID, fetch)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Zero(t, calls.Load(), "fetch must not be called for a provider with no usage capability")
 }

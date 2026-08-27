@@ -316,12 +316,20 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		})
 	case dialog.ActionAccountSaved:
 		m.dialog.CloseDialog(dialog.AccountFormID)
-		cmds = append(cmds, m.reloadAccountsCmd(msg.ProviderID))
+		cmds = append(cmds, m.reloadAccountsCmd(msg.ProviderID), m.refreshAccountLabelCmd(msg.ProviderID))
 	case dialog.ActionRequestAccountRemoval:
 		m.dialog.OpenDialog(dialog.NewAccountRemoveConfirm(m.com, msg.ProviderID, msg.Account))
 	case dialog.ActionRemoveAccountConfirmed:
 		m.dialog.CloseDialog(dialog.AccountRemoveConfirmID)
-		cmds = append(cmds, m.removeAccountCmd(msg.ProviderID, msg.AccountID))
+		cmds = append(cmds, m.removeAccountCmd(msg.ProviderID, msg.AccountID), m.refreshAccountLabelCmd(msg.ProviderID))
+	case dialog.ActionAccountActivated:
+		// See ActionAccountActivated's doc comment: this used to be a
+		// bare ActionClose{} handled by applyChromeDialogAction's default
+		// case below. It is intercepted here instead so a switch to a
+		// different account also refreshes the sidebar's cached label
+		// for the newly active one (see account_label.go).
+		m.dialog.CloseDialog(dialog.AccountsID)
+		cmds = append(cmds, m.refreshAccountLabelCmd(msg.ProviderID))
 	case dialog.ActionOpenProviderSettings:
 		m.dialog.OpenDialog(dialog.NewProviderSettings(m.com, msg.ProviderID))
 	case dialog.ActionSubmitProviderSettings:

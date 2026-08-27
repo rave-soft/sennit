@@ -554,6 +554,11 @@ func (s *stubWorkspace) SetProviderProxy(providerID, proxy string) error {
 	return nil
 }
 
+func (s *stubWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+	s.track("RefreshAccountLimits")
+	return nil, nil
+}
+
 func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	s.track("SetConfigField")
 	return nil

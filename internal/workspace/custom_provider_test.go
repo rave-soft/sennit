@@ -104,6 +104,11 @@ func (a *testConfigAccessor) SetProviderProxy(providerID, proxy string) error {
 	return config.SetProviderProxy(a.store, accStore, providerID, proxy)
 }
 
+func (a *testConfigAccessor) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID)
+}
+
 func (a *testConfigAccessor) SetConfigField(scope config.Scope, key string, value any) error {
 	return a.store.SetConfigField(scope, key, value)
 }

@@ -285,6 +285,17 @@ type (
 		ProviderID string
 		AccountID  string
 	}
+	// ActionAccountActivated is returned by Accounts.HandleMsg once the
+	// async ActivateAccount call it kicked off (selecting a different
+	// account from the list) succeeds. It carries ProviderID so the
+	// caller can refresh anything cached that depends on which account
+	// is now active (the sidebar's account-label cache — see
+	// model/account_label.go) alongside closing the dialog, the way a
+	// bare ActionClose used to do before there was a reason to
+	// distinguish this from any other dialog dismissal.
+	ActionAccountActivated struct {
+		ProviderID string
+	}
 	// ActionOpenProviderSettings is sent when "Provider settings…" is
 	// chosen from the accounts list, to open [ProviderSettings] for the
 	// dialog's provider.

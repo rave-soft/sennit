@@ -133,8 +133,14 @@ func TestUpdateSettings_ProviderConfiguredResult(t *testing.T) {
 		}, nil)
 
 		require.False(t, done)
-		require.Len(t, cmds, 1)
+		// One command drives model/agent init; the other refreshes the
+		// sidebar's cached account label for the now-configured provider
+		// (see account_label.go) — harmless for the common "just signed
+		// in" case, since that cache is a no-op for a single-account
+		// provider.
+		require.Len(t, cmds, 2)
 		require.NotNil(t, cmds[0])
+		require.NotNil(t, cmds[1])
 	})
 }
 
@@ -181,8 +187,13 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 		}, nil)
 
 		require.False(t, done)
-		require.Len(t, cmds, 1)
+		// As with providerConfiguredResult above: one command drives
+		// model/agent init, the other refreshes the sidebar's account
+		// label, since selecting a model can move to a provider whose
+		// label the cache has never held.
+		require.Len(t, cmds, 2)
 		require.NotNil(t, cmds[0])
+		require.NotNil(t, cmds[1])
 	})
 }
 
