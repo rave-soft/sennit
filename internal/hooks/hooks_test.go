@@ -580,6 +580,23 @@ func TestAggregationUpdatedInput(t *testing.T) {
 		require.Empty(t, agg.UpdatedInput)
 	})
 
+	t.Run("patch keys with sjson metacharacters land as literal top-level keys", func(t *testing.T) {
+		t.Parallel()
+		// Before the fix, shallowMerge fed each key straight into
+		// sjson.SetRawBytes, which treats its key argument as a path
+		// expression. "file.path" would nest into {"file":{"path":...}},
+		// and "*"/"?"/"#" would be reinterpreted as wildcards/array
+		// indices, silently dropping the write instead of erroring.
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `{"file.path":"a.go","a*b":1,"a?b":2,"a#b":3,"plain":"ok"}`},
+		}, `{"unrelated":"keep-me"}`)
+		require.JSONEq(
+			t,
+			`{"file.path":"a.go","a*b":1,"a?b":2,"a#b":3,"plain":"ok","unrelated":"keep-me"}`,
+			agg.UpdatedInput,
+		)
+	})
+
 	t.Run("null updated_input is a no-op", func(t *testing.T) {
 		t.Parallel()
 		// parseStdout converts null updated_input to "", so aggregate

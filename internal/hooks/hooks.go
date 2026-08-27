@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/tidwall/sjson"
 )
 
 // Hook event name constants.
@@ -162,31 +160,39 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 // objects). Keys in patch overwrite keys in base; keys absent from the
 // patch are preserved. Returns an error if either value is not a valid
 // JSON object.
+//
+// This merges the already-decoded maps directly rather than feeding each
+// patch key through sjson.SetRawBytes: sjson's second argument is a path
+// expression, not a literal key, so a key containing a path metacharacter
+// (".", "*", "?", "#") would be reinterpreted instead of being set
+// verbatim — e.g. a patch key "file.path" would create a nested
+// {"file":{"path":...}} instead of setting the top-level "file.path"
+// key. Since the patch is already unmarshalled into a map and the base
+// is already known to be a JSON object, merging the maps is both simpler
+// and immune to that reinterpretation.
 func shallowMerge(base, patch string) (string, error) {
 	if base == "" {
 		base = "{}"
 	}
-	// Ensure base is an object so sjson has somewhere to write.
-	var baseAny any
-	if err := json.Unmarshal([]byte(base), &baseAny); err != nil {
-		return "", err
-	}
-	if _, ok := baseAny.(map[string]any); !ok {
+	var baseMap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(base), &baseMap); err != nil {
 		return "", errNotObject("tool_input")
 	}
 	var patchMap map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(patch), &patchMap); err != nil {
 		return "", errNotObject("updated_input")
 	}
-	out := base
-	for k, v := range patchMap {
-		next, err := sjson.SetRawBytes([]byte(out), k, v)
-		if err != nil {
-			return "", err
-		}
-		out = string(next)
+	if baseMap == nil {
+		baseMap = map[string]json.RawMessage{}
 	}
-	return out, nil
+	for k, v := range patchMap {
+		baseMap[k] = v
+	}
+	out, err := json.Marshal(baseMap)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 type errNotObject string
