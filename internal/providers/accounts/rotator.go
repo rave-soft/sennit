@@ -218,7 +218,9 @@ func (r *Rotator) coolingDown(accountID string) bool {
 // A single usable candidate, or a provider with only one account
 // configured at all, is a total no-op: Pick returns it directly without
 // consulting the debounce timer, matching the plan's requirement that a
-// one-account provider never rotates.
+// one-account provider never rotates. A sole account that is Disabled is
+// not usable, though: Pick returns *ErrAllExhausted for it exactly as it
+// would for any other exhausted candidate.
 //
 // When nothing is usable, Pick returns *ErrAllExhausted carrying the
 // earliest time any candidate becomes available again (the soonest usage
@@ -235,6 +237,13 @@ func (r *Rotator) Pick(providerID, currentID string, candidates []Account) (Acco
 		return Account{}, &ErrAllExhausted{ProviderID: providerID}
 	}
 	if len(candidates) == 1 {
+		// The one-account no-op still has to honor Disabled: a disabled
+		// sole account is exactly the "everything is exhausted" case
+		// ErrAllExhausted exists for, not a free pass to send requests
+		// on credentials the user turned off.
+		if candidates[0].Disabled {
+			return Account{}, &ErrAllExhausted{ProviderID: providerID}
+		}
 		return candidates[0], nil
 	}
 

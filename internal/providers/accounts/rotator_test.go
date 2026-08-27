@@ -77,17 +77,33 @@ func TestRotator_ShouldRotate_SingleAccountNoOp(t *testing.T) {
 	require.False(t, r.ShouldRotate(active, []Account{active}))
 }
 
-// TestRotator_Pick_SingleAccountNoOp: one account (even disabled or over
-// threshold) is returned as-is, never an error, never consulted against
-// disabled/threshold/cooldown.
+// TestRotator_Pick_SingleAccountNoOp: one account over threshold is
+// returned as-is, never an error — there's nowhere to rotate to, so
+// threshold/cooldown exhaustion is moot for a lone candidate.
 func TestRotator_Pick_SingleAccountNoOp(t *testing.T) {
 	t.Parallel()
 	r := NewRotator(RotationPolicy{})
 	only := withUsage(acct("only"), 99)
-	only.Disabled = true
 	got, err := r.Pick("prov", "only", []Account{only})
 	require.NoError(t, err)
 	require.Equal(t, "only", got.ID)
+}
+
+// TestRotator_Pick_SingleDisabledAccountIsExhausted is the regression test
+// for the sole-account fast path bypassing the Disabled check entirely:
+// Disabled means "skipped by rotation and selection" (see Account's doc
+// comment) regardless of how many candidates exist, so a disabled lone
+// account must report ErrAllExhausted, not hand back credentials the user
+// turned off.
+func TestRotator_Pick_SingleDisabledAccountIsExhausted(t *testing.T) {
+	t.Parallel()
+	r := NewRotator(RotationPolicy{})
+	only := acct("only")
+	only.Disabled = true
+	_, err := r.Pick("prov", "only", []Account{only})
+	require.Error(t, err)
+	var exhausted *ErrAllExhausted
+	require.True(t, errors.As(err, &exhausted))
 }
 
 // TestRotator_Pick_ZeroAccountsNoOp: no accounts at all is a clear error,
