@@ -831,19 +831,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 		"error_type", fmt.Sprintf("%T", err),
 		"is_cancel", isCancelErr)
 	if t.currentAssistant == nil {
-		// Cancel-before-assistant-creation window: the run was
-		// canceled after activeRequests.Set but before PrepareStep
-		// created the assistant message. Without this, the turn
-		// would return with no FinishReasonCanceled marker and no
-		// user-visible record. The user message was already created
-		// above, so persistCanceledTurn only writes the assistant
-		// record.
-		if isCancelErr {
-			if persistErr := t.agent.persistCanceledTurn(t.ctx, t.call, t.userMsgCreated); persistErr != nil {
-				return nil, persistErr
-			}
-		}
-		return nil, err
+		return t.handleStreamErrorBeforeAssistant(err, isCancelErr)
 	}
 	// Persist final state with a context detached from the run
 	// context. The run context (ctx) is derived from the
@@ -875,6 +863,40 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			"error", listErr,
 		)
 	}
+	t.closeUnfinishedToolCalls(cleanupCtx, toolCalls, msgs, listErr, isCancelErr)
+	err = t.finishAssistantOnStreamError(err, isCancelErr)
+	// Note: we use the cleanup context here because the genCtx has been
+	// cancelled.
+	updateErr := t.agent.messages.Update(cleanupCtx, *t.currentAssistant)
+	if updateErr != nil {
+		return nil, updateErr
+	}
+	return nil, err
+}
+
+// handleStreamErrorBeforeAssistant handles the cancel-before-assistant-
+// creation window: the run was canceled after activeRequests.Set but
+// before PrepareStep created the assistant message. Without this, the
+// turn would return with no FinishReasonCanceled marker and no
+// user-visible record. The user message was already created above, so
+// persistCanceledTurn only writes the assistant record.
+func (t *runTurn) handleStreamErrorBeforeAssistant(err error, isCancelErr bool) (*fantasy.AgentResult, error) {
+	if isCancelErr {
+		if persistErr := t.agent.persistCanceledTurn(t.ctx, t.call, t.userMsgCreated); persistErr != nil {
+			return nil, persistErr
+		}
+	}
+	return nil, err
+}
+
+// closeUnfinishedToolCalls marks every tool call left unfinished by the
+// stream error as finished and, for any that has no persisted tool result
+// yet, writes a synthetic error result so the conversation cannot lock on
+// an orphaned call. Every failure logged here is non-fatal: the caller
+// still needs to reach its own AddFinish/Update so the assistant message
+// ends up with a finish reason instead of looking "still running"
+// forever.
+func (t *runTurn) closeUnfinishedToolCalls(cleanupCtx context.Context, toolCalls []message.ToolCall, msgs []message.Message, listErr error, isCancelErr bool) {
 	for _, tc := range toolCalls {
 		if !tc.Finished {
 			tc.Finished = true
@@ -942,6 +964,13 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			continue
 		}
 	}
+}
+
+// finishAssistantOnStreamError records a finish reason describing err on
+// the current assistant message and returns the error the caller should
+// ultimately report - unchanged, except for the Copilot quota case, where
+// it is replaced with a typed ProviderQuotaError.
+func (t *runTurn) finishAssistantOnStreamError(err error, isCancelErr bool) error {
 	var fantasyErr *fantasy.Error
 	var providerErr *fantasy.ProviderError
 	const defaultTitle = "Provider Error"
@@ -981,11 +1010,5 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 	} else {
 		t.currentAssistant.AddFinish(message.FinishReasonError, time.Now().Unix(), defaultTitle, err.Error())
 	}
-	// Note: we use the cleanup context here because the genCtx has been
-	// cancelled.
-	updateErr := t.agent.messages.Update(cleanupCtx, *t.currentAssistant)
-	if updateErr != nil {
-		return nil, updateErr
-	}
-	return nil, err
+	return err
 }

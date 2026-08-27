@@ -205,15 +205,51 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 	}
 	cfg := newAgentConfig(b.cfg.Config())
 
+	bctx, err := b.newBuildToolsCtx(cfg, agent, isSubAgent, inputs)
+	if err != nil {
+		return nil, err
+	}
+
+	allTools, err := b.assembleAllTools(ctx, bctx, isSubAgent, inputs)
+	if err != nil {
+		return nil, err
+	}
+
+	filteredTools := filterToolsByAllowlist(allTools, agent)
+	filteredTools = appendAllowedMCPTools(filteredTools, b, inputs, agent)
+	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
+		return strings.Compare(a.Info().Name, b.Info().Name)
+	})
+
+	// Build hook runner if PreToolUse hooks are configured.
+	var hookRunner *hooks.Runner
+	if preToolHooks := cfg.PreToolUseHooks(); len(preToolHooks) > 0 {
+		hookRunner = hooks.NewRunner(preToolHooks, b.cfg.WorkingDir(), b.cfg.WorkingDir())
+	}
+
+	// Wrap tools with hook interception for the top-level agent only.
+	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
+	// without hook interception to avoid firing the user's hook N times
+	// per delegated turn. The top-level invocation of the sub-agent tool
+	// itself is still wrapped from the coder's side.
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+
+	return filteredTools, nil
+}
+
+// newBuildToolsCtx assembles the buildToolsCtx buildTools' toolSpecs loop
+// gates and builds against, from the current web-search backend and the
+// already-collected runtime inputs (skills, delegation tools, background
+// agents).
+func (b *runtimeBuilder) newBuildToolsCtx(cfg agentConfig, agent config.Agent, isSubAgent bool, inputs runtimeToolInputs) (*buildToolsCtx, error) {
 	searchBackend, err := b.webSearchBackend()
 	if err != nil {
 		return nil, fmt.Errorf("web_search: %w", err)
 	}
 
 	allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot := inputs.allSkills, inputs.activeSkills, inputs.skillTracker
-
 	delegationTools := inputs.delegationTools
-	bctx := &buildToolsCtx{
+	return &buildToolsCtx{
 		agent:              agent,
 		isSubAgent:         isSubAgent,
 		interactive:        b.interactive,
@@ -229,8 +265,14 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 		backgroundAgentsOn: inputs.backgroundAgentsOn,
 		toolAvailability:   tools.ResolveSystemToolAvailability(),
 		inputs:             inputs,
-	}
+	}, nil
+}
 
+// assembleAllTools runs every gated toolSpecs() entry against bctx and
+// appends the pre-built user-defined agent tools for the top-level agent
+// only (user-defined agents are offered to the top-level agent only - see
+// buildTools' doc comment).
+func (b *runtimeBuilder) assembleAllTools(ctx context.Context, bctx *buildToolsCtx, isSubAgent bool, inputs runtimeToolInputs) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	for _, spec := range toolSpecs() {
 		gate, ok := specGate(spec)
@@ -243,22 +285,17 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 		}
 		allTools = append(allTools, built...)
 	}
-
-	// User-defined agents are offered to the top-level agent only (see
-	// this function's doc comment).
 	if !isSubAgent {
 		allTools = append(allTools, inputs.customAgentToolsBuilt...)
 	}
+	return allTools, nil
+}
 
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := cfg.PreToolUseHooks(); len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, b.cfg.WorkingDir(), b.cfg.WorkingDir())
-	}
-
-	// grep and ripgrep are alternative registrations of the same content
-	// search slot (which one exists depends on whether rg is installed), so
-	// an agent allowing either name gets whichever is available.
+// filterToolsByAllowlist keeps only the tools agent.AllowedTools names.
+// grep and ripgrep are alternative registrations of the same content
+// search slot (which one exists depends on whether rg is installed), so
+// an agent allowing either name gets whichever is available.
+func filterToolsByAllowlist(allTools []fantasy.AgentTool, agent config.Agent) []fantasy.AgentTool {
 	allowsTool := func(name string) bool {
 		if name == tools.GrepToolName || name == tools.RipgrepToolName {
 			return slices.Contains(agent.AllowedTools, tools.GrepToolName) ||
@@ -266,14 +303,19 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 		}
 		return slices.Contains(agent.AllowedTools, name)
 	}
-
 	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
 		if allowsTool(tool.Info().Name) {
 			filteredTools = append(filteredTools, tool)
 		}
 	}
+	return filteredTools
+}
 
+// appendAllowedMCPTools appends the MCP tools agent.AllowedMCP permits (nil
+// means no restrictions; an empty, non-nil map means none allowed) to
+// filteredTools.
+func appendAllowedMCPTools(filteredTools []fantasy.AgentTool, b *runtimeBuilder, inputs runtimeToolInputs, agent config.Agent) []fantasy.AgentTool {
 	for _, tool := range tools.GetMCPTools(b.mcp, inputs.permissions, b.cfg, b.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
@@ -297,18 +339,7 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 		}
 	}
-	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
-		return strings.Compare(a.Info().Name, b.Info().Name)
-	})
-
-	// Wrap tools with hook interception for the top-level agent only.
-	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
-	// without hook interception to avoid firing the user's hook N times
-	// per delegated turn. The top-level invocation of the sub-agent tool
-	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
-
-	return filteredTools, nil
+	return filteredTools
 }
 
 // webSearchBackend builds the SearchBackend selected by options.web_search,

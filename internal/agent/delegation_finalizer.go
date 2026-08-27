@@ -647,16 +647,9 @@ func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID,
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
 func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
-	var sessionID string
-	if params.ChildSessionID != "" {
-		sessionID = params.ChildSessionID
-	} else {
-		agentToolSessionID := d.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
-		session, err := d.sessions.CreateSubAgentSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle, params.AgentID)
-		if err != nil {
-			return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
-		}
-		sessionID = session.ID
+	sessionID, err := d.resolveSubAgentSessionID(ctx, params)
+	if err != nil {
+		return fantasy.ToolResponse{}, err
 	}
 
 	// The delegate is built with its system prompt and tools assembled on
@@ -684,13 +677,7 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 	// Capture one immutable runtime after readiness. The same value sizes
 	// carry-over and drives Stream, so mutable agent/MCP state cannot drift
 	// between those two operations.
-	var runtime *streamRuntime
-	if snap, ok := params.Agent.(interface {
-		snapshotStreamRuntime(SessionAgentCall) streamRuntime
-	}); ok {
-		captured := snap.snapshotStreamRuntime(SessionAgentCall{SessionID: sessionID})
-		runtime = &captured
-	}
+	runtime := snapshotSubAgentRuntime(params.Agent, sessionID)
 
 	// What this named agent already knows, from its earlier delegations
 	// under the same parent. Collected after the session exists so the
@@ -706,24 +693,7 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 	if runtime != nil {
 		model = runtime.model
 	}
-	budgetIn := carryOverBudgetInput{
-		Model:             model,
-		SystemPromptBytes: 0,
-		ToolSchemaBytes:   0,
-		PromptBytes:       len(params.Prompt),
-	}
-	if runtime != nil {
-		budgetIn.SystemPromptBytes = len(runtime.systemPrompt) + len(runtime.systemPromptPrefix)
-		budgetIn.ToolSchemaBytes = toolSchemaBytes(runtime.tools)
-	} else if snap, ok := params.Agent.(interface {
-		runtimeSnapshot(SessionAgentCall) (string, []fantasy.AgentTool)
-	}); ok {
-		systemPrompt, agentTools := snap.runtimeSnapshot(SessionAgentCall{SessionID: sessionID})
-		budgetIn.SystemPromptBytes = len(systemPrompt)
-		budgetIn.ToolSchemaBytes = toolSchemaBytes(agentTools)
-	}
-
-	priorMessages, err := d.carryOverMessages(ctx, budgetIn, params.SessionID, params.AgentID, sessionID)
+	priorMessages, err := d.subAgentCarryOverMessages(ctx, params, sessionID, model, runtime)
 	if err != nil {
 		slog.Warn(
 			"Failed to carry over sub-agent history; running without it",
@@ -763,25 +733,7 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 	// below runs it with ctx directly, the detachable path with a child
 	// context that can outlive ctx.
 	run := func(runCtx context.Context) (*fantasy.AgentResult, error) {
-		call := SessionAgentCall{
-			SessionID:       sessionID,
-			Depth:           params.Depth,
-			Prompt:          params.Prompt,
-			PriorMessages:   priorMessages,
-			MaxOutputTokens: maxTokens,
-			// Keyed on the child session: a delegation's ~90 steps all
-			// replay its own growing prefix, which is exactly the run of
-			// requests prompt_cache_key exists to keep together.
-			ProviderOptions:  withPromptCacheKey(getProviderOptions(model, providerCfg), model, providerCfg, sessionID),
-			Temperature:      model.ModelCfg.Temperature,
-			TopP:             model.ModelCfg.TopP,
-			TopK:             model.ModelCfg.TopK,
-			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
-			PresencePenalty:  model.ModelCfg.PresencePenalty,
-			NonInteractive:   true,
-			ActiveRuntime:    active,
-			OnAuthRefresh:    d.makeAuthRefreshCallback(providerCfg, active),
-		}
+		call := d.buildSubAgentCall(params, sessionID, priorMessages, maxTokens, model, providerCfg, active)
 		if runtimeAgent, ok := params.Agent.(interface {
 			runWithStreamRuntime(context.Context, SessionAgentCall, streamRuntime) (*fantasy.AgentResult, error)
 		}); ok && runtime != nil {
@@ -806,6 +758,89 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 		}
 	}
 	return d.finishSubAgent(subAgentOutcome{result: result, err: err}), nil
+}
+
+// resolveSubAgentSessionID returns the child session id a delegation
+// should run in: the caller-supplied ChildSessionID for a task launch
+// (already created and finalized atomically by the store), or a freshly
+// created sub-agent session for a legacy direct call.
+func (d *delegationFinalizer) resolveSubAgentSessionID(ctx context.Context, params subAgentParams) (string, error) {
+	if params.ChildSessionID != "" {
+		return params.ChildSessionID, nil
+	}
+	agentToolSessionID := d.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
+	session, err := d.sessions.CreateSubAgentSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle, params.AgentID)
+	if err != nil {
+		return "", fmt.Errorf("create session: %w", err)
+	}
+	return session.ID, nil
+}
+
+// snapshotSubAgentRuntime captures the delegate's immutable runtime after
+// readiness, if it exposes one, so the same value sizes carry-over and
+// later drives Stream. Returns nil when params.Agent doesn't implement
+// the snapshot seam (see stream_runtime_snapshot_test.go).
+func snapshotSubAgentRuntime(agent SessionAgent, sessionID string) *streamRuntime {
+	snap, ok := agent.(interface {
+		snapshotStreamRuntime(SessionAgentCall) streamRuntime
+	})
+	if !ok {
+		return nil
+	}
+	captured := snap.snapshotStreamRuntime(SessionAgentCall{SessionID: sessionID})
+	return &captured
+}
+
+// subAgentCarryOverMessages sizes the carry-over budget from the resolved
+// model and runtime (falling back to the agent's own runtimeSnapshot when
+// no streamRuntime was captured) and fetches the prior messages this
+// delegation should see ahead of its own.
+func (d *delegationFinalizer) subAgentCarryOverMessages(ctx context.Context, params subAgentParams, sessionID string, model Model, runtime *streamRuntime) ([]message.Message, error) {
+	budgetIn := carryOverBudgetInput{
+		Model:             model,
+		SystemPromptBytes: 0,
+		ToolSchemaBytes:   0,
+		PromptBytes:       len(params.Prompt),
+	}
+	if runtime != nil {
+		budgetIn.SystemPromptBytes = len(runtime.systemPrompt) + len(runtime.systemPromptPrefix)
+		budgetIn.ToolSchemaBytes = toolSchemaBytes(runtime.tools)
+	} else if snap, ok := params.Agent.(interface {
+		runtimeSnapshot(SessionAgentCall) (string, []fantasy.AgentTool)
+	}); ok {
+		systemPrompt, agentTools := snap.runtimeSnapshot(SessionAgentCall{SessionID: sessionID})
+		budgetIn.SystemPromptBytes = len(systemPrompt)
+		budgetIn.ToolSchemaBytes = toolSchemaBytes(agentTools)
+	}
+	return d.carryOverMessages(ctx, budgetIn, params.SessionID, params.AgentID, sessionID)
+}
+
+// buildSubAgentCall assembles the SessionAgentCall a delegation's run
+// closure sends to params.Agent. active is threaded straight through as
+// ActiveRuntime and into makeAuthRefreshCallback - the exact wiring a
+// successful mid-delegation credential refresh depends on (see
+// runSubAgent's own comment on active) - so this must stay a plain
+// pass-through, never a copy or a fresh instance.
+func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID string, priorMessages []message.Message, maxTokens int64, model Model, providerCfg config.ProviderConfig, active *activeRuntime) SessionAgentCall {
+	return SessionAgentCall{
+		SessionID:       sessionID,
+		Depth:           params.Depth,
+		Prompt:          params.Prompt,
+		PriorMessages:   priorMessages,
+		MaxOutputTokens: maxTokens,
+		// Keyed on the child session: a delegation's ~90 steps all
+		// replay its own growing prefix, which is exactly the run of
+		// requests prompt_cache_key exists to keep together.
+		ProviderOptions:  withPromptCacheKey(getProviderOptions(model, providerCfg), model, providerCfg, sessionID),
+		Temperature:      model.ModelCfg.Temperature,
+		TopP:             model.ModelCfg.TopP,
+		TopK:             model.ModelCfg.TopK,
+		FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
+		PresencePenalty:  model.ModelCfg.PresencePenalty,
+		NonInteractive:   true,
+		ActiveRuntime:    active,
+		OnAuthRefresh:    d.makeAuthRefreshCallback(providerCfg, active),
+	}
 }
 
 func (d *delegationFinalizer) subAgentTaskRun(parentSessionID, childSessionID, prompt string, agent SessionAgent, depth int) func(context.Context) (tools.TaskRunResult, error) {
@@ -952,75 +987,84 @@ func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.C
 				SessionTitle:    "Fetch Analysis",
 				SessionID:       d.sessions.CreateAgentToolSessionID(validation.AgentMessageID, call.ID),
 				Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
-					description := "Search the web and analyze results"
-					if params.URL != "" {
-						description = fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL)
-					}
-					allowed, err := d.permissions.Request(ctx, permission.CreatePermissionRequest{
-						SessionID: validation.SessionID, Path: d.cfg.WorkingDir(), ToolCallID: call.ID,
-						ToolName: tools.AgenticFetchToolName, Action: "fetch", Description: description,
-						Params: tools.AgenticFetchPermissionsParams(params),
-					})
-					if err != nil {
-						return nil, nil, err
-					}
-					if !allowed {
-						return nil, nil, errors.New("permission denied for agentic fetch")
-					}
-					tmpDir, err := os.MkdirTemp(d.cfg.Config().Options.DataDirectory, brand.Slug+"-fetch-*")
-					if err != nil {
-						return nil, nil, fmt.Errorf("create temporary directory: %w", err)
-					}
-					cleanup := func() { _ = os.RemoveAll(tmpDir) }
-					fullPrompt := params.Prompt + "\n\nUse web_search and web_fetch to research this request."
-					if params.URL != "" {
-						content, filePath, err := tools.FetchLargeContent(ctx, client, tmpDir, params.URL)
-						if err != nil {
-							return nil, cleanup, fmt.Errorf("fetch URL: %w", err)
-						}
-						if filePath != "" {
-							fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s is saved at %s. Analyze it with read and grep.", params.Prompt, params.URL, filePath)
-						} else {
-							fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
-						}
-					}
-					promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), prompt.WithWorkingDir(tmpDir))
-					if err != nil {
-						return nil, cleanup, err
-					}
-					model, err := d.resolveAgentModel(ctx, true)
-					if err != nil {
-						return nil, cleanup, err
-					}
-					systemPrompt, err := promptTemplate.Build(ctx, model.Model.Provider(), model.Model.Model(), d.cfg)
-					if err != nil {
-						return nil, cleanup, err
-					}
-					providerCfg, ok := d.cfg.Config().Providers.Get(model.ModelCfg.Provider)
-					if !ok {
-						return nil, cleanup, errors.New("model provider not configured")
-					}
-					searchBackend, err := d.resolveWebSearchBackend()
-					if err != nil {
-						return nil, cleanup, fmt.Errorf("web_search: %w", err)
-					}
-					availability := tools.ResolveSystemToolAvailability()
-					agent := NewSessionAgent(SessionAgentOptions{
-						Model: model, SystemPromptPrefix: providerCfg.SystemPromptPrefix, SystemPrompt: systemPrompt,
-						DisableAutoSummarize: d.cfg.Config().Options.DisableAutoSummarize,
-						AutoSummarizeAt:      d.cfg.Config().Options.AutoSummarizeAt,
-						Sessions:             d.sessions, Messages: d.messages,
-						Tools: []fantasy.AgentTool{
-							tools.NewWebFetchTool(nil, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
-							tools.NewGlobTool(tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, d.cfg.Config().Tools.Grep),
-							tools.NewReadTool(d.lspManager, d.permissions, d.filetracker, nil, tmpDir),
-						},
-					})
-					return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth), cleanup, nil
+					return d.agenticFetchFactory(ctx, client, params, validation, call, childDepth, childID)
 				},
 			})
 		},
 	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
+}
+
+// agenticFetchFactory is the agentic-fetch tool's TaskCreateArgs.Factory: it
+// requests permission, fetches params.URL (if any) into a scratch
+// directory, builds that delegation's own system prompt and sub-agent, and
+// hands back its run function and cleanup. Split out of agenticFetchTool
+// only to keep that closure's nesting shallow - behavior is unchanged.
+func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *http.Client, params tools.AgenticFetchParams, validation agenticFetchValidationResult, call fantasy.ToolCall, childDepth int, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
+	description := "Search the web and analyze results"
+	if params.URL != "" {
+		description = fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL)
+	}
+	allowed, err := d.permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID: validation.SessionID, Path: d.cfg.WorkingDir(), ToolCallID: call.ID,
+		ToolName: tools.AgenticFetchToolName, Action: "fetch", Description: description,
+		Params: tools.AgenticFetchPermissionsParams(params),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if !allowed {
+		return nil, nil, errors.New("permission denied for agentic fetch")
+	}
+	tmpDir, err := os.MkdirTemp(d.cfg.Config().Options.DataDirectory, brand.Slug+"-fetch-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create temporary directory: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmpDir) }
+	fullPrompt := params.Prompt + "\n\nUse web_search and web_fetch to research this request."
+	if params.URL != "" {
+		content, filePath, err := tools.FetchLargeContent(ctx, client, tmpDir, params.URL)
+		if err != nil {
+			return nil, cleanup, fmt.Errorf("fetch URL: %w", err)
+		}
+		if filePath != "" {
+			fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s is saved at %s. Analyze it with read and grep.", params.Prompt, params.URL, filePath)
+		} else {
+			fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
+		}
+	}
+	promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), prompt.WithWorkingDir(tmpDir))
+	if err != nil {
+		return nil, cleanup, err
+	}
+	model, err := d.resolveAgentModel(ctx, true)
+	if err != nil {
+		return nil, cleanup, err
+	}
+	systemPrompt, err := promptTemplate.Build(ctx, model.Model.Provider(), model.Model.Model(), d.cfg)
+	if err != nil {
+		return nil, cleanup, err
+	}
+	providerCfg, ok := d.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return nil, cleanup, errors.New("model provider not configured")
+	}
+	searchBackend, err := d.resolveWebSearchBackend()
+	if err != nil {
+		return nil, cleanup, fmt.Errorf("web_search: %w", err)
+	}
+	availability := tools.ResolveSystemToolAvailability()
+	agent := NewSessionAgent(SessionAgentOptions{
+		Model: model, SystemPromptPrefix: providerCfg.SystemPromptPrefix, SystemPrompt: systemPrompt,
+		DisableAutoSummarize: d.cfg.Config().Options.DisableAutoSummarize,
+		AutoSummarizeAt:      d.cfg.Config().Options.AutoSummarizeAt,
+		Sessions:             d.sessions, Messages: d.messages,
+		Tools: []fantasy.AgentTool{
+			tools.NewWebFetchTool(nil, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
+			tools.NewGlobTool(tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, d.cfg.Config().Tools.Grep),
+			tools.NewReadTool(d.lspManager, d.permissions, d.filetracker, nil, tmpDir),
+		},
+	})
+	return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth), cleanup, nil
 }
 
 func (d *delegationFinalizer) customAgentTools(ctx context.Context, cfg agentConfig) ([]fantasy.AgentTool, error) {
