@@ -302,7 +302,10 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 
 	bindings := km.bindings()
 	if goos == "darwin" {
-		for _, binding := range bindings {
+		for action, binding := range bindings {
+			if darwinRewriteExclusions[action] {
+				continue
+			}
 			keys := binding.Keys()
 			for i, value := range keys {
 				keys[i] = strings.Replace(value, "ctrl+", "super+", 1)
@@ -333,6 +336,19 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 	}
 
 	return km
+}
+
+// darwinRewriteExclusions lists the actions the darwin ctrl+->super+ rewrite
+// must skip. These are terminal interrupt/suspend conventions ("ctrl+c" and
+// "ctrl+z") that a terminal user relies on regardless of platform; remapping
+// them to "super+..." leaves the documented key doing nothing while handing
+// the shortcut to the OS (e.g. "super+c" is Cmd-C, system copy, on macOS).
+// Other ctrl-bindings in this keymap (e.g. "ctrl+d" for toggling details)
+// are already repurposed away from their terminal meaning, so they stay in
+// the rewrite.
+var darwinRewriteExclusions = map[string]bool{
+	"quit":    true,
+	"suspend": true,
 }
 
 func (k *KeyMap) bindings() map[string]*key.Binding {

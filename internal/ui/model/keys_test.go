@@ -26,6 +26,22 @@ func TestConfiguredKeyMapDarwinUsesSuperDefaults(t *testing.T) {
 	require.Equal(t, "super+↓", km.Chat.EnterChildSession.Help().Key)
 }
 
+// TestConfiguredKeyMapDarwinKeepsTerminalConventions asserts that the
+// darwin ctrl+->super+ rewrite leaves "quit" (ctrl+c) and "suspend"
+// (ctrl+z) alone, since those are terminal interrupt/suspend conventions
+// a macOS terminal user still relies on, while an ordinary binding still
+// gets rewritten to its super+ form.
+func TestConfiguredKeyMapDarwinKeepsTerminalConventions(t *testing.T) {
+	t.Parallel()
+
+	km := configuredKeyMap("darwin", nil)
+	require.Equal(t, []string{"ctrl+c"}, km.Quit.Keys())
+	require.Equal(t, "ctrl+c", km.Quit.Help().Key)
+	require.Equal(t, []string{"ctrl+z"}, km.Suspend.Keys())
+	require.Equal(t, "ctrl+z", km.Suspend.Help().Key)
+	require.Equal(t, []string{"super+p"}, km.Commands.Keys())
+}
+
 func TestConfiguredKeyMapOverridesAllGroups(t *testing.T) {
 	t.Parallel()
 
