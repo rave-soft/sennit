@@ -28,3 +28,7 @@ func TestIsUnsupportedLinkError(t *testing.T) {
 
 	require.True(t, errors.Is(&os.LinkError{Op: "link", Err: syscall.EEXIST}, os.ErrExist))
 }
+
+// unsupportedLinkErrno is an errno that isUnsupportedLinkError accepts on
+// this platform, for the shared fallback tests in atomicwrite_test.go.
+var unsupportedLinkErrno error = syscall.ENOSYS

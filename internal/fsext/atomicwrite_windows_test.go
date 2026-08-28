@@ -43,3 +43,7 @@ func TestAtomicWriteFile_RetriesWhileDestinationHandleOpen(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"v":2}`, string(data))
 }
+
+// unsupportedLinkErrno is an errno that isUnsupportedLinkError accepts on
+// this platform, for the shared fallback tests in atomicwrite_test.go.
+var unsupportedLinkErrno error = windows.ERROR_NOT_SUPPORTED

@@ -80,7 +80,7 @@ func TestAtomicCreateFile_FallsBackWhenLinkUnsupported(t *testing.T) {
 	path := filepath.Join(dir, "create.json")
 
 	original := linkFile
-	linkFile = func(string, string) error { return &os.LinkError{Op: "link", Err: syscall.ENOSYS} }
+	linkFile = func(string, string) error { return &os.LinkError{Op: "link", Err: unsupportedLinkErrno} }
 	t.Cleanup(func() { linkFile = original })
 
 	require.NoError(t, AtomicCreateFile(path, []byte(`{"b":2}`), 0o600))
@@ -134,7 +134,7 @@ func TestAtomicCreateFile_FallbackStillExclusive(t *testing.T) {
 		// Simulate another writer landing the file between our link
 		// attempt and the fallback's own O_EXCL create.
 		require.NoError(t, os.WriteFile(path, []byte("winner"), 0o600))
-		return &os.LinkError{Op: "link", Err: syscall.ENOSYS}
+		return &os.LinkError{Op: "link", Err: unsupportedLinkErrno}
 	}
 	t.Cleanup(func() { linkFile = original })
 
