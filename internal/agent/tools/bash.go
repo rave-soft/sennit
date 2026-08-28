@@ -207,7 +207,7 @@ func blockFuncs() []shell.BlockFunc {
 // tool is built (see NewCoordinator's errBackgroundShellsRequired check), so
 // this path is unreachable in production and callers no longer need a panic
 // guard here.
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager, options ...toolAvailabilityOption) fantasy.AgentTool {
+func NewBashTool(permissions permission.Requester, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager, options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		BashToolName,

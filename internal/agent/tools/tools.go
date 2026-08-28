@@ -120,7 +120,7 @@ func NewPermissionDeniedResponse() fantasy.ToolResponse {
 // "permission denied" response that callers needing to attach response
 // metadata (e.g. a diff) can pass through fantasy.WithResponseMetadata
 // before returning it.
-func requirePermission(ctx context.Context, perms permission.Service, req permission.CreatePermissionRequest) (resp fantasy.ToolResponse, denied bool, err error) {
+func requirePermission(ctx context.Context, perms permission.Requester, req permission.CreatePermissionRequest) (resp fantasy.ToolResponse, denied bool, err error) {
 	if perms == nil {
 		return fantasy.ToolResponse{}, false, nil
 	}
@@ -328,7 +328,7 @@ func renderTemplate(tmpl *template.Template, data any) string {
 //
 // Returns ok=false when there is nothing to refuse: an unconfined
 // workspace, or a path already inside the boundary.
-func confinementRefusal(permissions permission.Service, filePath string) (message string, ok bool) {
+func confinementRefusal(permissions permission.Requester, filePath string) (message string, ok bool) {
 	if permissions == nil {
 		return "", false
 	}

@@ -42,7 +42,7 @@ func fetchDescription(availability toolAvailability) string {
 	})
 }
 
-func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
+func NewFetchTool(permissions permission.Requester, workingDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	if client == nil {
 		client = newHTTPClient(30 * time.Second)

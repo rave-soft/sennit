@@ -27,7 +27,7 @@ type readCoreResult struct {
 }
 type readCore func(context.Context, ReadParams, fantasy.ToolCall, string, int, bool) (readCoreResult, error)
 
-func newReadCore(_ *lsp.Manager, permissions permission.Service, tracker filetracker.Service, _ *skills.Tracker, workingDir string, skillsPaths ...string) readCore {
+func newReadCore(_ *lsp.Manager, permissions permission.Requester, tracker filetracker.Service, _ *skills.Tracker, workingDir string, skillsPaths ...string) readCore {
 	return func(ctx context.Context, p ReadParams, call fantasy.ToolCall, toolName string, outputBudget int, rejectSkills bool) (readCoreResult, error) {
 		if p.FilePath == "" {
 			return readCoreResult{errText: "file_path is required"}, nil

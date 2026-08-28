@@ -26,7 +26,7 @@ var webFetchDescriptionTpl = template.Must(
 // When permissions is nil, the permission check is skipped entirely — used
 // by the agentic_fetch sub-agent, whose own top-level call is already
 // permission-gated.
-func NewWebFetchTool(permissions permission.Service, workingDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
+func NewWebFetchTool(permissions permission.Requester, workingDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	if client == nil {
 		client = newHTTPClient(30 * time.Second)

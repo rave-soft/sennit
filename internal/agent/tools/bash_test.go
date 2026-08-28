@@ -306,3 +306,20 @@ func (*recordingPermissionService) ConfinedDir() string  { return "" }
 
 func (*mockBashPermissionService) ConfineToWorkingDir() {}
 func (*mockBashPermissionService) ConfinedDir() string  { return "" }
+
+// onlyRequester implements permission.Requester and nothing else, so
+// TestBashToolAcceptsRequesterOnly fails to compile if NewBashTool ever
+// widens back to permission.Service.
+type onlyRequester struct{}
+
+func (onlyRequester) Request(context.Context, permission.CreatePermissionRequest) (bool, error) {
+	return true, nil
+}
+
+func (onlyRequester) ConfinedDir() string { return "" }
+
+func TestBashToolAcceptsRequesterOnly(t *testing.T) {
+	t.Parallel()
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	_ = NewBashTool(onlyRequester{}, t.TempDir(), attribution, "test-model", shell.NewBackgroundShellManager())
+}

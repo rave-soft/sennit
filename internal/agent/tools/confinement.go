@@ -53,7 +53,7 @@ import (
 //
 // None of that is a gap in this function so much as the reason it exists
 // instead of a sandbox — see the bash entry in TECHDEBT.md.
-func bashConfinementRefusal(permissions permission.Service, command string) (message string, refused, permissionRequired bool) {
+func bashConfinementRefusal(permissions permission.Requester, command string) (message string, refused, permissionRequired bool) {
 	if permissions == nil {
 		return "", false, false
 	}

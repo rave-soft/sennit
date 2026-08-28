@@ -133,7 +133,7 @@ type coordinator struct {
 	credentials *credentials.Manager
 	sessions    session.Service
 	messages    MessageService
-	permissions permission.Service
+	permissions permission.Requester
 	questions   question.Service
 	history     history.Service
 	filetracker filetracker.Service
@@ -226,7 +226,7 @@ type CoordinatorOptions struct {
 	Credentials *credentials.Manager
 	Sessions    session.Service
 	Messages    MessageService
-	Permissions permission.Service
+	Permissions permission.Requester
 	Questions   question.Service
 	History     history.Service
 	FileTracker filetracker.Service

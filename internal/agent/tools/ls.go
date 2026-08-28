@@ -75,7 +75,7 @@ func lsDescription() string {
 	})
 }
 
-func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
+func NewLsTool(permissions permission.Requester, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		LSToolName,
 		lsDescription(),

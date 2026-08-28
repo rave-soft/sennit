@@ -92,7 +92,7 @@ const (
 	MaxLineLength    = 2000
 )
 
-func NewReadTool(lspManager *lsp.Manager, permissions permission.Service, tracker filetracker.Service, skillTracker *skills.Tracker, workingDir string, skillsPaths ...string) fantasy.AgentTool {
+func NewReadTool(lspManager *lsp.Manager, permissions permission.Requester, tracker filetracker.Service, skillTracker *skills.Tracker, workingDir string, skillsPaths ...string) fantasy.AgentTool {
 	core := newReadCore(lspManager, permissions, tracker, skillTracker, workingDir, skillsPaths...)
 	tool := fantasy.NewAgentTool(ReadToolName, readDescription(), func(ctx context.Context, params ReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		// Scheme-backed skills retain their public-read behaviour; batches reject

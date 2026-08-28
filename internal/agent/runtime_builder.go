@@ -73,7 +73,7 @@ type runtimeToolInputs struct {
 	skillTracker            *skills.Tracker
 	delegationTools         delegationToolsSnapshot
 	backgroundAgentsOn      bool
-	permissions             permission.Service
+	permissions             permission.Requester
 	delegationToolsBuilt    map[string]fantasy.AgentTool
 	customAgentToolsBuilt   []fantasy.AgentTool
 	toolBuildErr            error

@@ -31,7 +31,7 @@ type TaskCancelPermissionParams struct {
 
 // NewTaskCancelTool creates the task_cancel tool. See [NewTaskListTool]
 // for the manager nil-safety note.
-func NewTaskCancelTool(manager TaskManager, permissions permission.Service) fantasy.AgentTool {
+func NewTaskCancelTool(manager TaskManager, permissions permission.Requester) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		TaskCancelToolName,
 		renderToolDescription(taskCancelDescriptionTpl),

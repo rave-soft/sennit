@@ -46,7 +46,7 @@ var editDescription string
 
 type editContext struct {
 	ctx         context.Context
-	permissions permission.Service
+	permissions permission.Requester
 	files       history.Service
 	filetracker filetracker.Service
 	workingDir  string
@@ -54,7 +54,7 @@ type editContext struct {
 
 func NewEditTool(
 	lspManager *lsp.Manager,
-	permissions permission.Service,
+	permissions permission.Requester,
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir string,

@@ -14,19 +14,19 @@ import (
 // service that is still blocking on it. Falls back to this workspace's own
 // service for everything else — the user's own turn, and tasks, which run
 // in this very App.
-func (w *AppWorkspace) permissionsFor(perm permission.PermissionRequest) []permission.Service {
+func (w *AppWorkspace) permissionsFor(perm permission.PermissionRequest) []permission.Resolver {
 	own := w.app.Permissions()
 	if perm.Delegation.ID == "" {
-		return []permission.Service{own}
+		return []permission.Resolver{own}
 	}
 	mgr, ok := w.threadManager()
 	if !ok {
-		return []permission.Service{own}
+		return []permission.Resolver{own}
 	}
 	if svc := mgr.PermissionsFor(perm.Delegation.ID); svc != nil {
-		return []permission.Service{svc, own}
+		return []permission.Resolver{svc, own}
 	}
-	return []permission.Service{own}
+	return []permission.Resolver{own}
 }
 
 // answerPermission hands perm to each candidate service in turn until one
@@ -59,7 +59,7 @@ func answerPermission(attempts ...func() bool) bool {
 }
 
 // serviceAttempts adapts candidate services into answerPermission attempts.
-func serviceAttempts(services []permission.Service, answer func(permission.Service) bool) []func() bool {
+func serviceAttempts(services []permission.Resolver, answer func(permission.Resolver) bool) []func() bool {
 	attempts := make([]func() bool, 0, len(services))
 	for _, svc := range services {
 		if svc == nil {
@@ -72,17 +72,17 @@ func serviceAttempts(services []permission.Service, answer func(permission.Servi
 
 func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
 	return answerPermission(serviceAttempts(w.permissionsFor(perm),
-		func(s permission.Service) bool { return s.Grant(perm) })...)
+		func(s permission.Resolver) bool { return s.Grant(perm) })...)
 }
 
 func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
 	return answerPermission(serviceAttempts(w.permissionsFor(perm),
-		func(s permission.Service) bool { return s.GrantPersistent(perm) })...)
+		func(s permission.Resolver) bool { return s.GrantPersistent(perm) })...)
 }
 
 func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
 	return answerPermission(serviceAttempts(w.permissionsFor(perm),
-		func(s permission.Service) bool { return s.Deny(perm) })...)
+		func(s permission.Resolver) bool { return s.Deny(perm) })...)
 }
 
 func (w *AppWorkspace) PermissionSkipRequests() bool {

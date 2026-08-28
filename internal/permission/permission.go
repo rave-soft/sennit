@@ -65,8 +65,35 @@ type PermissionRequest struct {
 	Delegation DelegationRef `json:"delegation,omitempty"`
 }
 
-type Service interface {
-	pubsub.Subscriber[PermissionRequest]
+// Requester is the asking side of the permission service: tools and the
+// agent, which need to raise a request and, for file-shaped tools, check
+// the confinement boundary before they even do so.
+//
+// ConfinedDir lives here rather than on Resolver because it isn't part of
+// asking — it's what a confined workspace's file-shaped tools consult
+// *before* asking, to refuse outright rather than prompt when a request
+// would escape the workspace (see internal/agent/tools/confinement.go and
+// bashConfinementRefusal in internal/agent/tools/bash.go). Asking the user
+// to approve an escape would be the wrong question.
+type Requester interface {
+	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
+	// ConfinedDir returns the directory this workspace's writes are
+	// confined to, or "" when they are not confined.
+	//
+	// This is a boundary, not a permission: a confined workspace is one
+	// whose whole purpose is to keep its changes to itself — a thread,
+	// working in its own git worktree on its own branch. Asking the user
+	// to approve an escape would be the wrong question, and under yolo
+	// (which threads inherit from the main agent) nobody would be asked
+	// at all. So it is enforced ahead of the permission flow rather than
+	// through it; see the file tools, which refuse rather than prompt.
+	ConfinedDir() string
+}
+
+// Resolver is the answering side of the permission service: the
+// permission dialog UI and AppWorkspace, which settle a pending request
+// one way or another.
+type Resolver interface {
 	// GrantPersistent grants a permission request and remembers the grant
 	// for the session. It returns true if this call actually resolved the
 	// pending request; false if the request had already been resolved
@@ -80,13 +107,18 @@ type Service interface {
 	// actually resolved the pending request; false if the request had
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
-	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
-	AutoApproveSession(sessionID string)
-	SetSkipRequests(skip bool)
 	// ActiveRequest returns the request currently awaiting an answer,
 	// for subscribers that need to recover one they did not see
 	// published. See the implementation for why this is needed at all.
 	ActiveRequest() (PermissionRequest, bool)
+}
+
+// Observer is the watching side of the permission service: the UI and the
+// delegation idle watchdog (internal/thread), which need to know what is
+// pending without themselves asking or answering.
+type Observer interface {
+	pubsub.Subscriber[PermissionRequest]
+	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 	// AwaitingAnswer reports whether a request raised by the delegation
 	// identified by delegationID is outstanding right now — either shown
 	// to the user or queued behind another request.
@@ -100,21 +132,24 @@ type Service interface {
 	// exactly the delegations the user was about to approve.
 	AwaitingAnswer(delegationID string) bool
 	SkipRequests() bool
-	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+}
+
+// Controller holds the session- and workspace-level switches on the
+// permission service: auto-approving a session, skipping requests
+// entirely, and confining a workspace to its working directory.
+type Controller interface {
+	AutoApproveSession(sessionID string)
+	SetSkipRequests(skip bool)
 	// ConfineToWorkingDir marks this workspace as one that may not write
-	// outside its working directory at all. See ConfinedDir.
+	// outside its working directory at all. See Requester.ConfinedDir.
 	ConfineToWorkingDir()
-	// ConfinedDir returns the directory this workspace's writes are
-	// confined to, or "" when they are not confined.
-	//
-	// This is a boundary, not a permission: a confined workspace is one
-	// whose whole purpose is to keep its changes to itself — a thread,
-	// working in its own git worktree on its own branch. Asking the user
-	// to approve an escape would be the wrong question, and under yolo
-	// (which threads inherit from the main agent) nobody would be asked
-	// at all. So it is enforced ahead of the permission flow rather than
-	// through it; see the file tools, which refuse rather than prompt.
-	ConfinedDir() string
+}
+
+type Service interface {
+	Requester
+	Resolver
+	Observer
+	Controller
 }
 
 // PermissionKey is a composite key for session permission lookups.

@@ -26,7 +26,7 @@ var whitelistDockerTools = []string{
 
 // GetMCPTools gets all the currently available MCP tools from reg, the
 // caller's per-workspace MCP registry.
-func GetMCPTools(reg *mcp.Registry, permissions permission.Service, cfg mcp.ConfigProvider, wd string) []*Tool {
+func GetMCPTools(reg *mcp.Registry, permissions permission.Requester, cfg mcp.ConfigProvider, wd string) []*Tool {
 	if reg == nil {
 		return nil
 	}
@@ -51,7 +51,7 @@ type Tool struct {
 	mcpName         string
 	tool            *mcp.Tool
 	cfg             mcp.ConfigProvider
-	permissions     permission.Service
+	permissions     permission.Requester
 	workingDir      string
 	providerOptions fantasy.ProviderOptions
 	reg             *mcp.Registry

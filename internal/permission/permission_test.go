@@ -14,6 +14,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// These assertions are the compile-time proof that the role split didn't
+// change Service's effective method set: permissionService still
+// implements Service, and Service still satisfies each of the four role
+// interfaces it composes.
+var (
+	_ Service    = (*permissionService)(nil)
+	_ Requester  = Service(nil)
+	_ Resolver   = Service(nil)
+	_ Observer   = Service(nil)
+	_ Controller = Service(nil)
+)
+
 func TestPermissionService_AllowedCommands(t *testing.T) {
 	tests := []struct {
 		name         string

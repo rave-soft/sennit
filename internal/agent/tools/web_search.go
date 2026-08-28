@@ -71,7 +71,7 @@ func defaultSearchHTTPClient() *http.Client {
 // selects the search implementation (DuckDuckGo, Tavily, ...); a nil
 // backend defaults to DuckDuckGo, built from client (or a fresh client if
 // client is also nil).
-func NewWebSearchTool(permissions permission.Service, workingDir string, client *http.Client, backend SearchBackend, options ...toolAvailabilityOption) fantasy.AgentTool {
+func NewWebSearchTool(permissions permission.Requester, workingDir string, client *http.Client, backend SearchBackend, options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	if backend == nil {
 		if client == nil {

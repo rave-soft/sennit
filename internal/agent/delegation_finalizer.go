@@ -46,7 +46,7 @@ type delegationFinalizer struct {
 	cfg         *config.ConfigStore
 	sessions    session.Service
 	messages    MessageService
-	permissions permission.Service
+	permissions permission.Requester
 	questions   question.Service
 	history     history.Service
 	filetracker filetracker.Service

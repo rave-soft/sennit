@@ -425,7 +425,7 @@ func GetState(name string) (ClientInfo, bool) { return defaultRegistry.GetState(
 func (r *Registry) GetState(name string) (ClientInfo, bool) { return r.states.Get(name) }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func (r *Registry) Initialize(ctx context.Context, permissions permission.Service, cfg ConfigProvider) {
+func (r *Registry) Initialize(ctx context.Context, permissions permission.Requester, cfg ConfigProvider) {
 	r.markInitStarted()
 	slog.Info("Initializing MCP clients")
 

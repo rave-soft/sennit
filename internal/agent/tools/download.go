@@ -51,7 +51,7 @@ func downloadDescription() string {
 	})
 }
 
-func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
+func NewDownloadTool(permissions permission.Requester, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		client = newHTTPClient(5 * time.Minute) // Default 5 minute timeout for downloads
 	}

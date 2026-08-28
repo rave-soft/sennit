@@ -33,7 +33,7 @@ type ThreadRemovePermissionParams struct {
 
 // NewThreadRemoveTool creates the thread_remove tool. See
 // [NewThreadCreateTool] for the manager nil-safety note.
-func NewThreadRemoveTool(manager ThreadManager, permissions permission.Service) fantasy.AgentTool {
+func NewThreadRemoveTool(manager ThreadManager, permissions permission.Requester) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		ThreadRemoveToolName,
 		renderToolDescription(threadRemoveDescriptionTpl),
