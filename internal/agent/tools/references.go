@@ -53,7 +53,7 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			for _, r := range results {
 				locations, err := r.client.FindReferences(ctx, r.path, r.line, r.char, true)
 				if err != nil {
-					if strings.Contains(err.Error(), "no identifier found") {
+					if isNoIdentifierError(err) {
 						continue
 					}
 					slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", r.path, "line", r.line)
