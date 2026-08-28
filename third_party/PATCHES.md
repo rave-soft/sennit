@@ -58,7 +58,15 @@ one-line gofmt fix so it passes this repo's pre-commit hook.
 
 `providertests/` is deliberately **not** vendored: it is upstream's VCR
 integration suite, needs real provider API keys
-(`FANTASY_AZURE_API_KEY` and friends), and hangs without them.
+(`FANTASY_AZURE_API_KEY` and friends), and hangs without them. A
+`subtree pull` therefore reports modify/delete conflicts for every file
+under `providertests/`; resolve them by deleting, which a rebased
+upgrade was verified to require and nothing else:
+
+```
+git rm -r --cached third_party/fantasy/providertests
+rm -rf third_party/fantasy/providertests
+```
 
 Sennit's own tests for the patched behaviour live in files of their own
 (`agent_ratelimit_test.go`, `errors_transient_test.go`,
