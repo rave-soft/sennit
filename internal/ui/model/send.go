@@ -109,7 +109,7 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 			}
 			return createSessionMsg{session: created, content: content, attachments: attachments, generation: generation}
 		}
-		common.StartTurn()
+		common.StartTurn(sessionID)
 		for _, path := range reads {
 			ws.FileTrackerRecordRead(ctx, sessionID, path)
 			ws.LSPStart(ctx, path)

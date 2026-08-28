@@ -259,7 +259,7 @@ func (a *AssistantMessageItem) newAnim() *spin.Anim {
 		CycleColors: true,
 		Mode:        a.sty.WorkingSpinner,
 		Suffix: func() string {
-			return common.Elapsed()
+			return common.Elapsed(a.message.SessionID)
 		},
 		SuffixColor: a.sty.WorkingTimerColor,
 	})

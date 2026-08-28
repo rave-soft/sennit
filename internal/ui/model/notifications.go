@@ -220,7 +220,7 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
 	case workspace.AgentNotificationFinished:
-		common.StopTurn()
+		common.StopTurn(n.SessionID)
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
 			Message: notificationBodyTaskFinished(n.SessionTitle),
@@ -229,7 +229,7 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		// Terminal edge like TypeAgentFinished, but the turn ended with an
 		// error rather than a normal completion — surface it too instead of
 		// leaving the user to notice the failure on their own.
-		common.StopTurn()
+		common.StopTurn(n.SessionID)
 		// Report in-app as well as through the desktop notification
 		// below. The notification alone is not enough: sendNotification
 		// suppresses it while the terminal window is focused, which is

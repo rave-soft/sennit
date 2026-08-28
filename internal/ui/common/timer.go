@@ -7,35 +7,41 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 )
 
-// turnTimer tracks the elapsed time for the current agent turn.
-var turnTimer struct {
-	mu        sync.Mutex
-	startTime time.Time
-	active    bool
+// turnTimers tracks per-session elapsed time for the current agent turn.
+// A process can host more than one UI instance sharing this package (the
+// top-level UI and one embedded per thread — see UI.embedded in
+// internal/ui/model), so the timer is keyed by session ID rather than
+// kept as a single package-global value.
+var turnTimers struct {
+	mu    sync.Mutex
+	start map[string]time.Time
 }
 
-// StartTurn begins tracking elapsed time for a new turn.
-func StartTurn() {
-	turnTimer.mu.Lock()
-	defer turnTimer.mu.Unlock()
-	turnTimer.startTime = time.Now()
-	turnTimer.active = true
+// StartTurn begins tracking elapsed time for a new turn on sessionID.
+func StartTurn(sessionID string) {
+	turnTimers.mu.Lock()
+	defer turnTimers.mu.Unlock()
+	if turnTimers.start == nil {
+		turnTimers.start = make(map[string]time.Time)
+	}
+	turnTimers.start[sessionID] = time.Now()
 }
 
-// StopTurn stops tracking the current turn.
-func StopTurn() {
-	turnTimer.mu.Lock()
-	defer turnTimer.mu.Unlock()
-	turnTimer.active = false
+// StopTurn stops tracking the turn for sessionID.
+func StopTurn(sessionID string) {
+	turnTimers.mu.Lock()
+	defer turnTimers.mu.Unlock()
+	delete(turnTimers.start, sessionID)
 }
 
-// Elapsed returns the formatted elapsed time for the current turn.
-// Returns empty string if no turn is active.
-func Elapsed() string {
-	turnTimer.mu.Lock()
-	defer turnTimer.mu.Unlock()
-	if !turnTimer.active {
+// Elapsed returns the formatted elapsed time for sessionID's current
+// turn. Returns an empty string if no turn is active for it.
+func Elapsed(sessionID string) string {
+	turnTimers.mu.Lock()
+	defer turnTimers.mu.Unlock()
+	start, ok := turnTimers.start[sessionID]
+	if !ok {
 		return ""
 	}
-	return presentation.FormatElapsed(time.Since(turnTimer.startTime))
+	return presentation.FormatElapsed(time.Since(start))
 }
