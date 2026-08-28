@@ -20,20 +20,17 @@ import (
 // (messageQueue, activeRequests, dispatchMu, completionInbox,
 // cancelledSessions, acceptedRuns, cancelMark) keyed by session id.
 //
-// Field locking is split in two, not uniform, because it has to be:
+// mu is the per-session "dispatch mutex" dispatchDecision and Cancel
+// serialize the accept -> (cancel-on-entry | queued | active) transition
+// on. It guards every field below except refs, which lives under
+// dispatcher.statesMu instead because it is about this record's own
+// lifecycle in dispatcher.states, not about session content — see refs'
+// own doc comment.
 //
-//   - mu guards messageQueue, active, completionInbox, and cancelled. It
-//     is the per-session "dispatch mutex" dispatchDecision and Cancel
-//     serialize the accept -> (cancel-on-entry | queued | active)
-//     transition on.
-//   - acceptedRuns and cancelMark are guarded by dispatcher.acceptedMu
-//     instead — a lock shared by every session, not this one's own mu.
-//     dispatchDecision closes an AcceptedRun (which touches
-//     acceptedRuns/cancelMark) while it still holds mu; a sync.Mutex is
-//     not reentrant, so guarding those two fields with mu would deadlock
-//     the very goroutine holding it. Every place that needs both takes
-//     mu first and acceptedMu second (never the reverse), so this never
-//     becomes a lock-ordering deadlock across goroutines either.
+// The session's accept-reservation count and cancel high-water mark are
+// not fields here at all; they live in dispatcher.accepted, keyed by
+// session id — see acceptLedger's doc comment for why that bookkeeping
+// needed a lock of its own.
 //
 // Instances are refcounted and created/removed lazily by
 // dispatcher.session/release — see those for the removal invariant that
@@ -65,16 +62,6 @@ type sessionState struct {
 	// noteContinuationOutcome.
 	continuationFailures int
 
-	// acceptedRuns counts dispatched-but-not-yet-active runs for this
-	// session. Guarded by dispatcher.acceptedMu, not mu — see the
-	// struct doc comment.
-	acceptedRuns int
-	// cancelMark records a high-water accept sequence: an accepted
-	// handle is canceled by it iff the handle's sequence is at or below
-	// the mark. 0 means no pending cancel. Guarded by
-	// dispatcher.acceptedMu, not mu — see the struct doc comment.
-	cancelMark uint64
-
 	// refs is the number of callers currently holding a reference to
 	// this state — between a dispatcher.session call and its paired
 	// release — whether or not mu happens to be locked at any given
@@ -87,16 +74,216 @@ type sessionState struct {
 // idle reports whether s carries nothing worth keeping once refs drops
 // to zero: an empty queue and completion inbox, no active run, no
 // cancellation the user is owed, and no accepted-but-not-active run in
-// flight.
+// flight for sessionID (accepted asks the ledger, which owns that
+// bookkeeping and its own lock).
 //
-// Called only from dispatcher's release, under both statesMu and
-// acceptedMu, so the acceptedRuns/cancelMark read here is consistent;
-// the other fields are safe to read without mu at that point because
-// refs == 0 there means no other caller can be holding or about to lock
-// mu (see dispatcher.session).
-func (s *sessionState) idle() bool {
+// Called only from dispatcher's release, under statesMu, so the fields
+// read directly here are safe without mu: refs == 0 at that point means
+// no other caller can be holding or about to lock mu (see
+// dispatcher.session).
+func (s *sessionState) idle(accepted *acceptLedger, sessionID string) bool {
 	return len(s.messageQueue) == 0 && s.active == nil && len(s.completionInbox) == 0 &&
-		!s.cancelled && s.acceptedRuns == 0 && s.cancelMark == 0
+		!s.cancelled && accepted.idle(sessionID)
+}
+
+// acceptLedger tracks, for every session, how many dispatched-but-not-
+// yet-active runs are outstanding and what pending cancel (if any) covers
+// them, plus the process-wide monotonic sequence every accepted run is
+// stamped with. It exists as its own type, with its own lock, because
+// dispatchDecision closes an AcceptedRun (which mutates this bookkeeping)
+// while it still holds a session's own mu; sync.Mutex is not reentrant,
+// so this bookkeeping could never live under mu itself.
+//
+// mu is a leaf lock: no method here takes any other lock while holding
+// it. sessionState.mu and dispatcher.statesMu may be held by a caller
+// into acceptLedger, never the reverse.
+type acceptLedger struct {
+	mu      sync.Mutex
+	entries map[string]*acceptEntry
+	// seqGen is the monotonic source of accept sequence numbers, shared
+	// across every session. beginAccepted and nextSeq increment it under
+	// mu, so sequences strictly increase in accept order across the
+	// agent; cancel uses its current value as a session's high-water
+	// mark.
+	seqGen uint64
+}
+
+// acceptEntry is one session's outstanding-accept count and cancel
+// high-water mark. A count of zero and a mark of zero is the same thing
+// as no entry at all — see idle and forget.
+type acceptEntry struct {
+	// count is the number of accepted-but-not-yet-active runs.
+	count int
+	// mark records a high-water accept sequence: an accepted handle is
+	// canceled by it iff the handle's sequence is at or below the mark.
+	// Zero means no pending cancel.
+	mark uint64
+}
+
+func newAcceptLedger() *acceptLedger {
+	return &acceptLedger{entries: make(map[string]*acceptEntry)}
+}
+
+// entry returns sessionID's ledger entry, creating it if create is true.
+// Callers must hold mu.
+func (l *acceptLedger) entry(sessionID string, create bool) *acceptEntry {
+	e, ok := l.entries[sessionID]
+	if !ok && create {
+		e = &acceptEntry{}
+		l.entries[sessionID] = e
+	}
+	return e
+}
+
+// beginAccepted increments sessionID's accept count and stamps a fresh,
+// strictly increasing accept sequence for the new reservation, as a
+// single critical section so the count and the sequence it is compared
+// against never drift apart. It is the only method that mutates count
+// upward.
+func (l *acceptLedger) beginAccepted(sessionID string) uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entry(sessionID, true).count++
+	l.seqGen++
+	return l.seqGen
+}
+
+// endAccepted decrements sessionID's accept count. Reaching zero also
+// drops the cancel mark: no accepted handle remains for it to cover, and
+// any handle accepted later gets a strictly higher sequence that the
+// mark would not match anyway. Handles canceled on entry never reach
+// RunComplete, so this is the only place that clears the mark for an
+// all-canceled batch. Sibling handles covered by the same mark are
+// serialized on the session's own mu and read the mark before they
+// Close, so this never clears it out from under a covered handle still
+// waiting to enter dispatchDecision. The decrement and the mark clear
+// are one critical section: splitting them would let a concurrent
+// beginAccepted or canceledBySeq observe a count of zero with the old
+// mark still set, or vice versa.
+func (l *acceptLedger) endAccepted(sessionID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.entry(sessionID, false)
+	if e == nil {
+		return
+	}
+	if e.count <= 1 {
+		e.count = 0
+		e.mark = 0
+	} else {
+		e.count--
+	}
+}
+
+// nextSeq stamps and returns a fresh accept sequence without registering
+// an outstanding accepted run. It exists for requeueContinuation, which
+// needs a brand new sequence for a call re-entering the queue without
+// implying an accepted-but-not-active reservation — see its own comment
+// for why going through beginAccepted would be wrong there.
+func (l *acceptLedger) nextSeq() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seqGen++
+	return l.seqGen
+}
+
+// canceledBySeq reports whether an accepted handle or queued call with
+// the given accept sequence is covered by sessionID's pending cancel
+// mark. A tracked sequence (seq > 0) is covered only when it is at or
+// below the mark, so a prompt accepted after the cancel (higher seq) is
+// never poisoned. An untracked sequence (seq == 0, an in-process enqueue
+// with no accept reservation) is covered whenever any mark is present.
+// The mark is not consumed: it stays so every sibling handle it covers
+// observes the same cancel, and a later handle (higher seq) ignores it
+// regardless.
+//
+// Callers reach this only while already holding the relevant session's
+// own mu — see dispatcher.canceledBySeq's callers — which serializes the
+// cancel-on-entry decision against a concurrent enqueue or dequeue on the
+// same session; this method's own lock only protects the mark read
+// itself.
+func (l *acceptLedger) canceledBySeq(sessionID string, seq uint64) bool {
+	l.mu.Lock()
+	mark := l.markLocked(sessionID)
+	l.mu.Unlock()
+	if mark == 0 {
+		return false
+	}
+	return seq == 0 || seq <= mark
+}
+
+// markLocked returns sessionID's cancel mark. Callers must hold mu.
+func (l *acceptLedger) markLocked(sessionID string) uint64 {
+	if e := l.entry(sessionID, false); e != nil {
+		return e.mark
+	}
+	return 0
+}
+
+// mark returns sessionID's current cancel mark, for drainNext's own
+// queue-filtering pass over accept sequences.
+func (l *acceptLedger) mark(sessionID string) uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.markLocked(sessionID)
+}
+
+// recordCancel raises sessionID's cancel mark to the greater of its
+// current value and the ledger's current sequence, but only when at
+// least one run is currently accepted for it — an idle session has
+// nothing for a mark to cover. It reports the accepted count and the
+// sequence value used so the caller can log them; max keeps repeated
+// cancels idempotent while the same prompts are in flight and lets a
+// later cancel extend coverage to prompts accepted since.
+func (l *acceptLedger) recordCancel(sessionID string) (count int, mark uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	mark = l.seqGen
+	e := l.entry(sessionID, false)
+	if e == nil {
+		return 0, mark
+	}
+	if e.count > 0 {
+		e.mark = max(e.mark, mark)
+	}
+	return e.count, mark
+}
+
+// clearMarkIfIdle drops sessionID's cancel mark once no run remains
+// accepted for it. drainNext's empty-queue branch uses this to clear a
+// stale mark that no longer has anything to cover, so it cannot catch a
+// future run; it is a no-op while an accepted run is still outstanding,
+// since a sibling handle waiting to enter dispatchDecision still needs
+// that mark.
+func (l *acceptLedger) clearMarkIfIdle(sessionID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if e := l.entry(sessionID, false); e != nil && e.count == 0 {
+		e.mark = 0
+	}
+}
+
+// idle reports whether sessionID has no outstanding accepted run and no
+// pending cancel mark — the ledger's half of sessionState.idle.
+func (l *acceptLedger) idle(sessionID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.entry(sessionID, false)
+	return e == nil || (e.count == 0 && e.mark == 0)
+}
+
+// forget drops sessionID's ledger entry entirely, once it is confirmed
+// idle. Safe to call any time: an entry that does not exist, or is not
+// idle, both leave the ledger's observable behavior unchanged either way
+// (a missing entry and a zeroed one answer every method above
+// identically). dispatcher.session's release is the only caller, and it
+// holds statesMu across the whole idle-check-and-remove sequence, so a
+// concurrent beginAccepted for the same session id cannot race this
+// deletion — see dispatcher.session.
+func (l *acceptLedger) forget(sessionID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.entries, sessionID)
 }
 
 // dispatcher owns the "accept/queue/cancel" dispatch protocol shared by
@@ -114,38 +301,19 @@ type dispatcher struct {
 	// statesMu serializes creating, refcounting, and removing entries in
 	// states. It is only ever held briefly: map bookkeeping, no I/O.
 	//
-	// Lock order, where more than one is held at once: statesMu may be
-	// held while taking acceptedMu, and never the reverse. release is the
-	// one place that nests them — it decides under statesMu whether a
-	// state is idle, and the acceptedRuns/cancelMark half of that answer
-	// is acceptedMu's to give. The paths that hold acceptedMu on its own
-	// (BeginAccepted, endAccepted) release it before their deferred
-	// release runs, so they never nest the other way.
-	//
 	// A *sessionState's own mu is never taken while holding statesMu.
 	// release reads the state's fields directly instead, which is sound
 	// only because it does so at refs == 0 — see session's doc comment
-	// for that argument.
-	//
-	// This used to claim statesMu was never held while acquiring
-	// acceptedMu, which release plainly does. The order was right; the
-	// note about it was not, and it is the note a reader consults before
-	// adding a nesting of their own.
+	// for that argument. release does consult accepted (see below) while
+	// holding statesMu; accepted's own lock is a leaf, so that nesting
+	// can never invert.
 	statesMu sync.Mutex
 
-	// acceptedMu guards every session's acceptedRuns/cancelMark fields
-	// and acceptSeqGen below. It is a single lock shared across all
-	// sessions (not one per session) specifically so AcceptedRun.Close
-	// can run while dispatchDecision holds that session's own mu for an
-	// entirely different session without contending on session-specific
-	// state - see sessionState's doc comment.
-	acceptedMu sync.Mutex
-	// acceptSeqGen is the monotonic source of accept sequence numbers.
-	// Each BeginAccepted increments it under acceptedMu and stamps the
-	// returned handle, so sequences strictly increase in accept order
-	// across the agent. Cancel uses its current value as the per-session
-	// high-water mark.
-	acceptSeqGen uint64
+	// accepted owns every session's accept-reservation count and cancel
+	// mark, plus the shared accept-sequence generator — see acceptLedger's
+	// doc comment for why that bookkeeping needed its own type and lock
+	// rather than living on sessionState.
+	accepted *acceptLedger
 
 	// delegationParents maps a running delegation's own (child) session
 	// id to where its mid-run asks (SendToParent) should be delivered.
@@ -195,6 +363,7 @@ type dispatcher struct {
 func newDispatcher() *dispatcher {
 	return &dispatcher{
 		states:            csync.NewMap[string, *sessionState](),
+		accepted:          newAcceptLedger(),
 		userInput:         csync.NewMap[string, chan struct{}](),
 		delegationParents: csync.NewMap[string, DelegationParent](),
 	}
@@ -248,19 +417,15 @@ func (d *dispatcher) session(sessionID string) (state *sessionState, release fun
 		released = true
 		d.statesMu.Lock()
 		s.refs--
-		if s.refs == 0 {
-			d.acceptedMu.Lock()
-			idle := s.idle()
-			d.acceptedMu.Unlock()
-			if idle {
-				// Removing only when the map still points at this exact
-				// instance is belt-and-suspenders, not load-bearing: a
-				// concurrent session() call for the same id can't
-				// interleave here, since both it and this whole release
-				// hold statesMu for their entire body.
-				if cur, ok := d.states.Get(sessionID); ok && cur == s {
-					d.states.Del(sessionID)
-				}
+		if s.refs == 0 && s.idle(d.accepted, sessionID) {
+			// Removing only when the map still points at this exact
+			// instance is belt-and-suspenders, not load-bearing: a
+			// concurrent session() call for the same id can't
+			// interleave here, since both it and this whole release
+			// hold statesMu for their entire body.
+			if cur, ok := d.states.Get(sessionID); ok && cur == s {
+				d.states.Del(sessionID)
+				d.accepted.forget(sessionID)
 			}
 		}
 		d.statesMu.Unlock()
@@ -367,66 +532,31 @@ func (r *AcceptedRun) SessionID() string {
 
 // BeginAccepted increments the accept counter for sessionID and returns
 // a handle whose Close is the only way to decrement it. It is the only
-// entry point that mutates acceptedRuns.
+// entry point that mutates the ledger's count upward.
 func (d *dispatcher) BeginAccepted(sessionID string) *AcceptedRun {
-	s, release := d.session(sessionID)
+	_, release := d.session(sessionID)
 	defer release()
-	d.acceptedMu.Lock()
-	s.acceptedRuns++
-	d.acceptSeqGen++
-	seq := d.acceptSeqGen
-	d.acceptedMu.Unlock()
+	seq := d.accepted.beginAccepted(sessionID)
 	return &AcceptedRun{d: d, sessionID: sessionID, seq: seq}
 }
 
 // endAccepted decrements the accept counter for sessionID. It is only
-// called via AcceptedRun.Close. It uses acceptedMu (not a session's own
-// mu) so it can run while dispatchDecision holds that mu for the same
-// session without deadlocking — see sessionState's doc comment.
-//
-// When the count reaches zero the session's cancel mark is dropped: no
-// accepted handle remains for it to cover, and any handle accepted later
-// gets a strictly higher sequence that the mark would not match anyway.
-// Handles canceled on entry never reach RunComplete, so this is the only
-// place that clears the mark for an all-canceled batch. Sibling handles
-// covered by the same mark are serialized on the session's own mu and
-// read the mark before they Close, so this never clears it out from
-// under a covered handle still waiting to enter dispatchDecision.
+// called via AcceptedRun.Close, and delegates to acceptLedger.endAccepted
+// — see that method's doc comment for the count/mark invariant it keeps.
 func (d *dispatcher) endAccepted(sessionID string) {
-	s, release := d.session(sessionID)
+	_, release := d.session(sessionID)
 	defer release()
-	d.acceptedMu.Lock()
-	if s.acceptedRuns <= 1 {
-		s.acceptedRuns = 0
-		s.cancelMark = 0
-	} else {
-		s.acceptedRuns--
-	}
-	d.acceptedMu.Unlock()
+	d.accepted.endAccepted(sessionID)
 }
 
 // canceledBySeq reports whether an accepted handle or queued call with
 // the given accept sequence is covered by a pending cancel recorded for
-// s. Callers must already hold s.mu — that requirement serializes the
-// cancel-on-entry decision against a concurrent enqueue or dequeue on
-// the same session; this additionally takes acceptedMu itself to read
-// cancelMark, since that field is guarded by acceptedMu, not mu (see
-// sessionState's doc comment). A tracked sequence (seq > 0) is covered
-// only when it is at or below the cancel high-water mark, so a prompt
-// accepted after the cancel (higher seq) is never poisoned. An untracked
-// sequence (seq == 0, an in-process enqueue with no accept reservation)
-// is covered whenever any mark is present, preserving the
-// pre-sequence behavior. The mark is not consumed: it stays so every
-// sibling handle it covers observes the same cancel, and a later handle
-// (higher seq) ignores it regardless.
-func (d *dispatcher) canceledBySeq(s *sessionState, seq uint64) bool {
-	d.acceptedMu.Lock()
-	mark := s.cancelMark
-	d.acceptedMu.Unlock()
-	if mark == 0 {
-		return false
-	}
-	return seq == 0 || seq <= mark
+// sessionID — see acceptLedger.canceledBySeq for the coverage rule.
+// Callers must already hold the session's own mu: that requirement
+// serializes the cancel-on-entry decision against a concurrent enqueue
+// or dequeue on the same session.
+func (d *dispatcher) canceledBySeq(sessionID string, seq uint64) bool {
+	return d.accepted.canceledBySeq(sessionID, seq)
 }
 
 // notifyQueueChanged invokes onQueueChanged if one is set. Every caller
@@ -511,17 +641,12 @@ func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func())
 	// by the time this runs has no other way to reach a call that is
 	// only entering the queue now.
 	//
-	// acceptSeqGen lives under acceptedMu, not this session's own mu -
-	// see sessionState's doc comment - so this nests the two locks in
-	// the file's established order (mu, then acceptedMu) rather than
-	// going through BeginAccepted, which would also bump acceptedRuns
-	// and imply an accepted-but-not-yet-active reservation this call
-	// does not hold: it is going straight into the queue, not back
-	// through dispatchDecision.
-	d.acceptedMu.Lock()
-	d.acceptSeqGen++
-	call.acceptSeq = d.acceptSeqGen
-	d.acceptedMu.Unlock()
+	// nextSeq only stamps a sequence; it does not go through
+	// BeginAccepted, which would also bump the ledger's accept count and
+	// imply an accepted-but-not-yet-active reservation this call does not
+	// hold: it is going straight into the queue, not back through
+	// dispatchDecision.
+	call.acceptSeq = d.accepted.nextSeq()
 	call.Accepted = nil
 	s.messageQueue = append(s.messageQueue, call)
 	onQueued()
@@ -563,7 +688,7 @@ func (d *dispatcher) drainQueueForStep(sessionID string) (fold, canceledWithRunI
 
 	var keep []SessionAgentCall
 	for _, queued := range s.messageQueue {
-		if d.canceledBySeq(s, queued.acceptSeq) {
+		if d.canceledBySeq(sessionID, queued.acceptSeq) {
 			if queued.RunID != "" {
 				canceledWithRunID = append(canceledWithRunID, queued)
 			}
@@ -613,9 +738,7 @@ func (d *dispatcher) drainNext(sessionID string) (queued []SessionAgentCall, nex
 	queuedMessages := s.messageQueue
 	changed = len(queuedMessages) > 0
 
-	d.acceptedMu.Lock()
-	mark := s.cancelMark
-	d.acceptedMu.Unlock()
+	mark := d.accepted.mark(sessionID)
 
 	if mark > 0 && len(queuedMessages) > 0 {
 		// A cancel was recorded for this session (e.g. it arrived while
@@ -645,24 +768,20 @@ func (d *dispatcher) drainNext(sessionID string) (queued []SessionAgentCall, nex
 		// accepted runs are gone, this also clears a stale mark so it
 		// can't catch a future run.
 		s.messageQueue = nil
-		d.acceptedMu.Lock()
-		if s.acceptedRuns == 0 {
-			s.cancelMark = 0
-		}
-		d.acceptedMu.Unlock()
+		d.accepted.clearMarkIfIdle(sessionID)
 		return nil, nil, canceledWithRunID
 	}
 
 	// Reserve a fresh accept for the dequeued prompt before dropping the
-	// lock so acceptedRuns > 0 across the handoff into the recursive
-	// Run. This closes the window between this dequeue and the recursive
-	// Run registering its active entry: a cancel arriving in that window
-	// now records a pending cancel (acceptedRuns > 0) that the recursive
-	// Run's accepted path observes as cancel-on-entry.
+	// lock so the ledger's count is > 0 across the handoff into the
+	// recursive Run. This closes the window between this dequeue and the
+	// recursive Run registering its active entry: a cancel arriving in
+	// that window now records a pending cancel (count > 0) that the
+	// recursive Run's accepted path observes as cancel-on-entry.
 	//
 	// BeginAccepted re-enters session() for this same id: safe, since it
-	// only takes statesMu and acceptedMu, never s.mu, so it cannot
-	// deadlock against the s.mu this goroutine already holds.
+	// only takes statesMu and the ledger's own lock, never s.mu, so it
+	// cannot deadlock against the s.mu this goroutine already holds.
 	first := queuedMessages[0]
 	first.Accepted = d.BeginAccepted(sessionID)
 	s.messageQueue = queuedMessages[1:]
@@ -782,17 +901,13 @@ func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
 	// assigned so far. Every prompt currently accepted-but-not-yet-
 	// active has a sequence at or below that value, so one cancel covers
 	// all of them; a prompt accepted after this cancel gets a strictly
-	// higher sequence and is never poisoned. max keeps repeated cancels
-	// idempotent while the same prompts are in flight and lets a later
-	// cancel extend coverage to prompts accepted since.
-	d.acceptedMu.Lock()
-	count := s.acceptedRuns
-	mark := d.acceptSeqGen
-	if count > 0 {
+	// higher sequence and is never poisoned. acceptLedger.recordCancel
+	// keeps repeated cancels idempotent while the same prompts are in
+	// flight and lets a later cancel extend coverage to prompts accepted
+	// since.
+	if count, mark := d.accepted.recordCancel(sessionID); count > 0 {
 		slog.Debug("Recording cancel mark for accepted runs", "session_id", sessionID, "count", count, "mark", mark)
-		s.cancelMark = max(s.cancelMark, mark)
 	}
-	d.acceptedMu.Unlock()
 
 	if len(s.messageQueue) == 0 {
 		return nil

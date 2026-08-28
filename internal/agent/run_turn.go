@@ -86,7 +86,7 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 	defer release()
 	s.mu.Lock()
 
-	if call.Accepted != nil && a.canceledBySeq(s, call.Accepted.seq) {
+	if call.Accepted != nil && a.canceledBySeq(call.SessionID, call.Accepted.seq) {
 		// Cancel-on-entry: a cancel arrived while this accepted run was
 		// dispatched but not yet active, and this handle's accept sequence
 		// is at or below the session's cancel mark. The mark is left in

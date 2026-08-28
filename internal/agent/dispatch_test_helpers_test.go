@@ -51,29 +51,24 @@ func (d *dispatcher) getMessageQueueForTest(sessionID string) ([]SessionAgentCal
 // as if a Cancel had already raised it, without going through cancel()
 // itself.
 func (d *dispatcher) setCancelMarkForTest(sessionID string, mark uint64) {
-	s, release := d.session(sessionID)
-	defer release()
-	d.acceptedMu.Lock()
-	s.cancelMark = mark
-	d.acceptedMu.Unlock()
+	d.accepted.mu.Lock()
+	defer d.accepted.mu.Unlock()
+	d.accepted.entry(sessionID, true).mark = mark
 }
 
 // acceptedRunsForTest returns sessionID's in-flight accepted-run count.
 func (d *dispatcher) acceptedRunsForTest(sessionID string) int {
-	s, release := d.session(sessionID)
-	defer release()
-	d.acceptedMu.Lock()
-	defer d.acceptedMu.Unlock()
-	return s.acceptedRuns
+	d.accepted.mu.Lock()
+	defer d.accepted.mu.Unlock()
+	if e := d.accepted.entry(sessionID, false); e != nil {
+		return e.count
+	}
+	return 0
 }
 
 // cancelMarkForTest returns sessionID's cancel high-water mark.
 func (d *dispatcher) cancelMarkForTest(sessionID string) uint64 {
-	s, release := d.session(sessionID)
-	defer release()
-	d.acceptedMu.Lock()
-	defer d.acceptedMu.Unlock()
-	return s.cancelMark
+	return d.accepted.mark(sessionID)
 }
 
 // sessionCountForTest returns the number of sessions dispatcher
