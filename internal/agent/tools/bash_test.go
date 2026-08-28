@@ -81,6 +81,31 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.Contains(t, resp.Content, "moved to background")
 }
 
+// TestBashTool_NegativeAutoBackgroundAfterRunsSynchronously guards against a
+// negative auto_background_after (a model could send anything) collapsing
+// the wait threshold to a negative duration: time.After fires immediately on
+// a negative duration, which used to force every command into the "moved to
+// background" response even when it finishes in milliseconds.
+func TestBashTool_NegativeAutoBackgroundAfterRunsSynchronously(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:         "negative threshold",
+		Command:             "echo hi",
+		AutoBackgroundAfter: -1,
+	})
+
+	require.False(t, resp.IsError)
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.False(t, meta.Background)
+	require.Empty(t, meta.ShellID)
+	require.Contains(t, resp.Content, "hi")
+	require.NotContains(t, resp.Content, "moved to background")
+}
+
 // TestBashTool_RunInBackgroundReportsCompletionWithoutSleeping pins the
 // completion-signal behavior: a background command that finishes almost
 // immediately must be observed via BackgroundShell.Done() rather than by
@@ -211,6 +236,30 @@ func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 	resp, err := tool.Run(ctx, call)
 	require.NoError(t, err)
 	return resp
+}
+
+func TestNormalizeAutoBackgroundAfter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input int
+		want  int
+	}{
+		{"negative falls back to default", -1, DefaultAutoBackgroundAfter},
+		{"zero falls back to default", 0, DefaultAutoBackgroundAfter},
+		{"within range is unchanged", 30, 30},
+		{"above the cap is clamped", MaxAutoBackgroundAfter + 1000, MaxAutoBackgroundAfter},
+		{"exactly the default is unchanged", DefaultAutoBackgroundAfter, DefaultAutoBackgroundAfter},
+		{"exactly the cap is unchanged", MaxAutoBackgroundAfter, MaxAutoBackgroundAfter},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, normalizeAutoBackgroundAfter(tt.input))
+		})
+	}
 }
 
 func TestTruncateOutputValidUTF8(t *testing.T) {

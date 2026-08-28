@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -27,7 +26,7 @@ type BashParams struct {
 	Command             string `json:"command" description:"The command to execute"`
 	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
-	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait before automatically moving the command to a background job (default: 60)"`
+	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait before automatically moving the command to a background job (default: 60, max: 600)"`
 }
 
 type BashPermissionsParams struct {
@@ -52,8 +51,16 @@ const (
 	BashToolName = "bash"
 
 	DefaultAutoBackgroundAfter = 60 // Commands taking longer automatically become background jobs
-	MaxOutputLength            = 30000
-	BashNoOutput               = "no output"
+
+	// MaxAutoBackgroundAfter bounds how long a model can stretch the
+	// auto-background wait. Auto-background exists so a slow command
+	// cannot eat an entire turn; a model asking for, say, a day-long
+	// window would defeat that purpose. Ten minutes is generous headroom
+	// over the default while still keeping a hard ceiling.
+	MaxAutoBackgroundAfter = 600
+
+	MaxOutputLength = 30000
+	BashNoOutput    = "no output"
 )
 
 //go:embed bash.md.tpl
@@ -319,7 +326,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Wait for either completion, auto-background threshold, or context cancellation.
 			// bgShell.Done() is closed exactly once, after exitErr/completedAt are recorded,
 			// so there is no need to poll GetOutput on a ticker.
-			autoBackgroundAfter := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
+			autoBackgroundAfter := normalizeAutoBackgroundAfter(params.AutoBackgroundAfter)
 			autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
 			timeout := time.After(autoBackgroundThreshold)
 
@@ -351,7 +358,23 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			return stillRunningBashResponse(bgShell, params, startTime,
 				"Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate."), nil
 		},
-	), map[string]toolParameterSchema{"command": {minLength: intPtr(1)}})
+	), map[string]toolParameterSchema{"command": {minLength: intPtr(1)}, "auto_background_after": intSchemaBounds(MaxAutoBackgroundAfter)})
+}
+
+// normalizeAutoBackgroundAfter clamps a model-supplied auto-background
+// threshold into a sane range. The model is not a trusted source: zero or
+// negative values (including an omitted field, which decodes as zero) mean
+// "not set" and fall back to the default, and anything above
+// MaxAutoBackgroundAfter is capped there so a command can never be made to
+// run synchronously forever.
+func normalizeAutoBackgroundAfter(seconds int) int {
+	if seconds <= 0 {
+		return DefaultAutoBackgroundAfter
+	}
+	if seconds > MaxAutoBackgroundAfter {
+		return MaxAutoBackgroundAfter
+	}
+	return seconds
 }
 
 // finishBashRun turns a finished shell run's raw output into the tool's
