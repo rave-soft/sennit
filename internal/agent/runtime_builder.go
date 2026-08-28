@@ -760,31 +760,31 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 			slog.Warn("Threshold rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
 			return
 		}
-		active_ := accounts.Account{ID: providerCfg.Account, Usage: usage.Snapshot()}
+		acct := accounts.Account{ID: providerCfg.Account, Usage: usage.Snapshot()}
 		for i, a := range all {
 			if a.ID == providerCfg.Account {
-				active_ = a
-				active_.Usage = usage.Snapshot()
+				acct = a
+				acct.Usage = usage.Snapshot()
 				// Pick reads exhaustion off its own candidates list, not
-				// off active_ separately (unlike ShouldRotate, which
-				// takes active_ directly) - without this, Pick would see
+				// off acct separately (unlike ShouldRotate, which
+				// takes acct directly) - without this, Pick would see
 				// the store's possibly-stale Usage for the active
 				// account and, finding it "unknown" rather than
 				// exhausted, could pick the very account this callback
 				// is trying to rotate away from.
-				all[i] = active_
+				all[i] = acct
 				break
 			}
 		}
-		if !rotator.ShouldRotate(active_, all) {
+		if !rotator.ShouldRotate(acct, all) {
 			return
 		}
-		picked, err := rotator.Pick(providerCfg.ID, active_.ID, all)
+		picked, err := rotator.Pick(providerCfg.ID, acct.ID, all)
 		if err != nil {
 			slog.Warn("Threshold rotation: no usable account", "provider", providerCfg.ID, "error", err)
 			return
 		}
-		if picked.ID == active_.ID {
+		if picked.ID == acct.ID {
 			return
 		}
 		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, inputs); err != nil {
@@ -792,10 +792,10 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 			return
 		}
 		if b.notify != nil {
-			remaining := worstKnownRemainingPercent(active_.Usage)
+			remaining := worstKnownRemainingPercent(acct.Usage)
 			msg := fmt.Sprintf("%s: switched to %q", providerCfg.Name, accountLabel(picked))
 			if remaining >= 0 {
-				msg = fmt.Sprintf("%s, %q had %d%% left", msg, accountLabel(active_), remaining)
+				msg = fmt.Sprintf("%s, %q had %d%% left", msg, accountLabel(acct), remaining)
 			}
 			b.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 				Type:       notify.TypeAccountRotated,
