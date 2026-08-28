@@ -42,29 +42,53 @@ func TestValue_Struct(t *testing.T) {
 	require.Equal(t, config{Name: "updated", Count: 2}, v.Get())
 }
 
-func TestValue_PointerPanics(t *testing.T) {
+func TestValue_Pointer(t *testing.T) {
 	t.Parallel()
 
-	require.Panics(t, func() {
-		NewValue(&struct{}{})
-	})
+	type inner struct{ N int }
+
+	v := NewValue(&inner{N: 1})
+	require.Equal(t, &inner{N: 1}, v.Get())
+
+	v.Set(&inner{N: 2})
+	require.Equal(t, 2, v.Get().N)
 }
 
-func TestValue_SlicePanics(t *testing.T) {
+func TestValue_Slice(t *testing.T) {
 	t.Parallel()
 
-	require.Panics(t, func() {
-		NewValue([]string{"a", "b"})
-	})
+	v := NewValue([]string{"a", "b"})
+	require.Equal(t, []string{"a", "b"}, v.Get())
+
+	v.Set([]string{"c"})
+	require.Equal(t, []string{"c"}, v.Get())
 }
 
-func TestValue_MapPanics(t *testing.T) {
+func TestValue_Map(t *testing.T) {
 	t.Parallel()
 
-	require.Panics(t, func() {
-		NewValue(map[string]int{"a": 1})
-	})
+	v := NewValue(map[string]int{"a": 1})
+	require.Equal(t, map[string]int{"a": 1}, v.Get())
+
+	v.Set(map[string]int{"b": 2})
+	require.Equal(t, map[string]int{"b": 2}, v.Get())
 }
+
+func TestValue_InterfaceHoldingPointer(t *testing.T) {
+	t.Parallel()
+
+	type stringer interface{ String() string }
+
+	v := NewValue[stringer](&namedPtr{s: "one"})
+	require.Equal(t, "one", v.Get().String())
+
+	v.Set(&namedPtr{s: "two"})
+	require.Equal(t, "two", v.Get().String())
+}
+
+type namedPtr struct{ s string }
+
+func (n *namedPtr) String() string { return n.s }
 
 func TestValue_ConcurrentAccess(t *testing.T) {
 	t.Parallel()

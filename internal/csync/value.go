@@ -1,13 +1,16 @@
 package csync
 
-import (
-	"reflect"
-	"sync"
-)
+import "sync"
 
 // Value is a generic thread-safe wrapper for any value type.
 //
-// For slices, use [Slice]. For maps, use [Map]. Pointers are not supported.
+// Value stores T as a whole and swaps it under a lock, so it protects the
+// value itself, not what it points to. For a slice or map that only
+// protects the header (pointer/len/cap, or the map header) — concurrent
+// access to the underlying elements still races, so prefer [Slice] or [Map]
+// for those, which lock around element access too. A pointer is fine to
+// store directly: the pointer itself is what gets protected, same as any
+// other value.
 type Value[T any] struct {
 	v  T
 	mu sync.RWMutex
@@ -15,17 +18,10 @@ type Value[T any] struct {
 
 // NewValue creates a new Value with the given initial value.
 //
-// Panics if t is a pointer, slice, or map. Use the dedicated types for those.
+// For slices and maps, consider [Slice] and [Map] instead: they lock
+// around element access, whereas Value only protects the stored
+// header/reference as a whole. See the [Value] doc for details.
 func NewValue[T any](t T) *Value[T] {
-	v := reflect.ValueOf(t)
-	switch v.Kind() {
-	case reflect.Pointer:
-		panic("csync.Value does not support pointer types")
-	case reflect.Slice:
-		panic("csync.Value does not support slice types; use csync.Slice")
-	case reflect.Map:
-		panic("csync.Value does not support map types; use csync.Map")
-	}
 	return &Value[T]{v: t}
 }
 
