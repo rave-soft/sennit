@@ -91,20 +91,9 @@ deleted, and the history stays in git.
   уже сдвинулись один раз, ориентир — имя символа.
 
   Закрытые баги перечислять смысла нет, история в git. Открытыми остались
-  шесть:
+  три (было шесть; остальные закрыты и удалены отсюда 2026-08-28 — см.
+  ревью-раунд `REVIEW-2026-08-28.md`, где то же дерево проверено заново):
 
-  - `internal/agent/tools/lsp_replace_symbol.go` пишет файл собственным
-    конвейером (`os.WriteFile` + ручной `CreateVersion`) мимо
-    `applyFileMutation` из `filemutation.go`, поэтому не получает
-    freshness-проверки и сохранения CRLF, которые есть у `write`/`edit`.
-    Следующий шаг: провести запись через `applyFileMutation`.
-  - `internal/lsp/client.go`, `Restart` — переприсваивает `c.client`,
-    `c.ctx`, `c.diagCountsCache` и `c.diagCountsVersion` без
-    `diagCountsMu`, под которым их читает `GetDiagnosticCounts` (в UI —
-    каждый кадр), и не чистит `c.diagnostics`: после рестарта показываются
-    диагностики мёртвого сервера. Следующий шаг: взять `diagCountsMu` на
-    сброс кэша, `c.diagnostics` очистить, доступ к `client`/`ctx` увести
-    под мьютекс или атомик.
   - Проектный конфиг исполняется без trust-гейта: `sennitrc` проекта
     запускается при открытии каталога, `sennit.json` проекта может ставить
     `env`, stdio `mcp`/`lsp` и `hooks` (`internal/config/load.go`,
@@ -115,10 +104,6 @@ deleted, and the history stays in git.
     секции своего слоя, поэтому запись из нижнего слоя остаётся видимой и
     команда молча не делает то, что обещает. Следующий шаг: tombstone
     (`disable: true`) вместо удаления ключа.
-  - `internal/filetracker/service.go` — `RecordPartialRead`/`RecordEdit`
-    делают `ReadCoverage` и следом `record` без транзакции; два
-    параллельных инструмента в одной сессии теряют покрытие друг друга.
-    Следующий шаг: один SQL-апдейт или явная транзакция вокруг пары.
   - `internal/ui/common/timer.go` — `turnTimer` package-global, один на
     процесс. Главный UI и встроенный тред делят один таймер хода, и чей
     ход показан — вопрос того, кто последним позвал `StartTurn`.
@@ -129,13 +114,6 @@ deleted, and the history stays in git.
   `proto.Thread*Status` ↔ `thread.Status` (L12), `thread/store_testing.go`
   → `store_export_test.go` (половина L1). Открыто:
 
-  - L1(остаток) `internal/config/store_testing.go` — production-файл,
-    импортирующий `testing`. Следующий шаг: `store_export_test.go`.
-  - L3 `internal/message` — доменная модель и SQLite-сервис в одном
-    пакете, поэтому каждый потребитель `message.Message` (весь UI) линкует
-    sqlc и sqlite. Самая крупная правка из оставшихся, отдельным PR.
-    Следующий шаг: `internal/message` — модель, `internal/message/store` —
-    сервис.
   - L4 `config → clipboard | skills | db | oauth/{codex,copilot}`.
     Следующий шаг: `EnvironmentProblems`/`SkillProblems` — в вызывающий
     слой, `SetupGitHubCopilot`/`SetupCodex`/`applyProviderVendorSetup` — к
@@ -145,14 +123,15 @@ deleted, and the history stays in git.
     `internal/config/providers_merge.go` — чистый тип данных получает
     store, чтобы писать на диск. Следующий шаг: передавать
     `globalDataPath`, возвращать список stale-ключей.
-  - L6 `internal/app/services.go` — `Threads tools.ThreadManager` и
-    `threadManager atomic.Pointer[thread.Manager]` держат один и тот же
-    менеджер в двух полях. Комментарии уже исправлены, поля — нет.
-    Следующий шаг: одно типизированное поле, адаптеры строятся в `Attach`.
-  - L7 `workspace.Workspace` — 94 метода, `ui/common.Common` отдаёт
-    интерфейс целиком каждому компоненту; `AgentQueuedPrompts` и
-    `SetCurrentSession` не вызываются из production-кода. Следующий шаг:
-    `Common` отдаёт ролевые срезы, неиспользуемые методы удалить.
+  - L7 `workspace.Workspace` — ролевые интерфейсы написаны (14 штук в
+    `workspace.go`), но `Workspace` складывает их обратно, и
+    `ui/common.Common` отдаёт его целиком каждому компоненту. Замер
+    2026-08-28, однако, не подтверждает выгоду от сужения: полное имя
+    `workspace.Workspace` встречается в `internal/ui` всего в восьми
+    объявлениях, и оставшиеся компоненты реально охватывают по три-четыре
+    роли. Разбор — в `REVIEW-2026-08-28.md`, пункт 11. Остаётся только
+    удалить неиспользуемые методы (`AgentQueuedPrompts`,
+    `SetCurrentSession`), если они всё ещё не вызываются.
   - L9 UI мимо workspace. depguard закрыл `agent`, `thread`, `db`, `app`,
     но `internal/ui/**` по-прежнему импортирует `commands`, `config`,
     `diff`, `discover`, `git`, `history`, `hooks`, `lsp`, `message`,
@@ -161,20 +140,28 @@ deleted, and the history stays in git.
     `fsext` в `session.go`, `commands.LoadCustomCommands`, LSP-состояния,
     `hooks.HookMetadata` → proto DTO, OAuth-флоу из диалогов; затем
     расширить depguard.
-  - L10 `internal/session` шлёт телеметрию (`event.SessionCreated/Deleted`),
-    `internal/db/datadirlock.go` держит flock рабочего каталога в
-    DB-пакете, `internal/gc` импортирует `thread` ради `Status.Terminal()`.
-    Следующий шаг: три мелкие перестановки, разблокируют depguard-правила.
+  - L10 `internal/db/datadirlock.go` держит flock рабочего каталога в
+    DB-пакете. Следующий шаг: перестановка, разблокирует depguard-правило.
+    (Две другие трети этого пункта закрыты: `internal/session` телеметрию
+    больше не шлёт, `internal/gc` `thread` не импортирует — осталось
+    только упоминание в комментарии. Проверено 2026-08-28.)
 
   **Божественные объекты.** Закрыто: walker вынесен в
   `agent/tools/confinement.go`, `ProviderConfig` — в
-  `config/provider.go`. Открыто: `Coordinator` (интерфейс из 21 метода
-  плюс построение провайдеров, OAuth-refresh и cost под-агентов),
-  `ConfigStore` (69 методов), `internal/ui/model` (17.2k строк
-  non-test в 50 файлах), `lsp.Client` (834 строки: lifecycle + file-sync +
-  кэш диагностик + фасад запросов), `sennit import` в пакете `config`
+  `config/provider.go`, `lsp.Client` разнесён на
+  `runtime`/`diagnosticsStore`/`filesync`/`requests` (403 строки вместо
+  834). Открыто: `Coordinator` (интерфейс из 20 методов плюс построение
+  провайдеров, OAuth-refresh и cost под-агентов), `internal/ui/model`
+  (18.2k строк non-test в 54 файлах), `sennit import` в пакете `config`
   (→ `internal/importer`). Каждый — отдельный PR; порядок значения не
   имеет, они независимы.
+
+  `ConfigStore` из этого списка снят как god object по числу: методов
+  действительно 75, но замер 2026-08-28 показал, что главный
+  потребитель (`internal/agent`) зовёт около 35 из них, то есть
+  сужать нечего, а 25 файлов держат конкретный `*config.ConfigStore`,
+  а не интерфейс. Остаётся SRP-вопрос без ISP-выгоды; разбор и цена —
+  в `REVIEW-2026-08-28.md`, пункт 14.
 
   **KISS / перформанс.** Закрыто: индекс `(session_id, created_at)` и
   снятие триггера `update_messages_updated_at`, сигнатурный пропуск
@@ -183,18 +170,27 @@ deleted, and the history stays in git.
   JSON, мержит и заново зовёт `setDefaults` ради `data_directory`;
   `PushPopEnvOverrides` держится через `configureProviders`, включая до
   трёх секунд discovery-HTTP, и блокирует второй workspace;
-  `testing.Testing()` остаётся в production-коде семи пакетов.
+  `testing.Testing()` из production-кода ушёл — 0 вхождений на
+  2026-08-28.
 
   **YAGNI и мёртвый код.** `internal/event` из списка снят: no-op'ы —
   задокументированное решение, а не долг. `internal/diffdetect` и
-  `version.BuildID` удалены. Осталось: `deadcode ./...` даёт 81 символ
-  (было 106) — крупнейшие гнёзда `internal/proto` (мёртвые
-  `Marshal/UnmarshalJSON` у `Message`, `Attachment`, `AgentEvent`,
-  `PermissionRequest`), package-level API `agent/tools/mcp/registry.go`
-  (`ArmInit`, `WaitForInit`, `Close`, `SubscribeEvents`, `GetState`,
-  `BeginAuth`) и `internal/testenv`. Следующий шаг: удалять пакетами, с
-  `grep -rn` перед каждым; цель — 0 non-test символов или
-  задокументированные исключения.
+  `version.BuildID` удалены.
+
+  Формулировка «цель — 0 non-test символов» отсюда снята как ошибочная,
+  и `internal/testenv` из списка убран. `deadcode` считает достижимость
+  от `main`, поэтому всё, что вызывается только из тестов, попадает в
+  отчёт независимо от того, живое оно: `internal/testenv` — рабочий
+  тестовый хелпер семи пакетов, а шесть «мёртвых» форвардеров в
+  `delegation_finalizer.go` имеют по 2-19 вызовов в тестах. Вывод
+  `deadcode` — не список задач.
+
+  Разбор 2026-08-28 (89 символов после удаления восьми): по-настоящему
+  мёртвых, без единой ссылки где бы то ни было, оставалось девять, из
+  них восемь удалены. Остальное требует проверки по одному, и искать
+  там надо не мёртвое, а боевой код без боевого потребителя — этот
+  вопрос уже дал одну настоящую находку (механизм прерывания ожидания,
+  §4.1 в `REVIEW-2026-08-28.md`). Подробности и метод — там же.
 
   **Системные меры из плана**, которые стоило бы завести вместе с
   правками: тест «каждая команда из `safeCommands` не может быть обёрткой
