@@ -1,0 +1,35 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 202
+    host: generativelanguage.googleapis.com
+    body: |
+      {"contents":[{"parts":[{"text":"Say hi in Portuguese"}],"role":"user"}],"generationConfig":{"maxOutputTokens":4000},"systemInstruction":{"parts":[{"text":"You are a helpful assistant"}],"role":"user"}}
+    form:
+      alt:
+      - sse
+    headers:
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+      - google-genai-sdk/1.49.0 gl-go/go1.26.1
+    url: https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"\\\"Hi\\\" in Portuguese is **\\\"Oi\\\"** (pronounced like\"}],\"role\": \"model\"},\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 11,\"candidatesTokenCount\": 14,\"totalTokenCount\": 231,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 11}],\"thoughtsTokenCount\": 206},\"modelVersion\": \"gemini-3.1-pro-preview\",\"responseId\": \"NgCzaZz6I6nUz7IPhsKmmQw\"}\r\n\r\ndata: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \" \\\"oy\\\"). \\n\\nYou can also use **\\\"Olá\\\"** (pronounced oh-LAH), which means \\\"Hello\"}],\"role\": \"model\"},\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 11,\"candidatesTokenCount\": 38,\"totalTokenCount\": 255,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 11}],\"thoughtsTokenCount\": 206},\"modelVersion\": \"gemini-3.1-pro-preview\",\"responseId\": \"NgCzaZz6I6nUz7IPhsKmmQw\"}\r\n\r\ndata: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"\\\".\"}],\"role\": \"model\"},\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 11,\"candidatesTokenCount\": 39,\"totalTokenCount\": 256,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 11}],\"thoughtsTokenCount\": 206},\"modelVersion\": \"gemini-3.1-pro-preview\",\"responseId\": \"NgCzaZz6I6nUz7IPhsKmmQw\"}\r\n\r\ndata: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"\",\"thoughtSignature\": \"EpQHCpEHAb4+9vu/mjAC0d6LmaWJMcsNetDWpCWn9kOmImPTrAdAzQaRyodRopDz0rrLvokPvs5P2nJ/EYqDyau+LOVRjpUCSgriT/l0f9hPsQ5s+JgbZDYebVkfL1RwSIfYIio1pBlhTm5nraQZzRy4sQFiIO5qC9788htktcILqRC2tQhsuMHAVEvqX4BPBW/TRIFUOoc7O7NnOrFVmZ8wf2iwOJqtBQN5nat06mYhZCBNKWZbeJ11EfOiH7wZSyZvx12gU67LlP9Qj/RC8WJBRzcfSo5bdSZDysVcsSOn++QCzD5lUT5H8iNRyZ/oxwHeXfRwSoIBVHRlm5W1umcxbjD2j3xOh78eoboEB03K9xZgQTOOirwmYGqVW09PHGTUG3qyiSwMz9l5NHrw53lJW4ATzPbB6jtcyP3DkoxtSL/Q2l9yxkenhC3nC2VToauYT3nETvZQi0kZD3iTuqPdAVdzKvKN8vNypGgXGbclFNGOnBuhTLlz28KIS8kvdBT6Y/4QjSap6uU5k/THDtywYqtRt9IG5EINdI7hY+fsgWEubZV+U5jFAYncxgOpdsryQ+RYw3NGoS1eQpHySf7KLbzdHPeJaTTSaidB4Fv6rQec74yXfFCK6WTSnpBqi52ZN7oRFanG0dA2p6Wik6etlpH88jaP4r47cDqIdIqW3zM+JK631vkmMZ2kcfde7kO8hFbqUYLHFk80h2A56zjK8lNaGcEEVl1iStfLcG+9gFyH31whSUVE0kvIVeWHL067M8NB2apwrdASkUzqQXmy23OKxWRNnO47EwARmTKRJtbY4lnaWU0+l4sst+j2SX9cJSp+T61DtssnUdepgzS1tWKFr+IsP2cq73qxN843EAUfJW7OdzHNSwW2FdGBH4sEsk7pACvzlJllnn2SKhm5d7R9lM5zZfVSbFifFxNOL/+mPZRrFe0EwywjYa3ThUxinVa6uImIe1x39O0BI+j4GfZwKpsk05TrxxnvSaCyGwx5rrkm5LGKZAck4WdKB4K2X8J+N8DC2yJzo+OaKAuHTq3IYrge4BlVQkX9LZIj6quAtBy5pw80XumgpiYDoCCeqNs5qJGLCYI5jJHCT46zbFXCpj5bbuOFXi80V1NiKNbchQTZD+L8oIg+VgVY5+OeuXZ4/C7+q/pEfDDDqdLoqS1CGhjNq4Rdy6cVZE/vT/JvkTlKTrd2a2h/q5BIoE3NGY9qYA==\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 11,\"candidatesTokenCount\": 39,\"totalTokenCount\": 256,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 11}],\"thoughtsTokenCount\": 206},\"modelVersion\": \"gemini-3.1-pro-preview\",\"responseId\": \"NgCzaZz6I6nUz7IPhsKmmQw\"}\r\n\r\n"
+    headers:
+      Content-Type:
+      - text/event-stream
+    status: 200 OK
+    code: 200
+    duration: 3.642081208s

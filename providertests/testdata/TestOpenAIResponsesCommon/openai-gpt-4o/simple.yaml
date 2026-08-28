@@ -1,0 +1,106 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 205
+    host: ""
+    body: '{"max_output_tokens":4000,"store":false,"input":[{"content":"You are a helpful assistant","role":"system"},{"content":[{"text":"Say hi in Portuguese","type":"input_text"}],"role":"user"}],"model":"gpt-4o"}'
+    headers:
+      Accept:
+      - application/json
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.33.1 (https://charm.land/fantasy)
+    url: https://api.openai.com/v1/responses
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |-
+      {
+        "id": "resp_07592f42d0d2f1ac016a3c11f75bd081a1a99d083171a39f1f",
+        "object": "response",
+        "created_at": 1782321655,
+        "status": "completed",
+        "background": false,
+        "billing": {
+          "payer": "developer"
+        },
+        "completed_at": 1782321657,
+        "error": null,
+        "frequency_penalty": 0.0,
+        "incomplete_details": null,
+        "instructions": null,
+        "max_output_tokens": 4000,
+        "max_tool_calls": null,
+        "model": "gpt-4o-2024-08-06",
+        "moderation": null,
+        "output": [
+          {
+            "id": "msg_07592f42d0d2f1ac016a3c11f9002081a180824d7cd06bccbd",
+            "type": "message",
+            "status": "completed",
+            "content": [
+              {
+                "type": "output_text",
+                "annotations": [],
+                "logprobs": [],
+                "text": "Ol\u00e1!"
+              }
+            ],
+            "role": "assistant"
+          }
+        ],
+        "parallel_tool_calls": true,
+        "presence_penalty": 0.0,
+        "previous_response_id": null,
+        "prompt_cache_key": null,
+        "prompt_cache_retention": "in_memory",
+        "reasoning": {
+          "context": null,
+          "effort": null,
+          "summary": null
+        },
+        "safety_identifier": null,
+        "service_tier": "default",
+        "store": false,
+        "temperature": 1.0,
+        "text": {
+          "format": {
+            "type": "text"
+          },
+          "verbosity": "medium"
+        },
+        "tool_choice": "auto",
+        "tools": [],
+        "top_logprobs": 0,
+        "top_p": 1.0,
+        "truncation": "disabled",
+        "usage": {
+          "input_tokens": 20,
+          "input_tokens_details": {
+            "cached_tokens": 0
+          },
+          "output_tokens": 3,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 23
+        },
+        "user": null,
+        "metadata": {}
+      }
+    headers:
+      Content-Type:
+      - application/json
+    status: 200 OK
+    code: 200
+    duration: 3.360262125s

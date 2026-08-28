@@ -1,0 +1,64 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 202
+    host: generativelanguage.googleapis.com
+    body: |
+      {"contents":[{"parts":[{"text":"Say hi in Portuguese"}],"role":"user"}],"generationConfig":{"maxOutputTokens":4000},"systemInstruction":{"parts":[{"text":"You are a helpful assistant"}],"role":"user"}}
+    headers:
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+      - google-genai-sdk/1.49.0 gl-go/go1.26.1
+    url: https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |
+      {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "**Oi** (pronounced like \"oy\") is the most common way to say hi in Portuguese! \n\nYou can also use **Olá**, which means \"Hello\".",
+                  "thoughtSignature": "Eo0HCooHAb4+9vvmzjTCCR5H7kYVqqoZGutxZML9q6zHxLv+SpV8G645af8pq1n7c7C8jK25Uh+lJKnhUi/Qqhsrh0dY/SDZuCFE0QmL8mWX8tApxdDzq5xfP/P7VVqUuBfmwrm5zfTSGC5H/YTfVda9WaAWeMgkWYXoT/dAKoXnFXTfVt7SbYKuZoeZA7WQu5JDb013tCocrKxgl+NDnD2Ur2eTBYS1jpHD7NS3ILeh3fCGbr4J69J93Z9VdtDeUR4Rx7wL38Wehc22tlNUfBaNVYdnuWCQo5Q3u44BF1D7B1zeAd0pDvk68JntEGMK8gHhEKB0HHOtGbrKf71Wvy4rHZMwP4Bx8GglsfgHemgKMUZKdwPjP3FfuIrDC7SnaTNCFKHGDhE9vVK+3S7n3uL6bBzJv64TxkOIbin7AkPOsgouQ5xmkcufF+6+/4c3yDO6ATZLlvtbb643ZQwn7m8RRiAlZbq/gel9AxPCwgQJAYwdv8SGrDkbYfw/WQb3ZAb53Gidrz4EJyCZWnwHgFNQ/JyM8a6y098XQ6HLCvA48mI9Q+NTCldVa0hI9QSXC/uoLT2woVvWPH/rcbq9vCKh/UBT+qbZ92hDK8xXejNAlHkp4W/rQnoFivgiEz+FGinAhQRpTZJowag82GQ9vfWSjQG0CKsb7gJ495YM70CNPSolmOwCFJHbxFx13PddviH0Ooh+43r4XuPOmq7oGopm5baIjSTyE7uw/iRqIx7L3MLHeh62qSufybpGX2BXsmp52VJexvm6/Cl8VfGMW0JgqXnvBKQWvqzS0cWaRLoVmu5Khg+NtaszEgGHhBbQAIrETMf0CJgpNjwUMpjgTfv/98/31kpFoO14gfEiWE3clFS/GQhCG2dj7VEiOs5d5HJUKmDZS9QEnWkQpJbupa0LEjwVKy23AQlPrqqbTf4Vr+ehSK3Js4Zqa5EOUgQdLIWDu3T3dIPfpWiaEzTp9cVJAdI9rP+Tw1grScEZCoWhmD5Md+528fRzUQqYTVDX+sCPVbgX+QsgPAb3OeJrE5uGdqZnzRtDAi48lTHSRjyoZtKjnz8IErwFXptrE/FTHW11JfNkeafx4i/d/MiZ7gqdusL7fy9Yhhj7dkTeXuK5vK289vA5L0ft2YhKiA6I3YM+c5YrR/IGTIEZcdPfqgNF1N5J3rXwWkep3NcCNqygEt0d7pTcGoDAgSGsoRJN"
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "index": 0
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 11,
+          "candidatesTokenCount": 34,
+          "totalTokenCount": 267,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 11
+            }
+          ],
+          "thoughtsTokenCount": 222
+        },
+        "modelVersion": "gemini-3.1-pro-preview",
+        "responseId": "MgCzabnPN-fmz7IPgpGGgQI"
+      }
+    headers:
+      Content-Type:
+      - application/json; charset=UTF-8
+    status: 200 OK
+    code: 200
+    duration: 5.869259458s

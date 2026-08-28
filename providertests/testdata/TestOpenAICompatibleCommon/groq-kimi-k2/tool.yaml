@@ -1,0 +1,65 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 474
+    host: ""
+    body: '{"messages":[{"content":"You are a helpful assistant","role":"system"},{"content":"What''s the weather in Florence,Italy?","role":"user"}],"model":"moonshotai/kimi-k2-instruct-0905","max_tokens":4000,"tool_choice":"auto","tools":[{"function":{"name":"weather","strict":false,"description":"Get weather information for a location","parameters":{"properties":{"location":{"description":"the city","type":"string"}},"required":["location"],"type":"object"}},"type":"function"}]}'
+    headers:
+      Accept:
+      - application/json
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+    url: https://api.groq.com/openai/v1/chat/completions
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |
+      {"id":"chatcmpl-be641f72-2714-47dd-8b4f-522e8134fe11","object":"chat.completion","created":1773345612,"model":"moonshotai/kimi-k2-instruct-0905","choices":[{"index":0,"message":{"role":"assistant","content":"I'll check the weather in Florence, Italy for you.","tool_calls":[{"id":"functions.weather:0","type":"function","function":{"name":"weather","arguments":"{\"location\":\"Florence,Italy\"}"}}]},"logprobs":null,"finish_reason":"tool_calls"}],"usage":{"queue_time":0.195204943,"prompt_tokens":93,"prompt_time":0.014645715,"completion_tokens":32,"completion_time":0.085405286,"total_tokens":125,"total_time":0.100051001},"usage_breakdown":null,"system_fingerprint":"fp_241bc7119c","x_groq":{"id":"req_01kkht58t5fzxty9507k1xeacd","seed":1524148036},"service_tier":"on_demand"}
+    headers:
+      Content-Type:
+      - application/json
+    status: 200 OK
+    code: 200
+    duration: 367.7875ms
+- id: 1
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 768
+    host: ""
+    body: '{"messages":[{"content":"You are a helpful assistant","role":"system"},{"content":"What''s the weather in Florence,Italy?","role":"user"},{"content":"I''ll check the weather in Florence, Italy for you.","tool_calls":[{"id":"functions.weather:0","function":{"arguments":"{\"location\":\"Florence,Italy\"}","name":"weather"},"type":"function"}],"role":"assistant"},{"content":"40 C","tool_call_id":"functions.weather:0","role":"tool"}],"model":"moonshotai/kimi-k2-instruct-0905","max_tokens":4000,"tool_choice":"auto","tools":[{"function":{"name":"weather","strict":false,"description":"Get weather information for a location","parameters":{"properties":{"location":{"description":"the city","type":"string"}},"required":["location"],"type":"object"}},"type":"function"}]}'
+    headers:
+      Accept:
+      - application/json
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+    url: https://api.groq.com/openai/v1/chat/completions
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |
+      {"id":"chatcmpl-7a679b99-7eeb-4a98-ac30-c48297ee855f","object":"chat.completion","created":1773345613,"model":"moonshotai/kimi-k2-instruct-0905","choices":[{"index":0,"message":{"role":"assistant","content":"The current temperature in Florence, Italy is 40°C."},"logprobs":null,"finish_reason":"stop"}],"usage":{"queue_time":0.2004154,"prompt_tokens":143,"prompt_time":0.037531339,"completion_tokens":13,"completion_time":0.039510744,"total_tokens":156,"total_time":0.077042083},"usage_breakdown":null,"system_fingerprint":"fp_05df423bab","x_groq":{"id":"req_01kkht595hfwrt93w2tve660tb","seed":1991909797},"service_tier":"on_demand"}
+    headers:
+      Content-Type:
+      - application/json
+    status: 200 OK
+    code: 200
+    duration: 362.018875ms
