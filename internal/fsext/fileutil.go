@@ -115,12 +115,6 @@ func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, 
 	return globWithDoubleStar(context.Background(), pattern, cwd, limit)
 }
 
-// GlobGitignoreAwareCtx is like [GlobGitignoreAware] but stops early when ctx
-// is cancelled (e.g. on timeout), returning whatever was found so far.
-func GlobGitignoreAwareCtx(ctx context.Context, pattern, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(ctx, pattern, cwd, limit)
-}
-
 // VisitGlobGitignoreAware streams every matching path without retaining the
 // result set. Callers that paginate can therefore scan wide trees with memory
 // proportional to their page size.

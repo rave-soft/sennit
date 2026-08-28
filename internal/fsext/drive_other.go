@@ -9,8 +9,3 @@ package fsext
 func WindowsWorkingDirDrive() string {
 	panic("cannot call fsext.WindowsWorkingDirDrive() on non-Windows OS")
 }
-
-// WindowsSystemDrive returns the drive letter of the system drive, e.g. "C:".
-func WindowsSystemDrive() string {
-	panic("cannot call fsext.WindowsSystemDrive() on non-Windows OS")
-}

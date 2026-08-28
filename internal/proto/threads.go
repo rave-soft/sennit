@@ -100,17 +100,6 @@ const (
 	ThreadEventRemoved       ThreadEventType = "removed"
 )
 
-// MarshalText implements the [encoding.TextMarshaler] interface.
-func (t ThreadEventType) MarshalText() ([]byte, error) {
-	return []byte(t), nil
-}
-
-// UnmarshalText implements the [encoding.TextUnmarshaler] interface.
-func (t *ThreadEventType) UnmarshalText(text []byte) error {
-	*t = ThreadEventType(text)
-	return nil
-}
-
 // ThreadEvent is published over SSE on every thread lifecycle change.
 type ThreadEvent struct {
 	Type   ThreadEventType `json:"type"`
