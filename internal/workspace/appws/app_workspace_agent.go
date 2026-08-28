@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"context"
@@ -10,12 +10,14 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- Agent --
@@ -132,15 +134,15 @@ func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) bool {
 //
 // The coordinator remains the fallback for a config that selects nothing,
 // which is the state before onboarding picks a model.
-func (w *AppWorkspace) AgentModel() AgentModel {
+func (w *AppWorkspace) AgentModel() workspace.AgentModel {
 	coord := w.app.Coordinator()
 	if coord == nil {
-		return AgentModel{}
+		return workspace.AgentModel{}
 	}
 	cfg := w.store.Config()
 	if cfg == nil || cfg.Model.Model == "" {
 		m := coord.Model()
-		return AgentModel{CatalogCfg: m.CatalogCfg, ModelCfg: m.ModelCfg}
+		return workspace.AgentModel{CatalogCfg: m.CatalogCfg, ModelCfg: m.ModelCfg}
 	}
 	selected := cfg.Model
 	// A model the catalog cannot resolve is still named by its id rather
@@ -154,7 +156,7 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 			catalog = *known
 		}
 	}
-	return AgentModel{CatalogCfg: catalog, ModelCfg: selected}
+	return workspace.AgentModel{CatalogCfg: catalog, ModelCfg: selected}
 }
 
 func (w *AppWorkspace) AgentIsReady() bool {
@@ -163,7 +165,7 @@ func (w *AppWorkspace) AgentIsReady() bool {
 
 func (w *AppWorkspace) AgentReadyErr() error {
 	if w.app.Coordinator() == nil {
-		return ErrAgentNotInitialized
+		return workspace.ErrAgentNotInitialized
 	}
 	return nil
 }
@@ -207,7 +209,7 @@ func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 // one meaningful.
 func (w *AppWorkspace) ApplySessionModel(ctx context.Context, sessionID string) (bool, error) {
 	if w.app.Coordinator() == nil {
-		return false, ErrAgentNotInitialized
+		return false, workspace.ErrAgentNotInitialized
 	}
 	sess, err := w.app.Sessions().Get(ctx, sessionID)
 	if err != nil {
@@ -270,7 +272,7 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 // stripped of everything that isn't "run the turn and hand back
 // text": no spinner, no progress bar, no stdout writer. Those stay
 // the caller's job (see cmd/run.go).
-func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
+func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan workspace.AgentRunEvent, error) {
 	coord := w.app.Coordinator()
 	if coord == nil {
 		return nil, errors.New("agent coordinator not initialized")
@@ -295,7 +297,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	w.app.ReportCurrentSession(sessionID)
 
 	ctx, cancel := context.WithCancel(ctx)
-	out := make(chan AgentRunEvent)
+	out := make(chan workspace.AgentRunEvent)
 
 	type response struct {
 		result *fantasy.AgentResult
@@ -327,7 +329,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 		// reading leaves this goroutine blocked on an unbuffered send
 		// forever, and with it the deferred cancel and close, so every
 		// send has to be able to give up.
-		send := func(ev AgentRunEvent) bool {
+		send := func(ev workspace.AgentRunEvent) bool {
 			select {
 			case out <- ev:
 				return true
@@ -359,7 +361,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			// the longest silence of the turn.
 			if status := msg.Working().Label(); status != "" && status != lastStatus {
 				lastStatus = status
-				if !send(AgentRunEvent{Status: status}) {
+				if !send(workspace.AgentRunEvent{Status: status}) {
 					return true, nil
 				}
 			}
@@ -385,7 +387,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 				return false, nil
 			}
 			printed = true
-			if !send(AgentRunEvent{TextDelta: part}) {
+			if !send(workspace.AgentRunEvent{TextDelta: part}) {
 				return true, nil
 			}
 			return false, nil
@@ -417,17 +419,17 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			case result := <-done:
 				if result.err != nil {
 					if errors.Is(result.err, context.Canceled) {
-						send(AgentRunEvent{Done: true})
+						send(workspace.AgentRunEvent{Done: true})
 						return
 					}
-					send(AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)})
+					send(workspace.AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)})
 					return
 				}
 				if err := drain(); err != nil {
-					send(AgentRunEvent{Done: true, Err: err})
+					send(workspace.AgentRunEvent{Done: true, Err: err})
 					return
 				}
-				send(AgentRunEvent{Done: true})
+				send(workspace.AgentRunEvent{Done: true})
 				return
 
 			case ev, ok := <-messageEvents:
@@ -441,17 +443,24 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 				}
 				if stop, err := emit(ev); stop {
 					if err != nil {
-						send(AgentRunEvent{Done: true, Err: err})
+						send(workspace.AgentRunEvent{Done: true, Err: err})
 					}
 					return
 				}
 
 			case <-ctx.Done():
-				send(AgentRunEvent{Done: true, Err: ctx.Err()})
+				send(workspace.AgentRunEvent{Done: true, Err: ctx.Err()})
 				return
 			}
 		}
 	}()
 
 	return out, nil
+}
+
+// ResetAgentToolCache clears the built-in tools' process-wide regex
+// caches (see tools.ResetCache), so a session started after this one does
+// not reuse compiled patterns left over from it.
+func (w *AppWorkspace) ResetAgentToolCache() {
+	tools.ResetCache()
 }

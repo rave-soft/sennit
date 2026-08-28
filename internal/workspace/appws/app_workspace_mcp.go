@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- MCP operations --
@@ -15,20 +16,20 @@ func (w *AppWorkspace) WaitForMCPInit(ctx context.Context) error {
 	return w.app.MCP.WaitForInit(ctx)
 }
 
-func (w *AppWorkspace) MCPGetStates() map[string]MCPClientInfo {
+func (w *AppWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo {
 	states := w.app.MCP.GetStates()
-	result := make(map[string]MCPClientInfo, len(states))
+	result := make(map[string]workspace.MCPClientInfo, len(states))
 	for name, state := range states {
-		result[name] = MCPClientInfo{Name: state.Name, State: MCPState(state.State), Error: state.Error, Counts: MCPCounts{Tools: state.Counts.Tools, Prompts: state.Counts.Prompts, Resources: state.Counts.Resources}, ConnectedAt: state.ConnectedAt}
+		result[name] = workspace.MCPClientInfo{Name: state.Name, State: workspace.MCPState(state.State), Error: state.Error, Counts: workspace.MCPCounts{Tools: state.Counts.Tools, Prompts: state.Counts.Prompts, Resources: state.Counts.Resources}, ConnectedAt: state.ConnectedAt}
 	}
 	return result
 }
 
-func (w *AppWorkspace) MCPResources() []MCPResourceInfo {
-	var result []MCPResourceInfo
+func (w *AppWorkspace) MCPResources() []workspace.MCPResourceInfo {
+	var result []workspace.MCPResourceInfo
 	for mcpName, resources := range w.app.MCP.Resources() {
 		for _, r := range resources {
-			result = append(result, MCPResourceInfo{
+			result = append(result, workspace.MCPResourceInfo{
 				MCPName:  mcpName,
 				URI:      r.URI,
 				Title:    r.Name,
@@ -51,14 +52,14 @@ func (w *AppWorkspace) RefreshMCPTools(ctx context.Context, name string) {
 	w.app.MCP.RefreshTools(ctx, w.store, name)
 }
 
-func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
+func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]workspace.MCPResourceContents, error) {
 	contents, err := w.app.MCP.ReadResource(ctx, w.store, name, uri)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]MCPResourceContents, len(contents))
+	result := make([]workspace.MCPResourceContents, len(contents))
 	for i, c := range contents {
-		result[i] = MCPResourceContents{
+		result[i] = workspace.MCPResourceContents{
 			URI:      c.URI,
 			MIMEType: c.MIMEType,
 			Text:     c.Text,
@@ -108,11 +109,11 @@ func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
 	return w.app.MCP.AuthenticateMCP(ctx, w.store, name)
 }
 
-func (w *AppWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
+func (w *AppWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer {
 	pending := w.app.MCP.PendingAuthMCPs(w.store)
-	result := make([]MCPPendingAuthServer, len(pending))
+	result := make([]workspace.MCPPendingAuthServer, len(pending))
 	for i, server := range pending {
-		result[i] = MCPPendingAuthServer{Name: server.Name, URL: server.URL}
+		result[i] = workspace.MCPPendingAuthServer{Name: server.Name, URL: server.URL}
 	}
 	return result
 }

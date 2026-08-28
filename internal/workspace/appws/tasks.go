@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- AppWorkspace: Tasks --
@@ -25,7 +26,7 @@ func (w *AppWorkspace) SupportsTasks() bool {
 func (w *AppWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
 	mgr, ok := w.taskManager()
 	if !ok {
-		return nil, ErrTasksNotSupported
+		return nil, workspace.ErrTasksNotSupported
 	}
 	sts, err := mgr.List(ctx)
 	if err != nil {
@@ -43,7 +44,7 @@ func (w *AppWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
 func (w *AppWorkspace) CancelTask(ctx context.Context, id, reason string) error {
 	mgr, ok := w.taskManager()
 	if !ok {
-		return ErrTasksNotSupported
+		return workspace.ErrTasksNotSupported
 	}
 	return mgr.Cancel(ctx, id, reason)
 }

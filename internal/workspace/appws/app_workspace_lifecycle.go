@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- BackgroundJobs --
@@ -38,26 +39,26 @@ func (w *AppWorkspace) Subscribe(send func(any)) {
 func (w *AppWorkspace) translateEvent(msg any) any {
 	switch e := msg.(type) {
 	case pubsub.Event[notify.Notification]:
-		return pubsub.Event[AgentNotification]{Type: e.Type, Payload: AgentNotification{SessionID: e.Payload.SessionID, SessionTitle: e.Payload.SessionTitle, Type: AgentNotificationType(e.Payload.Type), ProviderID: e.Payload.ProviderID, RunID: e.Payload.RunID, Message: e.Payload.Message, AWSSOCommand: e.Payload.AWSSOCommand, AWSSOURL: e.Payload.AWSSOURL}}
+		return pubsub.Event[workspace.AgentNotification]{Type: e.Type, Payload: workspace.AgentNotification{SessionID: e.Payload.SessionID, SessionTitle: e.Payload.SessionTitle, Type: workspace.AgentNotificationType(e.Payload.Type), ProviderID: e.Payload.ProviderID, RunID: e.Payload.RunID, Message: e.Payload.Message, AWSSOCommand: e.Payload.AWSSOCommand, AWSSOURL: e.Payload.AWSSOURL}}
 	case pubsub.Event[mcptools.Event]:
-		var eventType MCPEventType
+		var eventType workspace.MCPEventType
 		switch e.Payload.Type {
 		case mcptools.EventStateChanged:
-			eventType = MCPEventStateChanged
+			eventType = workspace.MCPEventStateChanged
 		case mcptools.EventToolsListChanged:
-			eventType = MCPEventToolsListChanged
+			eventType = workspace.MCPEventToolsListChanged
 		case mcptools.EventPromptsListChanged:
-			eventType = MCPEventPromptsListChanged
+			eventType = workspace.MCPEventPromptsListChanged
 		case mcptools.EventResourcesListChanged:
-			eventType = MCPEventResourcesListChanged
+			eventType = workspace.MCPEventResourcesListChanged
 		default:
 			return nil
 		}
-		return pubsub.Event[MCPEvent]{Type: e.Type, Payload: MCPEvent{Type: eventType, Name: e.Payload.Name}}
+		return pubsub.Event[workspace.MCPEvent]{Type: e.Type, Payload: workspace.MCPEvent{Type: eventType, Name: e.Payload.Name}}
 	case pubsub.Event[app.LSPEvent]:
-		return pubsub.Event[LSPEvent]{Type: e.Type, Payload: LSPEvent{Type: LSPEventType(e.Payload.Type), Name: e.Payload.Name, State: e.Payload.State, Error: e.Payload.Error, DiagnosticCount: e.Payload.DiagnosticCount}}
+		return pubsub.Event[workspace.LSPEvent]{Type: e.Type, Payload: workspace.LSPEvent{Type: workspace.LSPEventType(e.Payload.Type), Name: e.Payload.Name, State: e.Payload.State, Error: e.Payload.Error, DiagnosticCount: e.Payload.DiagnosticCount}}
 	case app.UpdateAvailableMsg:
-		return UpdateAvailableMsg{CurrentVersion: e.CurrentVersion, LatestVersion: e.LatestVersion, IsDevelopment: e.IsDevelopment}
+		return workspace.UpdateAvailableMsg{CurrentVersion: e.CurrentVersion, LatestVersion: e.LatestVersion, IsDevelopment: e.IsDevelopment}
 	}
 	e, ok := msg.(pubsub.Event[thread.Event])
 	if !ok {

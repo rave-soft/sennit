@@ -1,37 +1,18 @@
-package workspace
+package appws
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- FileTracker --
 
-func (w *AppWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]SessionFile, error) {
-	return prepareSessionChanges(ctx, sessionID, w.ListSessionHistory, w.UncommittedFiles)
-}
-
-func prepareSessionChanges(
-	ctx context.Context,
-	sessionID string,
-	listHistory func(context.Context, string) ([]history.File, error),
-	uncommittedFiles func(context.Context) ([]git.FileChange, error),
-) ([]SessionFile, error) {
-	historyFiles, err := listHistory(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	files := AggregateSessionFiles(historyFiles)
-	uncommitted, err := uncommittedFiles(ctx)
-	if err != nil {
-		slog.Warn("Failed to load uncommitted files for session", "session_id", sessionID, "error", err)
-		return files, nil
-	}
-	return MarkUncommittedSessionFiles(files, uncommitted), nil
+func (w *AppWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {
+	return workspace.PrepareSessionChangesUsing(ctx, sessionID, w.ListSessionHistory, w.UncommittedFiles)
 }
 
 func (w *AppWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {

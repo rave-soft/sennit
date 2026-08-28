@@ -88,6 +88,11 @@ func (w *countingWorkspace) SupportsThreads() bool { return w.threadsSupported }
 // agents section; no test here drives one.
 func (w *countingWorkspace) SupportsTasks() bool { return false }
 
+// ResetAgentToolCache is a no-op: none of the tests using this stub care
+// about the process-wide tool cache, they just need newSession's call to
+// it not to panic through the embedded interface.
+func (w *countingWorkspace) ResetAgentToolCache() {}
+
 func (w *countingWorkspace) ListThreads(context.Context) ([]proto.Thread, error) {
 	w.listThreadsCalls++
 	return w.threads, nil

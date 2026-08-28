@@ -81,12 +81,18 @@ func (w *readOnlyWorkspace) readOnlyError(op string) error {
 	return &ErrReadOnlyOperation{Operation: op, Reason: w.reason}
 }
 
-// newReadOnlyWorkspace creates a read-only wrapper over the given workspace.
+// NewReadOnlyWorkspace creates a read-only wrapper over the given workspace.
 // workingDir is the thread worktree path (not the parent's workdir).
 // reason is why this view is read-only, carried into every refusal this
 // workspace returns - see ErrReadOnlyOperation.Reason. Pass "" when there
 // is nothing to explain.
-func newReadOnlyWorkspace(ws Workspace, workingDir, sessionID, reason string) *readOnlyWorkspace {
+//
+// Exported (rather than a private helper local to one caller) because
+// internal/workspace/appws builds one of these for a thread whose
+// workspace is not currently spawned (see AppWorkspace.AttachThread);
+// the returned *readOnlyWorkspace stays unexported since callers only
+// ever need it through the Workspace interface it satisfies.
+func NewReadOnlyWorkspace(ws Workspace, workingDir, sessionID, reason string) *readOnlyWorkspace {
 	return &readOnlyWorkspace{ws: ws, workingDir: workingDir, sessionID: sessionID, reason: reason}
 }
 
@@ -275,6 +281,17 @@ func (w *readOnlyWorkspace) AgentRunStream(ctx context.Context, sessionID, promp
 	return nil, w.readOnlyError("AgentRunStream")
 }
 
+// ResetAgentToolCache proxies to the wrapped workspace rather than
+// no-opping like the other mutations above: it clears a process-wide
+// cache, not anything scoped to a session or to write access, so there is
+// no read-only boundary for it to respect, and no-opping here would
+// silently stop the cache from being cleared whenever the caller happens
+// to be holding a read-only view (e.g. while inspecting a thread) instead
+// of the underlying workspace.
+func (w *readOnlyWorkspace) ResetAgentToolCache() {
+	w.ws.ResetAgentToolCache()
+}
+
 // -- Permissions (all denied) --
 
 func (w *readOnlyWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
@@ -319,13 +336,13 @@ func (w *readOnlyWorkspace) PrepareSessionChanges(ctx context.Context, sessionID
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return prepareSessionChanges(ctx, sessionID, w.ListSessionHistory, w.UncommittedFiles)
+	return PrepareSessionChangesUsing(ctx, sessionID, w.ListSessionHistory, w.UncommittedFiles)
 }
 
 // UncommittedFiles must not forward to the embedded Workspace: that
 // workspace is the parent AppWorkspace, and its UncommittedFiles diffs the
 // parent's own working directory, not this thread's worktree. w.workingDir
-// is the thread's worktree path (see newReadOnlyWorkspace), so that is
+// is the thread's worktree path (see NewReadOnlyWorkspace), so that is
 // what gets diffed here.
 func (w *readOnlyWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
 	return git.UncommittedFiles(ctx, w.workingDir)

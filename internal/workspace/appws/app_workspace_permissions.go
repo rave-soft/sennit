@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"github.com/rave-soft/sennit/internal/permission"

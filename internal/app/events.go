@@ -24,7 +24,7 @@ type appEvents struct {
 	// events is typed any rather than bubbletea's tea.Msg: the app
 	// package is core (no UI dependency), and any is what tea.Msg
 	// aliases down to anyway. Consumers that need a tea.Msg (the TUI)
-	// convert at the boundary; see workspace.AppWorkspace.Subscribe.
+	// convert at the boundary; see appws.AppWorkspace.Subscribe.
 	events *pubsub.Broker[any]
 	tuiWG  *sync.WaitGroup
 

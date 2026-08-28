@@ -1336,9 +1336,9 @@ func (m *UI) newSession() tea.Cmd {
 	m.invalidatePromptQueue()
 	m.wsCache.promptQueueCache.set(nil)
 	m.editor.historyReset()
-	workspace.ResetAgentToolCache()
 	ws := m.com.Workspace
 	ctx := m.com.Context()
+	ws.ResetAgentToolCache()
 	return tea.Batch(
 		func() tea.Msg {
 			ws.LSPStopAll(ctx)

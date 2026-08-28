@@ -28,3 +28,12 @@ type ProviderQuotaError struct {
 func (e *ProviderQuotaError) Error() string {
 	return fmt.Sprintf("%q is not enabled for %s; enable it at %s", e.Model, e.Provider, e.SettingsURL)
 }
+
+// QuotaInfo exposes the fields workspace.GetProviderQuotaInfo needs so it
+// can recognize this error via a structural errors.As match instead of
+// importing internal/agent for the concrete type — that import would pull
+// the whole agent runtime into internal/workspace's contract package (and
+// from there into internal/ui).
+func (e *ProviderQuotaError) QuotaInfo() (model, settingsURL string) {
+	return e.Model, e.SettingsURL
+}

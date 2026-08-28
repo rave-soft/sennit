@@ -48,7 +48,7 @@ func TestPrepareSessionChangesDegradesWhenGitFails(t *testing.T) {
 	t.Parallel()
 
 	historyFiles := []history.File{{Path: "main.go", Version: 1, Content: "before\n"}, {Path: "main.go", Version: 2, Content: "after\n"}}
-	files, err := prepareSessionChanges(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
+	files, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
 		return historyFiles, nil
 	}, func(context.Context) ([]git.FileChange, error) {
 		return nil, errors.New("git unavailable")
@@ -65,7 +65,7 @@ func TestPrepareSessionChangesPropagatesHistoryError(t *testing.T) {
 	t.Parallel()
 
 	expected := errors.New("history unavailable")
-	_, err := prepareSessionChanges(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
+	_, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
 		return nil, expected
 	}, func(context.Context) ([]git.FileChange, error) {
 		t.Fatal("git must not be called after a history error")

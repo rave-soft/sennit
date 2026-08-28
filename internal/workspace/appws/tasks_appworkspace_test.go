@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"testing"
@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,6 +104,6 @@ func TestAppWorkspace_Tasks_NotSupported(t *testing.T) {
 
 	require.False(t, aw.SupportsTasks())
 	_, err := aw.ListTasks(t.Context())
-	require.ErrorIs(t, err, ErrTasksNotSupported)
-	require.ErrorIs(t, aw.CancelTask(t.Context(), "id", ""), ErrTasksNotSupported)
+	require.ErrorIs(t, err, workspace.ErrTasksNotSupported)
+	require.ErrorIs(t, aw.CancelTask(t.Context(), "id", ""), workspace.ErrTasksNotSupported)
 }

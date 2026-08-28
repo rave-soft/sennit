@@ -31,6 +31,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/version"
 	"github.com/rave-soft/sennit/internal/workspace"
+	"github.com/rave-soft/sennit/internal/workspace/appws"
 	"github.com/spf13/cobra"
 )
 
@@ -269,7 +270,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		func() config.SelectedModel { return boot.App.Config().Model },
 	))
 
-	ws := workspace.NewAppWorkspace(boot.App, boot.Config)
+	ws := appws.NewAppWorkspace(boot.App, boot.Config)
 	cleanup := func() { boot.App.Shutdown() }
 	return ws, cleanup, nil
 }

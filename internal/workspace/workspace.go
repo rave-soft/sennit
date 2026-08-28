@@ -1,8 +1,13 @@
-// Package workspace defines the Workspace interface used by all
-// frontends (TUI, CLI) to interact with a running workspace. Two
-// implementations exist: [AppWorkspace], which wraps an in-process
-// app.App instance, and [readOnlyWorkspace], which wraps another
-// Workspace to restrict it to read-only operations.
+// Package workspace defines the Workspace interface and DTOs used by all
+// frontends (TUI, CLI) to interact with a running workspace. This is the
+// contract only: it must never import internal/db, internal/app,
+// internal/agent, or internal/thread (see dependency_guard_test.go),
+// because internal/ui imports this package for the interface and would
+// otherwise drag in the whole backend runtime transitively. The concrete
+// implementation wrapping an in-process app.App lives in
+// internal/workspace/appws ([appws.AppWorkspace]); [readOnlyWorkspace],
+// which wraps another Workspace to restrict it to read-only operations,
+// stays here since it depends on nothing but this package's own contract.
 package workspace
 
 import (
@@ -12,8 +17,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 
-	"github.com/rave-soft/sennit/internal/agent"
-	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
@@ -39,16 +42,23 @@ type ProviderQuotaInfo struct {
 	SettingsURL string
 }
 
+// providerQuotaError is the shape [agent.ProviderQuotaError] exposes via
+// its QuotaInfo method. Matching on this interface (errors.As accepts a
+// pointer to an interface type, not just a concrete type) lets
+// GetProviderQuotaInfo recognize the error without importing
+// internal/agent for its concrete type.
+type providerQuotaError interface {
+	error
+	QuotaInfo() (model, settingsURL string)
+}
+
 func GetProviderQuotaInfo(err error) (ProviderQuotaInfo, bool) {
-	var quotaErr *agent.ProviderQuotaError
+	var quotaErr providerQuotaError
 	if !errors.As(err, &quotaErr) {
 		return ProviderQuotaInfo{}, false
 	}
-	return ProviderQuotaInfo{Model: quotaErr.Model, SettingsURL: quotaErr.SettingsURL}, true
-}
-
-func ResetAgentToolCache() {
-	tools.ResetCache()
+	model, settingsURL := quotaErr.QuotaInfo()
+	return ProviderQuotaInfo{Model: model, SettingsURL: settingsURL}, true
 }
 
 var (
@@ -227,6 +237,14 @@ type AgentController interface {
 	// delivers a terminal event derived from ctx.Err() unless the turn
 	// already finished on its own.
 	AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error)
+	// ResetAgentToolCache clears process-wide caches the agent's built-in
+	// tools keep (e.g. compiled grep/glob regexes), so a fresh session
+	// does not inherit state left over from a previous one. It is a
+	// method on the interface, rather than a free function reaching into
+	// internal/agent/tools directly, so the contract package never needs
+	// to import that package (see app_workspace_agent.go's
+	// implementation in internal/workspace/appws).
+	ResetAgentToolCache()
 }
 
 // PermissionResolver resolves or inspects pending tool-permission requests.

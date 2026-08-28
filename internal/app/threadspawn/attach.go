@@ -294,7 +294,7 @@ func threadSkillsConfig(threadApp *app.App, inherited []*skills.Skill) skills.Di
 // the thread's worktree, not under the repository the parent workspace was
 // started in. The thread's App sweeps them when it is spawned, which covers
 // every thread that gets reactivated; a thread that is never reactivated,
-// or that cannot be (see workspace.AppWorkspace.AttachThread's read-only
+// or that cannot be (see appws.AppWorkspace.AttachThread's read-only
 // fallback), keeps a transcript full of tool calls that never came back.
 // The UI reads that shape as still running, so the thread sits there
 // spinning "Waiting for tool response..." forever, across every restart,

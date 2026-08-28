@@ -37,10 +37,14 @@ linters:
     depguard:
       rules:
         # C3 UI boundary inventory/rationale: the deny-list forbids orchestration and
-        # runtime packages (agent, thread, db, app, session/store, stats/gather,
-        # history/store). Remaining domain imports in internal/ui are allowed only
-        # as event/DTO contracts; all domain operations must go through the
-        # Workspace facade, never called directly.
+        # runtime packages (agent, thread, db, app, workspace/appws,
+        # session/store, stats/gather, history/store). Remaining domain
+        # imports in internal/ui are allowed only as event/DTO contracts;
+        # all domain operations must go through the Workspace facade. The
+        # UI sees the workspace *contract* (internal/workspace's interface
+        # and DTOs) but must never import a concrete implementation
+        # package like internal/workspace/appws, which would drag the
+        # whole backend runtime back in.
         ui-boundary:
           files:
             - "**/internal/ui/**/*.go"
@@ -49,6 +53,7 @@ linters:
             - pkg: github.com/rave-soft/sennit/internal/thread
             - pkg: github.com/rave-soft/sennit/internal/db
             - pkg: github.com/rave-soft/sennit/internal/app
+            - pkg: github.com/rave-soft/sennit/internal/workspace/appws
             - pkg: github.com/rave-soft/sennit/internal/session/store
             - pkg: github.com/rave-soft/sennit/internal/stats/gather
             - pkg: github.com/rave-soft/sennit/internal/history/store

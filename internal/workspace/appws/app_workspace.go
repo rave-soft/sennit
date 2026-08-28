@@ -1,9 +1,10 @@
-package workspace
+package appws
 
 import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // runAndCaptureStream and runAndPersist are indirected through package
@@ -49,4 +50,4 @@ func (w *AppWorkspace) Store() *config.ConfigStore {
 }
 
 // Compile-time check that AppWorkspace implements Workspace.
-var _ Workspace = (*AppWorkspace)(nil)
+var _ workspace.Workspace = (*AppWorkspace)(nil)

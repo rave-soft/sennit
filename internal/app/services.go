@@ -76,7 +76,7 @@ type appServices struct {
 
 	// agentCoordinatorMu guards agentCoordinator: initCoderAgent (on the
 	// main goroutine, typically) and SetDelegationManagers's republish can
-	// swap it while workspace.AppWorkspace's many methods read it from
+	// swap it while appws.AppWorkspace's many methods read it from
 	// request-handling goroutines. Read/write only through Coordinator()
 	// and setCoordinator (see thread_workspace.go) — never the field
 	// directly.

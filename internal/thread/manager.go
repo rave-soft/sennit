@@ -542,7 +542,7 @@ func (m *Manager) deliverMergeOutcome(ctx context.Context, threadID string) {
 // half-finished merge in it, and resolving that by hand and calling
 // [Manager.Merge] again is the recovery path mergeAttempt documents for
 // itself. Refusing here left that path reachable through Send but not
-// through the TUI, which attaches (see workspace.AppWorkspace.AttachThread)
+// through the TUI, which attaches (see appws.AppWorkspace.AttachThread)
 // and so fell back to a read-only workspace.
 //
 // Those two statuses are also preserved rather than reset to idle, unlike

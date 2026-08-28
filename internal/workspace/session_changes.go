@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 	"slices"
 
@@ -53,6 +54,32 @@ func AggregateSessionFiles(files []history.File) []SessionFile {
 		return 0
 	})
 	return result
+}
+
+// PrepareSessionChangesUsing aggregates sessionID's file history into
+// SessionFile entries and marks the ones still uncommitted, given the
+// caller's own ListSessionHistory/UncommittedFiles implementations. It is
+// exported (rather than a private helper local to one implementation)
+// because both AppWorkspace.PrepareSessionChanges (internal/workspace/appws)
+// and readOnlyWorkspace.PrepareSessionChanges (in this package) need it,
+// scoped to their own working directory/history source.
+func PrepareSessionChangesUsing(
+	ctx context.Context,
+	sessionID string,
+	listHistory func(context.Context, string) ([]history.File, error),
+	uncommittedFiles func(context.Context) ([]git.FileChange, error),
+) ([]SessionFile, error) {
+	historyFiles, err := listHistory(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	files := AggregateSessionFiles(historyFiles)
+	uncommitted, err := uncommittedFiles(ctx)
+	if err != nil {
+		slog.Warn("Failed to load uncommitted files for session", "session_id", sessionID, "error", err)
+		return files, nil
+	}
+	return MarkUncommittedSessionFiles(files, uncommitted), nil
 }
 
 func MarkUncommittedSessionFiles(sessionFiles []SessionFile, files []git.FileChange) []SessionFile {

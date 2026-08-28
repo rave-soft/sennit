@@ -214,7 +214,7 @@ func (app *App) AgentDispatcher() *AgentDispatcher {
 // concrete *tea.Program so this core package doesn't need to import
 // it; onPanic is invoked instead of a hardcoded program.Quit() if the
 // delivery loop panics. Callers that feed a *tea.Program (see
-// workspace.AppWorkspace.Subscribe) pass program.Send and program.Quit.
+// appws.AppWorkspace.Subscribe) pass program.Send and program.Quit.
 func (app *App) Subscribe(send func(any), onPanic func()) {
 	defer log.RecoverPanic("app.Subscribe", func() {
 		slog.Info("TUI subscription panic: attempting graceful shutdown")

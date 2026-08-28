@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // attachedThreadWorkspace is the workspace a caller drives after drilling
@@ -31,7 +32,7 @@ import (
 type attachedThreadWorkspace struct {
 	// Workspace is the thread's own AppWorkspace: everything this type
 	// does not override is its behavior, unchanged.
-	Workspace
+	workspace.Workspace
 	mgr *thread.Manager
 	// parent is the workspace this thread was attached from -- the one
 	// whose screen the user came in from. Kept for permission answers;
@@ -114,8 +115,8 @@ func (w *attachedThreadWorkspace) SubscribeWith(send func(any)) func() {
 	return sub.SubscribeWith(send)
 }
 
-func (w *attachedThreadWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]SessionFile, error) {
-	preparer, ok := w.Workspace.(SessionChangePreparer)
+func (w *attachedThreadWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {
+	preparer, ok := w.Workspace.(workspace.SessionChangePreparer)
 	if !ok {
 		return nil, errors.New("session change preparer is unavailable")
 	}

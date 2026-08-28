@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +28,7 @@ type threadEventSubscriber interface {
 // while its agent worked, and only leaving and re-entering showed what had
 // happened.
 func TestAttachedThreadWorkspace_StillOffersSubscribeWith(t *testing.T) {
-	var ws Workspace = &attachedThreadWorkspace{Workspace: &subscribeStubWorkspace{}}
+	var ws workspace.Workspace = &attachedThreadWorkspace{Workspace: &subscribeStubWorkspace{}}
 
 	sub, ok := ws.(threadEventSubscriber)
 	require.True(t, ok,
@@ -51,7 +52,7 @@ func TestAttachedThreadWorkspace_SubscribeWithoutSupportIsANoop(t *testing.T) {
 // subscribeStubWorkspace is a Workspace that can subscribe, standing in
 // for the thread's own AppWorkspace.
 type subscribeStubWorkspace struct {
-	Workspace
+	workspace.Workspace
 	stopped bool
 }
 
@@ -60,7 +61,7 @@ func (s *subscribeStubWorkspace) SubscribeWith(func(any)) func() {
 }
 
 // plainStubWorkspace is a Workspace with no subscription of its own.
-type plainStubWorkspace struct{ Workspace }
+type plainStubWorkspace struct{ workspace.Workspace }
 
 func TestAttachedThreadWorkspace_PreparesSessionChanges(t *testing.T) {
 	inner := &sessionChangeStubWorkspace{}
@@ -68,7 +69,7 @@ func TestAttachedThreadWorkspace_PreparesSessionChanges(t *testing.T) {
 
 	files, err := ws.PrepareSessionChanges(t.Context(), "thread-session")
 	require.NoError(t, err)
-	require.Equal(t, []SessionFile{{FirstVersion: history.File{Path: "thread-session"}}}, files)
+	require.Equal(t, []workspace.SessionFile{{FirstVersion: history.File{Path: "thread-session"}}}, files)
 	require.Equal(t, []string{"thread-session"}, inner.sessions)
 }
 
@@ -80,13 +81,13 @@ func TestAttachedThreadWorkspace_SessionChangesUnavailable(t *testing.T) {
 }
 
 type sessionChangeStubWorkspace struct {
-	Workspace
+	workspace.Workspace
 	sessions []string
 }
 
-func (s *sessionChangeStubWorkspace) PrepareSessionChanges(_ context.Context, sessionID string) ([]SessionFile, error) {
+func (s *sessionChangeStubWorkspace) PrepareSessionChanges(_ context.Context, sessionID string) ([]workspace.SessionFile, error) {
 	s.sessions = append(s.sessions, sessionID)
-	return []SessionFile{{FirstVersion: history.File{Path: sessionID}}}, nil
+	return []workspace.SessionFile{{FirstVersion: history.File{Path: sessionID}}}, nil
 }
 
 // The thread's own session must not drag the thread back onto the model it
@@ -116,7 +117,7 @@ func TestAttachedThreadWorkspace_AppliesSessionModelForOtherSessions(t *testing.
 // applyModelStubWorkspace records the session IDs ApplySessionModel was
 // called with.
 type applyModelStubWorkspace struct {
-	Workspace
+	workspace.Workspace
 	applied  []string
 	switched bool
 }
@@ -184,7 +185,7 @@ func TestAnswerPermission_ReportsNoAcceptance(t *testing.T) {
 
 // permissionStubWorkspace records which permission answer was asked of it.
 type permissionStubWorkspace struct {
-	Workspace
+	workspace.Workspace
 	calls  []string
 	accept bool
 }

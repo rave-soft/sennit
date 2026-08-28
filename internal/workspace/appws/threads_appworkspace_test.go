@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"context"
@@ -25,6 +25,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -545,7 +546,11 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	require.NotNil(t, attached)
 	require.NotNil(t, detach)
 	require.NotPanics(t, detach)
-	require.IsType(t, &readOnlyWorkspace{}, attached, "merge-flow threads must not be reactivated")
+	// readOnlyWorkspace's concrete type is unexported to internal/workspace,
+	// so its read-only-ness is asserted through behavior instead of a type
+	// check: a mutating call must be refused as a read-only operation.
+	_, saveErr := attached.SaveSession(t.Context(), session.Session{})
+	require.True(t, workspace.IsReadOnlyError(saveErr), "merge-flow threads must not be reactivated")
 	require.Nil(t, mgr.Handle(created.ID), "refused reactivation must not spawn a workspace")
 
 	// The attached workspace can read the persisted session from the
@@ -600,10 +605,10 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify it's a read-only workspace.
-	require.True(t, IsReadOnlyError(attached.AgentRun(t.Context(), "sess-1", "hello")))
+	require.True(t, workspace.IsReadOnlyError(attached.AgentRun(t.Context(), "sess-1", "hello")))
 	_, err = attached.CreateThread(t.Context(), proto.CreateThreadRequest{})
-	require.True(t, IsReadOnlyError(err))
-	require.True(t, IsReadOnlyError(attached.UpdatePreferredModel(config.ScopeWorkspace, config.SelectedModel{})))
+	require.True(t, workspace.IsReadOnlyError(err))
+	require.True(t, workspace.IsReadOnlyError(attached.UpdatePreferredModel(config.ScopeWorkspace, config.SelectedModel{})))
 
 	// Verify WorkingDir is the thread worktree, not the parent's.
 	require.Equal(t, created.WorktreePath, attached.WorkingDir())
@@ -657,7 +662,7 @@ func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testin
 	require.NoError(t, err)
 
 	runErr := attached.AgentRun(t.Context(), "sess-1", "hello")
-	require.True(t, IsReadOnlyError(runErr))
+	require.True(t, workspace.IsReadOnlyError(runErr))
 	require.Contains(t, runErr.Error(), "AgentRun", "the refusal must still name the operation")
 	require.Contains(t, runErr.Error(), "merge flow", "the refusal must carry why reactivation was refused")
 }

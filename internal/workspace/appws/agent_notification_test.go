@@ -1,22 +1,23 @@
-package workspace
+package appws
 
 import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAgentNotificationTranslation(t *testing.T) {
 	t.Parallel()
 
-	want := pubsub.Event[AgentNotification]{
+	want := pubsub.Event[workspace.AgentNotification]{
 		Type: pubsub.UpdatedEvent,
-		Payload: AgentNotification{
+		Payload: workspace.AgentNotification{
 			SessionID:    "session-1",
 			SessionTitle: "Session",
-			Type:         AgentNotificationAWSSSOAuth,
+			Type:         workspace.AgentNotificationAWSSSOAuth,
 			ProviderID:   "bedrock",
 			RunID:        "run-1",
 			Message:      "refreshing credentials",

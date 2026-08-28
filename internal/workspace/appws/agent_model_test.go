@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"testing"
@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/configtest"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,7 +88,7 @@ func TestAgentIsReady_FalseWithNoCoordinatorInstalled(t *testing.T) {
 	ws := NewAppWorkspace(a, store)
 
 	require.False(t, ws.AgentIsReady())
-	require.ErrorIs(t, ws.AgentReadyErr(), ErrAgentNotInitialized)
+	require.ErrorIs(t, ws.AgentReadyErr(), workspace.ErrAgentNotInitialized)
 	require.False(t, ws.AgentIsBusy())
 	require.False(t, ws.AgentIsSessionBusy("sess-1"))
 	require.Equal(t, 0, ws.AgentQueuedPrompts("sess-1"))

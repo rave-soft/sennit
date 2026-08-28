@@ -1,4 +1,4 @@
-package workspace
+package appws
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // threadEventPubsubType maps a thread lifecycle event's semantic type
@@ -47,7 +48,7 @@ func (w *AppWorkspace) SupportsThreads() bool {
 func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return nil, ErrThreadsNotSupported
+		return nil, workspace.ErrThreadsNotSupported
 	}
 	sts, err := mgr.List(ctx)
 	if err != nil {
@@ -63,7 +64,7 @@ func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) 
 func (w *AppWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return proto.Thread{}, ErrThreadsNotSupported
+		return proto.Thread{}, workspace.ErrThreadsNotSupported
 	}
 	st, err := mgr.Get(ctx, id)
 	if err != nil {
@@ -75,7 +76,7 @@ func (w *AppWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, 
 func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return proto.Thread{}, ErrThreadsNotSupported
+		return proto.Thread{}, workspace.ErrThreadsNotSupported
 	}
 	st, err := mgr.Create(ctx, thread.CreateArgs{
 		Name:            req.Name,
@@ -102,7 +103,7 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 func (w *AppWorkspace) SendThread(ctx context.Context, id, message string) error {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return ErrThreadsNotSupported
+		return workspace.ErrThreadsNotSupported
 	}
 	_, err := mgr.SendFromPerson(ctx, id, message)
 	return err
@@ -111,7 +112,7 @@ func (w *AppWorkspace) SendThread(ctx context.Context, id, message string) error
 func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return proto.Thread{}, ErrThreadsNotSupported
+		return proto.Thread{}, workspace.ErrThreadsNotSupported
 	}
 	st, err := mgr.Activate(ctx, id)
 	if err != nil {
@@ -123,7 +124,7 @@ func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thr
 func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return proto.Thread{}, ErrThreadsNotSupported
+		return proto.Thread{}, workspace.ErrThreadsNotSupported
 	}
 	// Merge returns the outcome directly: a thread that merged cleanly is
 	// discarded, so re-fetching it here would find nothing.
@@ -137,7 +138,7 @@ func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread
 func (w *AppWorkspace) CancelThread(ctx context.Context, id, reason string) error {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return ErrThreadsNotSupported
+		return workspace.ErrThreadsNotSupported
 	}
 	return mgr.Cancel(ctx, id, reason)
 }
@@ -145,7 +146,7 @@ func (w *AppWorkspace) CancelThread(ctx context.Context, id, reason string) erro
 func (w *AppWorkspace) RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return ErrThreadsNotSupported
+		return workspace.ErrThreadsNotSupported
 	}
 	return mgr.Remove(ctx, id, opts.Force, opts.DeleteBranch)
 }
@@ -160,10 +161,10 @@ func (w *AppWorkspace) RemoveThread(ctx context.Context, id string, opts proto.R
 // and was released), AttachThread returns a read-only workspace
 // bound to the shared session/message stores so the caller can
 // still inspect persisted session data in the database.
-func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, func(), error) {
+func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (workspace.Workspace, func(), error) {
 	mgr, ok := w.threadManager()
 	if !ok {
-		return nil, nil, ErrThreadsNotSupported
+		return nil, nil, workspace.ErrThreadsNotSupported
 	}
 	h := mgr.Handle(id)
 	if h != nil {
@@ -223,7 +224,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 	if err != nil {
 		slog.Warn("Thread could not be reactivated; opening it read-only",
 			"component", "thread", "thread", id, "error", err)
-		return newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID, err.Error()), func() {}, nil
+		return workspace.NewReadOnlyWorkspace(w, st.WorktreePath, st.SessionID, err.Error()), func() {}, nil
 	}
 	// Same wrapping as the live branch — and this is the branch that most
 	// needs it: a thread revived here is idle by definition, and everything

@@ -128,6 +128,7 @@ var readOnlySafeMethods = []string{
 	"ProjectNeedsInitialization",
 	"ReadMCPResource",
 	"ReadSkill",
+	"ResetAgentToolCache",
 	"Resolver",
 	"SetCurrentSession",
 	"SetCurrentSessionGeneration",
@@ -414,7 +415,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			stub := &stubWorkspace{}
-			ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
+			ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
 			check(t, ro)
 			require.Zerof(t, stub.calls[name],
 				"%s reached the underlying workspace; readOnlyWorkspace must refuse it itself, not let it forward", name)

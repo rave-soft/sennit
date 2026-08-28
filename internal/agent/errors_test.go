@@ -10,7 +10,7 @@ import (
 
 // TestProviderQuotaError_ErrorsAs ensures the error survives wrapping (as
 // it would after propagating through coordinator.run and
-// workspace.AppWorkspace.AgentRun) so UI callers can still recognize it via
+// appws.AppWorkspace.AgentRun) so UI callers can still recognize it via
 // errors.As and render their own styled message instead of relying on
 // ANSI-escaped text baked into persisted message content.
 func TestProviderQuotaError_ErrorsAs(t *testing.T) {

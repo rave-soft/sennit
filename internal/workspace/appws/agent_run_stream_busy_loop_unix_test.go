@@ -4,7 +4,7 @@
 // syscall.Getrusage, which exists only on unix. The loop it guards is
 // platform-independent, so covering it here is enough.
 
-package workspace
+package appws
 
 import (
 	"context"
