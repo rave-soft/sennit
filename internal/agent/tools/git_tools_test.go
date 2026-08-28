@@ -92,13 +92,23 @@ func TestGitDiffDisablesRepositoryTextconv(t *testing.T) {
 }
 
 func TestGitDiffStreamsOverLegacyOutputCap(t *testing.T) {
+	// The legacy cap is lowered for the duration of the test rather than
+	// out-writing the real 10MB one. What the test is about is that the
+	// streaming path is not bound by the cap at all, which a diff of any
+	// size past it demonstrates equally well — and a 10MB fixture, diffed
+	// and streamed through race-instrumented code, took 26 seconds, more
+	// than half of this package's whole race run.
+	oldCap := gitOutputCap
+	gitOutputCap = 64 << 10
+	t.Cleanup(func() { gitOutputCap = oldCap })
+
 	dir := gitToolRepo(t)
 	path := filepath.Join(dir, "large.txt")
 	require.NoError(t, os.WriteFile(path, []byte("base\n"), 0o644))
 	gitToolCommand(t, dir, "add", "large.txt")
 	gitToolCommand(t, dir, "commit", "-m", "initial")
 	// Line-oriented text ensures Git emits a patch rather than a binary summary.
-	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("changed line substantially longer than the original\n", 250000)), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("changed line substantially longer than the original\n", 6000)), 0o644))
 	r, meta := callGitTool[GitDiffParams, gitMeta](t, NewGitDiffTool(dir), GitDiffToolName, GitDiffParams{MaxBytes: 200000})
 	require.False(t, r.IsError)
 	require.Greater(t, meta.TotalBytes, gitOutputCap)

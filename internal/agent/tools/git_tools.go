@@ -20,14 +20,20 @@ import (
 )
 
 const (
-	GitStatusToolName  = "git_status"
-	GitDiffToolName    = "git_diff"
-	GitLogToolName     = "git_log"
-	gitOutputCap       = 10 << 20
-	defaultGitSpoolCap = 1 << 30
+	GitStatusToolName   = "git_status"
+	GitDiffToolName     = "git_diff"
+	GitLogToolName      = "git_log"
+	defaultGitOutputCap = 10 << 20
+	defaultGitSpoolCap  = 1 << 30
 )
 
 var (
+	// gitOutputCap is the ceiling on a git command whose whole output is
+	// read into memory (runGit). A var, like gitSpoolCap, so a test can
+	// lower it: proving that the streaming path is not bound by this cap
+	// otherwise means building a fixture bigger than 10MB, which under
+	// -race costs more than the rest of the package put together.
+	gitOutputCap      = defaultGitOutputCap
 	gitSpoolCap       = defaultGitSpoolCap
 	gitCommandContext = exec.CommandContext
 )

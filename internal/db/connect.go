@@ -40,9 +40,35 @@ func init() {
 // connEntry holds a shared database connection and its reference
 // count, which lets the same process open the same data directory
 // concurrently from multiple callers.
+//
+// An entry is published into the pool *before* its database is open, so
+// that opening and migrating happens with poolMu released. ready is what
+// makes that safe: it is closed once db and err are final, and every
+// caller that finds an existing entry waits on it before reading either.
+// The alternative — holding poolMu across the migration chain — makes
+// every Connect in the process queue behind every other one, however
+// unrelated their databases are. That is invisible in production, where a
+// process connects once, and dominates a test binary that stands up
+// hundreds of throwaway databases (a fresh one costs ~10ms of migrations,
+// and ~210ms under -race, where SQLite is a race-instrumented pure-Go VM).
 type connEntry struct {
+	ready    chan struct{}
 	db       *sql.DB
+	err      error
 	refCount int
+	// discard records that the last reference was released while the
+	// entry was still opening. Legitimate use cannot reach it — the
+	// opener's own reference is not released until its Connect returns —
+	// so it exists for the over-release case Release describes below: the
+	// opener closes the database it just finished opening instead of
+	// leaving a live connection nothing holds.
+	discard bool
+}
+
+// wait blocks until the entry's database is final and reports it.
+func (e *connEntry) wait() (*sql.DB, error) {
+	<-e.ready
+	return e.db, e.err
 }
 
 var (
@@ -74,18 +100,68 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	absPath := filepath.Join(fsext.Canonical(dataDir), brand.DBFile)
 
 	poolMu.Lock()
-	defer poolMu.Unlock()
-
 	if entry, ok := pool[absPath]; ok {
 		entry.refCount++
-		return entry.db, nil
+		poolMu.Unlock()
+		// Another caller is opening (or has opened) this database: wait
+		// for its result rather than opening a second connection to the
+		// same file, which is the invariant the pool exists to keep.
+		conn, err := entry.wait()
+		if err != nil {
+			// The opener already dropped the failed entry from the pool;
+			// give back the reference taken above so the ledger Release
+			// audits stays honest.
+			poolMu.Lock()
+			entry.refCount--
+			poolMu.Unlock()
+			return nil, err
+		}
+		return conn, nil
 	}
+	entry := &connEntry{refCount: 1, ready: make(chan struct{})}
+	pool[absPath] = entry
+	poolMu.Unlock()
 
+	conn, err := openAndMigrate(ctx, dataDir, dbPath)
+
+	poolMu.Lock()
+	entry.db, entry.err = conn, err
+	discard := entry.discard
+	if err != nil || discard {
+		// A failed open is not a pool entry: the next Connect must get a
+		// fresh attempt rather than the cached failure. Same for an entry
+		// nobody is left holding.
+		if cur, ok := pool[absPath]; ok && cur == entry {
+			delete(pool, absPath)
+		}
+	}
+	poolMu.Unlock()
+	close(entry.ready)
+
+	if err != nil {
+		return nil, err
+	}
+	if discard {
+		conn.Close()
+		return nil, fmt.Errorf("db: the connection to %q was released while it was still opening", dataDir)
+	}
+	return conn, nil
+}
+
+// openAndMigrate opens the database at dbPath and brings its schema up to
+// date. It runs with poolMu released (see connEntry), so two callers
+// opening two different databases do their migrations concurrently.
+func openAndMigrate(ctx context.Context, dataDir, dbPath string) (*sql.DB, error) {
 	// Ensuring the data directory exists is required before SQLite can
 	// create the database file inside it.
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create data directory %q: %w", dataDir, err)
 	}
+
+	// A test binary can ask for new databases to be stamped from a
+	// template migrated once for the whole process (see template.go); in
+	// production this is off and does nothing.
+	stampFromTemplate(ctx, dbPath)
 
 	conn, err := openDB(dbPath)
 	if err != nil {
@@ -132,19 +208,12 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	if err := initGoose(); err != nil {
+	if err := migrate(conn); err != nil {
 		conn.Close()
-		slog.Error("Failed to initialize goose", "error", err)
-		return nil, fmt.Errorf("failed to initialize goose: %w", err)
+		slog.Error("Failed to migrate the database", "error", err)
+		return nil, err
 	}
 
-	if err := goose.Up(conn, "migrations"); err != nil {
-		conn.Close()
-		slog.Error("Failed to apply migrations", "error", err)
-		return nil, fmt.Errorf("failed to apply migrations: %w", err)
-	}
-
-	pool[absPath] = &connEntry{db: conn, refCount: 1}
 	return conn, nil
 }
 
@@ -189,6 +258,18 @@ func Release(dataDir string) error {
 		return nil
 	}
 
+	// The entry is still opening (only reachable through the
+	// over-release this function exists to report, since the opener's own
+	// reference outlives its Connect): hand the close to the opener,
+	// which is the only goroutine that will have a database to close.
+	if !isReady(entry) {
+		entry.discard = true
+		if cur, ok := pool[absPath]; ok && cur == entry {
+			delete(pool, absPath)
+		}
+		return nil
+	}
+
 	delete(pool, absPath)
 	return entry.db.Close()
 }
@@ -199,8 +280,26 @@ func ResetPool() {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 	for path, entry := range pool {
-		entry.db.Close()
+		if isReady(entry) {
+			if entry.db != nil {
+				entry.db.Close()
+			}
+		} else {
+			// Still opening: the opener closes it (see connEntry.discard).
+			entry.discard = true
+		}
 		delete(pool, path)
+	}
+}
+
+// isReady reports whether entry's open has finished. Callers hold poolMu,
+// which is what makes reading entry.db/err after this safe.
+func isReady(entry *connEntry) bool {
+	select {
+	case <-entry.ready:
+		return true
+	default:
+		return false
 	}
 }
 

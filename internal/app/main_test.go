@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/testenv"
 )
 
@@ -15,6 +16,10 @@ func TestMain(m *testing.M) {
 	for _, key := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"} {
 		_ = os.Unsetenv(key)
 	}
+	// Stamp this package's throwaway databases from one migrated
+	// template rather than running the migration chain per test; see
+	// db.UseMigratedTemplate.
+	db.UseMigratedTemplate()
 	cleanup := testenv.IsolateGlobalProfile()
 	code := m.Run()
 	cleanup()

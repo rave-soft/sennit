@@ -18,6 +18,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,12 @@ import (
 
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
+
+	// Stamp this package's throwaway databases from one migrated
+	// template instead of running the migration chain per test. See
+	// db.UseMigratedTemplate — under -race the chain is the single most
+	// expensive thing this package does.
+	db.UseMigratedTemplate()
 
 	// Hermetic global config/data for the whole package: many tests load
 	// config through the real discovery paths, and t.Setenv is off-limits
