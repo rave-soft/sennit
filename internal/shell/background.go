@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,35 +14,198 @@ import (
 const (
 	MaxBackgroundJobs            = 50
 	CompletedJobRetentionMinutes = 8 * 60
+
+	// MaxSyncBufferHead is the number of bytes retained from the start of
+	// a syncBuffer's stream. Bytes beyond this are still counted (so the
+	// dropped-byte marker is accurate) but never copied into the head.
+	MaxSyncBufferHead = 256 * 1024
+
+	// MaxSyncBufferTail is the number of bytes retained from the end of a
+	// syncBuffer's stream, via a fixed-size ring buffer that always holds
+	// the most recently written bytes. Together with MaxSyncBufferHead
+	// this bounds a single stream to 512 KiB regardless of how much is
+	// written — MaxBackgroundJobs background shells each hold two streams
+	// (stdout, stderr), so the process-wide ceiling is ~50 MiB instead of
+	// unbounded.
+	MaxSyncBufferTail = 256 * 1024
 )
 
+// syncBuffer is a mutex-protected io.Writer with a bounded memory footprint:
+// it retains the first MaxSyncBufferHead bytes written and the last
+// MaxSyncBufferTail bytes, dropping whatever falls in between. This mirrors
+// the head+tail truncation [tools.TruncateOutput] already applies when
+// rendering bash output, so a chatty background command (a build, a test
+// run, `tail -f`) can no longer grow this buffer without bound while the
+// caller still sees the start and the most recent progress/error.
+//
+// The zero value is ready to use — [BackgroundShell] and RunAndCapture both
+// rely on that, so initialization happens lazily inside Write under the same
+// lock rather than through a constructor.
 type syncBuffer struct {
-	buf bytes.Buffer
-	mu  sync.RWMutex
+	mu sync.RWMutex
+
+	head bytes.Buffer // first min(total, MaxSyncBufferHead) bytes, never overwritten
+
+	tail    []byte // ring buffer of capacity MaxSyncBufferTail, lazily allocated
+	tailPos int    // index in tail where the next byte will be written
+	tailLen int    // valid bytes currently held in tail (<= MaxSyncBufferTail)
+
+	total int64 // total bytes ever written, including dropped ones
 }
 
+// Write appends p to the buffer, retaining it subject to the head/tail
+// caps. It always reports len(p) written with a nil error — dropping the
+// middle of the stream must never look like a short write to callers such
+// as mvdan.cc/sh's interp, which treats one as fatal.
 func (sb *syncBuffer) Write(p []byte) (n int, err error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
-	return sb.buf.Write(p)
+	sb.writeLocked(p)
+	return len(p), nil
 }
 
+// WriteString is the string equivalent of Write, avoiding a redundant
+// []byte(s) round trip through a second lock acquisition.
 func (sb *syncBuffer) WriteString(s string) (n int, err error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
-	return sb.buf.WriteString(s)
+	sb.writeLocked([]byte(s))
+	return len(s), nil
 }
 
+// writeLocked applies p to both the head buffer and the tail ring. Callers
+// must hold sb.mu.
+//
+// The tail ring is left unallocated until the stream first grows past
+// MaxSyncBufferHead: up to that point every byte already lives in head, so
+// a ring would only duplicate it, and the common case — a short command's
+// small output — must not pay for a 256 KiB allocation it never needs.
+func (sb *syncBuffer) writeLocked(p []byte) {
+	prevTotal := sb.total
+	sb.total += int64(len(p))
+
+	if room := MaxSyncBufferHead - sb.head.Len(); room > 0 {
+		sb.head.Write(p[:min(room, len(p))])
+	}
+
+	if sb.total <= MaxSyncBufferHead {
+		return
+	}
+	if sb.tail == nil {
+		// Crossing the cap for the first time: seed the ring with
+		// everything written before this call. All of it is still sitting
+		// in head (prevTotal <= MaxSyncBufferHead here, since this is the
+		// first crossing), so head.Bytes() is exactly those prevTotal
+		// bytes. Seed before appending p so nothing is double-counted.
+		if prevTotal > 0 {
+			sb.writeTailLocked(sb.head.Bytes()[:prevTotal])
+		}
+	}
+	sb.writeTailLocked(p)
+}
+
+// writeTailLocked copies p into the fixed-size tail ring buffer, keeping
+// only the most recently written MaxSyncBufferTail bytes. Callers must hold
+// sb.mu.
+func (sb *syncBuffer) writeTailLocked(p []byte) {
+	if len(p) == 0 {
+		return
+	}
+	if sb.tail == nil {
+		sb.tail = make([]byte, MaxSyncBufferTail)
+	}
+
+	// A single write already exceeding the tail capacity fully replaces
+	// it; only its own last MaxSyncBufferTail bytes can survive.
+	if len(p) >= MaxSyncBufferTail {
+		copy(sb.tail, p[len(p)-MaxSyncBufferTail:])
+		sb.tailPos = 0
+		sb.tailLen = MaxSyncBufferTail
+		return
+	}
+
+	end := sb.tailPos + len(p)
+	if end <= MaxSyncBufferTail {
+		copy(sb.tail[sb.tailPos:end], p)
+	} else {
+		first := MaxSyncBufferTail - sb.tailPos
+		copy(sb.tail[sb.tailPos:], p[:first])
+		copy(sb.tail[:end-MaxSyncBufferTail], p[first:])
+	}
+	sb.tailPos = end % MaxSyncBufferTail
+	sb.tailLen = min(sb.tailLen+len(p), MaxSyncBufferTail)
+}
+
+// tailBytesLocked returns the tail ring's contents in write order (oldest
+// first). Callers must hold sb.mu.
+func (sb *syncBuffer) tailBytesLocked() []byte {
+	if sb.tailLen < MaxSyncBufferTail {
+		// No wraparound yet: the ring has been written from index 0, so
+		// tailPos already equals tailLen and the data is contiguous.
+		return sb.tail[:sb.tailLen]
+	}
+	out := make([]byte, MaxSyncBufferTail)
+	n := copy(out, sb.tail[sb.tailPos:])
+	copy(out[n:], sb.tail[:sb.tailPos])
+	return out
+}
+
+// droppedMarker formats the marker String inserts between head and tail
+// once bytes have actually been discarded, matching the style of
+// [tools.TruncateOutput]'s "... [N lines truncated] ..." marker.
+func droppedMarker(dropped int64) string {
+	return fmt.Sprintf("\n\n... [%d bytes dropped] ...\n\n", dropped)
+}
+
+// String returns the retained head, a dropped-byte marker if anything was
+// discarded, and the retained tail — reconstructing the exact original
+// content whenever total writes fit within the combined head+tail caps.
 func (sb *syncBuffer) String() string {
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
-	return sb.buf.String()
+
+	headLen := int64(sb.head.Len())
+	tailLen := int64(sb.tailLen)
+	tail := sb.tailBytesLocked()
+	dropped := sb.total - headLen - tailLen
+
+	var b strings.Builder
+	if dropped <= 0 {
+		// Head and tail overlap or touch: everything fits, so skip the
+		// prefix of tail that head already covers and reassemble exactly.
+		skip := min(-dropped, int64(len(tail)))
+		b.Grow(sb.head.Len() + len(tail) - int(skip))
+		b.Write(sb.head.Bytes())
+		b.Write(tail[skip:])
+		return b.String()
+	}
+
+	marker := droppedMarker(dropped)
+	b.Grow(sb.head.Len() + len(marker) + len(tail))
+	b.Write(sb.head.Bytes())
+	b.WriteString(marker)
+	b.Write(tail)
+	return b.String()
 }
 
+// Len returns the length String() would return — the retained (possibly
+// truncated) length, not the total number of bytes ever written — computed
+// arithmetically from head.Len(), tailLen, and total so it stays O(1)
+// instead of building the (up to head+tail-sized) string just to measure
+// it. The one existing caller (RunAndCapture) only compares this against
+// zero, a comparison this definition preserves exactly.
 func (sb *syncBuffer) Len() int {
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
-	return sb.buf.Len()
+
+	headLen := int64(sb.head.Len())
+	tailLen := int64(sb.tailLen)
+	dropped := sb.total - headLen - tailLen
+	if dropped <= 0 {
+		// No truncation: String() reassembles the full stream.
+		return int(sb.total)
+	}
+	return sb.head.Len() + len(droppedMarker(dropped)) + sb.tailLen
 }
 
 type BackgroundShell struct {
