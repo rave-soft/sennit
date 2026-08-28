@@ -177,7 +177,9 @@ type AgentCall struct {
 	ProviderOptions  ProviderOptions
 	OnRetry          OnRetryCallback
 	OnAuthRefresh    OnAuthRefreshFunc
-	MaxRetries       *int
+	// OnRateLimit is a Sennit fork addition; see RetryOptions.OnRateLimit.
+	OnRateLimit OnRateLimitFunc
+	MaxRetries  *int
 
 	// ModelProvider, when non-nil, is called on each retry attempt to
 	// obtain the language model. This allows callers to swap in a
@@ -286,7 +288,9 @@ type AgentStreamCall struct {
 	ProviderOptions  ProviderOptions
 	OnRetry          OnRetryCallback
 	OnAuthRefresh    OnAuthRefreshFunc
-	MaxRetries       *int
+	// OnRateLimit is a Sennit fork addition; see RetryOptions.OnRateLimit.
+	OnRateLimit OnRateLimitFunc
+	MaxRetries  *int
 
 	// ModelProvider, when non-nil, is called on each retry attempt to
 	// obtain the language model. This allows callers to swap in a
@@ -517,6 +521,8 @@ func (a *agent) Generate(ctx context.Context, opts AgentCall) (*AgentResult, err
 		}
 		retryOptions.OnRetry = opts.OnRetry
 		retryOptions.OnAuthRefresh = opts.OnAuthRefresh
+		// Sennit fork addition; see RetryOptions.OnRateLimit.
+		retryOptions.OnRateLimit = opts.OnRateLimit
 		retry := RetryWithExponentialBackoffRespectingRetryHeaders[*Response](retryOptions)
 		result, err := retry(ctx, func() (*Response, error) {
 			// Re-read the model on each retry attempt so that
@@ -897,10 +903,12 @@ func (a *agent) Stream(ctx context.Context, opts AgentStreamCall) (*AgentResult,
 		MaxRetries:       opts.MaxRetries,
 		OnRetry:          opts.OnRetry,
 		OnAuthRefresh:    opts.OnAuthRefresh,
-		ModelProvider:    opts.ModelProvider,
-		StopWhen:         opts.StopWhen,
-		PrepareStep:      opts.PrepareStep,
-		RepairToolCall:   opts.RepairToolCall,
+		// Sennit fork addition; see RetryOptions.OnRateLimit.
+		OnRateLimit:    opts.OnRateLimit,
+		ModelProvider:  opts.ModelProvider,
+		StopWhen:       opts.StopWhen,
+		PrepareStep:    opts.PrepareStep,
+		RepairToolCall: opts.RepairToolCall,
 	}
 
 	call = a.prepareCall(call)
@@ -1010,6 +1018,8 @@ func (a *agent) Stream(ctx context.Context, opts AgentStreamCall) (*AgentResult,
 		}
 		retryOptions.OnRetry = call.OnRetry
 		retryOptions.OnAuthRefresh = call.OnAuthRefresh
+		// Sennit fork addition; see RetryOptions.OnRateLimit.
+		retryOptions.OnRateLimit = call.OnRateLimit
 		retry := RetryWithExponentialBackoffRespectingRetryHeaders[stepExecutionResult](retryOptions)
 
 		result, err := retry(ctx, func() (stepExecutionResult, error) {
@@ -1108,12 +1118,15 @@ func (a *agent) prepareTools(tools []AgentTool, providerDefinedTools []ProviderD
 			continue
 		}
 		info := tool.Info()
-		inputSchema := map[string]any{
-			"type":       "object",
-			"properties": info.Parameters,
-			"required":   info.Required,
+		inputSchema := cloneInputSchema(info.InputSchema)
+		if inputSchema == nil {
+			inputSchema = map[string]any{
+				"type":       "object",
+				"properties": info.Parameters,
+				"required":   info.Required,
+			}
+			schema.Normalize(inputSchema)
 		}
-		schema.Normalize(inputSchema)
 		preparedTools = append(preparedTools, FunctionTool{
 			Name:            info.Name,
 			Description:     info.Description,

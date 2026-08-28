@@ -927,7 +927,7 @@ func TestStream_RequiresMessageStopBeforeFinish(t *testing.T) {
 			chunks: []string{
 				anthropicSSEEvent("error", `{"type":"error","error":{"type":"api_error","message":"stream down"}}`),
 			},
-			wantRetryable: true,
+			wantRetryable:  true,
 			wantErrContain: "stream down",
 		},
 		{

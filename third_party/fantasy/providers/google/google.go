@@ -1173,6 +1173,18 @@ func (g *languageModel) streamObjectWithJSONMode(ctx context.Context, call fanta
 	}, nil
 }
 
+func cloneGoogleSchema(input map[string]any) map[string]any {
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	var cloned map[string]any
+	if json.Unmarshal(data, &cloned) != nil {
+		return nil
+	}
+	return cloned
+}
+
 func toGoogleTools(tools []fantasy.Tool, toolChoice *fantasy.ToolChoice) (googleTools []*genai.FunctionDeclaration, googleToolChoice *genai.ToolConfig, warnings []fantasy.CallWarning) {
 	for _, tool := range tools {
 		if tool.GetType() == fantasy.ToolTypeFunction {
@@ -1181,24 +1193,10 @@ func toGoogleTools(tools []fantasy.Tool, toolChoice *fantasy.ToolChoice) (google
 				continue
 			}
 
-			var required []string
-			var properties map[string]any
-			if props, ok := ft.InputSchema["properties"]; ok {
-				properties, _ = props.(map[string]any)
-			}
-			if req, ok := ft.InputSchema["required"]; ok {
-				if reqArr, ok := req.([]string); ok {
-					required = reqArr
-				}
-			}
 			declaration := &genai.FunctionDeclaration{
-				Name:        ft.Name,
-				Description: ft.Description,
-				Parameters: &genai.Schema{
-					Type:       genai.TypeObject,
-					Properties: convertSchemaProperties(properties),
-					Required:   required,
-				},
+				Name:                 ft.Name,
+				Description:          ft.Description,
+				ParametersJsonSchema: cloneGoogleSchema(ft.InputSchema),
 			}
 			googleTools = append(googleTools, declaration)
 			continue

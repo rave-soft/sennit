@@ -201,6 +201,40 @@ var TransientStreamErrorTypes = map[string]bool{
 	"rate_limit_error": true,
 }
 
+// transientStreamErrorMessageFragments are lowercase fragments of a stream
+// error message that name a temporary server-side condition. Some backends
+// (notably the ChatGPT/Codex Responses endpoint) send a mid-stream error
+// envelope with no "type" and no "code", leaving the human-readable message
+// as the only signal available for classification. The list is kept tight so
+// an application-level failure is not mistaken for a transient one.
+var transientStreamErrorMessageFragments = []string{
+	"overloaded",
+	"try again later",
+	"temporarily unavailable",
+	"service unavailable",
+	"internal server error",
+}
+
+// IsTransientStreamError reports whether a mid-stream SSE error event names a
+// temporary server-side condition worth retrying. errType is the payload's
+// "type" (or "code"); message is its human-readable text, consulted as a
+// fallback because an untyped envelope carries its only classification there.
+//
+// This is the canonical entry point for provider error handlers: they parse
+// their SDK-specific error shape and defer the policy decision here.
+func IsTransientStreamError(errType, message string) bool {
+	if TransientStreamErrorTypes[errType] {
+		return true
+	}
+	lower := strings.ToLower(message)
+	for _, fragment := range transientStreamErrorMessageFragments {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 // WrapTransportError wraps a transient transport failure in a retryable
 // ProviderError so callers get a clean message and .IsRetryable() reports
 // true. It recognizes an unexpected mid-stream EOF and HTTP/2 stream,

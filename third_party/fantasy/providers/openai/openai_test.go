@@ -4579,6 +4579,7 @@ func TestResponsesStream_RequiresTerminalEventBeforeFinish(t *testing.T) {
 		wantFinish       bool
 		wantFinishReason fantasy.FinishReason
 		wantRetryable    bool
+		wantTransient    bool
 		wantErrContain   string
 	}{
 		{
@@ -4595,11 +4596,13 @@ func TestResponsesStream_RequiresTerminalEventBeforeFinish(t *testing.T) {
 		{
 			name:           "response failed errors",
 			chunks:         []string{failedEvent},
+			wantTransient:  true,
 			wantErrContain: "response failed: boom (code: server_error)",
 		},
 		{
 			name:           "provider error event is preserved",
 			chunks:         []string{errorEvent},
+			wantTransient:  true,
 			wantErrContain: "response error: stream down (code: server_error)",
 		},
 		{
@@ -4648,9 +4651,12 @@ func TestResponsesStream_RequiresTerminalEventBeforeFinish(t *testing.T) {
 				require.Contains(t, errorParts[0].Error.Error(), tt.wantErrContain)
 			}
 
-			if tt.wantRetryable {
+			switch {
+			case tt.wantRetryable:
 				requireRetryableUnexpectedEOF(t, errorParts[0].Error)
-			} else {
+			case tt.wantTransient:
+				requireRetryableProviderError(t, errorParts[0].Error)
+			default:
 				requireNotRetryableUnexpectedEOF(t, errorParts[0].Error)
 			}
 		})
@@ -4682,6 +4688,7 @@ func TestResponsesStreamObject_RequiresTerminalEventBeforeFinish(t *testing.T) {
 		wantFinish     bool
 		wantObject     bool
 		wantRetryable  bool
+		wantTransient  bool
 		wantErrContain string
 	}{
 		{
@@ -4699,11 +4706,13 @@ func TestResponsesStreamObject_RequiresTerminalEventBeforeFinish(t *testing.T) {
 		{
 			name:           "response failed errors",
 			chunks:         []string{failedEvent},
+			wantTransient:  true,
 			wantErrContain: "response failed: boom (code: server_error)",
 		},
 		{
 			name:           "provider error event is preserved",
 			chunks:         []string{errorEvent},
+			wantTransient:  true,
 			wantErrContain: "response error: stream down (code: server_error)",
 		},
 		{
@@ -4762,9 +4771,12 @@ func TestResponsesStreamObject_RequiresTerminalEventBeforeFinish(t *testing.T) {
 				require.Contains(t, errorParts[0].Error.Error(), tt.wantErrContain)
 			}
 
-			if tt.wantRetryable {
+			switch {
+			case tt.wantRetryable:
 				requireRetryableUnexpectedEOF(t, errorParts[0].Error)
-			} else {
+			case tt.wantTransient:
+				requireRetryableProviderError(t, errorParts[0].Error)
+			default:
 				requireNotRetryableUnexpectedEOF(t, errorParts[0].Error)
 			}
 		})
@@ -4792,6 +4804,19 @@ func requireNotRetryableUnexpectedEOF(t *testing.T, err error) {
 		require.False(t, providerErr.IsRetryable())
 		require.NotErrorIs(t, providerErr.Cause, io.ErrUnexpectedEOF)
 	}
+}
+
+// requireRetryableProviderError asserts only that err is a retryable
+// ProviderError, without requiring io.ErrUnexpectedEOF as its cause. The
+// Sennit fork classifies a mid-stream error naming a transient server
+// condition (code "server_error", say) as retryable even though nothing
+// about it is an unexpected EOF - see IsTransientStreamError in errors.go.
+func requireRetryableProviderError(t *testing.T, err error) {
+	t.Helper()
+
+	var providerErr *fantasy.ProviderError
+	require.ErrorAs(t, err, &providerErr)
+	require.True(t, providerErr.IsRetryable())
 }
 
 func requireRetryableUnexpectedEOF(t *testing.T, err error) {

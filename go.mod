@@ -200,6 +200,6 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace charm.land/fantasy => ./third_party/fantasy-legacy
+replace charm.land/fantasy => ./third_party/fantasy
 
-replace github.com/charmbracelet/x/powernap => ./third_party/powernap-legacy
+replace github.com/charmbracelet/x/powernap => ./third_party/powernap

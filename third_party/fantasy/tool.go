@@ -18,7 +18,25 @@ type ToolInfo struct {
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
 	Required    []string       `json:"required"`
+	// InputSchema optionally preserves a complete JSON Schema.
+	InputSchema map[string]any `json:"input_schema,omitempty"`
 	Parallel    bool           `json:"parallel"` // Whether this tool can run in parallel with other tools
+}
+
+// cloneInputSchema prevents provider conversion from mutating a schema owned by a tool.
+func cloneInputSchema(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	var cloned map[string]any
+	if json.Unmarshal(data, &cloned) != nil {
+		return nil
+	}
+	return cloned
 }
 
 // ToolCall represents a tool invocation, matching the existing pattern.
@@ -157,11 +175,13 @@ func (w *funcToolWrapper[TInput]) Info() ToolInfo {
 	if w.schema.Required == nil {
 		w.schema.Required = []string{}
 	}
+	parameters := schema.ToParameters(w.schema)
 	return ToolInfo{
 		Name:        w.name,
 		Description: w.description,
-		Parameters:  schema.ToParameters(w.schema),
+		Parameters:  parameters,
 		Required:    w.schema.Required,
+		InputSchema: map[string]any{"type": "object", "properties": parameters, "required": w.schema.Required},
 		Parallel:    w.parallel,
 	}
 }

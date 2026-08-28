@@ -1584,12 +1584,27 @@ func (t *Or_Result_workspace_symbol) UnmarshalJSON(x []byte) error {
 		t.Value = nil
 		return nil
 	}
-	decoder326 := json.NewDecoder(bytes.NewReader(x))
-	decoder326.DisallowUnknownFields()
-	var h326 []SymbolInformation
-	if err := decoder326.Decode(&h326); err == nil {
-		t.Value = h326
-		return nil
+	// The two result shapes overlap. A modern WorkspaceSymbol can carry a
+	// LocationUriOnly while legacy SymbolInformation always has a range. The
+	// generated structs do not require Range, so trying SymbolInformation first
+	// incorrectly accepts modern URI-only entries.
+	var probe []struct {
+		Location struct {
+			Range json.RawMessage `json:"range"`
+		} `json:"location"`
+	}
+	if err := json.Unmarshal(x, &probe); err != nil {
+		return &UnmarshalError{"unmarshal failed to match one of [[]SymbolInformation []WorkspaceSymbol]"}
+	}
+	modern := len(probe) > 0 && len(probe[0].Location.Range) == 0
+	if !modern {
+		decoder326 := json.NewDecoder(bytes.NewReader(x))
+		decoder326.DisallowUnknownFields()
+		var h326 []SymbolInformation
+		if err := decoder326.Decode(&h326); err == nil {
+			t.Value = h326
+			return nil
+		}
 	}
 	decoder327 := json.NewDecoder(bytes.NewReader(x))
 	decoder327.DisallowUnknownFields()

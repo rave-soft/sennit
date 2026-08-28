@@ -68,13 +68,14 @@ func toProviderErrFromStreamError(streamErr *ssestream.StreamError) *fantasy.Pro
 	_ = json.Unmarshal(streamErr.Event.Data, &envelope) // best-effort; falls back to the raw message on parse failure.
 
 	errType := cmp.Or(envelope.Error.Type, envelope.Error.Code)
+	message := cmp.Or(envelope.Error.Message, streamErr.Message)
 
 	return &fantasy.ProviderError{
 		Title:          "stream error",
-		Message:        cmp.Or(envelope.Error.Message, streamErr.Message),
+		Message:        message,
 		Cause:          streamErr,
 		ResponseBody:   streamErr.Event.Data,
-		TransientError: fantasy.TransientStreamErrorTypes[errType],
+		TransientError: fantasy.IsTransientStreamError(errType, message),
 	}
 }
 

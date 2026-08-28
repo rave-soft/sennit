@@ -39,6 +39,7 @@ const (
 	MethodTextDocumentPrepareCallHierarchy   = "textDocument/prepareCallHierarchy"
 	MethodCallHierarchyIncomingCalls         = "callHierarchy/incomingCalls"
 	MethodCallHierarchyOutgoingCalls         = "callHierarchy/outgoingCalls"
+	MethodWorkspaceSymbol                    = "workspace/symbol"
 	MethodWorkspaceConfiguration             = "workspace/configuration"
 	MethodWorkspaceDidChangeConfiguration    = "workspace/didChangeConfiguration"
 	MethodWorkspaceDidChangeWorkspaceFolders = "workspace/didChangeWorkspaceFolders"
@@ -456,6 +457,20 @@ func (c *Client) RequestRename(ctx context.Context, filepath string, line, chara
 		return nil, fmt.Errorf("rename request failed: %w", err)
 	}
 	return &result, nil
+}
+
+// RequestWorkspaceSymbols requests workspace symbols matching query. The LSP
+// result is a union: servers may return legacy SymbolInformation or modern
+// WorkspaceSymbol entries.
+func (c *Client) RequestWorkspaceSymbols(ctx context.Context, query string) (protocol.Or_Result_workspace_symbol, error) {
+	if !c.initialized.Load() {
+		return protocol.Or_Result_workspace_symbol{}, fmt.Errorf("client not initialized")
+	}
+	var result protocol.Or_Result_workspace_symbol
+	if err := c.conn.Call(ctx, MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: query}, &result); err != nil {
+		return protocol.Or_Result_workspace_symbol{}, fmt.Errorf("workspace symbol request failed: %w", err)
+	}
+	return result, nil
 }
 
 // RequestDocumentSymbols requests the document symbols for the given file.

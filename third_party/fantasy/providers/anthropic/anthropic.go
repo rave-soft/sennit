@@ -676,6 +676,23 @@ func anyToUserLocation(v any) *UserLocation {
 	}
 }
 
+// cloneSchemaExtras retains JSON Schema keywords unsupported by the typed SDK
+// fields, including root description/default, $defs and composition keywords.
+func cloneSchemaExtras(input map[string]any) map[string]any {
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	var cloned map[string]any
+	if json.Unmarshal(data, &cloned) != nil {
+		return nil
+	}
+	delete(cloned, "type")
+	delete(cloned, "properties")
+	delete(cloned, "required")
+	return cloned
+}
+
 func (a languageModel) toTools(tools []fantasy.Tool, toolChoice *fantasy.ToolChoice, disableParallelToolCalls bool) (rawTools []json.RawMessage, anthropicToolChoice *anthropic.ToolChoiceUnionParam, warnings []fantasy.CallWarning, betaFlags []string) {
 	for _, tool := range tools {
 		if tool.GetType() == fantasy.ToolTypeFunction {
@@ -689,18 +706,27 @@ func (a languageModel) toTools(tools []fantasy.Tool, toolChoice *fantasy.ToolCho
 				properties = props
 			}
 			if req, ok := ft.InputSchema["required"]; ok {
-				if reqArr, ok := req.([]string); ok {
-					required = reqArr
+				switch reqArr := req.(type) {
+				case []string:
+					required = append(required, reqArr...)
+				case []any:
+					for _, value := range reqArr {
+						if name, ok := value.(string); ok {
+							required = append(required, name)
+						}
+					}
 				}
 			}
 			cacheControl := GetCacheControl(ft.ProviderOptions)
+			extraSchema := cloneSchemaExtras(ft.InputSchema)
 
 			anthropicTool := anthropic.ToolParam{
 				Name:        ft.Name,
 				Description: anthropic.String(ft.Description),
 				InputSchema: anthropic.ToolInputSchemaParam{
-					Properties: properties,
-					Required:   required,
+					Properties:  properties,
+					Required:    required,
+					ExtraFields: extraSchema,
 				},
 			}
 			if cacheControl != nil {

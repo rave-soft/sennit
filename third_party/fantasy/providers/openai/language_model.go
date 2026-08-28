@@ -610,6 +610,18 @@ func supportsPriorityProcessing(modelID string) bool {
 		strings.Contains(modelID, "o4-mini")
 }
 
+func cloneInputSchema(input map[string]any) map[string]any {
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	var cloned map[string]any
+	if json.Unmarshal(data, &cloned) != nil {
+		return nil
+	}
+	return cloned
+}
+
 func toOpenAiTools(tools []fantasy.Tool, toolChoice *fantasy.ToolChoice) (openAiTools []openai.ChatCompletionToolUnionParam, openAiToolChoice *openai.ChatCompletionToolChoiceOptionUnionParam, warnings []fantasy.CallWarning) {
 	for _, tool := range tools {
 		if tool.GetType() == fantasy.ToolTypeFunction {
@@ -622,7 +634,7 @@ func toOpenAiTools(tools []fantasy.Tool, toolChoice *fantasy.ToolChoice) (openAi
 					Function: shared.FunctionDefinitionParam{
 						Name:        ft.Name,
 						Description: param.NewOpt(ft.Description),
-						Parameters:  openai.FunctionParameters(ft.InputSchema),
+						Parameters:  openai.FunctionParameters(cloneInputSchema(ft.InputSchema)),
 						Strict:      param.NewOpt(false),
 					},
 					Type: "function",
