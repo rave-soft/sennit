@@ -12,12 +12,14 @@
 //
 //   - [Broker.PublishMustDeliver] is bounded-blocking. For each
 //     subscriber it first tries a non-blocking send, then falls back to
-//     a per-subscriber blocking send with a hard timeout. On timeout the
-//     event is dropped for that subscriber, an error is logged, and the
-//     must-deliver drop counter is incremented. The publisher never
-//     blocks indefinitely. This is the right choice for terminal events
-//     (finish, tool result, error, cancel) that must not be silently
-//     coalesced away.
+//     a blocking send with a hard timeout. All subscribers are served
+//     concurrently, so the timeout is a bound on the whole fan-out, not
+//     on each subscriber individually — N saturated subscribers cost
+//     one timeout window, not N. On timeout the event is dropped for
+//     that subscriber, an error is logged, and the must-deliver drop
+//     counter is incremented. The publisher never blocks indefinitely.
+//     This is the right choice for terminal events (finish, tool
+//     result, error, cancel) that must not be silently coalesced away.
 //
 // Drop counters ([Broker.DropCount], [Broker.MustDeliverDropCount]) are
 // exposed so callers can surface saturation in telemetry.
@@ -306,10 +308,31 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 
 // PublishMustDeliver delivers an event with bounded-blocking semantics.
 // For each subscriber it first attempts a non-blocking send, then falls
-// back to a blocking send bounded by a per-subscriber timeout (default
+// back to a blocking send bounded by a timeout (default
 // [defaultMustDeliverTimeout]). On timeout the event is dropped for
 // that subscriber, [Broker.MustDeliverDropCount] is incremented, and an
 // error is logged. The publisher never blocks indefinitely.
+//
+// Subscribers are served concurrently: each gets its own goroutine
+// racing sendMustDeliver's own timer, and PublishMustDeliver waits for
+// all of them before returning. Since every goroutine starts at
+// essentially the same instant, those independently-started timers
+// expire together and act as one shared deadline for the whole
+// fan-out — a derived context.WithTimeout would express that same
+// deadline but would also route a subscriber's per-send timeout through
+// ctx.Done(), turning deliverTimedOut into deliverCanceled and losing
+// the distinction the counters and logs rely on. With one subscriber
+// there is nothing to fan out, so the send happens inline and skips the
+// goroutine and WaitGroup entirely.
+//
+// If the caller's ctx is canceled mid-flight, every subscriber still
+// waiting on its blocking send observes that independently and stops
+// there — no drop is counted or logged for those, since the failure is
+// the caller's, not the subscriber's. This differs from the sequential
+// version: canceling used to also skip subscribers whose turn hadn't
+// come up yet (not even the non-blocking attempt), whereas now every
+// subscriber has already been offered the non-blocking send, so
+// cancellation can only affect ones that had to fall back to blocking.
 //
 // Use this for terminal events that must reach subscribers (finish,
 // tool result, error, cancel). Callers must still tolerate rare drops
@@ -329,19 +352,36 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 	subs := b.snapshot()
 	event := Event[T]{Type: t, Payload: payload}
 
+	if len(subs) == 1 {
+		b.recordMustDeliverResult(subs[0].sendMustDeliver(ctx, event, timeout), t, timeout)
+		return
+	}
+
+	var wg sync.WaitGroup
 	for _, sub := range subs {
-		switch sub.sendMustDeliver(ctx, event, timeout) {
-		case deliverOK, deliverGone:
-			// Delivered, or the subscriber is already gone — either way
-			// there's nothing more to do for it.
-		case deliverTimedOut:
-			b.mustDeliverDropCount.Add(1)
-			slog.Error("PublishMustDeliver timed out delivering event",
-				"type", t, "timeout", timeout)
-		case deliverCanceled:
-			// Caller gave up; matches the pre-refactor behavior of
-			// abandoning the rest of the fan-out immediately.
-			return
-		}
+		wg.Go(func() {
+			b.recordMustDeliverResult(sub.sendMustDeliver(ctx, event, timeout), t, timeout)
+		})
+	}
+	wg.Wait()
+}
+
+// recordMustDeliverResult applies the counter/log side effects of one
+// subscriber's delivery outcome. Split out of PublishMustDeliver so the
+// single-subscriber fast path and the fanned-out goroutines share the
+// same bookkeeping; mustDeliverDropCount.Add is safe to call
+// concurrently from those goroutines since it's an atomic counter.
+func (b *Broker[T]) recordMustDeliverResult(result deliverResult, t EventType, timeout time.Duration) {
+	switch result {
+	case deliverOK, deliverGone:
+		// Delivered, or the subscriber is already gone — either way
+		// there's nothing more to do for it.
+	case deliverTimedOut:
+		b.mustDeliverDropCount.Add(1)
+		slog.Error("PublishMustDeliver timed out delivering event",
+			"type", t, "timeout", timeout)
+	case deliverCanceled:
+		// Caller gave up; no drop is counted or logged since this
+		// isn't a subscriber-side saturation event.
 	}
 }

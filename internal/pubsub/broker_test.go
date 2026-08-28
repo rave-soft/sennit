@@ -223,3 +223,73 @@ func TestBroker_ConcurrentPublishAndSubscribeNoRace(t *testing.T) {
 	wg.Wait()
 	b.Shutdown()
 }
+
+// TestBroker_PublishMustDeliverFansOutConcurrently verifies that
+// PublishMustDeliver serves saturated subscribers concurrently rather
+// than one after another. With a sequential loop, N saturated
+// subscribers cost N*timeout; fanned out, they cost about one timeout
+// regardless of N. The threshold is set well below 2*timeout (half of
+// the 5*timeout a sequential implementation would take) so this fails
+// reliably on the old code while leaving slack for a loaded machine.
+func TestBroker_PublishMustDeliverFansOutConcurrently(t *testing.T) {
+	t.Parallel()
+
+	const n = 5
+	timeout := 200 * time.Millisecond
+
+	b := NewBrokerWithOptions[int](1)
+	b.SetMustDeliverTimeout(timeout)
+	ctx := t.Context()
+
+	for range n {
+		b.Subscribe(ctx)
+		b.Publish(UpdatedEvent, 0) // Fill each subscriber's one-slot buffer.
+	}
+	require.Equal(t, n, b.GetSubscriberCount())
+
+	start := time.Now()
+	b.PublishMustDeliver(ctx, UpdatedEvent, 1)
+	elapsed := time.Since(start)
+
+	require.Less(t, elapsed, 2*timeout,
+		"PublishMustDeliver took %s across %d saturated subscribers with a %s timeout; "+
+			"looks sequential rather than fanned out", elapsed, n, timeout)
+	require.Equal(t, uint64(n), b.MustDeliverDropCount())
+}
+
+// TestBroker_PublishMustDeliverCancelStopsWholeFanOut verifies that
+// canceling the caller's context stops the whole fan-out promptly,
+// rather than only the subscriber the (now-removed) sequential loop
+// happened to be blocked on. It also checks that a canceled delivery is
+// not counted as a must-deliver drop, since the failure is the
+// caller's, not the subscriber's.
+func TestBroker_PublishMustDeliverCancelStopsWholeFanOut(t *testing.T) {
+	t.Parallel()
+
+	const n = 5
+	timeout := time.Second // Long enough that a timeout would mask cancellation.
+
+	b := NewBrokerWithOptions[int](1)
+	b.SetMustDeliverTimeout(timeout)
+	subCtx := t.Context()
+
+	for range n {
+		b.Subscribe(subCtx)
+		b.Publish(UpdatedEvent, 0) // Fill each subscriber's one-slot buffer.
+	}
+
+	ctx, cancel := context.WithCancel(subCtx)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	b.PublishMustDeliver(ctx, UpdatedEvent, 1)
+	elapsed := time.Since(start)
+
+	require.Less(t, elapsed, timeout,
+		"PublishMustDeliver did not return promptly after ctx was canceled")
+	require.Equal(t, uint64(0), b.MustDeliverDropCount(),
+		"a canceled delivery must not be counted as a must-deliver drop")
+}
