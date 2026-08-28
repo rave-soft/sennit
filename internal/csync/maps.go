@@ -137,6 +137,14 @@ func (m *Map[K, V]) Copy() map[K]V {
 }
 
 // Seq2 returns an iter.Seq2 that yields key-value pairs from the map.
+//
+// It iterates a snapshot, not the map: the whole map is cloned up front,
+// under the read lock, and the returned sequence walks that copy. So the
+// lock is not held while the caller's loop body runs (a body that calls
+// back into this Map cannot deadlock), the caller sees a consistent view
+// even if a writer lands mid-loop, and each call costs one full copy.
+// Callers on a hot path that only need a count or a single lookup should
+// use Len or Get instead of ranging.
 func (m *Map[K, V]) Seq2() iter.Seq2[K, V] {
 	dst := m.Copy()
 	return func(yield func(K, V) bool) {
@@ -148,7 +156,9 @@ func (m *Map[K, V]) Seq2() iter.Seq2[K, V] {
 	}
 }
 
-// Seq returns an iter.Seq that yields values from the map.
+// Seq returns an iter.Seq that yields values from the map. Like Seq2,
+// which it delegates to, it iterates a snapshot and therefore copies the
+// whole map once per call.
 func (m *Map[K, V]) Seq() iter.Seq[V] {
 	return func(yield func(V) bool) {
 		for _, v := range m.Seq2() {

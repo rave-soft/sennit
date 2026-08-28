@@ -60,7 +60,9 @@ func (s *Slice[T]) SetSlice(items []T) {
 	copy(s.inner, items)
 }
 
-// Seq returns an iterator that yields elements from the slice.
+// Seq returns an iterator that yields elements from the slice. Like
+// Seq2, which it delegates to, it iterates a snapshot and therefore
+// copies the whole slice once per call.
 func (s *Slice[T]) Seq() iter.Seq[T] {
 	return func(yield func(T) bool) {
 		for _, v := range s.Seq2() {
@@ -72,6 +74,12 @@ func (s *Slice[T]) Seq() iter.Seq[T] {
 }
 
 // Seq2 returns an iterator that yields index-value pairs from the slice.
+//
+// It iterates a snapshot, not the slice: the contents are copied up
+// front, under the read lock, and the returned sequence walks that copy.
+// So the lock is not held while the caller's loop body runs, the caller
+// sees a consistent view even if a writer lands mid-loop, and each call
+// costs one full copy.
 func (s *Slice[T]) Seq2() iter.Seq2[int, T] {
 	items := s.Copy()
 	return func(yield func(int, T) bool) {
