@@ -12,7 +12,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/lsp"
 	lsputil "github.com/rave-soft/sennit/internal/lsp/util"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -32,7 +32,7 @@ var renameDescription string
 func NewRenameTool(
 	lspManager *lsp.Manager,
 	permissions permission.Requester,
-	files history.Service,
+	files historystore.Service,
 	filetracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {

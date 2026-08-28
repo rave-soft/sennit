@@ -35,6 +35,67 @@ import (
 	"strings"
 )
 
+// Scope names which slice of recorded usage a [Snapshot] covers. The
+// three are not variations on one query: a session's tree is walked by
+// parent link with no time bound (a session is however long it is), while
+// the project and global scopes are time-windowed sweeps.
+//
+// Scope and [Request] live here rather than with [internal/stats/gather]'s
+// Gather, even though only Gather consumes them: internal/ui's stats
+// dialog switches on Scope and builds a Request directly, and it must
+// stay clear of anything that imports internal/db.
+type Scope int
+
+const (
+	// ScopeSession covers one session and every sub-agent session
+	// beneath it, however long ago it started.
+	ScopeSession Scope = iota
+	// ScopeProject covers one project's sessions within a time window.
+	ScopeProject
+	// ScopeGlobal covers every project's sessions within a time window,
+	// and additionally fills [Snapshot.Projects].
+	ScopeGlobal
+)
+
+// String names the scope for a tab label or an error message.
+func (s Scope) String() string {
+	switch s {
+	case ScopeSession:
+		return "session"
+	case ScopeProject:
+		return "project"
+	case ScopeGlobal:
+		return "global"
+	default:
+		return "unknown"
+	}
+}
+
+// Request describes one aggregation to run.
+type Request struct {
+	Scope Scope
+	// SessionID is required for ScopeSession and ignored otherwise.
+	SessionID string
+	// ProjectPath is required for ScopeProject and ignored otherwise.
+	ProjectPath string
+	// Since bounds the project and global scopes to sessions created at
+	// or after this unix timestamp. Zero means unbounded. ScopeSession
+	// ignores it: a session's own history is never partially interesting.
+	Since int64
+	// WithSkills additionally gathers the skill-usage breakdown, which
+	// costs a JSON-scanning query over every message in the window and so
+	// is opt-in.
+	WithSkills bool
+	// WithLatency additionally gathers the internal-handoff latency
+	// breakdown. Opt-in for the same reason as WithSkills — it is an
+	// extra query nothing else needs — and ignored for ScopeSession: a
+	// wait is a property of how busy the process was at one moment, and
+	// a handful of samples from one session says nothing a reader can
+	// act on. The question it answers is "is this getting slower over
+	// time", which only a window can answer.
+	WithLatency bool
+}
+
 // Session is one session's contribution to a breakdown, in the shape the
 // aggregation needs. The db package generates a distinct row type per
 // query, so callers convert into this at the query seam and everything

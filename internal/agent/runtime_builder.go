@@ -40,7 +40,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/filetracker"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/lsp"
@@ -79,7 +79,7 @@ type runtimeToolInputs struct {
 	toolBuildErr            error
 	questions               question.Service
 	lspManager              *lsp.Manager
-	history                 history.Service
+	history                 historystore.Service
 	filetracker             filetracker.Service
 	background              *shell.BackgroundShellManager
 	sessions                sessionstore.Service

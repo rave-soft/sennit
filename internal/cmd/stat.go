@@ -10,6 +10,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/stats"
+	"github.com/rave-soft/sennit/internal/stats/gather"
 	"github.com/spf13/cobra"
 )
 
@@ -130,7 +131,7 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	// TUI's /stats screen, so the two can never disagree about the same
 	// numbers. This command's job is the flags, the scope they select,
 	// and the tables.
-	snap, err := stats.Gather(ctx, queries, stats.Request{
+	snap, err := gather.Gather(ctx, queries, stats.Request{
 		Scope: stats.ScopeProject,
 		// cwd, not cfg.WorkingDir(): sessions record project_path as an
 		// absolute path, which an empty-string config.Load() never
@@ -157,7 +158,7 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	}
 	if by == "" || by == "projects" {
 		if by == "projects" && allProjects {
-			global, err := stats.Gather(ctx, queries, stats.Request{Scope: stats.ScopeGlobal, Since: since})
+			global, err := gather.Gather(ctx, queries, stats.Request{Scope: stats.ScopeGlobal, Since: since})
 			if err != nil {
 				return err
 			}

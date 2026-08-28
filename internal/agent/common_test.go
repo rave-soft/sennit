@@ -21,7 +21,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/filetracker"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/lsp"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -42,7 +42,7 @@ type fakeEnv struct {
 	sessions    sessionstore.Service
 	messages    messagestore.Service
 	permissions permission.Service
-	history     history.Service
+	history     historystore.Service
 	filetracker *filetracker.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 }
@@ -111,7 +111,7 @@ func testEnvAt(t *testing.T, workingDir string) fakeEnv {
 	messages := messagestore.NewService(q)
 
 	permissions := permission.NewPermissionService(workingDir, true, []string{})
-	history := history.NewService(q, conn)
+	history := historystore.NewService(q, conn)
 	filetrackerService := filetracker.NewService(q, workingDir)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 

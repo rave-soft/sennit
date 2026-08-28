@@ -18,7 +18,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/permission"
 )
 
@@ -168,14 +168,14 @@ func ensureParentDir(filePath string) error {
 // content that changed on disk outside of Sennit, and stores the new
 // version. Used by write/edit/multiedit whenever a tool commits file
 // content, whether creating the file (oldContent == "") or overwriting it.
-func writeFileWithHistory(ctx context.Context, files history.Service, sessionID, filePath, oldContent, newContent string) error {
+func writeFileWithHistory(ctx context.Context, files historystore.Service, sessionID, filePath, oldContent, newContent string) error {
 	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 	return recordFileHistory(ctx, files, sessionID, filePath, oldContent, newContent)
 }
 
-func recordFileHistory(ctx context.Context, files history.Service, sessionID, filePath, oldContent, newContent string) error {
+func recordFileHistory(ctx context.Context, files historystore.Service, sessionID, filePath, oldContent, newContent string) error {
 	if files == nil || sessionID == "" {
 		return nil
 	}

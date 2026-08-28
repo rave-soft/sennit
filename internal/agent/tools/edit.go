@@ -13,7 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -47,7 +47,7 @@ var editDescription string
 type editContext struct {
 	ctx         context.Context
 	permissions permission.Requester
-	files       history.Service
+	files       historystore.Service
 	filetracker filetracker.Service
 	workingDir  string
 }
@@ -55,7 +55,7 @@ type editContext struct {
 func NewEditTool(
 	lspManager *lsp.Manager,
 	permissions permission.Requester,
-	files history.Service,
+	files historystore.Service,
 	filetracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {

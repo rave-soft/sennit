@@ -23,7 +23,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/filetracker"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
@@ -48,7 +48,7 @@ type delegationFinalizer struct {
 	messages    MessageService
 	permissions permission.Requester
 	questions   question.Service
-	history     history.Service
+	history     historystore.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	background  *shell.BackgroundShellManager

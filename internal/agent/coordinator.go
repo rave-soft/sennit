@@ -17,7 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/filetracker"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
@@ -135,7 +135,7 @@ type coordinator struct {
 	messages    MessageService
 	permissions permission.Requester
 	questions   question.Service
-	history     history.Service
+	history     historystore.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
@@ -228,7 +228,7 @@ type CoordinatorOptions struct {
 	Messages    MessageService
 	Permissions permission.Requester
 	Questions   question.Service
-	History     history.Service
+	History     historystore.Service
 	FileTracker filetracker.Service
 	LSPManager  *lsp.Manager
 	Notify      pubsub.Publisher[notify.Notification]

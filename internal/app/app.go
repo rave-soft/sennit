@@ -21,6 +21,7 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
+	"github.com/rave-soft/sennit/internal/stats/gather"
 )
 
 // UpdateAvailableMsg is sent when a new version is available.
@@ -260,5 +261,5 @@ func (app *App) Stats(ctx context.Context, req stats.Request) (stats.Snapshot, e
 	if app.queries == nil {
 		return stats.Snapshot{}, errors.New("app: stats unavailable: no database queries wired")
 	}
-	return stats.Gather(ctx, app.queries, req)
+	return gather.Gather(ctx, app.queries, req)
 }

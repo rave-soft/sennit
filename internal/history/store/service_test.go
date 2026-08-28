@@ -1,4 +1,4 @@
-package history
+package store
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
@@ -184,10 +185,10 @@ func TestCreateVersionAllocatesInsideSerializedTransaction(t *testing.T) {
 	defer cancel()
 
 	store := newSerializedVersionStore()
-	files := &service{Broker: pubsub.NewBroker[File](), versions: store}
+	files := &service{Broker: pubsub.NewBroker[history.File](), versions: store}
 
 	type result struct {
-		file File
+		file history.File
 		err  error
 	}
 	firstResult := make(chan result, 1)

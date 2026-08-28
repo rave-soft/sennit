@@ -1,4 +1,10 @@
-package stats
+// Package gather runs the SQL queries stats aggregation needs and hands
+// the results to internal/stats' pure Compute* functions. It exists
+// separately from internal/stats so that package can stay free of
+// database/sql and internal/db — internal/ui imports internal/stats for
+// its data types alone, and linking sqlc through it would drag both
+// SQLite drivers along for the ride.
+package gather
 
 import (
 	"context"
@@ -8,63 +14,8 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/stats"
 )
-
-// Scope names which slice of recorded usage a [Snapshot] covers. The
-// three are not variations on one query: a session's tree is walked by
-// parent link with no time bound (a session is however long it is), while
-// the project and global scopes are time-windowed sweeps.
-type Scope int
-
-const (
-	// ScopeSession covers one session and every sub-agent session
-	// beneath it, however long ago it started.
-	ScopeSession Scope = iota
-	// ScopeProject covers one project's sessions within a time window.
-	ScopeProject
-	// ScopeGlobal covers every project's sessions within a time window,
-	// and additionally fills [Snapshot.Projects].
-	ScopeGlobal
-)
-
-// String names the scope for a tab label or an error message.
-func (s Scope) String() string {
-	switch s {
-	case ScopeSession:
-		return "session"
-	case ScopeProject:
-		return "project"
-	case ScopeGlobal:
-		return "global"
-	default:
-		return "unknown"
-	}
-}
-
-// Request describes one aggregation to run.
-type Request struct {
-	Scope Scope
-	// SessionID is required for ScopeSession and ignored otherwise.
-	SessionID string
-	// ProjectPath is required for ScopeProject and ignored otherwise.
-	ProjectPath string
-	// Since bounds the project and global scopes to sessions created at
-	// or after this unix timestamp. Zero means unbounded. ScopeSession
-	// ignores it: a session's own history is never partially interesting.
-	Since int64
-	// WithSkills additionally gathers the skill-usage breakdown, which
-	// costs a JSON-scanning query over every message in the window and so
-	// is opt-in.
-	WithSkills bool
-	// WithLatency additionally gathers the internal-handoff latency
-	// breakdown. Opt-in for the same reason as WithSkills — it is an
-	// extra query nothing else needs — and ignored for ScopeSession: a
-	// wait is a property of how busy the process was at one moment, and
-	// a handful of samples from one session says nothing a reader can
-	// act on. The question it answers is "is this getting slower over
-	// time", which only a window can answer.
-	WithLatency bool
-}
 
 // Querier is the slice of the generated db API this package needs.
 // Declared here, on the consumer side, so a test can drive Gather with a
@@ -86,51 +37,51 @@ type Querier interface {
 
 var _ Querier = (*db.Queries)(nil)
 
-// Gather runs req's queries and aggregates them into a [Snapshot].
-func Gather(ctx context.Context, q Querier, req Request) (Snapshot, error) {
+// Gather runs req's queries and aggregates them into a [stats.Snapshot].
+func Gather(ctx context.Context, q Querier, req stats.Request) (stats.Snapshot, error) {
 	sessions, messages, delegations, err := fetch(ctx, q, req)
 	if err != nil {
-		return Snapshot{}, err
+		return stats.Snapshot{}, err
 	}
 
-	snap := Snapshot{
-		Totals:  ComputeTotals(sessions),
-		Models:  ComputeModels(sessions, messages, delegations),
-		Agents:  ComputeAgents(sessions, delegations),
-		Outcome: ComputeOutcome(delegations),
+	snap := stats.Snapshot{
+		Totals:  stats.ComputeTotals(sessions),
+		Models:  stats.ComputeModels(sessions, messages, delegations),
+		Agents:  stats.ComputeAgents(sessions, delegations),
+		Outcome: stats.ComputeOutcome(delegations),
 	}
 
-	if req.Scope == ScopeSession {
+	if req.Scope == stats.ScopeSession {
 		// A single session's "sessions count" would always be 1, which
 		// says nothing; what a reader wants there is how much work was
 		// delegated out of it.
 		snap.Totals.Sessions = int64(len(sessions))
 	}
 
-	if req.Scope == ScopeGlobal {
+	if req.Scope == stats.ScopeGlobal {
 		snap.Projects, err = gatherProjects(ctx, q, req.Since)
 		if err != nil {
-			return Snapshot{}, err
+			return stats.Snapshot{}, err
 		}
 	}
 
-	if req.WithSkills && req.Scope != ScopeSession {
+	if req.WithSkills && req.Scope != stats.ScopeSession {
 		rows, err := q.ListSkillLoadsSince(ctx, db.ListSkillLoadsSinceParams{
 			CreatedAt:   req.Since,
 			ProjectPath: req.ProjectPath,
 		})
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("stats: list skill loads: %w", err)
+			return stats.Snapshot{}, fmt.Errorf("stats: list skill loads: %w", err)
 		}
 		snap.Skills = ComputeSkills(rows)
 	}
 
-	if req.WithLatency && req.Scope != ScopeSession {
+	if req.WithLatency && req.Scope != stats.ScopeSession {
 		events, err := gatherLatency(ctx, q, req)
 		if err != nil {
-			return Snapshot{}, err
+			return stats.Snapshot{}, err
 		}
-		snap.Latency = ComputeLatency(events)
+		snap.Latency = stats.ComputeLatency(events)
 	}
 
 	return snap, nil
@@ -140,15 +91,15 @@ func Gather(ctx context.Context, q Querier, req Request) (Snapshot, error) {
 // the other breakdowns this one has no session-tree form, so it lives
 // outside fetch rather than adding a fifth return value nothing else
 // wants.
-func gatherLatency(ctx context.Context, q Querier, req Request) ([]LatencyEvent, error) {
-	if req.Scope == ScopeGlobal {
+func gatherLatency(ctx context.Context, q Querier, req stats.Request) ([]stats.LatencyEvent, error) {
+	if req.Scope == stats.ScopeGlobal {
 		rows, err := q.ListAllLatencyEventsSince(ctx, req.Since)
 		if err != nil {
 			return nil, fmt.Errorf("stats: list all latency events: %w", err)
 		}
-		events := make([]LatencyEvent, 0, len(rows))
+		events := make([]stats.LatencyEvent, 0, len(rows))
 		for _, r := range rows {
-			events = append(events, LatencyEvent{Kind: r.Kind, WaitedMS: r.WaitedMs})
+			events = append(events, stats.LatencyEvent{Kind: r.Kind, WaitedMS: r.WaitedMs})
 		}
 		return events, nil
 	}
@@ -159,9 +110,9 @@ func gatherLatency(ctx context.Context, q Querier, req Request) ([]LatencyEvent,
 	if err != nil {
 		return nil, fmt.Errorf("stats: list project latency events: %w", err)
 	}
-	events := make([]LatencyEvent, 0, len(rows))
+	events := make([]stats.LatencyEvent, 0, len(rows))
 	for _, r := range rows {
-		events = append(events, LatencyEvent{Kind: r.Kind, WaitedMS: r.WaitedMs})
+		events = append(events, stats.LatencyEvent{Kind: r.Kind, WaitedMS: r.WaitedMs})
 	}
 	return events, nil
 }
@@ -184,14 +135,15 @@ type rawSessionRow struct {
 }
 
 // sessionsFromRows converts one scope's raw session rows into this
-// package's neutral [Session] shape. conv does nothing but the row-type
-// conversion at each call site, so the field mapping itself — the part
-// that used to be copy-pasted once per scope — is written here only once.
-func sessionsFromRows[T any](rows []T, conv func(T) rawSessionRow) []Session {
-	sessions := make([]Session, 0, len(rows))
+// package's neutral [stats.Session] shape. conv does nothing but the
+// row-type conversion at each call site, so the field mapping itself —
+// the part that used to be copy-pasted once per scope — is written here
+// only once.
+func sessionsFromRows[T any](rows []T, conv func(T) rawSessionRow) []stats.Session {
+	sessions := make([]stats.Session, 0, len(rows))
 	for _, r := range rows {
 		raw := conv(r)
-		sessions = append(sessions, Session{
+		sessions = append(sessions, stats.Session{
 			ID:               raw.ID,
 			ParentID:         raw.ParentSessionID.String,
 			Title:            raw.Title,
@@ -207,11 +159,11 @@ func sessionsFromRows[T any](rows []T, conv func(T) rawSessionRow) []Session {
 }
 
 // messagesFromRows is [sessionsFromRows] for assistant-message rows. Here
-// the neutral [Message] shape matches the db row column-for-column, so
-// conv is always a bare type conversion — the duplication removed is the
-// three-line loop, not a field mapping.
-func messagesFromRows[T any](rows []T, conv func(T) Message) []Message {
-	messages := make([]Message, 0, len(rows))
+// the neutral [stats.Message] shape matches the db row column-for-column,
+// so conv is always a bare type conversion — the duplication removed is
+// the three-line loop, not a field mapping.
+func messagesFromRows[T any](rows []T, conv func(T) stats.Message) []stats.Message {
+	messages := make([]stats.Message, 0, len(rows))
 	for _, r := range rows {
 		messages = append(messages, conv(r))
 	}
@@ -219,9 +171,9 @@ func messagesFromRows[T any](rows []T, conv func(T) Message) []Message {
 }
 
 // delegationsFromRows is [messagesFromRows] for delegation-outcome rows;
-// [Delegation] likewise matches its db rows column-for-column.
-func delegationsFromRows[T any](rows []T, conv func(T) Delegation) []Delegation {
-	delegations := make([]Delegation, 0, len(rows))
+// [stats.Delegation] likewise matches its db rows column-for-column.
+func delegationsFromRows[T any](rows []T, conv func(T) stats.Delegation) []stats.Delegation {
+	delegations := make([]stats.Delegation, 0, len(rows))
 	for _, r := range rows {
 		delegations = append(delegations, conv(r))
 	}
@@ -231,9 +183,9 @@ func delegationsFromRows[T any](rows []T, conv func(T) Delegation) []Delegation 
 // fetch runs the three per-scope queries. Each scope reads its own row
 // types out of the db package and converts them to this package's neutral
 // shapes; everything downstream of here is scope-agnostic.
-func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, []Delegation, error) {
+func fetch(ctx context.Context, q Querier, req stats.Request) ([]stats.Session, []stats.Message, []stats.Delegation, error) {
 	switch req.Scope {
-	case ScopeSession:
+	case stats.ScopeSession:
 		if req.SessionID == "" {
 			return nil, nil, nil, fmt.Errorf("stats: session scope needs a session id")
 		}
@@ -246,7 +198,7 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 			return nil, nil, nil, fmt.Errorf("stats: list session tree messages: %w", err)
 		}
 		sessions := sessionsFromRows(rows, func(r db.ListSessionTreeSinceRow) rawSessionRow { return rawSessionRow(r) })
-		messages := messagesFromRows(msgRows, func(r db.ListSessionTreeAssistantMessagesRow) Message { return Message(r) })
+		messages := messagesFromRows(msgRows, func(r db.ListSessionTreeAssistantMessagesRow) stats.Message { return stats.Message(r) })
 		// Delegations are looked up by the sessions in the tree rather
 		// than by a scope-wide query: a delegation belongs to this
 		// session's stats when this session (or one below it) ran it.
@@ -256,7 +208,7 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 		}
 		return sessions, messages, delegations, nil
 
-	case ScopeProject:
+	case stats.ScopeProject:
 		rows, err := q.ListSessionsSinceWithAgent(ctx, db.ListSessionsSinceWithAgentParams{
 			CreatedAt:   req.Since,
 			ProjectPath: req.ProjectPath,
@@ -279,11 +231,11 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 			return nil, nil, nil, fmt.Errorf("stats: list project delegations: %w", err)
 		}
 		sessions := sessionsFromRows(rows, func(r db.ListSessionsSinceWithAgentRow) rawSessionRow { return rawSessionRow(r) })
-		messages := messagesFromRows(msgRows, func(r db.ListAssistantMessagesSinceRow) Message { return Message(r) })
-		delegations := delegationsFromRows(delRows, func(r db.ListDelegationOutcomesSinceRow) Delegation { return Delegation(r) })
+		messages := messagesFromRows(msgRows, func(r db.ListAssistantMessagesSinceRow) stats.Message { return stats.Message(r) })
+		delegations := delegationsFromRows(delRows, func(r db.ListDelegationOutcomesSinceRow) stats.Delegation { return stats.Delegation(r) })
 		return sessions, messages, delegations, nil
 
-	case ScopeGlobal:
+	case stats.ScopeGlobal:
 		rows, err := q.ListAllSessionsSince(ctx, req.Since)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("stats: list all sessions: %w", err)
@@ -297,8 +249,8 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 			return nil, nil, nil, fmt.Errorf("stats: list all delegations: %w", err)
 		}
 		sessions := sessionsFromRows(rows, func(r db.ListAllSessionsSinceRow) rawSessionRow { return rawSessionRow(r) })
-		messages := messagesFromRows(msgRows, func(r db.ListAllAssistantMessagesSinceRow) Message { return Message(r) })
-		delegations := delegationsFromRows(delRows, func(r db.ListAllDelegationOutcomesSinceRow) Delegation { return Delegation(r) })
+		messages := messagesFromRows(msgRows, func(r db.ListAllAssistantMessagesSinceRow) stats.Message { return stats.Message(r) })
+		delegations := delegationsFromRows(delRows, func(r db.ListAllDelegationOutcomesSinceRow) stats.Delegation { return stats.Delegation(r) })
 		return sessions, messages, delegations, nil
 
 	default:
@@ -311,7 +263,7 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 // a session tree" query because a delegation's row does not record which
 // session dispatched it, only which session ran it — and that session is
 // exactly what the tree walk already found.
-func delegationsForSessions(ctx context.Context, q Querier, sessions []Session) ([]Delegation, error) {
+func delegationsForSessions(ctx context.Context, q Querier, sessions []stats.Session) ([]stats.Delegation, error) {
 	if len(sessions) == 0 {
 		return nil, nil
 	}
@@ -323,33 +275,33 @@ func delegationsForSessions(ctx context.Context, q Querier, sessions []Session) 
 	for _, s := range sessions {
 		inTree[s.ID] = true
 	}
-	var out []Delegation
+	var out []stats.Delegation
 	for _, r := range rows {
 		if !inTree[r.SessionID] {
 			continue
 		}
-		out = append(out, Delegation(r))
+		out = append(out, stats.Delegation(r))
 	}
 	return out, nil
 }
 
 // gatherProjects aggregates one row per project known to the shared
 // database, plus a trailing totals row.
-func gatherProjects(ctx context.Context, q Querier, since int64) ([]Project, error) {
+func gatherProjects(ctx context.Context, q Querier, since int64) ([]stats.Project, error) {
 	dbRows, err := q.ProjectStatsSince(ctx, since)
 	if err != nil {
 		return nil, fmt.Errorf("stats: gather project stats: %w", err)
 	}
 
-	rows := make([]Project, 0, len(dbRows))
-	totals := Project{Path: "TOTAL"}
+	rows := make([]stats.Project, 0, len(dbRows))
+	totals := stats.Project{Path: "TOTAL"}
 	for _, r := range dbRows {
 		promptTokens, _ := CoerceInt64(r.PromptTokens)
 		completionTokens, _ := CoerceInt64(r.CompletionTokens)
 		timeSeconds, _ := CoerceInt64(r.TimeSeconds)
 		cost, _ := CoerceFloat64(r.Cost)
 
-		row := Project{
+		row := stats.Project{
 			Path:             r.ProjectPath,
 			Sessions:         r.Sessions,
 			PromptTokens:     promptTokens,
@@ -376,14 +328,14 @@ func gatherProjects(ctx context.Context, q Querier, since int64) ([]Project, err
 // ComputeSkills converts raw skill-load rows (whose aggregate columns come
 // back as interface{} because sqlc cannot infer a static type across the
 // json_each/json_extract join) into typed rows.
-func ComputeSkills(rows []db.ListSkillLoadsSinceRow) []Skill {
-	result := make([]Skill, 0, len(rows))
+func ComputeSkills(rows []db.ListSkillLoadsSinceRow) []stats.Skill {
+	result := make([]stats.Skill, 0, len(rows))
 	for _, r := range rows {
 		name, ok := r.SkillName.(string)
 		if !ok || name == "" {
 			continue
 		}
-		s := Skill{
+		s := stats.Skill{
 			Name:         name,
 			LoadCount:    r.LoadCount,
 			SessionCount: r.SessionCount,

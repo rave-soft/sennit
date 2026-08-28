@@ -17,7 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/herdr"
-	"github.com/rave-soft/sennit/internal/history"
+	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/lsp"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
@@ -65,7 +65,7 @@ type appServices struct {
 	// Sessions()/Messages()/Permissions() accessors, not as fields.
 	sessions    sessionstore.Service
 	messages    messagestore.Service
-	History     history.Service
+	History     historystore.Service
 	permissions permission.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
@@ -169,7 +169,7 @@ func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skil
 		sessions:         sessionstore.NewService(q, conn, store.WorkingDir(), sessionstore.WithTelemetry(event.NewSessionTelemetry())),
 		messages:         messagestore.NewService(q),
 		queries:          q,
-		History:          history.NewService(q, conn),
+		History:          historystore.NewService(q, conn),
 		permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		Questions:        question.NewService(),
 		FileTracker:      filetracker.NewService(q, store.WorkingDir()),

@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/stats"
+	"github.com/rave-soft/sennit/internal/stats/gather"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -241,7 +242,7 @@ func TestComputeModelStats_ExactAndApproximateAttribution(t *testing.T) {
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	snap, err := stats.Gather(t.Context(), q, stats.Request{
+	snap, err := gather.Gather(t.Context(), q, stats.Request{
 		Scope: stats.ScopeProject, ProjectPath: testProjectPath, Since: since,
 	})
 	require.NoError(t, err)
@@ -286,7 +287,7 @@ func TestComputeAgentStats_GroupsByTitle(t *testing.T) {
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	snap, err := stats.Gather(t.Context(), q, stats.Request{
+	snap, err := gather.Gather(t.Context(), q, stats.Request{
 		Scope: stats.ScopeProject, ProjectPath: testProjectPath, Since: since,
 	})
 	require.NoError(t, err)
@@ -323,7 +324,7 @@ func TestComputeSkillStats_MatchesDoubleJSONExtract(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "the skill-loading tool_result message must be matched by the double json_extract query")
 
-	snap, err := stats.Gather(t.Context(), q, stats.Request{
+	snap, err := gather.Gather(t.Context(), q, stats.Request{
 		Scope: stats.ScopeProject, ProjectPath: testProjectPath, Since: since, WithSkills: true,
 	})
 	require.NoError(t, err)
@@ -445,7 +446,7 @@ func TestGatherAllProjectStats_GroupsByProjectWithoutLeaking(t *testing.T) {
 	since, err := statSince("7d")
 	require.NoError(t, err)
 
-	global, err := stats.Gather(t.Context(), q, stats.Request{Scope: stats.ScopeGlobal, Since: since})
+	global, err := gather.Gather(t.Context(), q, stats.Request{Scope: stats.ScopeGlobal, Since: since})
 	require.NoError(t, err)
 	rows := global.Projects
 	require.Len(t, rows, 3, "testProjectPath row, otherProjectPath row, and a trailing TOTAL row")
