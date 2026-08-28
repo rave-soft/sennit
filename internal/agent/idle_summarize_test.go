@@ -73,15 +73,26 @@ const idleConfig = `{"options":{"auto_summarize_idle":{"enabled":true,"context_t
 // waiting for the next turn to walk into the context window.
 func TestIdleSweep_SummarizesALargeSessionOnceItGoesQuiet(t *testing.T) {
 	f, sess := newIdleSweepFixture(t, idleConfig, 80_000)
-	f.dispatcher.markActivity(sess.ID)
-	marked, ok := f.dispatcher.lastActivity.Get(sess.ID)
-	require.True(t, ok)
+
+	// Seed the clock directly instead of through markActivity, and put it
+	// an hour back, so the re-mark asserted at the end is later by
+	// minutes rather than by however much time.Now() happened to advance
+	// between two adjacent calls. markActivity records time.Now(), while
+	// the sweep below is handed an artificial now — so with the mark
+	// taken here, "before" and "after" would be two time.Now() readings
+	// microseconds apart. On Linux the monotonic clock always separates
+	// those; on Windows time.Now() can return the same instant for both,
+	// and the strict After below then failed in CI for a reason that had
+	// nothing to do with the sweep. The sweep times are derived from the
+	// same base so the 4m window in idleConfig still decides the outcome.
+	marked := time.Now().Add(-time.Hour)
+	f.dispatcher.lastActivity.Set(sess.ID, marked)
 
 	// Still inside the idle window: the person may just be reading.
-	f.dispatcher.sweepIdleSessions(t.Context(), time.Now().Add(3*time.Minute))
+	f.dispatcher.sweepIdleSessions(t.Context(), marked.Add(3*time.Minute))
 	require.Empty(t, f.summarized, "a session idle for less than the window must be left alone")
 
-	f.dispatcher.sweepIdleSessions(t.Context(), time.Now().Add(5*time.Minute))
+	f.dispatcher.sweepIdleSessions(t.Context(), marked.Add(5*time.Minute))
 	require.Equal(t, []string{sess.ID}, f.summarized)
 
 	// And it restarted the idle clock on the way, so the session has to
