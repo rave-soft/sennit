@@ -1496,7 +1496,7 @@ func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
 	}
 	client.runtime.config = badCfg
 
-	prepare := client.files.prepareRestart()
+	prepare := client.files.prepareSync()
 	var candidate *clientGeneration
 	blockedSend := make(chan struct{})
 	largeSendDone := make(chan error, 1)

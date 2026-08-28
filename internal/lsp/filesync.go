@@ -127,28 +127,35 @@ func (f *filesync) closeAllFiles(ctx context.Context, gen *clientGeneration) {
 	}
 }
 
-// prepareRestart snapshots user-open files before the old generation is
-// closed. Markers are candidate-only bootstrap documents and are never added
-// to this snapshot. Candidate notifications remain isolated until publish.
+// prepareSync snapshots the user-open files, returning a closure that
+// syncs them onto a target generation once that generation is ready.
+// Markers are candidate-only bootstrap documents and are never added to
+// this snapshot. Candidate notifications remain isolated until publish.
 //
-// The two-layer closure is intentional, not incidental: prepareRestart
+// It serves both callers of the generation-sync path, which is why the
+// name says "sync" rather than "restart": Restart, where the snapshot is
+// the point (the old generation's open files must be carried across), and
+// WaitForServerReady on a first boot, where no old generation exists and
+// the snapshot is simply empty.
+//
+// The two-layer closure is intentional, not incidental: prepareSync
 // itself must run — and take its userFiles snapshot — before the old
 // generation is torn down, while the closure it returns runs later,
 // against the new candidate generation, only once that candidate has
 // initialized. Flattening the two into one call would force the snapshot
 // to happen at candidate-ready time instead, after the old generation (and
 // the files it had open) may already be gone.
-func (f *filesync) prepareRestart() func(context.Context, *clientGeneration) (func(), error) {
+func (f *filesync) prepareSync() func(context.Context, *clientGeneration) (func(), error) {
 	userFiles := make(map[string]*OpenFileInfo)
 	for uri, info := range f.files.Seq2() {
 		userFiles[uri] = info
 	}
 	return func(ctx context.Context, gen *clientGeneration) (func(), error) {
-		return f.prepareRestartOn(ctx, gen, userFiles)
+		return f.prepareSyncOn(ctx, gen, userFiles)
 	}
 }
 
-func (f *filesync) prepareRestartOn(ctx context.Context, gen *clientGeneration, userFiles map[string]*OpenFileInfo) (func(), error) {
+func (f *filesync) prepareSyncOn(ctx context.Context, gen *clientGeneration, userFiles map[string]*OpenFileInfo) (func(), error) {
 	userURIs := make([]string, 0, len(userFiles))
 	for uri := range userFiles {
 		userURIs = append(userURIs, uri)

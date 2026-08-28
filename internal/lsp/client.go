@@ -174,7 +174,7 @@ func (c *Client) Close(ctx context.Context) error {
 // generation — which is dead but coherent — so a failed restart can never
 // leave a killed candidate published as current.
 func (c *Client) Restart() error {
-	return c.runtime.restart(c.diagnostics, c.files.prepareRestart())
+	return c.runtime.restart(c.diagnostics, c.files.prepareSync())
 }
 
 // GetServerState returns the current state of the LSP server
@@ -219,7 +219,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	c.runtime.mu.Lock()
 	defer c.runtime.mu.Unlock()
 	gen := c.runtime.currentGeneration()
-	prepare := c.files.prepareRestart()
+	prepare := c.files.prepareSync()
 	commit, err := prepare(ctx, gen)
 	if err != nil {
 		return err

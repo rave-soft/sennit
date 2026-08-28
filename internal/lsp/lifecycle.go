@@ -242,6 +242,14 @@ func (r *runtime) Kill() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	gen := r.currentGeneration()
+	// A runtime straight from newRuntime has no generation until
+	// publishInitial installs one. New never hands out a *Client before
+	// that, so production cannot reach this with a nil gen — but nothing
+	// in the type enforces it, and Shutdown right below already guards
+	// the same read. Guarding both keeps them from disagreeing.
+	if gen == nil {
+		return
+	}
 	gen.client.Kill()
 	gen.markDead()
 }
