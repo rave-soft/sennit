@@ -2,6 +2,8 @@ package permission
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1287,4 +1289,178 @@ func TestPermissionService_ActiveRequestFollowsTheQueue(t *testing.T) {
 		return ok && next.ID != first.ID
 	}, 5*time.Second, 5*time.Millisecond,
 		"once the current request resolves, the next one becomes the recoverable one")
+}
+
+// grantPersistentFor drives one Request call to completion with
+// GrantPersistent, so the caller can then observe whether a follow-up
+// request is auto-approved under the grant this recorded.
+func grantPersistentFor(t *testing.T, service Service, events <-chan pubsub.Event[PermissionRequest], req CreatePermissionRequest) {
+	t.Helper()
+
+	var wg sync.WaitGroup
+	var granted bool
+	wg.Go(func() {
+		granted, _ = service.Request(t.Context(), req)
+	})
+
+	var pending PermissionRequest
+	select {
+	case ev := <-events:
+		pending = ev.Payload
+	case <-time.After(2 * time.Second):
+		t.Fatal("request was never published")
+	}
+	require.True(t, service.GrantPersistent(pending))
+	wg.Wait()
+	require.True(t, granted, "the granting request itself must be granted")
+}
+
+// denyNext drains one published request and denies it, for a follow-up
+// request in these tests that is expected NOT to auto-approve.
+func denyNext(t *testing.T, service Service, events <-chan pubsub.Event[PermissionRequest]) {
+	t.Helper()
+	select {
+	case ev := <-events:
+		require.True(t, service.Deny(ev.Payload))
+	case <-time.After(2 * time.Second):
+		t.Fatal("follow-up request was auto-approved; it should have been re-prompted")
+	}
+}
+
+// TestPermissionService_PersistentGrantKeyIsPathScoped covers the fix for
+// a persistent grant ("allow for this session") being recorded against the
+// containing directory instead of the exact path the user was shown. That
+// widening meant approving one file under a tool+action pair silently
+// approved every other file in the same directory for the rest of the
+// session.
+func TestPermissionService_PersistentGrantKeyIsPathScoped(t *testing.T) {
+	t.Parallel()
+
+	t.Run("grant for one file does not auto-approve a sibling file", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+
+		grantPersistentFor(t, service, events, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-1", ToolName: "edit",
+			Action: "edit", Path: filepath.Join(dir, "a.txt"),
+		})
+
+		var wg sync.WaitGroup
+		var granted bool
+		wg.Go(func() {
+			granted, _ = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID: "s1", ToolCallID: "call-2", ToolName: "edit",
+				Action: "edit", Path: filepath.Join(dir, "b.txt"),
+			})
+		})
+		denyNext(t, service, events)
+		wg.Wait()
+		assert.False(t, granted, "a grant on a.txt must not cover b.txt in the same directory")
+	})
+
+	t.Run("grant for a file auto-approves the identical file again", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+
+		path := filepath.Join(dir, "a.txt")
+		grantPersistentFor(t, service, events, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-1", ToolName: "edit",
+			Action: "edit", Path: path,
+		})
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "edit",
+			Action: "edit", Path: path,
+		})
+		require.NoError(t, err)
+		assert.True(t, granted, "a repeat request for the exact same file must be auto-approved")
+	})
+
+	t.Run("grant recorded before the file exists still applies once it is created", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+
+		// This is the regression the old os.Stat-based widening was
+		// papering over: the grant must not depend on whether the path
+		// existed on disk at request time.
+		path := filepath.Join(dir, "new.txt")
+		grantPersistentFor(t, service, events, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-1", ToolName: "write",
+			Action: "write", Path: path,
+		})
+
+		require.NoError(t, os.WriteFile(path, []byte("hello"), 0o644))
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "write",
+			Action: "write", Path: path,
+		})
+		require.NoError(t, err)
+		assert.True(t, granted, "the grant must still apply once the file exists")
+	})
+
+	t.Run("relative and absolute spellings of the same file share a grant", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+
+		grantPersistentFor(t, service, events, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-1", ToolName: "edit",
+			Action: "edit", Path: "a.txt",
+		})
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "edit",
+			Action: "edit", Path: filepath.Join(dir, "a.txt"),
+		})
+		require.NoError(t, err)
+		assert.True(t, granted, "a relative grant must match the equivalent absolute request")
+	})
+
+	t.Run("absolute path with .. canonicalizes to the same grant", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+
+		grantPersistentFor(t, service, events, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-1", ToolName: "edit",
+			Action: "edit", Path: filepath.Join(dir, "sub", "..", "a.txt"),
+		})
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "edit",
+			Action: "edit", Path: filepath.Join(dir, "a.txt"),
+		})
+		require.NoError(t, err)
+		assert.True(t, granted, "an uncleaned absolute path must canonicalize to the same key")
+	})
+
+	t.Run("a directory-shaped tool keeps its directory-scoped grant", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+
+		// bash (and ls) pass their working directory as Path, not a file:
+		// narrowing the grant key must not change behavior for them.
+		grantPersistentFor(t, service, events, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-1", ToolName: "bash",
+			Action: "execute", Path: dir,
+		})
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "bash",
+			Action: "execute", Path: dir,
+		})
+		require.NoError(t, err)
+		assert.True(t, granted, "a repeat command in the same working directory must still auto-approve")
+	})
 }

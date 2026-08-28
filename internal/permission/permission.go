@@ -2,7 +2,6 @@ package permission
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -373,29 +372,32 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 
 	// A relative path is relative to the workspace, not to the process
-	// cwd — resolving it before the Stat and before it becomes the
-	// persistent-grant key keeps that key canonical, so a grant recorded
-	// for a relative spelling matches the later absolute request for the
-	// same file (and never a same-named file elsewhere).
+	// cwd — resolving it before it becomes the persistent-grant key keeps
+	// that key canonical, so a grant recorded for a relative spelling
+	// matches the later absolute request for the same file (and never a
+	// same-named file elsewhere). An absolute path is Cleaned for the same
+	// reason: "/a/b/../c" and "/a/c" must key to the same grant.
+	//
+	// The key is the path itself, not its containing directory: it must
+	// not depend on whether the path happens to exist on disk right now
+	// (a Stat-based check here previously widened every file grant to its
+	// whole directory, and did so specifically to dodge the disagreement
+	// an existence check produces between a request for a file that does
+	// not exist yet and the next request for the same, now-created file —
+	// see the tests for that regression). A directory-shaped tool (bash, ls)
+	// still passes its working directory in opts.Path, so its key is
+	// still that directory; only file-shaped tools get a narrower grant.
 	path := opts.Path
 	if path == "" || path == "." {
 		path = s.workingDir
 	} else if !filepath.IsAbs(path) {
 		path = filepath.Join(s.workingDir, path)
-	}
-	// The key is the containing directory for anything that is not a
-	// directory itself — including a path that does not exist yet. Keying
-	// a missing path on itself made the grant recorded for a file the
-	// agent was about to create disagree with the one looked up on the
-	// next write to it, once the file existed: the person was asked for
-	// the same file twice, having already said "allow for this session".
-	dir := path
-	if fileInfo, err := os.Stat(path); err != nil || !fileInfo.IsDir() {
-		dir = filepath.Dir(path)
+	} else {
+		path = filepath.Clean(path)
 	}
 	permission := PermissionRequest{
 		ID:          uuid.New().String(),
-		Path:        dir,
+		Path:        path,
 		SessionID:   opts.SessionID,
 		ToolCallID:  opts.ToolCallID,
 		ToolName:    opts.ToolName,
