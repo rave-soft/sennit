@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/shell"
 )
 
@@ -29,13 +30,11 @@ type BashParams struct {
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait before automatically moving the command to a background job (default: 60, max: 600)"`
 }
 
-type BashPermissionsParams struct {
-	Description         string `json:"description"`
-	Command             string `json:"command"`
-	WorkingDir          string `json:"working_dir"`
-	RunInBackground     bool   `json:"run_in_background"`
-	AutoBackgroundAfter int    `json:"auto_background_after"`
-}
+// BashPermissionsParams is defined in proto (the leaf package both proto
+// and tools can depend on) so proto.BashPermissionsParams and
+// tools.BashPermissionsParams stay the same Go type; see the comment in
+// internal/proto/tools.go.
+type BashPermissionsParams = proto.BashPermissionsParams
 
 type BashResponseMetadata struct {
 	StartTime        int64  `json:"start_time"`

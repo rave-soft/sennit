@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 type LSParams struct {
@@ -24,12 +25,9 @@ type LSParams struct {
 	Cursor string   `json:"cursor,omitempty" description:"Stable continuation token"`
 }
 
-type LSPermissionsParams struct {
-	Path   string   `json:"path"`
-	Ignore []string `json:"ignore"`
-	Depth  int      `json:"depth"`
-	Cursor string   `json:"cursor"`
-}
+// LSPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type LSPermissionsParams = proto.LSPermissionsParams
 
 type NodeType string
 

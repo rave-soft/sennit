@@ -17,12 +17,15 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 const (
-	GitStatusToolName   = "git_status"
-	GitDiffToolName     = "git_diff"
-	GitLogToolName      = "git_log"
+	// GitStatusToolName, GitDiffToolName, and GitLogToolName are defined
+	// in proto; see the comment on BashPermissionsParams in bash.go.
+	GitStatusToolName   = proto.GitStatusToolName
+	GitDiffToolName     = proto.GitDiffToolName
+	GitLogToolName      = proto.GitLogToolName
 	defaultGitOutputCap = 10 << 20
 	defaultGitSpoolCap  = 1 << 30
 )

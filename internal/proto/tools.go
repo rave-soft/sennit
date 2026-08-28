@@ -1,17 +1,19 @@
 package proto
 
-// The schema for per-tool permission parameters is owned by the tool
-// itself, not duplicated here. We alias the canonical types so there is
-// exactly one source of truth and so values survive a JSON round-trip
-// as the same Go type the UI asserts on.
-import "github.com/rave-soft/sennit/internal/agent/tools"
+// Per-tool permission parameter types are defined here, in the leaf
+// package, and aliased from internal/agent/tools. That direction (rather
+// than tools defining them and proto aliasing back) keeps proto free of
+// the tools package's heavy dependency graph while preserving type
+// identity: the permission dialog holds a value the agent constructed as
+// tools.*PermissionsParams and asserts on proto.*PermissionsParams, which
+// only works if both names denote the same Go type.
 
 const BashToolName = "bash"
 
 const (
-	GitStatusToolName = tools.GitStatusToolName
-	GitDiffToolName   = tools.GitDiffToolName
-	GitLogToolName    = tools.GitLogToolName
+	GitStatusToolName = "git_status"
+	GitDiffToolName   = "git_diff"
+	GitLogToolName    = "git_log"
 )
 
 // BashParams represents the parameters for the bash tool.
@@ -24,7 +26,13 @@ type BashParams struct {
 }
 
 // BashPermissionsParams represents the permission parameters for the bash tool.
-type BashPermissionsParams = tools.BashPermissionsParams
+type BashPermissionsParams struct {
+	Description         string `json:"description"`
+	Command             string `json:"command"`
+	WorkingDir          string `json:"working_dir"`
+	RunInBackground     bool   `json:"run_in_background"`
+	AutoBackgroundAfter int    `json:"auto_background_after"`
+}
 
 // BashResponseMetadata represents the metadata for a bash tool response.
 type BashResponseMetadata struct {
@@ -52,7 +60,11 @@ type DownloadParams struct {
 }
 
 // DownloadPermissionsParams represents the permission parameters for the download tool.
-type DownloadPermissionsParams = tools.DownloadPermissionsParams
+type DownloadPermissionsParams struct {
+	URL      string `json:"url"`
+	FilePath string `json:"file_path"`
+	Timeout  int    `json:"timeout,omitempty"`
+}
 
 const EditToolName = "edit"
 
@@ -65,7 +77,11 @@ type EditParams struct {
 }
 
 // EditPermissionsParams represents the permission parameters for the edit tool.
-type EditPermissionsParams = tools.EditPermissionsParams
+type EditPermissionsParams struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+}
 
 // EditResponseMetadata represents the metadata for an edit tool response.
 type EditResponseMetadata struct {
@@ -85,14 +101,21 @@ type FetchParams struct {
 }
 
 // FetchPermissionsParams represents the permission parameters for the fetch tool.
-type FetchPermissionsParams = tools.FetchPermissionsParams
+type FetchPermissionsParams struct {
+	URL     string `json:"url"`
+	Format  string `json:"format"`
+	Timeout int    `json:"timeout,omitempty"`
+}
 
 // AgenticFetchToolName is the name of the agentic_fetch tool.
-const AgenticFetchToolName = tools.AgenticFetchToolName
+const AgenticFetchToolName = "agentic_fetch"
 
 // AgenticFetchPermissionsParams represents the permission parameters for the
 // agentic_fetch tool.
-type AgenticFetchPermissionsParams = tools.AgenticFetchPermissionsParams
+type AgenticFetchPermissionsParams struct {
+	URL    string `json:"url,omitempty"`
+	Prompt string `json:"prompt"`
+}
 
 const GlobToolName = "glob"
 
@@ -136,7 +159,12 @@ type LSParams struct {
 }
 
 // LSPermissionsParams represents the permission parameters for the ls tool.
-type LSPermissionsParams = tools.LSPermissionsParams
+type LSPermissionsParams struct {
+	Path   string   `json:"path"`
+	Ignore []string `json:"ignore"`
+	Depth  int      `json:"depth"`
+	Cursor string   `json:"cursor"`
+}
 
 // LSResponseMetadata represents the metadata for an ls tool response.
 type LSResponseMetadata struct {
@@ -160,7 +188,11 @@ type MultiEditParams struct {
 }
 
 // MultiEditPermissionsParams represents the permission parameters for the multi-edit tool.
-type MultiEditPermissionsParams = tools.MultiEditPermissionsParams
+type MultiEditPermissionsParams struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+}
 
 // MultiEditResponseMetadata represents the metadata for a multi-edit tool response.
 type FailedEdit struct {
@@ -178,11 +210,11 @@ type MultiEditResponseMetadata struct {
 }
 
 const (
-	ReadToolName = tools.ReadToolName
+	ReadToolName = "read"
 	// LegacyReadToolName is the pre-rename name of the read tool, still
-	// present in sessions recorded before the rename. See
-	// [tools.LegacyReadToolName].
-	LegacyReadToolName = tools.LegacyReadToolName
+	// present in sessions recorded before the rename. History renderers
+	// and the config loader both keep accepting it.
+	LegacyReadToolName = "view"
 )
 
 // ReadParams represents the parameters for the read tool.
@@ -193,7 +225,12 @@ type ReadParams struct {
 }
 
 // ReadPermissionsParams represents the permission parameters for the read tool.
-type ReadPermissionsParams = tools.ReadPermissionsParams
+type ReadPermissionsParams struct {
+	FilePath string `json:"file_path"`
+	Offset   int    `json:"offset"`
+	Limit    int    `json:"limit"`
+	Cursor   string `json:"cursor"`
+}
 
 // ReadResponseMetadata represents the metadata for a read tool response.
 type ReadResourceType string
@@ -217,4 +254,8 @@ type WriteParams struct {
 }
 
 // WritePermissionsParams represents the permission parameters for the write tool.
-type WritePermissionsParams = tools.WritePermissionsParams
+type WritePermissionsParams struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+}

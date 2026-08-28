@@ -17,6 +17,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 type EditParams struct {
@@ -26,11 +27,9 @@ type EditParams struct {
 	ReplaceAll bool   `json:"replace_all,omitempty" description:"Replace all occurrences of old_string (default false)"`
 }
 
-type EditPermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
-}
+// EditPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type EditPermissionsParams = proto.EditPermissionsParams
 
 type EditResponseMetadata struct {
 	Additions  int    `json:"additions"`

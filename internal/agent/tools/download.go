@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 type DownloadParams struct {
@@ -25,11 +26,9 @@ type DownloadParams struct {
 	Timeout  int    `json:"timeout,omitempty" description:"Optional timeout in seconds (max 600)"`
 }
 
-type DownloadPermissionsParams struct {
-	URL      string `json:"url"`
-	FilePath string `json:"file_path"`
-	Timeout  int    `json:"timeout,omitempty"`
-}
+// DownloadPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type DownloadPermissionsParams = proto.DownloadPermissionsParams
 
 const DownloadToolName = "download"
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 //go:embed write.md
@@ -25,11 +26,9 @@ type WriteParams struct {
 	Content  string `json:"content" description:"The content to write to the file"`
 }
 
-type WritePermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
-}
+// WritePermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type WritePermissionsParams = proto.WritePermissionsParams
 
 type WriteResponseMetadata struct {
 	Diff      string `json:"diff"`

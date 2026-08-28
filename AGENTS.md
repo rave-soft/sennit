@@ -93,16 +93,24 @@ internal/
     `workspace/app_workspace.go` and named throughout `Workspace`'s thread
     methods, and `internal/app/threadspawn/protoconv.go` converts
     `thread.Thread` into it. Keep it.
-  - `tools.*PermissionsParams` **stays aliased, but not for the reason this
-    section used to give.** The old text said consumers assert the concrete
-    type "after a JSON round trip". They do not: the permission dialog holds a
+  - `tools.*PermissionsParams` **stays aliased, but the direction is now
+    `proto` → `tools`, not the other way round.** These structs are defined
+    in `proto` (a leaf package with a light dependency graph) and
+    `internal/agent/tools` aliases them back, e.g.
+    `type BashPermissionsParams = proto.BashPermissionsParams`. That
+    direction was chosen (2026-08-28) so `proto` no longer has to import
+    `tools` — the last remaining path by which `internal/ui` linked
+    `internal/db` — while the permission dialog still holds a
     `permission.PermissionRequest` built in-process and asserts on
-    `proto.*PermissionsParams`, which succeeds only because the alias makes it
-    the same Go type as the `tools.*` value the agent constructed. The alias
-    is load-bearing for **type identity**, and breaking it would break the
-    dialog's per-tool rendering (see `ui/dialog/permissions.go`'s registry and
-    `TestDiffContentRenderer_GuardStopsBeforeToDiff`). The JSON path that
-    rationale referred to — `proto.PermissionRequest.UnmarshalJSON` and
+    `proto.*PermissionsParams`, which succeeds only because the alias makes
+    it the same Go type as the `tools.*` value the agent constructed. The
+    alias is load-bearing for **type identity**, and breaking it (e.g. by
+    replacing it with a look-alike struct copy) would break the dialog's
+    per-tool rendering (see `ui/dialog/permissions.go`'s registry and
+    `TestDiffContentRenderer_GuardStopsBeforeToDiff`) — this is enforced by
+    compile-time identity assertions in
+    `internal/agent/tools/proto_identity_test.go`. The JSON path that the
+    old rationale referred to — `proto.PermissionRequest.UnmarshalJSON` and
     `unmarshalToolParams` in `proto/permission.go` — is real code but
     unreachable: nothing constructs a `proto.PermissionRequest`.
   - The following are **dead** and should be deleted rather than defended.

@@ -14,6 +14,7 @@ import (
 	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 type MultiEditOperation struct {
@@ -27,11 +28,9 @@ type MultiEditParams struct {
 	Edits    []MultiEditOperation `json:"edits" description:"Array of edit operations to perform sequentially on the file"`
 }
 
-type MultiEditPermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
-}
+// MultiEditPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type MultiEditPermissionsParams = proto.MultiEditPermissionsParams
 
 type FailedEdit struct {
 	Index int                `json:"index"`

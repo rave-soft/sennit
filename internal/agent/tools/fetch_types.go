@@ -1,7 +1,9 @@
 package tools
 
+import "github.com/rave-soft/sennit/internal/proto"
+
 // AgenticFetchToolName is the name of the agentic fetch tool.
-const AgenticFetchToolName = "agentic_fetch"
+const AgenticFetchToolName = proto.AgenticFetchToolName
 
 // WebFetchToolName is the name of the web_fetch tool.
 const WebFetchToolName = "web_fetch"
@@ -18,11 +20,9 @@ type AgenticFetchParams struct {
 	Prompt string `json:"prompt" description:"The prompt describing what information to find or extract"`
 }
 
-// AgenticFetchPermissionsParams defines the permission parameters for the agentic fetch tool.
-type AgenticFetchPermissionsParams struct {
-	URL    string `json:"url,omitempty"`
-	Prompt string `json:"prompt"`
-}
+// AgenticFetchPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type AgenticFetchPermissionsParams = proto.AgenticFetchPermissionsParams
 
 // WebFetchParams defines the parameters for the web_fetch tool.
 type WebFetchParams struct {
@@ -53,9 +53,6 @@ type FetchParams struct {
 	Timeout int    `json:"timeout,omitempty" description:"Optional timeout in seconds (max 120)"`
 }
 
-// FetchPermissionsParams defines the permission parameters for the simple fetch tool.
-type FetchPermissionsParams struct {
-	URL     string `json:"url"`
-	Format  string `json:"format"`
-	Timeout int    `json:"timeout,omitempty"`
-}
+// FetchPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type FetchPermissionsParams = proto.FetchPermissionsParams

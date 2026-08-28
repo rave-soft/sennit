@@ -15,6 +15,7 @@ import (
 	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 type ReplaceSymbolParams struct {
@@ -37,12 +38,10 @@ type ReplaceSymbolResponseMetadata struct {
 	Action     string `json:"action"`
 }
 
-// ReplaceSymbolPermissionsParams carries diff data for the permission dialog.
-type ReplaceSymbolPermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content"`
-	NewContent string `json:"new_content"`
-}
+// ReplaceSymbolPermissionsParams carries diff data for the permission
+// dialog. Defined in proto; see the comment on BashPermissionsParams in
+// bash.go.
+type ReplaceSymbolPermissionsParams = proto.ReplaceSymbolPermissionsParams
 
 func NewReplaceSymbolTool(
 	lspManager *lsp.Manager,

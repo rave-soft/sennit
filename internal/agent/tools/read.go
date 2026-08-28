@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/skills"
 )
 
@@ -49,12 +50,9 @@ type ReadParams struct {
 	Cursor   string `json:"cursor,omitempty" description:"Stable continuation token returned by a previous read"`
 }
 
-type ReadPermissionsParams struct {
-	FilePath string `json:"file_path"`
-	Offset   int    `json:"offset"`
-	Limit    int    `json:"limit"`
-	Cursor   string `json:"cursor"`
-}
+// ReadPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type ReadPermissionsParams = proto.ReadPermissionsParams
 
 type ReadResourceType string
 
@@ -76,14 +74,16 @@ type ReadResponseMetadata struct {
 }
 
 const (
-	ReadToolName = "read"
-	// LegacyReadToolName is what this tool was called before it took the
-	// name the UI had always shown for it ("Read"), which is also the
-	// name every other agent in the ecosystem uses. Sessions recorded
-	// before the rename still hold tool calls under the old name and user
-	// configs still list it, so the history renderers and the config
-	// loader both keep accepting it.
-	LegacyReadToolName = "view"
+	// ReadToolName and LegacyReadToolName are defined in proto; see the
+	// comment on BashPermissionsParams in bash.go. LegacyReadToolName is
+	// what this tool was called before it took the name the UI had
+	// always shown for it ("Read"), which is also the name every other
+	// agent in the ecosystem uses. Sessions recorded before the rename
+	// still hold tool calls under the old name and user configs still
+	// list it, so the history renderers and the config loader both keep
+	// accepting it.
+	ReadToolName       = proto.ReadToolName
+	LegacyReadToolName = proto.LegacyReadToolName
 	MaxReadSize        = 200 * 1024 // 200KB
 	// DefaultReadLimit matches Claude Code's Read default; 200 (Sennit's
 	// old default) made models page through files in tiny chunks, wasting

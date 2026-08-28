@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/brand"
 )
 
@@ -195,4 +194,8 @@ type DefinitionResponseMetadata struct {
 	Content  string `json:"content"`
 }
 
-type ReplaceSymbolPermissionsParams = tools.ReplaceSymbolPermissionsParams
+type ReplaceSymbolPermissionsParams struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content"`
+	NewContent string `json:"new_content"`
+}
