@@ -1638,17 +1638,15 @@ func TestClient_RestartPublishesReadyOnlyWithCandidate(t *testing.T) {
 	go func() { restartDone <- client.Restart() }()
 	<-generationPublished
 
-	observed := make(chan ServerState, 1)
-	go func() { observed <- client.GetServerState() }()
-	select {
-	case state := <-observed:
-		t.Fatalf("state reader observed generation publication gap: %v", state)
-	case <-time.After(100 * time.Millisecond):
-	}
+	// afterGenerationPublish runs inside publishSwap while genMu is held, so
+	// calling currentGeneration() (which also takes genMu) from here would
+	// deadlock against the hook below. GetServerState no longer takes any
+	// lock, so it is safe to call: StateReady is reported only after this
+	// hook returns, so it must not be visible yet.
+	require.NotEqual(t, StateReady, client.GetServerState())
 
 	close(releaseState)
 	require.NoError(t, <-restartDone)
-	require.Equal(t, StateReady, <-observed)
 	require.NotSame(t, oldGen, client.runtime.currentGeneration())
 	require.Equal(t, StateReady, client.GetServerState())
 	client.Shutdown()

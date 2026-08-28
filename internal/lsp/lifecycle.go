@@ -176,12 +176,6 @@ func (r *runtime) currentGeneration() *clientGeneration {
 	return gen
 }
 
-func (r *runtime) currentGenerationLocked() *clientGeneration {
-	r.genMu.Lock()
-	defer r.genMu.Unlock()
-	return r.gen
-}
-
 // initialize performs the LSP initialize handshake on the given
 // generation. Callers must hold r.mu; the handler registration is part of
 // the same critical section as the handshake because servers can send
@@ -247,7 +241,7 @@ func (r *runtime) waitForServerReady(ctx context.Context, gen *clientGeneration,
 func (r *runtime) Kill() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	gen := r.currentGenerationLocked()
+	gen := r.currentGeneration()
 	gen.client.Kill()
 	gen.markDead()
 }
@@ -312,7 +306,7 @@ func (r *runtime) restart(
 		return errClientShutdown
 	}
 
-	oldGen := r.currentGenerationLocked()
+	oldGen := r.currentGeneration()
 	r.reportState(StateStopped)
 
 	closeCtx, cancelClose := context.WithTimeout(context.Background(), 10*time.Second)
@@ -348,7 +342,7 @@ func (r *runtime) restart(
 	// The candidate is dead and was never published: cancel its context so
 	// nothing holds the process open.
 	defer func() {
-		if gen != r.currentGenerationLocked() {
+		if gen != r.currentGeneration() {
 			gen.cancel()
 		}
 	}()

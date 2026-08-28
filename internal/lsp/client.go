@@ -44,9 +44,10 @@ type Client struct {
 	config      config.LSPConfig
 	// serverState is written by the manager, the runtime lifecycle and the
 	// façade, and read by the manager and the UI from any goroutine, so it
-	// must be atomic. The zero value (StateUnstarted) is never published by
-	// this code, so readers can distinguish "never started" from an actual
-	// state by the enum value itself.
+	// must be atomic; no other lock is taken around it. The zero value
+	// (StateUnstarted) is never published by this code, so readers can
+	// distinguish "never started" from an actual state by the enum value
+	// itself.
 	serverState atomic.Int32
 	name        string
 	fileTypes   []string
@@ -100,7 +101,7 @@ func New(
 func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
 	c.runtime.mu.Lock()
 	defer c.runtime.mu.Unlock()
-	gen := c.runtime.currentGenerationLocked()
+	gen := c.runtime.currentGeneration()
 	// Register handlers for requests the server may send during the
 	// initialize handshake itself (e.g. typescript-language-server issuing
 	// window/workDoneProgress/create while loading the project, before
@@ -182,13 +183,7 @@ func (c *Client) GetServerState() ServerState {
 	if c == nil {
 		return StateStarting
 	}
-	if c.runtime == nil {
-		return ServerState(c.serverState.Load())
-	}
-	c.runtime.genMu.Lock()
-	state := ServerState(c.serverState.Load())
-	c.runtime.genMu.Unlock()
-	return state
+	return ServerState(c.serverState.Load())
 }
 
 // SetServerState sets the current state of the LSP server
@@ -224,7 +219,7 @@ func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
 func (c *Client) WaitForServerReady(ctx context.Context) error {
 	c.runtime.mu.Lock()
 	defer c.runtime.mu.Unlock()
-	gen := c.runtime.currentGenerationLocked()
+	gen := c.runtime.currentGeneration()
 	prepare := c.files.prepareRestart()
 	commit, err := prepare(ctx, gen)
 	if err != nil {

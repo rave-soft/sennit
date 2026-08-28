@@ -74,9 +74,7 @@ func newDiagnosticsStore(name string, active *clientGeneration) *diagnosticsStor
 		done:   make(chan struct{}),
 	}
 	d.cond = sync.NewCond(&d.mu)
-	d.mu.Lock()
 	go d.dispatch()
-	d.mu.Unlock()
 	return d
 }
 
@@ -105,6 +103,7 @@ func (d *diagnosticsStore) dispatch() {
 			return
 		}
 		event := d.events[0]
+		d.events[0] = diagnosticEvent{}
 		d.events = d.events[1:]
 		d.inFlight = &event
 		hook := d.hook
@@ -343,17 +342,23 @@ func (d *diagnosticsStore) reset() {
 
 // GetDiagnosticCounts returns cached diagnostic counts by severity.
 // Uses the VersionedMap version to avoid recomputing on every call.
+//
+// The content and its version come from one Snapshot rather than from a
+// Version() call followed by a separate read: taken apart, a writer
+// landing between the two would stamp the cache with a version older than
+// the content it was computed from, so the next call would recompute
+// counts it already had.
 func (d *diagnosticsStore) getDiagnosticCounts() DiagnosticCounts {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	currentVersion := d.store.Version()
+	content, currentVersion := d.store.Snapshot()
 	if currentVersion == d.version {
 		return d.counts
 	}
 
 	// Recompute counts.
 	counts := DiagnosticCounts{}
-	for _, diags := range d.store.Seq2() {
+	for _, diags := range content {
 		for _, diag := range diags {
 			switch diag.Severity {
 			case protocol.SeverityError:
