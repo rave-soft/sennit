@@ -16,7 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
@@ -329,7 +329,7 @@ func TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees(t *testing.T) {
 	// holding exactly what a killed process leaves behind: an assistant
 	// turn with no Finish and a tool call with no result.
 	worktree := t.TempDir()
-	sessions := session.NewService(q, conn, worktree)
+	sessions := sessionstore.NewService(q, conn, worktree)
 	sess, err := sessions.Create(t.Context(), "thread session")
 	require.NoError(t, err)
 	_, err = NewStore(q, a.Store().WorkingDir()).Create(t.Context(), thread.CreateParams{

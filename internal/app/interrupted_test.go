@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +17,7 @@ import (
 // assistant message with a null finished_at, joined to its project), so a
 // fake would be testing the fake.
 type interruptedEnv struct {
-	sessions session.Service
+	sessions sessionstore.Service
 	messages messagestore.Service
 }
 
@@ -41,7 +42,7 @@ func newInterruptedEnv(t *testing.T) interruptedEnv {
 	require.NoError(t, err)
 	q := db.New(conn)
 	return interruptedEnv{
-		sessions: session.NewService(q, conn, projectPath),
+		sessions: sessionstore.NewService(q, conn, projectPath),
 		messages: messagestore.NewService(q),
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -62,7 +63,7 @@ type sessionFixtureIDs struct {
 // for tests that exercise the session subcommands, since sessionSetup
 // always connects there regardless of --data-dir) and seeds it with two
 // top-level sessions plus one agent-tool child session, going through
-// session.Service/message.Service the same way sessionSetup does rather
+// sessionstore.Service/message.Service the same way sessionSetup does rather
 // than raw SQL, so the fixture exercises the real write paths the CLI
 // commands read back through. projectPath must be whatever ResolveCwd will
 // resolve --cwd to, so the project-scoped List/GetLast queries see these
@@ -79,7 +80,7 @@ func sessionFixture(t *testing.T, dataDir, projectPath string) sessionFixtureIDs
 	q := sennitdb.New(conn)
 	ctx := t.Context()
 
-	sessSvc := session.NewService(q, conn, projectPath)
+	sessSvc := sessionstore.NewService(q, conn, projectPath)
 	msgSvc := messagestore.NewService(q)
 
 	older, err := sessSvc.Create(ctx, "Session Alpha")
@@ -175,7 +176,7 @@ func TestResolveSessionID_FullUUIDResolves(t *testing.T) {
 	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	q := sennitdb.New(conn)
-	svc := session.NewService(q, conn, "/proj")
+	svc := sessionstore.NewService(q, conn, "/proj")
 
 	sess, err := svc.Create(t.Context(), "target")
 	require.NoError(t, err)
@@ -194,7 +195,7 @@ func TestResolveSessionID_UniqueHashPrefixResolves(t *testing.T) {
 	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	q := sennitdb.New(conn)
-	svc := session.NewService(q, conn, "/proj")
+	svc := sessionstore.NewService(q, conn, "/proj")
 
 	sess, err := svc.Create(t.Context(), "target")
 	require.NoError(t, err)
@@ -214,7 +215,7 @@ func TestResolveSessionID_NotFound(t *testing.T) {
 	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	q := sennitdb.New(conn)
-	svc := session.NewService(q, conn, "/proj")
+	svc := sessionstore.NewService(q, conn, "/proj")
 
 	_, err = svc.Create(t.Context(), "target")
 	require.NoError(t, err)
@@ -259,14 +260,14 @@ func TestResolveSessionID_AmbiguousPrefixReportsMatches(t *testing.T) {
 	// top-level sessions, so both colliding rows must be top-level
 	// (parent_session_id IS NULL) with a controlled, literal ID -- which
 	// is why these are seeded directly through sennitdb rather than
-	// through session.Service.Create (which always assigns a random UUID).
+	// through sessionstore.Service.Create (which always assigns a random UUID).
 	id1, id2, prefix := findHashCollision(t)
 	_, err = q.CreateSession(ctx, sennitdb.CreateSessionParams{ID: id1, Title: "one", ProjectPath: "/proj"})
 	require.NoError(t, err)
 	_, err = q.CreateSession(ctx, sennitdb.CreateSessionParams{ID: id2, Title: "two", ProjectPath: "/proj"})
 	require.NoError(t, err)
 
-	svc := session.NewService(q, conn, "/proj")
+	svc := sessionstore.NewService(q, conn, "/proj")
 	_, err = resolveSessionID(ctx, svc, prefix)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ambiguous")
@@ -452,7 +453,7 @@ func TestRunSessionDelete_DeletingParentCascadesToChild(t *testing.T) {
 	require.NoError(t, runSessionDelete(testCmd, []string{ids.Older}))
 
 	require.False(t, sessionRowExists(t, dataDir, ids.Older))
-	require.False(t, sessionRowExists(t, dataDir, ids.Child), "session.Service.Delete removes the whole subtree, not just the named row")
+	require.False(t, sessionRowExists(t, dataDir, ids.Child), "sessionstore.Service.Delete removes the whole subtree, not just the named row")
 	require.True(t, sessionRowExists(t, dataDir, ids.Newer), "an unrelated sibling session must survive")
 }
 

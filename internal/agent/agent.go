@@ -22,7 +22,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/version"
 	"golang.org/x/sync/errgroup"
 )
@@ -85,7 +85,7 @@ type sessionAgent struct {
 	tools              *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
-	sessions             session.Service
+	sessions             sessionstore.Service
 	messages             MessageService
 	disableAutoSummarize bool
 	autoSummarizeAt      int64
@@ -128,7 +128,7 @@ type SessionAgentOptions struct {
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	AutoSummarizeAt      int64
-	Sessions             session.Service
+	Sessions             sessionstore.Service
 	Messages             MessageService
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]

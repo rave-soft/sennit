@@ -10,7 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
 // The helpers in this file are the test-only stand-ins for the threadspawn
@@ -145,12 +145,12 @@ func (m *testMessageService) LastActivity(ctx context.Context, sessionID string)
 // NewTestSessionService adapts a real session service to the domain's
 // narrow [SessionService] view, as the composition seam does in
 // production (see threadspawn.NewSessionService).
-func NewTestSessionService(full session.Service) thread.SessionService {
+func NewTestSessionService(full sessionstore.Service) thread.SessionService {
 	return &testSessionService{full: full}
 }
 
 type testSessionService struct {
-	full session.Service
+	full sessionstore.Service
 }
 
 func (s *testSessionService) Create(ctx context.Context, title string) (thread.Session, error) {

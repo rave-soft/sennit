@@ -13,16 +13,17 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
-// getHookSessions wraps a session.Service and, from inside Get, invokes hook
+// getHookSessions wraps a sessionstore.Service and, from inside Get, invokes hook
 // once the underlying row has been read but before Get returns to the
 // caller. onStepFinish's own Get-then-SaveUsage span is exactly this window
 // - wrapping it lets a test land a concurrent cost write inside that window
 // deterministically, instead of racing real goroutines against a timing
 // accident.
 type getHookSessions struct {
-	session.Service
+	sessionstore.Service
 	hook func(ctx context.Context, sess session.Session)
 }
 
@@ -55,7 +56,7 @@ func TestOnStepFinish_ConcurrentCostWriteNotLost(t *testing.T) {
 
 	q := db.New(conn)
 	messages := messagestore.NewService(q, messagestore.WithDebounce(0))
-	realSessions := session.NewService(q, conn, "/test/project")
+	realSessions := sessionstore.NewService(q, conn, "/test/project")
 
 	sess, err := realSessions.Create(ctx, "cost race")
 	require.NoError(t, err)
@@ -118,7 +119,7 @@ func TestOnStepFinish_SessionLockRaceSafe(t *testing.T) {
 
 	q := db.New(conn)
 	messages := messagestore.NewService(q, messagestore.WithDebounce(0))
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 
 	sess, err := sessions.Create(ctx, "lock race")
 	require.NoError(t, err)

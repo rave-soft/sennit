@@ -7,7 +7,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/db"
 	. "github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +28,7 @@ func TestListBySessionIDs(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	root, err := sessions.Create(t.Context(), "root")
 	require.NoError(t, err)
 	child, err := sessions.CreateTaskSession(t.Context(), "child", root.ID, "child")
@@ -77,7 +77,7 @@ func TestListBySessionIDsSkipsCorruptMessage(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	root, err := sessions.Create(t.Context(), "root")
 	require.NoError(t, err)
 	svc := NewService(q)

@@ -1,9 +1,9 @@
 package event
 
-// sessionTelemetry adapts this package to session.TelemetrySink, the
-// narrow seam internal/session reports its lifecycle through. The
-// composition layer (internal/app and the session CLI commands) wires it
-// into the service.
+// sessionTelemetry adapts this package to sessionstore.TelemetrySink,
+// the narrow seam internal/session/store reports its lifecycle through.
+// The composition layer (internal/app and the session CLI commands)
+// wires it into the service.
 type sessionTelemetry struct{}
 
 // NewSessionTelemetry returns the session lifecycle sink backed by this

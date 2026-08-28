@@ -51,7 +51,7 @@ import (
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 )
@@ -82,7 +82,7 @@ type runtimeToolInputs struct {
 	history                 history.Service
 	filetracker             filetracker.Service
 	background              *shell.BackgroundShellManager
-	sessions                session.Service
+	sessions                sessionstore.Service
 	skillStates             []*skills.SkillState
 }
 

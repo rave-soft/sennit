@@ -16,7 +16,7 @@ import (
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,7 +43,7 @@ func newTestParentApp(t *testing.T) *app.App {
 // inserts real message rows, and the messages table has a FK to
 // sessions that fakeSessions (which fabricates a Session value without
 // persisting it) would violate.
-func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app.App, session.Service, messagestore.Service) {
+func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app.App, sessionstore.Service, messagestore.Service) {
 	t.Helper()
 	store := thread.NewStoreForTest(t)
 	mgr := thread.NewManager(thread.ManagerOptions{
@@ -60,7 +60,7 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app
 	conn, err := db.Connect(context.Background(), dataDir)
 	require.NoError(t, err)
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	messages := messagestore.NewService(q)
 
 	parentApp := app.NewForTest(context.Background())

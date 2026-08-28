@@ -25,7 +25,7 @@ import (
 	"github.com/rave-soft/sennit/internal/lsp"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 
@@ -39,7 +39,7 @@ import (
 // fakeEnv is an environment for testing.
 type fakeEnv struct {
 	workingDir  string
-	sessions    session.Service
+	sessions    sessionstore.Service
 	messages    messagestore.Service
 	permissions permission.Service
 	history     history.Service
@@ -107,7 +107,7 @@ func testEnvAt(t *testing.T, workingDir string) fakeEnv {
 	require.NoError(t, err)
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	messages := messagestore.NewService(q)
 
 	permissions := permission.NewPermissionService(workingDir, true, []string{})

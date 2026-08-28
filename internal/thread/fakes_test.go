@@ -27,6 +27,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
@@ -284,7 +285,7 @@ func (a *testRunCompletionBrokerAdapter) Publish(typ pubsub.EventType, v thread.
 
 // fakeSessions implements the session creation methods used by the manager.
 type fakeSessions struct {
-	session.Service
+	sessionstore.Service
 	mu             sync.Mutex
 	n              int
 	createdSession session.Session

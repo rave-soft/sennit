@@ -7,14 +7,15 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
-// fakeTodoSessions implements just enough of session.Service for the todos
+// fakeTodoSessions implements just enough of sessionstore.Service for the todos
 // tool: Get returns whatever was last written (or the seeded session), and
 // SetTodos/Save record writes.
 type fakeTodoSessions struct {
-	session.Service
+	sessionstore.Service
 	sess session.Session
 }
 

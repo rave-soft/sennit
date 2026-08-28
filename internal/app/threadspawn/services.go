@@ -9,7 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
@@ -88,7 +88,7 @@ func (a *AppWorkspaceAdapter) SendEvent(msg any) {
 // and with it internal/db, into internal/thread), so the full row is
 // converted to the domain view at this seam.
 type SessionAdapter struct {
-	full session.Service
+	full sessionstore.Service
 }
 
 func (a *SessionAdapter) Create(ctx context.Context, title string) (thread.Session, error) {

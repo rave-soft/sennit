@@ -30,6 +30,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 
 	// ui/chat is imported so `session show` (human output) renders messages
 	// with the exact same MessageItem pipeline the interactive TUI uses —
@@ -104,7 +105,7 @@ func init() {
 }
 
 type sessionServices struct {
-	sessions session.Service
+	sessions sessionstore.Service
 	messages messagestore.Service
 	cfg      *config.ConfigStore
 }
@@ -126,7 +127,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	}
 
 	svc := &sessionServices{
-		sessions: session.NewService(queries, conn, cfg.WorkingDir(), session.WithTelemetry(event.NewSessionTelemetry())),
+		sessions: sessionstore.NewService(queries, conn, cfg.WorkingDir(), sessionstore.WithTelemetry(event.NewSessionTelemetry())),
 		messages: messagestore.NewService(queries),
 		cfg:      cfg,
 	}

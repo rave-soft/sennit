@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
 //go:embed todos.md
@@ -40,7 +41,7 @@ type TodosResponseMetadata struct {
 	Total         int            `json:"total"`
 }
 
-func NewTodosTool(sessions session.Service) fantasy.AgentTool {
+func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		TodosToolName,
 		todosDescription,

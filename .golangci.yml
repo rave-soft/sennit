@@ -37,9 +37,9 @@ linters:
     depguard:
       rules:
         # C3 UI boundary inventory/rationale: the deny-list forbids orchestration and
-        # runtime packages (agent, thread, db, app). Remaining domain imports in
-        # internal/ui are allowed only as event/DTO contracts; all domain operations
-        # must go through the Workspace facade, never called directly.
+        # runtime packages (agent, thread, db, app, session/store). Remaining domain
+        # imports in internal/ui are allowed only as event/DTO contracts; all domain
+        # operations must go through the Workspace facade, never called directly.
         ui-boundary:
           files:
             - "**/internal/ui/**/*.go"
@@ -48,6 +48,7 @@ linters:
             - pkg: github.com/rave-soft/sennit/internal/thread
             - pkg: github.com/rave-soft/sennit/internal/db
             - pkg: github.com/rave-soft/sennit/internal/app
+            - pkg: github.com/rave-soft/sennit/internal/session/store
   disable:
     # Disabled since this config was inherited wholesale from the upstream
     # Crush/Braid config; no rationale for disabling it is on record.

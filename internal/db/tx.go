@@ -10,7 +10,7 @@ import (
 // committing when fn returns nil and rolling back otherwise (including
 // when fn panics, via conn.BeginTx's usual defer-Rollback pattern). It
 // factors out the begin/WithTx/commit-or-rollback boilerplate that gc,
-// session.Service.Delete and history.Service repeat by hand.
+// sessionstore.Service.Delete and history.Service repeat by hand.
 func InTx(ctx context.Context, conn *sql.DB, fn func(*Queries) error) error {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {

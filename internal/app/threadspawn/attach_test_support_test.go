@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
@@ -55,7 +56,7 @@ func initRepo(t *testing.T) string {
 // attachFakeSessions is the session-creation fake a thread's isolated
 // (or the parent's, for tasks) App is wired with during attach tests.
 type attachFakeSessions struct {
-	session.Service
+	sessionstore.Service
 	mu             sync.Mutex
 	n              int
 	createdSession session.Session

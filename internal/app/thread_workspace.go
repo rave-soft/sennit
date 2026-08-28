@@ -4,7 +4,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
 // These accessors exist so an *App satisfies thread.Workspace — the
@@ -52,7 +52,7 @@ func (app *App) setCoordinator(coordinator agent.Coordinator) {
 }
 
 // Sessions returns this workspace's session service.
-func (app *App) Sessions() session.Service { return app.sessions }
+func (app *App) Sessions() sessionstore.Service { return app.sessions }
 
 // Messages returns this workspace's message service.
 func (app *App) Messages() messagestore.Service { return app.messages }

@@ -23,6 +23,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
@@ -96,7 +97,7 @@ func newTestThreadStoreDB(t *testing.T) thread.Store {
 // interfaces). --
 
 type fakeThreadSessions struct {
-	session.Service
+	sessionstore.Service
 	mu    sync.Mutex
 	n     int
 	sesss map[string]session.Session

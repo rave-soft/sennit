@@ -338,7 +338,7 @@ func DeleteWith(ctx context.Context, conn *sql.DB, q *sennitdb.Queries, cutoff i
 }
 
 // DeleteSelected removes every row a Selection named: explicit per-table
-// deletes mirror session.Service.Delete's pattern rather than leaning
+// deletes mirror sessionstore.Service.Delete's pattern rather than leaning
 // solely on the schema's ON DELETE CASCADE, so gc keeps working even if a
 // future migration ever loosens those foreign keys.
 func DeleteSelected(ctx context.Context, q *sennitdb.Queries, selection Selection) error {

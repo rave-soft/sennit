@@ -14,7 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,7 +51,7 @@ func requireBranchGone(t *testing.T, repo, branch string) {
 // newTestManagerWithRealMessages wires a Manager whose parent App has a
 // real, sqlite-backed session and message service, so the note a discard
 // writes into the parent session's history can actually be read back.
-func newTestManagerWithRealMessages(t *testing.T, repo string) (*thread.Manager, *fakeSpawner, session.Service, messagestore.Service) {
+func newTestManagerWithRealMessages(t *testing.T, repo string) (*thread.Manager, *fakeSpawner, sessionstore.Service, messagestore.Service) {
 	t.Helper()
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
@@ -60,7 +60,7 @@ func newTestManagerWithRealMessages(t *testing.T, repo string) (*thread.Manager,
 	conn, err := db.Connect(context.Background(), dataDir)
 	require.NoError(t, err)
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	messages := messagestore.NewService(q)
 
 	parentApp := app.NewForTest(context.Background())

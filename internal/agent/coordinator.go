@@ -24,7 +24,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 )
@@ -131,7 +131,7 @@ func (p *coordinatorAgentPort) set(agent SessionAgent) { p.agent = agent }
 type coordinator struct {
 	cfg         *config.ConfigStore
 	credentials *credentials.Manager
-	sessions    session.Service
+	sessions    sessionstore.Service
 	messages    MessageService
 	permissions permission.Requester
 	questions   question.Service
@@ -224,7 +224,7 @@ type CoordinatorOptions struct {
 	// are called on it during interactive re-authentication and 401
 	// retry handling.
 	Credentials *credentials.Manager
-	Sessions    session.Service
+	Sessions    sessionstore.Service
 	Messages    MessageService
 	Permissions permission.Requester
 	Questions   question.Service

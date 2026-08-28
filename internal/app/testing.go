@@ -12,7 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 )
 
@@ -20,8 +20,8 @@ import (
 // (now unexported, exposed to the thread domain through the accessors in
 // thread_workspace.go). Production code keeps using those accessors; these
 // exist purely so tests can still install or read the services directly.
-func (app *App) SetSessionsForTest(s session.Service)       { app.sessions = s }
-func (app *App) SessionsForTest() session.Service           { return app.sessions }
+func (app *App) SetSessionsForTest(s sessionstore.Service)  { app.sessions = s }
+func (app *App) SessionsForTest() sessionstore.Service      { return app.sessions }
 func (app *App) SetMessagesForTest(m messagestore.Service)  { app.messages = m }
 func (app *App) MessagesForTest() messagestore.Service      { return app.messages }
 func (app *App) SetPermissionsForTest(p permission.Service) { app.permissions = p }

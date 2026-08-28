@@ -11,7 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/db"
 	. "github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -56,7 +56,7 @@ func newTestService(t *testing.T, opts ...ServiceOption) (Service, string) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 
@@ -72,7 +72,7 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	root, err := sessions.Create(t.Context(), "root")
 	require.NoError(t, err)
 	child, err := sessions.CreateTaskSession(t.Context(), "child", root.ID, "child")
@@ -333,7 +333,7 @@ func TestFlush_WriteErrorRetainsPendingStateForRetry(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 	failing := &failingUpdateQuerier{Querier: q}
@@ -367,7 +367,7 @@ func TestUpdate_ConcurrentFinalDeltaIsNotLostDuringFinalWrite(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 	slow := &slowUpdateQuerier{
@@ -733,7 +733,7 @@ func TestFlush_WaitsForInFlightWrite(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 
@@ -797,7 +797,7 @@ func TestFlushAll_WaitsForInFlightWrite(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 
@@ -890,7 +890,7 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 			t.Cleanup(func() { _ = conn.Close() })
 
 			q := db.New(conn)
-			sessions := session.NewService(q, conn, "/test/project")
+			sessions := sessionstore.NewService(q, conn, "/test/project")
 			sess, err := sessions.Create(t.Context(), "test")
 			require.NoError(t, err)
 
@@ -993,7 +993,7 @@ func TestFlush_MultipleWaitersWakeAfterInFlightWrite(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	q := db.New(conn)
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 

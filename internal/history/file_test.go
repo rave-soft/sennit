@@ -10,14 +10,14 @@ import (
 
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
 // newTestService sets up an isolated on-disk SQLite DB (with migrations) and
 // a session to attach files to, mirroring the pattern used in
 // internal/session/session_test.go.
-func newTestService(t *testing.T) (Service, session.Service, string, string) {
+func newTestService(t *testing.T) (Service, sessionstore.Service, string, string) {
 	t.Helper()
 
 	dataDir := t.TempDir()
@@ -29,7 +29,7 @@ func newTestService(t *testing.T) (Service, session.Service, string, string) {
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
-	sessions := session.NewService(db.New(conn), conn, dataDir)
+	sessions := sessionstore.NewService(db.New(conn), conn, dataDir)
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 

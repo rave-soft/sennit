@@ -24,7 +24,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
@@ -63,7 +63,7 @@ type appServices struct {
 	// and the domain interface internal/thread drives its delegations
 	// through requires method accessors. Read them through the
 	// Sessions()/Messages()/Permissions() accessors, not as fields.
-	sessions    session.Service
+	sessions    sessionstore.Service
 	messages    messagestore.Service
 	History     history.Service
 	permissions permission.Service
@@ -166,7 +166,7 @@ func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skil
 		skipPermissionsRequests = skipPermissionsRequests || configBypass
 	}
 	return &appServices{
-		sessions:         session.NewService(q, conn, store.WorkingDir(), session.WithTelemetry(event.NewSessionTelemetry())),
+		sessions:         sessionstore.NewService(q, conn, store.WorkingDir(), sessionstore.WithTelemetry(event.NewSessionTelemetry())),
 		messages:         messagestore.NewService(q),
 		queries:          q,
 		History:          history.NewService(q, conn),

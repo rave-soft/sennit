@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +22,7 @@ import (
 type idleSweepFixture struct {
 	dispatcher *turnDispatcher
 	agent      *sessionAgent
-	sessions   session.Service
+	sessions   sessionstore.Service
 	summarized []string
 }
 

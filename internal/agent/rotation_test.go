@@ -18,7 +18,7 @@ import (
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
 // fakeAccountStore is a minimal in-memory accounts.Store for rotation
@@ -498,7 +498,7 @@ func TestOnRateLimit_ResetsStreamedContent_NoConcatenation(t *testing.T) {
 	// off: this asserts on what a reader sees right after each callback,
 	// which the coalescing window would otherwise hide behind a timer.
 	messages := messagestore.NewService(q, messagestore.WithDebounce(0))
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 
 	sess, err := sessions.Create(ctx, "rate limit reset")
 	require.NoError(t, err)
@@ -568,7 +568,7 @@ func TestRotateThreshold_OnlyFiresFromOnStepFinish(t *testing.T) {
 
 	q := db.New(conn)
 	messages := messagestore.NewService(q, messagestore.WithDebounce(0))
-	sessions := session.NewService(q, conn, "/test/project")
+	sessions := sessionstore.NewService(q, conn, "/test/project")
 
 	sess, err := sessions.Create(ctx, "threshold placement")
 	require.NoError(t, err)

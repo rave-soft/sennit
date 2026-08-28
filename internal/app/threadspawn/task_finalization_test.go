@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +19,7 @@ func TestTransactionalStoreFinalizeTaskExactlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Release(config.GlobalDBDir())) })
 
-	sessions := session.NewService(db.New(conn), conn, project)
+	sessions := sessionstore.NewService(db.New(conn), conn, project)
 	parent, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
 	child, err := sessions.CreateTaskSession(t.Context(), uuid.NewString(), parent.ID, "child")
@@ -90,7 +90,7 @@ func TestTransactionalStoreRecoveryFinalizesActiveTaskExactlyOnce(t *testing.T) 
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Release(config.GlobalDBDir())) })
 
-	sessions := session.NewService(db.New(conn), conn, project)
+	sessions := sessionstore.NewService(db.New(conn), conn, project)
 	parent, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
 	child, err := sessions.CreateTaskSession(t.Context(), uuid.NewString(), parent.ID, "child")
@@ -138,7 +138,7 @@ func TestTransactionalStoreFinalizeTaskRollsBackWithoutParent(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Release(config.GlobalDBDir())) })
 
-	sessions := session.NewService(db.New(conn), conn, project)
+	sessions := sessionstore.NewService(db.New(conn), conn, project)
 	child, err := sessions.Create(t.Context(), "child")
 	require.NoError(t, err)
 	child.Cost = 2

@@ -80,7 +80,7 @@ func emitJSON(w io.Writer, v any) error {
 
 // sessionByIDLister is the narrow dependency resolveSessionID needs: a
 // direct-ID lookup plus a listing to fall back to for hash/hash-prefix
-// resolution. session.Service already satisfies it; workspaceSessionLookup
+// resolution. sessionstore.Service already satisfies it; workspaceSessionLookup
 // adapts workspace.Workspace's differently-named methods to it below.
 type sessionByIDLister interface {
 	Get(ctx context.Context, id string) (session.Session, error)
@@ -90,7 +90,7 @@ type sessionByIDLister interface {
 // workspaceSessionLookup adapts workspace.SessionStore's GetSession/
 // ListSessions to sessionByIDLister so resolveSessionID can resolve a
 // session ID against a Workspace the same way it does against a
-// session.Service.
+// sessionstore.Service.
 type workspaceSessionLookup struct{ ws workspace.SessionStore }
 
 func (w workspaceSessionLookup) Get(ctx context.Context, id string) (session.Session, error) {

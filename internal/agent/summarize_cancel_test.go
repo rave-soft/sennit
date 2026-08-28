@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -184,7 +185,7 @@ func TestSummarize_CleansUpActiveEntryOnEarlyError(t *testing.T) {
 }
 
 type blockingSessionService struct {
-	session.Service
+	sessionstore.Service
 	get func(context.Context, string) (session.Session, error)
 }
 

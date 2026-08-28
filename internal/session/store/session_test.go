@@ -1,10 +1,11 @@
-package session
+package store
 
 import (
 	"database/sql"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,9 +82,9 @@ func TestEstimatedUsageStateSurvivesFetchModifySave(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, fetched.EstimatedUsage)
 
-	fetched.Todos = []Todo{{
+	fetched.Todos = []session.Todo{{
 		Content:    "Check estimate state",
-		Status:     TodoStatusInProgress,
+		Status:     session.TodoStatusInProgress,
 		ActiveForm: "Checking estimate state",
 	}}
 
@@ -282,7 +283,7 @@ func TestGetReportsMissingSessionAsErrNotFound(t *testing.T) {
 	sessions := NewService(db.New(conn), conn, dataDir)
 
 	_, err = sessions.Get(t.Context(), "does-not-exist")
-	require.ErrorIs(t, err, ErrNotFound)
+	require.ErrorIs(t, err, session.ErrNotFound)
 	require.NotErrorIs(t, err, sql.ErrNoRows,
 		"the bare driver error reaches the user verbatim in the status line")
 	require.Contains(t, err.Error(), "does-not-exist", "the id being looked up must survive into the message")
@@ -307,7 +308,7 @@ func TestSetModelSurvivesFetchModifySave(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, created.Model.IsZero(), "a fresh session pins no model")
 
-	pinned := ModelRef{Provider: "anthropic", Model: "claude-opus-5"}
+	pinned := session.ModelRef{Provider: "anthropic", Model: "claude-opus-5"}
 	require.NoError(t, sessions.SetModel(t.Context(), created.ID, pinned))
 
 	fetched, err := sessions.Get(t.Context(), created.ID)
@@ -324,13 +325,13 @@ func TestSetModelSurvivesFetchModifySave(t *testing.T) {
 	require.Equal(t, pinned, again.Model)
 
 	// Re-pinning replaces rather than accumulates, and the zero ref clears.
-	moved := ModelRef{Provider: "openai", Model: "gpt-5"}
+	moved := session.ModelRef{Provider: "openai", Model: "gpt-5"}
 	require.NoError(t, sessions.SetModel(t.Context(), created.ID, moved))
 	again, err = sessions.Get(t.Context(), created.ID)
 	require.NoError(t, err)
 	require.Equal(t, moved, again.Model)
 
-	require.NoError(t, sessions.SetModel(t.Context(), created.ID, ModelRef{}))
+	require.NoError(t, sessions.SetModel(t.Context(), created.ID, session.ModelRef{}))
 	again, err = sessions.Get(t.Context(), created.ID)
 	require.NoError(t, err)
 	require.True(t, again.Model.IsZero(), "the zero ref clears the pin")

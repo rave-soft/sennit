@@ -17,7 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
 // turnDispatcher owns the turn lifecycle of the coordinator's own agent:
@@ -32,7 +32,7 @@ import (
 // protocol.
 type turnDispatcher struct {
 	cfg         *config.ConfigStore
-	sessions    session.Service
+	sessions    sessionstore.Service
 	messages    MessageService
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]

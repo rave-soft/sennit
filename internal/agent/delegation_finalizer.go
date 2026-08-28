@@ -30,7 +30,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
-	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 )
@@ -44,7 +44,7 @@ import (
 // it is per-session turn state, not per-coordinator state.
 type delegationFinalizer struct {
 	cfg         *config.ConfigStore
-	sessions    session.Service
+	sessions    sessionstore.Service
 	messages    MessageService
 	permissions permission.Requester
 	questions   question.Service

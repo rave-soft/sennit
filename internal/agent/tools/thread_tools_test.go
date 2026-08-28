@@ -28,6 +28,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
@@ -61,10 +62,10 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
-// fakeSessions implements just enough of session.Service for Manager.Create
+// fakeSessions implements just enough of sessionstore.Service for Manager.Create
 // to mint a thread session.
 type fakeSessions struct {
-	session.Service
+	sessionstore.Service
 	mu sync.Mutex
 	n  int
 }
