@@ -1298,3 +1298,62 @@ func TestOnboarding_FirstCredentialBuildsAgents(t *testing.T) {
 	require.Contains(t, cfg.Agents, "task")
 	require.Empty(t, preCfg.Agents, "pre-onboarding snapshot must stay untouched")
 }
+
+// TestRemoveRuntimeConfigFieldWorkspaceScopeWritesWorkspaceFile pins the
+// scope asymmetry this used to have: every other mutator resolves its
+// file through ConfigPath, but RemoveRuntimeConfigField fell back to
+// globalDataPath for any scope other than ScopeGlobal. A workspace-scoped
+// removal therefore edited the global file and left the workspace key in
+// place — the opposite of what was asked, in both directions at once.
+func TestRemoveRuntimeConfigFieldWorkspaceScopeWritesWorkspaceFile(t *testing.T) {
+	userDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", userDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
+
+	dataPath := GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
+	require.NoError(t, os.WriteFile(dataPath,
+		[]byte(`{"options":{"debug":true}}`), 0o600))
+
+	workspacePath := filepath.Join(t.TempDir(), "sennit.json")
+	require.NoError(t, os.WriteFile(workspacePath,
+		[]byte(`{"options":{"debug":true}}`), 0o600))
+
+	store := &ConfigStore{globalDataPath: dataPath, file: configFile{}}
+	store.workspacePath.Set(workspacePath)
+	store.RemoveRuntimeConfigField(ScopeWorkspace, "options.debug")
+
+	workspaceData, err := os.ReadFile(workspacePath)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(workspaceData, "options.debug").Exists(),
+		"the workspace-scoped key must be removed from the workspace file")
+
+	globalData, err := os.ReadFile(dataPath)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(globalData, "options.debug").Exists(),
+		"a workspace-scoped removal must not touch the global file")
+}
+
+// TestRemoveRuntimeConfigFieldWorkspaceScopeWithoutWorkspaceFile pins that
+// a workspace-scoped removal with no workspace config resolves to nothing
+// rather than falling back to the global file.
+func TestRemoveRuntimeConfigFieldWorkspaceScopeWithoutWorkspaceFile(t *testing.T) {
+	userDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", userDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
+
+	dataPath := GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
+	require.NoError(t, os.WriteFile(dataPath,
+		[]byte(`{"options":{"debug":true}}`), 0o600))
+
+	store := &ConfigStore{globalDataPath: dataPath, file: configFile{}}
+	store.RemoveRuntimeConfigField(ScopeWorkspace, "options.debug")
+
+	globalData, err := os.ReadFile(dataPath)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(globalData, "options.debug").Exists(),
+		"with no workspace config the removal must be a no-op, not a global write")
+}

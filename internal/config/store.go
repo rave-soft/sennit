@@ -319,6 +319,13 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 // RemoveRuntimeConfigField deletes key from the runtime config files that
 // apply to scope.
 //
+// ScopeGlobal deletes from every global layer, not just the one
+// ConfigPath would resolve: a stale key (an expired provider credential,
+// say) can sit in any of them, and leaving a copy behind in a
+// higher-priority layer would resurrect it on the next load. Any other
+// scope resolves its single file the same way every other mutator does,
+// through ConfigPath.
+//
 // Like SetConfigFields, the writes and the staleness-snapshot refresh happen
 // under one stalenessMu section so a concurrent ConfigStaleness() cannot
 // mistake one of these writes for an external change. See SetConfigFields
@@ -326,9 +333,15 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 // autoReload: these are "runtime" writes callers do not want reflected back
 // into in-memory config.
 func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
-	paths := []string{s.globalDataPath}
-	if scope == ScopeGlobal {
-		paths = globalConfigPaths()
+	paths := globalConfigPaths()
+	if scope != ScopeGlobal {
+		path, err := s.ConfigPath(scope)
+		if err != nil {
+			slog.Warn("Failed to remove runtime config field: no config file for this scope",
+				"key", key, "error", err)
+			return
+		}
+		paths = []string{path}
 	}
 	s.stalenessMu.Lock()
 	defer s.stalenessMu.Unlock()
