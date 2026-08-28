@@ -902,8 +902,13 @@ func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
 	started := make(chan struct{}, 2)
 	var sideEffects atomic.Int32
 	r.runAuth = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID) error {
-		started <- struct{}{}
+		// Count the side effect before announcing the worker, not after:
+		// the test reads sideEffects as soon as it has received from
+		// started, so signalling first leaves a window where the worker
+		// has been observed but its increment has not landed. That window
+		// is what made this fail under -race on a loaded machine.
 		sideEffects.Add(1)
+		started <- struct{}{}
 		<-release
 		return nil
 	}

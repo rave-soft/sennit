@@ -1423,17 +1423,28 @@ func TestClient_FailedRestartRollsBackCandidateFilesAndRetries(t *testing.T) {
 	require.NoError(t, client.Restart(), "retry must reopen the preserved user-file snapshot")
 	require.True(t, client.IsFileOpen(userFile))
 
-	contents, err := os.ReadFile(logPath)
-	require.NoError(t, err)
-	rootOpens := 0
-	for _, line := range strings.Split(strings.TrimSpace(string(contents[len(before):])), "\n") {
-		if strings.HasSuffix(line, " textDocument/didOpen") {
-			rootOpens++
-		}
-	}
 	// The failed candidate and successful retry each receive the root marker;
 	// the successful retry also receives the automatically reopened user file.
-	require.GreaterOrEqual(t, rootOpens, 3)
+	//
+	// Polled rather than read once: the lines are written by the server
+	// processes themselves, and Restart returns when the *client* is done
+	// with them, not when a killed candidate's last write has reached the
+	// file. Reading immediately made this fail under -race on a loaded
+	// machine, having seen two of the three opens.
+	require.Eventually(t, func() bool {
+		contents, err := os.ReadFile(logPath)
+		if err != nil {
+			return false
+		}
+		rootOpens := 0
+		for _, line := range strings.Split(strings.TrimSpace(string(contents[len(before):])), "\n") {
+			if strings.HasSuffix(line, " textDocument/didOpen") {
+				rootOpens++
+			}
+		}
+		return rootOpens >= 3
+	}, 10*time.Second, 10*time.Millisecond,
+		"the failed candidate, the retry, and the reopened user file must each show a didOpen")
 	client.Shutdown()
 }
 

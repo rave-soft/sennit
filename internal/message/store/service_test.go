@@ -256,7 +256,13 @@ func TestUpdate_TerminalUpdatesFlushSynchronously(t *testing.T) {
 
 	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
-	time.Sleep(5 * time.Millisecond)
+	// Wait for the create's own event before clearing, rather than
+	// sleeping long enough that it has "probably" arrived: on a loaded
+	// machine it arrived after the reset instead, and the assertion below
+	// then saw two events where it demands one.
+	require.Eventually(t, func() bool {
+		return len(collector.snapshot()) >= 1
+	}, time.Second, time.Millisecond, "the create must publish before the test clears the collector")
 	collector.reset()
 
 	// AddFinish makes the message terminal; Update must flush
