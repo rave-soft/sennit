@@ -110,6 +110,16 @@ type Manager struct {
 	shutdownOnce    sync.Once
 	shutdownStarted chan struct{}
 	shutdownDone    chan struct{}
+	// shutdownCancel cancels the context handed to the cleanup goroutine
+	// started inside shutdownOnce.Do — see Shutdown. It is written once,
+	// inside that Do, and read afterwards by every Shutdown call
+	// (possibly from a different goroutine than the one that ran Do).
+	// sync.Once.Do only guarantees happens-before for callers that
+	// actually waited on it, which every Shutdown call does by
+	// construction: Do either runs the closure itself (writing the field
+	// before ever reading it) or blocks until the concurrent Do call
+	// returns, so no reader can observe shutdownCancel before it is set.
+	shutdownCancel context.CancelFunc
 }
 
 // NewManager constructs a Manager. Callers must only do so for
@@ -252,11 +262,11 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	if err != nil {
 		// The GetByName check above is check-then-act: two concurrent
 		// Creates for the same name can both pass it and race into this
-		// insert, so the store's UNIQUE(project_path, kind, name)
-		// constraint is the real guard. Map that violation to the same
-		// message the check above gives instead of surfacing the raw
-		// driver text (e.g. "UNIQUE constraint failed: threads.name").
-		if isUniqueConstraintViolation(err) {
+		// insert, so the store's contract for this case (Create must
+		// return an error wrapping ErrNameTaken on a name collision —
+		// see ErrNameTaken's doc comment) is the real guard. Map that
+		// into the same message the check above gives.
+		if errors.Is(err, ErrNameTaken) {
 			return Thread{}, fmt.Errorf("thread: name %q is already in use", name)
 		}
 		return Thread{}, fmt.Errorf("thread: create record: %w", err)
@@ -968,8 +978,18 @@ func (m *Manager) PermissionsFor(delegationID string) permission.Service {
 // constructed sharing this Manager's lifecycle and ctx (see NewManager),
 // since m.lc.snapshotControls below walks that same shared controls map
 // regardless of which kind registered each entry.
+//
+// The cleanup below runs on its own context rather than ctx, since ctx
+// belongs to whichever caller happens to be waiting and m.ctx is already
+// cancelled by the time the goroutine starts. That context is shared by
+// every concurrent Shutdown call, and the first caller to give up on
+// waiting cancels it for all of them: the cleanup work is not meant to
+// outlive every caller that asked for it, so once nobody is left waiting
+// there is no reason to keep releasing runtimes gracefully.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		m.shutdownCancel = shutdownCancel
 		m.lc.closeAdmission()
 		close(m.shutdownStarted)
 		m.cancel()
@@ -993,15 +1013,18 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 					// row instead of reading it twice. If the row can't be
 					// read, skip both — there is no unrelated-work-safe
 					// fallback for "cancel something, we don't know what".
-					st, getErr := m.store.Get(context.Background(), threadID)
-					if err := releaseRuntime(context.Background(), rt, st.SessionID, getErr == nil); err != nil {
+					st, getErr := m.store.Get(shutdownCtx, threadID)
+					if err := releaseRuntime(shutdownCtx, rt, st.SessionID, getErr == nil); err != nil {
 						slog.Error("Failed to release workspace on shutdown", "component", "thread", "error", err)
 					}
-					// The workspace DB remains live until this method returns to
-					// its cleanup caller, so record the interrupted terminal
-					// state before the connection is released.
+					// The workspace DB remains live until this method returns
+					// to its cleanup caller, so this normally records the
+					// interrupted terminal state before the connection is
+					// released. But if every waiting caller has given up,
+					// shutdownCtx is cancelled and this write is skipped —
+					// the run is being abandoned, not tidily finalized.
 					if getErr == nil && st.Status == StatusRunning {
-						_, _ = m.lc.setStatus(context.Background(), st.ID, StatusInterrupted, "", "", 0)
+						_, _ = m.lc.setStatus(shutdownCtx, st.ID, StatusInterrupted, "", "", 0)
 					}
 				}
 				c.opMu.Unlock()
@@ -1011,8 +1034,10 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	})
 	select {
 	case <-m.shutdownDone:
+		m.shutdownCancel()
 		return nil
 	case <-ctx.Done():
+		m.shutdownCancel()
 		return ctx.Err()
 	}
 }
@@ -1235,15 +1260,6 @@ func registerParent(registerOn, parentCoord Coordinator, st Thread, depth int) {
 		Name:            st.Name,
 		Depth:           depth,
 	})
-}
-
-// isUniqueConstraintViolation reports whether err came from a UNIQUE
-// constraint failure. This package deliberately has no import on the SQL
-// driver (see the Store seam in internal/app/threadspawn), so it matches
-// on the message text every SQLite driver uses for this failure rather
-// than a driver-specific error type.
-func isUniqueConstraintViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func validateName(name string) (string, error) {

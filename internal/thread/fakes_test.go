@@ -607,6 +607,12 @@ type fakeSpawner struct {
 	// caller's next ctx.Err() check (Manager.Create/Activate), which
 	// nothing else can time deterministically.
 	afterSpawn func(path string)
+	// blockReleaseUntilCtxDone, when set, makes Release wait on the ctx it
+	// is called with before recording anything — for tests proving that a
+	// Release still in flight when a Shutdown caller gives up is handed a
+	// context that actually gets cancelled, rather than one that lingers
+	// on context.Background() forever.
+	blockReleaseUntilCtxDone bool
 	// noCoordinator, when set, leaves the spawned App's AgentCoordinator
 	// nil instead of installing a fakeCoordinator — for tests exercising
 	// the "workspace with no agent configured" path (Workspace.Coordinator
@@ -670,6 +676,10 @@ func (s *fakeSpawner) Release(ctx context.Context, id string) error {
 	// is what actually asserts on this.
 	_, statErr := os.Stat(id)
 	sawWorktree := statErr == nil
+
+	if s.blockReleaseUntilCtxDone {
+		<-ctx.Done()
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
