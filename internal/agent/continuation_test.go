@@ -456,8 +456,8 @@ func TestDeliverTaskCompletion_RaceWithUserPromptStartsOnlyOneTurn(t *testing.T)
 		// what the model actually received (runTurn.prepareStep's
 		// mid-turn drain never persists it) - see concurrencyGuardModel.
 		require.Eventually(t, func() bool {
-			return sa.QueuedPrompts(sess.ID) == 0 && !sa.IsSessionBusy(sess.ID) && model.occurrences(completion.ResultText) > 0
-		}, 3*time.Second, 5*time.Millisecond, "iteration %d: both the user prompt and the completion must eventually be delivered", i)
+			return sa.QueuedPrompts(sess.ID) == 0 && !sa.IsSessionBusy(sess.ID)
+		}, 3*time.Second, 5*time.Millisecond, "iteration %d: the race must settle with nothing queued and no turn left running", i)
 
 		require.LessOrEqual(t, model.maxActive.Load(), int32(1),
 			"iteration %d: at most one turn must ever be active on this session at a time", i)
@@ -471,9 +471,39 @@ func TestDeliverTaskCompletion_RaceWithUserPromptStartsOnlyOneTurn(t *testing.T)
 			}
 		}
 		require.Equal(t, 1, userCount, "iteration %d: the user prompt must be delivered exactly once", i)
-		require.Equal(t, 1, model.occurrences(completion.ResultText),
-			"iteration %d: the completion must reach the model exactly once, never duplicated", i)
+
+		// The completion must survive the race exactly once - but which
+		// of its two resting places it lands in is genuinely the race's
+		// to decide, and both are correct. This is a person's own
+		// session (nothing registers it under delegationParents), so
+		// isDelegationSession is false and no auto-wake applies to it:
+		// enqueueCompletion returns wakeEligible false and
+		// DeliverTaskCompletion returns without attempting a
+		// continuation. The completion therefore reaches the model only
+		// if it made it into the inbox before the user's turn drained
+		// it in prepareStep; landing a moment later leaves it queued
+		// for that person's next real turn, which is the documented
+		// behavior (see isDelegationSession: "The completion is not
+		// lost; it waits in the inbox"). Asserting delivery outright
+		// would be asserting one particular winner of the very race
+		// this test exists to allow either way.
+		delivered := model.occurrences(completion.ResultText)
+		queued := completionInboxLen(sa, sess.ID)
+		require.Equal(t, 1, delivered+queued,
+			"iteration %d: the completion must rest in exactly one place - delivered to the model (%d) or left queued in the inbox (%d) - never lost, never duplicated",
+			i, delivered, queued)
 	}
+}
+
+// completionInboxLen reports how many completions are still waiting in
+// sessionID's inbox, for the tests that have to tell "left queued for
+// the next real turn" apart from "lost".
+func completionInboxLen(sa *sessionAgent, sessionID string) int {
+	s, release := sa.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.completionInbox)
 }
 
 // TestDeliverTaskCompletion_CancelledParentDoesNotAutoStart proves that
