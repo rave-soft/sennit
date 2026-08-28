@@ -1,0 +1,84 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 211
+    host: ""
+    body: '{"max_tokens":4000,"messages":[{"content":[{"text":"Say hi in Portuguese","type":"text"}],"role":"user"}],"system":[{"text":"You are a helpful assistant","type":"text"}],"anthropic_version":"bedrock-2023-05-31"}'
+    headers:
+      Accept:
+      - application/json
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+    url: https://bedrock-runtime.us-east-1.amazonaws.com/model/us.anthropic.claude-haiku-4-5-20251001-v1%3A0/invoke-with-response-stream
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    body: !!binary |
+      AAACkQAAAEslgujaCzpldmVudC10eXBlBwAFY2h1bmsNOmNvbnRlbnQtdHlwZQcAEGFwcG
+      xpY2F0aW9uL2pzb24NOm1lc3NhZ2UtdHlwZQcABWV2ZW50eyJieXRlcyI6ImV5SjBlWEJs
+      SWpvaWJXVnpjMkZuWlY5emRHRnlkQ0lzSW0xbGMzTmhaMlVpT25zaWJXOWtaV3dpT2lKam
+      JHRjFaR1V0YUdGcGEzVXROQzAxTFRJd01qVXhNREF4SWl3aWFXUWlPaUp0YzJkZlltUnlh
+      MTh3TVZNNFl6VXpWMWh4TjJwS1JUbHVTbTUxVjFaNmRXSWlMQ0owZVhCbElqb2liV1Z6Yz
+      JGblpTSXNJbkp2YkdVaU9pSmhjM05wYzNSaGJuUWlMQ0pqYjI1MFpXNTBJanBiWFN3aWMz
+      UnZjRjl5WldGemIyNGlPbTUxYkd3c0luTjBiM0JmYzJWeGRXVnVZMlVpT201MWJHd3NJbl
+      Z6WVdkbElqcDdJbWx1Y0hWMFgzUnZhMlZ1Y3lJNk1UWXNJbU5oWTJobFgyTnlaV0YwYVc5
+      dVgybHVjSFYwWDNSdmEyVnVjeUk2TUN3aVkyRmphR1ZmY21WaFpGOXBibkIxZEY5MGIydG
+      xibk1pT2pBc0ltTmhZMmhsWDJOeVpXRjBhVzl1SWpwN0ltVndhR1Z0WlhKaGJGODFiVjlw
+      Ym5CMWRGOTBiMnRsYm5NaU9qQXNJbVZ3YUdWdFpYSmhiRjh4YUY5cGJuQjFkRjkwYjJ0bG
+      JuTWlPakI5TENKdmRYUndkWFJmZEc5clpXNXpJam8xZlgxOSIsInAiOiJhYmNkZWZnaGlq
+      a2xtbm9wcXJzdHV2d3h5ekFCQ0RFIn1vBReIAAAA+QAAAEvBCHVdCzpldmVudC10eXBlBw
+      AFY2h1bmsNOmNvbnRlbnQtdHlwZQcAEGFwcGxpY2F0aW9uL2pzb24NOm1lc3NhZ2UtdHlw
+      ZQcABWV2ZW50eyJieXRlcyI6ImV5SjBlWEJsSWpvaVkyOXVkR1Z1ZEY5aWJHOWphMTl6ZE
+      dGeWRDSXNJbWx1WkdWNElqb3dMQ0pqYjI1MFpXNTBYMkpzYjJOcklqcDdJblI1Y0dVaU9p
+      SjBaWGgwSWl3aWRHVjRkQ0k2SWlKOWZRPT0iLCJwIjoiYWJjZGVmZ2hpamtsbW5vcHFyc3
+      R1dnd4eXpBIn0jfX4HAAAA5gAAAEsjuHUOCzpldmVudC10eXBlBwAFY2h1bmsNOmNvbnRl
+      bnQtdHlwZQcAEGFwcGxpY2F0aW9uL2pzb24NOm1lc3NhZ2UtdHlwZQcABWV2ZW50eyJieX
+      RlcyI6ImV5SjBlWEJsSWpvaVkyOXVkR1Z1ZEY5aWJHOWphMTlrWld4MFlTSXNJbWx1WkdW
+      NElqb3dMQ0prWld4MFlTSTZleUowZVhCbElqb2lkR1Y0ZEY5a1pXeDBZU0lzSW5SbGVIUW
+      lPaUpQYk1PaElTQWlmWDA9IiwicCI6ImFiY2QifQiHWjkAAAEEAAAAS7rwMhQLOmV2ZW50
+      LXR5cGUHAAVjaHVuaw06Y29udGVudC10eXBlBwAQYXBwbGljYXRpb24vanNvbg06bWVzc2
+      FnZS10eXBlBwAFZXZlbnR7ImJ5dGVzIjoiZXlKMGVYQmxJam9pWTI5dWRHVnVkRjlpYkc5
+      amExOWtaV3gwWVNJc0ltbHVaR1Y0SWpvd0xDSmtaV3gwWVNJNmV5SjBlWEJsSWpvaWRHVj
+      RkRjlrWld4MFlTSXNJblJsZUhRaU9pTHduNUdMSW4xOSIsInAiOiJhYmNkZWZnaGlqa2xt
+      bm9wcXJzdHV2d3h5ekFCQ0RFRkdISUpLTCJ9QGcahgAAAO8AAABLLqgXfws6ZXZlbnQtdH
+      lwZQcABWNodW5rDTpjb250ZW50LXR5cGUHABBhcHBsaWNhdGlvbi9qc29uDTptZXNzYWdl
+      LXR5cGUHAAVldmVudHsiYnl0ZXMiOiJleUowZVhCbElqb2lZMjl1ZEdWdWRGOWliRzlqYT
+      E5a1pXeDBZU0lzSW1sdVpHVjRJam93TENKa1pXeDBZU0k2ZXlKMGVYQmxJam9pZEdWNGRG
+      OWtaV3gwWVNJc0luUmxlSFFpT2lKY2JseHVTRzkzSW4xOSIsInAiOiJhYmNkZWZnaGlqa2
+      xtIn3xmXDJAAABEwAAAEtoMHmGCzpldmVudC10eXBlBwAFY2h1bmsNOmNvbnRlbnQtdHlw
+      ZQcAEGFwcGxpY2F0aW9uL2pzb24NOm1lc3NhZ2UtdHlwZQcABWV2ZW50eyJieXRlcyI6Im
+      V5SjBlWEJsSWpvaVkyOXVkR1Z1ZEY5aWJHOWphMTlrWld4MFlTSXNJbWx1WkdWNElqb3dM
+      Q0prWld4MFlTSTZleUowZVhCbElqb2lkR1Y0ZEY5a1pXeDBZU0lzSW5SbGVIUWlPaUlnWT
+      JGdUlFa2dhR1ZzY0NCNWIzVWdkRzlrWVhrL0luMTkiLCJwIjoiYWJjZGVmZ2hpamtsbW5v
+      cHFyc3R1dnd4eXpBQkMifflTTQ4AAACrAAAAS4Pb6fYLOmV2ZW50LXR5cGUHAAVjaHVuaw
+      06Y29udGVudC10eXBlBwAQYXBwbGljYXRpb24vanNvbg06bWVzc2FnZS10eXBlBwAFZXZl
+      bnR7ImJ5dGVzIjoiZXlKMGVYQmxJam9pWTI5dWRHVnVkRjlpYkc5amExOXpkRzl3SWl3aW
+      FXNWtaWGdpT2pCOSIsInAiOiJhYmNkZWZnaGkifXdmSW8AAAELAAAASzigpcULOmV2ZW50
+      LXR5cGUHAAVjaHVuaw06Y29udGVudC10eXBlBwAQYXBwbGljYXRpb24vanNvbg06bWVzc2
+      FnZS10eXBlBwAFZXZlbnR7ImJ5dGVzIjoiZXlKMGVYQmxJam9pYldWemMyRm5aVjlrWld4
+      MFlTSXNJbVJsYkhSaElqcDdJbk4wYjNCZmNtVmhjMjl1SWpvaVpXNWtYM1IxY200aUxDSn
+      pkRzl3WDNObGNYVmxibU5sSWpwdWRXeHNmU3dpZFhOaFoyVWlPbnNpYjNWMGNIVjBYM1J2
+      YTJWdWN5STZNVGg5ZlE9PSIsInAiOiJhYmNkZWZnaGkifVU9BEkAAAFKAAAAS10z1DwLOm
+      V2ZW50LXR5cGUHAAVjaHVuaw06Y29udGVudC10eXBlBwAQYXBwbGljYXRpb24vanNvbg06
+      bWVzc2FnZS10eXBlBwAFZXZlbnR7ImJ5dGVzIjoiZXlKMGVYQmxJam9pYldWemMyRm5aVj
+      l6ZEc5d0lpd2lZVzFoZW05dUxXSmxaSEp2WTJzdGFXNTJiMk5oZEdsdmJrMWxkSEpwWTNN
+      aU9uc2lhVzV3ZFhSVWIydGxia052ZFc1MElqb3hOaXdpYjNWMGNIVjBWRzlyWlc1RGIzVn
+      VkQ0k2TVRnc0ltbHVkbTlqWVhScGIyNU1ZWFJsYm1ONUlqb3hOakE0TENKbWFYSnpkRUo1
+      ZEdWTVlYUmxibU41SWpveE5ETTRmWDA9IiwicCI6ImFiY2RlZmdoaWprbG1ub3AifTAgc8
+      4=
+    headers:
+      Content-Type:
+      - application/vnd.amazon.eventstream
+    status: 200 OK
+    code: 200
+    duration: 1.591722083s

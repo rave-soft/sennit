@@ -1,0 +1,40 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 680
+    host: ""
+    body: '{"messages":[{"content":"Generate information about a person named Alice who is 30 years old and lives in Paris.","role":"user"}],"model":"grok-4-fast","max_tokens":4000,"stream_options":{"include_usage":true},"tool_choice":{"function":{"name":"Person"},"type":"function"},"tools":[{"function":{"name":"Person","strict":false,"description":"A person with name, age, and city","parameters":{"properties":{"age":{"description":"The person''s age","type":"integer"},"city":{"description":"The city where the person lives","type":"string"},"name":{"description":"The person''s name","type":"string"}},"required":["name","age","city"],"type":"object"}},"type":"function"}],"stream":true}'
+    headers:
+      Accept:
+      - application/json
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+    url: https://api.x.ai/v1/chat/completions
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    body: |+
+      data: {"id":"212602fb-e3a2-6ee2-f83a-99bbfc95b48a","object":"chat.completion.chunk","created":1773345647,"model":"grok-4-fast-reasoning","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"id":"call_19252052","function":{"name":"Person","arguments":"{\"age\":30,\"city\":\"Paris\",\"name\":\"Alice\"}"},"index":0,"type":"function"}]}}],"system_fingerprint":"fp_3d7ed3b779"}
+
+      data: {"id":"212602fb-e3a2-6ee2-f83a-99bbfc95b48a","object":"chat.completion.chunk","created":1773345647,"model":"grok-4-fast-reasoning","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"system_fingerprint":"fp_3d7ed3b779"}
+
+      data: {"id":"212602fb-e3a2-6ee2-f83a-99bbfc95b48a","object":"chat.completion.chunk","created":1773345647,"model":"grok-4-fast-reasoning","choices":[],"usage":{"prompt_tokens":401,"completion_tokens":44,"total_tokens":702,"prompt_tokens_details":{"text_tokens":401,"audio_tokens":0,"image_tokens":0,"cached_tokens":400},"completion_tokens_details":{"reasoning_tokens":257,"audio_tokens":0,"accepted_prediction_tokens":0,"rejected_prediction_tokens":0},"num_sources_used":0,"cost_in_usd_ticks":1707000},"system_fingerprint":"fp_3d7ed3b779"}
+
+      data: [DONE]
+
+    headers:
+      Content-Type:
+      - text/event-stream
+    status: 200 OK
+    code: 200
+    duration: 635.784ms

@@ -1,0 +1,64 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 499
+    host: generativelanguage.googleapis.com
+    body: |
+      {"contents":[{"parts":[{"text":"Generate information about a person named Alice who is 30 years old and lives in Paris."}],"role":"user"}],"generationConfig":{"maxOutputTokens":4000,"responseJsonSchema":{"properties":{"age":{"description":"The person's age","type":"integer"},"city":{"description":"The city where the person lives","type":"string"},"name":{"description":"The person's name","type":"string"}},"required":["name","age","city"],"type":"object"},"responseMimeType":"application/json"}}
+    headers:
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+      - google-genai-sdk/1.49.0 gl-go/go1.26.1
+    url: https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |
+      {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "{\"age\":30,\"city\":\"Paris\",\"name\":\"Alice\"}",
+                  "thoughtSignature": "EsEHCr4HAb4+9vspyEj0mfPBpYCAMq/8S8uo1minbssZnBuLDoZUz1/V8LGwU82UaE34aVCRE+MTi3Tw8+Re5wFTiE1JbEMmHafHt8dWbqW2NSd78cj4VHF6EAVsB5BcYvWgSQV/hBaFXrItGnQVdiPkZBTx10QpqMfG0JQbs2t1hik7861Hr0dzJEjA5I22VfH6CoysS28TTYGNSYxJZFD0+UQwnNiMA7iJix4rSHlgBivr8MTBWnX50h1vfGAjrsDLDxrl0JUEz4DtMsJ6tPacJRabhErtpGCC84NniATSJvCtg5+21+YdvRHY/cajrmwBCUquMS6LJGy65G3Fz1shNiTn0ZtA9v60kxubLzNtpZYrLPFgq+l6lSmjaFb83FXmY3Cfzn2uOwRJKbjwi45/xBy2vzN9ag20MgjAnZ4lQ8/egGCEtm3HERi9nOhC6nM8VQk23v9IFKbV/G3EiUs4k5LwAwNyytYrZRmjOUytxZGhbA9IMKIaSoIvfIAMNp3QU7QPpkCgLu8crCCHFAh47dAGb+DFFTgkJpvCs3oMLINOYZANjcnYGuOVNRnR9Q0ZYdZbpetZubV5aSFd0g4492sshzDnv9pQayCoMIZcIhq9jIVceMrayfxKYnrDv91eW1mtH2eZYpSHb9D2sBHnFBS0MfJUjHSYbSsaX+a6kvzubvRLXAP6XyG73vEcnE0c2RBXkAsNCryiW96sdkDQ++50HCJu0YSzATyLXt7598/2jLBh4Y2hqNJYxDs3mweJpxcUwiQFVAhuQefcqRLhP5B0hvChfwYsYwQx/MqOnf5dqHZls+PgfIwDVlCXd39PQQE+CuKXkBj1pvXIvIRrWBniQmU23Hdj24Kj5o9oosabmwZEssf3yg/+7s6yHxA5tRHny8zzYReojLWOMp276qbyWh8U171jZ5huRkAhsi74RBSmy0dWnXpHmTGzIO/Wl8KgvAv4GTxk/I+KVilh6gmvccgE3G0kYJvxoWs5W85UvBzkuVVCEUFawznIqHIlW0Bst4+tug3BJ0VXC0Wc/Ld8Ke2tBhTsj3WR90c76+PUlpAZADP38/GfM4E0Vw81MVEHsBEKfZdSiTOWkQsyruk84o0EN7945U0Ny46un4JdXpLt6PmY5Vs0Kw8jg6PF8SlZJ/FJaDTyd77MKFmBvXZMMrfV/BPPyV/I1lav6yIC65phF/uhxUyC5iIdIOma6praUNm0tmpomzTJmVeTsELo8Oy4Js00S0EnmBR2MeNvQKRv4fbhD6W7YEDXqMu5mg=="
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "index": 0
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 20,
+          "candidatesTokenCount": 14,
+          "totalTokenCount": 310,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 20
+            }
+          ],
+          "thoughtsTokenCount": 276
+        },
+        "modelVersion": "gemini-3.1-pro-preview",
+        "responseId": "4ACzaYupBdLiz7IPuISqgQI"
+      }
+    headers:
+      Content-Type:
+      - application/json; charset=UTF-8
+    status: 200 OK
+    code: 200
+    duration: 4.748026459s

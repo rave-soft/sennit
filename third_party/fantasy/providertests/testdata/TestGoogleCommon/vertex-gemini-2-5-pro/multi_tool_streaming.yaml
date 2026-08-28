@@ -1,0 +1,67 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 809
+    host: us-east5-aiplatform.googleapis.com
+    body: |
+      {"contents":[{"parts":[{"text":"Add and multiply the number 2 and 3"}],"role":"user"}],"generationConfig":{"maxOutputTokens":4000},"systemInstruction":{"parts":[{"text":"You are a helpful assistant. Always use both add and multiply at the same time."}],"role":"user"},"toolConfig":{"functionCallingConfig":{"mode":"AUTO"}},"tools":[{"functionDeclarations":[{"description":"Add two numbers","name":"add","parameters":{"properties":{"a":{"description":"first number","type":"INTEGER"},"b":{"description":"second number","type":"INTEGER"}},"required":["a","b"],"type":"OBJECT"}},{"description":"Multiply two numbers","name":"multiply","parameters":{"properties":{"a":{"description":"first number","type":"INTEGER"},"b":{"description":"second number","type":"INTEGER"}},"required":["a","b"],"type":"OBJECT"}}]}]}
+    form:
+      alt:
+      - sse
+    headers:
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+      - google-genai-sdk/1.49.0 gl-go/go1.26.1
+    url: https://us-east5-aiplatform.googleapis.com/v1beta1/projects/fantasy-playground-472418/locations/us-east5/publishers/google/models/gemini-2.5-pro:streamGenerateContent?alt=sse
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    body: "data: {\"candidates\": [{\"content\": {\"role\": \"model\",\"parts\": [{\"functionCall\": {\"name\": \"add\",\"args\": {\"b\": 3,\"a\": 2}},\"thoughtSignature\": \"CiQBjz1rX9vXzx2kuVvHI7K1og7PRomR1HnReMQI5SRJMSPzcAIKXgGPPWtfnWtXrgO5+AzYP5pnrCj2zZQuYQN0+s8HD4ukcOblaIEB1+ol370baALNpJqz131WB7VTe7FEKvlvrDglcKIAp9nu+AFphYHm4M1jyYxVoWtN2SmsDrBzWbgKZwGPPWtfbCiEax2Ys/D5UxclK7OD6tuXVaguLSieWuIZbMLU1yx9Q1Z611Uf6Gw/IQHGuYR/muyUGA74rs7AXi+cJ38x7djHGaQR3AOaLOotrGqyGbtbrGu6hCqf1Acp/jDPLdMhnukKdgGPPWtfw7FXMbV6/HUhP8gPUid+InjyPPe7Y6yxaPYEt13mNS8LGh85JJrF6v6LyW8QlR+EnGoQxHWJzAKo1Da46RmjiSqftdKOWWFux+S5eULdHwSSp+YsdgMcEmp1I/HeqT13UiOLtlRHj3iXGAZWshN5rjwKLwGPPWtfCFqQYyE6rXmQXNrcKMx4VdDSMTkXfdt7Cz4P6h75QRfLYlBcupiVk7GR\"},{\"functionCall\": {\"name\": \"multiply\",\"args\": {\"a\": 2,\"b\": 3}}}]},\"finishReason\": \"STOP\"}],\"usageMetadata\": {\"promptTokenCount\": 57,\"candidatesTokenCount\": 10,\"totalTokenCount\": 136,\"trafficType\": \"ON_DEMAND\",\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 57}],\"candidatesTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 10}],\"thoughtsTokenCount\": 69},\"modelVersion\": \"gemini-2.5-pro\",\"createTime\": \"2026-03-12T18:06:36.729115Z\",\"responseId\": \"rACzaZvALL_p8eEPtqjmqQc\"}\r\n\r\n"
+    headers:
+      Content-Type:
+      - text/event-stream
+    status: 200 OK
+    code: 200
+    duration: 1.931946959s
+- id: 1
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 1704
+    host: us-east5-aiplatform.googleapis.com
+    body: |
+      {"contents":[{"parts":[{"text":"Add and multiply the number 2 and 3"}],"role":"user"},{"parts":[{"functionCall":{"args":{"a":2,"b":3},"name":"add"},"thoughtSignature":"CiQBjz1rX9vXzx2kuVvHI7K1og7PRomR1HnReMQI5SRJMSPzcAIKXgGPPWtfnWtXrgO5+AzYP5pnrCj2zZQuYQN0+s8HD4ukcOblaIEB1+ol370baALNpJqz131WB7VTe7FEKvlvrDglcKIAp9nu+AFphYHm4M1jyYxVoWtN2SmsDrBzWbgKZwGPPWtfbCiEax2Ys/D5UxclK7OD6tuXVaguLSieWuIZbMLU1yx9Q1Z611Uf6Gw/IQHGuYR/muyUGA74rs7AXi+cJ38x7djHGaQR3AOaLOotrGqyGbtbrGu6hCqf1Acp/jDPLdMhnukKdgGPPWtfw7FXMbV6/HUhP8gPUid+InjyPPe7Y6yxaPYEt13mNS8LGh85JJrF6v6LyW8QlR+EnGoQxHWJzAKo1Da46RmjiSqftdKOWWFux+S5eULdHwSSp+YsdgMcEmp1I/HeqT13UiOLtlRHj3iXGAZWshN5rjwKLwGPPWtfCFqQYyE6rXmQXNrcKMx4VdDSMTkXfdt7Cz4P6h75QRfLYlBcupiVk7GR"},{"functionCall":{"args":{"a":2,"b":3},"name":"multiply"}}],"role":"model"},{"parts":[{"functionResponse":{"name":"add","response":{"result":"5"}}},{"functionResponse":{"name":"multiply","response":{"result":"6"}}}],"role":"user"}],"generationConfig":{"maxOutputTokens":4000},"systemInstruction":{"parts":[{"text":"You are a helpful assistant. Always use both add and multiply at the same time."}],"role":"user"},"toolConfig":{"functionCallingConfig":{"mode":"AUTO"}},"tools":[{"functionDeclarations":[{"description":"Add two numbers","name":"add","parameters":{"properties":{"a":{"description":"first number","type":"INTEGER"},"b":{"description":"second number","type":"INTEGER"}},"required":["a","b"],"type":"OBJECT"}},{"description":"Multiply two numbers","name":"multiply","parameters":{"properties":{"a":{"description":"first number","type":"INTEGER"},"b":{"description":"second number","type":"INTEGER"}},"required":["a","b"],"type":"OBJECT"}}]}]}
+    form:
+      alt:
+      - sse
+    headers:
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+      - google-genai-sdk/1.49.0 gl-go/go1.26.1
+    url: https://us-east5-aiplatform.googleapis.com/v1beta1/projects/fantasy-playground-472418/locations/us-east5/publishers/google/models/gemini-2.5-pro:streamGenerateContent?alt=sse
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    body: "data: {\"candidates\": [{\"content\": {\"role\": \"model\",\"parts\": [{\"text\": \"The sum of 2 and 3 is 5, and the\",\"thoughtSignature\": \"ClIBjz1rX7FIBti76JKYaWPaehdPmQEfz1CDv9kmNNhLkl56+W4Tpupdrw7UyWuM5wAf6Gmo+wGAxm5wsbv3FTG06cHJz5X15P5/tQz3qxrhnEmvCmYBjz1rXw4rMCdHAlza5TGnWWQl1uvk20CaMkfn99df9c0dmoLig1p9G84h+P5pZ9KCb86xxj8sZo/Kv7RG7TOmpczIewfQmBUedVS72YcLJX8VgSjm30Dyk/fr0ySRRMyAVCp2KZoKtgEBjz1rXyhBXqbvtNG3Hl0MKixdlnH1Ni5Z0/7h027gkxGp3XV+aY/ku+ggpdR0BFDtztNqDJ5dhnRY7SsMB+trSj/nulpdi0huGUc9xMafk3Hwh3OTpsp9Z8ZXA2Bf4A0iq/vyHOZKaiZ9ORjckTMgOeFWdDooaWfnNaK5S6sNERencuWSkIx/Zno/T8mcRv5Px1xv5v+wD9dqwIEJVJ7nq4NGnDe2BVRpLFvz7qiwCp9nvOL7Jgp6AY89a1/VJhaeJrVOWtdqq7ffD3U3IWAI6Iht6aKMoztaFGxOjso25iUU+6P6EVDtrXYF7D21SL1NYYRwk4J5ZmV8NFywreBfpdSJmXVcw+HjgcM3RittJzD34NMD6nDX7MOKCgF9hmBr/h/vXwN9qPlDMNfVgf8fI48=\"}]}}],\"usageMetadata\": {\"trafficType\": \"ON_DEMAND\"},\"modelVersion\": \"gemini-2.5-pro\",\"createTime\": \"2026-03-12T18:06:38.666193Z\",\"responseId\": \"rgCzadHUKOXS8eEP54DhuA8\"}\r\n\r\ndata: {\"candidates\": [{\"content\": {\"role\": \"model\",\"parts\": [{\"text\": \" product of 2 and 3 is 6.\"}]},\"finishReason\": \"STOP\"}],\"usageMetadata\": {\"promptTokenCount\": 73,\"candidatesTokenCount\": 25,\"totalTokenCount\": 181,\"trafficType\": \"ON_DEMAND\",\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 73}],\"candidatesTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 25}],\"thoughtsTokenCount\": 83},\"modelVersion\": \"gemini-2.5-pro\",\"createTime\": \"2026-03-12T18:06:38.666193Z\",\"responseId\": \"rgCzadHUKOXS8eEP54DhuA8\"}\r\n\r\n"
+    headers:
+      Content-Type:
+      - text/event-stream
+    status: 200 OK
+    code: 200
+    duration: 2.147560375s

@@ -1,0 +1,34 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 182
+    host: ""
+    body: '{"messages":[{"content":"You are a helpful assistant","role":"system"},{"content":"Say hi in Portuguese","role":"user"}],"model":"moonshotai/kimi-k2-instruct-0905","max_tokens":4000}'
+    headers:
+      Accept:
+      - application/json
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+    url: https://api.groq.com/openai/v1/chat/completions
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |
+      {"id":"chatcmpl-6a0f3262-12b3-44b8-8253-8c1cad4415d5","object":"chat.completion","created":1773345612,"model":"moonshotai/kimi-k2-instruct-0905","choices":[{"index":0,"message":{"role":"assistant","content":"Olá!"},"logprobs":null,"finish_reason":"stop"}],"usage":{"queue_time":0.194572138,"prompt_tokens":20,"prompt_time":0.010962163,"completion_tokens":4,"completion_time":0.009096914,"total_tokens":24,"total_time":0.020059077},"usage_breakdown":null,"system_fingerprint":"fp_00c37775b7","x_groq":{"id":"req_01kkht589efqdsj9kpsy67f2sk","seed":1322261444},"service_tier":"on_demand"}
+    headers:
+      Content-Type:
+      - application/json
+    status: 200 OK
+    code: 200
+    duration: 373.365833ms

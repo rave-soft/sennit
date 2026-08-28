@@ -1,0 +1,64 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 817
+    host: generativelanguage.googleapis.com
+    body: |
+      {"contents":[{"parts":[{"text":"Generate information about 'The Lord of the Rings' book by J.R.R. Tolkien, including genres like fantasy and adventure, and its publication year (1954)."}],"role":"user"}],"generationConfig":{"maxOutputTokens":4000,"responseJsonSchema":{"properties":{"author":{"properties":{"name":{"description":"Author's name","type":"string"},"nationality":{"description":"Author's nationality","type":"string"}},"required":["name","nationality"],"type":"object"},"genres":{"description":"List of genres","items":{"type":"string"},"type":"array"},"published_year":{"description":"Year the book was published","type":"integer"},"title":{"description":"The book title","type":"string"}},"required":["title","author","genres","published_year"],"type":"object"},"responseMimeType":"application/json"}}
+    headers:
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+      - google-genai-sdk/1.49.0 gl-go/go1.26.1
+    url: https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |
+      {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "{\"author\":{\"name\":\"J.R.R. Tolkien\",\"nationality\":\"British\"},\"genres\":[\"Fantasy\",\"Adventure\"],\"published_year\":1954,\"title\":\"The Lord of the Rings\"}",
+                  "thoughtSignature": "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"
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "index": 0
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 38,
+          "candidatesTokenCount": 41,
+          "totalTokenCount": 582,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 38
+            }
+          ],
+          "thoughtsTokenCount": 503
+        },
+        "modelVersion": "gemini-3.1-pro-preview",
+        "responseId": "6wCzaa0uge3Psg-93ZyBDQ"
+      }
+    headers:
+      Content-Type:
+      - application/json; charset=UTF-8
+    status: 200 OK
+    code: 200
+    duration: 6.460072792s

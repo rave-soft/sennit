@@ -1,0 +1,35 @@
+---
+version: 2
+interactions:
+- id: 0
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 499
+    host: generativelanguage.googleapis.com
+    body: |
+      {"contents":[{"parts":[{"text":"Generate information about a person named Alice who is 30 years old and lives in Paris."}],"role":"user"}],"generationConfig":{"maxOutputTokens":4000,"responseJsonSchema":{"properties":{"age":{"description":"The person's age","type":"integer"},"city":{"description":"The city where the person lives","type":"string"},"name":{"description":"The person's name","type":"string"}},"required":["name","age","city"],"type":"object"},"responseMimeType":"application/json"}}
+    form:
+      alt:
+      - sse
+    headers:
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Fantasy/0.12.2 (https://charm.land/fantasy)
+      - google-genai-sdk/1.49.0 gl-go/go1.26.1
+    url: https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"{\\\"age\\\":30,\\\"city\\\":\\\"Paris\\\",\\\"name\\\":\\\"Alice\\\"}\"}],\"role\": \"model\"},\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 20,\"candidatesTokenCount\": 14,\"totalTokenCount\": 322,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 20}],\"thoughtsTokenCount\": 288},\"modelVersion\": \"gemini-3.1-pro-preview\",\"responseId\": \"5ACzaZ__IeLmz7IPh7_F8QE\"}\r\n\r\ndata: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"\",\"thoughtSignature\": \"EuQICuEIAb4+9vvJKGZmdmSaWwutI6ZYB3NqBsJaM3J5+1D2Kj7FAdIk0+U1ryJTgay2p+JujW/GKxSs1NnCbfAYpyRdsPsbRHPFWVeO4u8gue54KOFIDf1S71YdhI+x3dTB5zkExpnNxqcQmSHg42v+xvYuQZY3moWgkhX8P8MFjmLw2BNXHeBAnmgf9MeXuyXolDrhQTj5ScQbxDQQqsFsJiBk0jax7DElmXKVE4HZS0KY/SJJi5wQAuxQlgu/HOsZ45vCh7vfA2zyKqzAjxiYb8re5zSew+9SvaIyVdKSnH116ZQpWAEGDmHpELMmoprfjG+DmsmF3Ecm5LyWdxGtdV5WqP8khqIp5m2NthiOzjaMcNF+03GpFlXvrGj7IiH7WP1JbQpAC9kyvQejmG8/wCatXTv50wdZHBZ9J2QOkck7yolu83VGWgXd01yu7RQ44qXv7EyA8B95PipAMq89QjumZ2uznGyYT8ayFiES/LsfZ1nWCqrLHPd7Y5f2/9UayOmlg7GU+y9gNGYuSiSF2kkTuImI2d8t6D+KYrtAKu6aTPH8xVK1+NidjIZblAhqwWteCfcC2CeG+3koG/CbQC7r2oZxiI6OPRSPCJ0OpVEOmLSHuz2sjYn7Tkz60ZM3qRkJmDMoQH5YLNha5FNqUhtxhr2XSAhWbFcFtull27DL3Sw3vE6VxIhrgUMwXJdAr+HEeQEYQN00naVJM6cfqts5fCjmmoOOtfEsdCrWKUfLyhIc7qJqvimElQI9Lo9J21GXDti56PnG32mjOtWMQJkh44Rdq+IXx8BiSPZD4m87mzuZB7zjuxf+jO37XuybQp0jujmdQr1rNZ7jYqfl83XSvt9nxZWOOMcPpBlL0xemTtWTj70rm731xAqGQuu+Ex+ftMHDyEa06pOaWJ2FVzu8TxKEIL9MlguBIjoqXPYtIeeanj4WaY3qpOd+ynE1+M7wmmdUhaat9N/bf+6DK5xpruHGFJLpmoRaUcZK78TvSh6/n8K7OZdO12uX/c36Zx37JZw92TbzK7T444oV+Dcqm7wpB50zpMkGnwmRaP65m766vSeiWJA/WLwTr7WYqDcqkcLaKlSz5PeoUSK/tuVWqhmWtcfVPl1LK0waBWS7oONu4LQv7IzqirE9SmC83exhBuv+PaYB5slZBOlHNiFr9ZdBKcq31AnN7MkjlSCVYrS79pnbdUl83P/zwSHlhKcqkRUQlu+guFRLvmMgu8ta7CHUgs1OnQFNQda1QB9CPzFJe+DeoajuCypyNJ4iLMA+m266+5EaZfzNDeIQHjQXw1SlbbsFn7irlTLR+2CW5klXCI3+1jhF3VIhlu8RLKqzW6JfF81PEsD7lQn4otAI4SLjh5w+BCAZjeTpFQOfrt2GtV+hicYocvBNQEEOJKvvbT+UvFqSQjOIjWI9y3ulfiUMqtsueyC/5vJ7qleCMh0lUB+tB0AI2d8h16dK9RCkPx5loEFxN1Fbm8w56zaLD1Y=\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 20,\"candidatesTokenCount\": 14,\"totalTokenCount\": 322,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 20}],\"thoughtsTokenCount\": 288},\"modelVersion\": \"gemini-3.1-pro-preview\",\"responseId\": \"5ACzaZ__IeLmz7IPh7_F8QE\"}\r\n\r\n"
+    headers:
+      Content-Type:
+      - text/event-stream
+    status: 200 OK
+    code: 200
+    duration: 4.386368959s
