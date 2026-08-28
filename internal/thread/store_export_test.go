@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -95,6 +96,14 @@ func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, 
 		ParentSessionID: params.ParentSessionID,
 	})
 	if err != nil {
+		// Mirrors threadspawn.store.Create: this test double stands in
+		// for the real Store, so it must honor the same contract —
+		// ErrNameTaken on a name collision — or a test built on top of
+		// it (see manager_test.go's race regression test) would be
+		// exercising a store that cannot actually happen in production.
+		if db.IsUniqueConstraintError(err) {
+			return Thread{}, fmt.Errorf("%w: %w", ErrNameTaken, err)
+		}
 		return Thread{}, err
 	}
 	return testFromDBItem(dbThread), nil

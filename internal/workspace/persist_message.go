@@ -3,8 +3,8 @@ package workspace
 import (
 	"context"
 	"log/slog"
-	"strings"
 
+	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 )
@@ -35,10 +35,8 @@ func persistShellOutput(
 		}},
 	})
 	// The messages table has a single foreign key (session_id), so an FK
-	// failure here can only mean the session is gone. We match on the error
-	// text because the codebase builds against two swappable SQLite drivers
-	// (modernc and ncruces) and this is the one signal stable across both.
-	if err != nil && strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+	// failure here can only mean the session is gone.
+	if db.IsForeignKeyConstraintError(err) {
 		slog.Debug(
 			"Skipping shell command persistence: session no longer exists",
 			"session_id", sessionID,

@@ -72,6 +72,14 @@ func (s *store) Create(ctx context.Context, params thread.CreateParams) (thread.
 		ParentSessionID: params.ParentSessionID,
 	})
 	if err != nil {
+		// Satisfy the thread.Store contract: Create must report a
+		// (project_path, kind, name) collision as thread.ErrNameTaken,
+		// findable with errors.Is, so thread stays free to guard its own
+		// check-then-act race without knowing this store is backed by
+		// SQLite at all.
+		if db.IsUniqueConstraintError(err) {
+			return thread.Thread{}, fmt.Errorf("%w: %w", thread.ErrNameTaken, err)
+		}
 		return thread.Thread{}, err
 	}
 	return fromDBItem(dbThread), nil

@@ -1,6 +1,20 @@
 package thread
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrNameTaken is part of the Store contract: Create must return an error
+// wrapping ErrNameTaken (so callers can find it with errors.Is) whenever
+// the insert failed because (project_path, kind, name) is already in
+// use. This package must not import internal/db, so it cannot itself
+// tell a unique-constraint violation apart from any other write failure
+// — that recognition has to happen in the concrete implementation, which
+// does know its storage's error shapes, and the result is reported back
+// through this sentinel rather than through a driver-specific type or a
+// message text comparison.
+var ErrNameTaken = errors.New("thread: name already in use")
 
 // CreateParams holds the fields needed to create a new thread. Status
 // defaults to StatusPending, MergePolicy defaults to MergeAuto, and Kind
@@ -48,6 +62,9 @@ type FinalizeTaskParams struct {
 // internal/app/threadspawn (NewStore): this domain package declares the
 // contract and must not import internal/db.
 type Store interface {
+	// Create must return an error wrapping ErrNameTaken when the insert
+	// violates the (project_path, kind, name) uniqueness constraint — see
+	// ErrNameTaken's doc comment.
 	Create(ctx context.Context, params CreateParams) (Thread, error)
 	Get(ctx context.Context, id string) (Thread, error)
 	GetByName(ctx context.Context, name string) (Thread, error)
