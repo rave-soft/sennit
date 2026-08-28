@@ -781,11 +781,21 @@ func requireGit(t *testing.T) {
 // initGitRepo creates a scratch git repo in a fresh temp dir, with local
 // user.email/user.name config and one commit so a later uncommitted change
 // has something to diff against.
+//
+// The returned path is resolved with filepath.EvalSymlinks so it matches
+// what git itself reports: t.TempDir() can hand back a path that runs
+// through a symlink (e.g. macOS's /var -> /private/var), while git
+// canonicalises its worktree root. Comparing an unresolved test path
+// against git's resolved one would fail on those platforms even though
+// production behaviour is correct.
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	requireGit(t)
 
 	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	dir = resolved
 	runGit(t, dir, "init", "-b", "main")
 	runGit(t, dir, "config", "user.email", "test@example.com")
 	runGit(t, dir, "config", "user.name", "Test")
