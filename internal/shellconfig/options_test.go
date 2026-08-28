@@ -417,3 +417,33 @@ func TestOption_UnknownKey(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown key")
 }
+
+// TestOption_AutoSummarizeIdle pins the three idle auto-summarize keys,
+// which are the first options to nest under a block of their own outside
+// attribution and the UI: they must land in options.auto_summarize_idle,
+// not at the top of options.
+func TestOption_AutoSummarizeIdle(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option auto-summarize-idle true
+option auto-summarize-idle-tokens 40000
+option auto-summarize-idle-after 90s`)
+
+	idle := result["options"].(map[string]any)["auto_summarize_idle"].(map[string]any)
+	require.Equal(t, true, idle["enabled"])
+	require.Equal(t, float64(40000), idle["context_tokens"])
+	require.Equal(t, "90s", idle["after"])
+}
+
+// TestOption_AutoSummarizeIdleAfterRejectsGarbage: a duration that does not
+// parse is an error at the line that wrote it, not a value silently ignored
+// later by whatever reads it.
+func TestOption_AutoSummarizeIdleAfterRejectsGarbage(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option auto-summarize-idle-after 4 minutes`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects a positive duration")
+}

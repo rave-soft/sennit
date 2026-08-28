@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // handleOption implements the `option` builtin.
@@ -91,6 +92,11 @@ const (
 	optBool
 	optList
 	optInt
+	// optDuration is a Go duration string ("4m", "90s"): stored as the
+	// string the user typed, but rejected here if it does not parse, so a
+	// typo is an error at the line that made it rather than a silently
+	// ignored value at the point something reads it.
+	optDuration
 )
 
 // optionSpec describes one user-facing option key: the JSON field it writes,
@@ -139,6 +145,11 @@ var optionSpecs = map[string]optionSpec{
 
 	// Integer fields.
 	"history-retention-days": {jsonKey: "history_retention_days", kind: optInt},
+
+	// Idle auto-summarize, nested under options.auto_summarize_idle.
+	"auto-summarize-idle":        {jsonKey: "enabled", kind: optBool, path: []string{"auto_summarize_idle"}},
+	"auto-summarize-idle-tokens": {jsonKey: "context_tokens", kind: optInt, path: []string{"auto_summarize_idle"}, nonNegative: true},
+	"auto-summarize-idle-after":  {jsonKey: "after", kind: optDuration, path: []string{"auto_summarize_idle"}},
 
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},
@@ -217,6 +228,13 @@ func setOption(root map[string]any, spec optionSpec, label, val string, shorthan
 			bv = !bv
 		}
 		target[spec.jsonKey] = bv
+
+	case optDuration:
+		d, err := time.ParseDuration(val)
+		if err != nil || d <= 0 {
+			return usage(stderr, fmt.Sprintf("%s expects a positive duration like 4m or 90s, got %q", label, val))
+		}
+		target[spec.jsonKey] = val
 
 	default: // optString
 		if len(spec.enum) > 0 && !slices.Contains(spec.enum, val) {

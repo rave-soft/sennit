@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/invopop/jsonschema"
@@ -274,6 +275,11 @@ type Options struct {
 	// above the model's window has no effect. Ignored entirely when
 	// DisableAutoSummarize is set — that switch still wins.
 	AutoSummarizeAt int64 `json:"auto_summarize_at,omitempty" jsonschema:"description=Summarize once a session's context reaches this many tokens even when the model's own window is larger - 0 means no cap,default=0"`
+	// AutoSummarizeIdle summarizes a session that has been left alone
+	// with a large context, instead of waiting for the next turn to walk
+	// into the window. See AutoSummarizeIdleOptions. Ignored entirely
+	// when DisableAutoSummarize is set — that switch still wins.
+	AutoSummarizeIdle *AutoSummarizeIdleOptions `json:"auto_summarize_idle,omitempty" jsonschema:"description=Summarize a session that has grown past a context size and then sat idle"`
 	// DataDirectory is a project-local directory (".sennit" by default) for
 	// workspace-scoped state that is NOT part of the shared global database:
 	// the single-instance lock file, workspace config overrides, and (until
@@ -315,6 +321,84 @@ type Options struct {
 	// nothing purges history on its own. A pointer distinguishes "unset"
 	// (defaults to 90) from an explicit 0, which means keep history forever.
 	HistoryRetentionDays *int `json:"history_retention_days,omitempty" jsonschema:"description=Age in days after which \"sennit gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"sennit gc\" (e.g. from cron) to apply it.,default=90,example=30,example=180"`
+}
+
+// AutoSummarizeIdleOptions configures the idle summarize pass: a session
+// whose context has grown past ContextTokens and has then seen no work
+// for After is summarized where it stands, without waiting for someone to
+// come back and send the next turn.
+//
+// The point is when the cost is paid, not whether. A session that has
+// filled up summarizes sooner or later either way; doing it while nobody
+// is waiting means the person's next turn starts on a compacted context
+// instead of stopping mid-answer to compress the one it just read.
+//
+// Every field is optional and answered by the Effective* accessors below,
+// all of which are safe to call on a nil *AutoSummarizeIdleOptions — the
+// zero config is "on, with the defaults".
+type AutoSummarizeIdleOptions struct {
+	// Enabled turns the idle pass on or off. A pointer distinguishes
+	// "unset" from an explicit false, the same tri-state AutoLSP and
+	// Progress use; unset means on.
+	Enabled *bool `json:"enabled,omitempty" jsonschema:"description=Summarize a session left idle with a large context,default=true"`
+	// ContextTokens is how large a session's context must have grown
+	// before idling is worth summarizing at all, in tokens — the same
+	// unit as AutoSummarizeAt, measured against the session's recorded
+	// prompt tokens. A session under it is left alone however long it
+	// sits: summarizing a short conversation costs a request and throws
+	// away detail to free room nobody needed.
+	ContextTokens int64 `json:"context_tokens,omitempty" jsonschema:"description=Context size (in prompt tokens) a session must exceed before an idle summarize is worth doing,default=60000,example=60000"`
+	// After is how long a session must go without work before the pass
+	// fires, as a Go duration string ("4m", "90s", "1h"). Measured from
+	// the last turn this process ran for the session, so a person
+	// thinking, or away entirely, counts as idle — which is the point.
+	//
+	// The sweep runs on its own coarse tick (see
+	// idleSummarizeSweepInterval in internal/agent), so a trip can be up
+	// to one interval late. Nothing about this needs to be precise.
+	After string `json:"after,omitempty" jsonschema:"description=How long a session must sit idle before it is summarized (Go duration),default=4m,example=4m,example=90s"`
+}
+
+// Idle-summarize defaults, applied by the accessors below when a field is
+// unset. See AutoSummarizeIdleOptions for what each one means.
+const (
+	DefaultAutoSummarizeIdleContextTokens = 60_000
+	DefaultAutoSummarizeIdleAfter         = 4 * time.Minute
+)
+
+// IsEnabled reports whether the idle summarize pass should run. Safe on a
+// nil receiver: an absent config block is the default, which is on.
+func (o *AutoSummarizeIdleOptions) IsEnabled() bool {
+	if o == nil {
+		return true
+	}
+	return ptrValOr(o.Enabled, true)
+}
+
+// EffectiveContextTokens returns the context size an idle session must
+// exceed to be worth summarizing. A zero or negative value falls back to
+// the default rather than meaning "summarize everything": there is no
+// useful reading of "summarize a session with no context in it".
+func (o *AutoSummarizeIdleOptions) EffectiveContextTokens() int64 {
+	if o == nil || o.ContextTokens <= 0 {
+		return DefaultAutoSummarizeIdleContextTokens
+	}
+	return o.ContextTokens
+}
+
+// EffectiveAfter returns how long a session must be idle first. An empty,
+// unparseable, or non-positive value falls back to the default — the same
+// treatment RotationConfig.EffectiveCooldown gives a bad cooldown, and for
+// the same reason: a typo here must not turn into "summarize immediately".
+func (o *AutoSummarizeIdleOptions) EffectiveAfter() time.Duration {
+	if o == nil || o.After == "" {
+		return DefaultAutoSummarizeIdleAfter
+	}
+	d, err := time.ParseDuration(o.After)
+	if err != nil || d <= 0 {
+		return DefaultAutoSummarizeIdleAfter
+	}
+	return d
 }
 
 // ThreadsOptions configures the threads feature (parallel agent work

@@ -63,6 +63,44 @@ behaviour off with:
 option auto-summarize false
 ```
 
+### Idle summarization
+
+Waiting for the context limit means the compression happens at the worst
+moment: you have just sent a message, and the session stops to replay the
+whole conversation before it can start answering. So Sennit also summarizes a
+session that has grown large and then gone quiet — by default, one that is
+carrying more than 60,000 prompt tokens and has seen no work for four
+minutes. The next thing you send starts on a compacted context, and the
+request was paid for while nobody was waiting.
+
+Both thresholds, and the pass itself, are configurable:
+
+```bash
+option auto-summarize-idle false          # turn the idle pass off
+option auto-summarize-idle-tokens 100000  # only sessions this large
+option auto-summarize-idle-after 10m      # after this much silence
+```
+
+Or in `sennit.json`:
+
+```json
+{
+  "options": {
+    "auto_summarize_idle": {
+      "enabled": true,
+      "context_tokens": 60000,
+      "after": "4m"
+    }
+  }
+}
+```
+
+`option auto-summarize false` turns this off as well — it means "do not
+summarize behind my back", and this is exactly that. A session below the
+token threshold is never touched however long it sits, a session with a turn
+in flight is never touched at all, and the sweep runs on a coarse 30-second
+tick, so a trip can be up to half a minute late.
+
 Sennit uses a smaller, cheaper model for summarization and session titles. That
 choice is not configurable.
 

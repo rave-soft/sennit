@@ -496,6 +496,7 @@ Boolean Keys:
   progress                       show progress indicators
   metrics                        send anonymous usage metrics
   auto-summarize                 automatically summarize long conversations
+  auto-summarize-idle            summarize a large session once it goes quiet
   default-providers              include built-in providers
   attribution-generated-with     add the Generated with Sennit line
 
@@ -507,6 +508,15 @@ String Keys:
   attribution-trailer-style string attribution trailer: none or assisted-by
                                    (old configs with co_authored_by: true now
                                    map to assisted-by)
+
+Integer Keys:
+  history-retention-days int       days of history "sennit gc" keeps
+  auto-summarize-idle-tokens int   context size an idle session must exceed
+                                   before it is summarized (prompt tokens)
+
+Duration Keys:
+  auto-summarize-idle-after string how long a session must sit idle before
+                                   it is summarized, e.g. 4m or 90s
 
 List Keys:
   context-path string             append a project context path

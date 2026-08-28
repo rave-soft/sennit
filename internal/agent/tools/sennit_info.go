@@ -525,6 +525,17 @@ func writeOptions(b *strings.Builder, cfg SennitInfoConfig) {
 	if autoSummarize && c.Options.AutoSummarizeAt > 0 {
 		opts = append(opts, kv{"auto_summarize_at", strconv.FormatInt(c.Options.AutoSummarizeAt, 10)})
 	}
+	// The idle pass's thresholds are only worth reporting when it can
+	// actually fire: with auto-summarize off, or the pass itself off,
+	// they describe nothing that happens.
+	idle := c.Options.AutoSummarizeIdle
+	if autoSummarize {
+		opts = append(opts, kv{"auto_summarize_idle", fmt.Sprintf("%v", idle.IsEnabled())})
+		if idle.IsEnabled() {
+			opts = append(opts, kv{"auto_summarize_idle_context_tokens", strconv.FormatInt(idle.EffectiveContextTokens(), 10)})
+			opts = append(opts, kv{"auto_summarize_idle_after", idle.EffectiveAfter().String()})
+		}
+	}
 
 	slices.SortFunc(opts, func(a, b kv) int { return strings.Compare(a.key, b.key) })
 	b.WriteString("[options]\n")

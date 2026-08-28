@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/latency"
@@ -164,15 +165,16 @@ func (c *coordinator) newCoordinatorComponents() {
 	agentPort := &coordinatorAgentPort{}
 	lifecycle := &readinessLifecycle{}
 	c.dispatcher = &turnDispatcher{
-		cfg:         c.cfg,
-		sessions:    c.sessions,
-		messages:    c.messages,
-		notify:      c.notify,
-		runComplete: c.runComplete,
-		mcp:         c.mcp,
-		latency:     c.latency,
-		agentPort:   agentPort,
-		lifecycle:   lifecycle,
+		cfg:          c.cfg,
+		lastActivity: csync.NewMap[string, time.Time](),
+		sessions:     c.sessions,
+		messages:     c.messages,
+		notify:       c.notify,
+		runComplete:  c.runComplete,
+		mcp:          c.mcp,
+		latency:      c.latency,
+		agentPort:    agentPort,
+		lifecycle:    lifecycle,
 	}
 
 	c.builder = &runtimeBuilder{
@@ -323,6 +325,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	if sa, ok := agent.(*sessionAgent); ok {
 		sa.continuationRunner = c.dispatcher.runContinuation
 	}
+	// Started last, once there is an agent for it to summarize through.
+	// It ends with the coordinator: Close cancels the lifecycle context
+	// the sweep selects on and waits for it. See startIdleSummarize.
+	c.dispatcher.startIdleSummarize()
 	return c, nil
 }
 

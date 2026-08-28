@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"charm.land/fantasy"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -41,6 +44,24 @@ type turnDispatcher struct {
 	agentPort *coordinatorAgentPort
 
 	lifecycle *readinessLifecycle
+
+	// lastActivity records, per session this dispatcher has run work
+	// for, when that session was last busy. It is the clock the idle
+	// summarize sweep reads (see idle_summarize.go) and the only state
+	// that pass owns. Entries are created by markActivity and dropped
+	// only when the session turns out to be gone, so the map is bounded
+	// by the sessions one process actually drives.
+	lastActivity *csync.Map[string, time.Time]
+	// summarizeIdle is the action half of the idle sweep, split from the
+	// decision half so a test can drive the policy (thresholds, the idle
+	// clock, the busy and config checks) without a provider behind it.
+	// nil — always, in production — means d.Summarize.
+	summarizeIdle func(ctx context.Context, sessionID string) error
+	// idleSummarizeGroup is the errgroup the idle sweep goroutine runs
+	// in. It is separate from lifecycle.primary deliberately: the sweep
+	// only ends at Close, and waitPrimary — which every turn calls
+	// before it can run — would then never return.
+	idleSummarizeGroup errgroup.Group
 }
 
 // Close cancels the coordinator's background readiness work (buildAgent's
@@ -96,6 +117,10 @@ func (d *turnDispatcher) refreshRuntimeToken(ctx context.Context, runtime *compi
 // request replays through, refreshes an expired OAuth token first, and
 // hands the call to the current agent's own summarize pass.
 func (d *turnDispatcher) Summarize(ctx context.Context, sessionID string) error {
+	// A summarize is work on the session, whoever asked for it: the idle
+	// sweep must not fire on top of one a person just ran by hand.
+	d.markActivity(sessionID)
+	defer d.markActivity(sessionID)
 	runtime, err := d.builder.runtimeFor(ctx, d.delegation.runtimeInputs())
 	if err != nil {
 		return err
@@ -152,6 +177,8 @@ func (d *turnDispatcher) GenerateTitle(ctx context.Context, sessionID, prompt st
 // those is most likely precisely when a continuation fires — long after
 // the turn that started the delegation.
 func (d *turnDispatcher) runContinuation(ctx context.Context, sessionID string) error {
+	d.markActivity(sessionID)
+	defer d.markActivity(sessionID)
 	if err := d.lifecycle.waitPrimary(); err != nil {
 		return err
 	}
@@ -212,6 +239,12 @@ func (d *turnDispatcher) makeRunCall(call SessionAgentCall) SessionAgentCall {
 // reservation under dispatchMu; when nil (the in-process/local path) no
 // accept tracking applies.
 func (d *turnDispatcher) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	// Both ends of the turn count as activity for the idle summarize
+	// sweep: the entry mark covers a turn that outlives the idle window,
+	// and the deferred one restarts the clock from the moment the
+	// session actually went quiet. See markActivity.
+	d.markActivity(sessionID)
+	defer d.markActivity(sessionID)
 	if err := d.lifecycle.waitPrimary(); err != nil {
 		return nil, err
 	}
@@ -329,6 +362,8 @@ func (d *turnDispatcher) BeginAccepted(sessionID string) *AcceptedRun {
 
 // Steer implements Coordinator.
 func (d *turnDispatcher) Steer(ctx context.Context, call SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error) {
+	d.markActivity(call.SessionID)
+	defer d.markActivity(call.SessionID)
 	return d.agentPort.current().Steer(ctx, call)
 }
 

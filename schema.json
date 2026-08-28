@@ -28,6 +28,34 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "AutoSummarizeIdleOptions": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Summarize a session left idle with a large context",
+          "default": true
+        },
+        "context_tokens": {
+          "type": "integer",
+          "description": "Context size (in prompt tokens) a session must exceed before an idle summarize is worth doing",
+          "default": 60000,
+          "examples": [
+            60000
+          ]
+        },
+        "after": {
+          "type": "string",
+          "description": "How long a session must sit idle before it is summarized (Go duration)",
+          "default": "4m",
+          "examples": [
+            "4m",
+            "90s"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -491,6 +519,10 @@
           "type": "integer",
           "description": "Summarize once a session's context reaches this many tokens even when the model's own window is larger - 0 means no cap",
           "default": 0
+        },
+        "auto_summarize_idle": {
+          "$ref": "#/$defs/AutoSummarizeIdleOptions",
+          "description": "Summarize a session that has grown past a context size and then sat idle"
         },
         "data_directory": {
           "type": "string",

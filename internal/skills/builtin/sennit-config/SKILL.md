@@ -299,6 +299,11 @@ option reset <list-key>    # clear a list option back to empty
 - **Integer keys**: `history-retention-days` (age, in days, after which `sennit
   gc` deletes old sessions/threads; default 90, 0 keeps history forever — see
   [Maintenance](#maintenance)).
+- **Idle auto-summarize keys** (stored under `options.auto_summarize_idle`):
+  `auto-summarize-idle` (boolean, default on), `auto-summarize-idle-tokens`
+  (context size in prompt tokens a session must exceed, default 60000), and
+  `auto-summarize-idle-after` (duration a session must sit idle, default `4m`,
+  e.g. `90s`). Turning `auto-summarize` off disables this pass too.
 - **Attribution keys**: `attribution-trailer-style` (`none`, `assisted-by`) and
   `attribution-generated-with` (boolean). Old configs with `co_authored_by:
   true` now migrate to `assisted-by`.
