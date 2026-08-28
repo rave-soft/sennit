@@ -14,7 +14,6 @@ import (
 	"github.com/qjebbs/go-jsons"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config/migrate"
-	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/shellconfig"
@@ -480,38 +479,6 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	}
 	config.jsonAgentsBlockDetected = hadAgentsBlock
 	return &config, nil
-}
-
-func hasAWSCredentialsWithFiles(env env.Env, homeDir string, stat func(string) (os.FileInfo, error)) bool {
-	if env.Get("AWS_BEARER_TOKEN_BEDROCK") != "" {
-		return true
-	}
-
-	if env.Get("AWS_ACCESS_KEY_ID") != "" && env.Get("AWS_SECRET_ACCESS_KEY") != "" {
-		return true
-	}
-
-	if env.Get("AWS_PROFILE") != "" || env.Get("AWS_DEFAULT_PROFILE") != "" {
-		return true
-	}
-
-	if env.Get("AWS_REGION") != "" || env.Get("AWS_DEFAULT_REGION") != "" {
-		return true
-	}
-
-	if env.Get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" ||
-		env.Get("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
-		return true
-	}
-
-	if _, err := stat(filepath.Join(homeDir, ".aws/credentials")); err == nil {
-		return true
-	}
-	if _, err := stat(filepath.Join(homeDir, ".aws/login")); err == nil {
-		return true
-	}
-
-	return false
 }
 
 // migrateDisableNotifications migrates the deprecated disable_notifications

@@ -37,48 +37,6 @@ func TestMain(m *testing.M) {
 	os.Exit(exitVal)
 }
 
-func TestHasAWSCredentialsWithFiles(t *testing.T) {
-	t.Parallel()
-
-	for _, test := range []struct {
-		name      string
-		env       map[string]string
-		files     map[string]bool
-		wantPaths []string
-	}{
-		{name: "environment", env: map[string]string{"AWS_ACCESS_KEY_ID": "key", "AWS_SECRET_ACCESS_KEY": "secret"}},
-		{name: "credentials file", files: map[string]bool{".aws/credentials": true}, wantPaths: []string{".aws/credentials"}},
-		{name: "login file", files: map[string]bool{".aws/login": true}, wantPaths: []string{".aws/credentials", ".aws/login"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			var paths []string
-			stat := func(path string) (os.FileInfo, error) {
-				paths = append(paths, path)
-				rel, err := filepath.Rel("/isolated/home", path)
-				require.NoError(t, err)
-				// The table keys are slash paths; filepath.Rel hands back
-				// backslashes on Windows, where every lookup missed and
-				// the credentials went undetected.
-				if test.files[filepath.ToSlash(rel)] {
-					return nil, nil
-				}
-				return nil, os.ErrNotExist
-			}
-
-			require.True(t, hasAWSCredentialsWithFiles(testenv.New(test.env), "/isolated/home", stat))
-			var wantPaths []string
-			if len(test.wantPaths) > 0 {
-				wantPaths = make([]string, len(test.wantPaths))
-			}
-			for i, path := range test.wantPaths {
-				wantPaths[i] = filepath.Join("/isolated/home", path)
-			}
-			require.Equal(t, wantPaths, paths)
-		})
-	}
-}
-
 func TestConfig_LoadFromBytes(t *testing.T) {
 	data1 := []byte(`{"providers": {"openai": {"api_key": "key1", "base_url": "https://api.openai.com/v1"}}}`)
 	data2 := []byte(`{"providers": {"openai": {"api_key": "key2", "base_url": "https://api.openai.com/v2"}}}`)
