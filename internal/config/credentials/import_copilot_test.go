@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -13,12 +14,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// writeCopilotDiskToken drops a GitHub Copilot apps.json under a fake HOME,
-// the same file copilot.RefreshTokenFromDisk reads, so ImportCopilot has a
-// token to import.
+// writeCopilotDiskToken drops a GitHub Copilot apps.json where
+// copilot.RefreshTokenFromDisk actually looks for it, so ImportCopilot has
+// a token to import. That lookup is platform-specific: on Windows it reads
+// LOCALAPPDATA/github-copilot/apps.json, elsewhere it reads
+// HOME/.config/github-copilot/apps.json. Setting only HOME, as this test
+// used to, leaves Windows looking at nothing.
 func writeCopilotDiskToken(t *testing.T, home, oauthToken string) {
 	t.Helper()
-	dir := filepath.Join(home, ".config", "github-copilot")
+	var dir string
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", home)
+		dir = filepath.Join(home, "github-copilot")
+	} else {
+		t.Setenv("HOME", home)
+		dir = filepath.Join(home, ".config", "github-copilot")
+	}
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	content := `{"github.com:Iv1.b507a08c87ecfe98":{"user":"octocat","oauth_token":"` + oauthToken + `"}}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "apps.json"), []byte(content), 0o600))
@@ -35,7 +46,6 @@ func TestImportCopilot_BoundsTheExchange(t *testing.T) {
 	t.Cleanup(func() { importCopilotTimeout = 15 * time.Second })
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 	writeCopilotDiskToken(t, home, "gho_disktoken")
 
 	configPath := filepath.Join(t.TempDir(), "sennit.json")
@@ -61,7 +71,11 @@ func TestImportCopilot_BoundsTheExchange(t *testing.T) {
 		require.False(t, ok)
 	}()
 
-	<-exchangeStarted
+	select {
+	case <-exchangeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ImportCopilot never started its token exchange; the disk token likely was not found")
+	}
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
