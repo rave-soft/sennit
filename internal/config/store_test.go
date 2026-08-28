@@ -223,17 +223,6 @@ func TestConfigStore_RuntimeOverrides_ValueIsSnapshot(t *testing.T) {
 	require.False(t, store.Overrides().SkipPermissionRequests)
 }
 
-func TestGlobalWorkspaceDir(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("SENNIT_GLOBAL_DATA", dir)
-
-	wsDir := GlobalWorkspaceDir()
-	globalData := GlobalConfigData()
-
-	require.Equal(t, filepath.Dir(globalData), wsDir)
-	require.Equal(t, dir, wsDir)
-}
-
 func TestScope_String(t *testing.T) {
 	t.Parallel()
 

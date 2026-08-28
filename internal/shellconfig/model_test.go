@@ -192,7 +192,8 @@ provider add anthropic --api-key k
 provider remove openai`)
 
 	providers := result["providers"].(map[string]any)
-	require.NotContains(t, providers, "openai")
+	openai := providers["openai"].(map[string]any)
+	require.Equal(t, map[string]any{"section": "providers", "name": "openai"}, openai[TombstoneKey])
 	require.Contains(t, providers, "anthropic")
 }
 
@@ -209,7 +210,8 @@ model rm openai/a
 provider rm anthropic`)
 
 	providers := result["providers"].(map[string]any)
-	require.NotContains(t, providers, "anthropic")
+	anthropic := providers["anthropic"].(map[string]any)
+	require.Equal(t, map[string]any{"section": "providers", "name": "anthropic"}, anthropic[TombstoneKey])
 	models := providers["openai"].(map[string]any)["models"].([]any)
 	require.Len(t, models, 1)
 	require.Equal(t, "b", models[0].(map[string]any)["id"])

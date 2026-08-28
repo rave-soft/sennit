@@ -146,15 +146,6 @@ func GlobalConfigData() string {
 	return filepath.Join(home.Dir(), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
 }
 
-// GlobalWorkspaceDir returns the path to the global server workspace
-// directory. This directory acts as a meta-workspace for the server
-// process, giving it a real workingDir so that config loading, scoped
-// writes, and provider resolution behave identically to project
-// workspaces.
-func GlobalWorkspaceDir() string {
-	return filepath.Dir(GlobalConfigData())
-}
-
 // isInsideWorktree reports whether dir is inside a git working tree
 // (regular or linked worktree), as opposed to a bare repository or a
 // plain non-git directory. It answers for dir, not the process cwd, so

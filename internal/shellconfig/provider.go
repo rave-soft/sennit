@@ -61,7 +61,6 @@ func providerRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 		return usage(stderr, "usage: provider remove <id>")
 	}
 	id := args[2]
-	delete(b.section("providers"), id)
-	slog.Info("Provider removed in shell config", "provider", id)
+	removeNamedEntry(b, "providers", "Provider", id)
 	return nil
 }

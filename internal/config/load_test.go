@@ -730,6 +730,26 @@ func TestConfig_LoadFromBytes_LayeredTombstones(t *testing.T) {
 		require.Contains(t, cfg.MCP, "gopls")
 	})
 
+	t.Run("Provider deletion is section scoped and masks a lower layer", func(t *testing.T) {
+		lower := []byte(`{"providers":{"dropme":{"api_key":"k","base_url":"http://x"}},"mcp":{"dropme":{"type":"stdio","command":"mcp"}}}`)
+		cfg, err := loadFromBytes([][]byte{lower, marker("providers", "dropme")})
+		require.NoError(t, err)
+		_, ok := cfg.Providers.Get("dropme")
+		require.False(t, ok, "provider removed in a higher layer must not survive the merge")
+		require.Contains(t, cfg.MCP, "dropme", "the tombstone must stay scoped to providers")
+	})
+
+	t.Run("Provider tombstone marker never leaks into the merged config", func(t *testing.T) {
+		lower := []byte(`{"providers":{"dropme":{"api_key":"k","base_url":"http://x"}}}`)
+		cfg, err := loadFromBytes([][]byte{lower, marker("providers", "dropme")})
+		require.NoError(t, err)
+		require.Zero(t, cfg.Providers.Len(), "the tombstoned entry must not linger as a provider named __sennit_tombstone or dropme")
+		for id := range cfg.Providers.Seq2() {
+			require.NotEqual(t, shellconfig.TombstoneKey, id)
+			require.NotEqual(t, "dropme", id)
+		}
+	})
+
 	t.Run("Malformed and misplaced markers fail or remain ordinary data", func(t *testing.T) {
 		_, err := loadFromBytes([][]byte{[]byte(`{"mcp":{"server":{"__sennit_tombstone":{"section":"mcp","name":"server"},"command":"bad"}}}`)})
 		require.ErrorContains(t, err, "must not contain other fields")

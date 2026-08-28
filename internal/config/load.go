@@ -27,6 +27,14 @@ type credentialsFileDependency struct {
 }
 
 // LoadData loads configuration without provider runtime orchestration.
+//
+// Production boots exclusively through LoadWithProcessor, which requires a
+// RuntimeProcessor; this entry point exists so tests can build a real,
+// disk-backed store through the same pipeline without one. That makes it
+// unreachable from main and so a permanent fixture of `deadcode` output —
+// it is not a caller that went missing. See internal/config/configtest,
+// whose package doc names it, and its ~20 callers across config,
+// workspace/appws, agent and app tests.
 func LoadData(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, nil)
 }
@@ -388,7 +396,7 @@ func addTopLevelKeys(m map[string]map[string]bool, dir string, data []byte) {
 // jsonAgentsBlockDetected left behind for SetupAgents to turn into a doctor
 // Problem instead of silently ignoring it forever.
 func applyLayerTombstones(accumulated, incoming map[string]any, masked map[string]map[string]bool) error {
-	for _, sectionName := range []string{"mcp", "lsp"} {
+	for _, sectionName := range []string{"mcp", "lsp", "providers"} {
 		section, ok := incoming[sectionName].(map[string]any)
 		if !ok {
 			continue
@@ -439,7 +447,7 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	}
 
 	data := []byte(`{}`)
-	masked := map[string]map[string]bool{"mcp": {}, "lsp": {}}
+	masked := map[string]map[string]bool{"mcp": {}, "lsp": {}, "providers": {}}
 	for _, layer := range configs {
 		var accumulated map[string]any
 		if err := json.Unmarshal(data, &accumulated); err != nil {
