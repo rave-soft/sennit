@@ -113,11 +113,44 @@ deleted, and the history stays in git.
   `proto.Thread*Status` ↔ `thread.Status` (L12), `thread/store_testing.go`
   → `store_export_test.go` (половина L1). Открыто:
 
-  - L4 `config → clipboard | skills | db | oauth/{codex,copilot}`.
-    Следующий шаг: `EnvironmentProblems`/`SkillProblems` — в вызывающий
-    слой, `SetupGitHubCopilot`/`SetupCodex`/`applyProviderVendorSetup` — к
-    построению провайдера или в `credentials`, modelcache — в листовой
-    пакет.
+  - L4 `config → clipboard | skills | db | oauth/{codex,copilot}` —
+    **три четверти закрыты 2026-08-29, оставшаяся четверть
+    переформулирована.**
+
+    `clipboard` — ушёл: `EnvironmentProblems` и `SkillProblems` вынесены
+    в новый `internal/doctor`. Они и не отвечали на вопрос «правильно ли
+    настроено» — они отвечают «чего нет на машине» и «что сломалось при
+    обходе диска», а `config.Doctor` намеренно отвечает только по
+    конфигу и остаётся воспроизводимым где угодно. Все три вызывающих
+    (`cmd`, `ui/dialog`, `agent/tools`) уже принимали функцию
+    параметром, так что шов был готов. Заодно `SkillProblems` получил
+    тесты, которых у него не было.
+
+    `db` — оказался ложным: `internal/config` не импортирует
+    `internal/db` и не импортировал (`go list -deps` даёт **0**). Через
+    базу ходил `internal/config/modelcache` — сосед по каталогу, не
+    зависимость: сам `config` его не зовёт, зовут `providerload` и
+    `cmd`. Пакет переехал в `internal/modelcache`, где он и живёт по
+    смыслу. SQLite он открывает по делу, и никакой перенос этого не
+    отменяет.
+
+    `skills` — остались два места, оба не про эту границу:
+    `import.go` — это `sennit import`, у него свой пункт (→
+    `internal/importer`); `agents_markdown.go` зовёт
+    `skills.SplitFrontmatter`, чистый парсер.
+
+    `oauth/{codex,copilot}` — **записанный следующий шаг не работает, и
+    это проверено, а не предположено.** `SetupGitHubCopilot`/`SetupCodex`
+    зовутся не только снаружи: `ApplyPostCredentialSetup` вызывается из
+    самого `internal/config` в четырёх местах
+    (`reload.go:165`, `store_credentials.go:146,314,340`). Унести методы
+    «к построению провайдера или в credentials» — значит либо оставить
+    импорт на месте, либо завести хук, регистрируемый из `init()`; второе
+    в этой же серии уже отвергнуто на границе `workspace`, и по той же
+    причине: контракт, собранный без реализации, получает молчаливый
+    no-op вместо ошибки компиляции. Настоящий следующий шаг другой и
+    крупнее — вынести запись учётных данных из `config` вместе с
+    вендорной настройкой заголовков, а не отдельно от неё.
   - ~~L5 `(*Config).configureProviders(ctx, store, …)`~~ — **снят
     2026-08-29: описанного кода нет.** Ни метода, ни файла
     `internal/config/providers_merge.go` в дереве не осталось —
