@@ -13,7 +13,17 @@ type Attachment struct {
 	Content  []byte `json:"content"`
 }
 
-// MarshalJSON implements the [json.Marshaler] interface.
+// MarshalJSON implements the [json.Marshaler] interface, base64-encoding
+// Content so a []byte survives the wire as a string rather than as a
+// number array.
+//
+// `deadcode` reports this and UnmarshalJSON below as unreachable, and they
+// are not: encoding/json finds them by interface assertion at run time,
+// which no static reachability analysis can follow. AgentMessage carries
+// Attachments and is marshalled on every dispatch. Deleting either — the
+// 2026-08-28 review listed both as dead — would silently change how every
+// attachment is encoded, and the pairing is what the round-trip test in
+// agent_message_test.go pins.
 func (a Attachment) MarshalJSON() ([]byte, error) {
 	type Alias Attachment
 	return json.Marshal(&struct {
