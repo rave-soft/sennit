@@ -1555,7 +1555,15 @@ func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
 			}()
 			select {
 			case sendErr := <-largeSendDone:
-				return nil, fmt.Errorf("large send completed before process destruction: %w", sendErr)
+				// Whether the candidate process is still alive is the
+				// whole question here and the error alone does not say:
+				// "connection is closed" reads the same whether the send
+				// raced a transport we closed or whether the fake server
+				// died and took its end of the pipe with it. The wedge
+				// needs a live process that has stopped reading, so
+				// record which one happened.
+				return nil, fmt.Errorf("large send completed before process destruction (candidate still running: %t): %w",
+					gen.client.IsRunning(), sendErr)
 			case <-time.After(2 * time.Second):
 			}
 			lockWaiterStarted := make(chan struct{})

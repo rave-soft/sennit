@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeLSPServerEnv, when set to "1" in the child process environment,
@@ -70,7 +71,22 @@ func runFakeLSPServer() {
 		}
 		if len(envelope.ID) == 0 {
 			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "stop-reading-after-workspace-change" && envelope.Method == "workspace/didChangeWatchedFiles" {
-				select {}
+				// Sleep rather than `select {}`. The scenario needs a
+				// process that is alive and no longer reading stdin, and
+				// a bare select is neither reliably: it parks the only
+				// goroutine this process has, which is the exact
+				// condition the runtime's deadlock detector panics on.
+				// Whether it fires depends on what else happens to be
+				// runnable, so the server sometimes dies here instead of
+				// going quiet — and a dead server closes the pipe, which
+				// makes the caller's next write return immediately
+				// instead of blocking on back-pressure. That is the
+				// opposite of the state the caller is trying to reach.
+				// A timer keeps the runtime satisfied without giving the
+				// process any reason to read again.
+				for {
+					time.Sleep(time.Hour)
+				}
 			}
 			continue // notification, no response expected
 		}
