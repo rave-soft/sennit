@@ -18,17 +18,25 @@ func TestPageCursorRejectsTampering(t *testing.T) {
 	if tampered == token {
 		tampered = token[:len(token)-1] + "B"
 	}
-	if err := validatePageKeyCursor(tampered, "grep", "query", "generation"); err == nil {
+	if _, err := openPageKeyCursor(tampered, "grep", "query"); err == nil {
 		t.Fatal("tampered cursor accepted")
 	}
 }
 
 func TestPageCursorBindsQueryAndGeneration(t *testing.T) {
 	token := makePageKeyCursor("glob", "query", "generation", "last")
-	if err := validatePageKeyCursor(token, "glob", "other", "generation"); err == nil || !strings.Contains(err.Error(), "request") {
+	if _, err := openPageKeyCursor(token, "glob", "other"); err == nil || !strings.Contains(err.Error(), "request") {
 		t.Fatalf("query error = %v", err)
 	}
-	if err := validatePageKeyCursor(token, "glob", "query", "other"); err == nil || !strings.Contains(err.Error(), "stale") {
+	// The generation is checked after the scan, not before it, which is
+	// why these are two calls and not one: openPageKeyCursor hands back
+	// the boundary the scan needs, and finishPageKeyCursor rejects the
+	// cursor once the scan has said what generation it saw.
+	c, err := openPageKeyCursor(token, "glob", "query")
+	if err != nil {
+		t.Fatalf("open = %v", err)
+	}
+	if err := finishPageKeyCursor(c, "other"); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("generation error = %v", err)
 	}
 }

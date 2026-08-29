@@ -198,55 +198,6 @@ func NewSennitLogsTool(logFile string) fantasy.AgentTool {
 	})
 }
 
-// runSennitLogsText is the backward-compatible entry point that returns only
-// the formatted text (no structured metadata, no error, no footer). It is what
-// the pre-T5 tests and any text-only consumer use: it yields exactly the
-// per-entry lines joined by newlines, identical to the pre-T5 output. The
-// tool-facing path (runSennitLogs) additionally appends the metadata footer.
-func runSennitLogsText(logFile string, params SennitLogsParams) string {
-	output, _, err := runSennitLogs(logFile, params)
-	if err != nil {
-		return err.Error()
-	}
-	return stripMetaFooter(output)
-}
-
-// stripMetaFooter removes the trailing "-- ..." metadata footer line that
-// runSennitLogs appends, so a text-only consumer sees only the entry lines.
-func stripMetaFooter(output string) string {
-	idx := strings.LastIndex(output, "\n-- ")
-	if idx < 0 {
-		return output
-	}
-	return strings.TrimRight(output[:idx], "\n")
-}
-
-// readLastLines is a thin backward-compatible wrapper over scanBackward for
-// callers that want the raw last-N entries (the pre-T5 signature). It reads the
-// most recent n valid entries from the end of the file in chronological order.
-// The 8KB chunk-boundary carrying it relies on is pinned by
-// TestReadLastLinesKeepsEntriesAcrossChunkBoundaries.
-func readLastLines(filePath string, n int) ([]map[string]any, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if stat.Size() == 0 {
-		return nil, nil
-	}
-	res := scanBackward(file, stat.Size(), -1, mustLogFilter(), n)
-	entries := make([]map[string]any, 0, len(res.entries))
-	for _, rec := range res.entries {
-		entries = append(entries, rec.entry)
-	}
-	return entries, nil
-}
-
 // runSennitLogs reads, filters and paginates the log file, returning the
 // backward-compatible text output and its structured metadata. It returns an
 // error only for I/O failures; a missing/empty file is reported in the text.
@@ -456,17 +407,6 @@ func validateLimit(params SennitLogsParams, limit int) error {
 		return fmt.Errorf("invalid limit %d: max is %d", limit, maxLogLines)
 	}
 	return nil
-}
-
-// mustLogFilter builds a filter for the zero params (no level/since), so it
-// cannot fail. It is the backward-compat readLastLines path's filter.
-func mustLogFilter() *logFilter {
-	f, err := newLogFilter(SennitLogsParams{})
-	if err != nil {
-		// Unreachable: the zero params have no level/since to validate.
-		panic(fmt.Sprintf("mustLogFilter: %v", err))
-	}
-	return f
 }
 
 // logFilter holds the parsed, cheaply-testable predicate state for one call.

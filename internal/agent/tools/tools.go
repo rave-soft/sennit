@@ -163,18 +163,13 @@ func ensureParentDir(filePath string) error {
 	return nil
 }
 
-// writeFileWithHistory writes newContent to filePath and updates file
-// history: it records a history entry if none exists yet, snapshots any
-// content that changed on disk outside of Sennit, and stores the new
-// version. Used by write/edit/multiedit whenever a tool commits file
-// content, whether creating the file (oldContent == "") or overwriting it.
-func writeFileWithHistory(ctx context.Context, files historystore.Service, sessionID, filePath, oldContent, newContent string) error {
-	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-	return recordFileHistory(ctx, files, sessionID, filePath, oldContent, newContent)
-}
-
+// recordFileHistory updates the file history for a write that has already
+// landed on disk. Writing is the caller's job and deliberately so: every
+// mutation goes through applyFileMutation, which writes with
+// fsext.AtomicWriteFileIfUnchanged so a file edited between the diff the
+// user approved and the commit is refused rather than overwritten. A
+// combined write-and-record helper used to sit here and is gone, because
+// the only way to use it was to give that check up.
 func recordFileHistory(ctx context.Context, files historystore.Service, sessionID, filePath, oldContent, newContent string) error {
 	if files == nil || sessionID == "" {
 		return nil

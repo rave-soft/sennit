@@ -25,9 +25,8 @@ import (
 // and owns its own *Registry (app.App.MCP), so two workspaces in one
 // process no longer share sessions, states, auth handlers, or the event
 // broker. The package-level functions below still operate against a
-// single [defaultRegistry] purely for source compatibility with tests and
-// any caller that constructs a Registry directly rather than via app.New;
-// production call sites all go through app.App.MCP.
+// single [defaultRegistry]; production has no callers left, and the only
+// ones remaining are this package's own tests.
 type attemptID struct {
 	gen uint64
 	seq uint64
@@ -216,10 +215,15 @@ func NewRegistry() *Registry {
 }
 
 // defaultRegistry is the shared, process-wide MCP registry every
-// package-level function below operates on. It exists purely for source
-// compatibility with the many pre-existing callers (agent, workspace, app,
-// commands packages); new code that can construct its own [Registry]
-// should prefer doing so.
+// package-level function below operates on.
+//
+// The "many pre-existing callers (agent, workspace, app, commands)" this
+// comment used to name are gone: every one of them now holds its own
+// registry through app.App.MCP, and a search for a package-level call
+// outside a _test.go file returns nothing. What is left is the tests, and
+// the reason they are worth unwinding is not tidiness — a process-global
+// registry is shared state between tests, which is what stops this
+// package's tests from running in parallel with each other.
 var defaultRegistry = NewRegistry()
 
 // ArmInit marks that MCP initialization is expected so WaitForInit blocks
@@ -231,8 +235,9 @@ var defaultRegistry = NewRegistry()
 // be matched by exactly one later Close call so the shared event broker is
 // only shut down once every armed workspace has gone away (see Close and the
 // liveWorkspaces doc on [Registry]). Initialize calls markInitStarted rather
-// than ArmInit for this reason — app.New already calls ArmInit once per
-// workspace before launching Initialize in a goroutine, and Initialize
+// than ArmInit for this reason — app.New arms each workspace exactly once
+// (through its own registry, app.MCP.ArmInit, not this package-level
+// wrapper) before launching Initialize in a goroutine, and Initialize
 // re-arming would double-count that single workspace against one Close.
 func ArmInit() { defaultRegistry.ArmInit() }
 

@@ -153,21 +153,6 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep, options ...ripgrepTo
 	})
 }
 
-// searchWithRipgrep collects every match for a case-sensitive search. Case
-// insensitivity is reached through searchWithRipgrepCommand directly; no
-// caller needs both a canned command and a case-insensitive search.
-func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
-	return searchWithRipgrepCommand(ctx, pattern, path, include, false, getRgSearchCmd)
-}
-
-func searchWithRipgrepCommand(ctx context.Context, pattern, path, include string, caseInsensitive bool, command func(context.Context, string, string, string, bool) *exec.Cmd) ([]grepMatch, error) {
-	var matches []grepMatch
-	err := visitRipgrepMatches(ctx, pattern, path, include, caseInsensitive, command, func(match grepMatch) {
-		matches = append(matches, match)
-	})
-	return matches, err
-}
-
 func visitRipgrepMatches(ctx context.Context, pattern, path, include string, caseInsensitive bool, command func(context.Context, string, string, string, bool) *exec.Cmd, visit func(grepMatch)) error {
 	cmd := command(ctx, pattern, path, include, caseInsensitive)
 	if cmd == nil {

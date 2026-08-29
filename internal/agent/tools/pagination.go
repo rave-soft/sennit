@@ -232,14 +232,6 @@ func finishPageKeyCursor(c pageCursor, generation string) error {
 	return nil
 }
 
-func validatePageKeyCursor(token, kind, query, generation string) error {
-	c, err := openPageKeyCursor(token, kind, query)
-	if err != nil {
-		return err
-	}
-	return finishPageKeyCursor(c, generation)
-}
-
 type pageItem[T any] struct {
 	key   string
 	value T

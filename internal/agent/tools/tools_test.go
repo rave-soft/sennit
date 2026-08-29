@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -102,17 +104,87 @@ func TestEnsureParentDir(t *testing.T) {
 	require.True(t, info.IsDir())
 }
 
-func TestWriteFileWithHistoryCreatesNewFile(t *testing.T) {
-	dir := t.TempDir()
-	filePath := filepath.Join(dir, "new.txt")
-	files := &mockHistoryService{}
+// recordingHistoryService records what was versioned, in order, and can be
+// told whether the path already has history and what its stored content is.
+type recordingHistoryService struct {
+	*mockHistoryService
+	stored   string
+	hasEntry bool
+	versions []string
+}
 
-	err := writeFileWithHistory(context.Background(), files, "session", filePath, "", "hello")
-	require.NoError(t, err)
+func (r *recordingHistoryService) GetByPathAndSession(ctx context.Context, path, sessionID string) (history.File, error) {
+	if !r.hasEntry {
+		return history.File{}, sql.ErrNoRows
+	}
+	return history.File{Path: path, Content: r.stored}, nil
+}
 
-	content, err := os.ReadFile(filePath)
-	require.NoError(t, err)
-	require.Equal(t, "hello", string(content))
+func (r *recordingHistoryService) CreateVersion(ctx context.Context, sessionID, path, content string) (history.File, error) {
+	r.versions = append(r.versions, content)
+	return history.File{}, nil
+}
+
+// TestRecordFileHistory covers the three shapes of a committed write. It
+// replaces a test of a combined write-and-record helper that no tool used:
+// that helper wrote with os.WriteFile, which is exactly the check
+// applyFileMutation exists to keep, and the test asserted only that the
+// bytes reached the disk — nothing about the history it was named for.
+func TestRecordFileHistory(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		hasEntry bool
+		stored   string
+		old      string
+		want     []string
+	}{
+		{
+			// Nothing recorded yet: what was on disk becomes the
+			// baseline, then the new content.
+			name: "first write in this session",
+			old:  "before",
+			want: []string{"before", "after"},
+		},
+		{
+			// History agrees with what was on disk, so no intermediate
+			// version is needed.
+			name:     "history already matches disk",
+			hasEntry: true,
+			stored:   "before",
+			old:      "before",
+			want:     []string{"after"},
+		},
+		{
+			// Someone edited the file outside Sennit between two tool
+			// writes; that content would be lost on undo without a
+			// version of its own.
+			name:     "changed on disk behind us",
+			hasEntry: true,
+			stored:   "recorded",
+			old:      "edited by hand",
+			want:     []string{"edited by hand", "after"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			files := &recordingHistoryService{hasEntry: tc.hasEntry, stored: tc.stored}
+			require.NoError(t, recordFileHistory(context.Background(), files, "session", "/w/file.txt", tc.old, "after"))
+			require.Equal(t, tc.want, files.versions)
+		})
+	}
+}
+
+// TestRecordFileHistory_NoSessionIsNotAnError: a tool call outside a
+// session has nowhere to record to, and that is not a failure to report.
+func TestRecordFileHistory_NoSessionIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	files := &recordingHistoryService{}
+	require.NoError(t, recordFileHistory(context.Background(), files, "", "/w/file.txt", "", "after"))
+	require.Empty(t, files.versions)
 }
 
 func TestCommandAvailable(t *testing.T) {

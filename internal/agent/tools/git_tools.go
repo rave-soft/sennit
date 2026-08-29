@@ -596,24 +596,6 @@ func readUTF8Page(file *os.File, offset, total, max int) ([]byte, int, error) {
 	return b[:end], offset + end, nil
 }
 
-func parseNumstat(data []byte) []gitDiffStatEntry {
-	fields := bytes.Split(data, []byte{0})
-	var out []gitDiffStatEntry
-	for i := 0; i < len(fields); i++ {
-		parts := strings.SplitN(string(fields[i]), "\t", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		e := gitDiffStatEntry{Added: parts[0], Deleted: parts[1], Path: parts[2]}
-		if e.Path == "" && i+2 < len(fields) {
-			e.OriginalPath, e.Path = string(fields[i+1]), string(fields[i+2])
-			i += 2
-		}
-		out = append(out, e)
-	}
-	return out
-}
-
 func statKey(e gitDiffStatEntry) string {
 	return e.Path + "\x00" + e.OriginalPath + "\x00" + e.Added + "\x00" + e.Deleted
 }

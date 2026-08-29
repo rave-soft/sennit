@@ -208,11 +208,6 @@ func countFileLines(filePath string) (int, error) {
 	}
 }
 
-func readTextFile(filePath string, offset, limit, maxContentSize int) (string, bool, error) {
-	content, hasMore, _, err := readTextFileCount(filePath, offset, limit, maxContentSize)
-	return content, hasMore, err
-}
-
 func readTextFileCount(filePath string, offset, limit, maxContentSize int) (string, bool, int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
