@@ -14,8 +14,8 @@ import (
 	"charm.land/lipgloss/v2/tree"
 	"github.com/mattn/go-isatty"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/discover"
+	"github.com/rave-soft/sennit/internal/modelcache"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/spf13/cobra"
 )

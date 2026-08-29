@@ -9,9 +9,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/discover"
+	"github.com/rave-soft/sennit/internal/modelcache"
 )
 
 // resolveCustomProviderModels does two things for every custom provider,

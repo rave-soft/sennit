@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config/migrate"
-	"github.com/rave-soft/sennit/internal/config/modelcache"
+	"github.com/rave-soft/sennit/internal/modelcache"
 	"github.com/rave-soft/sennit/internal/shellconfig"
 	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"

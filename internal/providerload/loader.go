@@ -14,10 +14,10 @@ import (
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/migrate"
-	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/modelcache"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 )
 

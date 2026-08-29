@@ -128,7 +128,7 @@ type ProviderConfig struct {
 
 	// ModelsSource records where Models came from for this load: the
 	// user's own config, or the global model-discovery cache (see
-	// internal/config/modelcache.go). It is in-memory bookkeeping only,
+	// internal/modelcache). It is in-memory bookkeeping only,
 	// never serialized — set by resolveCustomProviderModels/
 	// validateCustomProviders in load.go, and read by `sennit models
 	// refresh` (internal/cmd/models.go) to refuse silently overwriting a

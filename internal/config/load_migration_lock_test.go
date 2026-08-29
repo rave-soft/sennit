@@ -11,9 +11,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config/migrate"
-	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lock"
+	"github.com/rave-soft/sennit/internal/modelcache"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )

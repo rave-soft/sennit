@@ -8,8 +8,8 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/discover"
+	"github.com/rave-soft/sennit/internal/modelcache"
 )
 
 // Hints shared by every drop of the same class in this file, so a custom
