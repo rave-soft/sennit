@@ -38,7 +38,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		// discoverability of how to get back to the parent.
 		if m.viewingChildSession() {
 			binds = append(binds, k.Chat.ExitChildSession)
-			if m.childSessionSiblingCount() > 1 {
+			if m.sess.childSessionSiblingCount() > 1 {
 				binds = append(binds, k.Chat.PrevChildSession, k.Chat.NextChildSession)
 			}
 		}
@@ -143,7 +143,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 		// discoverability of how to get back to the parent.
 		if m.viewingChildSession() {
 			childBinds := []key.Binding{k.Chat.ExitChildSession}
-			if m.childSessionSiblingCount() > 1 {
+			if m.sess.childSessionSiblingCount() > 1 {
 				childBinds = append(childBinds, k.Chat.PrevChildSession, k.Chat.NextChildSession)
 			}
 			binds = append(binds, childBinds)

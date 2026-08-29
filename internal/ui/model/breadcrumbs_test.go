@@ -18,7 +18,7 @@ func drawSeparatorRow(t *testing.T, u *UI) string {
 	t.Helper()
 	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	u.drawChatSeparators(scr, u.lay.layout.editor)
-	row := u.breadcrumbBarRow()
+	row := u.lay.breadcrumbBarRow()
 	var b []rune
 	for x := row.Min.X; x < row.Max.X; x++ {
 		cell := scr.CellAt(x, row.Min.Y)
@@ -128,7 +128,7 @@ func TestBreadcrumbBar_ClickOnBackGoesUp(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	plan, ok := u.planBreadcrumbBar(u.breadcrumbBarRow())
+	plan, ok := u.planBreadcrumbBar(u.lay.breadcrumbBarRow())
 	require.True(t, ok)
 
 	_, cmd := u.Update(tea.MouseClickMsg(tea.Mouse{
@@ -148,7 +148,7 @@ func TestBreadcrumbBar_ClickBesideTheButtonIsNotBack(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	row := u.breadcrumbBarRow()
+	row := u.lay.breadcrumbBarRow()
 
 	u.Update(tea.MouseClickMsg(tea.Mouse{X: row.Min.X, Y: row.Min.Y, Button: uv.MouseLeft}))
 	require.Len(t, u.sess.navStack, 2, "clicking the trail must not navigate")
@@ -160,7 +160,7 @@ func TestBreadcrumbBar_ButtonHover(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	plan, ok := u.planBreadcrumbBar(u.breadcrumbBarRow())
+	plan, ok := u.planBreadcrumbBar(u.lay.breadcrumbBarRow())
 	require.True(t, ok)
 
 	u.Update(tea.MouseMotionMsg(tea.Mouse{X: plan.buttonRect.Min.X, Y: plan.buttonRect.Min.Y}))
@@ -181,7 +181,7 @@ func TestBreadcrumbBar_KeepsTheWayOutWhenTooNarrowForTheTrail(t *testing.T) {
 	u.lay.width = ansi.StringWidth(u.breadcrumbButtonLabel()) + 8
 	u.updateLayoutAndSize()
 
-	plan, ok := u.planBreadcrumbBar(u.breadcrumbBarRow())
+	plan, ok := u.planBreadcrumbBar(u.lay.breadcrumbBarRow())
 	require.True(t, ok, "the way out must survive a narrow terminal")
 	require.Empty(t, plan.trail)
 	require.NotZero(t, plan.buttonRect)
@@ -194,7 +194,7 @@ func TestBreadcrumbBar_FallsBackToAPlainRuleWhenEvenTheButtonCannotFit(t *testin
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	row := u.breadcrumbBarRow()
+	row := u.lay.breadcrumbBarRow()
 	row.Max.X = row.Min.X + 4
 
 	_, ok := u.planBreadcrumbBar(row)

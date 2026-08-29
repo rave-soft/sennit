@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // promptHistoryLoadedMsg is sent when prompt history is loaded.
@@ -15,16 +16,16 @@ type promptHistoryLoadedMsg struct {
 }
 
 // loadPromptHistory loads user messages for history navigation.
-func (m *UI) loadPromptHistory() tea.Cmd {
-	ctx := m.com.Context()
-	ws := m.com.Workspace
+func (s *sessionState) loadPromptHistory(com *common.Common) tea.Cmd {
+	ctx := com.Context()
+	ws := com.Workspace
 
 	// Snapshot session state up front: the closure below runs on the cmd
-	// goroutine and must not read m.sess off the Update loop.
-	hasSession := m.sess.current != nil
+	// goroutine and must not read the session state off the Update loop.
+	hasSession := s.current != nil
 	var sessionID string
 	if hasSession {
-		sessionID = m.sess.current.ID
+		sessionID = s.current.ID
 	}
 
 	return func() tea.Msg {

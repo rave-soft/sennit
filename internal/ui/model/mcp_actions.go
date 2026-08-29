@@ -4,12 +4,13 @@ import (
 	"context"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
-func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
-	ws := m.com.Workspace
+func (w *widgets) runMCPPrompt(com *common.Common, clientID, promptID string, arguments map[string]string) tea.Cmd {
+	ws := com.Workspace
 	load := func() tea.Msg {
 		prompt, err := ws.GetMCPPrompt(clientID, promptID, arguments)
 		if err != nil {
@@ -31,12 +32,12 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	// flight, the close below must still target this dialog specifically
 	// rather than whatever now sits on top.
 	var frontID string
-	if front := m.dialog.DialogLast(); front != nil {
+	if front := w.dialog.DialogLast(); front != nil {
 		frontID = front.ID()
 	}
 
 	var cmds []tea.Cmd
-	if cmd := m.dialog.StartLoading(); cmd != nil {
+	if cmd := w.dialog.StartLoading(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	cmds = append(cmds, load, func() tea.Msg {

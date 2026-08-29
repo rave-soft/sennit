@@ -112,7 +112,7 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 	u.chat.AppendMessages(item)
 
 	childID := u.com.Workspace.CreateAgentToolSessionID("parent-msg", "tc-agent")
-	u.handleChildSessionUpdate(session.Session{ID: childID, PromptTokens: 500, CompletionTokens: 120})
+	u.handleChildSessionUpdate(u.com, session.Session{ID: childID, PromptTokens: 500, CompletionTokens: 120})
 
 	// A pending delegation's chat transcript render is now just the bare
 	// stub (see TestAgentToolMessageItem_PendingRendersBareStub in
@@ -125,7 +125,7 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 	// session's own updates, for instance) must be ignored rather than
 	// panicking on the ParseAgentToolSessionID miss.
 	require.NotPanics(t, func() {
-		u.handleChildSessionUpdate(session.Session{ID: "top-level-session", PromptTokens: 1})
+		u.handleChildSessionUpdate(u.com, session.Session{ID: "top-level-session", PromptTokens: 1})
 	})
 }
 
@@ -144,7 +144,7 @@ func TestHandleChildSessionUpdate_Todos(t *testing.T) {
 	u.chat.AppendMessages(item)
 
 	childID := u.com.Workspace.CreateAgentToolSessionID("parent-msg", "tc-agent")
-	u.handleChildSessionUpdate(session.Session{
+	u.handleChildSessionUpdate(u.com, session.Session{
 		ID: childID,
 		Todos: []session.Todo{
 			{Content: "Fix the bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing the bug"},

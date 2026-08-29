@@ -75,19 +75,19 @@ func (m *UI) refreshAccountLabelCmd(providerID string) tea.Cmd {
 
 // applyAccountLabelsLoaded stores the refreshed label and bumps
 // labelsVersion so sidebarSig (sidebar.go) notices the cache changed.
-func (m *UI) applyAccountLabelsLoaded(msg accountLabelsLoadedMsg) {
-	labels := make(map[string]accountLabelInfo, len(m.labels)+1)
-	maps.Copy(labels, m.labels)
+func (a *accountLabelsState) applyAccountLabelsLoaded(msg accountLabelsLoadedMsg) {
+	labels := make(map[string]accountLabelInfo, len(a.labels)+1)
+	maps.Copy(labels, a.labels)
 	labels[msg.providerID] = msg.info
-	m.labels = labels
-	m.labelsVersion++
+	a.labels = labels
+	a.labelsVersion++
 }
 
 // accountLabelFor returns the cached display label for providerID's
 // active account, or "" when the provider has one account or fewer, or
 // the cache hasn't been populated for it yet.
-func (m *UI) accountLabelFor(providerID string) string {
-	info, ok := m.labels[providerID]
+func (a *accountLabelsState) accountLabelFor(providerID string) string {
+	info, ok := a.labels[providerID]
 	if !ok || !info.multiple {
 		return ""
 	}

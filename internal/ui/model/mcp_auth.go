@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 )
@@ -62,17 +63,17 @@ func (m *UI) loadMCPResourceCompletions() []completions.ResourceCompletionValue 
 // openMCPAuthDialog opens the MCP authentication dialog if any servers
 // are pending auth. If the dialog is already open, it brings it to the
 // front instead.
-func (m *UI) openMCPAuthDialog() tea.Cmd {
-	pending := m.com.Workspace.MCPPendingAuth()
+func (w *widgets) openMCPAuthDialog(com *common.Common) tea.Cmd {
+	pending := com.Workspace.MCPPendingAuth()
 	if len(pending) == 0 {
 		return nil
 	}
-	if m.dialog.ContainsDialog(dialog.MCPAuthID) {
-		m.dialog.BringToFront(dialog.MCPAuthID)
+	if w.dialog.ContainsDialog(dialog.MCPAuthID) {
+		w.dialog.BringToFront(dialog.MCPAuthID)
 		return nil
 	}
-	dlg, cmd := dialog.NewMCPAuth(m.com, pending, m.com.Workspace.MCPAuthURL)
-	m.dialog.OpenDialog(dlg)
+	dlg, cmd := dialog.NewMCPAuth(com, pending, com.Workspace.MCPAuthURL)
+	w.dialog.OpenDialog(dlg)
 	return cmd
 }
 

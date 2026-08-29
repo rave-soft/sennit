@@ -27,7 +27,7 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 		},
 	}
 
-	items := ui.skillStatusItems()
+	items := ui.skillStatusItems(ui.com)
 	require.NotEmpty(t, items)
 
 	var hasGoDoc bool
@@ -86,7 +86,7 @@ func TestSkillStatusItemsDoesNotMutateBuiltinCache(t *testing.T) {
 	st := uistyles.SennitDark()
 	ui := &UI{com: &common.Common{Styles: &st}}
 
-	_ = ui.skillStatusItems()
+	_ = ui.skillStatusItems(ui.com)
 
 	require.Equal(t, expected, builtinSkillsCache.skills,
 		"skillStatusItems must not sort the shared builtin skills cache in place")
@@ -108,7 +108,7 @@ func TestSkillStatusItemsExcludesDisabledSkills(t *testing.T) {
 		},
 	}
 
-	items := ui.skillStatusItems()
+	items := ui.skillStatusItems(ui.com)
 
 	for _, item := range items {
 		require.NotEqual(t, "go-doc", item.name)

@@ -51,12 +51,12 @@ func isTerminalThreadStatus(status string) bool {
 //     threadsDock population on session load populating a thread that
 //     finished before this UI ever attached to it. Only real transitions
 //     observed live are worth interrupting the user for.
-func (m *UI) notifyThreadCompletion(t proto.Thread) tea.Cmd {
-	if m.threadLastStatus == nil {
-		m.threadLastStatus = make(map[string]string)
+func (n *notifyState) notifyThreadCompletion(t proto.Thread) tea.Cmd {
+	if n.threadLastStatus == nil {
+		n.threadLastStatus = make(map[string]string)
 	}
-	prev, known := m.threadLastStatus[t.ID]
-	m.threadLastStatus[t.ID] = t.Status
+	prev, known := n.threadLastStatus[t.ID]
+	n.threadLastStatus[t.ID] = t.Status
 	if !known || prev == t.Status || !isTerminalThreadStatus(t.Status) {
 		return nil
 	}
@@ -66,7 +66,7 @@ func (m *UI) notifyThreadCompletion(t proto.Thread) tea.Cmd {
 	// session full of threads that finish but are never deleted — a
 	// repeat event for the same terminal status is still a no-op, since
 	// it now reads as an unseen thread and !known short-circuits above.
-	delete(m.threadLastStatus, t.ID)
+	delete(n.threadLastStatus, t.ID)
 	return threadCompletionToast(t)
 }
 

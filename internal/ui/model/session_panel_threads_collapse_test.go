@@ -25,7 +25,7 @@ func TestSessionPanelPlan_CollapsedThreadsKeepHeaderDropBlocks(t *testing.T) {
 	require.Equal(t, 1, expanded.threadsHeaderRows)
 	require.Equal(t, 2, expanded.threadsActive)
 
-	u.toggleThreadsCollapsed()
+	u.panel.toggleThreadsCollapsed()
 	collapsed := u.sessionPanelPlan(100)
 	require.False(t, collapsed.threadsExpanded)
 	require.Zero(t, collapsed.threadsRows, "collapsed blocks must not reserve rows")
@@ -33,7 +33,7 @@ func TestSessionPanelPlan_CollapsedThreadsKeepHeaderDropBlocks(t *testing.T) {
 	require.Equal(t, 2, collapsed.threadsActive, "the header still reports what is running")
 	require.Less(t, collapsed.totalRows, expanded.totalRows, "collapsing must actually reclaim space")
 
-	u.toggleThreadsCollapsed()
+	u.panel.toggleThreadsCollapsed()
 	require.Equal(t, expanded.totalRows, u.sessionPanelPlan(100).totalRows, "toggling back restores the section")
 }
 
@@ -45,7 +45,7 @@ func TestSessionPanelPlan_CollapsedThreadsWithNoneActiveDropHeader(t *testing.T)
 	t.Parallel()
 
 	u := sessionUI()
-	u.toggleThreadsCollapsed()
+	u.panel.toggleThreadsCollapsed()
 	plan := u.sessionPanelPlan(100)
 	require.Zero(t, plan.threadsHeaderRows)
 	require.Zero(t, plan.threadsRows)
@@ -59,7 +59,7 @@ func TestDrawSessionPanel_CollapsedThreadsHeaderIsClickable(t *testing.T) {
 
 	u := sessionUI()
 	u.threadList.cache.value = mkDockThreads(2)
-	u.toggleThreadsCollapsed()
+	u.panel.toggleThreadsCollapsed()
 
 	area := uv.Rect(0, 0, 60, 6)
 	u.lay.layout.panel = area

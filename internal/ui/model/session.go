@@ -250,10 +250,10 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 // viewing. Errors are logged at debug only; the call is a hint
 // for server-side presence tracking, not correctness-critical
 // state.
-func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
-	workspace := m.com.Workspace
-	generation := m.sess.loadGen
-	ctx := m.com.Context()
+func (s *sessionState) reportCurrentSession(com *common.Common, sessionID string) tea.Cmd {
+	workspace := com.Workspace
+	generation := s.loadGen
+	ctx := com.Context()
 	return func() tea.Msg {
 		if err := workspace.SetCurrentSessionGeneration(ctx, sessionID, generation); err != nil {
 			slog.Debug("Failed to report current session", "session_id", sessionID, "error", err)
@@ -271,13 +271,13 @@ func loadModifiedFiles(ctx context.Context, preparer workspace.SessionChangePrep
 
 // handleFileEvent processes file change events and updates the session file
 // list with new or updated file information.
-func (m *UI) handleFileEvent(file history.File) tea.Cmd {
-	if m.sess.current == nil || file.SessionID != m.sess.current.ID {
+func (s *sessionState) handleFileEvent(com *common.Common, file history.File) tea.Cmd {
+	if s.current == nil || file.SessionID != s.current.ID {
 		return nil
 	}
 
-	sessionID := m.sess.current.ID
-	ctx, preparer := m.com.Context(), m.com.SessionChanges
+	sessionID := s.current.ID
+	ctx, preparer := com.Context(), com.SessionChanges
 	return func() tea.Msg {
 		sessionFiles, err := loadModifiedFiles(ctx, preparer, sessionID)
 		// could not load session files
@@ -291,12 +291,12 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 	}
 }
 
-func (m *UI) refreshModifiedFiles() tea.Cmd {
-	if m.sess.current == nil {
+func (s *sessionState) refreshModifiedFiles(com *common.Common) tea.Cmd {
+	if s.current == nil {
 		return nil
 	}
-	sessionID := m.sess.current.ID
-	ctx, preparer := m.com.Context(), m.com.SessionChanges
+	sessionID := s.current.ID
+	ctx, preparer := com.Context(), com.SessionChanges
 	return func() tea.Msg {
 		files, err := loadModifiedFiles(ctx, preparer, sessionID)
 		if err != nil {
@@ -308,8 +308,8 @@ func (m *UI) refreshModifiedFiles() tea.Cmd {
 
 // filesInfo renders the modified files section for the sidebar, showing files
 // with their addition/deletion counts.
-func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
-	t := m.com.Styles
+func (s *sessionState) filesInfo(com *common.Common, cwd string, width, maxItems int, isSection bool) string {
+	t := com.Styles
 
 	title := t.Files.SectionTitle.Render("Modified Files")
 	if isSection {
@@ -317,7 +317,7 @@ func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
 	}
 	list := t.Files.EmptyMessage.Render("None")
 	var filesWithChanges []SessionFile
-	for _, f := range m.sess.files {
+	for _, f := range s.files {
 		if !hasFileChanges(f) {
 			continue
 		}

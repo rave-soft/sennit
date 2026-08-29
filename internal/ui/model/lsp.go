@@ -129,16 +129,16 @@ func (m *UI) lspErrorCount() int {
 // every frame, and the workspace probes behind it are treated as IO. LSP
 // events (plus the TTL backstop) keep the memoized state fresh off-thread;
 // see requestLSPRefresh.
-func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
-	t := m.com.Styles
+func (l *lspState) lspInfo(com *common.Common, width, maxItems int, isSection bool) string {
+	t := com.Styles
 
-	states := slices.SortedFunc(maps.Values(m.lsp.states), func(a, b workspace.LSPClientInfo) int {
+	states := slices.SortedFunc(maps.Values(l.states), func(a, b workspace.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		counts := m.lsp.diagnostics[state.Name]
+		counts := l.diagnostics[state.Name]
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: map[protocol.DiagnosticSeverity]int{
 			protocol.SeverityError:       counts.Error,
 			protocol.SeverityWarning:     counts.Warning,

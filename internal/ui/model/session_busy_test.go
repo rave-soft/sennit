@@ -699,7 +699,7 @@ func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
 	// (esc clears the queue) supersedes it.
 	m.wsCache.promptQueueCache.inFlight = true
 	staleGen := m.wsCache.promptQueueCache.generation
-	m.invalidatePromptQueue()
+	m.wsCache.invalidatePromptQueue()
 	m.wsCache.promptQueueCache.value = nil
 
 	// The stale fetch (still saw one prompt) lands for the same session.
@@ -760,7 +760,7 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 
 	for range 10 {
 		require.NotNil(t, m.selectedModel())
-		m.lspInfo(40, 5, true)
+		m.lsp.lspInfo(m.com, 40, 5, true)
 		require.Equal(t, 3, m.lspErrorCount())
 	}
 

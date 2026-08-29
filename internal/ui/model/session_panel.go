@@ -127,11 +127,11 @@ func (m *UI) syncPanelSpinner() tea.Cmd {
 // represents work in flight), a static spinner glyph otherwise — the same
 // static-fallback the todos list uses, so a briefly-stalled tick loop
 // degrades to a frozen glyph rather than a misleading arrow.
-func (m *UI) panelActivityIcon() string {
-	if m.panel.isSpinning {
-		return m.panel.spinner.View()
+func (p *sessionPanelState) panelActivityIcon(com *common.Common) string {
+	if p.isSpinning {
+		return p.spinner.View()
 	}
-	return m.com.Styles.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
+	return com.Styles.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 }
 
 // maxPanelTodosRows caps how tall the expanded todos section may grow, in
@@ -340,15 +340,15 @@ func delegationBlockStatusText(t proto.Thread) string {
 // Falls back to "agent" for a delegation with no stub to resolve — one
 // started before this session was reloaded far enough back to hold it, or
 // by a delegation of its own rather than by this transcript.
-func (m *UI) delegationBlockName(t proto.Thread) string {
-	if m.com == nil || m.com.Workspace == nil {
+func (w *widgets) delegationBlockName(com *common.Common, t proto.Thread) string {
+	if com == nil || com.Workspace == nil {
 		return defaultDelegationBlockName
 	}
-	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(t.SessionID)
+	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(t.SessionID)
 	if !ok {
 		return defaultDelegationBlockName
 	}
-	item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem)
+	item, ok := w.chat.MessageItem(toolCallID).(chat.ToolMessageItem)
 	if !ok {
 		return defaultDelegationBlockName
 	}
@@ -998,13 +998,13 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		sessionPanelAgentsHeaderText(plan.agentsLive, plan.agentsExpanded), m.panel.agentsHover, &m.panel.agentsHeaderRect,
 		m.panel.hoveredAgent, panelBlockDrawSpec{
 			count: len(plan.agents), more: plan.agentsMore, footer: "…and %d more agents",
-			name: func(i int) string { return m.delegationBlockName(plan.agents[i]) },
+			name: func(i int) string { return m.delegationBlockName(m.com, plan.agents[i]) },
 			task: func(i int) string { return threadDockGoalFirstLine(plan.agents[i].Goal) },
 			line2: func(i int) string {
 				item := plan.agents[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
 				if proto.ThreadStatus(item.Status) == proto.ThreadStatusRunning {
-					icon = m.panelActivityIcon()
+					icon = m.panel.panelActivityIcon(m.com)
 				}
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(delegationBlockStatusText(item))
 			},
@@ -1038,7 +1038,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				item := plan.threads[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
 				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning || status == proto.ThreadStatusMerging {
-					icon = m.panelActivityIcon()
+					icon = m.panel.panelActivityIcon(m.com)
 				}
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].value))
 			},
@@ -1073,7 +1073,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 			listWidth = max(0, width-1) // reserve the right column for the scrollbar.
 		}
 
-		inProgressIcon := m.panelActivityIcon()
+		inProgressIcon := m.panel.panelActivityIcon(m.com)
 		for _, todo := range all[offset:end] {
 			if row.Min.Y >= area.Max.Y {
 				break
@@ -1183,13 +1183,13 @@ func (m *UI) toggleTodosExpanded() tea.Cmd {
 // blocks and showing only its header. It mirrors toggleTodosExpanded, but
 // needs no relayout command of its own: the row budget is recomputed from
 // the plan on the next draw, and the plan reads this flag directly.
-func (m *UI) toggleThreadsCollapsed() {
-	m.panel.threadsCollapsed = !m.panel.threadsCollapsed
+func (p *sessionPanelState) toggleThreadsCollapsed() {
+	p.threadsCollapsed = !p.threadsCollapsed
 }
 
 // toggleAgentsCollapsed is toggleThreadsCollapsed for the agents section.
-func (m *UI) toggleAgentsCollapsed() {
-	m.panel.agentsCollapsed = !m.panel.agentsCollapsed
+func (p *sessionPanelState) toggleAgentsCollapsed() {
+	p.agentsCollapsed = !p.agentsCollapsed
 }
 
 // enterDelegation opens a delegation's own transcript from its panel

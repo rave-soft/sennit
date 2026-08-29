@@ -42,8 +42,8 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// A prompt was just accepted (run started or enqueued): fetch the
 		// authoritative busy/queue state to confirm the optimistic values
 		// sendMessage wrote.
-		m.invalidateBusyCaches()
-		m.invalidatePromptQueue()
+		m.wsCache.invalidateBusyCaches()
+		m.wsCache.invalidatePromptQueue()
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -102,8 +102,8 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
 		// session instead of a stale one.
-		m.invalidateBusyCaches()
-		m.invalidatePromptQueue()
+		m.wsCache.invalidateBusyCaches()
+		m.wsCache.invalidatePromptQueue()
 		if msg.modelSwitched {
 			// Loading the session moved the instance onto the model it is
 			// pinned to. The rebuild has already landed by the time this
@@ -130,13 +130,13 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		cmds = append(cmds, m.reportCurrentSession(msg.sessionID))
+		cmds = append(cmds, m.sess.reportCurrentSession(m.com, msg.sessionID))
 		if hasInProgressTodo(m.sess.current.Todos) {
 			m.updateLayoutAndSize()
 		}
 		// Reload prompt history for the new session.
 		m.editor.historyReset()
-		cmds = append(cmds, m.loadPromptHistory())
+		cmds = append(cmds, m.sess.loadPromptHistory(m.com))
 
 		m.editor.pendingSendLoading = false
 		m.editor.pendingSendActive = false
@@ -254,7 +254,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// Not the current session — it may be a running delegation's
 			// child session, updated as its own turns complete. Surface
 			// its running token count on the parent's status line.
-			m.handleChildSessionUpdate(msg.Payload)
+			m.handleChildSessionUpdate(m.com, msg.Payload)
 		}
 	case pubsub.Event[message.Message]:
 		// Check if this is a child session message for an agent tool.
@@ -263,12 +263,12 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		if msg.Payload.SessionID != m.sess.current.ID {
 			// This might be a child session message from an agent tool.
-			if cmd := m.handleChildSessionMessage(msg); cmd != nil {
+			if cmd := m.handleChildSessionMessage(m.com, msg); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			break
 		}
-		m.recordAssistantModel(msg.Payload)
+		m.sess.recordAssistantModel(msg.Payload)
 		switch msg.Type {
 		case pubsub.CreatedEvent:
 			cmds = append(cmds, m.appendSessionMessage(msg.Payload))
@@ -278,8 +278,8 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// off-thread. Per-chunk UpdatedEvents deliberately do NOT
 			// trigger this: during streaming that would put workspace
 			// probes on every token.
-			m.invalidateBusyCaches()
-			m.invalidatePromptQueue()
+			m.wsCache.invalidateBusyCaches()
+			m.wsCache.invalidatePromptQueue()
 			if cmd := m.dispatchBusyRefresh(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -297,7 +297,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[history.File]:
-		cmds = append(cmds, m.handleFileEvent(msg.Payload))
+		cmds = append(cmds, m.sess.handleFileEvent(m.com, msg.Payload))
 
 	case sendMessageErrorMsg:
 		if !msg.creating && m.sess.loadExpectedID != "" && (msg.sessionID != m.sess.loadExpectedID || msg.loadGeneration != m.sess.loadGen) {

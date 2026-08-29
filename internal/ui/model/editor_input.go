@@ -84,9 +84,9 @@ type openEditorReadyMsg struct {
 // scratch-file IO in the returned tea.Cmd's closure: os.CreateTemp and the
 // write both touch disk and must not run on the Update goroutine that a key
 // handler calls this from.
-func (m *UI) openEditor(value string) tea.Cmd {
-	line := m.editor.textarea.Line() + 1
-	col := m.editor.textarea.Column() + 1
+func (e *editorState) openEditor(value string) tea.Cmd {
+	line := e.textarea.Line() + 1
+	col := e.textarea.Column() + 1
 	return func() tea.Msg {
 		tmpfile, err := os.CreateTemp("", "msg_*.md")
 		if err != nil {
@@ -326,9 +326,9 @@ var workingPlaceholders = [...]string{
 
 // randomizePlaceholders selects random placeholder text for the textarea's
 // ready and working states.
-func (m *UI) randomizePlaceholders() {
-	m.editor.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
-	m.editor.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+func (e *editorState) randomizePlaceholders() {
+	e.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
+	e.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
 // checkBangModeAfterPaste engages bang mode when pasted text starts with

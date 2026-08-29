@@ -86,7 +86,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.mcpStates = msg.states
 		m.mcpVersion++
 		// Auto-open the MCP auth dialog if any servers need authentication.
-		if cmd := m.openMCPAuthDialog(); cmd != nil {
+		if cmd := m.openMCPAuthDialog(m.com); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case mcpPromptsLoadedMsg:

@@ -6,6 +6,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -66,11 +67,11 @@ func lastAssistantModel(sessionID string, msgs []message.Message) sessionModelRe
 // recordAssistantModel notes the model an incoming message was produced by,
 // so a session that starts answering while it is on screen stops being
 // described by whatever the previous one used.
-func (m *UI) recordAssistantModel(msg message.Message) {
+func (s *sessionState) recordAssistantModel(msg message.Message) {
 	if msg.Role != message.Assistant || msg.Model == "" || msg.Provider == "" {
 		return
 	}
-	m.sess.modelUsed = sessionModelRef{sessionID: msg.SessionID, provider: msg.Provider, model: msg.Model}
+	s.modelUsed = sessionModelRef{sessionID: msg.SessionID, provider: msg.Provider, model: msg.Model}
 }
 
 // viewedModel is the model to describe for whatever session is on screen.
@@ -83,7 +84,7 @@ func (m *UI) recordAssistantModel(msg message.Message) {
 // neither.
 func (m *UI) viewedModel() *workspace.AgentModel {
 	if len(m.sess.navStack) > 0 {
-		if model := m.recordedModel(m.sess.navStack[len(m.sess.navStack)-1]); model != nil {
+		if model := m.sess.recordedModel(m.com, m.sess.navStack[len(m.sess.navStack)-1]); model != nil {
 			return model
 		}
 	}
@@ -112,9 +113,9 @@ func (m *UI) viewedModel() *workspace.AgentModel {
 // Nothing at all is returned when neither answers — a delegation with no
 // override that has yet to say a word really does run on the selection,
 // and that is what the caller falls back to.
-func (m *UI) recordedModel(frame sessionNavFrame) *workspace.AgentModel {
+func (s *sessionState) recordedModel(com *common.Common, frame sessionNavFrame) *workspace.AgentModel {
 	provider, model := "", ""
-	if ref := m.sess.modelUsed.forSession(frame.childSessionID); ref.model != "" {
+	if ref := s.modelUsed.forSession(frame.childSessionID); ref.model != "" {
 		provider, model = ref.provider, ref.model
 	}
 	if provider == "" || model == "" {
@@ -129,7 +130,7 @@ func (m *UI) recordedModel(frame sessionNavFrame) *workspace.AgentModel {
 	catalog := catwalk.Model{ID: model, Name: model}
 	// A config without providers is a config that can resolve nothing, and
 	// that is the shape a UI built without a workspace has.
-	if cfg := m.com.Config(); cfg != nil && cfg.Providers != nil {
+	if cfg := com.Config(); cfg != nil && cfg.Providers != nil {
 		if known := cfg.GetModel(provider, model); known != nil {
 			catalog = *known
 		}

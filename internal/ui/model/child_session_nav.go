@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // viewingChildSession reports whether the UI is currently navigated into a
@@ -22,11 +23,11 @@ func (m *UI) viewingChildSession() bool {
 // childSessionSiblingCount returns the number of sibling delegations in the
 // top nav-stack frame, i.e. how many sub-agents alt+left/alt+right can cycle
 // through. Zero when not viewing a child session.
-func (m *UI) childSessionSiblingCount() int {
-	if len(m.sess.navStack) == 0 {
+func (s *sessionState) childSessionSiblingCount() int {
+	if len(s.navStack) == 0 {
 		return 0
 	}
-	return len(m.sess.navStack[len(m.sess.navStack)-1].siblings)
+	return len(s.navStack[len(s.navStack)-1].siblings)
 }
 
 // childSessionBreadcrumbMaxLen is the approximate max length of the prompt
@@ -220,12 +221,12 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 // effort: it's a no-op when the session isn't an agent-tool child session,
 // or the parent item can't be found (e.g. scrolled out of the loaded
 // window).
-func (m *UI) handleChildSessionUpdate(payload session.Session) {
-	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(payload.ID)
+func (w *widgets) handleChildSessionUpdate(com *common.Common, payload session.Session) {
+	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(payload.ID)
 	if !ok {
 		return
 	}
-	container := m.findNestedToolContainer(toolCallID)
+	container := w.findNestedToolContainer(toolCallID)
 	if container == nil {
 		return
 	}
@@ -238,7 +239,7 @@ func (m *UI) handleChildSessionUpdate(payload session.Session) {
 }
 
 // handleChildSessionMessage handles messages from child sessions (agent tools).
-func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
+func (w *widgets) handleChildSessionMessage(com *common.Common, event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
 
 	// Only process messages with tool calls or results.
@@ -248,12 +249,12 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 
 	// Check if this is an agent tool session and parse it.
 	childSessionID := event.Payload.SessionID
-	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(childSessionID)
+	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(childSessionID)
 	if !ok {
 		return nil
 	}
 
-	agentItem := m.findNestedToolContainer(toolCallID)
+	agentItem := w.findNestedToolContainer(toolCallID)
 	if agentItem == nil {
 		return nil
 	}
@@ -273,7 +274,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		}
 		if !found {
 			// Create a new nested tool item.
-			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false, m.com.Config())
+			nestedItem := chat.NewToolMessageItem(com.Styles, event.Payload.ID, tc, nil, false, com.Config())
 			if simplifiable, ok := nestedItem.(chat.Compactable); ok {
 				simplifiable.SetCompact(true)
 			}
@@ -300,13 +301,13 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	agentItem.SetNestedTools(nestedTools)
 
 	// Update the chat so it updates the index map for animations to work as expected
-	m.chat.UpdateNestedToolIDs(toolCallID)
+	w.chat.UpdateNestedToolIDs(toolCallID)
 
-	if m.chat.Follow() {
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+	if w.chat.Follow() {
+		if cmd := w.chat.ScrollToBottomAndAnimate(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.chat.SelectLast()
+		w.chat.SelectLast()
 	}
 
 	return tea.Sequence(cmds...)

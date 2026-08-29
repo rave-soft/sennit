@@ -79,10 +79,10 @@ func TestRecordAssistantModelTracksALiveDelegation(t *testing.T) {
 	u := newCursorTestUI(t)
 	u.sess.modelUsed = sessionModelRef{provider: "openai", model: "gpt-5.6"}
 
-	u.recordAssistantModel(message.Message{Role: message.User, Provider: "x", Model: "y"})
+	u.sess.recordAssistantModel(message.Message{Role: message.User, Provider: "x", Model: "y"})
 	require.Equal(t, "openai/gpt-5.6", u.sess.modelUsed.String(), "a user message says nothing about the model")
 
-	u.recordAssistantModel(message.Message{SessionID: "child-1", Role: message.Assistant, Provider: "anthropic", Model: "claude-sonnet-5"})
+	u.sess.recordAssistantModel(message.Message{SessionID: "child-1", Role: message.Assistant, Provider: "anthropic", Model: "claude-sonnet-5"})
 	require.Equal(t, "anthropic/claude-sonnet-5", u.sess.modelUsed.String())
 }
 
@@ -137,13 +137,13 @@ func TestViewedModelIgnoresAnotherSessionsReading(t *testing.T) {
 	require.Equal(t, "high", viewed.ModelCfg.ReasoningEffort)
 
 	// And the parent going on streaming must not move it either.
-	u.recordAssistantModel(message.Message{
+	u.sess.recordAssistantModel(message.Message{
 		SessionID: "main", Role: message.Assistant, Provider: "codex", Model: "gpt-5.6-sol",
 	})
 	require.Equal(t, "gpt-5.6-terra", u.viewedModel().ModelCfg.Model)
 
 	// Once the child answers, its own messages are what describe it.
-	u.recordAssistantModel(message.Message{
+	u.sess.recordAssistantModel(message.Message{
 		SessionID: "child-1", Role: message.Assistant, Provider: "codex", Model: "gpt-5.6-terra-preview",
 	})
 	require.Equal(t, "gpt-5.6-terra-preview", u.viewedModel().ModelCfg.Model)

@@ -95,7 +95,7 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		sessionID = m.sess.current.ID
 		m.wsCache.agentBusyCache.set(true)
 		m.wsCache.busyFetchGen++
-		m.invalidatePromptQueue()
+		m.wsCache.invalidatePromptQueue()
 	}
 
 	return func() tea.Msg {
@@ -167,7 +167,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 		// m.panel.isSpinning fresh on every draw, and again once the
 		// off-thread refresh (and the agent's own events) land.
 		m.panel.isSpinning = false
-		m.invalidateBusyCaches()
+		m.wsCache.invalidateBusyCaches()
 		return m.dispatchBusyRefresh()
 	}
 
@@ -179,7 +179,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 		// Bump the queue generation so a fetch started before this clear
 		// cannot land and repopulate the pill we just emptied, then write
 		// the now-authoritative empty queue through as fresh.
-		m.invalidatePromptQueue()
+		m.wsCache.invalidatePromptQueue()
 		m.wsCache.promptQueueCache.set(nil)
 		m.updateLayoutAndSize()
 		return nil

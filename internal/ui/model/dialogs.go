@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -68,7 +69,7 @@ func (m *UI) openDialog(id string) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ModelsID:
-		if cmd := m.openModelsDialog(); cmd != nil {
+		if cmd := m.openModelsDialog(m.com); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.CommandsID:
@@ -76,11 +77,11 @@ func (m *UI) openDialog(id string) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ReasoningID:
-		if cmd := m.openReasoningDialog(); cmd != nil {
+		if cmd := m.openReasoningDialog(m.com); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ThemeID:
-		if cmd := m.openThemeDialog(); cmd != nil {
+		if cmd := m.openThemeDialog(m.com); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ProvidersID:
@@ -88,7 +89,7 @@ func (m *UI) openDialog(id string) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.NotificationsID:
-		if cmd := m.openNotificationsDialog(); cmd != nil {
+		if cmd := m.openNotificationsDialog(m.com); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.FilePickerID:
@@ -96,9 +97,9 @@ func (m *UI) openDialog(id string) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.QuitID:
-		m.openQuitDialog()
+		m.openQuitDialog(m.com)
 	case dialog.DoctorID:
-		m.openDoctorDialog()
+		m.openDoctorDialog(m.com)
 	case dialog.StatsID:
 		if cmd := m.openStatsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -111,31 +112,31 @@ func (m *UI) openDialog(id string) tea.Cmd {
 }
 
 // openQuitDialog opens the quit confirmation dialog.
-func (m *UI) openQuitDialog() {
-	if m.dialog.ContainsDialog(dialog.QuitID) {
+func (w *widgets) openQuitDialog(com *common.Common) {
+	if w.dialog.ContainsDialog(dialog.QuitID) {
 		// Bring to front
-		m.dialog.BringToFront(dialog.QuitID)
+		w.dialog.BringToFront(dialog.QuitID)
 		return
 	}
 
-	quitDialog := dialog.NewQuit(m.com)
-	m.dialog.OpenDialog(quitDialog)
+	quitDialog := dialog.NewQuit(com)
+	w.dialog.OpenDialog(quitDialog)
 }
 
 // openModelsDialog opens the models dialog.
-func (m *UI) openModelsDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.ModelsID) {
+func (w *widgets) openModelsDialog(com *common.Common) tea.Cmd {
+	if w.dialog.ContainsDialog(dialog.ModelsID) {
 		// Bring to front
-		m.dialog.BringToFront(dialog.ModelsID)
+		w.dialog.BringToFront(dialog.ModelsID)
 		return nil
 	}
 
-	modelsDialog, pruneCmd, err := dialog.NewModels(m.com)
+	modelsDialog, pruneCmd, err := dialog.NewModels(com)
 	if err != nil {
 		return util.ReportError(err)
 	}
 
-	m.dialog.OpenDialog(modelsDialog)
+	w.dialog.OpenDialog(modelsDialog)
 
 	return pruneCmd
 }
@@ -202,35 +203,35 @@ func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
 }
 
 // openReasoningDialog opens the reasoning effort dialog.
-func (m *UI) openReasoningDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.ReasoningID) {
-		m.dialog.BringToFront(dialog.ReasoningID)
+func (w *widgets) openReasoningDialog(com *common.Common) tea.Cmd {
+	if w.dialog.ContainsDialog(dialog.ReasoningID) {
+		w.dialog.BringToFront(dialog.ReasoningID)
 		return nil
 	}
 
-	reasoningDialog, err := dialog.NewReasoning(m.com)
+	reasoningDialog, err := dialog.NewReasoning(com)
 	if err != nil {
 		return util.ReportError(err)
 	}
 
-	m.dialog.OpenDialog(reasoningDialog)
+	w.dialog.OpenDialog(reasoningDialog)
 	return nil
 }
 
 // openThemeDialog opens the color theme picker — see the "select_theme"
 // entry in dialog/commands.go ("/theme").
-func (m *UI) openThemeDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.ThemeID) {
-		m.dialog.BringToFront(dialog.ThemeID)
+func (w *widgets) openThemeDialog(com *common.Common) tea.Cmd {
+	if w.dialog.ContainsDialog(dialog.ThemeID) {
+		w.dialog.BringToFront(dialog.ThemeID)
 		return nil
 	}
 
-	themeDialog, err := dialog.NewTheme(m.com)
+	themeDialog, err := dialog.NewTheme(com)
 	if err != nil {
 		return util.ReportError(err)
 	}
 
-	m.dialog.OpenDialog(themeDialog)
+	w.dialog.OpenDialog(themeDialog)
 	return nil
 }
 
@@ -255,14 +256,14 @@ func (m *UI) openProvidersDialog() tea.Cmd {
 
 // openAccountsDialog opens the accounts dialog for providerID, letting the
 // user switch between stored credentialed accounts.
-func (m *UI) openAccountsDialog(providerID string) tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.AccountsID) {
-		m.dialog.BringToFront(dialog.AccountsID)
+func (w *widgets) openAccountsDialog(com *common.Common, providerID string) tea.Cmd {
+	if w.dialog.ContainsDialog(dialog.AccountsID) {
+		w.dialog.BringToFront(dialog.AccountsID)
 		return nil
 	}
 
-	accountsDialog, cmd := dialog.NewAccounts(m.com, providerID)
-	m.dialog.OpenDialog(accountsDialog)
+	accountsDialog, cmd := dialog.NewAccounts(com, providerID)
+	w.dialog.OpenDialog(accountsDialog)
 	return cmd
 }
 
@@ -297,14 +298,14 @@ func (m *UI) removeAccountCmd(providerID, accountID string) tea.Cmd {
 }
 
 // openProviderFormDialog opens the custom provider form dialog.
-func (m *UI) openProviderFormDialog() {
-	if m.dialog.ContainsDialog(dialog.ProviderFormID) {
-		m.dialog.BringToFront(dialog.ProviderFormID)
+func (w *widgets) openProviderFormDialog(com *common.Common) {
+	if w.dialog.ContainsDialog(dialog.ProviderFormID) {
+		w.dialog.BringToFront(dialog.ProviderFormID)
 		return
 	}
 
-	formDialog := dialog.NewProviderForm(m.com)
-	m.dialog.OpenDialog(formDialog)
+	formDialog := dialog.NewProviderForm(com)
+	w.dialog.OpenDialog(formDialog)
 }
 
 // configureProvider resolves providerID to its catalog entry and opens the
@@ -357,14 +358,14 @@ func (m *UI) configureProvider(providerID string, forceNewAccount bool) tea.Cmd 
 // openNotificationsDialog opens the notification style picker dialog.
 //
 //nolint:unparam // always nil today, but matches the tea.Cmd signature shared by the other open*Dialog methods
-func (m *UI) openNotificationsDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.NotificationsID) {
-		m.dialog.BringToFront(dialog.NotificationsID)
+func (w *widgets) openNotificationsDialog(com *common.Common) tea.Cmd {
+	if w.dialog.ContainsDialog(dialog.NotificationsID) {
+		w.dialog.BringToFront(dialog.NotificationsID)
 		return nil
 	}
 
-	notificationsDialog := dialog.NewNotifications(m.com)
-	m.dialog.OpenDialog(notificationsDialog)
+	notificationsDialog := dialog.NewNotifications(com)
+	w.dialog.OpenDialog(notificationsDialog)
 	return nil
 }
 
@@ -392,13 +393,13 @@ func (m *UI) openStatsDialog() tea.Cmd {
 }
 
 // openDoctorDialog opens the /doctor config-problems dialog.
-func (m *UI) openDoctorDialog() {
-	if m.dialog.ContainsDialog(dialog.DoctorID) {
-		m.dialog.BringToFront(dialog.DoctorID)
+func (w *widgets) openDoctorDialog(com *common.Common) {
+	if w.dialog.ContainsDialog(dialog.DoctorID) {
+		w.dialog.BringToFront(dialog.DoctorID)
 		return
 	}
 
-	m.dialog.OpenDialog(dialog.NewDoctor(m.com))
+	w.dialog.OpenDialog(dialog.NewDoctor(com))
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already

@@ -117,7 +117,7 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		cmds = append(cmds, m.loadPromptHistory())
+		cmds = append(cmds, m.sess.loadPromptHistory(m.com))
 		if len(m.editor.pendingSendQueue) > 0 {
 			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 		}

@@ -26,7 +26,7 @@ func (m *UI) openExternalEditorGuarded(cmds []tea.Cmd) (out []tea.Cmd, started b
 	if m.editor.bangMode {
 		editorValue = "!" + editorValue
 	}
-	return append(cmds, m.openEditor(editorValue)), true
+	return append(cmds, m.editor.openEditor(editorValue)), true
 }
 
 // openThreadsDashboardGuarded appends the command that opens the threads
@@ -45,13 +45,13 @@ func (m *UI) openThreadsDashboardGuarded(cmds []tea.Cmd) []tea.Cmd {
 // viewport — moves the selection to the previous item and scrolls it back
 // into view. Shared by the Chat.Up key binding and the mouse hover-scroll
 // zone at the top of the chat viewport (mouse.go).
-func (m *UI) scrollChatUpAndKeepSelectionVisible(cmds []tea.Cmd) []tea.Cmd {
-	if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
+func (w *widgets) scrollChatUpAndKeepSelectionVisible(cmds []tea.Cmd) []tea.Cmd {
+	if cmd := w.chat.ScrollByAndAnimate(-1); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if !m.chat.SelectedItemInView() {
-		m.chat.SelectPrev()
-		if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+	if !w.chat.SelectedItemInView() {
+		w.chat.SelectPrev()
+		if cmd := w.chat.ScrollToSelectedAndAnimate(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -61,13 +61,13 @@ func (m *UI) scrollChatUpAndKeepSelectionVisible(cmds []tea.Cmd) []tea.Cmd {
 // scrollChatDownAndKeepSelectionVisible mirrors
 // scrollChatUpAndKeepSelectionVisible for the Chat.Down key binding and the
 // mouse hover-scroll zone at the bottom of the chat viewport.
-func (m *UI) scrollChatDownAndKeepSelectionVisible(cmds []tea.Cmd) []tea.Cmd {
-	if cmd := m.chat.ScrollByAndAnimate(1); cmd != nil {
+func (w *widgets) scrollChatDownAndKeepSelectionVisible(cmds []tea.Cmd) []tea.Cmd {
+	if cmd := w.chat.ScrollByAndAnimate(1); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if !m.chat.SelectedItemInView() {
-		m.chat.SelectNext()
-		if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+	if !w.chat.SelectedItemInView() {
+		w.chat.SelectNext()
+		if cmd := w.chat.ScrollToSelectedAndAnimate(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -82,7 +82,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 	if key.Matches(msg, m.keyMap.Quit) && !m.dialog.ContainsDialog(dialog.QuitID) {
 		// Always handle quit keys first
-		m.openQuitDialog()
+		m.openQuitDialog(m.com)
 
 		return tea.Batch(cmds...)
 	}
@@ -168,7 +168,7 @@ func (m *UI) handleGlobalKeys(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cmd, b
 		}
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Models):
-		if cmd := m.openModelsDialog(); cmd != nil {
+		if cmd := m.openModelsDialog(m.com); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return cmds, true
@@ -307,14 +307,14 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 
 		value = strings.TrimSpace(value)
 		if value == "exit" || value == "quit" {
-			m.openQuitDialog()
+			m.openQuitDialog(m.com)
 			return cmds, nil, true
 		}
 
 		if m.editor.bangMode && value != "" {
 			m.editor.bangMode = false
 			m.setEditorPrompt(m.yoloModeCached())
-			m.randomizePlaceholders()
+			m.editor.randomizePlaceholders()
 			m.editor.historyReset()
 			return cmds, tea.Batch(m.runShellCommand(value)), true
 		}
@@ -325,10 +325,10 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 			return cmds, nil, true
 		}
 
-		m.randomizePlaceholders()
+		m.editor.randomizePlaceholders()
 		m.editor.historyReset()
 
-		return cmds, tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory()), true
+		return cmds, tea.Batch(m.sendMessage(value, attachments...), m.sess.loadPromptHistory(m.com)), true
 	case key.Matches(msg, m.keyMap.Chat.NewSession):
 		if !m.hasSession() {
 			break

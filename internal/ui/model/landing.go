@@ -44,9 +44,9 @@ func (m *UI) landingView() string {
 
 	mcpLspSectionWidth := min(30, (width-2)/3)
 
-	lspSection := m.lspInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	mcpSection := m.mcpInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	skillsSection := m.skillsInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
+	lspSection := m.lsp.lspInfo(m.com, mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
+	mcpSection := m.mcpInfo(m.com, mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
+	skillsSection := m.skillsInfo(m.com, mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Left, lspSection, " ", mcpSection, " ", skillsSection)
 

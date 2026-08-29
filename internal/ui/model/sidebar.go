@@ -221,7 +221,7 @@ func (m *UI) modelInfo(width int) string {
 // Empty for everything but Codex, and empty there too until the account has
 // made a request: the figures are quoted on responses, so there is nothing
 // to report before the first one.
-func (m *UI) planInfo(model *mcp.AgentModel) string {
+func (a *accountLabelsState) planInfo(model *mcp.AgentModel) string {
 	if model == nil || model.ModelCfg.Provider != codex.ProviderID {
 		return ""
 	}
@@ -229,7 +229,7 @@ func (m *UI) planInfo(model *mcp.AgentModel) string {
 	if !ok {
 		return ""
 	}
-	return common.FormatPlanUsage(usage.Plan, planWindows(usage), m.accountLabelFor(model.ModelCfg.Provider))
+	return common.FormatPlanUsage(usage.Plan, planWindows(usage), a.accountLabelFor(model.ModelCfg.Provider))
 }
 
 // planWindows converts the account's rate-limit windows into the shape the
@@ -308,10 +308,10 @@ func (m *UI) updateSidebarScrollState() {
 	contentHeight := contentRect.Dy()
 
 	// Render all items without truncation; virtual scrolling handles overflow.
-	lspSection := m.lspInfo(contentWidth, len(m.lsp.states), true)
-	mcpSection := m.mcpInfo(contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
-	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sess.files), true)
+	lspSection := m.lsp.lspInfo(m.com, contentWidth, len(m.lsp.states), true)
+	mcpSection := m.mcpInfo(m.com, contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
+	skillsSection := m.skillsInfo(m.com, contentWidth, len(m.skillStatusItems(m.com)), true)
+	filesSection := m.sess.filesInfo(m.com, m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sess.files), true)
 
 	// Build the scrollable content.
 	content := lipgloss.JoinVertical(

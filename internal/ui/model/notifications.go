@@ -190,8 +190,8 @@ func (m *UI) handleQuestionNotification(_ question.Notification) {
 }
 
 // handlePermissionNotification updates tool items when permission state changes.
-func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
-	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
+func (w *widgets) handlePermissionNotification(notification permission.PermissionNotification) {
+	if toolItem := w.chat.MessageItem(notification.ToolCallID); toolItem != nil {
 		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
 			if notification.Granted {
 				permItem.SetStatus(chat.ToolStatusRunning)
@@ -207,9 +207,9 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	if !notification.Granted && !notification.Denied {
 		return
 	}
-	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
+	if d := w.dialog.Dialog(dialog.PermissionsID); d != nil {
 		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
-			m.dialog.CloseDialog(dialog.PermissionsID)
+			w.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
 }
@@ -246,7 +246,7 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 	case workspace.AgentNotificationReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case workspace.AgentNotificationAWSSSOAuth:
-		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
+		return m.handleAWSSSOAuth(m.com, n.AWSSOCommand, n.AWSSOURL)
 	case workspace.AgentNotificationAWSSSOResult:
 		return m.handleAWSSSOAuthResult(n.Message)
 	case workspace.AgentNotificationAccountRotated:
@@ -267,7 +267,7 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		// than duplicated: it exists precisely so an enqueue/drain/
 		// cancel/clear shows up immediately instead of waiting out the
 		// TTL backstop.
-		m.invalidatePromptQueue()
+		m.wsCache.invalidatePromptQueue()
 		return m.dispatchPromptQueueRefresh()
 	default:
 		return nil
@@ -276,8 +276,8 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 	// clears its active request before publishing precisely so observers
 	// can re-probe. Drop the memoized busy state and re-fetch it and the
 	// prompt queue off-thread.
-	m.invalidateBusyCaches()
-	m.invalidatePromptQueue()
+	m.wsCache.invalidateBusyCaches()
+	m.wsCache.invalidatePromptQueue()
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}

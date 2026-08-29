@@ -253,7 +253,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 				}
 			}
 		}
-		cmds = append(cmds, m.refreshModifiedFiles())
+		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com))
 	}
 	m.refloatQueuedPrompts()
 	return tea.Sequence(cmds...)
@@ -343,8 +343,8 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 // delegations — all three construct an AgentToolMessageItem, see
 // chat.NewToolMessageItem). Returns nil if the item is missing or isn't a
 // nested-tool container, e.g. a plain (non-delegating) tool call.
-func (m *UI) findNestedToolContainer(toolCallID string) chat.NestedToolContainer {
-	item := m.chat.MessageItem(toolCallID)
+func (w *widgets) findNestedToolContainer(toolCallID string) chat.NestedToolContainer {
+	item := w.chat.MessageItem(toolCallID)
 	if item == nil {
 		return nil
 	}

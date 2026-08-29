@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/logo"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -127,7 +128,7 @@ func (m *UI) drawEditorArea(scr uv.Screen, area uv.Rectangle, editorWidth int) {
 		}
 		return
 	}
-	editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+	editor := uv.NewStyledString(m.editor.renderEditorView(editorWidth))
 	editor.Draw(scr, area)
 	m.drawGhostText(scr)
 	m.inlineCursor = nil
@@ -371,7 +372,7 @@ func (m *UI) updateSize() {
 	switch m.state {
 	case uiChat:
 		if !m.lay.isCompact {
-			m.cacheSidebarLogo(m.lay.layout.sidebar.Dx())
+			m.sidebar.cacheSidebarLogo(m.com, m.lay.layout.sidebar.Dx())
 		}
 	}
 }
@@ -652,13 +653,13 @@ func (m *UI) completionsPosition() image.Point {
 // empty editor with a single line of text is exactly one row tall, with no
 // reserved blank lines above or below (see editorAttachmentsRowOffset and
 // TextareaMinHeight).
-func (m *UI) renderEditorView(width int) string {
-	if len(m.editor.attachments.List()) == 0 {
-		return m.editor.textarea.View()
+func (e *editorState) renderEditorView(width int) string {
+	if len(e.attachments.List()) == 0 {
+		return e.textarea.View()
 	}
 	return strings.Join([]string{
-		m.editor.attachments.Render(width),
-		m.editor.textarea.View(),
+		e.attachments.Render(width),
+		e.textarea.View(),
 	}, "\n")
 }
 
@@ -681,8 +682,8 @@ func (m *UI) editorAttachmentsRowOffset() int {
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
-func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebar.logo = renderLogo(m.com.Styles, true, width)
+func (sb *sidebarState) cacheSidebarLogo(com *common.Common, width int) {
+	sb.logo = renderLogo(com.Styles, true, width)
 }
 
 // editorContentWidth returns the content width available to the
@@ -743,10 +744,10 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	sectionWidth := max(1, min(maxSectionWidth, width/4-2)) // account for spacing between sections
 	maxItemsPerSection := remainingHeight - 3               // Account for section title and spacing
 
-	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
-	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
-	skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
+	lspSection := m.lsp.lspInfo(m.com, sectionWidth, maxItemsPerSection, false)
+	mcpSection := m.mcpInfo(m.com, sectionWidth, maxItemsPerSection, false)
+	skillsSection := m.skillsInfo(m.com, sectionWidth, maxItemsPerSection, false)
+	filesSection := m.sess.filesInfo(m.com, m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
 	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
 	uv.NewStyledString(
 		s.CompactDetails.View.

@@ -40,15 +40,15 @@ func cachedBuiltinSkills() []*skills.Skill {
 
 // skillsInfo renders the skill discovery status section showing loaded and
 // invalid skills.
-func (m *UI) skillsInfo(width, maxItems int, isSection bool) string {
-	t := m.com.Styles
+func (is *integrationsState) skillsInfo(com *common.Common, width, maxItems int, isSection bool) string {
+	t := com.Styles
 
 	title := t.Resource.Heading.Render("Skills")
 	if isSection {
 		title = common.Section(t, title, width)
 	}
 
-	items := m.skillStatusItems()
+	items := is.skillStatusItems(com)
 	if len(items) == 0 {
 		list := t.Resource.AdditionalText.Render("None")
 		return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
@@ -58,21 +58,21 @@ func (m *UI) skillsInfo(width, maxItems int, isSection bool) string {
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
-func (m *UI) skillStatusItems() []skillStatusItem {
-	t := m.com.Styles
+func (is *integrationsState) skillStatusItems(com *common.Common) []skillStatusItem {
+	t := com.Styles
 	var items []skillStatusItem
-	stateNames := make(map[string]struct{}, len(m.skillStates))
+	stateNames := make(map[string]struct{}, len(is.skillStates))
 
 	disabledSet := make(map[string]bool)
-	if m.com != nil && m.com.Workspace != nil {
-		if cfg := m.com.Config(); cfg != nil {
+	if com != nil && com.Workspace != nil {
+		if cfg := com.Config(); cfg != nil {
 			for _, name := range cfg.Options.DisabledSkills {
 				disabledSet[name] = true
 			}
 		}
 	}
 
-	states := slices.Clone(m.skillStates)
+	states := slices.Clone(is.skillStates)
 	slices.SortStableFunc(states, func(a, b *skills.SkillState) int {
 		return strings.Compare(a.Path, b.Path)
 	})

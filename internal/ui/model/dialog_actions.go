@@ -293,7 +293,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// over again. Both checks are pure in-memory reads, so onboarding
 		// and a fresh (never-configured) provider are unaffected.
 		if pc, ok := m.com.Config().Providers.Get(msg.ProviderID); ok && (pc.APIKey != "" || pc.OAuthToken != nil) {
-			if cmd := m.openAccountsDialog(msg.ProviderID); cmd != nil {
+			if cmd := m.openAccountsDialog(m.com, msg.ProviderID); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			break
@@ -314,7 +314,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionOpenCustomProviderForm:
-		m.openProviderFormDialog()
+		m.openProviderFormDialog(m.com)
 	case dialog.ActionOpenAccountEdit:
 		m.dialog.OpenDialog(dialog.NewAccountForm(m.com, msg.ProviderID, msg.Account, msg.Active))
 	case dialog.ActionSubmitAccountForm:
@@ -540,7 +540,7 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 			m.dialog.OpenDialog(argsDialog)
 			break
 		}
-		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+		cmds = append(cmds, m.runMCPPrompt(m.com, msg.ClientID, msg.PromptID, msg.Args))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}

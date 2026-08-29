@@ -122,11 +122,11 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				return cmds, true
 			}
 			if hit.inThreadsHeader {
-				m.toggleThreadsCollapsed()
+				m.panel.toggleThreadsCollapsed()
 				return cmds, true
 			}
 			if hit.inAgentsHeader {
-				m.toggleAgentsCollapsed()
+				m.panel.toggleAgentsCollapsed()
 				return cmds, true
 			}
 			if hit.threadIndex >= 0 {

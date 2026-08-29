@@ -27,7 +27,7 @@ func TestMouseGolden(t *testing.T) {
 		m.crumbRoot = "Golden Thread"
 		m.updateLayoutAndSize()
 
-		row := m.breadcrumbBarRow()
+		row := m.lay.breadcrumbBarRow()
 		require.False(t, row.Empty(), "breadcrumb bar row must have room to draw")
 		plan, ok := m.planBreadcrumbBar(row)
 		require.True(t, ok, "breadcrumb bar must have a plan once crumbRoot is set")

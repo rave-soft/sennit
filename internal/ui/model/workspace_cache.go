@@ -129,21 +129,21 @@ type agentModelChangedMsg struct{}
 func agentModelChangedCmd() tea.Msg { return agentModelChangedMsg{} }
 
 // currentSessionID returns the active session's ID, or "" when none.
-func (m *UI) currentSessionID() string {
-	if m.sess.current == nil {
+func (s *sessionState) currentSessionID() string {
+	if s.current == nil {
 		return ""
 	}
-	return m.sess.current.ID
+	return s.current.ID
 }
 
 // invalidateBusyCaches marks all memoized workspace probe state stale and
 // bumps the busy generation so any in-flight probe result is discarded when
 // it lands. Called by handlers for events that change agent or permission
 // state.
-func (m *UI) invalidateBusyCaches() {
-	m.wsCache.agentBusyCache.invalidate()
-	m.wsCache.yoloCache.invalidate()
-	m.wsCache.busyFetchGen++
+func (c *workspaceCacheState) invalidateBusyCaches() {
+	c.agentBusyCache.invalidate()
+	c.yoloCache.invalidate()
+	c.busyFetchGen++
 }
 
 // invalidatePromptQueue marks the cached queue stale and bumps its
@@ -151,8 +151,8 @@ func (m *UI) invalidateBusyCaches() {
 // lands (and re-fetched) instead of overwriting newer optimistic or cleared
 // queue state. Callers that already know the authoritative new value
 // re-freshen it with a follow-up set, per ttlCache's invalidate doc.
-func (m *UI) invalidatePromptQueue() {
-	m.wsCache.promptQueueCache.invalidate()
+func (c *workspaceCacheState) invalidatePromptQueue() {
+	c.promptQueueCache.invalidate()
 }
 
 // dispatchBusyRefresh returns a command that probes the workspace busy and
@@ -239,7 +239,7 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 		// now-departed session is discarded rather than repopulating the
 		// queue, then write the now-authoritative empty queue through as
 		// fresh.
-		m.invalidatePromptQueue()
+		m.wsCache.invalidatePromptQueue()
 		m.wsCache.promptQueueCache.set(nil)
 		if hadItems {
 			m.updateLayoutAndSize()
@@ -269,7 +269,7 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	// session-scope check below rejects the result), matching complete's
 	// contract of always being called once per dispatched fetch.
 	genOK := m.wsCache.promptQueueCache.complete(msg.gen)
-	if msg.forSession != m.currentSessionID() || !genOK {
+	if msg.forSession != m.sess.currentSessionID() || !genOK {
 		// The fetch raced a session switch or a newer queue transition
 		// (submit, clear, invalidation). Discard the stale result and
 		// re-fetch so newer state is not clobbered and the authoritative

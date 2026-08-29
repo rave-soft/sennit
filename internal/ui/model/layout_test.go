@@ -203,7 +203,7 @@ func TestRenderEditorView_NoAttachmentsRowWhenEmpty(t *testing.T) {
 	u := newTestUI()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 
-	out := u.renderEditorView(80)
+	out := u.editor.renderEditorView(80)
 	require.Equal(t, u.editor.textarea.View(), out)
 }
 

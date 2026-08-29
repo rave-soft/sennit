@@ -279,8 +279,8 @@ func (m *UI) drawBreadcrumbBar(scr uv.Screen, area uv.Rectangle) bool {
 
 // breadcrumbBarRow is the rule row the bar lives on: the one directly above
 // the editor. Zero-height when there is no editor area to sit above.
-func (m *UI) breadcrumbBarRow() image.Rectangle {
-	e := m.lay.layout.editor
+func (l *layoutState) breadcrumbBarRow() image.Rectangle {
+	e := l.layout.editor
 	if e.Dx() <= 0 {
 		return image.Rectangle{}
 	}
@@ -291,7 +291,7 @@ func (m *UI) breadcrumbBarRow() image.Rectangle {
 // recomputing the hit box from the current layout rather than trusting the
 // rect last painted (see planBreadcrumbBar).
 func (m *UI) breadcrumbButtonHit(pt image.Point) bool {
-	row := m.breadcrumbBarRow()
+	row := m.lay.breadcrumbBarRow()
 	if row.Empty() {
 		return false
 	}

@@ -389,7 +389,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		ui.wsCache.agentCache.set(agentReadyModel{ready: true, model: com.Workspace.AgentModel()})
 	}
 	ui.setEditorPrompt(yolo)
-	ui.randomizePlaceholders()
+	ui.editor.randomizePlaceholders()
 	ui.editor.textarea.Placeholder = ui.editor.readyPlaceholder
 	ui.status = status
 
@@ -458,7 +458,7 @@ func (m *UI) Init() tea.Cmd {
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
-	cmds = append(cmds, m.loadPromptHistory())
+	cmds = append(cmds, m.sess.loadPromptHistory(m.com))
 	// Prime the memoized LSP state off-thread.
 	if cmd := m.requestLSPRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -691,7 +691,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case agentModelChangedMsg:
 			// The coordinator model changed (selection, thinking, reasoning):
 			// re-fetch the memoized ready/model state off-thread.
-			m.invalidateBusyCaches()
+			m.wsCache.invalidateBusyCaches()
 			if cmd := m.dispatchBusyRefresh(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1217,7 +1217,7 @@ func (m *UI) setTheme(id string) tea.Cmd {
 		m.dialog.Restyle()
 	}
 
-	m.cacheSidebarLogo(m.lay.layout.sidebar.Dx())
+	m.sidebar.cacheSidebarLogo(m.com, m.lay.layout.sidebar.Dx())
 	m.updateLayoutAndSize()
 	return cmd
 }
@@ -1332,8 +1332,8 @@ func (m *UI) newSession() tea.Cmd {
 	m.panel.expanded = false
 	m.panel.autoExpanded = false
 	m.panel.todosScrollOffset = 0
-	m.invalidateBusyCaches()
-	m.invalidatePromptQueue()
+	m.wsCache.invalidateBusyCaches()
+	m.wsCache.invalidatePromptQueue()
 	m.wsCache.promptQueueCache.set(nil)
 	m.editor.historyReset()
 	ws := m.com.Workspace
@@ -1344,8 +1344,8 @@ func (m *UI) newSession() tea.Cmd {
 			ws.LSPStopAll(ctx)
 			return nil
 		},
-		m.loadPromptHistory(),
-		m.reportCurrentSession(""),
+		m.sess.loadPromptHistory(m.com),
+		m.sess.reportCurrentSession(m.com, ""),
 	)
 }
 
@@ -1354,8 +1354,8 @@ func (m *UI) newSession() tea.Cmd {
 // goroutine, so it must not touch m.chat directly.
 type clearChatMouseMsg struct{}
 
-func (m *UI) copyChatHighlight() tea.Cmd {
-	text := m.chat.HighlightContent()
+func (w *widgets) copyChatHighlight() tea.Cmd {
+	text := w.chat.HighlightContent()
 	return common.CopyToClipboardWithCallback(
 		text,
 		"Selected text copied to clipboard",
