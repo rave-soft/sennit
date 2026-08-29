@@ -1423,28 +1423,43 @@ func TestClient_FailedRestartRollsBackCandidateFilesAndRetries(t *testing.T) {
 	require.NoError(t, client.Restart(), "retry must reopen the preserved user-file snapshot")
 	require.True(t, client.IsFileOpen(userFile))
 
-	// The failed candidate and successful retry each receive the root marker;
-	// the successful retry also receives the automatically reopened user file.
+	// What this asserts is the retry's two opens — the root marker and the
+	// automatically reopened user file — landing on one and the same
+	// process. That is the property the rollback exists for: the preserved
+	// snapshot is replayed onto the generation that actually took over.
 	//
-	// Polled rather than read once: the lines are written by the server
-	// processes themselves, and Restart returns when the *client* is done
-	// with them, not when a killed candidate's last write has reached the
-	// file. Reading immediately made this fail under -race on a loaded
-	// machine, having seen two of the three opens.
+	// Deliberately not "three opens across all processes". The failed
+	// candidate is killed, and nothing sequences its death after it has
+	// read the didOpen the client already wrote into its stdin: the client
+	// sends a notification and moves on, so the message can still be
+	// sitting in the pipe when the process dies, and that line then never
+	// appears at all. Counting it made this test wait out its whole
+	// timeout on a loaded CI runner for a line that was not coming
+	// (run 33239477400, ubuntu). A longer timeout does not fix a write
+	// that was never made.
+	//
+	// Still polled rather than read once: Restart returns when the
+	// *client* is done, not when the surviving server has flushed its log.
 	require.Eventually(t, func() bool {
 		contents, err := os.ReadFile(logPath)
 		if err != nil {
 			return false
 		}
-		rootOpens := 0
+		opensByPID := map[string]int{}
 		for _, line := range strings.Split(strings.TrimSpace(string(contents[len(before):])), "\n") {
-			if strings.HasSuffix(line, " textDocument/didOpen") {
-				rootOpens++
+			fields := strings.Fields(line)
+			if len(fields) == 2 && fields[1] == "textDocument/didOpen" {
+				opensByPID[fields[0]]++
 			}
 		}
-		return rootOpens >= 3
+		for _, n := range opensByPID {
+			if n == 2 {
+				return true
+			}
+		}
+		return false
 	}, 10*time.Second, 10*time.Millisecond,
-		"the failed candidate, the retry, and the reopened user file must each show a didOpen")
+		"the surviving retry must show two didOpens: the root marker and the reopened user file")
 	client.Shutdown()
 }
 
