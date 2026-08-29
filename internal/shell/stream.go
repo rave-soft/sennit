@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"sync"
@@ -10,9 +9,15 @@ import (
 // progressWriter wraps an io.Writer and calls onProgress with each write.
 // It is safe for concurrent use from multiple goroutines (e.g. stdout and
 // stderr writing simultaneously).
+//
+// The accumulated copy is a syncBuffer rather than a bytes.Buffer for the
+// reason given there: nothing bounds how much a running command writes, and
+// the progress callback has already delivered every chunk by the time this
+// copy is read, so the head+tail truncation costs the caller nothing a
+// runaway command was going to keep anyway.
 type progressWriter struct {
 	mu         sync.Mutex
-	buf        bytes.Buffer
+	buf        syncBuffer
 	onProgress func(string)
 }
 

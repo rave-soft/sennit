@@ -44,6 +44,8 @@ const (
 type syncBuffer struct {
 	mu sync.RWMutex
 
+	// bounded-buffer: writeLocked only ever appends up to the
+	// MaxSyncBufferHead room left in it, so this stops growing at 256 KiB.
 	head bytes.Buffer // first min(total, MaxSyncBufferHead) bytes, never overwritten
 
 	tail    []byte // ring buffer of capacity MaxSyncBufferTail, lazily allocated

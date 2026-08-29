@@ -164,3 +164,24 @@ func TestSyncBufferConcurrentWriteAndString(t *testing.T) {
 	})
 	wg.Wait()
 }
+
+// TestProgressWriterIsBounded guards the streaming capture path against the
+// same unbounded growth syncBuffer was introduced to stop: the progress
+// callback still sees every byte, but the retained copy is capped.
+func TestProgressWriterIsBounded(t *testing.T) {
+	t.Parallel()
+
+	var delivered int
+	w := &progressWriter{onProgress: func(s string) { delivered += len(s) }}
+
+	chunk := []byte(strings.Repeat("y", 64*1024))
+	total := MaxSyncBufferHead + MaxSyncBufferTail + 2*1024*1024
+	for written := 0; written < total; written += len(chunk) {
+		n, err := w.Write(chunk)
+		require.NoError(t, err)
+		require.Equal(t, len(chunk), n)
+	}
+
+	require.GreaterOrEqual(t, delivered, total)
+	require.LessOrEqual(t, len(w.String()), MaxSyncBufferHead+MaxSyncBufferTail+128)
+}
