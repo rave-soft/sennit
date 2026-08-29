@@ -118,10 +118,17 @@ deleted, and the history stays in git.
     слой, `SetupGitHubCopilot`/`SetupCodex`/`applyProviderVendorSetup` — к
     построению провайдера или в `credentials`, modelcache — в листовой
     пакет.
-  - L5 `(*Config).configureProviders(ctx, store, …)` в
-    `internal/config/providers_merge.go` — чистый тип данных получает
-    store, чтобы писать на диск. Следующий шаг: передавать
-    `globalDataPath`, возвращать список stale-ключей.
+  - ~~L5 `(*Config).configureProviders(ctx, store, …)`~~ — **снят
+    2026-08-29: описанного кода нет.** Ни метода, ни файла
+    `internal/config/providers_merge.go` в дереве не осталось —
+    построение провайдеров уехало в `internal/providerload`. Правку
+    сделали сильнее, чем предлагал «следующий шаг» здесь: store приходит
+    туда не как аргумент чистому типу данных, а полем `RuntimeInput.Store`
+    и под интерфейсом `config.RuntimeStore` из двух методов
+    (`RemoveRuntimeConfigField`, `WriteRuntimeConfigFields`) — то есть
+    записывающий получает право записать ровно два вида полей, а не
+    store целиком. Закрыто не этой работой, а чужой; запись пережила
+    код.
   - L7 `workspace.Workspace` — ролевые интерфейсы написаны (14 штук в
     `workspace.go`), но `Workspace` складывает их обратно, и
     `ui/common.Common` отдаёт его целиком каждому компоненту. Замер
@@ -176,13 +183,22 @@ deleted, and the history stays in git.
 
   **KISS / перформанс.** Закрыто: индекс `(session_id, created_at)` и
   снятие триггера `update_messages_updated_at`, сигнатурный пропуск
-  перерисовки сайдбара. Открыто: `applyWorkspaceConfig`
-  (`internal/config/load.go`) на каждый reload маршалит весь `Config` в
-  JSON, мержит и заново зовёт `setDefaults` ради `data_directory`;
-  `PushPopEnvOverrides` держится через `configureProviders`, включая до
-  трёх секунд discovery-HTTP, и блокирует второй workspace;
-  `testing.Testing()` из production-кода ушёл — 0 вхождений на
-  2026-08-28.
+  перерисовки сайдбара; `testing.Testing()` из production-кода ушёл — 0
+  вхождений на 2026-08-28.
+
+  Закрыто и то, что записано здесь как открытое:
+  `PushPopEnvOverrides` больше не держит лок на время discovery.
+  `internal/providerload/loader.go:53-56` снимает его явно перед
+  `runDiscoveryRequests` и берёт заново после, так что три секунды
+  HTTP второй workspace не ждёт. Проверено по коду 2026-08-29.
+
+  Остаётся открытым `applyWorkspaceConfig` (`internal/config/load.go`):
+  чтобы применить workspace-слой, он маршалит весь `Config` в JSON и
+  мержит заново, а потом зовёт `setDefaults` ради `data_directory` —
+  ради переиспользования той же машинерии слияния, из-за чего `Problems`
+  приходится переносить руками (они не сериализуются). Мельче, чем
+  записано: путь отсекается сразу, если workspace-конфига нет, так что
+  цена платится только там, где файл есть.
 
   **YAGNI и мёртвый код.** `internal/event` из списка снят: no-op'ы —
   задокументированное решение, а не долг. `internal/diffdetect` и
