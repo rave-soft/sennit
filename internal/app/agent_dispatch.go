@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/message"
@@ -21,7 +22,24 @@ var ErrDispatcherClosed = errors.New("agent dispatcher closed")
 // initialized an agent.Coordinator yet.
 var ErrCoordinatorNotInitialized = errors.New("agent coordinator not initialized")
 
-// AgentDispatcher accepts prompts for an [agent.Coordinator] and
+// AcceptedRunner is the subset of agent.Coordinator's API the
+// AgentDispatcher needs: reserve acceptance for a session, then execute
+// the run that reservation stands for. Declared here, on the consumer
+// side, so the dispatcher cannot reach for the rest of the coordinator —
+// it must not cancel, summarize, inspect the queue or swap models, since
+// every one of those is somebody else's decision arriving on its own
+// path, and a dispatcher that could make them would be a second place
+// turn policy lives.
+type AcceptedRunner interface {
+	BeginAccepted(sessionID string) *agent.AcceptedRun
+	RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
+}
+
+// The port is a narrowing of the coordinator's contract, never a
+// divergent one: this fails to compile the moment the two disagree.
+var _ AcceptedRunner = agent.Coordinator(nil)
+
+// AgentDispatcher accepts prompts for an [AcceptedRunner] and
 // dispatches each accepted run on its own goroutine, bound to a fixed
 // context supplied at construction. That binding is what makes a run's
 // lifetime independent of whichever caller requested it: the owner
@@ -29,13 +47,13 @@ var ErrCoordinatorNotInitialized = errors.New("agent coordinator not initialized
 // that triggered one.
 type AgentDispatcher struct {
 	ctx context.Context
-	// coordinator resolves the current agent.Coordinator on every call
+	// coordinator resolves the current coordinator on every call
 	// instead of capturing one at construction time. The dispatcher is
 	// meant to be built once for the whole life of its owner (e.g. a
 	// workspace), but the coordinator it fans out to can be created —
 	// or replaced — after that: BeginAccepted/RunAccepted always need
 	// today's value, not the one that existed at construction.
-	coordinator    func() agent.Coordinator
+	coordinator    func() AcceptedRunner
 	notifications  *pubsub.Broker[notify.Notification]
 	runCompletions *pubsub.Broker[notify.RunComplete]
 
@@ -59,7 +77,7 @@ type AgentDispatcher struct {
 // (e.g. in CreateWorkspace) before the coordinator necessarily exists,
 // and the owner may (re)initialize its coordinator afterwards. notifications
 // and runCompletions are assumed stable for the owner's lifetime.
-func NewAgentDispatcher(ctx context.Context, coordinator func() agent.Coordinator, notifications *pubsub.Broker[notify.Notification], runCompletions *pubsub.Broker[notify.RunComplete]) *AgentDispatcher {
+func NewAgentDispatcher(ctx context.Context, coordinator func() AcceptedRunner, notifications *pubsub.Broker[notify.Notification], runCompletions *pubsub.Broker[notify.RunComplete]) *AgentDispatcher {
 	return &AgentDispatcher{
 		ctx:            ctx,
 		coordinator:    coordinator,
@@ -135,7 +153,7 @@ func (d *AgentDispatcher) Send(sessionID, runID, prompt string, attachments []me
 // notify.RunComplete event with that correlator. A run-complete marker
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting run avoid a duplicate fallback.
-func (d *AgentDispatcher) run(coordinator agent.Coordinator, sessionID, runID, prompt string, attachments []message.Attachment, accept *agent.AcceptedRun) {
+func (d *AgentDispatcher) run(coordinator AcceptedRunner, sessionID, runID, prompt string, attachments []message.Attachment, accept *agent.AcceptedRun) {
 	defer d.wg.Done()
 	defer accept.Close()
 

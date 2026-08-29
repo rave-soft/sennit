@@ -88,7 +88,7 @@ func NewForTest(ctx context.Context) *App {
 		globalCtx: ctx,
 	}
 	app.app = app
-	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() agent.Coordinator { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
+	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() AcceptedRunner { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
 
 	eventsCtx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = eventsCtx

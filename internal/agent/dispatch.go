@@ -432,19 +432,32 @@ func (d *dispatcher) session(sessionID string) (state *sessionState, release fun
 	}
 }
 
+// CompletionDeliverer is the one thing a delegation is allowed to do to
+// the session that created it: drop a completion into its inbox. It is
+// the subset of [Coordinator] that [DelegationParent] holds, named here
+// rather than storing the whole coordinator so a child can never reach
+// through its parent link to cancel, steer, or re-run the parent's turn —
+// the parent's own turn stays the parent's to drive.
+type CompletionDeliverer interface {
+	DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion)
+}
+
+var _ CompletionDeliverer = Coordinator(nil)
+
 // DelegationParent describes where a running delegation should send an
 // ask, and how to attribute it. Registered once, at delegation-create
 // time, by internal/thread (a later change - not part of this step),
 // keyed by the delegation's own (child) session id.
 type DelegationParent struct {
-	// Parent is the Coordinator owning the parent session's completion
-	// inbox. For a task this is the delegation's own Coordinator (a
-	// task shares its parent's App/coordinator); for a thread with a
-	// parent it is a different Coordinator entirely (the thread spawns
-	// its own isolated App) - see internal/thread's
-	// resolveDeliveryTarget for the existing analogous split on the
-	// terminal-completion path.
-	Parent          Coordinator
+	// Parent owns the parent session's completion inbox. For a task
+	// this is the delegation's own Coordinator (a task shares its
+	// parent's App/coordinator); for a thread with a parent it is a
+	// different Coordinator entirely (the thread spawns its own
+	// isolated App) - see internal/thread's resolveDeliveryTarget for
+	// the existing analogous split on the terminal-completion path.
+	// Both are Coordinators; the field names only the delivery slice of
+	// one - see [CompletionDeliverer].
+	Parent          CompletionDeliverer
 	ParentSessionID string
 	DelegationID    string
 	Kind            string

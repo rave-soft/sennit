@@ -382,8 +382,20 @@ type registeredParent struct {
 func (f *fakeCoordinator) RegisterDelegationParent(sessionID string, parent agent.DelegationParent) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// A registered parent carries only the delivery slice of a coordinator
+	// (agent.CompletionDeliverer). Every value these tests register is a
+	// whole coordinator behind that slice, so widening it back here keeps
+	// the recorded DelegationParent shaped the way the assertions read it.
+	// Failing loudly rather than recording a nil: a parent that is not a
+	// full coordinator means the production wiring changed, and the
+	// assertions downstream would otherwise report it as some unrelated
+	// mismatch several frames away from the cause.
+	full, ok := parent.Parent.(agent.Coordinator)
+	if !ok {
+		panic(fmt.Sprintf("registered parent %T is not an agent.Coordinator; see threadspawn.DelegationCoordinator", parent.Parent))
+	}
 	f.registeredParents = append(f.registeredParents, registeredParent{sessionID: sessionID, parent: thread.DelegationParent{
-		Parent:          &testCoordinatorAdapter{inner: parent.Parent},
+		Parent:          &testCoordinatorAdapter{inner: full},
 		ParentSessionID: parent.ParentSessionID,
 		DelegationID:    parent.DelegationID,
 		Kind:            parent.Kind,

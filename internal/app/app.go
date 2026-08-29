@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/config"
@@ -156,7 +155,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// context this constructor derives and could cancel itself — the
 	// dispatcher's lifetime tracks its owning App rather than any single
 	// request.
-	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() agent.Coordinator { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
+	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() AcceptedRunner { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {

@@ -3,6 +3,7 @@ package threadspawn
 import (
 	"context"
 
+	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/message"
@@ -26,8 +27,31 @@ import (
 // persistence and dispatch decision are byte-identical to before the port
 // was introduced.
 type coordinatorAdapter struct {
-	inner agent.Coordinator
+	inner DelegationCoordinator
 }
+
+// DelegationCoordinator is the subset of agent.Coordinator this seam
+// forwards to — the seven methods the six of [thread.Coordinator] map
+// onto. It is named here, on the forwarding side, so the port stays a
+// two-sided contract: widening what the delegation lifecycle can ask a
+// coordinator for takes a deliberate edit here as well as in
+// internal/thread, rather than silently becoming possible because the
+// whole coordinator was in reach. In particular the lifecycle gets no
+// Summarize, no UpdateModels, no RefreshSkills and no CancelAll: those
+// are the workspace's own business, driven from internal/app.
+type DelegationCoordinator interface {
+	agent.CompletionDeliverer
+	RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
+	BeginAccepted(sessionID string) *agent.AcceptedRun
+	Cancel(sessionID string)
+	IsSessionBusy(sessionID string) bool
+	QueuedPrompts(sessionID string) int
+	RegisterDelegationParent(sessionID string, parent agent.DelegationParent)
+}
+
+// The seam narrows the coordinator's contract rather than restating it:
+// this fails to compile the moment the two disagree.
+var _ DelegationCoordinator = agent.Coordinator(nil)
 
 // NewCoordinatorAdapter wraps c so it satisfies [thread.Coordinator]. A nil
 // c (an App that never initialized a coordinator) yields a nil
@@ -35,7 +59,7 @@ type coordinatorAdapter struct {
 // nil coordinator before calling it (see lifecycle.cancel), and an
 // adapter-with-nil-inner would panic on any call — including Cancel during
 // shutdown.
-func NewCoordinatorAdapter(c agent.Coordinator) thread.Coordinator {
+func NewCoordinatorAdapter(c DelegationCoordinator) thread.Coordinator {
 	if c == nil {
 		return nil
 	}
@@ -144,13 +168,14 @@ func (a *coordinatorAdapter) DeliverTaskCompletion(ctx context.Context, parentSe
 	})
 }
 
-// unwrapCoordinator recovers the concrete agent.Coordinator a
-// [thread.Coordinator] wraps. Every Coordinator the domain sees in this
+// unwrapCoordinator recovers the parent-delivery slice of the coordinator
+// a [thread.Coordinator] wraps, which is all a DelegationParent holds (see
+// agent.CompletionDeliverer). Every Coordinator the domain sees in this
 // system is a *coordinatorAdapter produced by [NewCoordinatorAdapter] (the
 // composition seam is the only place real coordinators are handed to the
 // domain), so the assertion is safe; a nil or foreign value degrades to nil,
 // matching the domain's "no parent to deliver to" handling.
-func unwrapCoordinator(c thread.Coordinator) agent.Coordinator {
+func unwrapCoordinator(c thread.Coordinator) agent.CompletionDeliverer {
 	if a, ok := c.(*coordinatorAdapter); ok {
 		return a.inner
 	}

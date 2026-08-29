@@ -84,7 +84,7 @@ func TestAgentDispatcher_SendRefusedAfterMarkClosing(t *testing.T) {
 	t.Parallel()
 
 	coord := &stubDispatchCoordinator{}
-	d := NewAgentDispatcher(t.Context(), func() agent.Coordinator { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
 	d.MarkClosing()
 
 	err := d.Send("S1", "run-1", "hi", nil)
@@ -106,7 +106,7 @@ func TestAgentDispatcher_SendDispatchesAndWaits(t *testing.T) {
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	d := NewAgentDispatcher(t.Context(), func() agent.Coordinator { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
 
 	err := d.Send("S1", "run-1", "hi", nil)
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestAgentDispatcher_TerminalFallbackOnPreRunError(t *testing.T) {
 	coord := &stubDispatchCoordinator{err: runErr}
 	runCompletions := pubsub.NewBroker[notify.RunComplete]()
 
-	d := NewAgentDispatcher(t.Context(), func() agent.Coordinator { return coord }, pubsub.NewBroker[notify.Notification](), runCompletions)
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), runCompletions)
 
 	subCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -179,7 +179,7 @@ func TestAgentDispatcher_NoFallbackWhenCoordinatorPublished(t *testing.T) {
 	coord := &stubDispatchCoordinator{err: runErr, markPublished: true}
 	runCompletions := pubsub.NewBroker[notify.RunComplete]()
 
-	d := NewAgentDispatcher(t.Context(), func() agent.Coordinator { return coord }, pubsub.NewBroker[notify.Notification](), runCompletions)
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), runCompletions)
 
 	subCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -205,7 +205,7 @@ func TestAgentDispatcher_CancellationPublishesNoErrorTerminal(t *testing.T) {
 	coord := &stubDispatchCoordinator{err: context.Canceled}
 	runCompletions := pubsub.NewBroker[notify.RunComplete]()
 
-	d := NewAgentDispatcher(t.Context(), func() agent.Coordinator { return coord }, pubsub.NewBroker[notify.Notification](), runCompletions)
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), runCompletions)
 
 	subCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -228,7 +228,7 @@ func TestAgentDispatcher_SendValidatesCall(t *testing.T) {
 	t.Parallel()
 
 	coord := &stubDispatchCoordinator{}
-	d := NewAgentDispatcher(t.Context(), func() agent.Coordinator { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
 
 	err := d.Send("S1", "", "", nil)
 	require.ErrorIs(t, err, agent.ErrEmptyPrompt)

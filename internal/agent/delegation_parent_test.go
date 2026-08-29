@@ -12,15 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// coordinatorDeliverOnly is a minimal Coordinator fake for tests that only
-// exercise the SendToParent delivery path: every other Coordinator method
-// is promoted from a nil embedded interface (unreachable here - SendToParent
-// only ever calls DeliverTaskCompletion) and DeliverTaskCompletion is
-// overridden to forward into a real sessionAgent, so a message rides the
-// exact same delivery path (enqueue, at-most-once, idle-wake)
-// DeliverTaskCompletion's own tests already exercise.
+// coordinatorDeliverOnly is a minimal CompletionDeliverer for tests that
+// only exercise the SendToParent delivery path: it forwards into a real
+// sessionAgent, so a message rides the exact same delivery path (enqueue,
+// at-most-once, idle-wake) DeliverTaskCompletion's own tests already
+// exercise. Nothing else needs stubbing - a DelegationParent holds only
+// the delivery slice of a coordinator.
 type coordinatorDeliverOnly struct {
-	Coordinator
 	sa *sessionAgent
 }
 
