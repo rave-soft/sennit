@@ -24,6 +24,25 @@ import (
 
 const unavailableRetryDelay = 30 * time.Second
 
+// ConfigProvider is the slice of *config.ConfigStore the LSP manager needs:
+// the config snapshot, the variable resolver used to expand server commands
+// and arguments, and the working directory that bounds which files a server
+// may be asked about. Declaring it here rather than accepting the concrete
+// *config.ConfigStore keeps the manager on the reading side of the store: it
+// cannot write config fields, persist credentials, reload from disk or
+// register watchers. Language servers are started in reaction to config, and
+// a manager that could also change config would close that loop into a
+// feedback path nobody wants to debug.
+type ConfigProvider interface {
+	Config() *config.Config
+	Resolver() config.VariableResolver
+	WorkingDir() string
+}
+
+// The port is a narrowing of the store's contract, never a divergent one:
+// this fails to compile the moment the two disagree.
+var _ ConfigProvider = (*config.ConfigStore)(nil)
+
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
 	clients     *csync.Map[string, *Client]
@@ -32,7 +51,7 @@ type Manager struct {
 	// check-then-create-then-store sequence in startServer so concurrent
 	// starts for the same server never spawn two LSP processes.
 	startMu  *csync.Map[string, *sync.Mutex]
-	cfg      *config.ConfigStore
+	cfg      ConfigProvider
 	manager  *powernapconfig.Manager
 	callback func(name string, client *Client)
 	now      func() time.Time
@@ -40,7 +59,7 @@ type Manager struct {
 }
 
 // NewManager creates a new LSP manager service.
-func NewManager(cfg *config.ConfigStore) *Manager {
+func NewManager(cfg ConfigProvider) *Manager {
 	manager := powernapconfig.NewManager()
 	if err := manager.LoadDefaults(); err != nil {
 		slog.Warn("Failed to load default LSP server configs", "error", err)

@@ -20,6 +20,24 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 )
 
+// ConfigProvider is the slice of *config.ConfigStore prompt building needs:
+// the config snapshot, the variable resolver used to expand context-file
+// paths, and the working directory those paths are relative to. Declaring it
+// here rather than accepting the concrete *config.ConfigStore keeps prompt
+// building a pure read of config: it cannot write config fields, activate an
+// account, persist credentials or reload from disk. Building a system prompt
+// happens on every turn, and a step on that path that could mutate the store
+// would make the prompt an input to the next prompt.
+type ConfigProvider interface {
+	Config() *config.Config
+	Resolver() config.VariableResolver
+	WorkingDir() string
+}
+
+// The port is a narrowing of the store's contract, never a divergent one:
+// this fails to compile the moment the two disagree.
+var _ ConfigProvider = (*config.ConfigStore)(nil)
+
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
 	name       string
@@ -81,7 +99,7 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
-func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
+func (p *Prompt) Build(ctx context.Context, provider, model string, store ConfigProvider) (string, error) {
 	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
@@ -106,7 +124,7 @@ func processFile(filePath string) *ContextFile {
 	}
 }
 
-func processContextPath(p string, store *config.ConfigStore) []ContextFile {
+func processContextPath(p string, store ConfigProvider) []ContextFile {
 	var contexts []ContextFile
 	fullPath := filepathext.SmartJoin(store.WorkingDir(), p)
 	info, err := os.Stat(fullPath)
@@ -137,7 +155,7 @@ func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 }
 
 // expandPath expands ~ and environment variables in file paths
-func expandPath(path string, store *config.ConfigStore) string {
+func expandPath(path string, store ConfigProvider) string {
 	path = home.Long(path)
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
@@ -150,7 +168,7 @@ func expandPath(path string, store *config.ConfigStore) string {
 }
 
 // loadContextFiles loads and deduplicates context files from a list of paths.
-func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
+func loadContextFiles(paths []string, store ConfigProvider) map[string][]ContextFile {
 	files := map[string][]ContextFile{}
 	for _, pth := range paths {
 		expanded := expandPath(pth, store)
@@ -163,7 +181,7 @@ func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]Co
 	return files
 }
 
-func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) PromptDat {
+func (p *Prompt) promptData(ctx context.Context, provider, model string, store ConfigProvider) PromptDat {
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 

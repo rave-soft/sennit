@@ -242,7 +242,12 @@ func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-func GetMCPPrompt(reg *mcp.Registry, cfg *config.ConfigStore, clientID, promptID string, args map[string]string) (string, error) {
+// GetMCPPrompt takes mcp.ConfigProvider rather than the concrete
+// *config.ConfigStore because it does nothing with the store itself — it
+// hands it straight to the registry. Naming the callee's port here keeps
+// this package from being a hole through which the full store reaches code
+// that was deliberately narrowed.
+func GetMCPPrompt(reg *mcp.Registry, cfg mcp.ConfigProvider, clientID, promptID string, args map[string]string) (string, error) {
 	// Create a context with timeout since tea.Cmd doesn't support context passing.
 	// The MCP client has its own timeout, but this provides an additional safeguard.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
