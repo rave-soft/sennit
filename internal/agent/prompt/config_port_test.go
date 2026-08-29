@@ -48,6 +48,11 @@ func TestBuild_UsesOnlyConfigProvider(t *testing.T) {
 
 	out, err := p.Build(context.Background(), "p", "m", provider)
 	require.NoError(t, err)
-	require.Contains(t, out, dir)
+	// ToSlash because promptData renders WorkingDir through it (a prompt
+	// is read by a model, and one path separator is enough), which the
+	// rest of this package's tests already assert the same way. Comparing
+	// against the raw t.TempDir() passes on unix by coincidence and fails
+	// on Windows, where the two spellings actually differ.
+	require.Contains(t, out, filepath.ToSlash(dir))
 	require.Contains(t, out, "hello notes")
 }
