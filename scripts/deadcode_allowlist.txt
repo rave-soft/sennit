@@ -1,0 +1,9 @@
+# Functions that `deadcode -test ./...` reports as unreachable and that we
+# keep anyway. One per line: "<file> <symbol>", no line numbers.
+#
+# An entry needs a reason on the line above it. "It might be useful later"
+# is not one — an unreachable helper is found again by the next reader as a
+# puzzle, not as a tool. See scripts/check_deadcode.sh.
+#
+# Empty on purpose: as of 2026-08-29 nothing in the tree is unreachable from
+# both main and the tests.

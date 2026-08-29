@@ -56,6 +56,16 @@ jobs:
       # Compiles _test.go for every OS CI builds: a unix-only syscall or a
       # POSIX path literal in a test is invisible to a host-only vet.
       - run: ./scripts/check_cross_platform.sh
+      # Functions nothing can reach — not main, not a test. Runs with
+      # `-test` so the tests count as roots; see the script's header for
+      # why the bare reachability number is noise, and why a finding is a
+      # prompt to read the code rather than a delete list.
+      - run: ./scripts/check_deadcode.sh
+      # A background job's stdout used to grow for as long as the command
+      # ran (fixed in 6c7504ebd by syncBuffer's head+tail caps): this
+      # refuses a new struct in internal/shell that accumulates output the
+      # same unbounded way.
+      - run: ./scripts/check_shell_buffers.sh
       # Built from source with this repo's Go rather than installed as a
       # release binary: golangci-lint refuses to run when the Go it was
       # built with is older than the version the module targets, and its
