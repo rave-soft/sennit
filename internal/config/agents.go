@@ -89,7 +89,7 @@ func (c *Config) setupAgents(inherited map[string]Agent) {
 		})
 	}
 
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	allowedTools := resolveAllowedTools(AllToolNames(), c.Options.DisabledTools)
 	providers := c.providersOrEmpty()
 
 	// Markdown files under .sennit/agents are the only source of user-defined
@@ -187,7 +187,7 @@ func cloneAgent(agent Agent) Agent {
 func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]string) {
 	valid = make(map[string]Agent)
 	invalid = make(map[string]string)
-	builtinTools := allToolNames()
+	builtinTools := AllToolNames()
 	providers := c.providersOrEmpty()
 
 	for id, agent := range c.Agents {

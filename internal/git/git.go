@@ -621,15 +621,6 @@ func MergeIntoWorktree(ctx context.Context, worktree, ref string) (*MergeResult,
 	return &MergeResult{Merged: false, Conflicts: strings.Split(conflicts, "\n")}, nil
 }
 
-// AbortMerge aborts an in-progress merge in worktree, restoring it to the
-// pre-merge state.
-func AbortMerge(ctx context.Context, worktree string) error {
-	if _, err := run(ctx, worktree, "merge", "--abort"); err != nil {
-		return fmt.Errorf("git: merge abort: %w", err)
-	}
-	return nil
-}
-
 // ConflictedFiles lists the paths currently left in conflicted (unmerged)
 // state in worktree. Empty when there is no merge in progress or all
 // conflicts have been resolved and staged.

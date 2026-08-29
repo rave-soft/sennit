@@ -203,10 +203,6 @@ func (c *runtimeCache) getOrBuild(ctx context.Context, current func() runtimeKey
 	}
 }
 
-func (c *runtimeCache) invalidate(ctx context.Context, reason string, key runtimeKey) {
-	c.invalidateAndPublish(ctx, reason, key, nil)
-}
-
 // invalidateAndPublish records an invalidation reason and publishes its
 // generation while holding the cache mutex. This closes the only window in
 // which an old builder could otherwise publish and clear the pending reason
@@ -228,8 +224,4 @@ func (c *runtimeCache) invalidateAndPublish(ctx context.Context, reason string, 
 	c.mu.Unlock()
 	count := c.invalidations.Add(1)
 	c.log(ctx, "invalidate", reason, key, count)
-}
-
-func (c *runtimeCache) stats() runtimeCacheStats {
-	return runtimeCacheStats{Hits: c.hits.Load(), Misses: c.misses.Load(), Builds: c.builds.Load(), Invalidations: c.invalidations.Load()}
 }

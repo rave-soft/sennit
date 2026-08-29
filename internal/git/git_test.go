@@ -644,7 +644,7 @@ func TestMergeIntoWorktreeConflict(t *testing.T) {
 
 	// Clean up so other tests in the same repo (none currently, but future
 	// callers) aren't left with a merge in progress.
-	require.NoError(t, AbortMerge(ctx, repo))
+	require.NoError(t, abortMerge(ctx, repo))
 
 	dirty, err := IsDirty(ctx, repo)
 	require.NoError(t, err)

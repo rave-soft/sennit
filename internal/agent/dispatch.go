@@ -611,22 +611,6 @@ func enqueueLocked(s *sessionState, call SessionAgentCall) {
 	s.messageQueue = append(s.messageQueue, queued)
 }
 
-// enqueueCall appends call to the session's message queue, acquiring the
-// session's dispatch mutex itself. Use this from anywhere that doesn't
-// already hold it (tests included); dispatchDecision's busy branch calls
-// enqueueLocked directly instead. Unlike drainQueueForStep and friends
-// below, this does not call notifyQueueChanged itself: its two callers
-// (this file's dispatchDecision-adjacent path is actually enqueueLocked;
-// this variant's own callers are external) are responsible for
-// notifying once they've dropped the lock.
-func (d *dispatcher) enqueueCall(call SessionAgentCall) {
-	s, release := d.session(call.SessionID)
-	defer release()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	enqueueLocked(s, call)
-}
-
 func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func()) {
 	s, release := d.session(call.SessionID)
 	defer release()

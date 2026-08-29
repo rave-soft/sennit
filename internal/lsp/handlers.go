@@ -97,11 +97,3 @@ func HandleServerMessage(_ context.Context, method string, params json.RawMessag
 		slog.Debug("LSP Server", "message", msg.Message)
 	}
 }
-
-// HandleDiagnostics handles a textDocument/publishDiagnostics notification
-// that did not arrive through the registered generation handler (tests and
-// manual dispatch). It forwards to the current generation's diagnostics
-// path.
-func HandleDiagnostics(client *Client, params json.RawMessage) {
-	client.diagnostics.publish(client.runtime.currentGeneration(), params)
-}

@@ -365,7 +365,7 @@ func TestClient_DiagnosticsResetConcurrent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range iterations {
-			HandleDiagnostics(c, []byte(`{"uri":"file:///test.go","diagnostics":[]}`))
+			handleDiagnostics(c, []byte(`{"uri":"file:///test.go","diagnostics":[]}`))
 		}
 	}()
 	go func() {
@@ -736,7 +736,7 @@ func TestClient_DiagnosticsCallbackConcurrent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range iterations {
-			HandleDiagnostics(c, []byte(`{"uri":"file:///test.go","diagnostics":[]}`))
+			handleDiagnostics(c, []byte(`{"uri":"file:///test.go","diagnostics":[]}`))
 		}
 	}()
 	wg.Wait()

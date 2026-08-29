@@ -24,7 +24,6 @@ type Style struct {
 	Filename    LineStyle
 }
 
-// DefaultLightStyle provides a default light theme style for the diff view.
 func DefaultLightStyle() Style {
 	return Style{
 		DividerLine: LineStyle{

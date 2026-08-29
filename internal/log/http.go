@@ -13,15 +13,6 @@ import (
 	"unicode"
 )
 
-// NewHTTPClient creates an HTTP client with debug logging enabled when debug mode is on.
-func NewHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &HTTPRoundTripLogger{
-			Transport: http.DefaultTransport,
-		},
-	}
-}
-
 // HTTPRoundTripLogger is an http.RoundTripper that logs requests and responses.
 type HTTPRoundTripLogger struct {
 	Transport http.RoundTripper

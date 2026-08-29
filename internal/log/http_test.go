@@ -21,7 +21,7 @@ func TestHTTPRoundTripLogger(t *testing.T) {
 	defer server.Close()
 
 	// Create HTTP client with logging
-	client := NewHTTPClient()
+	client := newHTTPClient()
 
 	// Make a request
 	req, err := http.NewRequestWithContext(
@@ -217,7 +217,7 @@ func TestHTTPRoundTripLogger_BodyIdenticalWithAndWithoutDebug(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: level})))
 			defer slog.SetDefault(prev)
 
-			client := NewHTTPClient()
+			client := newHTTPClient()
 			req, err := http.NewRequestWithContext(
 				t.Context(),
 				http.MethodPost,
@@ -265,7 +265,7 @@ func TestHTTPRoundTripLogger_DoesNotBufferStreamingResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient()
+	client := newHTTPClient()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
 	if err != nil {
 		t.Fatal(err)

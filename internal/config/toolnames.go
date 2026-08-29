@@ -69,13 +69,14 @@ func (t ToolGlob) GetTimeout() time.Duration {
 // AllToolNames returns the names of every built-in tool the agent can be
 // given, in the order buildTools constructs them. It is the single source
 // of truth for what a "known tool" is — used both to resolve
-// disabled_tools/allowed_tools and (from internal/ui) to verify every
-// tool has a rendering path.
+// disabled_tools/allowed_tools and (from internal/ui and internal/agent's
+// tests) to verify every tool has a rendering path and a permission
+// classification.
+//
+// There used to be an unexported twin that production called while the
+// exported one served only tests, which made the exported name look
+// unused and split one answer across two functions.
 func AllToolNames() []string {
-	return allToolNames()
-}
-
-func allToolNames() []string {
 	return toolmeta.DefaultNames()
 }
 
