@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/doctor"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
@@ -69,7 +70,7 @@ var _ Dialog = (*Doctor)(nil)
 
 // NewDoctor creates the /doctor problems dialog.
 func NewDoctor(com *common.Common) *Doctor {
-	return newDoctorWithEnvironment(com, config.EnvironmentProblems)
+	return newDoctorWithEnvironment(com, doctor.EnvironmentProblems)
 }
 
 func newDoctorWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) *Doctor {
@@ -240,7 +241,7 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 func doctorProblemsWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) []config.Problem {
 	problems := config.Doctor(com.Config())
 	problems = append(problems, environmentProblems()...)
-	problems = append(problems, config.SkillProblems(skills.GetLatestStates())...)
+	problems = append(problems, doctor.SkillProblems(skills.GetLatestStates())...)
 	// Sorted, because map iteration is random and this list is rendered:
 	// the MCP problems shuffled on every open, so the row under the
 	// cursor was a different server each time.

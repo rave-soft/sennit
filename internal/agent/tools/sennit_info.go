@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/doctor"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/skills"
 )
@@ -48,7 +49,7 @@ func NewSennitInfoTool(
 	skillStates []*skills.SkillState,
 	environmentProblems ...func() []config.Problem,
 ) fantasy.AgentTool {
-	collectEnvironmentProblems := config.EnvironmentProblems
+	collectEnvironmentProblems := doctor.EnvironmentProblems
 	if len(environmentProblems) > 0 {
 		collectEnvironmentProblems = environmentProblems[0]
 	}
@@ -66,7 +67,7 @@ func NewSennitInfoTool(
 
 // modelsForCap bounds how many model IDs buildModelsFor lists directly.
 // Router providers backed by the model-discovery cache (see
-// internal/config/modelcache.go) can carry thousands of models; dumping all
+// internal/modelcache) can carry thousands of models; dumping all
 // of them defeats the point of a quick "does this ID exist" check.
 const modelsForCap = 50
 
@@ -112,7 +113,7 @@ func buildModelsFor(cfg SennitInfoConfig, providerID string) string {
 }
 
 func buildSennitInfo(cfg SennitInfoConfig, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker, skillStates []*skills.SkillState, environmentProblems ...func() []config.Problem) string {
-	collectEnvironmentProblems := config.EnvironmentProblems
+	collectEnvironmentProblems := doctor.EnvironmentProblems
 	if len(environmentProblems) > 0 {
 		collectEnvironmentProblems = environmentProblems[0]
 	}
@@ -186,13 +187,13 @@ func writeConfigStaleness(b *strings.Builder, cfg SennitInfoConfig) {
 // was told to follow do nothing?") can answer from its own sennit_info
 // output instead of a log file it never sees.
 func writeProblems(b *strings.Builder, cfg SennitInfoConfig, mcpStates map[string]mcp.ClientInfo, skillStates []*skills.SkillState, environmentProblems ...func() []config.Problem) {
-	collectEnvironmentProblems := config.EnvironmentProblems
+	collectEnvironmentProblems := doctor.EnvironmentProblems
 	if len(environmentProblems) > 0 {
 		collectEnvironmentProblems = environmentProblems[0]
 	}
 	problems := config.Doctor(cfg.Config())
 	problems = append(problems, collectEnvironmentProblems()...)
-	problems = append(problems, config.SkillProblems(skillStates)...)
+	problems = append(problems, doctor.SkillProblems(skillStates)...)
 	for name, info := range mcpStates {
 		if info.State != mcp.StateError && info.State != mcp.StateNeedsAuth {
 			continue

@@ -7,10 +7,11 @@ import (
 	"slices"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/doctor"
 	"github.com/spf13/cobra"
 )
 
-var doctorCmd = newDoctorCmd(config.EnvironmentProblems)
+var doctorCmd = newDoctorCmd(doctor.EnvironmentProblems)
 
 func newDoctorCmd(environmentProblems func() []config.Problem) *cobra.Command {
 	cmd := &cobra.Command{
