@@ -2,11 +2,9 @@ package fsext
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -15,14 +13,8 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/brand"
-	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/home"
 )
-
-type FileInfo struct {
-	Path    string
-	ModTime time.Time
-}
 
 // commonIgnoredDirNames is the single source of truth for directory names
 // fsext skips by plain exact match, independent of gitignore pattern
@@ -110,15 +102,21 @@ func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
 	return w.directoryLister.shouldIgnore(path, nil, true)
 }
 
-// GlobGitignoreAware globs files respecting gitignore.
-func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(context.Background(), pattern, cwd, limit)
-}
-
 // VisitGlobGitignoreAware streams every matching path without retaining the
 // result set. Callers that paginate can therefore scan wide trees with memory
 // proportional to their page size.
-func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, visit func(string)) error {
+//
+// visit is called from several goroutines at once — fastwalk is concurrent —
+// so it must guard whatever it touches. The production caller adds to a
+// mutex-guarded page scan; a caller collecting into a plain slice will read
+// as working and fail only under -race, or lose entries without it.
+//
+// The modification time comes with the path because the glob tool orders its
+// results by it, and the walk is the only place it can be had without a
+// second stat of every match. A file whose info cannot be read is still
+// visited, with a zero time: the caller wanted to know the path exists, and
+// an unreadable mtime is a worse reason to hide it than to sort it last.
+func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, visit func(path string, modTime time.Time)) error {
 	pattern = filepath.ToSlash(pattern)
 	walker := NewFastGlobWalker(searchPath)
 	conf := fastwalk.Config{Follow: false, ToSlash: fastwalk.DefaultToSlash(), Sort: fastwalk.SortFilesFirst}
@@ -129,13 +127,17 @@ func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, vi
 		if err != nil {
 			return nil
 		}
+		// A directory is both a candidate match and something to descend
+		// into, so it is matched here and the walk continues either way.
+		// Skipping the match — which this did for a while — makes a
+		// pattern naming a directory ("pkg", "**/testdata") return
+		// nothing at all, with no way for the caller to tell that from
+		// "no such directory".
 		if d.IsDir() {
 			if walker.ShouldSkipDir(path) {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-		if walker.ShouldSkip(path) {
+		} else if walker.ShouldSkip(path) {
 			return nil
 		}
 		relPath, relErr := filepath.Rel(searchPath, path)
@@ -147,7 +149,11 @@ func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, vi
 			return matchErr
 		}
 		if matched {
-			visit(path)
+			var modTime time.Time
+			if info, infoErr := d.Info(); infoErr == nil {
+				modTime = info.ModTime()
+			}
+			visit(path, modTime)
 		}
 		return nil
 	})
@@ -157,91 +163,6 @@ func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, vi
 	return nil
 }
 
-func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
-	// Normalize pattern to forward slashes on Windows so their config can use
-	// backslashes
-	pattern = filepath.ToSlash(pattern)
-
-	walker := NewFastGlobWalker(searchPath)
-	found := csync.NewSlice[FileInfo]()
-	conf := fastwalk.Config{
-		// Do not follow symlinks: following them lets the walk escape the
-		// search root (into module caches, the nix store, $HOME, etc.) and
-		// chase cycles, which is slow and can hang. Mirrors the rg path,
-		// which no longer passes -L.
-		Follow:  false,
-		ToSlash: fastwalk.DefaultToSlash(),
-		Sort:    fastwalk.SortFilesFirst,
-	}
-	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
-		if ctx.Err() != nil {
-			return filepath.SkipAll // Timed out or cancelled; stop walking.
-		}
-		if err != nil {
-			return nil // Skip files we can't access
-		}
-
-		isDir := d.IsDir()
-		if isDir {
-			if walker.ShouldSkipDir(path) {
-				return filepath.SkipDir
-			}
-		} else {
-			if walker.ShouldSkip(path) {
-				return nil
-			}
-		}
-
-		relPath, err := filepath.Rel(searchPath, path)
-		if err != nil {
-			relPath = path
-		}
-
-		// Normalize separators to forward slashes
-		relPath = filepath.ToSlash(relPath)
-
-		// Check if path matches the pattern
-		matched, err := doublestar.Match(pattern, relPath)
-		if err != nil || !matched {
-			return nil
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-
-		found.Append(FileInfo{Path: path, ModTime: info.ModTime()})
-		// Walk order has no relation to ModTime, and the result below is
-		// sorted newest-first and truncated to limit. Stopping right at
-		// limit would let whichever limit files the walk happens to reach
-		// first win, even if files visited a moment later are more
-		// recently modified. Overshooting to limit*2 gives the sort a
-		// larger pool to pick the true most-recent limit files from,
-		// without walking the whole tree.
-		if limit > 0 && found.Len() >= limit*2 {
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, filepath.SkipAll) {
-		return nil, false, fmt.Errorf("fastwalk error: %w", err)
-	}
-
-	matches := slices.SortedFunc(found.Seq(), func(a, b FileInfo) int {
-		return b.ModTime.Compare(a.ModTime)
-	})
-	matches, truncated := truncate(matches, limit)
-
-	results := make([]string, len(matches))
-	for i, m := range matches {
-		results[i] = m.Path
-	}
-	return results, truncated || errors.Is(err, filepath.SkipAll), nil
-}
-
-// ShouldExcludeFile checks if a file should be excluded from processing
-// based on common patterns and ignore rules.
 func ShouldExcludeFile(rootPath, filePath string) bool {
 	info, err := os.Stat(filePath)
 	isDir := err == nil && info.IsDir()

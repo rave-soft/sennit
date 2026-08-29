@@ -5,8 +5,10 @@ import (
 	_ "embed"
 	"fmt"
 	"html/template"
+	"math"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
@@ -82,7 +84,9 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			scan := newPageScan[string](continuation.Last, limit)
-			err = visitGlobFiles(searchCtx, params.Pattern, searchPath, func(path string) { scan.Add(path, path) })
+			err = visitGlobFiles(searchCtx, params.Pattern, searchPath, func(path string, modTime time.Time) {
+				scan.Add(globPageKey(path, modTime), path)
+			})
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error finding files: %v", err)), nil
 			}
@@ -111,7 +115,37 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 	})
 }
 
-func visitGlobFiles(ctx context.Context, pattern, searchPath string, visit func(string)) error {
+// globPageKey orders the page newest-first while keeping the total order a
+// keyset cursor needs. The scan pages by ascending key, so the timestamp is
+// inverted; the path is appended so two files written in the same nanosecond
+// still have one definite order, and so the key identifies the entry the
+// cursor resumes after.
+//
+// Ordering by modification time is what this tool advertises ("sorted by
+// modification time" in glob.md.tpl) and what a caller looking for recent
+// work needs. It was lost when the tool moved to keyset pagination in
+// 4052fdab0: the key became the path, the description was not updated, and
+// the test that asserted newest-first kept passing because it exercised a
+// collect-everything helper in fsext that nothing called any more.
+//
+// A file touched between two pages changes this key and therefore the scan
+// generation, so the next page is refused as stale rather than silently
+// skipping or repeating an entry — which is the whole point of the
+// generation check, and the reason mtime is usable as a page key here at
+// all.
+func globPageKey(path string, modTime time.Time) string {
+	nanos := modTime.UnixNano()
+	// Clamp rather than let the subtraction wrap: a zero or pre-epoch
+	// mtime (an unreadable info, an archive restored with a bogus time)
+	// would otherwise produce a key that sorts before genuinely new files
+	// instead of after everything.
+	if nanos < 0 {
+		nanos = 0
+	}
+	return fmt.Sprintf("%019d\x00%s", math.MaxInt64-nanos, path)
+}
+
+func visitGlobFiles(ctx context.Context, pattern, searchPath string, visit func(path string, modTime time.Time)) error {
 	prefix, rest := filepathext.SplitGlobPrefix(pattern)
 	walkRoot, walkPattern := searchPath, pattern
 	if prefix != "" {

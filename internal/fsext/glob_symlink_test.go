@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -30,9 +32,18 @@ func TestVisitGlobGitignoreAware_DoesNotFollowSymlinkEscape(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	var got []string
+	// fastwalk visits concurrently, so the append needs a lock even here,
+	// where the tree is small enough that the race rarely fires.
+	var (
+		mu  sync.Mutex
+		got []string
+	)
 	require.NoError(t, VisitGlobGitignoreAware(context.Background(), "**/*.go", project,
-		func(path string) { got = append(got, path) }))
+		func(path string, _ time.Time) {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append(got, path)
+		}))
 
 	require.NotEmpty(t, got, "the file inside the root must still be found")
 	for _, p := range got {

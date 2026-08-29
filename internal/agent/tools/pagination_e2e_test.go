@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -207,9 +206,16 @@ func TestGlobAndLSHandlerPaginationNoGapsAndStaleGeneration(t *testing.T) {
 		}
 	}
 	require.Len(t, files, 215)
-	sorted := append([]string(nil), files...)
-	sort.Strings(sorted)
-	require.Equal(t, sorted, files)
+	// No gaps and no repeats is the property this test is named for. It
+	// used to be checked by asserting the pages came back in path order,
+	// which only held while the page key was the path; glob keys by
+	// modification time, so completeness is checked directly instead.
+	unique := map[string]bool{}
+	for _, f := range files {
+		require.False(t, unique[f], "%s appeared on two pages", f)
+		unique[f] = true
+	}
+	require.Len(t, unique, 215)
 
 	first := runToolWith(t, globTool, t.Context(), GlobToolName, GlobParams{Pattern: "*.txt", MaxResults: 10})
 	firstMeta := responseMetadata[GlobResponseMetadata](t, first.Metadata)

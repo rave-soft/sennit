@@ -1,14 +1,50 @@
 package fsext
 
 import (
-	"fmt"
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+// globAll collects every match from VisitGlobGitignoreAware, sorted by path
+// so assertions do not depend on walk order. The collecting form used to
+// live in fileutil.go; it was the last caller of a second walker that
+// nothing in production ran, so these tests exercised gitignore and pattern
+// behaviour on code the tools did not use. Result *ordering* is the glob
+// tool's business, not this walker's, and is pinned in
+// internal/agent/tools.
+func globAll(t *testing.T, pattern, dir string) []string {
+	t.Helper()
+
+	// The walk is concurrent, so the collector needs its own lock — see
+	// VisitGlobGitignoreAware's doc.
+	var (
+		mu      sync.Mutex
+		matches []string
+	)
+	err := VisitGlobGitignoreAware(context.Background(), pattern, dir, func(path string, _ time.Time) {
+		mu.Lock()
+		defer mu.Unlock()
+		matches = append(matches, path)
+	})
+	if err != nil {
+		return nil
+	}
+	slices.Sort(matches)
+	return matches
+}
+
+func globAllErr(t *testing.T, pattern, dir string) error {
+	t.Helper()
+
+	return VisitGlobGitignoreAware(context.Background(), pattern, dir, func(string, time.Time) {})
+}
 
 func TestGlobWithDoubleStar(t *testing.T) {
 	t.Run("finds files matching pattern", func(t *testing.T) {
@@ -24,9 +60,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.WriteFile(file, []byte("test content"), 0o644))
 		}
 
-		matches, truncated, err := GlobGitignoreAware("**/main.go", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches := globAll(t, "**/main.go", testDir)
 
 		require.Equal(t, matches, []string{mainGo})
 	})
@@ -47,9 +81,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0o644))
 		require.NoError(t, os.WriteFile(pkgFile, []byte("test"), 0o644))
 
-		matches, truncated, err := GlobGitignoreAware("pkg", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches := globAll(t, "pkg", testDir)
 
 		require.Equal(t, matches, []string{pkgDir})
 	})
@@ -66,9 +98,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.MkdirAll(dir, 0o755))
 		}
 
-		matches, truncated, err := GlobGitignoreAware("**/pkg", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches := globAll(t, "**/pkg", testDir)
 
 		var relativeMatches []string
 		for _, match := range matches {
@@ -95,9 +125,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.WriteFile(file, []byte("package main"), 0o644))
 		}
 
-		matches, truncated, err := GlobGitignoreAware("pkg/**", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches := globAll(t, "pkg/**", testDir)
 
 		var relativeMatches []string
 		for _, match := range matches {
@@ -115,21 +143,6 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		})
 	})
 
-	t.Run("respects limit parameter", func(t *testing.T) {
-		testDir := t.TempDir()
-
-		for i := range 10 {
-			file := filepath.Join(testDir, "file", fmt.Sprintf("test%d.txt", i))
-			require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
-			require.NoError(t, os.WriteFile(file, []byte("test"), 0o644))
-		}
-
-		matches, truncated, err := GlobGitignoreAware("**/*.txt", testDir, 5)
-		require.NoError(t, err)
-		require.True(t, truncated, "Expected truncation with limit")
-		require.Len(t, matches, 5, "Expected exactly 5 matches with limit")
-	})
-
 	t.Run("handles nested directory patterns", func(t *testing.T) {
 		testDir := t.TempDir()
 
@@ -143,47 +156,15 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.WriteFile(file, []byte("test"), 0o644))
 		}
 
-		matches, truncated, err := GlobGitignoreAware("a/b/c/file1.txt", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches := globAll(t, "a/b/c/file1.txt", testDir)
 
 		require.Equal(t, []string{file1}, matches)
-	})
-
-	t.Run("returns results sorted by modification time (newest first)", func(t *testing.T) {
-		testDir := t.TempDir()
-
-		file1 := filepath.Join(testDir, "file1.txt")
-		require.NoError(t, os.WriteFile(file1, []byte("first"), 0o644))
-
-		file2 := filepath.Join(testDir, "file2.txt")
-		require.NoError(t, os.WriteFile(file2, []byte("second"), 0o644))
-
-		file3 := filepath.Join(testDir, "file3.txt")
-		require.NoError(t, os.WriteFile(file3, []byte("third"), 0o644))
-
-		base := time.Now()
-		m1 := base
-		m2 := base.Add(10 * time.Hour)
-		m3 := base.Add(20 * time.Hour)
-
-		require.NoError(t, os.Chtimes(file1, m1, m1))
-		require.NoError(t, os.Chtimes(file2, m2, m2))
-		require.NoError(t, os.Chtimes(file3, m3, m3))
-
-		matches, truncated, err := GlobGitignoreAware("*.txt", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
-
-		require.Equal(t, []string{file3, file2, file1}, matches)
 	})
 
 	t.Run("handles empty directory", func(t *testing.T) {
 		testDir := t.TempDir()
 
-		matches, truncated, err := GlobGitignoreAware("**", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches := globAll(t, "**", testDir)
 		// Even empty directories should return the directory itself
 		require.Equal(t, []string{testDir}, matches)
 	})
@@ -191,10 +172,8 @@ func TestGlobWithDoubleStar(t *testing.T) {
 	t.Run("handles non-existent search path", func(t *testing.T) {
 		nonExistentDir := filepath.Join(t.TempDir(), "does", "not", "exist")
 
-		matches, truncated, err := GlobGitignoreAware("**", nonExistentDir, 0)
-		require.Error(t, err, "Should return error for non-existent search path")
-		require.False(t, truncated)
-		require.Empty(t, matches)
+		require.Error(t, globAllErr(t, "**", nonExistentDir),
+			"Should return error for non-existent search path")
 	})
 
 	t.Run("respects basic ignore patterns", func(t *testing.T) {
@@ -219,52 +198,32 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		ignoredFileInDir := filepath.Join(testDir, "backup", "old.txt")
 		require.NoError(t, os.WriteFile(ignoredFileInDir, []byte("old content"), 0o644))
 
-		matches, truncated, err := GlobGitignoreAware("*.tmp", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches := globAll(t, "*.tmp", testDir)
 		require.Empty(t, matches, "Expected no matches for '*.tmp' pattern (should be ignored)")
 
-		matches, truncated, err = GlobGitignoreAware("backup", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches = globAll(t, "backup", testDir)
 		require.Empty(t, matches, "Expected no matches for 'backup' pattern (should be ignored)")
 
-		matches, truncated, err = GlobGitignoreAware("*.txt", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
+		matches = globAll(t, "*.txt", testDir)
 		require.Equal(t, []string{goodFile}, matches)
 	})
 
-	t.Run("handles mixed file and directory matching with sorting", func(t *testing.T) {
+	t.Run("matches files and directories alike", func(t *testing.T) {
 		testDir := t.TempDir()
 
-		oldestFile := filepath.Join(testDir, "old.rs")
-		require.NoError(t, os.WriteFile(oldestFile, []byte("old"), 0o644))
+		file := filepath.Join(testDir, "old.rs")
+		require.NoError(t, os.WriteFile(file, []byte("old"), 0o644))
 
-		middleDir := filepath.Join(testDir, "mid.rs")
-		require.NoError(t, os.MkdirAll(middleDir, 0o755))
+		dir := filepath.Join(testDir, "mid.rs")
+		require.NoError(t, os.MkdirAll(dir, 0o755))
 
-		newestFile := filepath.Join(testDir, "new.rs")
-		require.NoError(t, os.WriteFile(newestFile, []byte("new"), 0o644))
+		other := filepath.Join(testDir, "new.rs")
+		require.NoError(t, os.WriteFile(other, []byte("new"), 0o644))
 
-		base := time.Now()
-		tOldest := base
-		tMiddle := base.Add(10 * time.Hour)
-		tNewest := base.Add(20 * time.Hour)
-
-		// Reverse the expected order
-		require.NoError(t, os.Chtimes(newestFile, tOldest, tOldest))
-		require.NoError(t, os.Chtimes(middleDir, tMiddle, tMiddle))
-		require.NoError(t, os.Chtimes(oldestFile, tNewest, tNewest))
-
-		matches, truncated, err := GlobGitignoreAware("*.rs", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
-		require.Len(t, matches, 3)
-
-		// Results should be sorted by mod time, but we set the oldestFile
-		// to have the most recent mod time
-		require.Equal(t, []string{oldestFile, middleDir, newestFile}, matches)
+		// A pattern that names a directory has to match it: nothing else
+		// in the walk reports a directory, so dropping the match here
+		// makes `glob "pkg"` indistinguishable from "there is no pkg".
+		require.ElementsMatch(t, []string{file, dir, other}, globAll(t, "*.rs", testDir))
 	})
 }
 
