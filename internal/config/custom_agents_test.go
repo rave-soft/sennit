@@ -181,10 +181,10 @@ func TestValidAgentID(t *testing.T) {
 	invalid := []string{"", "my agent", "review.er", "café", "agent/one"}
 
 	for _, id := range valid {
-		require.True(t, validAgentID(id), "%q should be valid", id)
+		require.True(t, ValidAgentID(id), "%q should be valid", id)
 	}
 	for _, id := range invalid {
-		require.False(t, validAgentID(id), "%q should be invalid", id)
+		require.False(t, ValidAgentID(id), "%q should be invalid", id)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/brand"
-	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/frontmatter"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,19 +38,24 @@ type markdownAgent struct {
 	ReasoningEffort string `yaml:"reasoning_effort"`
 	// Tools restricts the agent's tools. Accepts a YAML list or the
 	// comma-separated string Claude Code uses.
-	Tools stringList `yaml:"tools"`
+	Tools StringList `yaml:"tools"`
 	// Mode is opencode's field; "primary" marks an agent meant to be driven
 	// directly rather than delegated to, so those files are skipped.
 	Mode     string `yaml:"mode"`
 	Disabled bool   `yaml:"disabled"`
 }
 
-// stringList accepts `tools: [a, b]`, the comma-separated string Claude Code
+// StringList accepts `tools: [a, b]`, the comma-separated string Claude Code
 // uses (`tools: a, b`), and the enabled-map form opencode uses
 // (`tools: {a: true, b: false}`) — only keys mapped to true are kept.
-type stringList []string
+//
+// Exported for internal/importer, which must accept exactly what loading an
+// agent file accepts: the point of `sennit import` is that what it writes
+// loads, so the two have to agree on the shape rather than each have their
+// own idea of it.
+type StringList []string
 
-func (s *stringList) UnmarshalYAML(value *yaml.Node) error {
+func (s *StringList) UnmarshalYAML(value *yaml.Node) error {
 	var list []string
 	if err := value.Decode(&list); err == nil {
 		*s = list
@@ -148,13 +153,13 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 		return "", Agent{}, err
 	}
 
-	frontmatter, body, err := skills.SplitFrontmatter(string(content))
+	header, body, err := frontmatter.Split(string(content))
 	if err != nil {
 		return "", Agent{}, err
 	}
 
 	var meta markdownAgent
-	if err := yaml.Unmarshal([]byte(frontmatter), &meta); err != nil {
+	if err := yaml.Unmarshal([]byte(header), &meta); err != nil {
 		return "", Agent{}, err
 	}
 
@@ -168,7 +173,7 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 	if id == "" {
 		id = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
-	if !validAgentID(id) {
+	if !ValidAgentID(id) {
 		return "", Agent{}, errors.New("agent name must contain only letters, digits, '_' or '-'")
 	}
 

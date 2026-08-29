@@ -1,4 +1,4 @@
-package config
+package importer
 
 import (
 	"cmp"
@@ -11,29 +11,31 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/frontmatter"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/toolmeta"
 	"gopkg.in/yaml.v3"
 )
 
-// ImportSource identifies which foreign tool's files `sennit import` reads.
+// Source identifies which foreign tool's files `sennit import` reads.
 // Auto-discovery only ever looks at .sennit/skills and .sennit/agents (see
 // load.go, agents_markdown.go); this is the only supported path for bringing
 // in a Claude Code or opencode role or skill, and it goes through validation
 // and an explicit report rather than trusting a foreign directory.
-type ImportSource string
+type Source string
 
 const (
-	ImportSourceClaude   ImportSource = "claude"
-	ImportSourceOpenCode ImportSource = "opencode"
+	SourceClaude   Source = "claude"
+	SourceOpenCode Source = "opencode"
 )
 
-// ImportOptions configures a sennit import run.
-type ImportOptions struct {
-	Source     ImportSource
+// Options configures a sennit import run.
+type Options struct {
+	Source     Source
 	WorkingDir string
-	Providers  map[string]ProviderConfig
+	Providers  map[string]config.ProviderConfig
 	Skills     bool // import skills
 	Agents     bool // import agents
 	DryRun     bool // report what would happen, write nothing
@@ -41,35 +43,35 @@ type ImportOptions struct {
 	Force      bool // overwrite files that already exist at the destination
 }
 
-// ImportStatus is the outcome recorded for one imported item.
-type ImportStatus string
+// Status is the outcome recorded for one imported item.
+type Status string
 
 const (
 	// StatusImported means the item was written (or would be, under
 	// --dry-run) without needing any adjustment.
-	StatusImported ImportStatus = "imported"
+	StatusImported Status = "imported"
 	// StatusAdjusted means the item was written, but with warnings — a
 	// field was dropped, mapped to the nearest equivalent, or left as a
 	// frontmatter comment because Sennit has no matching field.
-	StatusAdjusted ImportStatus = "adjusted"
+	StatusAdjusted Status = "adjusted"
 	// StatusSkipped means nothing was written; Reason explains why.
-	StatusSkipped ImportStatus = "skipped"
+	StatusSkipped Status = "skipped"
 )
 
-// ImportEntry reports the outcome for a single skill or agent.
-type ImportEntry struct {
+// Entry reports the outcome for a single skill or agent.
+type Entry struct {
 	Kind     string // "skill" or "agent"
 	Name     string
-	Status   ImportStatus
+	Status   Status
 	Reason   string   // set when Status is StatusSkipped
 	Warnings []string // set when Status is StatusAdjusted
 	Dest     string   // destination path, populated even under --dry-run
 }
 
-// ImportReport is the result of a sennit import run.
-type ImportReport struct {
-	Source  ImportSource
-	Entries []ImportEntry
+// Report is the result of a sennit import run.
+type Report struct {
+	Source  Source
+	Entries []Entry
 	// Searched lists every source directory that was looked in, for the
 	// kinds this run asked for, whether or not it existed. It is what
 	// lets "nothing to import" be distinguished from "looked in the
@@ -78,23 +80,23 @@ type ImportReport struct {
 	Searched []string
 }
 
-// RunImport copies skills and/or agents from a foreign tool's directories
+// Run copies skills and/or agents from a foreign tool's directories
 // into Sennit's own (.sennit/skills, .sennit/agents, or their global
 // equivalents under --global), validating and translating as it goes. It
 // never touches source files. Nothing is written when opts.DryRun is set;
 // callers get the same report either way.
-func RunImport(opts ImportOptions) (ImportReport, error) {
-	if opts.Source != ImportSourceClaude && opts.Source != ImportSourceOpenCode {
-		return ImportReport{}, fmt.Errorf("unknown import source %q (want %q or %q)", opts.Source, ImportSourceClaude, ImportSourceOpenCode)
+func Run(opts Options) (Report, error) {
+	if opts.Source != SourceClaude && opts.Source != SourceOpenCode {
+		return Report{}, fmt.Errorf("unknown import source %q (want %q or %q)", opts.Source, SourceClaude, SourceOpenCode)
 	}
 	if !opts.Skills && !opts.Agents {
-		return ImportReport{}, errors.New("nothing to import: pass --skills and/or --agents")
+		return Report{}, errors.New("nothing to import: pass --skills and/or --agents")
 	}
 
 	srcSkillsDirs, srcAgentsDirs := importSourceDirs(opts.Source, opts.WorkingDir, opts.Global)
 	dstSkillsDir, dstAgentsDir := importDestDirs(opts.WorkingDir, opts.Global)
 
-	report := ImportReport{Source: opts.Source}
+	report := Report{Source: opts.Source}
 
 	// seen tracks which source directory each name was taken from, so a
 	// tool that reads two spellings of the same directory does not import
@@ -149,7 +151,7 @@ func RunImport(opts ImportOptions) (ImportReport, error) {
 // the global one alike. Its global root is $XDG_CONFIG_HOME/opencode
 // falling back to ~/.config/opencode, which is exactly what home.Config
 // resolves.
-func importSourceDirs(source ImportSource, workingDir string, global bool) (skillsDirs, agentsDirs []string) {
+func importSourceDirs(source Source, workingDir string, global bool) (skillsDirs, agentsDirs []string) {
 	join := func(root string, names ...string) []string {
 		out := make([]string, 0, len(names))
 		for _, name := range names {
@@ -159,13 +161,13 @@ func importSourceDirs(source ImportSource, workingDir string, global bool) (skil
 	}
 
 	switch source {
-	case ImportSourceClaude:
+	case SourceClaude:
 		root := filepath.Join(workingDir, ".claude")
 		if global {
 			root = filepath.Join(home.Dir(), ".claude")
 		}
 		return join(root, "skills"), join(root, "agents")
-	case ImportSourceOpenCode:
+	case SourceOpenCode:
 		root := filepath.Join(workingDir, ".opencode")
 		if global {
 			root = filepath.Join(home.Config(), "opencode")
@@ -180,7 +182,7 @@ func importSourceDirs(source ImportSource, workingDir string, global bool) (skil
 // ones discovery reads, project or global depending on opts.Global.
 func importDestDirs(workingDir string, global bool) (skillsDir, agentsDir string) {
 	if global {
-		return filepath.Join(home.Config(), appName, "skills"), filepath.Join(filepath.Dir(GlobalConfig()), "agents")
+		return filepath.Join(home.Config(), brand.Slug, "skills"), filepath.Join(filepath.Dir(config.GlobalConfig()), "agents")
 	}
 	return filepath.Join(workingDir, brand.DataDir, "skills"), filepath.Join(workingDir, brand.DataDir, "agents")
 }
@@ -190,12 +192,12 @@ func importDestDirs(workingDir string, global bool) (skillsDir, agentsDir string
 // not an error — it just means there is nothing of that kind to import.
 //
 // seen carries names already taken by an earlier source directory (see
-// RunImport) and is extended with the ones this call claims. Matching on
+// Run) and is extended with the ones this call claims. Matching on
 // the directory name rather than the parsed skill name is deliberate: the
 // spec ties the two together, and a name has to be claimed before the
 // file is parsed for a --dry-run to report the same outcome as a real
 // run.
-func importSkills(srcDir, dstDir string, opts ImportOptions, seen map[string]string) ([]ImportEntry, error) {
+func importSkills(srcDir, dstDir string, opts Options, seen map[string]string) ([]Entry, error) {
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -204,13 +206,13 @@ func importSkills(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 		return nil, fmt.Errorf("reading %s: %w", srcDir, err)
 	}
 
-	var out []ImportEntry
+	var out []Entry
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		if from, dup := seen[e.Name()]; dup {
-			out = append(out, ImportEntry{
+			out = append(out, Entry{
 				Kind: "skill", Name: e.Name(), Status: StatusSkipped,
 				Reason: fmt.Sprintf("already imported from %s", from),
 			})
@@ -222,7 +224,7 @@ func importSkills(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 
 		skill, err := skills.Parse(skillFile)
 		if err != nil {
-			out = append(out, ImportEntry{
+			out = append(out, Entry{
 				Kind: "skill", Name: e.Name(), Status: StatusSkipped,
 				Reason: fmt.Sprintf("cannot parse %s: %v", skills.SkillFileName, err),
 			})
@@ -232,7 +234,7 @@ func importSkills(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 		// already follow, so this mostly catches name/directory mismatches
 		// and oversized descriptions rather than anything tool-specific.
 		if err := skill.Validate(); err != nil {
-			out = append(out, ImportEntry{
+			out = append(out, Entry{
 				Kind: "skill", Name: e.Name(), Status: StatusSkipped,
 				Reason: fmt.Sprintf("not sennit-compatible: %v", err),
 			})
@@ -240,7 +242,7 @@ func importSkills(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 		}
 
 		dest := filepath.Join(dstDir, skill.Name)
-		entry := ImportEntry{Kind: "skill", Name: skill.Name, Status: StatusImported, Dest: dest}
+		entry := Entry{Kind: "skill", Name: skill.Name, Status: StatusImported, Dest: dest}
 
 		if _, err := os.Stat(dest); err == nil {
 			if !opts.Force {
@@ -295,17 +297,17 @@ func copyDir(src, dst string) error {
 // opencode's "effort" alias, its "temperature"/"top_p" model tuning, and its
 // permission block. All three only matter here, for reporting/translation.
 type importAgentMeta struct {
-	Name            string     `yaml:"name"`
-	Description     string     `yaml:"description"`
-	Model           string     `yaml:"model"`
-	ReasoningEffort string     `yaml:"reasoning_effort"`
-	Effort          string     `yaml:"effort"`
-	Temperature     *float64   `yaml:"temperature"`
-	TopP            *float64   `yaml:"top_p"`
-	Tools           stringList `yaml:"tools"`
-	Mode            string     `yaml:"mode"`
-	Disabled        bool       `yaml:"disabled"`
-	Permission      yaml.Node  `yaml:"permission"`
+	Name            string            `yaml:"name"`
+	Description     string            `yaml:"description"`
+	Model           string            `yaml:"model"`
+	ReasoningEffort string            `yaml:"reasoning_effort"`
+	Effort          string            `yaml:"effort"`
+	Temperature     *float64          `yaml:"temperature"`
+	TopP            *float64          `yaml:"top_p"`
+	Tools           config.StringList `yaml:"tools"`
+	Mode            string            `yaml:"mode"`
+	Disabled        bool              `yaml:"disabled"`
+	Permission      yaml.Node         `yaml:"permission"`
 }
 
 // outAgentFrontmatter is the frontmatter Sennit actually writes. A dedicated
@@ -321,7 +323,7 @@ type outAgentFrontmatter struct {
 
 // importAgents converts every *.md file in srcDir into a Sennit agent file
 // under dstDir. A missing srcDir is not an error — nothing to import.
-func importAgents(srcDir, dstDir string, opts ImportOptions, seen map[string]string) ([]ImportEntry, error) {
+func importAgents(srcDir, dstDir string, opts Options, seen map[string]string) ([]Entry, error) {
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -330,7 +332,7 @@ func importAgents(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 		return nil, fmt.Errorf("reading %s: %w", srcDir, err)
 	}
 
-	var out []ImportEntry
+	var out []Entry
 	for _, e := range entries {
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".md") {
 			continue
@@ -339,7 +341,7 @@ func importAgents(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 		// conversion, and by then a duplicate would already have been
 		// written. See importSkills for the same reasoning.
 		if from, dup := seen[e.Name()]; dup {
-			out = append(out, ImportEntry{
+			out = append(out, Entry{
 				Kind: "agent", Name: e.Name(), Status: StatusSkipped,
 				Reason: fmt.Sprintf("already imported from %s", from),
 			})
@@ -348,7 +350,7 @@ func importAgents(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 		seen[e.Name()] = srcDir
 		entry, err := convertAgentFile(filepath.Join(srcDir, e.Name()), e.Name(), dstDir, opts)
 		if err != nil {
-			out = append(out, ImportEntry{Kind: "agent", Name: e.Name(), Status: StatusSkipped, Reason: err.Error()})
+			out = append(out, Entry{Kind: "agent", Name: e.Name(), Status: StatusSkipped, Reason: err.Error()})
 			continue
 		}
 		out = append(out, entry)
@@ -361,20 +363,20 @@ func importAgents(srcDir, dstDir string, opts ImportOptions, seen map[string]str
 // can't be translated is dropped from the written frontmatter, recorded as
 // a warning, and left behind as a "# original ..." comment so the user can
 // see what was lost without diffing against the source file.
-func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (ImportEntry, error) {
+func convertAgentFile(path, filename, dstDir string, opts Options) (Entry, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return ImportEntry{}, err
+		return Entry{}, err
 	}
 
-	frontmatter, body, err := skills.SplitFrontmatter(string(content))
+	header, body, err := frontmatter.Split(string(content))
 	if err != nil {
-		return ImportEntry{}, fmt.Errorf("no valid frontmatter: %w", err)
+		return Entry{}, fmt.Errorf("no valid frontmatter: %w", err)
 	}
 
 	var meta importAgentMeta
-	if err := yaml.Unmarshal([]byte(frontmatter), &meta); err != nil {
-		return ImportEntry{}, fmt.Errorf("parsing frontmatter: %w", err)
+	if err := yaml.Unmarshal([]byte(header), &meta); err != nil {
+		return Entry{}, fmt.Errorf("parsing frontmatter: %w", err)
 	}
 
 	id := meta.Name
@@ -383,17 +385,17 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 	}
 
 	if meta.Disabled {
-		return ImportEntry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "disabled in source file"}, nil
+		return Entry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "disabled in source file"}, nil
 	}
 	if strings.EqualFold(meta.Mode, "primary") {
-		return ImportEntry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "opencode primary-mode agents are driven directly, not delegated to"}, nil
+		return Entry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "opencode primary-mode agents are driven directly, not delegated to"}, nil
 	}
-	if !validAgentID(id) {
-		return ImportEntry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "invalid agent name (letters, digits, '_' or '-' only)"}, nil
+	if !config.ValidAgentID(id) {
+		return Entry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "invalid agent name (letters, digits, '_' or '-' only)"}, nil
 	}
 	prompt := strings.TrimSpace(body)
 	if prompt == "" {
-		return ImportEntry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "empty body: no system prompt"}, nil
+		return Entry{Kind: "agent", Name: id, Status: StatusSkipped, Reason: "empty body: no system prompt"}, nil
 	}
 
 	var warnings []string
@@ -401,7 +403,7 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 	fm := outAgentFrontmatter{Name: id, Description: meta.Description}
 
 	if meta.Model != "" {
-		if match, err := ResolveModelString(opts.Providers, meta.Model); err == nil {
+		if match, err := config.ResolveModelString(opts.Providers, meta.Model); err == nil {
 			fm.Model = match.Provider + "/" + match.ModelID
 		} else {
 			warnings = append(warnings, fmt.Sprintf("model %q not available; agent will inherit the main model", meta.Model))
@@ -452,7 +454,7 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 
 	yamlBytes, err := yaml.Marshal(&fm)
 	if err != nil {
-		return ImportEntry{}, fmt.Errorf("encoding frontmatter: %w", err)
+		return Entry{}, fmt.Errorf("encoding frontmatter: %w", err)
 	}
 
 	var sb strings.Builder
@@ -471,7 +473,7 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 	if len(warnings) > 0 {
 		status = StatusAdjusted
 	}
-	entry := ImportEntry{Kind: "agent", Name: id, Status: status, Warnings: warnings, Dest: dest}
+	entry := Entry{Kind: "agent", Name: id, Status: status, Warnings: warnings, Dest: dest}
 
 	if _, err := os.Stat(dest); err == nil && !opts.Force {
 		entry.Status = StatusSkipped
@@ -510,7 +512,7 @@ func normalizeReasoningEffort(v string) (mapped string, adjusted bool, ok bool) 
 }
 
 // importKnownTools is derived from the canonical static registry. Foreign
-// names are mapped by ClaudeToolNames; aliases owned by Sennit are folded by
+// names are mapped by config.ClaudeToolNames; aliases owned by Sennit are folded by
 // toolmeta.CanonicalName below.
 func importKnownTools() map[string]bool {
 	known := make(map[string]bool, len(toolmeta.NamesAll()))
@@ -536,13 +538,13 @@ func translateAgentTools(names []string) (mapped []string, dropped []string) {
 		}
 		lower := strings.ToLower(name)
 		switch {
-		case ClaudeToolNames[lower] != "":
-			name = ClaudeToolNames[lower]
+		case config.ClaudeToolNames[lower] != "":
+			name = config.ClaudeToolNames[lower]
 		case knownTools[lower]:
 			name = lower
 		case toolmeta.CanonicalName(lower) != lower:
 			// One of Sennit's own older names — fold it forward rather
-			// than dropping it. See [CanonicalToolName].
+			// than dropping it. See [config.CanonicalToolName].
 			name = toolmeta.CanonicalName(lower)
 		default:
 			dropped = append(dropped, name)

@@ -71,14 +71,6 @@ func TestDiscoverMarkdownAgents_FoldsLegacyToolName(t *testing.T) {
 	require.Equal(t, []string{"read", "grep"}, got["reviewer"].AllowedTools)
 }
 
-func TestTranslateAgentTools_FoldsLegacyToolNameInsteadOfDropping(t *testing.T) {
-	t.Parallel()
-
-	mapped, dropped := translateAgentTools([]string{"view", "not_a_real_tool"})
-	require.Equal(t, []string{"read"}, mapped)
-	require.Equal(t, []string{"not_a_real_tool"}, dropped)
-}
-
 func TestDoctor_DoesNotWarnAboutALegacyToolName(t *testing.T) {
 	t.Parallel()
 

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/importer"
 	"github.com/spf13/cobra"
 )
 
@@ -39,14 +39,14 @@ than one is imported once and reported as skipped against the rest. When
 nothing is found, the directories that were searched are listed.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var source config.ImportSource
+		var source importer.Source
 		switch strings.ToLower(args[0]) {
-		case string(config.ImportSourceClaude):
-			source = config.ImportSourceClaude
-		case string(config.ImportSourceOpenCode):
-			source = config.ImportSourceOpenCode
+		case string(importer.SourceClaude):
+			source = importer.SourceClaude
+		case string(importer.SourceOpenCode):
+			source = importer.SourceOpenCode
 		default:
-			return fmt.Errorf("unknown import source %q (want %q or %q)", args[0], config.ImportSourceClaude, config.ImportSourceOpenCode)
+			return fmt.Errorf("unknown import source %q (want %q or %q)", args[0], importer.SourceClaude, importer.SourceOpenCode)
 		}
 
 		if !importSkillsFlag && !importAgentsFlag {
@@ -59,7 +59,7 @@ nothing is found, the directories that were searched are listed.`,
 			return err
 		}
 
-		report, err := config.RunImport(config.ImportOptions{
+		report, err := importer.Run(importer.Options{
 			Source:     source,
 			WorkingDir: cwd,
 			Providers:  cfg.Config().Providers.Copy(),
@@ -80,7 +80,7 @@ nothing is found, the directories that were searched are listed.`,
 
 // printImportReport renders the import outcome as a table: kind, name,
 // status, and the reason/warnings behind it.
-func printImportReport(cmd *cobra.Command, report config.ImportReport, dryRun bool) {
+func printImportReport(cmd *cobra.Command, report importer.Report, dryRun bool) {
 	if len(report.Entries) == 0 {
 		// Name the directories. "Nothing to import" on its own reads as
 		// a fact about the user's setup when it may be a fact about
@@ -108,7 +108,7 @@ func printImportReport(cmd *cobra.Command, report config.ImportReport, dryRun bo
 	}
 	_ = w.Flush()
 
-	counts := map[config.ImportStatus]int{}
+	counts := map[importer.Status]int{}
 	for _, e := range report.Entries {
 		counts[e.Status]++
 	}
@@ -118,7 +118,7 @@ func printImportReport(cmd *cobra.Command, report config.ImportReport, dryRun bo
 	}
 	sort.Strings(kinds)
 	cmd.Printf("%d imported, %d adjusted, %d skipped\n",
-		counts[config.StatusImported], counts[config.StatusAdjusted], counts[config.StatusSkipped])
+		counts[importer.StatusImported], counts[importer.StatusAdjusted], counts[importer.StatusSkipped])
 }
 
 func init() {

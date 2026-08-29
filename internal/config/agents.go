@@ -198,7 +198,7 @@ func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]s
 			continue
 		case agent.Disabled:
 			continue
-		case !validAgentID(id):
+		case !ValidAgentID(id):
 			invalid[id] = "id must be non-empty and contain only letters, digits, '_' or '-'"
 		case slices.Contains(builtinTools, id):
 			invalid[id] = "id collides with a built-in tool of the same name"
@@ -230,10 +230,14 @@ func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]s
 	return valid, invalid
 }
 
-// validAgentID reports whether id is usable as a tool name. Providers reject
+// ValidAgentID reports whether id is usable as a tool name. Providers reject
 // tool names outside this character set, so an invalid id would otherwise
 // surface as an opaque API error on the first request.
-func validAgentID(id string) bool {
+//
+// Exported for internal/importer, which rejects a foreign agent up front for
+// the same reason and must reject exactly the same set: an import that
+// writes an agent config cannot load is worse than one that says so.
+func ValidAgentID(id string) bool {
 	if id == "" {
 		return false
 	}

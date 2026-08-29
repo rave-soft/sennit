@@ -1,4 +1,4 @@
-package config
+package importer
 
 import (
 	"os"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +28,7 @@ func writeForeignSkill(t *testing.T, root, sourceDir, name, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644))
 }
 
-func findEntry(t *testing.T, report ImportReport, kind, name string) ImportEntry {
+func findEntry(t *testing.T, report Report, kind, name string) Entry {
 	t.Helper()
 	for _, e := range report.Entries {
 		if e.Kind == kind && e.Name == name {
@@ -35,7 +36,7 @@ func findEntry(t *testing.T, report ImportReport, kind, name string) ImportEntry
 		}
 	}
 	t.Fatalf("no %s entry named %q in report: %+v", kind, name, report.Entries)
-	return ImportEntry{}
+	return Entry{}
 }
 
 // An unresolvable model (a Claude Code model name, not a configured
@@ -50,8 +51,8 @@ model: claude-opus-4
 ---
 You review code.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Agents: true,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Agents: true,
 	})
 	require.NoError(t, err)
 
@@ -77,12 +78,12 @@ model: fakeprovider/FAKE-MODEL
 ---
 You review code.`)
 
-	providers := map[string]ProviderConfig{
+	providers := map[string]config.ProviderConfig{
 		"fakeprovider": {ID: "fakeprovider", Models: []catwalk.Model{{ID: "fake-model"}}},
 	}
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Agents: true, Providers: providers,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Agents: true, Providers: providers,
 	})
 	require.NoError(t, err)
 
@@ -105,8 +106,8 @@ tools: Read, Grep, Bash
 ---
 You review code.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Agents: true,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Agents: true,
 	})
 	require.NoError(t, err)
 
@@ -132,8 +133,8 @@ tools: Read, WebSearch
 ---
 You review code.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Agents: true,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Agents: true,
 	})
 	require.NoError(t, err)
 
@@ -159,8 +160,8 @@ permission:
 ---
 You review databases.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceOpenCode, WorkingDir: root, Agents: true,
+	report, err := Run(Options{
+		Source: SourceOpenCode, WorkingDir: root, Agents: true,
 	})
 	require.NoError(t, err)
 
@@ -190,8 +191,8 @@ effort: max
 ---
 You review databases.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceOpenCode, WorkingDir: root, Agents: true,
+	report, err := Run(Options{
+		Source: SourceOpenCode, WorkingDir: root, Agents: true,
 	})
 	require.NoError(t, err)
 
@@ -213,8 +214,8 @@ description: Fill PDF forms.
 ---
 Fill the form.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Skills: true,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Skills: true,
 	})
 	require.NoError(t, err)
 
@@ -236,8 +237,8 @@ description: Fill PDF forms.
 ---
 Fill the form.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Skills: true,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Skills: true,
 	})
 	require.NoError(t, err)
 
@@ -263,8 +264,8 @@ description: Fill PDF forms.
 ---
 Fill the form.`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Agents: true, Skills: true, DryRun: true,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Agents: true, Skills: true, DryRun: true,
 	})
 	require.NoError(t, err)
 
@@ -287,15 +288,15 @@ description: Reviews code
 ---
 You review code.`)
 
-	opts := ImportOptions{Source: ImportSourceClaude, WorkingDir: root, Agents: true}
+	opts := Options{Source: SourceClaude, WorkingDir: root, Agents: true}
 
-	_, err := RunImport(opts)
+	_, err := Run(opts)
 	require.NoError(t, err)
 
 	dest := filepath.Join(root, ".sennit", "agents", "reviewer.md")
 	require.NoError(t, os.WriteFile(dest, []byte("hand-edited"), 0o644))
 
-	report, err := RunImport(opts)
+	report, err := Run(opts)
 	require.NoError(t, err)
 
 	entry := findEntry(t, report, "agent", "reviewer")
@@ -316,15 +317,15 @@ description: Reviews code
 ---
 You review code.`)
 
-	opts := ImportOptions{Source: ImportSourceClaude, WorkingDir: root, Agents: true}
-	_, err := RunImport(opts)
+	opts := Options{Source: SourceClaude, WorkingDir: root, Agents: true}
+	_, err := Run(opts)
 	require.NoError(t, err)
 
 	dest := filepath.Join(root, ".sennit", "agents", "reviewer.md")
 	require.NoError(t, os.WriteFile(dest, []byte("hand-edited"), 0o644))
 
 	opts.Force = true
-	report, err := RunImport(opts)
+	report, err := Run(opts)
 	require.NoError(t, err)
 
 	entry := findEntry(t, report, "agent", "reviewer")
@@ -340,8 +341,8 @@ You review code.`)
 func TestRunImport_MissingSourceDirIsNotAnError(t *testing.T) {
 	root := t.TempDir()
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceOpenCode, WorkingDir: root, Agents: true, Skills: true,
+	report, err := Run(Options{
+		Source: SourceOpenCode, WorkingDir: root, Agents: true, Skills: true,
 	})
 	require.NoError(t, err)
 	require.Empty(t, report.Entries)
@@ -354,8 +355,8 @@ func TestRunImport_OpenCodeAgent_SkipsPrimaryAndDisabled(t *testing.T) {
 	writeForeignAgent(t, root, ".opencode/agent", "build.md", "---\nmode: primary\ndescription: x\n---\nbody")
 	writeForeignAgent(t, root, ".opencode/agent", "off.md", "---\nname: off\ndisabled: true\ndescription: x\n---\nbody")
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceOpenCode, WorkingDir: root, Agents: true,
+	report, err := Run(Options{
+		Source: SourceOpenCode, WorkingDir: root, Agents: true,
 	})
 	require.NoError(t, err)
 
@@ -364,12 +365,12 @@ func TestRunImport_OpenCodeAgent_SkipsPrimaryAndDisabled(t *testing.T) {
 }
 
 func TestRunImport_RejectsUnknownSource(t *testing.T) {
-	_, err := RunImport(ImportOptions{Source: "cursor", WorkingDir: t.TempDir(), Agents: true})
+	_, err := Run(Options{Source: "cursor", WorkingDir: t.TempDir(), Agents: true})
 	require.Error(t, err)
 }
 
 func TestRunImport_RequiresSkillsOrAgents(t *testing.T) {
-	_, err := RunImport(ImportOptions{Source: ImportSourceClaude, WorkingDir: t.TempDir()})
+	_, err := Run(Options{Source: SourceClaude, WorkingDir: t.TempDir()})
 	require.Error(t, err)
 }
 
@@ -404,8 +405,8 @@ mode: subagent
 ---
 body`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceOpenCode, WorkingDir: root, Skills: true, Agents: true,
+	report, err := Run(Options{
+		Source: SourceOpenCode, WorkingDir: root, Skills: true, Agents: true,
 	})
 	require.NoError(t, err)
 
@@ -436,8 +437,8 @@ description: The copy in the singular directory.
 ---
 singular body`)
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceOpenCode, WorkingDir: root, Skills: true,
+	report, err := Run(Options{
+		Source: SourceOpenCode, WorkingDir: root, Skills: true,
 	})
 	require.NoError(t, err)
 
@@ -465,8 +466,8 @@ singular body`)
 func TestRunImport_ReportsEveryDirectorySearched(t *testing.T) {
 	root := t.TempDir()
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceOpenCode, WorkingDir: root, Skills: true, Agents: true,
+	report, err := Run(Options{
+		Source: SourceOpenCode, WorkingDir: root, Skills: true, Agents: true,
 	})
 	require.NoError(t, err)
 	require.Empty(t, report.Entries)
@@ -483,8 +484,8 @@ func TestRunImport_ReportsEveryDirectorySearched(t *testing.T) {
 func TestRunImport_SearchedCoversOnlyRequestedKinds(t *testing.T) {
 	root := t.TempDir()
 
-	report, err := RunImport(ImportOptions{
-		Source: ImportSourceClaude, WorkingDir: root, Agents: true,
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Agents: true,
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{filepath.Join(root, ".claude", "agents")}, report.Searched)
@@ -498,7 +499,7 @@ func TestImportSourceDirs_OpenCodeGlobalFollowsXDGConfigHome(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 
-	skillsDirs, agentsDirs := importSourceDirs(ImportSourceOpenCode, "/irrelevant", true)
+	skillsDirs, agentsDirs := importSourceDirs(SourceOpenCode, "/irrelevant", true)
 	require.Equal(t, []string{
 		filepath.Join(xdg, "opencode", "skills"),
 		filepath.Join(xdg, "opencode", "skill"),
