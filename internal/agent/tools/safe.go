@@ -14,7 +14,8 @@ import (
 // and skip the prompt entirely — an outright permission bypass, since
 // bannedCommands does not carry `rm`. `kill`/`killall` are not read-only
 // in the first place. Anything added here must be a command that is
-// harmless *including every argument it accepts*.
+// harmless *including every argument it accepts* — or, where that holds
+// only for some argument forms, gated in [argumentGatedSafeCommands].
 var safeCommands = []string{
 	// Bash builtins and core utils
 	"cal",
@@ -58,6 +59,44 @@ var safeCommands = []string{
 	"git show",
 	"git status",
 	"git tag",
+}
+
+// argumentGatedSafeCommands lists the entries of [safeCommands] whose
+// prefix names a read-only command in its bare form but a mutating one as
+// soon as arguments arrive. `git branch` lists branches; `git branch -D x`
+// deletes one. `git tag` lists tags; `git tag v9` creates one and `git tag
+// -d v9` deletes one. `git remote` lists remotes; `git remote remove
+// origin` drops one. All three matched by prefix and ran with no prompt at
+// all — the same shape of bypass the wrapper entries had, and just as
+// invisible, since bannedCommands carries no git.
+//
+// The value is the complete set of tokens that may follow the prefix.
+// Every remaining token must be in it, not just the first: git accepts
+// `git branch -v -D x`, so checking only the token after the prefix would
+// let a read-only flag escort a destructive one past the gate. Only
+// valueless flags are listed, which is why `git branch --contains main`
+// asks — the alternative is teaching this table which flags consume the
+// next token, and a prompt costs less than that table being subtly wrong.
+var argumentGatedSafeCommands = map[string][]string{
+	"git branch": {"-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "-l", "--list", "--show-current"},
+	"git tag":    {"-l", "--list", "-n"},
+	"git remote": {"-v", "--verbose"},
+}
+
+// isReadOnlyInvocation reports whether cmdLower — which has already matched
+// entry as a prefix on a command boundary — is read-only in this particular
+// invocation. Entries with no gate are read-only however they are called.
+func isReadOnlyInvocation(entry, cmdLower string) bool {
+	allowed, gated := argumentGatedSafeCommands[entry]
+	if !gated {
+		return true
+	}
+	for _, token := range strings.Fields(cmdLower[len(entry):]) {
+		if !slices.Contains(allowed, token) {
+			return false
+		}
+	}
+	return true
 }
 
 var chainingMetacharacters = []string{

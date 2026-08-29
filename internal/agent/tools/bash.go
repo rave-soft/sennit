@@ -249,8 +249,13 @@ func NewBashTool(permissions permission.Requester, workingDir string, attributio
 				for _, safe := range safeCommands {
 					if strings.HasPrefix(cmdLower, safe) {
 						if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
-							isSafeReadOnly = true
-							break
+							// A failed gate does not break: it means this
+							// entry does not make the command read-only,
+							// not that no later entry can.
+							if isReadOnlyInvocation(safe, cmdLower) {
+								isSafeReadOnly = true
+								break
+							}
 						}
 					}
 				}
