@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1468,16 +1467,19 @@ func TestClient_FailedRestartRollsBackCandidateFilesAndRetries(t *testing.T) {
 // forces its cleanup: the kill and the shutdown that follow must not wait
 // on that send.
 //
-// Unix only, because the wedge is: the test fills the server's stdin pipe
-// with 8MB the fake server never reads, and relies on the write blocking
-// on back-pressure. On a Windows runner that write returns an error
-// instead ("large send completed before process destruction: jsonrpc2:
-// connection is closed"), so the state the test is about never exists
-// there and there is nothing to assert.
+// The wedge is: the test fills the server's stdin pipe with 8MB the fake
+// server never reads, and relies on the write blocking on back-pressure.
+//
+// This used to skip Windows, on the strength of that write returning
+// "large send completed before process destruction: jsonrpc2: connection
+// is closed" there — read at the time as a platform property. The same
+// message then appeared twice running on macOS, and the cause turned out
+// to be the fake server killing itself on `select {}` rather than
+// anything about the platform. With that fixed the skip has no evidence
+// behind it, so it is gone; if Windows still cannot hold the wedge, the
+// failure now says whether the candidate process survived, which is the
+// thing the old diagnosis assumed without checking.
 func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("the blocked-send wedge this test needs does not reproduce on Windows")
-	}
 	exe, err := os.Executable()
 	require.NoError(t, err)
 	dir := t.TempDir()

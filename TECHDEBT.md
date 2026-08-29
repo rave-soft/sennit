@@ -135,9 +135,14 @@ deleted, and the history stays in git.
     отменяет.
 
     `skills` — остались два места, оба не про эту границу:
-    `import.go` — это `sennit import`, у него свой пункт (→
-    `internal/importer`); `agents_markdown.go` зовёт
-    `skills.SplitFrontmatter`, чистый парсер.
+    `import.go` уехал в `internal/importer`, а `SplitFrontmatter` — в
+    листовой `internal/frontmatter`, откуда его берут все трое (skills,
+    config, importer). Заявленная причина экспорта («у config этот импорт
+    и так есть — см. doctor.go и import.go») к тому моменту стала ложной:
+    оба файла из конфига ушли. Проверено: `go list -deps
+    ./internal/config` больше не содержит ни `skills`, ни `clipboard`, ни
+    `db`. Заодно у парсера появились тесты на BOM, CRLF, пустой блок и
+    горизонтальную черту в теле — их не было ни одного.
 
     `oauth/{codex,copilot}` — **записанный следующий шаг не работает, и
     это проверено, а не предположено.** `SetupGitHubCopilot`/`SetupCodex`
@@ -194,10 +199,15 @@ deleted, and the history stays in git.
   `config/provider.go`, `lsp.Client` разнесён на
   `runtime`/`diagnosticsStore`/`filesync`/`requests` (403 строки вместо
   834). Открыто: `Coordinator` (интерфейс из 20 методов плюс построение
-  провайдеров, OAuth-refresh и cost под-агентов), `internal/ui/model`
-  (18.2k строк non-test в 54 файлах), `sennit import` в пакете `config`
-  (→ `internal/importer`). Каждый — отдельный PR; порядок значения не
-  имеет, они независимы.
+  провайдеров, OAuth-refresh и cost под-агентов) и `internal/ui/model`
+  (18.2k строк non-test в 54 файлах). `sennit import` **вынесен
+  2026-08-29** в `internal/importer` (557 строк). Связность оказалась
+  тонкой: наружу торчали `ProviderConfig`, `GlobalConfig()`,
+  `ResolveModelString`, `ClaudeToolNames`, `CanonicalToolName` — уже
+  экспортированные, — плюс два внутренних (`stringList`, `validAgentID`).
+  Оба экспортированы, а не скопированы, и именно в этом смысл: импорт
+  обязан принимать ровно то, что принимает загрузка, иначе `sennit
+  import` напишет агента, которого не прочитает `sennit`.
 
   `Coordinator` из этого списка снят 2026-08-29: интерфейс на месте, но
   ни один потребитель больше не получает его целиком — `AgentDispatcher`
@@ -578,3 +588,22 @@ mutation disabling the UNC branch left the suite green.
 **Latent, not touched:** `filetracker`'s `filepath.Rel(s.workingDir, path)` has the
 same spelling sensitivity, but it was not in the failure list and widening scope on
 suspicion was not worth it.
+
+**Round five (2026-08-29) -- a test that killed its own fake server.** The
+macOS leg went red twice on the same commit, on
+`TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown`. The scenario needs
+a server that is alive and has stopped reading stdin, so the caller's write
+blocks on pipe back-pressure; the fake server did it with `select {}`, which
+parks the only goroutine that process has -- the exact condition the runtime's
+deadlock detector panics on. Whether it fires depends on what else happens to be
+runnable, so the server sometimes went quiet and sometimes died, and a dead
+server closes the pipe, which makes the write return at once. The failure then
+reads as "large send completed", i.e. the opposite of what was being set up.
+
+Same lesson as round two, one layer down: the test was marked unix-only because
+Windows showed this symptom, and the symptom was read as a platform property.
+It was the test. The Windows skip stays until a run says otherwise, and the
+failure message now reports whether the candidate process is still alive --
+"connection is closed" reads identically whether the send raced a transport we
+closed or the server died holding its end of the pipe, and those need different
+fixes.
