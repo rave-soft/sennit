@@ -9,6 +9,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/workspacelock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,7 +72,7 @@ func TestConnect_IgnoresContendedWorkspaceLock(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(ResetPool)
 
-	lockObj, err := AcquireWorkspaceLock(dataDir)
+	lockObj, err := workspacelock.Acquire(dataDir)
 	require.NoError(t, err, "expected to take the workspace lock for the first time")
 	t.Cleanup(lockObj.Release)
 

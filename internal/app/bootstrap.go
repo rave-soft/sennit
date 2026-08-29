@@ -15,6 +15,7 @@ import (
 	gitpkg "github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/herdr"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/workspacelock"
 )
 
 // BootstrapOptions configures Bootstrap. Fields marked "top-level" or
@@ -132,13 +133,13 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		return nil, err
 	}
 
-	var wsLock *db.WorkspaceLock
+	var wsLock *workspacelock.Lock
 	if opts.WorkspaceLock {
 		lockDir, err := workspaceLockDir(ctx, cfg.WorkingDir(), cfg.Config().Options.DataDirectory)
 		if err != nil {
 			return nil, err
 		}
-		wsLock, err = db.AcquireWorkspaceLock(lockDir)
+		wsLock, err = workspacelock.Acquire(lockDir)
 		if err != nil {
 			return nil, err
 		}
@@ -232,7 +233,7 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	// time, not what it held now. The very next line sets wsLock = nil
 	// (to disarm the early-return defer above once ownership has moved
 	// here), which used to leave this closure releasing a nil
-	// *WorkspaceLock: Release is a documented no-op on nil, so the OS
+	// *workspacelock.Lock: Release is a documented no-op on nil, so the OS
 	// lock was silently never released.
 	lockToRelease := wsLock
 	if err := appInstance.AddFinalCleanup(func(context.Context) error {

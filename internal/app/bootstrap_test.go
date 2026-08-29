@@ -16,6 +16,7 @@ import (
 
 	gitpkg "github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/hooks"
+	"github.com/rave-soft/sennit/internal/workspacelock"
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
@@ -43,7 +44,7 @@ func TestWorkspaceLockHelperProcess(t *testing.T) {
 	if os.Getenv("SENNIT_WORKSPACE_LOCK_HELPER") != "1" {
 		return
 	}
-	lock, err := db.AcquireWorkspaceLock(os.Args[len(os.Args)-1])
+	lock, err := workspacelock.Acquire(os.Args[len(os.Args)-1])
 	if err != nil {
 		fmt.Fprintln(os.Stdout, err)
 		os.Exit(1)
@@ -224,7 +225,7 @@ func TestBootstrap_WorkspaceLockReleasedOnShutdown(t *testing.T) {
 	require.NoError(t, err)
 	result.App.Shutdown()
 
-	lock, err := db.AcquireWorkspaceLock(dataDir)
+	lock, err := workspacelock.Acquire(dataDir)
 	require.NoError(t, err, "workspace lock should be released after Shutdown")
 	lock.Release()
 }
@@ -263,7 +264,7 @@ func TestWorkspaceLock_DifferentRepositoriesDoNotConflict(t *testing.T) {
 	otherRepo := initWorkspaceRepo(t)
 	lockDir, err := workspaceLockDir(t.Context(), repo, t.TempDir())
 	require.NoError(t, err)
-	lock, err := db.AcquireWorkspaceLock(lockDir)
+	lock, err := workspacelock.Acquire(lockDir)
 	require.NoError(t, err)
 	defer lock.Release()
 
@@ -279,7 +280,7 @@ func TestWorkspaceLock_NonGitUsesDataDirFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dataDir, lockDir)
 
-	lock, err := db.AcquireWorkspaceLock(lockDir)
+	lock, err := workspacelock.Acquire(lockDir)
 	require.NoError(t, err)
 	defer lock.Release()
 	requireWorkspaceLockContended(t, dataDir)
@@ -338,9 +339,9 @@ func TestWorkspaceLock_ReleaseIsRefcounted(t *testing.T) {
 	repo := initWorkspaceRepo(t)
 	commonDir, err := gitpkg.CommonDir(t.Context(), repo)
 	require.NoError(t, err)
-	parent, err := db.AcquireWorkspaceLock(commonDir)
+	parent, err := workspacelock.Acquire(commonDir)
 	require.NoError(t, err)
-	child, err := db.AcquireWorkspaceLock(commonDir)
+	child, err := workspacelock.Acquire(commonDir)
 	require.NoError(t, err)
 	child.Release()
 	requireWorkspaceLockContended(t, commonDir)
@@ -432,7 +433,7 @@ func requireWorkspaceLockContended(t *testing.T, lockDir string) {
 	require.NoError(t, cmd.Start())
 	line, err := bufio.NewReader(stdout).ReadString('\n')
 	require.NoError(t, err)
-	require.Contains(t, line, db.ErrWorkspaceLocked.Error())
+	require.Contains(t, line, workspacelock.ErrLocked.Error())
 	require.NoError(t, stdin.Close())
 	require.Error(t, cmd.Wait())
 }
