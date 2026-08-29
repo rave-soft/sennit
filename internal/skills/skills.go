@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/charlievieth/fastwalk"
+	"github.com/rave-soft/sennit/internal/frontmatter"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"gopkg.in/yaml.v3"
 )
@@ -165,13 +166,13 @@ func Parse(path string) (*Skill, error) {
 
 // ParseContent parses a SKILL.md from raw bytes.
 func ParseContent(content []byte) (*Skill, error) {
-	frontmatter, body, err := splitFrontmatter(string(content))
+	header, body, err := frontmatter.Split(string(content))
 	if err != nil {
 		return nil, err
 	}
 
 	var skill Skill
-	if err := yaml.Unmarshal([]byte(frontmatter), &skill); err != nil {
+	if err := yaml.Unmarshal([]byte(header), &skill); err != nil {
 		return nil, fmt.Errorf("parsing frontmatter: %w", err)
 	}
 
@@ -179,44 +180,6 @@ func ParseContent(content []byte) (*Skill, error) {
 	skill.Source = string(content)
 
 	return &skill, nil
-}
-
-// splitFrontmatter extracts YAML frontmatter and body from markdown content.
-// SplitFrontmatter is exported because internal/config parses the same
-// file shape for agent markdown and carried a line-for-line copy of this
-// function to avoid the import — an import it already has (see doctor.go
-// and import.go). One parser means one answer to the awkward cases: a BOM,
-// CRLF line endings, leading blank lines, an unclosed block.
-func SplitFrontmatter(content string) (frontmatter, body string, err error) {
-	return splitFrontmatter(content)
-}
-
-func splitFrontmatter(content string) (frontmatter, body string, err error) {
-	// Strip UTF-8 BOM for compatibility with editors that include it.
-	content = strings.TrimPrefix(content, "\uFEFF")
-	// Normalize line endings to \n for consistent parsing.
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-
-	lines := strings.Split(content, "\n")
-	start := slices.IndexFunc(lines, func(line string) bool {
-		return strings.TrimSpace(line) != ""
-	})
-	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
-		return "", "", errors.New("no YAML frontmatter found")
-	}
-
-	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
-		return strings.TrimSpace(line) == "---"
-	})
-	if endOffset == -1 {
-		return "", "", errors.New("unclosed frontmatter")
-	}
-	end := start + 1 + endOffset
-
-	frontmatter = strings.Join(lines[start+1:end], "\n")
-	body = strings.Join(lines[end+1:], "\n")
-	return frontmatter, body, nil
 }
 
 // walkSkillFiles walks each of paths looking for SKILL.md files, the shared
