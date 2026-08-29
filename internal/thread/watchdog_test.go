@@ -133,10 +133,19 @@ func TestIdleWatchdog_IgnoresFinishedTask(t *testing.T) {
 	coord := parentApp.Coordinator().(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
-	require.Eventually(t, func() bool {
-		got, err := store.Get(t.Context(), st.ID)
-		return err == nil && got.Status == thread.StatusCompleted
-	}, eventuallyTimeout, eventuallyTick)
+	// Wait for the delivery, not for the stored status. Finalization
+	// writes the terminal status first and only then calls
+	// deliverStoredCompletion (lifecycle.go, finishRun), so the status
+	// this test used to wait on becomes visible while the one delivery it
+	// is about to count has not happened yet. On a loaded runner the
+	// goroutine gets descheduled in exactly that window and the assertion
+	// below reads zero — which is how this failed in CI while passing
+	// thirty times under -race locally. Every other test in this package
+	// already waits on the delivery for the same reason; waiting on it
+	// also implies the status write, which is asserted separately after
+	// the sweep.
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 },
+		eventuallyTimeout, eventuallyTick, "the task's own completion must be delivered before the sweep runs")
 
 	tasks.SweepIdleTasksForTest(t.Context(), time.Unix(st.CreatedAt, 0).Add(thread.TaskIdleTimeoutForTest+time.Hour))
 
