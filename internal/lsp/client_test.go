@@ -1474,11 +1474,10 @@ func TestClient_FailedRestartRollsBackCandidateFilesAndRetries(t *testing.T) {
 // "large send completed before process destruction: jsonrpc2: connection
 // is closed" there — read at the time as a platform property. The same
 // message then appeared twice running on macOS, and the cause turned out
-// to be the fake server killing itself on `select {}` rather than
-// anything about the platform. With that fixed the skip has no evidence
-// behind it, so it is gone; if Windows still cannot hold the wedge, the
-// failure now says whether the candidate process survived, which is the
-// thing the old diagnosis assumed without checking.
+// to be the fake server killing itself on `select {}`. With that fixed
+// the skip was removed, and the Windows leg passes: the wedge holds on
+// all three platforms, and the write really does block on back-pressure
+// everywhere. The skip had been standing in for a bug in this file.
 func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
 	exe, err := os.Executable()
 	require.NoError(t, err)

@@ -602,8 +602,10 @@ reads as "large send completed", i.e. the opposite of what was being set up.
 
 Same lesson as round two, one layer down: the test was marked unix-only because
 Windows showed this symptom, and the symptom was read as a platform property.
-It was the test. The Windows skip stays until a run says otherwise, and the
-failure message now reports whether the candidate process is still alive --
+It was the test. Confirmed by removing the skip and running it: with the fake
+server fixed, the Windows leg passes, so the wedge holds on all three platforms
+and the skip had been standing in for a bug in the test file. The failure
+message now also reports whether the candidate process is still alive --
 "connection is closed" reads identically whether the send raced a transport we
 closed or the server died holding its end of the pipe, and those need different
 fixes.
