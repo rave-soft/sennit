@@ -40,11 +40,15 @@ func TestGlobTool_OrdersByModificationTime(t *testing.T) {
 		GlobParams{Pattern: "*.txt"})
 	require.False(t, response.IsError, response.Content)
 
+	// ToSlash because the tool renders every path through
+	// normalizeFilePaths, as the rest of this package's glob assertions
+	// already do. Comparing against filepath.Join passes on unix by
+	// coincidence and fails on Windows, where the two spellings differ.
 	got := strings.Split(strings.TrimSpace(response.Content), "\n")
 	require.Equal(t, []string{
-		filepath.Join(dir, "c.txt"),
-		filepath.Join(dir, "b.txt"),
-		filepath.Join(dir, "a.txt"),
+		filepath.ToSlash(filepath.Join(dir, "c.txt")),
+		filepath.ToSlash(filepath.Join(dir, "b.txt")),
+		filepath.ToSlash(filepath.Join(dir, "a.txt")),
 	}, got, "newest first")
 }
 
@@ -62,5 +66,5 @@ func TestGlobTool_FindsDirectories(t *testing.T) {
 	response := runToolWith(t, NewGlobTool(dir, config.ToolGlob{}), t.Context(), GlobToolName,
 		GlobParams{Pattern: "pkg"})
 	require.False(t, response.IsError, response.Content)
-	require.Equal(t, filepath.Join(dir, "pkg"), strings.TrimSpace(response.Content))
+	require.Equal(t, filepath.ToSlash(filepath.Join(dir, "pkg")), strings.TrimSpace(response.Content))
 }
