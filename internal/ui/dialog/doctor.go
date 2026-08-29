@@ -227,17 +227,16 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 	return [][]key.Binding{d.ShortHelp()}
 }
 
-// DoctorProblems collects every config.Problem for this workspace: the
-// static findings from config.Doctor, any MCP server currently stuck in an
-// error/needs-auth state, and any SKILL.md that failed to parse or
-// validate. This mirrors sennit_info's [problems] section
-// (domain/agent/tools/sennit_info.go's writeProblems) — the same merge, on
-// the UI side of the workspace.Workspace boundary since internal/config
-// cannot import the MCP client package.
-func DoctorProblems(com *common.Common) []config.Problem {
-	return doctorProblemsWithEnvironment(com, config.EnvironmentProblems)
-}
-
+// doctorProblemsWithEnvironment collects every config.Problem for this
+// workspace: the static findings from config.Doctor, any MCP server
+// currently stuck in an error/needs-auth state, and any SKILL.md that
+// failed to parse or validate. This mirrors sennit_info's [problems]
+// section (domain/agent/tools/sennit_info.go's writeProblems) — the same
+// merge, on the UI side of the workspace.Workspace boundary since
+// internal/config cannot import the MCP client package.
+//
+// environmentProblems is injected so tests can drive the dialog without
+// the real environment probe.
 func doctorProblemsWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) []config.Problem {
 	problems := config.Doctor(com.Config())
 	problems = append(problems, environmentProblems()...)

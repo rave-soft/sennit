@@ -72,11 +72,6 @@ func NewFixtureHTTPServer(cfg FixtureConfig) (*FixtureServer, *httptest.Server) 
 	return fsrv, srv
 }
 
-// ResourceURL returns the URL for a deterministic fixture resource.
-func (s *FixtureServer) ResourceURL(path string) string {
-	return s.resourceBaseURL + path
-}
-
 // ServeHTTP implements deterministic resource and OpenAI-compatible chat endpoints.
 func (s *FixtureServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
@@ -137,16 +132,6 @@ func (s *FixtureServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	turn := fixtureTurnWithResourceURLs(sc.Turns[turnIdx], s.resourceBaseURL)
 	sseStream(w, turn, s.config.DefaultModel)
-}
-
-// ResetTurns resets the turn counters for all scenarios. Call this
-// before starting a new test run.
-func (s *FixtureServer) ResetTurns() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for k := range s.turns {
-		delete(s.turns, k)
-	}
 }
 
 // ---------------------------------------------------------------------------
