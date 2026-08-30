@@ -447,7 +447,24 @@ func (cm *connectionManager) getOrRenewClient(ctx context.Context, cfg ConfigPro
 	if usesOAuth(m) && !cm.reg.reserveTokenMutation(cfg, name, m, renewal) {
 		return nil, errLostOwnership
 	}
-	newSess, err := cm.newSession(ctx, cfg, name, m, renewal, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	// Detach from ctx before building the renewed session: on the lazy
+	// renewal path (a broken ping discovered inside a tool call), ctx is
+	// that tool call's own context, derived from the turn's per-generation
+	// ctx (run_turn.go) - not the long-lived init ctx a fresh server gets
+	// on startup. createSession derives the stdio transport's
+	// exec.CommandContext and SIGKILL-the-group cmd.Cancel from whatever
+	// context it is given, so a session built on the caller's ctx gets
+	// killed the moment that tool call returns, and the very next call
+	// pings it, finds it dead, and renews again - paying process start +
+	// initialize + list-tools on every single call and losing all
+	// per-process server state in between. context.WithoutCancel keeps
+	// this call's values (for tracing) but not its cancellation; the
+	// connect itself is still bounded by createSession's own
+	// mcpTimeout-derived timer, so a renewal can't hang forever even
+	// detached. ctx itself is still used for ping/list above and
+	// publishOrClose below, where a caller cancellation genuinely should
+	// be observed.
+	newSess, err := cm.newSession(context.WithoutCancel(ctx), cfg, name, m, renewal, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		cm.reg.clearMCPDataFor(name, renewal)
 		if usesOAuth(m) && isOAuthInitErr(err) {

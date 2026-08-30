@@ -674,6 +674,23 @@ func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConf
 	}
 }
 
+// currentRotationAccount resolves the account a rotation callback should
+// act on for providerCfg's provider. providerCfg is captured by value once
+// per turn (turn_dispatcher.go), so after the first rotation it still names
+// the pre-rotation account; active, if present, is restored on every
+// successful applyRotationPick with a freshly rebuilt runtime whose
+// providerCfg carries the account that is actually live now. Falling back
+// to providerCfg.Account keeps this correct for callers that pass a nil
+// active (e.g. no top-level agent to rebuild for).
+func currentRotationAccount(providerCfg config.ProviderConfig, active *activeRuntime) string {
+	if active != nil {
+		if runtime := active.load(); runtime != nil {
+			return runtime.providerCfg.Account
+		}
+	}
+	return providerCfg.Account
+}
+
 // accountLabel returns a's display name for a rotation notification:
 // its user-editable Label when set, its bookkeeping ID otherwise.
 func accountLabel(a accounts.Account) string {
@@ -745,13 +762,18 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 	}
 	inputs := port.inputs
 	return func(ctx context.Context) {
+		// Resolve the account live rather than trusting providerCfg.Account:
+		// providerCfg is captured by value once per turn, so after a
+		// rotation it still names the pre-rotation account (see
+		// currentRotationAccount's doc comment).
+		account := currentRotationAccount(providerCfg, active)
 		// RotateThreshold is Codex-only today (see capabilities.go), so
 		// reading its usage snapshot straight from the codex package is
 		// deliberate, not a layering slip - a future non-Codex threshold
 		// provider would need this coupling broken out (e.g. a small
 		// per-provider usage-lookup registry) before it could reuse this
 		// path.
-		usage, ok := codex.UsageFor(providerCfg.Account)
+		usage, ok := codex.UsageFor(account)
 		if !ok {
 			return
 		}
@@ -760,9 +782,9 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 			slog.Warn("Threshold rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
 			return
 		}
-		acct := accounts.Account{ID: providerCfg.Account, Usage: usage.Snapshot()}
+		acct := accounts.Account{ID: account, Usage: usage.Snapshot()}
 		for i, a := range all {
-			if a.ID == providerCfg.Account {
+			if a.ID == account {
 				acct = a
 				acct.Usage = usage.Snapshot()
 				// Pick reads exhaustion off its own candidates list, not
@@ -831,14 +853,21 @@ func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig
 	}
 	inputs := port.inputs
 	return func(ctx context.Context, providerErr *fantasy.ProviderError) error {
-		rotator.MarkRateLimited(providerCfg.Account, retryAfterFromHeaders(providerErr))
+		// Resolve the account live rather than trusting providerCfg.Account:
+		// providerCfg is captured by value once per turn, so after a
+		// rotation it still names the pre-rotation account (see
+		// currentRotationAccount's doc comment) - without this, a second
+		// 429 on the newly-picked account would mark the WRONG account
+		// rate-limited and hot-loop retrying on the still-limited one.
+		account := currentRotationAccount(providerCfg, active)
+		rotator.MarkRateLimited(account, retryAfterFromHeaders(providerErr))
 
 		all, err := b.accountStore().List(providerCfg.ID)
 		if err != nil {
 			slog.Warn("Rate-limit rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
 			return err
 		}
-		picked, err := rotator.Pick(providerCfg.ID, providerCfg.Account, all)
+		picked, err := rotator.Pick(providerCfg.ID, account, all)
 		if err != nil {
 			var exhausted *accounts.ErrAllExhausted
 			if errors.As(err, &exhausted) && b.notify != nil {
@@ -854,7 +883,7 @@ func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig
 			}
 			return err
 		}
-		if picked.ID == providerCfg.Account {
+		if picked.ID == account {
 			// Pick found nothing better to switch to (single-account
 			// provider, or debounced back onto the same still-usable
 			// account) - applying it would be a no-op ActivateAccount

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -167,18 +168,40 @@ func expandPath(path string, store ConfigProvider) string {
 	return path
 }
 
-// loadContextFiles loads and deduplicates context files from a list of paths.
-func loadContextFiles(paths []string, store ConfigProvider) map[string][]ContextFile {
-	files := map[string][]ContextFile{}
+// loadContextFiles loads and deduplicates context files from a list of
+// paths, in the order paths lists them - so the same working directory
+// always produces the same system-prompt text (see promptData), which
+// matters for provider prompt caching on the cached prefix.
+//
+// Each path is stat'd before it is considered for dedup, and only two
+// paths that resolve to the SAME on-disk file (os.SameFile - same device
+// and inode, so this works for a symlink or a hardlink too, not just an
+// identical string) collapse into one entry. Deduplicating on the
+// case-folded path string instead used to mean that on a case-sensitive
+// filesystem a path that doesn't exist (e.g. "AGENTS.md" when only
+// "agents.md" is present) still claimed the dedup key and silently
+// prevented the real file from ever being stat'd - config.go deliberately
+// lists AGENTS.md, agents.md, and Agents.md as separate candidates
+// precisely so a project using any one casing is found, so a Linux project
+// with only agents.md must not be treated as having no context file at
+// all.
+func loadContextFiles(paths []string, store ConfigProvider) []ContextFile {
+	var result []ContextFile
+	var seen []os.FileInfo
 	for _, pth := range paths {
 		expanded := expandPath(pth, store)
-		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		fullPath := filepathext.SmartJoin(store.WorkingDir(), expanded)
+		info, err := os.Stat(fullPath)
+		if err != nil {
 			continue
 		}
-		files[pathKey] = processContextPath(expanded, store)
+		if slices.ContainsFunc(seen, func(s os.FileInfo) bool { return os.SameFile(s, info) }) {
+			continue
+		}
+		seen = append(seen, info)
+		result = append(result, processContextPath(expanded, store)...)
 	}
-	return files
+	return result
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store ConfigProvider) PromptDat {
@@ -246,12 +269,8 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 		data.GitStatus = getGitStatus(ctx, store.WorkingDir())
 	}
 
-	for _, files := range contextFiles {
-		data.ContextFiles = append(data.ContextFiles, files...)
-	}
-	for _, files := range globalContextFiles {
-		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
-	}
+	data.ContextFiles = contextFiles
+	data.GlobalContextFiles = globalContextFiles
 	return data
 }
 

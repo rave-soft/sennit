@@ -505,7 +505,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		// the stream outpaces SQL write latency.
 		wasDirty := p.dirty
 		if err == nil && snap.IsFinished() && s.pending[id] == p &&
-			!p.flushing && !p.dirty && p.generation == generation {
+			!p.flushing && !p.dirty && !p.deleted && p.generation == generation {
 			// A finished message needs no coalescing state after its final
 			// snapshot has landed. Stop defensively even though the flush
 			// normally cleared the timer before issuing SQL.

@@ -578,7 +578,7 @@ func (d *delegationFinalizer) updateParentSessionCost(ctx context.Context, child
 	}
 
 	if err := d.sessions.AddCost(ctx, parentSessionID, childSession.Cost); err != nil {
-		return fmt.Errorf("get parent session: %w", err)
+		return fmt.Errorf("add cost to parent session: %w", err)
 	}
 
 	return nil

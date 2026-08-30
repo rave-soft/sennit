@@ -64,8 +64,21 @@ func (r *Registry) RefreshPrompts(ctx context.Context, name string) {
 	publishSingleCatalog(r, r.allPrompts, name, owner, session, prompts, func(c *Counts, n int) { c.Prompts = n })
 }
 
+// hasPromptsCapability reports whether a server's initialize result
+// advertises prompt support. A server that omits "capabilities" entirely
+// from InitializeResult (rather than sending an empty object) leaves
+// Capabilities nil, matching hasChannelCapability's own nil check
+// (channel.go) - guarding against it here avoids a nil-pointer panic
+// reading .Prompts off it. On the startup path that panic would otherwise
+// be recovered into a confusing StateError; on the renewal path
+// (mcp-tools.go's tool-call goroutine) nothing in this package recovers it
+// at all.
+func hasPromptsCapability(res *mcp.InitializeResult) bool {
+	return res != nil && res.Capabilities != nil && res.Capabilities.Prompts != nil
+}
+
 func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
-	if c.InitializeResult().Capabilities.Prompts == nil {
+	if !hasPromptsCapability(c.InitializeResult()) {
 		return nil, nil
 	}
 	result, err := c.ListPrompts(ctx, &mcp.ListPromptsParams{})

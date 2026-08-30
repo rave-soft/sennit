@@ -122,9 +122,20 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
 			}
 
-			body, err := io.ReadAll(io.LimitReader(resp.Body, MaxFetchSize))
+			// Read one byte past the cap so a body that exactly fills it
+			// can be told apart from one that was genuinely cut short:
+			// truncated is recorded off the RAW read, before any
+			// text/markdown conversion shrinks content well under
+			// MaxFetchSize and would otherwise make the truncation notice
+			// below never fire (a 300KB page cut to 100KB then converted
+			// to ~30KB of markdown must still be reported as incomplete).
+			body, err := io.ReadAll(io.LimitReader(resp.Body, MaxFetchSize+1))
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to read response body: " + err.Error()), nil
+			}
+			truncated := len(body) > MaxFetchSize
+			if truncated {
+				body = body[:MaxFetchSize]
 			}
 
 			// The size cap cuts at a byte offset, which lands mid-rune on
@@ -176,9 +187,10 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 					content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
 				}
 			}
-			// truncate content if it exceeds max read size
-			if int64(len(content)) >= MaxFetchSize {
-				content = truncateToRuneBoundary(content, MaxFetchSize)
+			// Report truncation off the raw-read flag, not off the
+			// (possibly since-shrunk-by-conversion) content length - see
+			// the comment on truncated's assignment above.
+			if truncated {
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxFetchSize)
 			}
 

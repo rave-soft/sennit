@@ -164,6 +164,40 @@ func TestReadTextFileCountDoesNotCountEmptySplitTail(t *testing.T) {
 	}
 }
 
+// TestReadTextFileCountDoesNotCountEmptySplitTail_NonLimitBound is the
+// counterpart to TestReadTextFileCountDoesNotCountEmptySplitTail for the
+// path where the loop stops at EOF rather than at limit: with a limit big
+// enough that every real line fits, the final ReadString past the file's
+// trailing newline returns ("", io.EOF), a phantom empty "line" that used
+// to be counted, rendered as an extra blank line in the tool's output, and
+// recorded one line past EOF by RecordPartialRead. "a\nb\n" has exactly two
+// real lines, matching countFileLines' own count for the same input.
+func TestReadTextFileCountDoesNotCountEmptySplitTail_NonLimitBound(t *testing.T) {
+	path := t.TempDir() + "/file.txt"
+	if err := os.WriteFile(path, []byte("a\nb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, more, consumed, err := readTextFileCount(path, 0, 100, 0)
+	if err != nil || content != "a\nb" || more || consumed != 2 {
+		t.Fatalf("content=%q more=%v consumed=%d err=%v", content, more, consumed, err)
+	}
+}
+
+// TestReadTextFileCountOffsetAtEnd_ReturnsZeroLines is the offset==total
+// counterpart: skipping past every real line must land the reader exactly
+// at EOF, and that trailing empty read must not be reported as a single
+// phantom line of empty content.
+func TestReadTextFileCountOffsetAtEnd_ReturnsZeroLines(t *testing.T) {
+	path := t.TempDir() + "/file.txt"
+	if err := os.WriteFile(path, []byte("a\nb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, more, consumed, err := readTextFileCount(path, 2, 100, 0)
+	if err != nil || content != "" || more || consumed != 0 {
+		t.Fatalf("content=%q more=%v consumed=%d err=%v", content, more, consumed, err)
+	}
+}
+
 func TestGrepContextFormat(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/file.txt"

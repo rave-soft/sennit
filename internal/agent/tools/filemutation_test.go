@@ -44,6 +44,32 @@ func TestWriteTool_PermissionDeniedDoesNotWriteFile(t *testing.T) {
 	require.NoFileExists(t, target)
 }
 
+// TestWriteTool_PermissionDeniedDoesNotCreateParentDirs is the regression
+// test for write.go's early ensureParentDir call: it used to create
+// newdir/sub/ on disk before applyFileMutation ever reached the permission
+// prompt, so a denied write for a path inside a not-yet-existing directory
+// tree still left that tree behind. applyFileMutation already creates the
+// parent AFTER approval (filemutation.go), which made the early call both
+// redundant and premature; removing it means a denial leaves nothing on
+// disk at all.
+func TestWriteTool_PermissionDeniedDoesNotCreateParentDirs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "newdir", "sub", "new.txt")
+	tool := NewWriteTool(nil, denyingPermissions{}, &mockHistoryService{}, mockFileTrackerService{}, dir)
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  WriteToolName,
+		Input: `{"file_path":"newdir/sub/new.txt","content":"hello\n"}`,
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "a denied write must not report success")
+	require.NoFileExists(t, target)
+	require.NoDirExists(t, filepath.Join(dir, "newdir"), "a denied write must not leave the parent directory tree behind")
+}
+
 // staleFileTracker reports a fixed, caller-chosen LastReadTime instead of
 // the "always just read it" behavior mockFileTrackerService gives, so a
 // test can put a file's on-disk mtime after the session's last read of it.

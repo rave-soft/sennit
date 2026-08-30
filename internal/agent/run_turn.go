@@ -446,6 +446,35 @@ func (a *sessionAgent) finishTurn(
 		}
 	}
 
+	return a.completeTurn(ctx, call, ac, cancel, t, reporter, result, err, summarizeFailed)
+}
+
+// completeTurn runs the release/notify/drain/hand-off tail every terminal
+// turn outcome needs, regardless of whether Stream itself succeeded:
+// releases this turn's active-request slot, fires AgentFinished, and hands
+// off to the next queued call (if any) so a prompt queued behind this turn
+// - including one carrying its own RunID - is never stranded waiting on a
+// RunComplete that would otherwise never come.
+//
+// finishTurn (the Stream-success path) and runTurn's Stream-error path (a
+// non-cancel error never reached finishTurn before this was extracted) both
+// funnel through here for exactly that reason - see
+// TestRunTurn_StreamErrorStillDrainsQueue.
+//
+// summarizeFailed, when non-nil, is folded into this turn's own terminal
+// RunComplete exactly as finishTurn's shouldSummarize branch does; the
+// Stream-error caller has no summarize step of its own and passes nil.
+func (a *sessionAgent) completeTurn(
+	ctx context.Context,
+	call SessionAgentCall,
+	ac *activeCancel,
+	cancel context.CancelFunc,
+	t *runTurn,
+	reporter *completionReporter,
+	result *fantasy.AgentResult,
+	err error,
+	summarizeFailed error,
+) (*fantasy.AgentResult, *SessionAgentCall, error) {
 	// Release active request before publishing the notification.
 	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
 	// tea.Msg arrives, so the cleanup must precede the notify or
@@ -523,7 +552,16 @@ func (a *sessionAgent) finishTurn(
 	}
 	if outerOwesRunComplete {
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if summarizeFailed != nil {
+		// err carries this turn's own Stream failure (the finishTurn
+		// caller always passes nil here, since it is only reached after
+		// Stream succeeded); summarizeFailed carries a failure from the
+		// summarize step that ran after a successful Stream. The two are
+		// mutually exclusive in practice, but check err first so a real
+		// Stream failure is never masked.
+		if err != nil {
+			complete.Error = err.Error()
+			complete.Cancelled = errors.Is(err, context.Canceled)
+		} else if summarizeFailed != nil {
 			complete.Error = summarizeFailed.Error()
 		}
 		if t.currentAssistant != nil {
@@ -774,7 +812,39 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 
 	if err != nil {
 		streamResult, streamErr := t.handleStreamError(err)
-		return SteerRan, streamResult, nil, streamErr
+		// Cancel already clears the queue (see dispatcher.Cancel), so there
+		// is nothing behind this turn that needs draining or a hand-off.
+		//
+		// t.currentAssistant == nil means PrepareStep failed on step 0,
+		// before createStepAssistant ever ran - handleStreamError's own
+		// "before assistant" branch. The one PrepareStep failure that
+		// reaches here today is foldSteering's own persist failure
+		// (turn.go): it re-queues the unpersisted remainder of THIS call's
+		// own folded follow-ups ITSELF before returning its error, so by
+		// the time we would drain the queue here, that queue holds this
+		// same failure's own rollback, not an unrelated caller's queued
+		// prompt. Handing off to it would swallow this call's own error
+		// return - its only completion channel when call.RunID is empty -
+		// in favor of running that rolled-back remainder's own turn and
+		// returning ITS result instead (see run's loop: next != nil means
+		// the ORIGINAL call's result is never returned). A genuinely
+		// separate queued caller stuck behind a mid-stream provider/network
+		// failure - the bug this tail exists for - always has a live
+		// assistant message by the time Stream errors (PrepareStep already
+		// succeeded for that step), so this gate does not skip that case.
+		if errors.Is(err, context.Canceled) || t.currentAssistant == nil {
+			return SteerRan, streamResult, nil, streamErr
+		}
+		// A non-cancel Stream error (a genuinely failed request, not a
+		// user cancellation) used to return here directly, skipping the
+		// release/notify/drain tail entirely - the only drainNext call in
+		// the turn path lived inside finishTurn, which this path never
+		// reached. A prompt queued behind the failed turn (including a
+		// RunID-bearing `sennit run` caller) sat in the queue with no
+		// hand-off until its own timeout. completeTurn is the same tail
+		// finishTurn's Stream-success path runs.
+		result, next, retErr = a.completeTurn(ctx, call, ac, cancel, t, reporter, streamResult, streamErr, nil)
+		return SteerRan, result, next, retErr
 	}
 
 	result, next, retErr = a.finishTurn(ctx, genCtx, call, ac, cancel, t, reporter, result, err)

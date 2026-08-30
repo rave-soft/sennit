@@ -162,11 +162,6 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	// Create parent directories
-	if err := ensureParentDir(params.FilePath); err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-
 	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
 
 	// Get session and message IDs

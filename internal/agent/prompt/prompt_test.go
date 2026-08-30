@@ -308,22 +308,63 @@ func TestLoadContextFiles(t *testing.T) {
 		t.Parallel()
 		files := loadContextFiles([]string{"a.md"}, store)
 		require.Len(t, files, 1)
-		require.Len(t, files["a.md"], 1)
-		require.Equal(t, "A", files["a.md"][0].Content)
+		require.Equal(t, "A", files[0].Content)
 	})
 
-	t.Run("deduplicates case-insensitively", func(t *testing.T) {
+	// Same path listed twice (a genuine duplicate, not just a case
+	// variant) must collapse to one entry regardless of platform.
+	t.Run("deduplicates the same path listed twice", func(t *testing.T) {
 		t.Parallel()
-		files := loadContextFiles([]string{"a.md", "A.MD"}, store)
-		// Both paths normalize to the same map key, so only one entry.
+		files := loadContextFiles([]string{"a.md", "a.md"}, store)
 		require.Len(t, files, 1)
 	})
 
-	t.Run("a path that expands to nothing yields an empty slice, not an error", func(t *testing.T) {
+	// Regression test for the case-insensitive-dedup bug: loadContextFiles
+	// used to key dedup on strings.ToLower(path), so a NONEXISTENT
+	// case-variant checked first (AGENTS.md) silently claimed the dedup
+	// slot and the real file (agents.md) was never even stat'd - only ever
+	// exercised on a case-sensitive filesystem, which is why it went
+	// unnoticed. config.go deliberately lists AGENTS.md, agents.md, and
+	// Agents.md as separate candidates so any one casing is found; on a
+	// case-sensitive filesystem with only "agents.md" present, the
+	// nonexistent "AGENTS.md" listed ahead of it must not shadow it.
+	t.Run("a nonexistent case variant does not shadow a real file with different casing", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("this filesystem's case sensitivity is not guaranteed; the dedup logic itself (os.SameFile) is platform-agnostic and covered by the two tests above")
+		}
+		t.Parallel()
+		files := loadContextFiles([]string{"AGENTS.md", "a.md"}, store)
+		require.Len(t, files, 1, "AGENTS.md doesn't exist on disk, so only a.md should load")
+		require.Equal(t, "A", files[0].Content)
+	})
+
+	t.Run("a path that expands to nothing contributes nothing, not an error", func(t *testing.T) {
 		t.Parallel()
 		files := loadContextFiles([]string{"missing.md"}, store)
-		require.Contains(t, files, "missing.md")
-		require.Empty(t, files["missing.md"])
+		require.Empty(t, files)
+	})
+
+	// Regression test for the random-order bug: loadContextFiles used to
+	// build a map[string][]ContextFile and promptData appended its values
+	// by ranging over that map, so the system prompt's context-file order
+	// (and therefore its text) differed between rebuilds of the SAME
+	// config - defeating provider prompt caching on the cached prefix.
+	// loadContextFiles now returns an ordered slice, so repeated calls
+	// with the same paths must always produce paths.md before zeta.md,
+	// matching the order paths lists them in, not map iteration order.
+	t.Run("preserves configured order across repeated calls", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "zeta.md"), []byte("Z"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "alpha.md"), []byte("A2"), 0o644))
+		orderStore := newStore(t, dir)
+		paths := []string{"zeta.md", "alpha.md"}
+		for range 20 {
+			files := loadContextFiles(paths, orderStore)
+			require.Len(t, files, 2)
+			require.Equal(t, "zeta.md", filepath.Base(files[0].Path))
+			require.Equal(t, "alpha.md", filepath.Base(files[1].Path))
+		}
 	})
 }
 

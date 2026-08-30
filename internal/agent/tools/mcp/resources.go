@@ -77,8 +77,14 @@ func (r *Registry) RefreshResources(ctx context.Context, name string) {
 	publishSingleCatalog(r, r.allResources, name, owner, session, resources, func(c *Counts, n int) { c.Resources = n })
 }
 
+// hasResourcesCapability is the resources counterpart to
+// hasPromptsCapability (prompts.go): see its doc comment.
+func hasResourcesCapability(res *mcp.InitializeResult) bool {
+	return res != nil && res.Capabilities != nil && res.Capabilities.Resources != nil
+}
+
 func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
-	if c.InitializeResult().Capabilities.Resources == nil {
+	if !hasResourcesCapability(c.InitializeResult()) {
 		return nil, nil
 	}
 	result, err := c.ListResources(ctx, &mcp.ListResourcesParams{})

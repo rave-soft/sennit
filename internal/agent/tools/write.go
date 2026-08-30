@@ -115,10 +115,6 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
 
-			if err := ensureParentDir(filePath); err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-
 			resp, err := applyFileMutation(fileMutationRequest{
 				editContext: editContext{ctx, permissions, files, filetracker, workingDir},
 				call:        call, filePath: filePath, sessionID: sessionID, toolName: WriteToolName,

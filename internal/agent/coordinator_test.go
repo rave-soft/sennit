@@ -494,7 +494,10 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 		err = coord.delegation.updateParentSessionCost(t.Context(), child.ID, "non-existent")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "get parent session")
+		// AddCost failing is a write-path failure, not a read: the wrap
+		// used to say "get parent session", which was misleading (nothing
+		// here reads the parent session).
+		assert.Contains(t, err.Error(), "add cost to parent session")
 	})
 
 	t.Run("concurrent updates from several sub-agents do not lose a delta", func(t *testing.T) {

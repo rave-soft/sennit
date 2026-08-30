@@ -42,7 +42,12 @@ func newRgSearchCmd(ctx context.Context, name, pattern, path, include string, ca
 	if caseInsensitive {
 		args = append(args, "-i")
 	}
-	args = append(args, pattern)
+	// -e (rather than a bare positional) keeps a pattern starting with "-"
+	// (e.g. "->") from being parsed as a flag - ripgrep would otherwise
+	// exit 2 with "unrecognized flag", which the tool then surfaces as an
+	// opaque "error searching files: exit status 2". literal_text:true
+	// does not help: escapeRegexPattern does not escape "-".
+	args = append(args, "-e", pattern)
 	if include != "" {
 		args = append(args, "--glob", include)
 	}

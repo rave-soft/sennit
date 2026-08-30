@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -164,6 +165,55 @@ func TestIdleSweep_ForgetsADeletedSession(t *testing.T) {
 	require.Empty(t, f.summarized)
 	_, watched := f.dispatcher.lastActivity.Get(sess.ID)
 	require.False(t, watched, "a session that is gone must be dropped from the idle watch")
+}
+
+// flakySessionsService wraps a real sessionstore.Service and makes its
+// first Get call for one specific session ID fail with an injected error,
+// so a test can exercise the idle sweep's handling of a transient store
+// failure without a real database fault.
+type flakySessionsService struct {
+	sessionstore.Service
+	failFor string
+	failErr error
+	calls   int
+}
+
+func (f *flakySessionsService) Get(ctx context.Context, id string) (session.Session, error) {
+	if id == f.failFor && f.calls == 0 {
+		f.calls++
+		return session.Session{}, f.failErr
+	}
+	return f.Service.Get(ctx, id)
+}
+
+// TestIdleSweep_RetriesATransientReadFailureInsteadOfForgettingTheSession is
+// the regression test for idle_summarize.go dropping a session from the
+// idle watch on ANY session.Get error, not just a genuinely missing
+// session: its own doc comment on summarizeIfIdle says only a deleted
+// session is dropped and "anything else is logged and retried on the next
+// sweep", but the code used to call lastActivity.Del for every non-cancel
+// error, including a transient one like "database is locked" - silently and
+// permanently dropping the session from the idle sweep instead of retrying
+// it.
+func TestIdleSweep_RetriesATransientReadFailureInsteadOfForgettingTheSession(t *testing.T) {
+	f, sess := newIdleSweepFixture(t, idleConfig, 80_000)
+	f.dispatcher.markActivity(sess.ID)
+
+	flaky := &flakySessionsService{Service: f.sessions, failFor: sess.ID, failErr: errors.New("database is locked")}
+	f.dispatcher.sessions = flaky
+
+	// The transient failure must not summarize AND must not forget the
+	// session - it stays on the idle watch for a retry.
+	f.dispatcher.sweepIdleSessions(t.Context(), time.Now().Add(time.Hour))
+	require.Empty(t, f.summarized, "a transient read failure must not be treated as ready to summarize")
+	_, watched := f.dispatcher.lastActivity.Get(sess.ID)
+	require.True(t, watched, "a transient read failure must retry on the next sweep, not drop the session from the idle watch")
+	require.Equal(t, 1, flaky.calls)
+
+	// The next sweep's Get succeeds (the store recovered), and the session
+	// is summarized normally.
+	f.dispatcher.sweepIdleSessions(t.Context(), time.Now().Add(2*time.Hour))
+	require.Equal(t, []string{sess.ID}, f.summarized)
 }
 
 // TestIdleSweep_ReadsTheConfiguredThresholds: the numbers are the user's,

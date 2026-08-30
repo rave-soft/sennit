@@ -1186,6 +1186,76 @@ func TestDeleteVersusInFlightUpdate_NoPendingLeak(t *testing.T) {
 	}
 }
 
+// TestDeleteVersusInFlightFlush_TombstoneSurvivesFlushCleanup is the
+// regression test for the flush-cleanup path dropping a mid-flush
+// tombstone: flushOne's post-write cleanup deletes s.pending[id] once a
+// finished message's flush lands cleanly, so it can stop coalescing state
+// for a message with nothing left to send. But if a Delete lands WHILE
+// that SQL write is in flight, evictAndPublishDeleted reuses the very same
+// *pendingState pointer flushOne is about to clean up (Delete finds the
+// entry already present and marks it, rather than creating a new one) and
+// sets p.deleted = true. The cleanup's condition used to check
+// flushing/dirty/generation but not p.deleted, so it deleted the
+// tombstoned entry anyway — losing the tombstone. A later Update then found
+// no pending entry, created a fresh one, and issued an UPDATE against a
+// row Delete had already removed, publishing UpdatedEvent for a message
+// that no longer exists.
+func TestDeleteVersusInFlightFlush_TombstoneSurvivesFlushCleanup(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := sessionstore.NewService(q, conn, "/test/project")
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	svc := NewService(slow, WithDebounce(time.Hour))
+	impl := svc.(*service)
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AppendContent("final")
+	msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
+
+	// A finished message flushes synchronously inside Update, and
+	// slowUpdateQuerier hangs that write on slow.release - this is the
+	// in-flight SQL write window Delete must land inside.
+	updateDone := make(chan error, 1)
+	go func() { updateDone <- svc.Update(t.Context(), msg) }()
+	select {
+	case <-slow.started:
+	case <-time.After(time.Second):
+		t.Fatal("final write never reached UpdateMessage")
+	}
+
+	require.NoError(t, svc.Delete(t.Context(), msg.ID))
+
+	close(slow.release)
+	require.NoError(t, <-updateDone, "Update must not fail just because the message was deleted mid-write")
+
+	impl.mu.Lock()
+	p, ok := impl.pending[msg.ID]
+	impl.mu.Unlock()
+	require.True(t, ok, "the tombstone must survive the flush's own post-write cleanup")
+	require.True(t, p.deleted, "the surviving entry must still be marked deleted")
+
+	_, err = svc.Get(t.Context(), msg.ID)
+	require.Error(t, err, "the message must stay deleted")
+
+	// A late Update landing after all this must not resurrect the row.
+	msg.AppendContent(" late")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	require.NoError(t, svc.FlushAll(t.Context()))
+	_, err = svc.Get(t.Context(), msg.ID)
+	require.Error(t, err, "a late Update must not resurrect a deleted message")
+}
+
 // TestDeleteSessionMessages_PublishesDeletedEventPerMessage pins that
 // batching the SQL delete in DeleteSessionMessages (see the generated
 // DeleteSessionMessages query) did not change the pubsub contract:

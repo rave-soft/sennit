@@ -529,3 +529,63 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 	require.Equal(t, Counts{Tools: 1, Prompts: 1, Resources: 1}, info.Counts,
 		"reported counts must match the restored registries")
 }
+
+// TestGetOrRenewClient_RenewalDetachesFromCallerContext is the regression
+// test for the renewed-session-killed-on-tool-call-return bug: a lazy
+// renewal (a broken ping discovered inside a tool call) used to build the
+// new session straight off the caller's ctx, which createSession derives
+// its stdio transport's exec.CommandContext and SIGKILL-the-group
+// cmd.Cancel from. The tool call's own ctx is cancelled the moment the
+// tool call returns, killing the freshly spawned server immediately - the
+// next call would ping it, find it dead, and renew again, paying process
+// start + initialize + list-tools on every single call. The fix builds the
+// renewed session off context.WithoutCancel(ctx) instead, so the session
+// outlives the tool call that happened to trigger the renewal.
+func TestGetOrRenewClient_RenewalDetachesFromCallerContext(t *testing.T) {
+	const name = "test-renew-detached-ctx"
+	t.Cleanup(func() {
+		if s, ok := defaultRegistry.sessions.Take(name); ok {
+			_ = s.Close()
+		}
+		defaultRegistry.allTools.Del(name)
+		defaultRegistry.states.Del(name)
+	})
+
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+
+	// Seed a dead session so the renewal path runs.
+	dead, _ := liveSession(t, "send_message")
+	require.NoError(t, dead.Close())
+	owner, err := defaultRegistry.beginAttempt(name)
+	require.NoError(t, err)
+	defaultRegistry.publishMu.Lock()
+	defaultRegistry.sessions.Set(name, dead)
+	defaultRegistry.sessionOwners[name] = owner
+	defaultRegistry.publishMu.Unlock()
+
+	replacement, _ := liveSession(t, "send_message")
+	t.Cleanup(func() { _ = replacement.Close() })
+
+	var capturedCtx context.Context
+	origNewSession := defaultRegistry.newSession
+	defaultRegistry.newSession = func(ctx context.Context, _ ConfigProvider, _ string, _ config.MCPConfig, _ attemptID, _ config.VariableResolver, _ bool) (*ClientSession, error) {
+		capturedCtx = ctx
+		return replacement, nil
+	}
+	t.Cleanup(func() { defaultRegistry.newSession = origNewSession })
+
+	// Simulate the tool call's own ctx: it is what a lazy renewal is
+	// triggered under (mcp-tools.go), and it is cancelled the moment that
+	// tool call returns.
+	callerCtx, cancelCaller := context.WithCancel(context.Background())
+	sess, err := defaultRegistry.getOrRenewClient(callerCtx, cfg, name)
+	require.NoError(t, err)
+	require.Same(t, replacement, sess)
+	require.NotNil(t, capturedCtx, "newSession must have been called for the renewal")
+
+	// The tool call returns and its ctx is cancelled - the renewed
+	// session's own context must not observe it.
+	cancelCaller()
+	require.NoError(t, capturedCtx.Err(),
+		"the renewed session's context must be detached from the caller's tool-call ctx")
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -90,4 +91,47 @@ func TestTruncateToRuneBoundary(t *testing.T) {
 		t.Parallel()
 		require.Equal(t, "short", truncateToRuneBoundary("short", 100))
 	})
+}
+
+// TestFetchTool_ReportsTruncationEvenAfterConversionShrinksContent is the
+// regression test for truncation being reported only when the CONVERTED
+// output is still >= MaxFetchSize: a raw HTML body over the cap converts to
+// markdown far smaller than MaxFetchSize (a page dense in markup collapses
+// to compact text), so checking len(content) after conversion missed the
+// truncation entirely and presented a cut-off page as complete. The fix
+// reads MaxFetchSize+1 raw bytes and reports truncation off that raw read,
+// independent of how much the conversion step shrinks it afterward.
+func TestFetchTool_ReportsTruncationEvenAfterConversionShrinksContent(t *testing.T) {
+	t.Parallel()
+
+	// A page whose raw HTML exceeds MaxFetchSize but whose markdown
+	// conversion is tiny: a long run of empty, attribute-heavy divs
+	// (markup, not text) followed by one real paragraph.
+	var raw strings.Builder
+	raw.WriteString("<html><body>")
+	for raw.Len() < MaxFetchSize+1000 {
+		raw.WriteString(`<div class="noise" data-x="1" data-y="2"></div>`)
+	}
+	raw.WriteString("<p>hello</p></body></html>")
+	require.Greater(t, raw.Len(), MaxFetchSize, "test setup: raw body must exceed the fetch cap")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(raw.String()))
+	}))
+	t.Cleanup(server.Close)
+
+	tool := NewFetchTool(&stubPermissionService{granted: true}, t.TempDir(), server.Client())
+	input, err := json.Marshal(FetchParams{URL: server.URL, Format: "markdown"})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+
+	require.Less(t, len(resp.Content), MaxFetchSize,
+		"test setup: the converted markdown must be far smaller than the raw cap, or this test doesn't exercise the bug")
+	require.Contains(t, resp.Content, "[Content truncated to",
+		"a page cut short by the fetch cap must still say so, even after conversion shrinks it well under the cap")
 }

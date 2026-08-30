@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/session"
 )
 
 // The idle summarize pass.
@@ -132,6 +134,15 @@ func (d *turnDispatcher) summarizeIfIdle(ctx context.Context, sessionID string, 
 		// retried on the next sweep — an unreadable store must never
 		// be the reason a session is summarized, or forgotten.
 		if errors.Is(err, context.Canceled) {
+			return
+		}
+		if !errors.Is(err, session.ErrNotFound) {
+			// A transient store failure (e.g. "database is locked") must
+			// retry on the next sweep, not be dropped forever - only a
+			// genuinely missing session (deleted while this process held
+			// it) is worth forgetting permanently.
+			slog.Debug("Could not read a session for the idle summarize sweep, will retry",
+				"session_id", sessionID, "error", err)
 			return
 		}
 		slog.Debug("Could not read a session for the idle summarize sweep",

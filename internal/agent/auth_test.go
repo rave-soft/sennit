@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -34,6 +35,7 @@ type authCoordSettings struct {
 	configureProv    func(*config.ProviderConfig)
 	globalConfigJSON string
 	globalDataJSON   string
+	providerID       string
 }
 
 type authCoordOpt func(*authCoordSettings)
@@ -62,6 +64,15 @@ func withProvider(configure func(*config.ProviderConfig)) authCoordOpt {
 	return func(s *authCoordSettings) { s.configureProv = configure }
 }
 
+// withProviderID overrides the provider ID authTestCoordinator installs
+// (and keys the config store's Providers map with), in place of the default
+// authProviderID. Use it when the test needs a specific well-known ID, such
+// as codex.ProviderID, for accounts.CapabilitiesOf to route it to the
+// rotation trigger under test.
+func withProviderID(id string) authCoordOpt {
+	return func(s *authCoordSettings) { s.providerID = id }
+}
+
 // withGlobalDataJSON seeds config.GlobalConfigData()'s file (the "data"
 // config layer ConfigStore.ActivateAccount's ScopeGlobal writes actually
 // land in - see atomicWrite) with json, instead of leaving it absent.
@@ -88,7 +99,7 @@ func withProvider(configure func(*config.ProviderConfig)) authCoordOpt {
 // provider's rotation would pass its own JSON here rather than growing a
 // second near-identical helper.
 //
-//nolint:unparam // general-purpose test helper API, see doc comment above
+
 func withGlobalDataJSON(json string) authCoordOpt {
 	return func(s *authCoordSettings) { s.globalDataJSON = json }
 }
@@ -129,8 +140,9 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 
+	providerID := cmp.Or(s.providerID, authProviderID)
 	providerCfg := config.ProviderConfig{
-		ID:      authProviderID,
+		ID:      providerID,
 		Name:    "Test",
 		Type:    openaicompat.Name,
 		BaseURL: "http://127.0.0.1:0/v1",
@@ -140,8 +152,8 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 	if s.configureProv != nil {
 		s.configureProv(&providerCfg)
 	}
-	cfg.Config().Providers.Set(authProviderID, providerCfg)
-	cfg.OverridePreferredModel(config.SelectedModel{Provider: authProviderID, Model: authModelID})
+	cfg.Config().Providers.Set(providerID, providerCfg)
+	cfg.OverridePreferredModel(config.SelectedModel{Provider: providerID, Model: authModelID})
 	cfg.SetupAgents()
 
 	// Keep buildTools light: no sub-agent or agentic-fetch construction.

@@ -118,10 +118,6 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	if err := ensureParentDir(filePath); err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-
 	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
 		return fantasy.ToolResponse{}, missingSessionID("creating a new file")

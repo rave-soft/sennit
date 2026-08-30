@@ -104,7 +104,7 @@ func NewReplaceSymbolTool(
 			rng := target.GetRange()
 
 			startLine := int(rng.Start.Line)
-			endLine := int(rng.End.Line)
+			endLine := symbolRangeEndLine(rng)
 			resp, err := applyFileMutation(fileMutationRequest{
 				editContext: editContext{ctx, permissions, files, filetracker, workingDir}, call: call,
 				filePath: filePath, sessionID: sessionID, toolName: ReplaceSymbolToolName,
@@ -172,6 +172,23 @@ func NewReplaceSymbolTool(
 		map[string]any{"required": []string{"action", "replacement"}, "properties": map[string]any{"action": map[string]any{"enum": []any{"replace", "add_before", "add_after"}}, "replacement": map[string]any{"type": "string", "minLength": 1}}},
 		map[string]any{"required": []string{"replacement"}, "not": map[string]any{"required": []string{"action"}}, "properties": map[string]any{"replacement": map[string]any{"type": "string", "minLength": 1}}},
 	}})
+}
+
+// symbolRangeEndLine returns the 0-indexed last line rng actually covers.
+//
+// LSP ranges are end-exclusive: per protocol.Range's own doc comment, a
+// range spanning through the end of line 5 (0-indexed) is reported with
+// End:{Line:6, Character:0} - the start of the FOLLOWING line, not a
+// position on the last line itself. Treating End.Line as an inclusive line
+// index in that case eats one line too many on delete/replace, or inserts
+// one line too late on add_after; back it off to the true last line
+// whenever End lands at column 0 of a line after Start's.
+func symbolRangeEndLine(rng protocol.Range) int {
+	endLine := int(rng.End.Line)
+	if rng.End.Character == 0 && rng.End.Line > rng.Start.Line {
+		endLine--
+	}
+	return endLine
 }
 
 // findSymbolByName searches for a symbol by name in the document symbol tree.

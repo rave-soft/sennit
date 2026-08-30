@@ -238,6 +238,17 @@ func readTextFileCount(filePath string, offset, limit, maxContentSize int) (stri
 		}
 		lineText = strings.TrimSuffix(lineText, "\n")
 		lineText = strings.TrimSuffix(lineText, "\r")
+		if err == io.EOF && lineText == "" {
+			// A file ending in a trailing newline (e.g. "a\nb\n") makes
+			// this final ReadString return ("", io.EOF): there is no line
+			// here, just the empty tail bufio.Reader always produces once
+			// it has consumed the last "\n". Without this, that phantom
+			// line was counted, rendered as an extra blank line, and
+			// recorded one line past EOF by RecordPartialRead. This
+			// mirrors countFileLines' own `if len(line) > 0` guard on its
+			// EOF branch.
+			break
+		}
 		if len(lineText) > MaxLineLength {
 			// Truncate at a rune boundary to avoid splitting
 			// multi-byte characters.

@@ -144,6 +144,11 @@ func apiKeyAccount(id, key string) accounts.Account {
 // incomplete one that provider validation then drops.
 const diskAuthProviderJSON = `{"providers":{"test-openai-compat":{"id":"test-openai-compat","name":"Test","type":"openai-compat","base_url":"http://127.0.0.1:0/v1","api_key":"orig-key","models":[{"id":"test-model","name":"test-model"}]}}}`
 
+// diskCodexProviderJSON is diskAuthProviderJSON's counterpart for tests
+// that need CapabilitiesOf to route the provider to RotateThreshold, which
+// requires the provider ID to be exactly codex.ProviderID.
+const diskCodexProviderJSON = `{"providers":{"codex":{"id":"codex","name":"Test","type":"openai-compat","base_url":"http://127.0.0.1:0/v1","api_key":"orig-key","models":[{"id":"test-model","name":"test-model"}]}}}`
+
 // TestMakeRateLimitCallback_Disabled_ReturnsNil is sabotage rule 1's
 // integration point at this trigger: with rotation disabled, fantasy must
 // never even be handed a callback to call.
@@ -334,6 +339,58 @@ func TestMakeRateLimitCallback_HonorsRetryAfterHeader(t *testing.T) {
 	require.True(t, errors.As(pickErr, &exhausted), "with no header, the default (long) cooldown must still be in effect")
 }
 
+// TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount is a
+// regression test for the stale-providerCfg hot-loop bug: the callback is
+// built once per turn and closes over providerCfg by value, so after the
+// first rotation (acct-a -> acct-b) a second 429 must be attributed to
+// acct-b, the account that is now actually live, not to acct-a again. Before
+// the fix, this second call kept marking acct-a rate-limited, Pick kept
+// finding acct-b "usable" (it was never actually marked), and the callback
+// re-ran applyRotationPick and returned nil every time - fantasy would retry
+// immediately on the still-limited acct-b forever. With the fix, the second
+// call marks acct-b (the real culprit) and, with both accounts now cooling
+// down, correctly reports exhaustion instead of looping.
+func TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount(t *testing.T) {
+	notifier := &recordingNotifier{}
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskAuthProviderJSON),
+		withNotify(notifier),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true}
+			p.Account = "acct-a"
+			p.APIKey = "key-a"
+		}),
+	)
+	co.builder.accStore = newFakeAccountStore(authProviderID,
+		apiKeyAccount("acct-a", "key-a"),
+		apiKeyAccount("acct-b", "key-b"),
+	)
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
+	require.True(t, ok)
+
+	runtime, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
+	require.NoError(t, err)
+	active := newActiveRuntime(runtime)
+
+	port := runtimeOperationPort{agent: co.dispatcher.agentPort.current(), inputs: co.delegation.runtimeInputs()}
+	// The callback is built once, exactly like turn_dispatcher.go does for
+	// the whole turn, and reused across both simulated 429s below.
+	cb := co.builder.makeRateLimitCallback(providerCfg, active, port)
+	require.NotNil(t, cb)
+
+	require.NoError(t, cb(t.Context(), rateLimitErr(nil)), "first 429 rotates acct-a -> acct-b")
+	require.Equal(t, "acct-b", active.load().providerCfg.Account)
+	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
+
+	err = cb(t.Context(), rateLimitErr(nil))
+	var exhausted *accounts.ErrAllExhausted
+	require.True(t, errors.As(err, &exhausted),
+		"a second 429 must mark acct-b (the account actually rate-limited), leaving both accounts cooling down")
+	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated),
+		"the stale-account bug re-applies the same pick and re-notifies on every retry")
+}
+
 // ---------------------------------------------------------------------------
 // makeThresholdRotateCallback (Trigger A: threshold, RotateThreshold providers)
 // ---------------------------------------------------------------------------
@@ -431,6 +488,62 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 	require.Equal(t, "acct-c", after.Account, "usage over threshold must rotate to the next account")
 
 	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
+}
+
+// TestMakeThresholdRotateCallback_SecondStepReadsRotatedAccountUsage is the
+// threshold-trigger counterpart of
+// TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount: the
+// callback is built once per turn, so after the first rotation
+// (acct-over -> acct-c) a later step must read acct-c's usage snapshot, not
+// keep reading acct-over's stale one. Before the fix, every subsequent step
+// re-read acct-over's over-threshold usage, found ShouldRotate still true,
+// and re-ran applyRotationPick (rebuild + "switched" notification) even
+// though acct-c was already active - see the doc comment on
+// currentRotationAccount.
+func TestMakeThresholdRotateCallback_SecondStepReadsRotatedAccountUsage(t *testing.T) {
+	codex.RecordUsageFor("acct-over-2", codex.Usage{Plan: "plus", Primary: codex.UsageWindow{UsedPercent: 95, WindowMinutes: 60}})
+
+	notifier := &recordingNotifier{}
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskCodexProviderJSON),
+		withNotify(notifier),
+		withProviderID(codex.ProviderID),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true, MinRemainingPercent: 10}
+			p.Account = "acct-over-2"
+		}),
+	)
+	co.builder.accStore = codexAccountStore(apiKeyAccount("acct-over-2", "key-a"), apiKeyAccount("acct-c-2", "key-c"))
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+
+	runtime, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
+	require.NoError(t, err)
+	active := newActiveRuntime(runtime)
+
+	port := runtimeOperationPort{agent: co.dispatcher.agentPort.current(), inputs: co.delegation.runtimeInputs()}
+	// Built once, exactly like turn_dispatcher.go does for the whole turn,
+	// and reused across both simulated steps below.
+	cb := co.builder.makeThresholdRotateCallback(providerCfg, active, port)
+	require.NotNil(t, cb)
+
+	cb(t.Context())
+	after, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "acct-c-2", after.Account, "first step rotates over-threshold acct-over-2 to acct-c-2")
+	require.Equal(t, "acct-c-2", active.load().providerCfg.Account)
+	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
+
+	// acct-c-2 has no recorded usage, so a step that correctly reads ITS
+	// (unknown) usage must be a no-op, not a repeat rotation driven by
+	// acct-over-2's stale, still-over-threshold snapshot.
+	cb(t.Context())
+	after, ok = co.cfg.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "acct-c-2", after.Account, "a later step must not re-rotate off the already-current account")
+	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated),
+		"the stale-account bug re-reads acct-over-2's usage and re-notifies on every step")
 }
 
 // testRotationConfigStore builds a real, LoadData-backed *config.ConfigStore
