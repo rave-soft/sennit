@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +13,27 @@ import (
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
+
+// failCreateOnce wraps a real message store and fails the first Create
+// call whose tool result answers one of the given call IDs — standing in
+// for a transient SQLite busy on exactly one synthetic write, the case
+// the seal-skip guards against.
+type failCreateOnce struct {
+	messagestore.Service
+	failFor map[string]struct{}
+}
+
+func (f *failCreateOnce) Create(ctx context.Context, sessionID string, params message.CreateMessageParams) (message.Message, error) {
+	for _, p := range params.Parts {
+		if tr, ok := p.(message.ToolResult); ok {
+			if _, fail := f.failFor[tr.ToolCallID]; fail {
+				delete(f.failFor, tr.ToolCallID)
+				return message.Message{}, errors.New("injected create failure")
+			}
+		}
+	}
+	return f.Service.Create(ctx, sessionID, params)
+}
 
 // interruptedEnv is a project's session and message services over a real
 // database, which this needs: the sweep's candidate query is SQL (an
@@ -177,6 +200,58 @@ func TestFinalizeInterruptedTurns_IgnoresOtherProjects(t *testing.T) {
 
 	got := env.reload(t, sess.ID, msg.ID)
 	require.Nil(t, got.FinishPart(), "another project's turn must be left for its own bootstrap")
+}
+
+// A failed synthetic write must not be papered over with a seal: the
+// comment on finalizeInterruptedTurns promises the message is "left to be
+// retried on the next start rather than sealed half-repaired", and this
+// is what makes that true instead of aspirational.
+func TestFinalizeInterruptedTurns_LeavesMessageUnsealedOnCreateFailure(t *testing.T) {
+	env := newInterruptedEnv(t)
+	sess, msg := env.assistantWithToolCall(t)
+	failing := &failCreateOnce{Service: env.messages, failFor: map[string]struct{}{"call-1": {}}}
+
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), interruptedTestProject, failing))
+
+	got := env.reload(t, sess.ID, msg.ID)
+	require.Nil(t, got.FinishPart(), "a half-repaired message must not be sealed")
+
+	unfinished, err := env.messages.ListUnfinishedAssistantMessages(t.Context(), interruptedTestProject)
+	require.NoError(t, err)
+	require.Len(t, unfinished, 1, "the message must still be found on the next start")
+	require.Equal(t, msg.ID, unfinished[0].ID)
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	for _, m := range msgs {
+		require.NotEqual(t, message.Tool, m.Role, "the failed write must not have partially landed")
+	}
+}
+
+// A retriable failure on one message's tool call must not stop the sweep
+// from repairing everything else it found.
+func TestFinalizeInterruptedTurns_OneFailureDoesNotStopTheRest(t *testing.T) {
+	env := newInterruptedEnv(t)
+	_, failedMsg := env.assistantWithToolCall(t)
+	sess2, err := env.sessions.Create(t.Context(), "s2")
+	require.NoError(t, err)
+	okMsg, err := env.messages.Create(t.Context(), sess2.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{message.ToolCall{
+			ID: "call-2", Name: "agent", Input: "{}", Finished: false,
+		}},
+	})
+	require.NoError(t, err)
+	failing := &failCreateOnce{Service: env.messages, failFor: map[string]struct{}{"call-1": {}}}
+
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), interruptedTestProject, failing))
+
+	gotFailed := env.reload(t, failedMsg.SessionID, failedMsg.ID)
+	require.Nil(t, gotFailed.FinishPart(), "the message whose write failed stays unsealed")
+
+	gotOK := env.reload(t, sess2.ID, okMsg.ID)
+	require.NotNil(t, gotOK.FinishPart(), "the other message must still be repaired and sealed")
+	require.Equal(t, message.FinishReasonCanceled, gotOK.FinishReason())
 }
 
 // Running twice must be a no-op the second time: the Finish written by the

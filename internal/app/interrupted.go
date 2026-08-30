@@ -75,6 +75,7 @@ func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages 
 			answered[msg.SessionID] = seen
 		}
 
+		repaired := true
 		for _, tc := range calls {
 			if _, done := seen[tc.ID]; done {
 				continue
@@ -90,11 +91,20 @@ func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages 
 			}); createErr != nil {
 				slog.Error("Failed to record an interrupted tool call",
 					"component", "app", "session_id", msg.SessionID, "tool_call_id", tc.ID, "error", createErr)
+				repaired = false
 				continue
 			}
 			// Recorded, so a sibling unfinished message in the same
 			// session does not answer it a second time.
 			seen[tc.ID] = struct{}{}
+		}
+		if !repaired {
+			// A tool call was left without a result, so this message must
+			// not look repaired: sealing it here would take it out of
+			// ListUnfinishedAssistantMessages' reach forever, leaving that
+			// call's result missing for good. Skip the seal so the next
+			// start finds this message unfinished and tries again.
+			continue
 		}
 
 		// The Finish is what takes the message out of this query's reach,
