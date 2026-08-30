@@ -46,7 +46,7 @@ func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)
-	p := childMap(b.section("providers"), id)
+	p := b.addLocal(b.section("providers"), "providers", id)
 
 	if err := applyFlags(providerAddFlags, args, 3, p, "provider add", stderr); err != nil {
 		return err

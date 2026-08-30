@@ -93,7 +93,14 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 		return err
 	}
 
-	p := childMap(providers, provider)
+	// providers[provider] may be a tombstone left by an earlier `provider
+	// remove` in this script: plain childMap would hand back the
+	// {__sennit_tombstone: ...} wrapper itself, and writing "models" beside
+	// it corrupts the entry so ParseTombstone rejects the whole config.
+	// addLocal already knows how to unwrap a tombstone into its
+	// replacement map, and is a no-op passthrough for the common case where
+	// `provider add` already resolved this id earlier in the same script.
+	p := b.addLocal(providers, "providers", provider)
 	// Re-adding a model id replaces the existing entry, matching the
 	// update-in-place behavior of `provider add` and `lsp add`.
 	modelsArr, _ := p["models"].([]any)
