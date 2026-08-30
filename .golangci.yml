@@ -45,6 +45,22 @@ linters:
         # and DTOs) but must never import a concrete implementation
         # package like internal/workspace/appws, which would drag the
         # whole backend runtime back in.
+        # internal/ui/model drives the whole TUI and is the widest UI
+        # package, so it is the one where a stray import spreads fastest.
+        # It has no business reaching a vendor's sign-in package: the plan
+        # line it used to read from internal/oauth/codex now comes through
+        # Workspace.CurrentPlanUsage, and the provider id it used to
+        # compare against lives next to the dialog that handles it
+        # (dialog.CodexProviderID). internal/ui/dialog still imports the
+        # package, because the sign-in dialog is what actually drives the
+        # flow — that one is the remaining item, not an oversight.
+        ui-model-no-vendor-signin:
+          files:
+            - "**/internal/ui/model/**/*.go"
+          deny:
+            - pkg: github.com/rave-soft/sennit/internal/oauth
+            - pkg: github.com/rave-soft/sennit/internal/oauth/codex
+            - pkg: github.com/rave-soft/sennit/internal/oauth/copilot
         ui-boundary:
           files:
             - "**/internal/ui/**/*.go"

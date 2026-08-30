@@ -3,7 +3,6 @@ package model
 import (
 	"testing"
 
-	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +19,7 @@ func TestApplyProviderDialogAction_AddAccountForcesNewAccount(t *testing.T) {
 	ws := &cmdDrivingWorkspace{}
 	m := newCmdDrivenUI(ws)
 
-	_, handled := m.applyProviderDialogAction(dialog.ActionAddAccount{ProviderID: codex.ProviderID})
+	_, handled := m.applyProviderDialogAction(dialog.ActionAddAccount{ProviderID: dialog.CodexProviderID})
 	require.True(t, handled)
 
 	oa, ok := m.dialog.Dialog(dialog.OAuthID).(*dialog.OAuth)
@@ -38,7 +37,7 @@ func TestApplyProviderDialogAction_ConfigureProviderDoesNotForceNewAccount(t *te
 	ws := &cmdDrivingWorkspace{}
 	m := newCmdDrivenUI(ws)
 
-	_, handled := m.applyProviderDialogAction(dialog.ActionConfigureProvider{ProviderID: codex.ProviderID})
+	_, handled := m.applyProviderDialogAction(dialog.ActionConfigureProvider{ProviderID: dialog.CodexProviderID})
 	require.True(t, handled)
 
 	oa, ok := m.dialog.Dialog(dialog.OAuthID).(*dialog.OAuth)
