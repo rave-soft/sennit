@@ -3,6 +3,7 @@ package dialog
 import (
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -16,6 +17,12 @@ import (
 type commandsNamesTestWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
+}
+
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w commandsNamesTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
 }
 
 func (w *commandsNamesTestWorkspace) SupportsThreads() bool { return false }

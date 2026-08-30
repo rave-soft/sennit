@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
@@ -22,6 +23,12 @@ import (
 type slashCommandsTestWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
+}
+
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w slashCommandsTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
 }
 
 func (w *slashCommandsTestWorkspace) SupportsThreads() bool { return false }

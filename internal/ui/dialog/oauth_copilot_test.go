@@ -21,6 +21,12 @@ type copilotProxyTestWorkspace struct {
 	cfg *config.Config
 }
 
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w copilotProxyTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
+}
+
 func (w *copilotProxyTestWorkspace) Config() *config.Config { return w.cfg }
 
 // TestOAuthCopilotUsesConfiguredProxy pins B10: a proxy already set for the

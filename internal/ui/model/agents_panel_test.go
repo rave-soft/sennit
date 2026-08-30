@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -163,6 +164,9 @@ func TestDrawSessionPanel_AgentsSection(t *testing.T) {
 type agentsPanelWorkspace struct {
 	workspace.Workspace
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w agentsPanelWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (agentsPanelWorkspace) SupportsThreads() bool { return false }
 

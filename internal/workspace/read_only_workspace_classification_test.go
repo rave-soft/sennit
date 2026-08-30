@@ -107,6 +107,7 @@ var readOnlySafeMethods = []string{
 	"FileTrackerLastReadTime",
 	"FileTrackerListReadFiles",
 	"GetLastSession",
+	"KnownProviders",
 	"GetMCPPrompt",
 	"GetSession",
 	"GetThread",

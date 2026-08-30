@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
@@ -44,6 +45,12 @@ type accountsTestWorkspace struct {
 }
 
 func (w *accountsTestWorkspace) SupportsThreads() bool { return false }
+
+// KnownProviders mirrors what the dialog used to compute for itself: the
+// embedded catalog for this fake's config.
+func (w accountsTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
+}
 
 func (w *accountsTestWorkspace) Config() *config.Config { return w.cfg }
 

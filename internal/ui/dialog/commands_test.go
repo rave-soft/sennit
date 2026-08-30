@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/commands"
@@ -70,6 +71,9 @@ type dockerProbeWorkspace struct {
 	workspace.Workspace
 	available bool
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w dockerProbeWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (w *dockerProbeWorkspace) RefreshDockerMCPAvailability() bool { return w.available }
 

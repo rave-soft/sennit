@@ -398,7 +398,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			// case, where no model has ever been selected) — fall back to
 			// this provider's own default rather than whatever
 			// defaultModelSelection would pick globally.
-			knownProviders := config.Providers(cfg)
+			knownProviders := m.com.Workspace.KnownProviders()
 			def, err := cfg.DefaultModelForProvider(msg.ProviderID, knownProviders)
 			if err != nil {
 				cmds = append(cmds, util.ReportError(err))

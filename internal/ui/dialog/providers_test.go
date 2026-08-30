@@ -21,6 +21,10 @@ type providersTestWorkspace struct {
 	cfg *config.Config
 }
 
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w providersTestWorkspace) KnownProviders() []catwalk.Provider { return config.Providers(w.cfg) }
+
 func (w *providersTestWorkspace) SupportsThreads() bool { return false }
 
 func (w *providersTestWorkspace) Config() *config.Config {

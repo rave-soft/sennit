@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
@@ -140,6 +141,9 @@ func minimalFileStyles() *styles.Styles {
 type fileHistoryWorkspace struct {
 	workspace.Workspace
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w fileHistoryWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (fileHistoryWorkspace) PrepareSessionChanges(context.Context, string) ([]workspace.SessionFile, error) {
 	return nil, nil

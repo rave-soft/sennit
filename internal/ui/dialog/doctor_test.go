@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/stats"
@@ -22,6 +23,10 @@ type doctorTestWorkspace struct {
 	cfg    *config.Config
 	states map[string]workspace.MCPClientInfo
 }
+
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w doctorTestWorkspace) KnownProviders() []catwalk.Provider { return config.Providers(w.cfg) }
 
 func (w *doctorTestWorkspace) SupportsThreads() bool { return false }
 

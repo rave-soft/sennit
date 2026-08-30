@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -26,6 +27,9 @@ type statsTestWorkspace struct {
 	snap      stats.Snapshot
 	err       error
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w statsTestWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (w *statsTestWorkspace) WorkingDir() string { return "/repo" }
 

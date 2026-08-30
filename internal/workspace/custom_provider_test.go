@@ -111,6 +111,10 @@ func (a *testConfigAccessor) RefreshAccountLimits(ctx context.Context, providerI
 	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
 }
 
+func (a *testConfigAccessor) KnownProviders() []catwalk.Provider {
+	return config.Providers(a.store.Config())
+}
+
 func (a *testConfigAccessor) CustomProviderTypes() []string { return nil }
 
 // CurrentPlanUsage: no provider in these tests quotes usage.

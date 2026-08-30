@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -26,6 +27,9 @@ type rootTestWorkspace struct {
 	// TestThreadEventDispatchesOneListThreadsCall (threads_rpc_collapse_test.go).
 	listThreadsCalls int
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w rootTestWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (w *rootTestWorkspace) Config() *config.Config {
 	providers := csync.NewMap[string, config.ProviderConfig]()

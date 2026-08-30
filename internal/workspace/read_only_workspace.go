@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
@@ -453,6 +454,10 @@ func (w *readOnlyWorkspace) DockerMCPAvailable() (available, known bool) {
 // about the machine — so a read-only workspace may ask it.
 func (w *readOnlyWorkspace) RefreshDockerMCPAvailability() bool {
 	return w.ws.RefreshDockerMCPAvailability()
+}
+
+func (w *readOnlyWorkspace) KnownProviders() []catwalk.Provider {
+	return w.ws.KnownProviders()
 }
 
 func (w *readOnlyWorkspace) CustomProviderTypes() []string {

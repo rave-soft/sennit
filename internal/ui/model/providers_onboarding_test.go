@@ -126,6 +126,12 @@ type onboardingTestWorkspace struct {
 	updateAgentModelCalled bool
 }
 
+// KnownProviders mirrors what the UI used to compute for itself: the
+// embedded catalog for this fake's config.
+func (w onboardingTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
+}
+
 func (w *onboardingTestWorkspace) Config() *config.Config { return w.cfg }
 
 func (w *onboardingTestWorkspace) PermissionSkipRequests() bool { return false }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -15,6 +16,9 @@ type attachedSessionChangesWorkspace struct {
 	workspace.Workspace
 	inner workspace.SessionChangePreparer
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w attachedSessionChangesWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (w *attachedSessionChangesWorkspace) Config() *config.Config {
 	return &config.Config{}

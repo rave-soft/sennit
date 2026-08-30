@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
@@ -110,6 +111,12 @@ type cmdDrivingWorkspace struct {
 	setProviderProxyCalls int
 	lastSetProviderProxy  string
 	setProviderProxyErr   error
+}
+
+// KnownProviders mirrors what the UI used to compute for itself: the
+// embedded catalog for this fake's config.
+func (w *cmdDrivingWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.Config())
 }
 
 // CurrentPlanUsage: no provider in these tests quotes rate limits, so the

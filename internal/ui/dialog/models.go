@@ -90,7 +90,7 @@ func NewModels(com *common.Common) (*Models, tea.Cmd, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	m.providers = config.Providers(m.com.Config())
+	m.providers = m.com.Workspace.KnownProviders()
 
 	return m, m.setProviderItems(), nil
 }
@@ -260,7 +260,7 @@ func (m *Models) setProviderItems() tea.Cmd {
 	addedProviders := make(map[string]bool)
 
 	// Get a list of known providers to compare against
-	knownProviders := config.Providers(cfg)
+	knownProviders := m.com.Workspace.KnownProviders()
 
 	containsProviderFunc := func(id string) func(p catwalk.Provider) bool {
 		return func(p catwalk.Provider) bool {

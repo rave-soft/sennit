@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -22,6 +23,12 @@ type accountLabelTestWorkspace struct {
 	cfg  *config.Config
 	accs []accounts.Account
 	err  error
+}
+
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w accountLabelTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
 }
 
 func (w *accountLabelTestWorkspace) Config() *config.Config { return w.cfg }

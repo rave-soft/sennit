@@ -3,6 +3,7 @@ package dialog
 import (
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -18,6 +19,12 @@ import (
 type notificationsTestWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
+}
+
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w notificationsTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
 }
 
 func (w *notificationsTestWorkspace) Config() *config.Config { return w.cfg }

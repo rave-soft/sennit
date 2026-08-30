@@ -340,6 +340,18 @@ type ConfigAccessor interface {
 	// the active account first activates a replacement, so the provider
 	// never ends up pointing at a deleted account.
 	RemoveAccount(scope config.Scope, providerID, accountID string) error
+	// KnownProviders is the provider catalog this workspace was built
+	// with: the embedded list plus Codex, or nothing at all when
+	// disable_default_providers is set.
+	//
+	// It is the store's cached copy, which is the same list model
+	// resolution and credential setup use. The UI used to recompute it
+	// from the config on every call — seven call sites, some on a render
+	// path — which rebuilt the embedded catalog each time and, worse, was
+	// a second answer to a question the store already answers. A reload
+	// recomputes the store's copy; a recomputation here could disagree
+	// with the one the agent is actually using.
+	KnownProviders() []catwalk.Provider
 	// CustomProviderTypes lists the provider types a custom provider may
 	// declare beyond catwalk's own catalog — the ones this build has a
 	// discovery enricher registered for.

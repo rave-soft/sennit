@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
@@ -590,6 +591,11 @@ func (s *stubWorkspace) DockerMCPAvailable() (bool, bool) {
 func (s *stubWorkspace) RefreshDockerMCPAvailability() bool {
 	s.track("RefreshDockerMCPAvailability")
 	return false
+}
+
+func (s *stubWorkspace) KnownProviders() []catwalk.Provider {
+	s.track("KnownProviders")
+	return nil
 }
 
 func (s *stubWorkspace) CustomProviderTypes() []string {

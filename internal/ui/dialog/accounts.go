@@ -364,7 +364,7 @@ func providerDisplayName(com *common.Common, providerID string) string {
 	if pc, ok := cfg.Providers.Get(providerID); ok && pc.Name != "" {
 		return pc.Name
 	}
-	for _, p := range config.Providers(cfg) {
+	for _, p := range com.Workspace.KnownProviders() {
 		if string(p.ID) == providerID {
 			return p.Name
 		}

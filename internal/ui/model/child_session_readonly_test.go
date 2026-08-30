@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
@@ -224,6 +225,9 @@ func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
 type drillInWorkspace struct {
 	workspace.Workspace
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w drillInWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (drillInWorkspace) SupportsThreads() bool { return false }
 

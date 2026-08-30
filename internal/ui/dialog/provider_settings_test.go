@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -18,6 +19,12 @@ import (
 type providerSettingsTestWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
+}
+
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w providerSettingsTestWorkspace) KnownProviders() []catwalk.Provider {
+	return config.Providers(w.cfg)
 }
 
 func (w *providerSettingsTestWorkspace) Config() *config.Config { return w.cfg }

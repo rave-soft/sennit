@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
@@ -17,6 +18,9 @@ import (
 type historyWorkspace struct {
 	workspace.Workspace
 }
+
+// KnownProviders: no test here renders a provider list.
+func (w historyWorkspace) KnownProviders() []catwalk.Provider { return nil }
 
 func (historyWorkspace) Config() *config.Config {
 	return &config.Config{}

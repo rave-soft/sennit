@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -71,7 +70,7 @@ func providerItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	t := com.Styles
 	cfg := com.Config()
 
-	providers := config.Providers(cfg)
+	providers := com.Workspace.KnownProviders()
 
 	sorted := slices.Clone(providers)
 	slices.SortFunc(sorted, func(a, b catwalk.Provider) int {

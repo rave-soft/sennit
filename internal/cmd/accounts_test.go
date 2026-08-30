@@ -110,6 +110,8 @@ func (a *realConfigAccessor) RefreshAccountLimits(ctx context.Context, providerI
 	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
 }
 
+func (a *realConfigAccessor) KnownProviders() []catwalk.Provider { return a.store.KnownProviders() }
+
 func (a *realConfigAccessor) CustomProviderTypes() []string { return nil }
 
 // CurrentPlanUsage: these tests drive account bookkeeping, not the

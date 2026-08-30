@@ -320,7 +320,7 @@ func (w *widgets) openProviderFormDialog(com *common.Common) {
 // refreshing the active one in place. It has no effect on the API-key
 // path, which calls SetProviderAPIKey rather than RecordAccount.
 func (m *UI) configureProvider(providerID string, forceNewAccount bool) tea.Cmd {
-	providers := config.Providers(m.com.Config())
+	providers := m.com.Workspace.KnownProviders()
 
 	idx := slices.IndexFunc(providers, func(p catwalk.Provider) bool {
 		return string(p.ID) == providerID

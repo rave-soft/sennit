@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
@@ -133,4 +134,9 @@ func (w *AppWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool
 // CustomProviderTypes implements Workspace.
 func (w *AppWorkspace) CustomProviderTypes() []string {
 	return discover.RegisteredProviderTypes()
+}
+
+// KnownProviders implements Workspace.
+func (w *AppWorkspace) KnownProviders() []catwalk.Provider {
+	return w.store.KnownProviders()
 }

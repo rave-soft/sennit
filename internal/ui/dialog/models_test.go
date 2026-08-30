@@ -23,6 +23,10 @@ type modelsTestWorkspace struct {
 	setConfigFields   map[string]any
 }
 
+// KnownProviders mirrors what the UI used to compute for itself:
+// the embedded catalog for this fake's config.
+func (w modelsTestWorkspace) KnownProviders() []catwalk.Provider { return config.Providers(w.cfg) }
+
 func (w *modelsTestWorkspace) SupportsThreads() bool { return false }
 
 func (w *modelsTestWorkspace) Config() *config.Config {
