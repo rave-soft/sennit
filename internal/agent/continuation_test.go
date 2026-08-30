@@ -121,6 +121,10 @@ func TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// The wake path only ever starts the session this sennit is
+	// working in (see dispatcher.wakeAllowed); this is that session.
+	sa.SetLiveSession(sess.ID)
+
 	completion := testCompletion("wake-marker-text")
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
 
@@ -180,6 +184,8 @@ func TestDeliverTaskCompletion_LogsCarryNoPromptOrResultText(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	sa.SetLiveSession(sess.ID)
+
 	completion := TaskCompletion{
 		DelegationID:   "task-1",
 		Kind:           "task",
@@ -234,6 +240,8 @@ func TestDeliverTaskCompletion_PlaceholderNeverLeaksToModelOrHistory(t *testing.
 		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
 	})
 	require.NoError(t, err)
+
+	sa.SetLiveSession(sess.ID)
 
 	completion := testCompletion("leak-check-marker")
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
@@ -573,6 +581,8 @@ func TestDeliverTaskCompletion_PersonsSessionIsWokenToo(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	sa.SetLiveSession(sess.ID)
+
 	completion := testCompletion("reaches-the-person's-session")
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
 
@@ -851,6 +861,8 @@ func deliverThroughWake(t *testing.T, completion TaskCompletion) (string, int) {
 	})
 	require.NoError(t, err)
 
+	sa.SetLiveSession(sess.ID)
+
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
 	require.Eventually(t, func() bool { return model.count() > 0 }, 2*time.Second, 5*time.Millisecond)
 
@@ -927,4 +939,78 @@ func TestFoldCompletions_ContinuationStaysAtItsOwnLevel(t *testing.T) {
 			require.Equal(t, tc.want, turn.call.Depth)
 		})
 	}
+}
+
+// TestDeliverTaskCompletion_OtherSessionIsNeverWoken is the rule the wake
+// gate exists for, written from the day it was missing: four sessions
+// nobody was working in woke at once when a restart recovered their
+// interrupted delegations, and each re-ran a pipeline whose work was
+// long since committed.
+//
+// A sennit works in one session; every other conversation in the
+// database stays where it was left. Its completion is not lost - it is
+// folded into the top of that session's next turn, the first moment it
+// is being worked in again.
+func TestDeliverTaskCompletion_OtherSessionIsNeverWoken(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &promptRecordingModel{text: "done"}
+	sa := testSessionAgent(env, model, "system").(*sessionAgent)
+
+	left, err := env.sessions.Create(t.Context(), "left days ago")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), left.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
+	})
+	require.NoError(t, err)
+
+	// This sennit is working in an entirely different session.
+	sa.SetLiveSession("a-different-session")
+
+	sa.DeliverTaskCompletion(t.Context(), left.ID, testCompletion("must-not-restart-this"))
+
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, model.count(), "a session nobody is working in must never start a turn")
+	require.False(t, sa.IsSessionBusy(left.ID))
+
+	// Their own next turn in it is what delivers the report.
+	_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: left.ID, Prompt: "hello"})
+	require.NoError(t, runErr)
+
+	prompts := model.snapshotPrompts()
+	require.Len(t, prompts, 1, "exactly one turn must have reached the model")
+	require.True(t, promptContains(prompts[0], "must-not-restart-this"),
+		"the queued completion must reach the model on the person's next turn")
+	require.Empty(t, sa.drainCompletionsForStep(left.ID), "that turn must have drained the inbox")
+}
+
+// TestWakeAllowed_FollowsTheDelegationChainToTheLiveSession pins what
+// the live session's tree covers: the session itself, and a delegation
+// of a delegation of it, however many levels down - because nobody sits
+// in those to type, and parking them forever would hold a concurrency
+// slot and never answer the parent. Anything rooted elsewhere is
+// refused.
+func TestWakeAllowed_FollowsTheDelegationChainToTheLiveSession(t *testing.T) {
+	t.Parallel()
+	d := newDispatcher()
+
+	d.RegisterDelegationParent("child", DelegationParent{ParentSessionID: "live"})
+	d.RegisterDelegationParent("grandchild", DelegationParent{ParentSessionID: "child"})
+	d.RegisterDelegationParent("other-child", DelegationParent{ParentSessionID: "left-behind"})
+
+	require.False(t, d.wakeAllowed("live"), "nothing wakes before a session is reported")
+
+	d.SetLiveSession("live")
+	require.True(t, d.wakeAllowed("live"))
+	require.True(t, d.wakeAllowed("child"))
+	require.True(t, d.wakeAllowed("grandchild"))
+	require.False(t, d.wakeAllowed("left-behind"))
+	require.False(t, d.wakeAllowed("other-child"), "a delegation of a session left behind is left behind too")
+	require.False(t, d.wakeAllowed("unknown-session"))
+
+	// A registration cycle must answer, not hang.
+	d.RegisterDelegationParent("a", DelegationParent{ParentSessionID: "b"})
+	d.RegisterDelegationParent("b", DelegationParent{ParentSessionID: "a"})
+	require.False(t, d.wakeAllowed("a"))
 }

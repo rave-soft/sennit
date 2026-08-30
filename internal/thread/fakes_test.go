@@ -828,3 +828,7 @@ func publishSuccess(t *testing.T, a *app.App, sessionID string) {
 	coord.mu.Unlock()
 	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, RunID: runID, Text: "finished"})
 }
+
+// SetLiveSession records nothing: the domain only has to be able to
+// call it, and what it means is decided in the agent.
+func (t *testCoordinatorAdapter) SetLiveSession(string) {}

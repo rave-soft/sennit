@@ -47,8 +47,22 @@ func (app *App) Coordinator() agent.Coordinator {
 // coordinator. See Coordinator's doc for why this needs a lock.
 func (app *App) setCoordinator(coordinator agent.Coordinator) {
 	app.agentCoordinatorMu.Lock()
-	defer app.agentCoordinatorMu.Unlock()
 	app.agentCoordinator = coordinator
+	app.agentCoordinatorMu.Unlock()
+
+	// A coordinator built after the client reported which session this is
+	// working in - the ordinary order at startup, and again on every
+	// config reload - would otherwise start out believing there is none,
+	// and nothing a delegation finished could resume it. Applied after
+	// the lock is dropped: this reaches into the agent, and holding the
+	// coordinator lock across that call is how lock orders get inverted
+	// later.
+	if coordinator == nil {
+		return
+	}
+	if live := app.liveSession.Load(); live != nil {
+		coordinator.SetLiveSession(*live)
+	}
 }
 
 // Sessions returns this workspace's session service.

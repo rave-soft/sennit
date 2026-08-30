@@ -89,6 +89,7 @@ func TestSummarize_WakesFromInboxAfterReleasingTheActiveSlot(t *testing.T) {
 	// sweep reaches these sessions at all - so that is the shape this
 	// test uses, though the wake path itself no longer asks what kind of
 	// session it is waking.
+	sa.SetLiveSession(sess.ID)
 	sa.RegisterDelegationParent(sess.ID, DelegationParent{
 		ParentSessionID: "parent-of-" + sess.ID,
 		DelegationID:    "delegation-1",

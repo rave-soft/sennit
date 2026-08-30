@@ -77,6 +77,9 @@ func TestSendToParent_WakesIdleParentAndDeliversOnce(t *testing.T) {
 
 	const childSessionID = "child-session-ask"
 	registerSelfParent(sa, childSessionID, parentSess.ID)
+	// The parent is the session being worked in, so its delegation's
+	// ask may start it - see dispatcher.wakeAllowed.
+	sa.SetLiveSession(parentSess.ID)
 
 	err = sa.SendToParent(t.Context(), childSessionID, "ask-marker-text")
 	require.NoError(t, err)
@@ -283,6 +286,7 @@ func TestSendToParent_PersonsSessionIsWokenToo(t *testing.T) {
 	// own session, so no registerSelfParent call for it.
 	const childSessionID = "child-session-ask-person"
 	registerSelfParent(sa, childSessionID, parentSess.ID)
+	sa.SetLiveSession(parentSess.ID)
 
 	require.NoError(t, sa.SendToParent(t.Context(), childSessionID, "ask-reaches-the-person"))
 

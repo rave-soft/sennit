@@ -239,3 +239,6 @@ func TestAgentDispatcher_SendValidatesCall(t *testing.T) {
 	d.Wait()
 	require.Equal(t, int32(0), coord.runCount.Load())
 }
+
+// SetLiveSession is inert: this stub exists for dispatch bookkeeping.
+func (s *stubDispatchCoordinator) SetLiveSession(string) {}

@@ -83,6 +83,14 @@ type appServices struct {
 	agentCoordinatorMu sync.RWMutex
 	agentCoordinator   agent.Coordinator
 
+	// liveSession is the one session this App is working in, remembered
+	// here so a coordinator built after the fact - or rebuilt when the
+	// config reloads - starts out knowing it. Only this session and its
+	// delegations may be started by something finishing in the
+	// background; see ReportCurrentSession and
+	// agent.Coordinator.SetLiveSession.
+	liveSession atomic.Pointer[string]
+
 	LSPManager *lsp.Manager
 
 	// lsp holds this workspace's own LSP client states and event broker;
@@ -320,12 +328,20 @@ func (app *App) SetPermissionsSkip(skip bool) {
 }
 
 // ReportCurrentSession tells herdr which session the user is now
-// viewing so it can persist a resumable reference for the pane. Safe
-// to call when not running inside a herdr pane; the underlying client
-// is nil-safe. Call this whenever the active session changes (load,
-// new, or select).
+// viewing so it can persist a resumable reference for the pane, and
+// tells the coordinator, for which it is load-bearing rather than a
+// hint: that session and its delegations are the only work a
+// background completion may start (see
+// agent.Coordinator.SetLiveSession). Safe to call when not running
+// inside a herdr pane, and before there is a coordinator at all - the
+// value is applied to whichever one comes next (see setCoordinator).
+// Call this whenever the active session changes (load, new, or select).
 func (app *App) ReportCurrentSession(sessionID string) {
 	app.herdrClient.SetSessionID(sessionID)
+	app.liveSession.Store(&sessionID)
+	if coord := app.Coordinator(); coord != nil {
+		coord.SetLiveSession(sessionID)
+	}
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {

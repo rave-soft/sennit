@@ -114,3 +114,7 @@ func TestAppWorkspace_AgentRunStream_ClosedMessageChannelDoesNotBusyLoop(t *test
 func timevalDiff(a, b syscall.Timeval) time.Duration {
 	return time.Duration(a.Nano() - b.Nano())
 }
+
+// SetLiveSession is inert: AgentRunStream reports the run's session
+// through App.ReportCurrentSession, and this double only has to answer it.
+func (c *blockingStreamCoordinator) SetLiveSession(string) {}

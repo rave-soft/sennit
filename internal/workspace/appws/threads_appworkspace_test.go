@@ -781,3 +781,7 @@ func TestAttachedThread_PermissionAnswerReachesTheParentThatRaisedIt(t *testing.
 		t.Fatal("the parent stayed blocked after its request was answered from the thread's screen")
 	}
 }
+
+// SetLiveSession is inert: AgentRunStream reports the run's session
+// through App.ReportCurrentSession, and this double only has to answer it.
+func (c *fakeThreadCoordinator) SetLiveSession(string) {}

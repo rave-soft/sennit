@@ -79,7 +79,9 @@ type TaskCompletion struct {
 
 // enqueueCompletion appends completion to sessionID's completion inbox
 // and reports whether the session is now eligible for an auto-wake
-// attempt (idle, not left canceled by the user). It never interrupts a
+// attempt (part of the session being worked in - see wakeAllowed -
+// idle, and not
+// left canceled by the user). It never interrupts a
 // running turn itself - eligible only ever means "the caller may attempt
 // a continuation," never "this call drained anything." The actual
 // consumption happens later, atomically, in whichever turn's own
@@ -108,6 +110,9 @@ func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompleti
 	// user's own work (or the delegation's own words) and must not end
 	// up in a log that outlives the session.
 	slog.Info("Completion enqueued", "delegation", completion.DelegationID, "kind", completion.Kind, "status", completion.Status, "is_message", completion.IsMessage, "session", sessionID, "inbox_size", len(s.completionInbox))
+	if !d.wakeAllowed(sessionID) {
+		return false
+	}
 	return d.wakeEligibleLocked(s)
 }
 
@@ -231,11 +236,75 @@ func (d *dispatcher) dropCompletions(sessionID string) {
 // startContinuation for why a separate pre-drain step would reintroduce
 // exactly the "fabricated user message" problem this design avoids.
 func (d *dispatcher) wakeEligible(sessionID string) bool {
+	if !d.wakeAllowed(sessionID) {
+		return false
+	}
 	s, release := d.session(sessionID)
 	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return d.wakeEligibleLocked(s)
+}
+
+// SetLiveSession records the one session this sennit is working in.
+// Reported on every session load, create and select (see
+// App.ReportCurrentSession), and "" while there is none - the landing
+// screen, or before the first load lands.
+func (d *dispatcher) SetLiveSession(sessionID string) {
+	d.liveSessionID.Store(&sessionID)
+}
+
+// liveSession reports the session this sennit is working in, or "".
+func (d *dispatcher) liveSession() string {
+	if p := d.liveSessionID.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// wakeAllowed reports whether sessionID may be started by something
+// finishing in the background: only the session this sennit is working
+// in, or a delegation of it, however many levels down.
+//
+// A sennit works in exactly one session - restored from history, named
+// on the command line, or created new - and that session is the only
+// conversation anyone is having here. Everything else in the database is
+// a conversation that was left, and one that restarted itself would
+// spend tokens and edit files with nobody watching: the day this gate
+// was missing, a restart recovered the interrupted delegations of four
+// sessions from days earlier and every one of them woke at once, each
+// re-running a pipeline whose work was long since committed. Nothing is
+// lost by refusing them - the completion waits in that session's inbox
+// and is folded into the top of its next turn (see
+// drainCompletionsForStep), the first moment it is being worked in
+// again.
+//
+// The walk up delegationParents is what makes it the session's whole
+// tree rather than the session alone: a delegation that started
+// delegations of its own has nobody to type into it, and parking it
+// forever would hold a concurrency slot and never answer its parent.
+// Chains are bounded by maxTaskCascadeDepth; the loop counts anyway so a
+// registration cycle cannot hang the caller. A parent in another app
+// instance (a thread runs in one of its own, working in one session just
+// the same) ends the walk - that instance answers this question for
+// itself.
+func (d *dispatcher) wakeAllowed(sessionID string) bool {
+	live := d.liveSession()
+	if live == "" {
+		return false
+	}
+	id := sessionID
+	for range maxTaskCascadeDepth + 2 {
+		if id == live {
+			return true
+		}
+		parent, ok := d.delegationParents.Get(id)
+		if !ok {
+			return false
+		}
+		id = parent.ParentSessionID
+	}
+	return false
 }
 
 // wakeEligibleLocked is wakeEligible's body. Callers must hold s.mu -

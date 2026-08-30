@@ -405,3 +405,9 @@ func (c *callReturnCoordinator) RunAccepted(ctx context.Context, accept *agent.A
 	c.once.Do(func() { close(c.callReturned) })
 	return res, err
 }
+
+// SetLiveSession is inert: this double records agent-run calls.
+func (c *callReturnCoordinator) SetLiveSession(string) {}
+
+// SetLiveSession is inert: this double gates RunAccepted.
+func (g *gatedRunAcceptedCoordinator) SetLiveSession(string) {}

@@ -238,6 +238,10 @@ type Coordinator interface {
 	// sessionID reports its completion / resolves mid-run asks against
 	// parent.
 	RegisterDelegationParent(sessionID string, parent DelegationParent)
+	// SetLiveSession tells this coordinator which one session it is
+	// working in, and so which may be started by something finishing in
+	// the background. See agent.Coordinator.SetLiveSession.
+	SetLiveSession(sessionID string)
 	// DeliverTaskCompletion enqueues completion into the parent session's
 	// inbox for delivery on its next step.
 	DeliverTaskCompletion(ctx context.Context, parentSessionID string, completion TaskCompletion)

@@ -71,10 +71,16 @@ type Coordinator interface {
 	// runtime because it changes the thread_* tool set; task adapters take
 	// effect immediately for background delegation.
 	SetDelegationTools(threads tools.ThreadManager, tasks tools.TaskManager)
+	// SetLiveSession records the one session this sennit is working in,
+	// the only one - along with its delegations - that something
+	// finishing in the background may start. See dispatcher.wakeAllowed
+	// and App.ReportCurrentSession, its caller.
+	SetLiveSession(sessionID string)
 	// DeliverTaskCompletion enqueues completion into sessionID's
 	// completion inbox for delivery on that session's next step (see
 	// runTurn.prepareStep), or starts a continuation turn immediately if
-	// the session is idle and eligible (see startContinuation).
+	// the session is the one being worked in, idle and eligible (see
+	// startContinuation and dispatcher.wakeAllowed).
 	// internal/thread calls this once a task reaches a terminal status,
 	// having resolved sessionID as the task's *parent* session - never
 	// the task's own child session.
@@ -504,6 +510,11 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 // mixed adapter generations impossible, including while publications race.
 func (c *coordinator) SetDelegationTools(threads tools.ThreadManager, tasks tools.TaskManager) {
 	c.delegation.SetDelegationTools(threads, tasks)
+}
+
+// SetLiveSession implements Coordinator.
+func (c *coordinator) SetLiveSession(sessionID string) {
+	c.dispatcher.agentPort.current().SetLiveSession(sessionID)
 }
 
 // DeliverTaskCompletion implements Coordinator.

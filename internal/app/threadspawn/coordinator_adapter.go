@@ -47,6 +47,7 @@ type DelegationCoordinator interface {
 	IsSessionBusy(sessionID string) bool
 	QueuedPrompts(sessionID string) int
 	RegisterDelegationParent(sessionID string, parent agent.DelegationParent)
+	SetLiveSession(sessionID string)
 }
 
 // The seam narrows the coordinator's contract rather than restating it:
@@ -139,6 +140,12 @@ func (a *coordinatorAdapter) Cancel(sessionID string) {
 // sender internally consistent.
 func (a *coordinatorAdapter) SessionQueue(sessionID string) (bool, int) {
 	return a.inner.IsSessionBusy(sessionID), a.inner.QueuedPrompts(sessionID)
+}
+
+// SetLiveSession passes the domain's choice straight through: the
+// wake rule it feeds lives in the agent, not here.
+func (a *coordinatorAdapter) SetLiveSession(sessionID string) {
+	a.inner.SetLiveSession(sessionID)
 }
 
 func (a *coordinatorAdapter) RegisterDelegationParent(sessionID string, parent thread.DelegationParent) {

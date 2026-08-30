@@ -369,6 +369,9 @@ func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
 		ChildSessionID: "child-session",
 		ResultText:     "background-task-result-once",
 	}
+	// This is the session being worked in, so run()'s exit-hook wake -
+	// the auto-retry this test is about - is allowed to fire for it.
+	sa.SetLiveSession(sess.ID)
 	// The low-level dispatcher primitive, not sa.DeliverTaskCompletion:
 	// DeliverTaskCompletion would itself attempt to wake a continuation
 	// immediately (the session is idle), which is not what this test is

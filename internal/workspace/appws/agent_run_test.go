@@ -197,3 +197,7 @@ func TestAppWorkspace_Shutdown_JoinsRunDispatchedViaAgentRun(t *testing.T) {
 		t.Fatal("Shutdown did not complete after the blocked run was released")
 	}
 }
+
+// SetLiveSession is inert: AgentRunStream reports the run's session
+// through App.ReportCurrentSession, and this double only has to answer it.
+func (c *blockingAgentRunCoordinator) SetLiveSession(string) {}

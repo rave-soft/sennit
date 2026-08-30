@@ -35,18 +35,28 @@ A task isn't polled for its result. Once it finishes, its outcome is
 delivered back automatically and shows up as a report at the next step of
 whatever turn created it.
 
-If that turn has already ended, the report starts a new one: the session
-wakes on its own and picks the work back up, which is what lets a delegation
-hand off to the next one without you typing between them. This applies to
-every session — a delegation's own, and the one you are sitting in. A
-session you left therefore keeps going while you are elsewhere, spending
-tokens and editing files on the work it was already given; press Esc twice
-to stop it, or turn tasks off with `options.background_agents: false` if you
-want a session that never moves unless you ask it to.
+If that turn has already ended, the report starts a new one — but only in
+the session this sennit is working in. A sennit works in exactly one:
+restored from history, named on the command line, or created new. That
+session and the delegations under it are the one line of work that may move
+on its own, which is what lets a delegation hand off to the next without you
+typing between them.
 
-Nothing is lost if a wake cannot happen — the session is busy, you canceled
-it, or the continuation keeps failing. The report waits in the inbox and is
-folded into the top of the next turn instead, ahead of what you typed.
+Every other conversation in the database stays where it was left. One from
+last week does not pick itself back up because something it started finally
+finished, and a restart that recovers a pile of interrupted delegations wakes
+nothing. Switch to one of them and it becomes the session being worked in;
+what you switched away from goes quiet again.
+
+Nothing is lost either way. A report that cannot wake its session — it is not
+the one being worked in, it is busy, you canceled it, or its continuation
+keeps failing — waits in the inbox and is folded into the top of that
+session's next turn, ahead of what you typed, the first moment you are back
+in it.
+
+The session you are in does keep working while you watch it, and that is the
+point; press Esc twice to stop it, or turn delegation off entirely with
+`options.background_agents: false`.
 
 A workspace allows at most 4 tasks running at once, and at most 2 of those
 started by any one turn — past either limit, starting another is refused
@@ -67,6 +77,11 @@ and branch, its own app instance and database, a merge policy for folding the
 work back in — at real cost (a full agent session, plus a git merge on the
 way back). Use one only when the work would otherwise collide with something
 else already happening: the same files, the same branch.
+
+A thread runs in an app instance of its own, and that instance works in one
+session the same way yours does — the one your session asked for. That is
+what a thread may wake itself for; it grants nothing to the workspace you are
+in, which is a different instance entirely.
 
 A thread can be cancelled without being torn down — its worktree and branch
 stay on disk, so you can still inspect or resume the work — or removed

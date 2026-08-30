@@ -182,6 +182,15 @@ func runAgent(
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
 
+	// A non-interactive run works in one session just as an interactive
+	// one does - this is it. Without saying so the wake path has nothing
+	// to allow, and a run whose turn ended waiting on a delegation would
+	// sit there until the process was killed. See
+	// agent.Coordinator.SetLiveSession.
+	if err := ws.SetCurrentSession(ctx, sess.ID); err != nil {
+		slog.Debug("Failed to report the run's session", "session_id", sess.ID, "error", err)
+	}
+
 	stderrTTY := term.IsTerminal(os.Stderr.Fd())
 	progress := ws.Config().Options.Progress == nil || *ws.Config().Options.Progress
 

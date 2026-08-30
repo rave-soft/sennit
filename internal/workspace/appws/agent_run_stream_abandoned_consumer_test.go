@@ -121,3 +121,7 @@ func TestAppWorkspace_AgentRunStream_AbandonedConsumerDoesNotLeakGoroutine(t *te
 	}
 	t.Fatalf("an abandoned consumer must not leak AgentRunStream's goroutines: %v", leakErr)
 }
+
+// SetLiveSession is inert: AgentRunStream reports the run's session
+// through App.ReportCurrentSession, and this double only has to answer.
+func (s *streamingCoordinator) SetLiveSession(string) {}

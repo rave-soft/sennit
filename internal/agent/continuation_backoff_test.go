@@ -15,6 +15,7 @@ import (
 // writes and error logs for as long as the process lived.
 func TestWakeStopsAfterRepeatedContinuationFailures(t *testing.T) {
 	d := newDispatcher()
+	d.SetLiveSession("s1")
 
 	d.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})
 	require.True(t, d.wakeEligible("s1"), "a queued completion on an idle session wakes it")
@@ -38,6 +39,7 @@ func TestWakeStopsAfterRepeatedContinuationFailures(t *testing.T) {
 // arriving is an external event, not another go at the one that failed.
 func TestANewCompletionGivesTheWakePathItsAttemptsBack(t *testing.T) {
 	d := newDispatcher()
+	d.SetLiveSession("s1")
 	boom := errors.New("boom")
 
 	d.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})

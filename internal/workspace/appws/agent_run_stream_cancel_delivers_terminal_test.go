@@ -116,3 +116,7 @@ func TestAppWorkspace_AgentRunStream_CtxCancelAlwaysDeliversTerminalEvent(t *tes
 		cancel()
 	}
 }
+
+// SetLiveSession is inert: AgentRunStream reports the run's session
+// through App.ReportCurrentSession, and this double only has to answer it.
+func (c *releaseGatedCoordinator) SetLiveSession(string) {}

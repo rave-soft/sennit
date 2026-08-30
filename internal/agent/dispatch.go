@@ -358,6 +358,15 @@ type dispatcher struct {
 	// against each other; without it two goroutines can hand out different
 	// channels for the same session and one of them never closes.
 	userInputMu sync.Mutex
+
+	// liveSessionID is the one session this sennit is working in -
+	// restored from history, named on the command line, or newly
+	// created - reported on every session load/create/select (see
+	// App.ReportCurrentSession) and empty while there is none. It is the
+	// whole of the wake path's authority: nothing starts a turn nobody
+	// asked for unless it belongs to that session's own tree of work.
+	// See wakeAllowed.
+	liveSessionID atomic.Pointer[string]
 }
 
 func newDispatcher() *dispatcher {

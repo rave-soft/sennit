@@ -1230,7 +1230,20 @@ func (m *Manager) registerThreadParent(handle Handle, st Thread) {
 	if m.parentApp == nil {
 		return
 	}
-	registerParent(handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st, 0)
+	coord := handle.Workspace().Coordinator()
+	registerParent(coord, m.parentApp.Coordinator(), st, 0)
+
+	// A thread runs in an App instance of its own, and that instance
+	// works in one session the same way any other does - this one,
+	// created because the person's session asked for a thread. Saying so
+	// is what makes it wake-eligible over there; without it a thread that
+	// ended a turn waiting on delegations of its own would park at
+	// StatusRunning forever. It grants nothing to the workspace the
+	// person is working in, whose coordinator is a different one
+	// entirely.
+	if coord != nil {
+		coord.SetLiveSession(st.SessionID)
+	}
 }
 
 // registerParent installs st's parent link on registerOn — the coordinator

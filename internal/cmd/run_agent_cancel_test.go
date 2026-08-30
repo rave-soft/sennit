@@ -27,6 +27,11 @@ func (f *fakeRunWorkspace) Config() *config.Config {
 	return &config.Config{Options: &config.Options{}}
 }
 
+// SetCurrentSession is what runAgent calls to name the run's own session
+// as the one this process works in (see the call in run.go); the fake
+// only has to answer it.
+func (f *fakeRunWorkspace) SetCurrentSession(context.Context, string) error { return nil }
+
 func (f *fakeRunWorkspace) CreateSession(context.Context, string) (session.Session, error) {
 	return session.Session{ID: "sess-1"}, nil
 }

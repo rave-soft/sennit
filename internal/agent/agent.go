@@ -51,11 +51,17 @@ type SessionAgent interface {
 	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
+	// SetLiveSession records the one session this sennit is working in.
+	// Only that session and its delegations may be started by something
+	// finishing in the background - see dispatcher.wakeAllowed.
+	SetLiveSession(sessionID string)
 	// DeliverTaskCompletion enqueues completion into sessionID's
-	// completion inbox and, if the session is idle and was not left
-	// canceled by the user, starts a continuation turn for it. See
-	// dispatcher's completionInbox field, runTurn.prepareStep (the
-	// mid-turn delivery path), and startContinuation (the wake path).
+	// completion inbox and, if the session is the one being worked in or
+	// a delegation of it (see dispatcher.wakeAllowed), idle, and not
+	// left canceled by the
+	// user, starts a continuation turn for it. See dispatcher's
+	// completionInbox field, runTurn.prepareStep (the mid-turn delivery
+	// path), and startContinuation (the wake path).
 	DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion)
 	// RegisterDelegationParent records where sessionID (a running
 	// delegation's own child session) should deliver a mid-run ask via

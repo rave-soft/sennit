@@ -94,3 +94,7 @@ func TestAgentIsReady_FalseWithNoCoordinatorInstalled(t *testing.T) {
 	require.Equal(t, 0, ws.AgentQueuedPrompts("sess-1"))
 	require.Nil(t, ws.AgentQueuedPromptsList("sess-1"))
 }
+
+// SetLiveSession is inert: AgentRunStream reports the run's session
+// through App.ReportCurrentSession, and this double only has to answer it.
+func (c *modelStubCoordinator) SetLiveSession(string) {}

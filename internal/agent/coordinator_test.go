@@ -632,3 +632,8 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
 }
+
+// SetLiveSession is inert here: these tests drive the coordinator's
+// plumbing, not the wake rule the foreground feeds (see
+// dispatcher.wakeAllowed).
+func (m *mockSessionAgent) SetLiveSession(string) {}

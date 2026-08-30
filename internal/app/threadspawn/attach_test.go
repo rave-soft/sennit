@@ -534,3 +534,7 @@ func TestAttachGitRootHandsCoordinatorAdaptersFromPublishedPair(t *testing.T) {
 	_, err = tasksAdapter.List(t.Context())
 	require.NoError(t, err)
 }
+
+// SetLiveSession is inert: this fake embeds a nil coordinator, and
+// the wake rule the foreground feeds is the agent's, not Attach's.
+func (a *attachFakeCoordinator) SetLiveSession(string) {}
