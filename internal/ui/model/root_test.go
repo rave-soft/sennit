@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -197,7 +198,7 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
-	r.dashboard = newThreadsDashboard(r.com, &r.main.threadList)
+	r.dashboard = threads.New(r.com, &r.main.threadList)
 
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)
@@ -205,8 +206,9 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 	require.Equal(t, 120, r.width)
 	require.Equal(t, 40, r.height)
 	require.Equal(t, 120, r.main.lay.width)
-	require.Equal(t, 120, r.dashboard.width)
-	require.Equal(t, 40, r.dashboard.height)
+	width, height := r.dashboard.Size()
+	require.Equal(t, 120, width)
+	require.Equal(t, 40, height)
 }
 
 // TestThreadEventMsgDroppedWhenNotAttached exercises both "no thread
@@ -435,7 +437,7 @@ func TestHandleThreadAttachedTearsDownPreviousAttachment(t *testing.T) {
 	r.active = screenDashboard
 	// The request itself (Enter on the dashboard row) is what marks the
 	// answer as wanted; see Root.pendingAttach.
-	model, _ := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "first"})
+	model, _ := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "first"})
 	r = model.(*Root)
 
 	var firstStopCalls, firstDetachCalls, secondDetachCalls int
@@ -501,7 +503,7 @@ func TestHandleThreadAttachedStaleAfterLeavingDashboard(t *testing.T) {
 // TestHandleThreadAttachedFromMainScreenPanel is the regression test for a
 // click on a thread block in the main screen's session panel doing nothing:
 // the attach result was judged wanted by "is the dashboard active?", so a
-// request that started on screenMain (enterThreadMsg from mouse.go) was
+// request that started on screenMain (threads.EnterMsg from mouse.go) was
 // treated as stale and its workspace silently released. The request the
 // user is still waiting on (pendingAttach) must land whichever screen it
 // started from.
@@ -511,9 +513,9 @@ func TestHandleThreadAttachedFromMainScreenPanel(t *testing.T) {
 	r := newTestRoot(t, true)
 	r.active = screenMain
 
-	model, cmd := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "panel"})
+	model, cmd := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "panel"})
 	r = model.(*Root)
-	require.NotNil(t, cmd, "enterThreadMsg must start an attach")
+	require.NotNil(t, cmd, "threads.EnterMsg must start an attach")
 	require.Equal(t, "s1", r.pendingAttach)
 
 	detached := false
@@ -540,9 +542,9 @@ func TestHandleThreadAttachedSupersededRequestIsStale(t *testing.T) {
 	r := newTestRoot(t, true)
 	r.active = screenDashboard
 
-	model, _ := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "first"})
+	model, _ := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "first"})
 	r = model.(*Root)
-	model, _ = r.Update(enterThreadMsg{id: "s2", sessionID: "sess2", name: "second"})
+	model, _ = r.Update(threads.EnterMsg{ID: "s2", SessionID: "sess2", Name: "second"})
 	r = model.(*Root)
 
 	detached := false
@@ -571,7 +573,7 @@ func TestChatWarmStepReachesMainScreenWhileThreadIsOpen(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
-	model, _ := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "x"})
+	model, _ := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "x"})
 	r = model.(*Root)
 	model, cmd := r.Update(threadAttachedMsg{id: "s1", sessionID: "sess1", name: "x", ws: &rootTestWorkspace{}, detach: func() {}})
 	r = model.(*Root)

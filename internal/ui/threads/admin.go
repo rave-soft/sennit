@@ -1,4 +1,4 @@
-package model
+package threads
 
 // The threads dashboard's administration chrome: the toolbar of buttons,
 // the status filter tabs, and the detail pane under the list. threads.go

@@ -4,7 +4,7 @@ package model
 // chat input and shows a handful of active background threads, each with a
 // live one-line status.
 //
-// The thread list itself lives in threadListCache (threads_cache.go),
+// The thread list itself lives in threads.ListCache (threads_cache.go),
 // shared with the dashboard and the header badge — one ListThreads round
 // trip serves every consumer. What's specific to the dock, and stays here,
 // is per-thread live activity (in-progress todo, message count): it
@@ -71,7 +71,7 @@ type threadsDockState struct {
 	// per-thread fetch that started before the thread list moved on (e.g.
 	// the thread was removed) is discarded when it lands, mirroring gen but
 	// scoped to the activity half. Bumped by UI.updateThreads on every
-	// applied threadsLoadedMsg (see threadListCache.applyLoaded's applied
+	// applied threads.LoadedMsg (see threads.ListCache.applyLoaded's applied
 	// return).
 	activityGen uint64
 }
@@ -88,7 +88,7 @@ func (c *threadsDockState) dropActivity(id string) {
 
 // activeDockThreads filters threads down to the ones worth showing in the
 // dock as live work: pending, running, or merging (mirroring
-// activeThreadCount's status set), plus idle. Idle is deliberately included
+// threads.ActiveCount's status set), plus idle. Idle is deliberately included
 // here even though Status.Active() excludes it (see thread/types.go's
 // StatusIdle doc comment): an idle delegation's workspace is still live and
 // worth surfacing, it just has no run in flight right now — "idle must not

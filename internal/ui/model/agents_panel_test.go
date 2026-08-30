@@ -76,7 +76,7 @@ func TestSessionDelegations_IdleIsStillLive(t *testing.T) {
 }
 
 // TestAgentListCache_KeepsOnlyTasks proves the event filter that keeps this
-// cache and threadListCache from swallowing each other's rows: both kinds
+// cache and threads.ListCache from swallowing each other's rows: both kinds
 // ride one pubsub stream. Threads (and payloads predating the Kind field)
 // must not land here.
 func TestAgentListCache_KeepsOnlyTasks(t *testing.T) {
@@ -258,7 +258,7 @@ func TestSessionPanelRowLayout_AgentsAboveThreads(t *testing.T) {
 
 	u := sessionUI()
 	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "m$$c1")}
-	u.threadList.cache.Value = []proto.Thread{
+	u.threadList.Cache.Value = []proto.Thread{
 		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
 	}
 	u.updateLayoutAndSize()

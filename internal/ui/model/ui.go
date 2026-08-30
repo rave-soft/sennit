@@ -31,6 +31,7 @@ import (
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
 	"github.com/rave-soft/sennit/internal/ui/notification"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -196,9 +197,9 @@ type UI struct {
 
 	// threadList holds the memoized thread list shared by the header
 	// badge, the session panel's dock, and (via a pointer handed to
-	// newThreadsDashboard) the threads dashboard — one ListThreads round
+	// threads.New) the threads dashboard — one ListThreads round
 	// trip serves all three. See threads_cache.go.
-	threadList threadListCache
+	threadList threads.ListCache
 
 	// agentList holds the memoized delegation (task) list behind the
 	// session panel's agents section. See agents_cache.go.
@@ -656,7 +657,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 		reflect.TypeFor[pubsub.Event[workspace.AgentNotification]](), reflect.TypeFor[cancelTimerExpiredMsg]())
 
 	register((*UI).updateThreads,
-		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[threadsLoadedMsg](),
+		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[threads.LoadedMsg](),
 		reflect.TypeFor[threadDockActivityLoadedMsg]())
 
 	return g
@@ -1019,7 +1020,7 @@ func (m *UI) activeThreadBadgeCount() int {
 	if !m.surfacesThreads() {
 		return 0
 	}
-	return activeThreadCount(m.threadList.cache.Value)
+	return threads.ActiveCount(m.threadList.Threads())
 }
 
 func (m *UI) currentModelSupportsImages() bool {

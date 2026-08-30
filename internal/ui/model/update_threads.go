@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 )
 
 // updateThreads handles the thread-tracking branches of UI.Update: the
@@ -25,7 +26,7 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// Root fans this to both screens (see root.go); the main screen
 		// only cares about keeping the shared list (and the header badge
 		// it feeds) current.
-		m.threadList.applyEvent(msg)
+		m.threadList.ApplyEvent(msg)
 		// Tasks ride the same event stream as threads; each cache keeps
 		// only its own kind (see agentListCache.applyEvent).
 		m.agentList.applyEvent(msg)
@@ -51,8 +52,8 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case threadsLoadedMsg:
-		loadCmds, applied := m.threadList.applyLoaded(m.com, msg)
+	case threads.LoadedMsg:
+		loadCmds, applied := m.threadList.ApplyLoaded(m.com, msg)
 		cmds = append(cmds, loadCmds...)
 		if applied {
 			// The freshly listed threads may have added or retired

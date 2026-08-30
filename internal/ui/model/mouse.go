@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
@@ -132,7 +133,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			}
 			if hit.threadIndex >= 0 {
 				th := hit.plan.threads[hit.threadIndex]
-				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID, name: th.Name}))
+				cmds = append(cmds, util.CmdHandler(threads.EnterMsg{ID: th.ID, SessionID: th.SessionID, Name: th.Name}))
 				return cmds, true
 			}
 			// A click on a delegation block drills into its child session:
