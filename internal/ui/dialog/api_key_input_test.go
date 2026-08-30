@@ -218,3 +218,34 @@ func TestAPIKeyInput_VerifySnapshotsInputBeforeAsyncCheck(t *testing.T) {
 	}
 	require.True(t, gotResult, "expected the verify cmd to produce ActionChangeAPIKeyState")
 }
+
+// TestActionChangeAPIKeyState_IsDialogAddressed is the regression test for
+// a verify result being delivered to the wrong dialog. Without a DialogID,
+// Overlay.Update hands ActionChangeAPIKeyState to whichever dialog is on
+// top (e.g. a permission prompt raised mid-verify) instead of routing it
+// back to the still-open APIKeyInput, leaving that dialog stuck in
+// APIKeyInputStateVerifying.
+func TestActionChangeAPIKeyState_IsDialogAddressed(t *testing.T) {
+	addressed, ok := any(ActionChangeAPIKeyState{}).(DialogAddressed)
+	require.True(t, ok, "ActionChangeAPIKeyState must implement DialogAddressed")
+	require.Equal(t, APIKeyInputID, addressed.DialogID())
+}
+
+// TestAPIKeyInput_EscCancelsWhileVerifying is the regression test for the
+// only other way out of a stuck verify: previously
+// APIKeyInputStateVerifying absorbed every key, esc included, so a
+// verification that never resolved (or resolved into an unaddressed
+// message under a dialog that had since opened over it) left restart as
+// the only recovery.
+func TestAPIKeyInput_EscCancelsWhileVerifying(t *testing.T) {
+	com, _ := newAPIKeyTestCommon(t)
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider("test-provider"), Name: "Test Provider"}
+	dlg, _ := NewAPIKeyInput(com, false, provider, nil)
+
+	dlg.HandleMsg(ActionChangeAPIKeyState{State: APIKeyInputStateVerifying})
+	require.Equal(t, APIKeyInputStateVerifying, dlg.state)
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, ok := action.(ActionClose)
+	require.True(t, ok, "esc must close the dialog even mid-verify, got %#v", action)
+}

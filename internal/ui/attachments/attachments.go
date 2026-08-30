@@ -205,10 +205,24 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 	if width < maxItemWidth {
 		return ansi.Truncate(fmt.Sprintf("%d attachments…", len(attachments)), width, "…")
 	}
+	// fits is the number of full chips that still leave room for the
+	// summary chip beside them: floor(width/maxItemWidth) total slots,
+	// minus one reserved for the summary. Checked *before* drawing chip i
+	// below, so a truncated row draws exactly `fits` chips plus one summary
+	// chip — fits+1 slots, which is what floor(width/maxItemWidth) actually
+	// allows. Drawing chip `fits` itself before checking (the previous
+	// shape of this loop) put fits+1 chips *and* the summary on screen —
+	// one full chip's width more than the row had room for.
 	fits := int(math.Floor(float64(width)/float64(maxItemWidth))) - 1
 
 	var offset int
 	for i, att := range attachments {
+		if i == fits && i < len(attachments)-1 {
+			hidden := len(attachments) - i
+			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", hidden)))
+			break
+		}
+
 		filename := filepath.Base(att.FileName)
 		// Truncate if needed.
 		if ansi.StringWidth(filename) > maxFilename {
@@ -257,22 +271,6 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			offset = removeStart + removeW
 		default:
 			offset += chipW
-		}
-
-		// Only show the "N more…" summary when there is at least one
-		// attachment after i that it's actually hiding. len(attachments)
-		// > i was true even for i == len(attachments)-1 — the last
-		// attachment, fully rendered above — which showed a bogus
-		// "1 more…" chip when nothing was in fact hidden.
-		//
-		// Chips 0..i (i+1 of them) have been drawn by this point, so the
-		// hidden count is len(attachments)-(i+1), not len(attachments)-fits
-		// (which overstated it by one: it counted the chip at i itself as
-		// still hidden).
-		if i == fits && i < len(attachments)-1 {
-			hidden := len(attachments) - i - 1
-			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", hidden)))
-			break
 		}
 	}
 

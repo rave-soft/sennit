@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -87,6 +89,52 @@ func TestShellItemCompleteReplacesPartialOutputAndIgnoresLateChunks(t *testing.T
 
 	require.Equal(t, "complete\nresult\n", item.output.String())
 	require.NotContains(t, ansi.Strip(item.RawRender(80)), "late duplicate")
+}
+
+// TestShellItemHighlightAlignsWithContentNotPadding is the regression test
+// for a selection drawn two columns left of the mouse: Render used to
+// highlight the already-prefixed string with columns SetHighlight had
+// already shifted left by MessageLeftPaddingTotal to address the unprefixed
+// content, landing the highlight on the shell bar/padding instead of the
+// character under the pointer. Render must highlight RawRender's output
+// first and prefix afterward, like assistant.go/user.go/tools_item.go do.
+func TestShellItemHighlightAlignsWithContentNotPadding(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewPendingShellItem(&sty, "echo hi")
+	item.Complete("hi\n", 0)
+
+	const width = 80
+	plainHeader := ansi.Strip(strings.SplitN(item.RawRender(width), "\n", 2)[0])
+	require.NotEmpty(t, plainHeader)
+
+	// SetHighlight takes screen columns (prefix included) and subtracts
+	// MessageLeftPaddingTotal itself — mirroring what a real mouse drag
+	// reports — so this selects the single content character at column 0,
+	// which is plainHeader[0].
+	item.SetHighlight(0, MessageLeftPaddingTotal, 0, MessageLeftPaddingTotal+1)
+
+	rendered := item.Render(width)
+	scr := uv.NewScreenBuffer(width, lipgloss.Height(rendered))
+	uv.NewStyledString(rendered).Draw(scr, scr.Bounds())
+
+	// The item's highlighter (sty.TextSelection) paints a background color
+	// rather than setting AttrReverse, so that is what marks a selected
+	// cell here.
+	selectionBg := sty.TextSelection.GetBackground()
+
+	prefixCell := scr.CellAt(0, 0)
+	require.NotNil(t, prefixCell)
+	require.NotEqual(t, selectionBg, prefixCell.Style.Bg,
+		"the prefix bar must not be highlighted")
+
+	contentCell := scr.CellAt(MessageLeftPaddingTotal, 0)
+	require.NotNil(t, contentCell)
+	require.Equal(t, selectionBg, contentCell.Style.Bg,
+		"the character under the mouse must be highlighted")
+	require.Equal(t, string(plainHeader[0]), contentCell.Content,
+		"the highlighted cell must be the actual content character, not padding two columns off")
 }
 
 func TestPendingShellItemPreservesANSIBoundaryInCollapsedTail(t *testing.T) {

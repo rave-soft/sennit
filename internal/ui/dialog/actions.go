@@ -380,6 +380,13 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 // DialogID implements [DialogAddressed].
 func (ActionAPIKeySaved) DialogID() string { return APIKeyInputID }
 
+// DialogID implements [DialogAddressed]. Without this, the verification
+// result raised while another dialog (e.g. a permission prompt) opened on
+// top of APIKeyInput would go to that top dialog instead, leaving
+// APIKeyInput stuck in APIKeyInputStateVerifying — a state that also
+// swallows every key, esc included — with restart the only way out.
+func (ActionChangeAPIKeyState) DialogID() string { return APIKeyInputID }
+
 // DialogID implements [DialogAddressed].
 func (ActionCustomProviderResult) DialogID() string { return ProviderFormID }
 

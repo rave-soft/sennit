@@ -179,15 +179,23 @@ func (s *ShellItem) Render(width int) string {
 	// narrower than the space actually available.
 	content := s.RawRender(width)
 
+	// Highlight before prefixing, not after. SetHighlight's stored columns
+	// are already shifted left by MessageLeftPaddingTotal to address the
+	// unprefixed content (see its comment) — assistant.go, user.go and
+	// tools_item.go all highlight for that same reason before adding their
+	// prefix. Highlighting the already-prefixed string here used to land
+	// the selection two columns short of the mouse, onto the bar/padding,
+	// and left copied text (via RawRender, read by the same columns) not
+	// matching what was shown as selected.
+	content = s.renderHighlighted(content, cappedMessageWidth(width), lipgloss.Height(content))
+
 	var prefix string
 	if s.focused {
 		prefix = s.sty.Messages.ShellBarFocused.Render()
 	} else {
 		prefix = s.sty.Messages.ShellBarBlurred.Render()
 	}
-	out := prefixLines(content, prefix)
-
-	return s.renderHighlighted(out, width, lipgloss.Height(out))
+	return prefixLines(content, prefix)
 }
 
 // HandleMouseClick implements MouseClickable so clicks select this item.

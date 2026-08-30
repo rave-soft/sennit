@@ -63,6 +63,15 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			m.editor.pendingSendQueue = nil
 			m.editor.pendingSendGen = 0
 			m.editor.pendingSendLoading = false
+			// The nav frame rolls back below, so m.sess.current is (or
+			// remains) the parent session — but nothing else resets
+			// loadExpectedID. Left pointing at the session that just failed
+			// to load, sendMessage's "still waiting on a load" check
+			// (loadExpectedID != current.ID) keeps matching forever, so
+			// every later prompt is queued for a session that will never
+			// answer instead of running against the parent that is actually
+			// on screen.
+			m.sess.loadExpectedID = ""
 			// A delegation the person opened before it had begun. The
 			// sub-session row is written at the top of runSubAgent, so
 			// between the model emitting the tool call and that call

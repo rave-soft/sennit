@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -206,6 +207,39 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 	require.Equal(t, 120, r.main.lay.width)
 	require.Equal(t, 120, r.dashboard.width)
 	require.Equal(t, 40, r.dashboard.height)
+}
+
+// TestDashboardCoalescedWheelScrolls is the regression test for the mouse
+// wheel doing nothing over the threads dashboard: the input filter
+// (cmd/root.go) rewrites every raw tea.MouseWheelMsg into
+// common.CoalescedWheelMsg before Root ever sees it, but handleDashboardMsg
+// used to switch only on the raw type, so threadsDashboard.HandleMouseWheel
+// was dead code in production.
+func TestDashboardCoalescedWheelScrolls(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	threads := make([]proto.Thread, 40)
+	for i := range threads {
+		threads[i] = proto.Thread{
+			ID: fmt.Sprintf("t%d", i), Name: fmt.Sprintf("thread %d", i),
+			Kind: "thread", Status: "running",
+		}
+	}
+	r.dashboard = dashboardWith(t, threads...)
+	r.active = screenDashboard
+
+	before := r.dashboard.list.Offset()
+	pt := r.dashboard.listRect.Min
+
+	model, _ := r.Update(common.CoalescedWheelMsg{
+		Mouse:  tea.Mouse{X: pt.X, Y: pt.Y},
+		DeltaY: 3,
+	})
+	r = model.(*Root)
+
+	require.Greater(t, r.dashboard.list.Offset(), before,
+		"the coalesced wheel event must scroll the dashboard list")
 }
 
 // TestThreadEventMsgDroppedWhenNotAttached exercises both "no thread
@@ -528,6 +562,40 @@ func TestHandleThreadAttachedFromMainScreenPanel(t *testing.T) {
 	require.Equal(t, "s1", r.thread.threadID)
 	require.Empty(t, r.pendingAttach, "an answered request is no longer pending")
 	require.False(t, detached, "the wanted attachment must stay installed, not be released")
+}
+
+// TestLeaveThreadFromMainScreenPanelBuildsDashboard is the regression test
+// for a nil-pointer panic: a thread opened via enterThreadMsg (the main
+// screen's session panel, not showThreadsDashboardMsg) never gets r.dashboard
+// constructed, yet leaveThread (ctrl+e's screenThread case) unconditionally
+// switched r.active to screenDashboard — View() then called
+// r.dashboard.Draw() on nil. leaveThread must build the dashboard lazily,
+// the same way showThreadsDashboardMsg does, before landing on it.
+func TestLeaveThreadFromMainScreenPanelBuildsDashboard(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	r.active = screenMain
+
+	model, _ := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "panel"})
+	r = model.(*Root)
+	model, cmd := r.Update(threadAttachedMsg{
+		id: "s1", sessionID: "sess1", name: "panel", ws: &rootTestWorkspace{},
+		detach: func() {},
+	})
+	r = model.(*Root)
+	runBatchCmd(t, cmd)
+	require.Equal(t, screenThread, r.active)
+	require.Nil(t, r.dashboard, "no dashboard was ever opened for this thread")
+
+	cmd = r.leaveThread()
+	require.Equal(t, screenDashboard, r.active)
+	require.NotNil(t, r.dashboard, "leaveThread must build one before landing on screenDashboard")
+	if cmd != nil {
+		runBatchCmd(t, cmd)
+	}
+
+	require.NotPanics(t, func() { r.View() })
 }
 
 // TestHandleThreadAttachedSupersededRequestIsStale: asking for a second

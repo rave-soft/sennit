@@ -270,12 +270,13 @@ func (m *threadsDashboard) selected() *proto.Thread {
 }
 
 // SetSize resizes the dashboard, leaving room for the chrome around the
-// table.
+// table. The list itself is sized inside rebuildItems, once the selection
+// (which the detail pane's height, and so chromeHeight, depends on) has
+// actually been settled for the new dimensions.
 func (m *threadsDashboard) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 	m.columns = computeThreadsColumns(max(0, width-2))
-	m.list.SetSize(max(0, width-2), max(0, height-m.chromeHeight()))
 	m.rebuildItems()
 }
 
@@ -577,21 +578,31 @@ func (m *threadsDashboard) rebuildItems() {
 	}
 	m.list.SetItems(items...)
 
+	restored := false
 	for i, s := range m.visible {
 		if selectedID != "" && s.ID == selectedID {
 			m.list.SetSelected(i)
-			return
+			restored = true
+			break
 		}
 	}
-
-	// Nothing to restore: land on the first row. A table whose toolbar is
-	// entirely disabled because no row is selected is a dead screen, and
-	// the list also renders nothing until its window is placed (SetItems
-	// alone leaves it unset).
-	if len(m.visible) > 0 {
+	if !restored && len(m.visible) > 0 {
+		// Nothing to restore: land on the first row. A table whose toolbar
+		// is entirely disabled because no row is selected is a dead screen,
+		// and the list also renders nothing until its window is placed
+		// (SetItems alone leaves it unset).
 		m.list.SetSelected(0)
 		m.list.ScrollToTop()
 	}
+
+	// Must come after the selection above settles: the detail pane's
+	// height — and so chromeHeight, and so how many rows the list gets —
+	// depends on which row is selected. Sizing before this point (as
+	// SetSize used to, and as every caller that only invoked rebuildItems
+	// on its own always did) left the list believing it had more rows to
+	// work with than listRect could actually show, clipping it and
+	// throwing off ScrollBy/AtBottom by the difference.
+	m.list.SetSize(max(0, m.width-2), max(0, m.height-m.chromeHeight()))
 }
 
 // setFilter switches the visible status class and rebuilds the table.

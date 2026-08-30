@@ -132,15 +132,18 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 		}
 	case tea.KeyPressMsg:
 		switch {
-		case m.state == APIKeyInputStateVerifying:
-			// do nothing
 		case key.Matches(msg, m.keyMap.Close):
+			// Checked before the "verifying absorbs everything" case below
+			// so esc still gets the person out mid-verify — previously the
+			// only way out of a stuck verify was to restart.
 			switch m.state {
 			case APIKeyInputStateVerified:
 				return ActionCmd{m.saveAPIKeyCmd()}
 			default:
 				return ActionClose{}
 			}
+		case m.state == APIKeyInputStateVerifying:
+			// do nothing
 		case key.Matches(msg, m.keyMap.Submit):
 			switch m.state {
 			case APIKeyInputStateInitial, APIKeyInputStateError:

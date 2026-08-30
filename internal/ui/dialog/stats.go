@@ -53,6 +53,14 @@ type StatsLoadedMsg struct {
 	Scope    stats.Scope
 	Snapshot stats.Snapshot
 	Err      error
+	// SessionID pins this result to the dialog instance that started the
+	// sweep: DialogID routes by the constant StatsID string, not by
+	// instance, so closing this dialog and reopening it (for the same or a
+	// different session) while a sweep started by the old instance is
+	// still in flight — the global scope can take up to 10s — would
+	// otherwise let that late result land in the new instance and be shown
+	// as its own.
+	SessionID string
 }
 
 // DialogID implements [DialogAddressed]: gathering runs while the dialog
@@ -182,6 +190,7 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 		req.ProjectPath = d.com.Workspace.WorkingDir()
 	}
 	ctx := d.com.Context()
+	sessionID := d.sessionID
 	return func() tea.Msg {
 		// Bounded on top of the lifecycle context: a global sweep over a
 		// large history is the case worth bounding on its own, separate
@@ -189,7 +198,7 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		snap, err := ws.Stats(ctx, req)
-		return StatsLoadedMsg{Scope: scope, Snapshot: snap, Err: err}
+		return StatsLoadedMsg{Scope: scope, Snapshot: snap, Err: err, SessionID: sessionID}
 	}
 }
 
@@ -197,6 +206,12 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 func (d *Stats) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case StatsLoadedMsg:
+		if msg.SessionID != d.sessionID {
+			// A sweep from a since-closed instance of this dialog (see
+			// SessionID's doc comment) — drop it rather than showing a
+			// stale snapshot as this instance's own.
+			return nil
+		}
 		for i, tab := range statsTabs {
 			if tab.scope != msg.Scope {
 				continue

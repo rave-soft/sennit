@@ -13,6 +13,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestOAuthCopilotStartPollingWithoutDeviceCodeReportsError is the
+// regression test for a nil-pointer panic: startPolling used to snapshot
+// m.deviceCode unconditionally and hand it straight to
+// copilot.PollForToken, which dereferences it. A late ActionInitiateOAuth
+// from an abandoned initiate (see
+// TestOAuthCopilotInitiateAuthNoopsOnceStopped) landing on a fresh dialog
+// whose own initiate has not completed yet used to reach here with
+// deviceCode still nil.
+func TestOAuthCopilotStartPollingWithoutDeviceCodeReportsError(t *testing.T) {
+	t.Parallel()
+
+	s := styles.SennitDark()
+	m := &OAuthCopilot{com: &common.Common{Styles: &s}}
+
+	cmd := m.startPolling("", 0)
+	require.NotNil(t, cmd)
+
+	var msg any
+	require.NotPanics(t, func() { msg = cmd() })
+	errored, ok := msg.(ActionOAuthErrored)
+	require.True(t, ok, "expected ActionOAuthErrored, got %#v", msg)
+	require.Error(t, errored.Error)
+}
+
+// TestOAuthCopilotInitiateAuthNoopsOnceStopped covers the other half of the
+// same fix: esc during "Initializing" (OAuth.HandleMsg's Close case) calls
+// stopPolling before the device-code request has necessarily returned.
+// initiateAuth must notice stopped==true and drop its result rather than
+// writing m.deviceCode and returning ActionInitiateOAuth for a dialog that
+// is already gone — which, addressed only by the constant OAuthID, would
+// otherwise land on whatever OAuth dialog opens next.
+//
+// stopPolling is called before initiateAuth here specifically so the
+// stopped check at the top short-circuits before any network call, keeping
+// this hermetic.
+func TestOAuthCopilotInitiateAuthNoopsOnceStopped(t *testing.T) {
+	t.Parallel()
+
+	s := styles.SennitDark()
+	m := &OAuthCopilot{com: &common.Common{Styles: &s}}
+
+	m.stopPolling()
+	msg := m.initiateAuth()
+
+	require.Nil(t, msg, "a dismissed dialog's initiate result must not surface")
+	require.Nil(t, m.deviceCode, "a dropped result must not write the device code either")
+}
+
 // copilotProxyTestWorkspace is a minimal [workspace.Workspace] stub —
 // mirroring accountsTestWorkspace's comment on why it must embed the full
 // interface — exposing only the config NewOAuthCopilot reads for the

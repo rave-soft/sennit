@@ -146,3 +146,28 @@ func TestSessionComposition_RenameDeleteAndCancelTransitions(t *testing.T) {
 	_, ok := action.(ActionCmd)
 	require.True(t, ok, "confirmed deletion remains asynchronous")
 }
+
+// TestSessionRenameInputCmdIsWrapped is the regression test for a rename
+// keystroke's cmd going nowhere: HandleInput (SessionItem's forwarder to
+// the title textinput) returns a bare tea.Cmd, not a dialog.Action.
+// Returning that unwrapped from HandleMsg used to fall into
+// applyDialogAction's generic "unhandled Action" path, which re-sends
+// whatever it's given as if it were a Bubble Tea message — a func value
+// masquerading as a tea.Msg that Session.HandleMsg's own type switch could
+// never match, silently dropping any cmd the textinput produced (e.g. its
+// cursor blink). It must come back wrapped in ActionCmd instead.
+func TestSessionRenameInputCmdIsWrapped(t *testing.T) {
+	com := newCommandsNamesTestCommon(t)
+	s := NewSessions(com, []session.Session{{ID: "one", Title: "One"}}, "one")
+
+	s.HandleMsg(tea.KeyPressMsg{Text: "ctrl+r"})
+	require.Equal(t, sessionsModeUpdating, s.sessionsMode)
+
+	// ctrl+v is the textinput's own Paste binding — the one stock keystroke
+	// that returns a non-nil cmd (a clipboard read), unlike an ordinary
+	// rune which only mutates the input's value.
+	action := s.HandleMsg(tea.KeyPressMsg{Mod: tea.ModCtrl, Code: 'v'})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "a rename keystroke's cmd must come back as ActionCmd, not a bare tea.Cmd")
+	require.NotNil(t, cmdAction.Cmd)
+}

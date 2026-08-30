@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -421,10 +422,38 @@ func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 	// that block's outcome-and-result shape.
 	require.NotContains(t, out, "It is running independently")
 
-	// The tool call itself is genuinely finished — never mistaken for
-	// still streaming.
-	require.False(t, item.isSpinning())
-	require.True(t, item.Finished())
+	// The delegation itself is not finished: a background-dispatch ack
+	// means the sub-agent is still running remotely, its actual result
+	// not yet in. isSpinning/Finished must say so too — treating the ack
+	// as a real result (the previous expectation here) froze the elapsed
+	// line above at whatever it read the moment the ack arrived, breaking
+	// its own "advances on wall clock alone" promise (see the comment on
+	// renderAgentStatusLine and backgroundDispatchTaskID's doc comment).
+	require.True(t, item.isSpinning())
+	require.False(t, item.Finished())
+}
+
+// TestAgentToolMessageItem_BackgroundDispatchAnimateKeepsTicking is the
+// regression test for the elapsed-time line freezing between child-session
+// events: once a background-dispatch ack was (wrongly) treated as a real
+// result, Animate — gated on isSpinning — returned nil and stopped bumping
+// the item's version, so nothing re-rendered it and the wall-clock elapsed
+// line stuck at whatever it read the moment the ack arrived. Animate must
+// keep producing ticks (and RawRender keep recomputing time.Since) for as
+// long as the delegation is still actually running.
+func TestAgentToolMessageItem_BackgroundDispatchAnimateKeepsTicking(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-bg", Name: "agent", Input: `{"prompt":"scan"}`, Finished: true}
+	metaJSON, err := json.Marshal(tools.AgentBackgroundResponseMetadata{TaskID: "t1", SessionID: "s1", Status: "running"})
+	require.NoError(t, err)
+	result := &message.ToolResult{ToolCallID: "agent-bg", Content: "ack", Metadata: string(metaJSON)}
+	item := NewAgentToolMessageItem(&sty, parent, result, false, nil)
+
+	requireBump(t, "Animate[background dispatch, own ID]", item, func() {
+		item.Animate(spin.StepMsg{ID: parent.ID})
+	})
 }
 
 // TestAgentToolRenderPending_ShowsElapsedAndTokens pins the shape of a

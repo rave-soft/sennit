@@ -183,6 +183,15 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		return nil
 
 	case ActionAccountsLoaded:
+		if msg.ProviderID != m.providerID {
+			// DialogID routes by the AccountsID constant, not by dialog
+			// instance: a refresh started for provider A that is still in
+			// flight when the dialog is closed and reopened for provider B
+			// (same AccountsID) would otherwise land here and render A's
+			// accounts under B's title, with activate/edit/delete then
+			// running A's account id against B.
+			return nil
+		}
 		if msg.Err != nil {
 			// Keep the last good m.accs on failure. A refresh (ctrl+l)
 			// that errors currently switches straight to the error view

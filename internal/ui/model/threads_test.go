@@ -121,6 +121,33 @@ func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *threadsDas
 	return m
 }
 
+// TestThreadsDashboardRebuildItemsResizesListForDetailPane is the
+// regression test for the list rendering more rows than listRect could
+// show: SetSize used to size the list from chromeHeight() before
+// rebuildItems ever ran, so on first open — when m.visible is still empty
+// and m.selected() is nil — chromeHeight() ignored the detail pane the
+// first row's selection was about to add. rebuildItems must resize the
+// list itself, after the selection it just settled is what chromeHeight
+// sees.
+func TestThreadsDashboardRebuildItemsResizesListForDetailPane(t *testing.T) {
+	t.Parallel()
+
+	ws := &threadsTestWorkspace{supported: true}
+	m := newTestThreadsDashboard(t, ws) // SetSize(80, 20) while the cache is still empty.
+	require.Nil(t, m.selected())
+	beforeHeight := m.list.Height()
+
+	m.cache.cache.value = []proto.Thread{{ID: "s1", Name: "one", Status: "running"}}
+	m.rebuildItems()
+
+	require.NotNil(t, m.selected(), "rebuildItems lands on the first row when nothing was selected")
+	wantHeight := max(0, m.height-m.chromeHeight())
+	require.Equal(t, wantHeight, m.list.Height(),
+		"the list must be sized off the chrome height of the now-selected row")
+	require.Less(t, wantHeight, beforeHeight,
+		"the detail pane must shrink the list once a row is selected")
+}
+
 func TestThreadsDashboardHandleKeyEnter(t *testing.T) {
 	t.Parallel()
 

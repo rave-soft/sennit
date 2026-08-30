@@ -449,7 +449,9 @@ func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// An open dialog owns the pointer: clicking "through" a modal onto the
 	// toolbar behind it would act on a screen the user cannot see.
 	if r.dashboardDialog.HasDialogs() {
-		if _, ok := msg.(tea.MouseMsg); ok {
+		_, isMouse := msg.(tea.MouseMsg)
+		_, isWheel := msg.(common.CoalescedWheelMsg)
+		if isMouse || isWheel {
 			action := r.dashboardDialog.Update(msg)
 			return r, r.handleDashboardDialogAction(action)
 		}
@@ -465,6 +467,24 @@ func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, nil
 	case tea.MouseWheelMsg:
 		r.dashboard.HandleMouseWheel(msg)
+		return r, nil
+	case common.CoalescedWheelMsg:
+		// The input filter (cmd/root.go) rewrites every raw wheel event
+		// into this before it reaches here, so the tea.MouseWheelMsg case
+		// above is dead in production — mirror mouse.go's main-screen
+		// handling and translate the coalesced delta back into the
+		// button HandleMouseWheel expects.
+		button := tea.MouseWheelDown
+		if msg.DeltaY < 0 {
+			button = tea.MouseWheelUp
+		}
+		if msg.DeltaY != 0 {
+			r.dashboard.HandleMouseWheel(tea.MouseWheelMsg{
+				X:      msg.Mouse.X,
+				Y:      msg.Mouse.Y,
+				Button: button,
+			})
+		}
 		return r, nil
 	}
 	return r, nil
@@ -619,8 +639,18 @@ func (r *Root) detachThread() tea.Cmd {
 }
 
 // leaveThread tears down the attached thread and returns to the dashboard.
+// A thread reached via enterThreadMsg (e.g. the main screen's session panel)
+// never had a dashboard constructed for it — only showThreadsDashboardMsg
+// does that — so this lazily builds one here too, the same way that case
+// does, before switching screens; View()'s screenDashboard case draws
+// r.dashboard unconditionally and would otherwise panic on a nil dashboard.
 func (r *Root) leaveThread() tea.Cmd {
 	cmd := r.detachThread()
+	built := r.dashboard == nil
+	if built {
+		r.dashboard = newThreadsDashboard(r.com, &r.main.threadList)
+		r.dashboard.SetSize(r.width, r.height)
+	}
 	r.active = screenDashboard
 	r.pendingAttach = ""
 
@@ -628,13 +658,14 @@ func (r *Root) leaveThread() tea.Cmd {
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if r.dashboard != nil {
-		// The thread may have changed status while attached (e.g.
-		// completed); invalidate so the dashboard doesn't sit on a stale
-		// row until the TTL backstop catches up.
-		r.dashboard.cache.invalidate()
-		cmds = append(cmds, r.dashboard.Refresh())
+	if built {
+		cmds = append(cmds, r.dashboard.SetActive(true))
 	}
+	// The thread may have changed status while attached (e.g.
+	// completed); invalidate so the dashboard doesn't sit on a stale
+	// row until the TTL backstop catches up.
+	r.dashboard.cache.invalidate()
+	cmds = append(cmds, r.dashboard.Refresh())
 	return tea.Batch(cmds...)
 }
 

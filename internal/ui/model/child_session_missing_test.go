@@ -115,6 +115,31 @@ func TestChildSessionLoadFailureStillReportsRealErrors(t *testing.T) {
 	require.Contains(t, infos[0].Msg, "database is locked")
 }
 
+// TestFailedChildLoadClearsLoadExpectedID is the regression test for a
+// stuck queue: after a not-found load rolls back the nav frame,
+// loadExpectedID used to stay pointed at the child that just failed to
+// load, even though m.sess.current is (and remains) the parent. Every
+// later sendMessage then saw loadExpectedID != current.ID and treated the
+// prompt as "still waiting on a delegation load", queuing it for a
+// session that will never answer instead of running it — with no error
+// surfaced to the person typing.
+func TestFailedChildLoadClearsLoadExpectedID(t *testing.T) {
+	t.Parallel()
+
+	u := newChildNavUI()
+	u.sess.current = &session.Session{ID: "parent"}
+	childID := "parent$$call_notyet"
+	enterMissingChild(t, u, childID)
+
+	require.Empty(t, u.sess.loadExpectedID,
+		"a failed load must not leave loadExpectedID pointed at a session that no longer exists")
+
+	cmd := u.sendMessage("hello")
+	require.NotNil(t, cmd, "the prompt must run against the parent, not queue for the missing child")
+	require.Empty(t, u.editor.pendingSendQueue,
+		"the prompt must not be queued for a session that will never resolve")
+}
+
 // TestAbandonOnlyPopsTheFrameItWasAskedAbout pins that a late failure
 // from a session the person has already navigated away from cannot pop
 // somebody else's frame.

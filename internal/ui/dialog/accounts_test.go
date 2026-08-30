@@ -239,6 +239,28 @@ func TestAccounts_LoadErrorEntersErrorState(t *testing.T) {
 	})
 }
 
+// TestAccounts_IgnoresLoadedResultForADifferentProvider is the regression
+// test for a stale-provider race: ActionAccountsLoaded is addressed by the
+// AccountsID constant, not by dialog instance, so a refresh started for one
+// provider that is still in flight when the dialog is closed and reopened
+// for a different provider would otherwise land here and render the first
+// provider's accounts under the second provider's title.
+func TestAccounts_IgnoresLoadedResultForADifferentProvider(t *testing.T) {
+	providerID := "openai"
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	dlg := loadedAccounts(t, com, providerID)
+
+	action := dlg.HandleMsg(ActionAccountsLoaded{
+		ProviderID: "anthropic",
+		Accounts:   []accounts.Account{{ID: "other-acct", Label: "Someone else"}},
+	})
+
+	require.Nil(t, action, "a mismatched provider result must be dropped, not acted on")
+	require.Equal(t, accountsStateList, dlg.state)
+	require.Equal(t, providerID, dlg.providerID, "the dialog must stay addressed to its own provider")
+}
+
 func TestAccounts_SelectNonActiveAccount_NoIOInHandleMsg(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")

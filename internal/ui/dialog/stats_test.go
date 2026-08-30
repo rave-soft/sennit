@@ -252,6 +252,33 @@ func TestStats_LoadedMsgReachesDialogBehindAnotherOne(t *testing.T) {
 	require.Contains(t, out, "By model", "the result must reach Stats even though another dialog is in front")
 }
 
+// TestStats_IgnoresLoadedMsgFromADifferentInstance is the regression test
+// for a stale sweep landing in the wrong dialog instance: DialogID routes
+// StatsLoadedMsg by the constant StatsID, not by instance, so closing this
+// dialog and reopening a fresh one — for a different session, the common
+// case — while the old instance's sweep is still in flight (up to 10s for
+// the global scope) would otherwise let that late result be shown as the
+// new instance's own.
+func TestStats_IgnoresLoadedMsgFromADifferentInstance(t *testing.T) {
+	t.Parallel()
+
+	ws := &statsTestWorkspace{snap: sampleSnapshot()}
+	d := newStatsTestDialog(t, ws, "sess-2")
+
+	// A result from an abandoned instance opened for a different session.
+	action := d.HandleMsg(StatsLoadedMsg{
+		Scope:     stats.ScopeProject,
+		Snapshot:  sampleSnapshot(),
+		SessionID: "sess-1",
+	})
+
+	require.Nil(t, action)
+	require.False(t, d.tabs[1].loaded, "a result addressed to a different instance must not populate this one's tab")
+
+	out := drawStats(t, d)
+	require.NotContains(t, out, "By model", "the stale snapshot must not be shown as this instance's data")
+}
+
 // The same model id served by two providers is two rows with two costs.
 // Naming only the model would print what looks like the same row twice,
 // so the provider is appended exactly where it tells them apart.

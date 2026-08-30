@@ -103,7 +103,17 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		if item := s.selectedSessionItem(); item != nil {
-			return item.HandleInput(keyMsg)
+			// HandleInput returns a bare tea.Cmd, not a dialog.Action.
+			// Returning it unwrapped used to fall into applyDialogAction's
+			// generic "unhandled Action" default branch, which re-sends
+			// whatever it's handed as a Bubble Tea *message* — a func
+			// value masquerading as a tea.Msg — that Session.HandleMsg's
+			// own type switch could never match, so the textinput's cmd
+			// was silently dropped instead of run.
+			if cmd := item.HandleInput(keyMsg); cmd != nil {
+				return ActionCmd{cmd}
+			}
+			return nil
 		}
 		return nil
 	}

@@ -234,7 +234,15 @@ func (a *delegationToolMessageItem) Restyle() tea.Cmd {
 // previously rendered frame indefinitely and the spinner would appear
 // frozen.
 func (a *delegationToolMessageItem) Animate(msg spin.StepMsg) tea.Cmd {
-	if a.result != nil || a.Status() == ToolStatusCanceled {
+	// isSpinning defers to spinningFunc (set by the concrete
+	// agent/agentic_fetch constructors), not a bare "no result yet" check:
+	// a background-dispatch ack sets a.result to the ack immediately, but
+	// the delegation is still running remotely. Gating on "a.result != nil"
+	// directly here — bypassing spinningFunc — used to stop ticks (and so
+	// the elapsed-time status line) the moment that ack landed, freezing it
+	// between child-session events despite renderAgentStatusLine's promise
+	// to advance on wall clock alone.
+	if !a.isSpinning() {
 		return nil
 	}
 	if msg.ID == a.ID() {
@@ -344,8 +352,17 @@ func NewAgentToolMessageItem(
 	}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	// For the agent tool we keep spinning until the tool call is finished.
+	// A background-dispatch ack (see backgroundDispatchTaskID) does not
+	// count as finished: the delegation is still running remotely, and
+	// treating the ack as a real result froze the elapsed-time status line
+	// (Finished() would go true, dropping it out of the animation loop)
+	// even though the comment above renderAgentStatusLine promises it
+	// "advances on wall clock alone" no matter what.
 	t.spinningFunc = func(state SpinningState) bool {
-		return !state.HasResult() && !state.IsCanceled()
+		if state.IsCanceled() {
+			return false
+		}
+		return !state.HasResult() || backgroundDispatchTaskID(state.Result) != ""
 	}
 	return t
 }
@@ -436,6 +453,23 @@ type AgentToolRenderContext struct {
 // one thing there that knows which item it renders.
 func (r *AgentToolRenderContext) Hidden() bool {
 	return r.agent != nil && r.agent.Hidden()
+}
+
+// backgroundDispatchTaskID returns the TaskID of a background-dispatch
+// acknowledgment result, or "" if result is nil or carries a genuine
+// (non-background) result. Every delegation tool returns synchronously
+// with this ack, not the delegation's actual answer, the moment the
+// background task is dispatched — see the call site in
+// AgentToolRenderContext.RenderTool for the full explanation.
+func backgroundDispatchTaskID(result *message.ToolResult) string {
+	if result == nil {
+		return ""
+	}
+	var meta tools.AgentBackgroundResponseMetadata
+	if err := json.Unmarshal([]byte(result.Metadata), &meta); err != nil {
+		return ""
+	}
+	return meta.TaskID
 }
 
 // delegationStillRunning reports whether a delegation (agent/agentic_fetch)
@@ -559,9 +593,14 @@ func NewAgenticFetchToolMessageItem(
 ) *AgenticFetchToolMessageItem {
 	t := &AgenticFetchToolMessageItem{delegationToolMessageItem: &delegationToolMessageItem{startTime: time.Now()}}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgenticFetchToolRenderContext{fetch: t}, canceled)
-	// For the agentic fetch tool we keep spinning until the tool call is finished.
+	// For the agentic fetch tool we keep spinning until the tool call is
+	// finished. See AgentToolMessageItem's matching spinningFunc for why a
+	// background-dispatch ack does not count as finished.
 	t.spinningFunc = func(state SpinningState) bool {
-		return !state.HasResult() && !state.IsCanceled()
+		if state.IsCanceled() {
+			return false
+		}
+		return !state.HasResult() || backgroundDispatchTaskID(state.Result) != ""
 	}
 	return t
 }

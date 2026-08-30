@@ -450,23 +450,26 @@ func TestRender_NoMoreChipWhenEverythingFits(t *testing.T) {
 
 var moreOrCountRE = regexp.MustCompile(`(\d+) (?:more|attachments)…`)
 
-// TestRender_ChipsPlusHiddenCountEqualsTotal is a regression test for two
-// bugs in the overflow cap: (a) the "N more…" summary counted the chip at
-// the cutoff index as still hidden, overstating the true hidden count by
-// one; (b) when the row was narrower than a single chip, `fits` went
-// negative and the cap never triggered at all, so every chip rendered and
-// overflowed the row instead of collapsing.
+// TestRender_ChipsPlusHiddenCountEqualsTotal is a regression test for bugs
+// in the overflow cap: (a) the "N more…" summary counted the chip at the
+// cutoff index as still hidden, overstating the true hidden count by one;
+// (b) when the row was narrower than a single chip, `fits` went negative
+// and the cap never triggered at all, so every chip rendered and
+// overflowed the row instead of collapsing; (c) `fits` counted one more
+// full chip than the row actually had room for once the summary chip's own
+// width was added, so a truncated row's rendered width was always one
+// chip's width more than the width it was given (see
+// TestRender_SummaryNeverOverflowsWidth for that one directly).
 //
 // The invariant under test: at every width, the number of chips actually
 // drawn (one ✕ per chip) plus whatever count the summary reports as
 // hidden must equal the total number of attachments — never more, never
-// less. That invariant alone doesn't catch (b): drawing every chip with
-// no summary at all also happens to sum correctly (3 drawn + 0 hidden =
-// 3), even though the row overflows its width. So each case also pins
-// down exactly how many chips a correct implementation draws, which
-// fails on "exactly one chip's worth" (summary overstated the hidden
-// count by one) and "narrower than one chip" (nothing capped, so all
-// three chips drew) before the fix.
+// less. That invariant alone doesn't catch (b) or (c): drawing every chip
+// with no summary at all also happens to sum correctly (3 drawn + 0
+// hidden = 3) even though the row overflows its width, and so does
+// drawing one chip too many alongside the summary. So each case also pins
+// down exactly how many chips a correct implementation draws, and that
+// the rendered width never exceeds what was asked for.
 func TestRender_ChipsPlusHiddenCountEqualsTotal(t *testing.T) {
 	t.Parallel()
 
@@ -487,7 +490,13 @@ func TestRender_ChipsPlusHiddenCountEqualsTotal(t *testing.T) {
 		wantHidden int
 	}{
 		{"comfortably wide", maxItemWidth * (len(atts) + 2), 3, 0},
-		{"exactly one chip's worth", maxItemWidth, 1, 2},
+		// A single slot has room for either one full chip (nothing hidden,
+		// covered by "comfortably wide"/other tests) or the summary alone —
+		// never both, since chip + summary together need two slots. With
+		// three attachments and one slot, the correct call is the summary
+		// reporting all three as hidden, not a chip plus an
+		// overstated-by-width summary beside it.
+		{"exactly one chip's worth", maxItemWidth, 0, 3},
 		{"narrower than one chip", maxItemWidth - 1, 0, 3},
 	}
 
@@ -514,6 +523,39 @@ func TestRender_ChipsPlusHiddenCountEqualsTotal(t *testing.T) {
 				shown, hidden, len(atts))
 			require.Equal(t, tt.wantShown, shown, "unexpected number of chips drawn")
 			require.Equal(t, tt.wantHidden, hidden, "unexpected hidden count reported")
+			require.LessOrEqual(t, lipgloss.Width(out), tt.width,
+				"rendered row must never exceed the width it was given")
+		})
+	}
+}
+
+// TestRender_SummaryNeverOverflowsWidth is the regression test for the "N
+// more…" summary chip overflowing the row by exactly one chip's width:
+// `fits` used to count the chip at the cutoff index as already drawable,
+// then append the summary chip beside it anyway — fits+1 chips plus one
+// summary chip, one slot more than floor(width/maxItemWidth) actually
+// allows. Sized (six attachments, names past the truncation cap) and
+// measured (width 17 -> 34, 34 -> 51, 51 -> 68) the way the bug was found.
+func TestRender_SummaryNeverOverflowsWidth(t *testing.T) {
+	t.Parallel()
+
+	atts := make([]message.Attachment, 6)
+	for i := range atts {
+		atts[i] = message.Attachment{FileName: fmt.Sprintf("attachment-name-%d.txt", i)}
+	}
+
+	r := newTestRenderer()
+	removeReserve := r.removeStyle.String()
+	maxItemWidth := lipgloss.Width(r.imageStyle.String() + r.normalStyle.Render(strings.Repeat("x", maxFilename)) + removeReserve)
+
+	for slots := 1; slots <= len(atts)+1; slots++ {
+		width := maxItemWidth * slots
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			t.Parallel()
+
+			out := newTestRenderer().Render(atts, false, true, width)
+			require.LessOrEqual(t, lipgloss.Width(out), width,
+				"rendered row (%d) must never exceed the requested width (%d)", lipgloss.Width(out), width)
 		})
 	}
 }
