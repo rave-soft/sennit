@@ -143,6 +143,28 @@ func TestExtractContextLength(t *testing.T) {
 		{"no context key", map[string]any{"llama.block_count": float64(32)}, 0},
 		{"empty map", map[string]any{}, 0},
 		{"nil map", nil, 0},
+		// A vision-capable model exposes both the model's own context
+		// length and its vision tower's, under keys that both happen to
+		// end in ".context_length". general.architecture must steer to
+		// the model's own key, never the vision one.
+		{
+			"prefers architecture key over vision key",
+			map[string]any{
+				"general.architecture":        "llama",
+				"llama.context_length":        float64(8192),
+				"llama.vision.context_length": float64(2048),
+			},
+			8192,
+		},
+		{
+			"architecture key present regardless of map order",
+			map[string]any{
+				"general.architecture":        "llama",
+				"llama.vision.context_length": float64(2048),
+				"llama.context_length":        float64(8192),
+			},
+			8192,
+		},
 	}
 
 	for _, tt := range tests {
@@ -151,4 +173,26 @@ func TestExtractContextLength(t *testing.T) {
 			require.Equal(t, tt.expected, extractContextLength(tt.info))
 		})
 	}
+}
+
+// TestExtractContextLength_FallbackIsDeterministic covers the case
+// general.architecture doesn't resolve one of the candidate keys (missing
+// or wrong architecture value): the fallback scan must pick the same key
+// every time, not whichever the map's randomized iteration order visits
+// first.
+func TestExtractContextLength_FallbackIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	info := map[string]any{
+		"general.architecture":        "unknownarch",
+		"llama.vision.context_length": float64(2048),
+		"llama.context_length":        float64(8192),
+	}
+	// "llama.context_length" < "llama.vision.context_length"
+	// lexicographically, so the fallback must consistently pick it.
+	want := extractContextLength(info)
+	for range 20 {
+		require.Equal(t, want, extractContextLength(info))
+	}
+	require.Equal(t, int64(8192), want)
 }

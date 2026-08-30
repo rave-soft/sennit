@@ -108,7 +108,16 @@ func doRequest(ctx context.Context, client *http.Client, method, baseURL, path, 
 	}
 	for k, v := range extraHeaders {
 		resolved, err := resolver.ResolveValue(v)
-		if err != nil || resolved == "" {
+		if err != nil {
+			// Same rationale as base_url/api_key above: a failing
+			// extra_headers substitution (e.g. `$(op read ...)` when the
+			// vault is locked) must not be swallowed — that used to send
+			// the request without the header at all, and the server
+			// answered with the same opaque 401 this function's other
+			// resolutions were already fixed to avoid.
+			return nil, fmt.Errorf("resolve extra_headers[%s]: %w", k, err)
+		}
+		if resolved == "" {
 			continue
 		}
 		req.Header.Set(k, resolved)

@@ -209,6 +209,38 @@ func TestDiscoverModels_APIKeyResolveErrorSurfaces(t *testing.T) {
 	require.Zero(t, requests, "a failed api_key resolution must not fall through to an HTTP request that surfaces as a 401")
 }
 
+// TestDiscoverModels_ExtraHeaderResolveErrorSurfaces is
+// TestDiscoverModels_APIKeyResolveErrorSurfaces's counterpart for
+// extra_headers: a failing $(cmd) substitution there (e.g. `$(op read ...)`
+// against a locked vault) used to be silently dropped, so the request went
+// out missing that header and the server answered with the same opaque
+// 401 base_url/api_key were already fixed to avoid.
+func TestDiscoverModels_ExtraHeaderResolveErrorSurfaces(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	resolveErr := errors.New("command substitution failed: exit status 1")
+	cfg := Config{
+		ID:      "test",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-key",
+		ExtraHeaders: map[string]string{
+			"X-Custom": "$(broken-cmd)",
+		},
+	}
+	resolver := &failingResolver{failFor: "$(broken-cmd)", err: resolveErr}
+
+	models, err := DiscoverModels(context.Background(), cfg, resolver)
+	require.Error(t, err)
+	require.ErrorIs(t, err, resolveErr)
+	require.Nil(t, models)
+	require.Zero(t, requests, "a failed extra_headers resolution must not fall through to an HTTP request that surfaces as a 401")
+}
+
 func TestDiscoverModels_ExtraHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "custom-value", r.Header.Get("X-Custom"))

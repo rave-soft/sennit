@@ -95,24 +95,60 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 
 // extractContextLength finds the context_length value in Ollama's
 // model_info map. The key is architecture-specific (e.g.
-// "llama.context_length", "qwen2.context_length"), so we scan for any
-// key ending in ".context_length".
+// "llama.context_length", "qwen2.context_length"), so we prefer
+// "<general.architecture>.context_length" — model_info's own field naming
+// the model's architecture, so this is the model's real context window,
+// not an auxiliary one. A model that also exposes a vision tower (e.g.
+// "<arch>.vision.context_length", which happens to match the same
+// ".context_length" suffix but describes the vision encoder, not the
+// model) must not be picked up ahead of it.
+//
+// If the architecture is missing or its key isn't present, fall back to
+// scanning every key ending in ".context_length" and taking the
+// lexicographically smallest one — deterministic, unlike ranging over the
+// map directly, which returned whichever key Go's randomized iteration
+// visited first and could pick the vision context length one run and the
+// model's real one the next.
 func extractContextLength(info map[string]any) int64 {
+	if arch, ok := info["general.architecture"].(string); ok && arch != "" {
+		if v, exists := info[arch+".context_length"]; exists {
+			if cl, ok := parseContextLength(v); ok {
+				return cl
+			}
+		}
+	}
+
+	var bestKey string
+	var best int64
 	for k, v := range info {
 		if !strings.HasSuffix(k, ".context_length") {
 			continue
 		}
-		switch n := v.(type) {
-		case float64:
-			return int64(n)
-		case int64:
-			return n
-		case json.Number:
-			i, err := n.Int64()
-			if err == nil {
-				return i
-			}
+		cl, ok := parseContextLength(v)
+		if !ok {
+			continue
+		}
+		if bestKey == "" || k < bestKey {
+			bestKey = k
+			best = cl
 		}
 	}
-	return 0
+	return best
+}
+
+// parseContextLength converts an Ollama model_info value (a JSON number
+// decoded as float64, or as json.Number when the caller uses a
+// number-preserving decoder) into an int64, reporting ok=false for
+// anything else.
+func parseContextLength(v any) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	}
+	return 0, false
 }

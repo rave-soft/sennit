@@ -84,7 +84,17 @@ func (l *Loader) validateCustomProviders(cfg *config.Config, knownProviderNames 
 				// entries are ever written to the cache — otherwise a
 				// hand-written model would be persisted there and
 				// resurface after being deleted from config.
-				hadConfigModels := len(providerConfig.Models) > 0
+				// hadConfigModels must distinguish "hand-written in
+				// sennit.json/sennitrc" from "pre-filled from the cache by
+				// resolveCustomProviderModels" — len(providerConfig.Models) > 0
+				// is true in both cases, since the cache pre-fill also
+				// populates Models before discovery runs. Getting this wrong
+				// makes the cache-fed case look hand-written, which below
+				// persists only the newly-found delta and overwrites the
+				// cache row with just that subset, permanently forgetting
+				// every previously cached model that the endpoint didn't
+				// happen to return again this run.
+				hadConfigModels := providerConfig.ModelsSource == config.ModelsSourceConfig
 				freshlyDiscovered := newModelsOnly(providerConfig.Models, result.models)
 				providerConfig.Models = result.models
 				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
@@ -95,19 +105,27 @@ func (l *Loader) validateCustomProviders(cfg *config.Config, knownProviderNames 
 					// just because discover_models: true also ran
 					// discovery.
 					providerConfig.ModelsSource = config.ModelsSourceConfig
+					if len(freshlyDiscovered) > 0 {
+						// Persist only the freshly discovered models to the
+						// model cache (not sennit.json), so the next load
+						// finds them via resolveCustomProviderModels and
+						// skips this HTTP round trip entirely, without also
+						// caching (and later resurrecting) any hand-written
+						// models this provider already had. A failed
+						// discovery (the branch above) must never reach
+						// here, so a down endpoint never touches the cache.
+						modelcache.New(globalDataPath).SaveBestEffort(id, freshlyDiscovered)
+					}
 				} else {
 					providerConfig.ModelsSource = config.ModelsSourceCache
-				}
-				if len(freshlyDiscovered) > 0 {
-					// Persist only the freshly discovered models to the
-					// model cache (not sennit.json), so the next load finds
-					// them via resolveCustomProviderModels and skips this
-					// HTTP round trip entirely, without also caching (and
-					// later resurrecting) any hand-written models this
-					// provider already had. A failed discovery (the branch
-					// above) must never reach here, so a down endpoint
-					// never touches the cache.
-					modelcache.New(globalDataPath).SaveBestEffort(id, freshlyDiscovered)
+					// The pre-discovery list came from the cache itself, not
+					// hand-written config, so it's not a "hand-written
+					// model" to protect — save the full merged result. Only
+					// saving the delta (freshlyDiscovered) would overwrite
+					// the cache row and drop every model the endpoint didn't
+					// return this time, so a later load with the endpoint
+					// down would come back with just the new subset.
+					modelcache.New(globalDataPath).SaveBestEffort(id, result.models)
 				}
 			}
 		}
