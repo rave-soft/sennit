@@ -301,7 +301,7 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 	case JobKillToolName:
 		return NewJobKillTool(shell.NewBackgroundShellManager())
 	case DiagnosticsToolName:
-		return NewDiagnosticsTool(nil)
+		return NewDiagnosticsTool(nil, dir)
 	case ReferencesToolName:
 		return NewReferencesTool(nil, dir)
 	case SymbolsToolName:

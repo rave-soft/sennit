@@ -62,8 +62,6 @@ func firstWithDefinition[T any](results []T, definition func(T) ([]protocol.Loca
 // (definition, rename, call hierarchy) use resolveSymbol; callers that
 // want to iterate all matches (references) use this directly.
 func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) ([]*resolvedSymbol, error) {
-	lspManager.Start(ctx, workingDir)
-
 	// Use word boundaries to avoid matching inside larger identifiers
 	// (e.g. "Bar" inside "myBar"). The symbol is already QuoteMeta'd
 	// so dots and other regex metacharacters are escaped.
@@ -83,6 +81,11 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 			continue
 		}
 
+		// Server selection is per-file (handlesFiletype on a directory
+		// never matches), so starting on workingDir started nothing. Start
+		// on the matched file itself, before the first read/edit has had a
+		// chance to open one.
+		lspManager.Start(ctx, absPath)
 		client := findLSPClient(lspManager, absPath)
 		if client == nil {
 			continue

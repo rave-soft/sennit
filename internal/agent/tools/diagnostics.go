@@ -12,6 +12,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
@@ -24,13 +25,17 @@ const DiagnosticsToolName = "lsp_diagnostics"
 //go:embed diagnostics.md
 var diagnosticsDescription string
 
-func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
+func NewDiagnosticsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
 		diagnosticsDescription,
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			notifyLSPs(ctx, lspManager, params.FilePath)
-			output := getDiagnostics(params.FilePath, lspManager)
+			filePath := params.FilePath
+			if filePath != "" {
+				filePath = filepathext.SmartJoin(workingDir, filePath)
+			}
+			notifyLSPs(ctx, lspManager, filePath)
+			output := getDiagnostics(filePath, lspManager)
 			return fantasy.NewTextResponse(output), nil
 		},
 	)

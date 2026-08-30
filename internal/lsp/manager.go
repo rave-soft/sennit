@@ -157,20 +157,25 @@ func (s *Manager) WorkspaceClients(ctx context.Context, root string) []*Client {
 	// GetServers returns every server powernap knows (dozens, most not
 	// installed), so comparing found against len(servers) never triggers
 	// and the walk covers the whole tree regardless of root's size.
-	// Compare against the subset actually capable of starting instead:
-	// user-configured servers, plus auto-start candidates whose command
-	// is on PATH.
-	startable := 0
+	// Restrict both the target count and the servers the walk even
+	// considers to the subset actually capable of starting: user-configured
+	// servers, plus auto-start candidates whose command is on PATH.
+	// Otherwise a filetype match against a non-startable server (e.g.
+	// autotools_ls for a stray Makefile) marks itself found, the walk
+	// reaches len(startable) early on servers that were never going to
+	// start, and SkipDir cuts the walk off before it reaches a file that
+	// would have found a server that could.
+	startableServers := make(map[string]*powernapconfig.ServerConfig, len(servers))
 	for name, server := range servers {
 		if s.isUserConfigured(name) {
-			startable++
+			startableServers[name] = server
 			continue
 		}
 		if skipAutoStartCommands[server.Command] {
 			continue
 		}
 		if _, err := s.lookPath(server.Command); err == nil {
-			startable++
+			startableServers[name] = server
 		}
 	}
 
@@ -185,7 +190,7 @@ func (s *Manager) WorkspaceClients(ctx context.Context, root string) []*Client {
 			}
 			return nil
 		}
-		if len(found) == startable {
+		if len(found) >= len(startableServers) {
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
@@ -194,7 +199,7 @@ func (s *Manager) WorkspaceClients(ctx context.Context, root string) []*Client {
 			}
 			return nil
 		}
-		for name, server := range servers {
+		for name, server := range startableServers {
 			if !found[name] && handles(server, path, root) {
 				found[name] = true
 				s.startServer(name, path, server)

@@ -37,12 +37,38 @@ func runLSPToolHelper() {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
-		if json.Unmarshal(body, &request) != nil || len(request.ID) == 0 {
+		if json.Unmarshal(body, &request) != nil {
+			continue
+		}
+		scenario := os.Getenv("SENNIT_LSP_TOOL_SCENARIO")
+		if len(request.ID) == 0 {
+			// Notification (no id expecting a reply). The only one this
+			// helper reacts to is didOpen, and only for the "diagnostics"
+			// scenario: reply with a publishDiagnostics notification for
+			// the just-opened file, mimicking a real server that found a
+			// problem in it.
+			if scenario == "diagnostics" && request.Method == "textDocument/didOpen" {
+				var params struct {
+					TextDocument struct {
+						URI string `json:"uri"`
+					} `json:"textDocument"`
+				}
+				// Only the user's own file gets a diagnostic — root-marker
+				// files like go.mod are opened too (Start opens root
+				// markers), and a diagnostic on those would land in the
+				// project bucket and confuse what this test is checking.
+				if json.Unmarshal(request.Params, &params) == nil && strings.HasSuffix(params.TextDocument.URI, "a.go") {
+					notification := []byte(fmt.Sprintf(
+						`{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":%q,"diagnostics":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"severity":1,"message":"boom"}]}}`,
+						params.TextDocument.URI))
+					fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(notification), notification)
+				}
+			}
 			continue
 		}
 		result := "null"
-		scenario := os.Getenv("SENNIT_LSP_TOOL_SCENARIO")
 		switch request.Method {
 		case "initialize":
 			if scenario == "no-capabilities" {
@@ -160,4 +186,41 @@ func TestLSPWorkspaceSymbolsThroughManagerRequiresCapability(t *testing.T) {
 	response := runToolWith(t, NewWorkspaceSymbolsTool(manager, root), t.Context(), WorkspaceSymbolsToolName, WorkspaceSymbolsParams{Query: "Exact"})
 	require.True(t, response.IsError)
 	require.Contains(t, response.Content, "no workspace-symbol-capable LSP client")
+}
+
+// TestDiagnosticsToolAttributesRelativeFilePathToCurrentFile reproduces
+// defect 1: a model naturally passes the relative path it saw from
+// read/grep. Before the fix, lsp_diagnostics compared that raw relative
+// path against the absolute paths reported by the LSP client, so the
+// file's own diagnostic never matched path == filePath and landed in the
+// project bucket instead of "Current file".
+func TestDiagnosticsToolAttributesRelativeFilePathToCurrentFile(t *testing.T) {
+	root := newLSPToolWorktree(t)
+	manager := newLSPToolE2EManager(t, root, "diagnostics")
+
+	response := runToolWith(t, NewDiagnosticsTool(manager, root), t.Context(), DiagnosticsToolName, DiagnosticsParams{FilePath: "a.go"})
+	require.False(t, response.IsError)
+	require.Contains(t, response.Content, "<file_diagnostics>")
+	require.Contains(t, response.Content, "boom")
+	require.NotContains(t, response.Content, "<project_diagnostics>")
+	require.Contains(t, response.Content, "Current file: 1 errors, 0 warnings")
+	require.Contains(t, response.Content, "Project: 0 errors, 0 warnings")
+}
+
+// TestResolveSymbolResultsStartsOnMatchedFileNotWorkingDir reproduces
+// defect 2: resolveSymbolResults used to call lspManager.Start on the
+// workspace directory, which handlesFiletype always rejects (a directory
+// has no file extension), so no server was ever started on a session's
+// first LSP call. This manager is fresh — no read/edit has opened
+// anything yet — so a client only appears in Clients() if
+// resolveSymbolResults itself starts one, on the matched file.
+func TestResolveSymbolResultsStartsOnMatchedFileNotWorkingDir(t *testing.T) {
+	root := newLSPToolWorktree(t)
+	manager := newLSPToolE2EManager(t, root, "symbols")
+	require.Zero(t, manager.Clients().Len(), "fixture must start with no running LSP client")
+
+	results, err := resolveSymbolResults(t.Context(), manager, "Exact", root)
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+	require.Positive(t, manager.Clients().Len(), "resolveSymbolResults must start a client for the matched file")
 }

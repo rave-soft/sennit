@@ -202,7 +202,7 @@ func toolSpecs() []toolSpec {
 		{[]string{"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			f := b.inputs
 			return []fantasy.AgentTool{
-				tools.NewDiagnosticsTool(f.lspManager),
+				tools.NewDiagnosticsTool(f.lspManager, rb.cfg.WorkingDir()),
 				tools.NewReferencesTool(f.lspManager, rb.cfg.WorkingDir()),
 				tools.NewLSPRestartTool(f.lspManager),
 				tools.NewSymbolsTool(f.lspManager, rb.cfg.WorkingDir()),

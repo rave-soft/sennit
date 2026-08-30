@@ -315,6 +315,71 @@ func TestWorkspaceClients_EarlyExitCountsOnlyStartableServers(t *testing.T) {
 	require.Equal(t, "go-lsp", clients[0].GetName())
 }
 
+// TestWorkspaceClients_SkipsNonStartableServerFiletypeMatch pins the bug
+// where a file matching a non-startable server's filetype could exhaust the
+// walk's early exit before the startable server it was looking for was ever
+// found. The registry here is trimmed to exactly two servers via
+// powernapconfig.Manager's own AddServer (bypassing LoadDefaults, so the
+// dozens of stock entries — several of which match any file because they
+// carry no FileTypes filter — can't blur the count): "fake-ls", whose
+// filetype matches "app.txt" (walked first, since it sorts before
+// "main.go") but whose command is never on PATH, and "go-lsp", the
+// user-configured server this test wants found. Before the fix, the walk
+// marked fake-ls found (and called startServer for it) purely because its
+// filetype matched — regardless of it being startable — which made
+// len(found) reach the startable count (1, for go-lsp alone) right after
+// app.txt, so the walk hit SkipDir at the root and never reached main.go.
+func TestWorkspaceClients_SkipsNonStartableServerFiletypeMatch(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.txt"), []byte("noise\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
+
+	cfg := configtest.NewStore(t, &config.Config{
+		Options: &config.Options{},
+		LSP: config.LSPs{
+			"go-lsp": {
+				Command:   "go-lsp-binary",
+				FileTypes: []string{"go"},
+			},
+		},
+	}, configtest.WithWorkingDir(dir))
+
+	registry := powernapconfig.NewManager()
+	registry.AddServer("go-lsp", &powernapconfig.ServerConfig{
+		Command:   "go-lsp-binary",
+		FileTypes: []string{"go"},
+	})
+	registry.AddServer("fake-ls", &powernapconfig.ServerConfig{
+		Command:   "fake-ls-binary",
+		FileTypes: []string{"txt"},
+	})
+
+	mgr := &Manager{
+		clients:     csync.NewMap[string, *Client](),
+		unavailable: csync.NewMap[string, time.Time](),
+		startMu:     csync.NewMap[string, *sync.Mutex](),
+		cfg:         cfg,
+		manager:     registry,
+		callback:    func(string, *Client) {},
+		now:         time.Now,
+		// Neither fake-ls-binary nor go-lsp-binary is ever on PATH; go-lsp
+		// counts as startable solely because it is user-configured.
+		lookPath: func(string) (string, error) { return "", errors.New("not found") },
+	}
+
+	client := newTestClient()
+	client.name = "go-lsp"
+	client.SetServerState(StateReady)
+	mgr.clients.Set("go-lsp", client)
+
+	clients := mgr.WorkspaceClients(t.Context(), dir)
+
+	require.Len(t, clients, 1, "go-lsp must still be discovered even though a file matching a non-startable server's filetype is walked first")
+	require.Equal(t, "go-lsp", clients[0].GetName())
+}
+
 // TestStartServer_StateRaceSafeUnderConcurrentUIReads pins the state
 // race: startServer writes the server state (Starting during Initialize,
 // Ready/Error afterwards) while a UI goroutine polls GetServerState. A
