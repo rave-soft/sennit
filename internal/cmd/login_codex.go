@@ -116,6 +116,7 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 	account, err := ws.RecordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
 		Token:     token,
 		AccountID: accountID,
+		Email:     codex.Email(token.AccessToken),
 	})
 	if err != nil {
 		restoreCodexProxyField(ws, hadProxyURL, previousProxyURL)

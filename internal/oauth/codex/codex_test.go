@@ -357,3 +357,36 @@ func TestTokenFromDiskForChecksAccount(t *testing.T) {
 	_, ok = TokenFromDiskFor("")
 	require.True(t, ok)
 }
+
+// fakeProfileJWT builds an unsigned token carrying the profile namespace's
+// email claim, which is where OpenAI puts it — beside, not inside, the
+// auth namespace that holds the account id.
+func fakeProfileJWT(t *testing.T, email string) string {
+	t.Helper()
+
+	claims := map[string]any{
+		"https://api.openai.com/auth":    map[string]any{"chatgpt_account_id": "acct-1"},
+		"https://api.openai.com/profile": map[string]any{"email": email, "name": "Someone"},
+	}
+	payload, err := json.Marshal(claims)
+	require.NoError(t, err)
+	enc := base64.RawURLEncoding.EncodeToString
+	return enc([]byte(`{"alg":"none"}`)) + "." + enc(payload) + ".sig"
+}
+
+func TestEmailReadsProfileClaim(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "someone@example.com", Email(fakeProfileJWT(t, "someone@example.com")))
+}
+
+// TestEmailIsEmptyWithoutTheClaim: a token that names an account but no
+// person is normal — the id is required, the email is a courtesy — so the
+// absence is an empty string, never an error.
+func TestEmailIsEmptyWithoutTheClaim(t *testing.T) {
+	t.Parallel()
+
+	require.Empty(t, Email(fakeJWT(t, "acct-1")), "a token without the profile claim names nobody")
+	require.Empty(t, Email("not-a-jwt"))
+	require.Empty(t, Email(""))
+}

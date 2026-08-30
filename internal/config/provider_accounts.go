@@ -449,11 +449,58 @@ func EnsureAccountMigrated(store *ConfigStore, accStore accounts.Store, provider
 	if err != nil {
 		return fmt.Errorf("migrating existing credential for provider %s: %w", providerID, err)
 	}
+	// Runs either way: an account just folded in from a pre-accounts
+	// credential has no email for the same reason an older recorded one
+	// does not — nobody read it out of the token.
+	if err := backfillCodexIdentity(accStore, providerID); err != nil {
+		return err
+	}
 	if !migrated {
 		return nil
 	}
 	if err := store.SetConfigField(ScopeGlobal, ProviderFieldKey(providerID, "account"), a.ID); err != nil {
 		return fmt.Errorf("marking migrated account active for provider %s: %w", providerID, err)
+	}
+	return nil
+}
+
+// backfillCodexIdentity fills in the email of Codex accounts recorded
+// before it was read from the token, and replaces a label that is nothing
+// but the account's UUID.
+//
+// Both are display-only, and both have been in the token on disk the whole
+// time: the sign-in that stored it simply did not look. Without this an
+// account recorded earlier keeps showing its UUID until the next full
+// re-login, which for Codex happens only when a refresh token is finally
+// rejected — so, for most people, not for a long while.
+//
+// A label is replaced only when it is exactly the AccountID. That is the
+// automatic fallback RecordAccount uses when it has nothing better; any
+// other label was either derived from something the token said or typed by
+// the person, and neither is ours to overwrite.
+func backfillCodexIdentity(accStore accounts.Store, providerID string) error {
+	if providerID != codex.ProviderID {
+		return nil
+	}
+	list, err := accStore.List(providerID)
+	if err != nil {
+		return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
+	}
+	for _, a := range list {
+		if a.Token == nil || a.Email != "" {
+			continue
+		}
+		email := codex.Email(a.Token.AccessToken)
+		if email == "" {
+			continue
+		}
+		a.Email = email
+		if a.Label == a.AccountID {
+			a.Label = email
+		}
+		if err := accStore.Upsert(providerID, a); err != nil {
+			return fmt.Errorf("backfilling account %s for provider %s: %w", a.ID, providerID, err)
+		}
 	}
 	return nil
 }

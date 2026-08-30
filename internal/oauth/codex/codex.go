@@ -122,6 +122,26 @@ func AccountID(token string) string {
 	return claims.Auth.AccountID
 }
 
+// Email extracts the signed-in account's email address from a Codex JWT.
+// It returns "" when the token is opaque or the claim is missing, which
+// callers treat as "no name to show" rather than as an error — nothing
+// keys off it, it is only what a person is shown instead of a UUID.
+//
+// The claim lives beside the account id but in a different namespace:
+// chatgpt_account_id is under .../auth, while email and name are under
+// .../profile. The scopes already ask for it (see scopes above).
+func Email(token string) string {
+	var claims struct {
+		Profile struct {
+			Email string `json:"email"`
+		} `json:"https://api.openai.com/profile"`
+	}
+	if !decodeClaims(token, &claims) {
+		return ""
+	}
+	return claims.Profile.Email
+}
+
 // ExpiresAt reports when an access token stops being accepted, or the zero
 // time when the token does not say.
 //

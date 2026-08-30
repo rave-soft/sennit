@@ -67,6 +67,7 @@ var (
 	_ oauthPostSaver       = (*OAuthCodex)(nil)
 	_ oauthProxyConfigurer = (*OAuthCodex)(nil)
 	_ oauthAccountIDer     = (*OAuthCodex)(nil)
+	_ oauthAccountEmailer  = (*OAuthCodex)(nil)
 )
 
 func (m *OAuthCodex) name() string {
@@ -77,6 +78,13 @@ func (m *OAuthCodex) name() string {
 // identity in the access token's JWT claims.
 func (m *OAuthCodex) accountID(token *oauth.Token) string {
 	return codex.AccountID(token.AccessToken)
+}
+
+// accountEmail implements [oauthAccountEmailer]: the same token carries
+// the signed-in address, which is what the accounts list shows instead of
+// accountID's UUID.
+func (m *OAuthCodex) accountEmail(token *oauth.Token) string {
+	return codex.Email(token.AccessToken)
 }
 
 // proxyURL prefills the step, in order of how much it is known to be what

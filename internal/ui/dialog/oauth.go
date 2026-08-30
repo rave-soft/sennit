@@ -712,13 +712,19 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		// loginCodex's comment in internal/cmd/login_codex.go) — recording
 		// it directly on the account here would make it indistinguishable
 		// from an override this one account wants.
-		var accountID string
+		var accountID, email string
 		if ider, ok := oAuthProvider.(oauthAccountIDer); ok {
 			accountID = ider.accountID(token)
+		}
+		// The email is what the accounts list shows instead of an opaque
+		// id, so a provider that can name its account is asked to.
+		if namer, ok := oAuthProvider.(oauthAccountEmailer); ok {
+			email = namer.accountEmail(token)
 		}
 		if _, err := com.Workspace.RecordAccount(config.ScopeGlobal, string(provider.ID), accounts.LegacyCredential{
 			Token:           token,
 			AccountID:       accountID,
+			Email:           email,
 			ForceNewAccount: forceNewAccount,
 		}); err != nil {
 			return oauthSaveErrMsg{err: fmt.Errorf("failed to save account: %w", err)}
@@ -749,6 +755,13 @@ type oauthPostSaver interface {
 // as an update to a specific existing account for it.
 type oauthAccountIDer interface {
 	accountID(token *oauth.Token) string
+}
+
+// oauthAccountEmailer is implemented by providers whose token names the
+// person who signed in. The accounts list falls back to the provider's own
+// account id when there is nothing better, which for Codex is a UUID.
+type oauthAccountEmailer interface {
+	accountEmail(token *oauth.Token) string
 }
 
 // confirmAndSelectModel is invoked when the user acknowledges the success
