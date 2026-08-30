@@ -411,6 +411,14 @@ func (d *delegationFinalizer) makeAuthRefreshCallback(providerCfg config.Provide
 	return d.builder.makeAuthRefreshCallback(providerCfg, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
 }
 
+// makeSubAgentAuthRefreshCallback is makeAuthRefreshCallback for a
+// delegation - see buildSubAgentCall's comment for why the sub-agent's own
+// model, not the coordinator's, has to drive what a refresh stores into
+// active.
+func (d *delegationFinalizer) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, model Model, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
+	return d.builder.makeSubAgentAuthRefreshCallback(providerCfg, model, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
+}
+
 func (d *delegationFinalizer) waitForInteractiveReauth(ctx context.Context, providerID string) error {
 	return d.builder.waitForInteractiveReauth(ctx, providerID, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
 }
@@ -724,9 +732,11 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 	// built from the *old* one - the delegation died on an expiry the
 	// top-level agent recovers from cleanly. active starts empty and is
 	// only ever populated by a successful refresh (see
-	// makeAuthRefreshCallback); it is local to this call and discarded
-	// with it, so it cannot leak into the parent's turn or a later
-	// delegation.
+	// makeSubAgentAuthRefreshCallback, which rebuilds the runtime for this
+	// delegation's own model rather than the coordinator's - see its
+	// comment for why that distinction matters); it is local to this call
+	// and discarded with it, so it cannot leak into the parent's turn or a
+	// later delegation.
 	active := newActiveRuntime(nil)
 
 	// Run the agent. Takes its context explicitly - the non-detached path
@@ -817,8 +827,8 @@ func (d *delegationFinalizer) subAgentCarryOverMessages(ctx context.Context, par
 
 // buildSubAgentCall assembles the SessionAgentCall a delegation's run
 // closure sends to params.Agent. active is threaded straight through as
-// ActiveRuntime and into makeAuthRefreshCallback - the exact wiring a
-// successful mid-delegation credential refresh depends on (see
+// ActiveRuntime and into makeSubAgentAuthRefreshCallback - the exact wiring
+// a successful mid-delegation credential refresh depends on (see
 // runSubAgent's own comment on active) - so this must stay a plain
 // pass-through, never a copy or a fresh instance.
 func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID string, priorMessages []message.Message, maxTokens int64, model Model, providerCfg config.ProviderConfig, active *activeRuntime) SessionAgentCall {
@@ -839,7 +849,7 @@ func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
 		ActiveRuntime:    active,
-		OnAuthRefresh:    d.makeAuthRefreshCallback(providerCfg, active),
+		OnAuthRefresh:    d.makeSubAgentAuthRefreshCallback(providerCfg, model, active),
 	}
 }
 

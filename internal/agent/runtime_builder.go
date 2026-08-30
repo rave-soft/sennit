@@ -674,6 +674,65 @@ func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConf
 	}
 }
 
+// makeSubAgentAuthRefreshCallback is makeAuthRefreshCallback's counterpart
+// for a delegation whose model differs from the coordinator's own (a
+// custom agent's own "provider/model-id", or merely a cheaper model on the
+// same OAuth provider). makeAuthRefreshCallback stores b.runtimeFor's
+// result into active after a refresh, but that always rebuilds the
+// coder/top-level runtime; modelProvider (turn.go) only adopts what is in
+// active when both the provider AND the model match the turn's own, so for
+// any sub-agent running a different model that store was silently a
+// no-op - the retry kept using the pre-refresh provider instance built
+// from t.model's stale credential, hit 401 again, and fantasy only
+// refreshes once per pass, so the delegation died on an expiry the
+// top-level agent recovers from cleanly. This variant rebuilds a runtime
+// scoped to model (the sub-agent's own, already resolved by buildAgentModel
+// or buildCustomAgentModel in buildAgent) instead, so what lands in active
+// actually matches what modelProvider is comparing against.
+func (b *runtimeBuilder) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, model Model, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
+	if providerCfg.OAuthToken == nil &&
+		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
+		providerCfg.AWSAuthRefresh == "" {
+		return nil
+	}
+	return func(ctx context.Context, _ *fantasy.ProviderError) error {
+		if err := b.retryAfterUnauthorized(ctx, providerCfg, port); err != nil {
+			return err
+		}
+		if active != nil {
+			runtime, err := b.buildSubAgentRuntime(ctx, model)
+			if err != nil {
+				return err
+			}
+			active.store(runtime)
+		}
+		return nil
+	}
+}
+
+// buildSubAgentRuntime rebuilds model's provider/language-model pair against
+// the current config (i.e. after a credential refresh has landed a new
+// token or key), the same way buildAgentModel/buildCustomAgentModel do for
+// a fresh delegation build. It re-reads providerCfg from the live config
+// store rather than trusting a value captured before the refresh, since
+// that value's credential is exactly what the refresh just replaced.
+// Deliberately minimal: the only field a sub-agent's OnAuthRefresh path
+// reads back out of the stored compiledRuntime is .model (see
+// modelProvider in turn.go and summarize's ModelProvider in usage.go) -
+// tools and system prompt are not rebuilt here, unlike runtimeFor's
+// coder-runtime construction, because nothing on this path consults them.
+func (b *runtimeBuilder) buildSubAgentRuntime(ctx context.Context, model Model) (*compiledRuntime, error) {
+	providerCfg, ok := b.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	rebuilt, err := b.buildModel(ctx, providerCfg, model.ModelCfg, true)
+	if err != nil {
+		return nil, err
+	}
+	return &compiledRuntime{model: rebuilt, providerCfg: providerCfg}, nil
+}
+
 // currentRotationAccount resolves the account a rotation callback should
 // act on for providerCfg's provider. providerCfg is captured by value once
 // per turn (turn_dispatcher.go), so after the first rotation it still names

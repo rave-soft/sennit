@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
@@ -113,4 +114,126 @@ func TestRunSubAgent_RetryUsesRefreshedCredential(t *testing.T) {
 	require.Equal(t, "Bearer "+oldKey, authz[0], "the first attempt carries the credential the delegate was built with")
 	require.Equal(t, "Bearer "+newKey, authz[len(authz)-1],
 		"the retry must carry the refreshed credential, not the one that just got a 401")
+}
+
+// subAgentDifferentModelID names a second catalog model, distinct from
+// authModelID, that only a custom agent's own agent.Model routes to (see
+// buildCustomAgentModel) - the coordinator's own selected model never
+// resolves to it.
+const subAgentDifferentModelID = "sub-model-different"
+
+// TestRunSubAgent_RetryUsesRefreshedCredential_DifferentModel pins the fix
+// for makeAuthRefreshCallback storing the wrong runtime into active when a
+// delegation's model differs from the coordinator's own: it used to always
+// recompile the coder/top-level runtime (b.runtimeFor), which modelProvider
+// (turn.go) only adopts when BOTH the stored runtime's provider AND model
+// equal the turn's t.model. A custom agent running its own model therefore
+// never matched, so the retry kept dispatching on t.model's stale
+// provider instance - the exact case makeSubAgentAuthRefreshCallback fixes
+// by rebuilding a runtime scoped to the delegation's own model instead.
+//
+// This drives a real custom-agent delegation, on a model different from the
+// coordinator's selected one, through a real (httptest) provider endpoint
+// that 401s the stale key once. It asserts both that the retry carries the
+// refreshed credential and that every request - including the retry - names
+// the sub-agent's own model, never the coder's.
+func TestRunSubAgent_RetryUsesRefreshedCredential_DifferentModel(t *testing.T) {
+	const oldKey = "old-key-different-model"
+	const newKey = "new-key-different-model"
+	t.Setenv(subAgentRotateEnvVar, oldKey)
+
+	var (
+		mu       sync.Mutex
+		authz    []string
+		models   []string
+		sawFirst bool
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := readAndReplaceBody(r)
+		require.NoError(t, err)
+		var payload struct {
+			Tools json.RawMessage `json:"tools"`
+			Model string          `json:"model"`
+		}
+		require.NoError(t, json.Unmarshal(body, &payload))
+		if len(payload.Tools) == 0 {
+			// Title generation; keep it out of the delegation's own
+			// request bookkeeping below, same as the same-model test.
+			sseStream(w, FixtureTurn{Text: "Test session"}, authModelID)
+			return
+		}
+
+		mu.Lock()
+		authz = append(authz, r.Header.Get("Authorization"))
+		models = append(models, payload.Model)
+		first := !sawFirst
+		sawFirst = true
+		mu.Unlock()
+
+		if first {
+			require.NoError(t, os.Setenv(subAgentRotateEnvVar, newKey))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"invalid api key","type":"invalid_request_error","code":"invalid_api_key"}}`))
+			return
+		}
+		sseStream(w, FixtureTurn{Text: "done after refresh"}, subAgentDifferentModelID)
+	}))
+	defer srv.Close()
+
+	co := authTestCoordinator(t, withProvider(func(p *config.ProviderConfig) {
+		p.BaseURL = srv.URL + "/v1"
+		p.APIKey = "$" + subAgentRotateEnvVar
+		p.APIKeyTemplate = "$" + subAgentRotateEnvVar
+		// A second catalog model that only the custom agent below names,
+		// so the delegation's own model genuinely differs from the
+		// coordinator's selected authModelID.
+		p.Models = append(p.Models, catwalkModelWithID(subAgentDifferentModelID))
+	}))
+
+	parent, err := co.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// A custom agent naming its own model, distinct from the coordinator's
+	// selected one - buildAgent routes this through buildCustomAgentModel
+	// instead of inheriting the app's main model (see TestBuildAgentCustomModel).
+	taskCfg, ok := co.cfg.Config().Agents[config.AgentTask]
+	require.True(t, ok, "authTestCoordinator's SetupAgents must configure the task agent")
+	agentCfg := taskCfg
+	agentCfg.Model = authProviderID + "/" + subAgentDifferentModelID
+
+	p, err := taskPrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
+	require.NoError(t, err)
+	delegate, err := co.delegation.newSubAgent(t.Context(), p, agentCfg)
+	require.NoError(t, err)
+	require.Equal(t, subAgentDifferentModelID, delegate.Model().ModelCfg.Model,
+		"the delegate must be built against its own agent.Model, not the coordinator's")
+
+	resp, err := co.delegation.runSubAgent(t.Context(), subAgentParams{
+		Agent:          delegate,
+		SessionID:      parent.ID,
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-1",
+		Prompt:         "do something that needs a retry",
+		SessionTitle:   "Test Session",
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "delegation must succeed once the retry carries the refreshed credential: %s", resp.Content)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.GreaterOrEqual(t, len(authz), 2, "the 401 must have provoked a retry")
+	require.Equal(t, "Bearer "+oldKey, authz[0], "the first attempt carries the credential the delegate was built with")
+	require.Equal(t, "Bearer "+newKey, authz[len(authz)-1],
+		"the retry must carry the refreshed credential, not the one that just got a 401")
+	for i, m := range models {
+		require.Equal(t, subAgentDifferentModelID, m,
+			"request %d must name the sub-agent's own model, not the coder's", i)
+	}
+}
+
+// catwalkModelWithID returns a minimal catalog entry for id, for tests that
+// only need a second model to exist in a provider's catalog.
+func catwalkModelWithID(id string) catwalk.Model {
+	return catwalk.Model{ID: id, DefaultMaxTokens: 4096}
 }
