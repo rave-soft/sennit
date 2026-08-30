@@ -405,6 +405,17 @@ func (cm *connectionManager) getOrRenewClient(ctx context.Context, cfg ConfigPro
 			if current {
 				return observedSession, nil
 			}
+		} else if ctxErr := ctx.Err(); ctxErr != nil {
+			// This ping only failed because the caller's own context was
+			// already cancelled (e.g. Esc on a queued tool call), not
+			// because the session is broken. The symmetric guard below
+			// catches this for the lost-ownership/relock path, but that
+			// branch is skipped in the common case where the session is
+			// still the one we just observed - and without this check
+			// we'd fall through to beginRenewal and tear down a healthy
+			// session (killing a stdio server's process) just because
+			// its owner happened to be cancelled mid-call.
+			return nil, ctxErr
 		}
 	}
 

@@ -349,6 +349,52 @@ func TestGetOrRenewClient_CancelledContextTakesQuietPath(t *testing.T) {
 	require.NoError(t, freshCtx.Err(), "cancellation must not tear down the session")
 }
 
+// TestGetOrRenewClient_CancelledContextOnFirstPingLeavesSessionAlone pins the
+// common case the two tests above don't reach: a caller that's cancelled
+// before its very first ping, against the session it still owns (no
+// concurrent takeover in play). The `!observed || owner != observedOwner ||
+// session != observedSession` guard in getOrRenewClient exists to turn a
+// ctx-cancelled ping into quiet cancellation, but it only runs on the
+// re-check path — when the session under the renew lock is the same one
+// just pinged, that branch is skipped entirely, so without a check right
+// after the first ping, execution fell through to beginRenewal and tore
+// down a perfectly healthy session (killing a stdio server's process)
+// just because the caller happened to be cancelled.
+func TestGetOrRenewClient_CancelledContextOnFirstPingLeavesSessionAlone(t *testing.T) {
+	const name = "test-cancel-first-ping"
+	r := NewRegistry()
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	sess, sessCtx := liveSession(t, "do_thing")
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.publishMu.Lock()
+	r.sessions.Set(name, sess)
+	r.sessionOwners[name] = owner
+	r.publishMu.Unlock()
+
+	r.ping = func(ctx context.Context, _ *ClientSession, _ time.Duration) error {
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	got, err := r.getOrRenewClient(ctx, cfg, name)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, errPingFailed)
+	require.Nil(t, got)
+
+	// The session must be untouched: same one still published, still alive,
+	// and the server must not have been driven into StateError.
+	current, ok := r.sessions.Get(name)
+	require.True(t, ok, "session must still be published")
+	require.Same(t, sess, current, "session must not have been replaced")
+	require.NoError(t, sessCtx.Err(), "cancellation must not tear down the session")
+	if info, ok := r.states.Get(name); ok {
+		require.NotEqual(t, StateError, info.State, "genuine cancellation must not surface as a connection failure")
+	}
+}
+
 func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	const name = "test-renew-concurrency"
 	const workers = 8
