@@ -42,9 +42,12 @@ refining work already in flight → steering (say it, don't dispatch anything).
 - Do not poll for the result. A task's outcome — completed, failed, or
   cancelled, with its result or error — is delivered into your own context
   automatically once it finishes, arriving as a system-generated report at
-  your next step. Correlate by task and child-session id; sibling completions
-  may arrive in any order. `task_result` is for checking in on one that hasn't
-  reported back yet, not the normal way to receive it.
+  your next step, or waking the session if the turn that started it has
+  already ended. Ending the turn is therefore how you wait for a task, and
+  the report is what starts you again. Correlate by task and child-session
+  id; sibling completions may arrive in any order. `task_result` is for
+  checking in on one that hasn't reported back yet, not the normal way to
+  receive it.
 
 ## Limits
 

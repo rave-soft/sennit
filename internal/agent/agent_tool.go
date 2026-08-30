@@ -8,7 +8,28 @@ import (
 )
 
 //go:embed templates/agent_tool.md
-var agentToolDescription string
+var agentToolPurpose string
+
+// delegationReportContract is how a delegation answers: the caller is
+// told, in the description of every tool that starts one, that the
+// report comes back by itself and what that means for how the turn ends.
+//
+// It lives in one file because three tool descriptions need it word for
+// word - the built-in agent tool here, agentic_fetch, and every named
+// agent in .sennit/agents, whose description is the person's own
+// sentence about what that agent is for and says nothing about how
+// delegation works. A caller that reads only one of them must not come
+// away with a different contract than a caller that reads another. The
+// coder prompt states the same rule (see templates/coder.md.tpl,
+// "Delegation completions") for the turns that never read a tool
+// description at all.
+//
+//go:embed templates/delegation_report.md
+var delegationReportContract string
+
+// agentToolDescription is what this tool is for, then how its answer
+// comes back.
+var agentToolDescription = agentToolPurpose + "\n" + delegationReportContract
 
 // AgentParams is deliberately limited to the work to delegate. Delegations are
 // always asynchronous; a tool call is only an acknowledgement of launch.

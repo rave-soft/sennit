@@ -1101,7 +1101,7 @@ func (d *delegationFinalizer) customAgentTools(ctx context.Context, cfg agentCon
 func (d *delegationFinalizer) buildCustomAgentTool(_ context.Context, id string, agentCfg config.Agent) (fantasy.AgentTool, error) {
 	return fantasy.NewParallelAgentTool(
 		id,
-		customAgentDescription(id, agentCfg)+" The call returns immediately; correlate its later completion by task and child session id.",
+		customAgentDescription(id, agentCfg)+"\n\n"+delegationReportContract,
 		func(ctx context.Context, params CustomAgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil

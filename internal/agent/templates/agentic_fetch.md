@@ -1,1 +1,1 @@
-Start an asynchronous AI research delegation that fetches a URL or searches the web, then extracts, summarizes, and answers questions. The call acknowledges immediately; its correlated task completion arrives later and may arrive out of order with other delegations. Slower and costlier than fetch; use fetch for raw content or API responses.
+Start an asynchronous AI research delegation that fetches a URL or searches the web, then extracts, summarizes, and answers questions. Slower and costlier than fetch; use fetch for raw content or API responses.

@@ -9,7 +9,11 @@ import (
 )
 
 //go:embed templates/agentic_fetch.md
-var agenticFetchToolDescription string
+var agenticFetchPurpose string
+
+// A research delegation reports back exactly like any other, so it says
+// so in the same words - see delegationReportContract.
+var agenticFetchToolDescription = agenticFetchPurpose + "\n" + delegationReportContract
 
 // agenticFetchValidationResult holds the validated parameters from the tool call context.
 type agenticFetchValidationResult struct {
