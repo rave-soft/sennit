@@ -2,8 +2,10 @@ package appws
 
 import (
 	"context"
+	"errors"
 
 	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/skills"
 )
@@ -25,6 +27,25 @@ func (w *AppWorkspace) InitializePrompt() (string, error) {
 func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {
 	mgr := w.app.Skills
 	return skills.Catalog(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir()), nil
+}
+
+// ListCustomCommands implements Workspace: the markdown commands found in
+// the config directories, followed by the user-invocable skills.
+//
+// A failure to read one half is logged and the other half is still
+// returned. The palette exists to offer what is available, and a broken
+// commands directory is a worse reason to show an empty list than to show
+// the skills that did load — which is also why the error is returned
+// rather than swallowed: the caller decides whether to say anything.
+func (w *AppWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {
+	custom, cmdErr := commands.LoadCustomCommands(w.store.Config())
+
+	entries, skillErr := w.ListSkills(ctx)
+	if skillErr == nil {
+		custom = append(custom, commands.FromSkillCatalog(entries)...)
+	}
+
+	return custom, errors.Join(cmdErr, skillErr)
 }
 
 func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {

@@ -377,6 +377,15 @@ type ProjectLifecycle interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	// ListCustomCommands returns everything the command palette offers
+	// under "user commands": the markdown commands found on disk, plus
+	// the user-invocable skills, already merged.
+	//
+	// The merge is here rather than in the caller because both halves are
+	// discovery — walking the config directories, then the skill catalog —
+	// and the palette's job is to render a list, not to know that a
+	// command can come from two places or how either is found.
+	ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error)
 }
 
 // MCPController manages MCP server connections and their tools, prompts,

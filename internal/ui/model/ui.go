@@ -13,7 +13,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
@@ -554,21 +553,20 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 }
 
 // loadCustomCommands loads the custom commands asynchronously.
+//
+// The palette used to walk the config directories itself and then merge in
+// the skill catalog. Both are discovery, and where a command comes from is
+// not the palette's business — it asks the workspace for the list and
+// renders it. Whatever could be read is still returned when part of it
+// failed, so a broken commands directory costs the skills nothing.
 func (m *UI) loadCustomCommands() tea.Cmd {
-	cfg := m.com.Config()
 	ws := m.com.Workspace
 	ctx := m.com.Context()
 	return func() tea.Msg {
-		customCommands, err := commands.LoadCustomCommands(cfg)
+		customCommands, err := ws.ListCustomCommands(ctx)
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
-		// Append user-invocable skills as commands.
-		skillEntries, err := ws.ListSkills(ctx)
-		if err != nil {
-			slog.Error("Failed to load skill commands", "error", err)
-		}
-		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
 }

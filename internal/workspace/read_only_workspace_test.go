@@ -582,6 +582,11 @@ func (s *stubWorkspace) RefreshAccountLimits(ctx context.Context, providerID str
 	return nil, nil
 }
 
+func (s *stubWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {
+	s.track("ListCustomCommands")
+	return nil, nil
+}
+
 func (s *stubWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool) {
 	s.track("CurrentPlanUsage")
 	return accounts.Usage{}, false

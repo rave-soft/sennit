@@ -652,6 +652,10 @@ func (w *readOnlyWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEnt
 	return w.ws.ListSkills(ctx)
 }
 
+func (w *readOnlyWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {
+	return w.ws.ListCustomCommands(ctx)
+}
+
 func (w *readOnlyWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
 	return w.ws.ListTasks(ctx)
 }
