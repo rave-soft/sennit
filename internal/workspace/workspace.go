@@ -352,6 +352,18 @@ type ConfigAccessor interface {
 	// fetch failing does not fail the call — see config.RefreshAccountLimits
 	// for the full contract.
 	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
+	// CurrentPlanUsage reports the rate-limit snapshot the provider quoted
+	// on its most recent response, and whether there is one. It is not the
+	// stored per-account snapshot RefreshAccountLimits persists: this one
+	// is whatever the last request came back with, which is what the
+	// sidebar shows while a turn is running.
+	//
+	// Empty for every provider that does not quote usage, and empty for
+	// one that does until it has answered once. It is on the facade
+	// because the numbers live in the vendor package that also carries
+	// that vendor's sign-in flow, and the UI has no business importing
+	// that to read a percentage.
+	CurrentPlanUsage(providerID string) (accounts.Usage, bool)
 }
 
 // ProjectLifecycle covers first-run project initialization and skill

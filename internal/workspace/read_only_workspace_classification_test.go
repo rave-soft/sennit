@@ -99,6 +99,7 @@ var readOnlySafeMethods = []string{
 	"BackgroundJobCounts",
 	"Config",
 	"CreateAgentToolSessionID",
+	"CurrentPlanUsage",
 	"FileTrackerLastReadTime",
 	"FileTrackerListReadFiles",
 	"GetLastSession",

@@ -19,6 +19,13 @@ import (
 // the sign-in before giving up and freeing the callback port.
 const codexAuthTimeout = 10 * time.Minute
 
+// CodexProviderID is the provider this dialog signs in to. It is exported
+// so the caller that picks a sign-in dialog can name the provider without
+// importing the vendor package: the knowledge "this id means Codex"
+// belongs next to the dialog that handles it, and internal/ui/model has no
+// other reason to reach into a package that carries an OAuth flow.
+const CodexProviderID = codex.ProviderID
+
 // NewOAuthCodex builds the Codex sign-in dialog.
 //
 // Codex is a redirect flow, not a device flow: there is no code to type, so

@@ -9,7 +9,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -135,17 +135,15 @@ func (m *UI) computeSidebarSig() sidebarSig {
 		sig.providerName = providerConfig.Name
 	}
 
-	if model.ModelCfg.Provider == codex.ProviderID {
-		if usage, ok := codex.LatestUsage(); ok {
-			sig.planKnown = true
-			sig.plan = usage.Plan
-			sig.primaryUsedPercent = usage.Primary.UsedPercent
-			sig.primaryWindowMinutes = usage.Primary.WindowMinutes
-			sig.primaryResetsAt = usage.Primary.ResetsAt.UnixNano()
-			sig.secondaryUsedPercent = usage.Secondary.UsedPercent
-			sig.secondaryWindowMinutes = usage.Secondary.WindowMinutes
-			sig.secondaryResetsAt = usage.Secondary.ResetsAt.UnixNano()
-		}
+	if usage, ok := m.com.Workspace.CurrentPlanUsage(model.ModelCfg.Provider); ok {
+		sig.planKnown = true
+		sig.plan = usage.Plan
+		sig.primaryUsedPercent = usage.Primary.UsedPercent
+		sig.primaryWindowMinutes = usage.Primary.WindowMinutes
+		sig.primaryResetsAt = usage.Primary.ResetsAt.UnixNano()
+		sig.secondaryUsedPercent = usage.Secondary.UsedPercent
+		sig.secondaryWindowMinutes = usage.Secondary.WindowMinutes
+		sig.secondaryResetsAt = usage.Secondary.ResetsAt.UnixNano()
 	}
 
 	return sig
@@ -211,7 +209,7 @@ func (m *UI) modelInfo(width int) string {
 	if model != nil {
 		modelName = model.CatalogCfg.Name
 	}
-	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, m.planInfo(model), modelContext, width)
+	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, m.planInfo(m.com, model), modelContext, width)
 }
 
 // planInfo describes the subscription the current model runs on and how
@@ -221,11 +219,11 @@ func (m *UI) modelInfo(width int) string {
 // Empty for everything but Codex, and empty there too until the account has
 // made a request: the figures are quoted on responses, so there is nothing
 // to report before the first one.
-func (a *accountLabelsState) planInfo(model *mcp.AgentModel) string {
-	if model == nil || model.ModelCfg.Provider != codex.ProviderID {
+func (a *accountLabelsState) planInfo(com *common.Common, model *mcp.AgentModel) string {
+	if model == nil {
 		return ""
 	}
-	usage, ok := codex.LatestUsage()
+	usage, ok := com.Workspace.CurrentPlanUsage(model.ModelCfg.Provider)
 	if !ok {
 		return ""
 	}
@@ -234,9 +232,9 @@ func (a *accountLabelsState) planInfo(model *mcp.AgentModel) string {
 
 // planWindows converts the account's rate-limit windows into the shape the
 // renderer takes, dropping any the plan does not have.
-func planWindows(usage codex.Usage) []common.PlanWindow {
+func planWindows(usage accounts.Usage) []common.PlanWindow {
 	var windows []common.PlanWindow
-	for _, w := range []codex.UsageWindow{usage.Primary, usage.Secondary} {
+	for _, w := range []accounts.UsageWindow{usage.Primary, usage.Secondary} {
 		if !w.Known() {
 			continue
 		}

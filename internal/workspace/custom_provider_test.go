@@ -111,6 +111,11 @@ func (a *testConfigAccessor) RefreshAccountLimits(ctx context.Context, providerI
 	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
 }
 
+// CurrentPlanUsage: no provider in these tests quotes usage.
+func (a *testConfigAccessor) CurrentPlanUsage(string) (accounts.Usage, bool) {
+	return accounts.Usage{}, false
+}
+
 func (a *testConfigAccessor) SetConfigField(scope config.Scope, key string, value any) error {
 	return a.store.SetConfigField(scope, key, value)
 }

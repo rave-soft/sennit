@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chat"
@@ -25,10 +26,28 @@ import (
 type cursorTestWorkspace struct {
 	*countingWorkspace
 	cfg *config.Config
+
+	// planUsageProvider and planUsage stand in for the rate-limit snapshot
+	// a provider quotes on its responses. They live behind
+	// CurrentPlanUsage because the sidebar reads them through the
+	// workspace facade rather than out of a vendor package's
+	// process-global store.
+	planUsageProvider string
+	planUsage         accounts.Usage
 }
 
 func (w *cursorTestWorkspace) Config() *config.Config { return w.cfg }
-func (w *cursorTestWorkspace) WorkingDir() string     { return "/tmp" }
+
+// CurrentPlanUsage answers for planUsageProvider only, so a test can check
+// both that the plan line appears for the provider that quotes limits and
+// that it stays empty for one that does not.
+func (w *cursorTestWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool) {
+	if w.planUsageProvider == "" || providerID != w.planUsageProvider {
+		return accounts.Usage{}, false
+	}
+	return w.planUsage, true
+}
+func (w *cursorTestWorkspace) WorkingDir() string { return "/tmp" }
 
 // newCursorTestUI builds a *UI in uiChat with an active session, focused
 // editor, and compact mode forced on so Draw() renders the header instead of

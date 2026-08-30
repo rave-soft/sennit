@@ -110,6 +110,12 @@ func (a *realConfigAccessor) RefreshAccountLimits(ctx context.Context, providerI
 	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
 }
 
+// CurrentPlanUsage: these tests drive account bookkeeping, not the
+// sidebar's plan line.
+func (a *realConfigAccessor) CurrentPlanUsage(string) (accounts.Usage, bool) {
+	return accounts.Usage{}, false
+}
+
 func (a *realConfigAccessor) ImportCopilot() (*oauth.Token, bool) {
 	return a.credentials.ImportCopilot()
 }

@@ -113,6 +113,12 @@ type cmdDrivingWorkspace struct {
 	setProviderProxyErr   error
 }
 
+// CurrentPlanUsage: no provider in these tests quotes rate limits, so the
+// sidebar renders no plan line.
+func (w *cmdDrivingWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {
+	return accounts.Usage{}, false
+}
+
 func (w *cmdDrivingWorkspace) Config() *config.Config {
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	providers.Set("test-provider", config.ProviderConfig{ID: "test-provider"})

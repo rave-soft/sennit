@@ -442,6 +442,13 @@ func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID
 	return nil, w.readOnlyError("RefreshAccountLimits")
 }
 
+// CurrentPlanUsage is a read, so the read-only workspace answers it: an
+// attached thread shows the same plan line as the workspace it is attached
+// to.
+func (w *readOnlyWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool) {
+	return w.ws.CurrentPlanUsage(providerID)
+}
+
 func (w *readOnlyWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.readOnlyError("SetConfigField")
 }

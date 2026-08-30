@@ -113,3 +113,18 @@ func fetchCodexUsage(ctx context.Context, proxyURL, accessToken, accountID strin
 	}
 	return u.Snapshot(), true, nil
 }
+
+// CurrentPlanUsage implements Workspace. Codex is the only provider that
+// quotes rate limits on its responses, and the snapshot it publishes lives
+// in the package that also carries its browser sign-in — which is exactly
+// why the UI asks the workspace for it instead of reading it there.
+func (w *AppWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool) {
+	if providerID != codex.ProviderID {
+		return accounts.Usage{}, false
+	}
+	u, ok := codex.LatestUsage()
+	if !ok {
+		return accounts.Usage{}, false
+	}
+	return u.Snapshot(), true
+}

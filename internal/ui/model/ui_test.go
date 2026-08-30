@@ -7,6 +7,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -100,6 +101,12 @@ func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 type testWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
+
+	// planUsage is what CurrentPlanUsage answers, so a test can set the
+	// sidebar's plan line without reaching into a vendor package's
+	// process-global snapshot.
+	planUsage   accounts.Usage
+	planUsageOK bool
 }
 
 func (w *testWorkspace) SupportsThreads() bool { return false }
@@ -110,6 +117,10 @@ func (w *testWorkspace) SupportsTasks() bool { return false }
 
 func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
+}
+
+func (w *testWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {
+	return w.planUsage, w.planUsageOK
 }
 
 // mcpEventsWorkspace is a [workspace.MCPController] stub — a fraction of
