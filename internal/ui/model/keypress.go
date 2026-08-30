@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -33,8 +34,8 @@ func (m *UI) openExternalEditorGuarded(cmds []tea.Cmd) (out []tea.Cmd, started b
 // dashboard, or an info message instead when the workspace doesn't support
 // threads at all. Shared by the Threads key binding and the commands
 // palette's ActionOpenThreadsDashboard.
-func (m *UI) openThreadsDashboardGuarded(cmds []tea.Cmd) []tea.Cmd {
-	if !m.com.Workspace.SupportsThreads() {
+func openThreadsDashboardGuarded(com *common.Common, cmds []tea.Cmd) []tea.Cmd {
+	if !com.Workspace.SupportsThreads() {
 		return append(cmds, util.ReportInfo("This workspace doesn't support threads."))
 	}
 	return append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
@@ -178,7 +179,7 @@ func (m *UI) handleGlobalKeys(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cmd, b
 		}
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Threads):
-		cmds = m.openThreadsDashboardGuarded(cmds)
+		cmds = openThreadsDashboardGuarded(m.com, cmds)
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Chat.Details) && m.lay.isCompact:
 		m.lay.detailsOpen = !m.lay.detailsOpen
@@ -274,7 +275,7 @@ func (m *UI) handleEditorKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cm
 func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cmd, tea.Cmd, bool) {
 	switch {
 	case key.Matches(msg, m.keyMap.Editor.AddImage):
-		if !m.currentModelSupportsImages() {
+		if !currentModelSupportsImages(m.com) {
 			break
 		}
 		if cmd := m.openFilesDialog(); cmd != nil {
@@ -282,7 +283,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 		}
 
 	case key.Matches(msg, m.keyMap.Editor.PasteImage):
-		if !m.currentModelSupportsImages() {
+		if !currentModelSupportsImages(m.com) {
 			break
 		}
 		cmds = append(cmds, m.pasteImageFromClipboardCmd())
@@ -447,7 +448,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 			m.editor.completionsPositionStart = m.completionsPosition()
 			depth, limit := m.com.Config().Options.TUI.Completions.Limits()
 			m.editor.completions.SetMaxWidth(m.completionsMaxWidth())
-			cmds = append(cmds, m.editor.completions.Open(depth, limit, m.loadMCPResourceCompletions))
+			cmds = append(cmds, m.editor.completions.Open(depth, limit, func() []completions.ResourceCompletionValue { return loadMCPResourceCompletions(m.com) }))
 		}
 	}
 

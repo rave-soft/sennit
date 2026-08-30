@@ -397,13 +397,13 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 }
 
 // startLSPs starts LSP servers for the given file paths.
-func (m *UI) startLSPs(paths []string) tea.Cmd {
+func startLSPs(com *common.Common, paths []string) tea.Cmd {
 	if len(paths) == 0 {
 		return nil
 	}
 
-	ctx := m.com.Context()
-	ws := m.com.Workspace
+	ctx := com.Context()
+	ws := com.Workspace
 	return func() tea.Msg {
 		for _, path := range paths {
 			ws.LSPStart(ctx, path)

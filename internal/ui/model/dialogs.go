@@ -272,8 +272,8 @@ func (w *widgets) openAccountsDialog(com *common.Common, providerID string) tea.
 // rebuilds the list exactly as the initial load does. It is addressed by ID
 // (see [dialog.DialogAddressed]), so it reaches Accounts wherever it sits
 // in the stack, including underneath the dialog that triggered the reload.
-func (m *UI) reloadAccountsCmd(providerID string) tea.Cmd {
-	ws := m.com.Workspace
+func reloadAccountsCmd(com *common.Common, providerID string) tea.Cmd {
+	ws := com.Workspace
 	return func() tea.Msg {
 		accs, err := ws.ListAccounts(providerID)
 		return dialog.ActionAccountsLoaded{ProviderID: providerID, Accounts: accs, Err: err}
@@ -285,8 +285,8 @@ func (m *UI) reloadAccountsCmd(providerID string) tea.Cmd {
 // folded into the same [dialog.ActionAccountsLoaded] message rather than a
 // separate error path, so the Accounts dialog's existing error-state
 // handling (report + show) covers it without new plumbing.
-func (m *UI) removeAccountCmd(providerID, accountID string) tea.Cmd {
-	ws := m.com.Workspace
+func removeAccountCmd(com *common.Common, providerID, accountID string) tea.Cmd {
+	ws := com.Workspace
 	return func() tea.Msg {
 		if err := ws.RemoveAccount(config.ScopeGlobal, providerID, accountID); err != nil {
 			return dialog.ActionAccountsLoaded{ProviderID: providerID, Err: err}

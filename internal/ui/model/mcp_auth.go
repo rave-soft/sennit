@@ -30,8 +30,8 @@ func isAuthTimeout(err error) bool {
 // authenticateMCP runs the OAuth flow for a named MCP server using the
 // provided context. The dialog owns the context and cancels it if the
 // user closes the dialog.
-func (m *UI) authenticateMCP(ctx context.Context, name string) tea.Cmd {
-	ws := m.com.Workspace
+func authenticateMCP(com *common.Common, ctx context.Context, name string) tea.Cmd {
+	ws := com.Workspace
 	return func() tea.Msg {
 		if err := ws.MCPAuthenticate(ctx, name); err != nil {
 			if isAuthTimeout(err) {
@@ -46,8 +46,8 @@ func (m *UI) authenticateMCP(ctx context.Context, name string) tea.Cmd {
 // loadMCPResourceCompletions fetches the MCP resource catalog through the
 // workspace (never the mcp package directly — see internal/ui/AGENTS.md on
 // layering) for the @-completion popup.
-func (m *UI) loadMCPResourceCompletions() []completions.ResourceCompletionValue {
-	infos := m.com.Workspace.MCPResources()
+func loadMCPResourceCompletions(com *common.Common) []completions.ResourceCompletionValue {
+	infos := com.Workspace.MCPResources()
 	result := make([]completions.ResourceCompletionValue, len(infos))
 	for i, info := range infos {
 		result[i] = completions.ResourceCompletionValue{
@@ -80,9 +80,9 @@ func (w *widgets) openMCPAuthDialog(com *common.Common) tea.Cmd {
 // checkPendingMCPAuth waits for MCP initialization to finish and then
 // checks whether any OAuth MCPs need authentication. This runs as a
 // Bubble Tea command so it doesn't block the UI.
-func (m *UI) checkPendingMCPAuth() tea.Cmd {
-	parentCtx := m.com.Context()
-	ws := m.com.Workspace
+func checkPendingMCPAuth(com *common.Common) tea.Cmd {
+	parentCtx := com.Context()
+	ws := com.Workspace
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 		defer cancel()

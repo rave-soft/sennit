@@ -129,7 +129,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
+		cmds = append(cmds, startLSPs(m.com, msg.lspFilePaths()))
 		if cmd := m.applySessionMessageItems(msg.items, msg.lastUserMessageTime); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -198,7 +198,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		for _, f := range msg.sessionFiles {
 			paths = append(paths, f.LatestVersion.Path)
 		}
-		cmds = append(cmds, m.startLSPs(paths))
+		cmds = append(cmds, startLSPs(m.com, paths))
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))

@@ -5,6 +5,7 @@ import (
 	"maps"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // accountLabelsState caches, per provider, the display label of that
@@ -48,11 +49,10 @@ type accountLabelsLoadedMsg struct {
 // the cached entry rather than surfacing an error dialog — the sidebar
 // silently falls back to its no-label form, the same as for a provider
 // with only one account.
-func (m *UI) refreshAccountLabelCmd(providerID string) tea.Cmd {
+func refreshAccountLabelCmd(com *common.Common, providerID string) tea.Cmd {
 	if providerID == "" {
 		return nil
 	}
-	com := m.com
 	return func() tea.Msg {
 		accs, err := com.Workspace.ListAccounts(providerID)
 		if err != nil || len(accs) <= 1 {

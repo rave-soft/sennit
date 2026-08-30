@@ -151,7 +151,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// init above (see account_label.go). Harmless for every other
 		// caller of this same success path: refreshAccountLabelCmd is a
 		// cheap no-op for a single-account provider.
-		cmds = append(cmds, m.refreshAccountLabelCmd(msg.Model.Provider))
+		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.Model.Provider))
 
 	case modelSelectResult:
 		if msg.generation != m.ops.modelOperationGeneration {
@@ -168,7 +168,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// provider the UI had not seen at startup would render its plan
 		// line with no account label until something else happened to
 		// refresh it (see account_label.go).
-		cmds = append(cmds, m.refreshAccountLabelCmd(msg.Model.Provider))
+		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.Model.Provider))
 
 	case agentModelInitializedMsg:
 		if msg.generation != m.ops.modelOperationGeneration {

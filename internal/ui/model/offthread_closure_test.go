@@ -29,7 +29,7 @@ func TestAttachSkillCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	ws := &cmdDrivingWorkspace{agentReady: true}
 	u := newCmdDrivenUI(ws)
 
-	cmd := u.attachSkill("skill-1", "Skill One")
+	cmd := attachSkill(u.com, "skill-1", "Skill One")
 	require.NotNil(t, cmd)
 
 	done := make(chan struct{})
@@ -54,7 +54,7 @@ func TestStartLSPsCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	ws := &cmdDrivingWorkspace{agentReady: true}
 	u := newCmdDrivenUI(ws)
 
-	cmd := u.startLSPs([]string{"main.go"})
+	cmd := startLSPs(u.com, []string{"main.go"})
 	require.NotNil(t, cmd)
 
 	done := make(chan struct{})
@@ -77,7 +77,7 @@ func TestLoadMCPromptsCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	ws := &cmdDrivingWorkspace{agentReady: true}
 	u := newCmdDrivenUI(ws)
 
-	cmd := u.loadMCPromptsCmd()
+	cmd := loadMCPromptsCmd(u.com)
 	require.NotNil(t, cmd)
 
 	done := make(chan struct{})

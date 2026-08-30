@@ -50,7 +50,7 @@ func (w *widgets) runMCPPrompt(com *common.Common, clientID, promptID string, ar
 func (m *UI) handleStateChanged() tea.Cmd {
 	ws := m.com.Workspace
 	ctx := m.com.Context()
-	return m.updateAgentModelCmd(func() tea.Msg {
+	return updateAgentModelCmd(func() tea.Msg {
 		if err := ws.UpdateAgentModel(ctx); err != nil {
 			return util.NewErrorMsg(err)
 		}
@@ -84,9 +84,9 @@ func handleMCPResourcesEvent(ctx context.Context, ws workspace.MCPController, na
 // enableDockerMCPCmd snapshots the workspace and context before returning
 // the closure: callers pass the result directly as a tea.Cmd, so it must
 // not read m off the Update goroutine when it runs.
-func (m *UI) enableDockerMCPCmd() tea.Cmd {
-	ws := m.com.Workspace
-	ctx := m.com.Context()
+func enableDockerMCPCmd(com *common.Common) tea.Cmd {
+	ws := com.Workspace
+	ctx := com.Context()
 	return func() tea.Msg {
 		if err := ws.EnableDockerMCP(ctx); err != nil {
 			return util.ReportError(err)()
@@ -97,8 +97,8 @@ func (m *UI) enableDockerMCPCmd() tea.Cmd {
 
 // disableDockerMCPCmd snapshots the workspace before returning the closure;
 // see enableDockerMCPCmd.
-func (m *UI) disableDockerMCPCmd() tea.Cmd {
-	ws := m.com.Workspace
+func disableDockerMCPCmd(com *common.Common) tea.Cmd {
+	ws := com.Workspace
 	return func() tea.Msg {
 		if err := ws.DisableDockerMCP(); err != nil {
 			return util.ReportError(err)()

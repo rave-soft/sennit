@@ -327,12 +327,12 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		})
 	case dialog.ActionAccountSaved:
 		m.dialog.CloseDialog(dialog.AccountFormID)
-		cmds = append(cmds, m.reloadAccountsCmd(msg.ProviderID), m.refreshAccountLabelCmd(msg.ProviderID))
+		cmds = append(cmds, reloadAccountsCmd(m.com, msg.ProviderID), refreshAccountLabelCmd(m.com, msg.ProviderID))
 	case dialog.ActionRequestAccountRemoval:
 		m.dialog.OpenDialog(dialog.NewAccountRemoveConfirm(m.com, msg.ProviderID, msg.Account))
 	case dialog.ActionRemoveAccountConfirmed:
 		m.dialog.CloseDialog(dialog.AccountRemoveConfirmID)
-		cmds = append(cmds, m.removeAccountCmd(msg.ProviderID, msg.AccountID), m.refreshAccountLabelCmd(msg.ProviderID))
+		cmds = append(cmds, removeAccountCmd(m.com, msg.ProviderID, msg.AccountID), refreshAccountLabelCmd(m.com, msg.ProviderID))
 	case dialog.ActionAccountActivated:
 		// See ActionAccountActivated's doc comment: this used to be a
 		// bare ActionClose{} handled by applyChromeDialogAction's default
@@ -340,7 +340,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// different account also refreshes the sidebar's cached label
 		// for the newly active one (see account_label.go).
 		m.dialog.CloseDialog(dialog.AccountsID)
-		cmds = append(cmds, m.refreshAccountLabelCmd(msg.ProviderID))
+		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.ProviderID))
 	case dialog.ActionOpenProviderSettings:
 		m.dialog.OpenDialog(dialog.NewProviderSettings(m.com, msg.ProviderID))
 	case dialog.ActionSubmitProviderSettings:
@@ -487,13 +487,13 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.enableDockerMCPCmd())
+		cmds = append(cmds, enableDockerMCPCmd(m.com))
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.disableDockerMCPCmd())
+		cmds = append(cmds, disableDockerMCPCmd(m.com))
 	case dialog.ActionOpenThreadsDashboard:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = m.openThreadsDashboardGuarded(cmds)
+		cmds = openThreadsDashboardGuarded(m.com, cmds)
 
 	case dialog.ActionFilePickerSelected:
 		m.dialog.CloseDialog(dialog.FilePickerID)
@@ -524,7 +524,7 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 		m.dialog.CloseFrontDialog()
 	case dialog.ActionAttachSkill:
 		m.dialog.CloseFrontDialog()
-		cmds = append(cmds, m.attachSkill(msg.ID, msg.Name))
+		cmds = append(cmds, attachSkill(m.com, msg.ID, msg.Name))
 
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {

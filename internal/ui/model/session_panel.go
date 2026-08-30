@@ -857,8 +857,8 @@ type panelBlockDrawSpec struct {
 // drawPanelSectionHeader paints one section-separator header row — text
 // styled and, while hover is true, hover-lit — the way the todos, threads,
 // and agents headers all render theirs.
-func (m *UI) drawPanelSectionHeader(scr uv.Screen, headerRow uv.Rectangle, text string, hover bool) {
-	t := m.com.Styles
+func drawPanelSectionHeader(com *common.Common, scr uv.Screen, headerRow uv.Rectangle, text string, hover bool) {
+	t := com.Styles
 	width := headerRow.Dx()
 	headerView := common.SectionStyled(t, t.Section.Title, text, width)
 	if hover {
@@ -878,7 +878,7 @@ func (m *UI) drawPanelLiveSection(scr uv.Screen, area uv.Rectangle, row *uv.Rect
 		hr := area
 		hr.Min.Y = row.Min.Y
 		hr.Max.Y = row.Min.Y + 1
-		m.drawPanelSectionHeader(scr, hr, headerText, hover)
+		drawPanelSectionHeader(m.com, scr, hr, headerText, hover)
 		*headerRect = hr
 		row.Min.Y++
 		row.Max.Y = row.Min.Y
@@ -886,7 +886,7 @@ func (m *UI) drawPanelLiveSection(scr uv.Screen, area uv.Rectangle, row *uv.Rect
 	sectionArea := area
 	sectionArea.Min.Y = row.Min.Y
 	sectionArea.Max.Y = min(row.Min.Y+rows, area.Max.Y)
-	rects := m.drawPanelBlocks(scr, sectionArea, hoveredIdx, spec)
+	rects := drawPanelBlocks(m.com, scr, sectionArea, hoveredIdx, spec)
 	row.Min.Y = sectionArea.Max.Y
 	row.Max.Y = row.Min.Y
 	return rects
@@ -894,13 +894,13 @@ func (m *UI) drawPanelLiveSection(scr uv.Screen, area uv.Rectangle, row *uv.Rect
 
 // drawPanelBlocks paints two-line panel blocks and returns their hit-test
 // rectangles. Callers provide only their distinct name/task/status content.
-func (m *UI) drawPanelBlocks(scr uv.Screen, area uv.Rectangle, hoveredIdx int, spec panelBlockDrawSpec) []uv.Rectangle {
+func drawPanelBlocks(com *common.Common, scr uv.Screen, area uv.Rectangle, hoveredIdx int, spec panelBlockDrawSpec) []uv.Rectangle {
 	rects := panelBlockGeometry(area, spec.count)
 	if len(rects) == 0 {
 		return nil
 	}
 
-	sty := &m.com.Styles.ChildBanner
+	sty := &com.Styles.ChildBanner
 	width := area.Dx()
 	for i, block := range rects {
 		line1Row := uv.Rectangle{Min: uv.Position{X: area.Min.X, Y: block.Min.Y}, Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 1}}
@@ -913,7 +913,7 @@ func (m *UI) drawPanelBlocks(scr uv.Screen, area uv.Rectangle, hoveredIdx int, s
 			sty.Base.Render(" — "+spec.task(i))
 		styled = ansi.Truncate(styled, width, "…")
 		if i == hoveredIdx {
-			styled = common.BlockBackground(styled, width, m.com.Styles.Tool.ClickableHoverBg)
+			styled = common.BlockBackground(styled, width, com.Styles.Tool.ClickableHoverBg)
 		}
 		uv.NewStyledString(styled).Draw(scr, line1Row)
 
@@ -923,7 +923,7 @@ func (m *UI) drawPanelBlocks(scr uv.Screen, area uv.Rectangle, hoveredIdx int, s
 		line2Row := uv.Rectangle{Min: uv.Position{X: area.Min.X, Y: block.Min.Y + 1}, Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 2}}
 		line2 := ansi.Truncate(spec.line2(i), width, "…")
 		if i == hoveredIdx {
-			line2 = common.BlockBackground(line2, width, m.com.Styles.Tool.ClickableHoverBg)
+			line2 = common.BlockBackground(line2, width, com.Styles.Tool.ClickableHoverBg)
 		}
 		uv.NewStyledString(line2).Draw(scr, line2Row)
 	}
@@ -1051,7 +1051,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		// The todos header is the same section-separator style as
 		// threads/agents/queue. Its full row is clickable, so hover paints the
 		// full row rather than only changing the title.
-		m.drawPanelSectionHeader(scr, headerRow, sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded), m.panel.todosHover)
+		drawPanelSectionHeader(m.com, scr, headerRow, sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded), m.panel.todosHover)
 		m.panel.todosHeaderRect = headerRow
 		m.panel.todosListRect = layout.todosList
 		row.Min.Y++

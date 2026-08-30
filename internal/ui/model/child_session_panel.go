@@ -234,7 +234,7 @@ func (m *UI) childPanelElapsedText(frame sessionNavFrame) string {
 	if frame.delegationDuration > 0 {
 		return presentation.FormatElapsed(frame.delegationDuration)
 	}
-	if m.childDelegationBusy(frame) && !frame.delegationStart.IsZero() {
+	if childDelegationBusy(m.com, frame) && !frame.delegationStart.IsZero() {
 		return presentation.FormatElapsed(time.Since(frame.delegationStart)) + " elapsed"
 	}
 	return ""

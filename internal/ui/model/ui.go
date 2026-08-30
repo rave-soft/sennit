@@ -457,7 +457,7 @@ func (m *UI) Init() tea.Cmd {
 		}
 	}
 	// load the user commands async
-	cmds = append(cmds, m.loadCustomCommands())
+	cmds = append(cmds, loadCustomCommands(m.com))
 	// load prompt history async
 	cmds = append(cmds, m.sess.loadPromptHistory(m.com))
 	// Prime the memoized LSP state off-thread.
@@ -472,13 +472,13 @@ func (m *UI) Init() tea.Cmd {
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	cmds = append(cmds, m.checkPendingMCPAuth())
+	cmds = append(cmds, checkPendingMCPAuth(m.com))
 	// Prime the sidebar's account-label cache for whatever model/provider
 	// this UI already knows about at construction time (see
 	// account_label.go). refreshAccountLabelCmd is nil for a nil model,
 	// so this is a no-op during onboarding.
 	if model := m.viewedModel(); model != nil {
-		if cmd := m.refreshAccountLabelCmd(model.ModelCfg.Provider); cmd != nil {
+		if cmd := refreshAccountLabelCmd(m.com, model.ModelCfg.Provider); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -561,9 +561,9 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 // not the palette's business — it asks the workspace for the list and
 // renders it. Whatever could be read is still returned when part of it
 // failed, so a broken commands directory costs the skills nothing.
-func (m *UI) loadCustomCommands() tea.Cmd {
-	ws := m.com.Workspace
-	ctx := m.com.Context()
+func loadCustomCommands(com *common.Common) tea.Cmd {
+	ws := com.Workspace
+	ctx := com.Context()
 	return func() tea.Msg {
 		customCommands, err := ws.ListCustomCommands(ctx)
 		if err != nil {
@@ -709,7 +709,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		case openEditorReadyMsg:
-			cmds = append(cmds, m.execEditorCmd(msg))
+			cmds = append(cmds, execEditorCmd(msg))
 		case tea.KeyPressMsg:
 			if cmd := m.handleKeyPressMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -870,11 +870,11 @@ func (f *sessionNavFrame) adoptRef(ref childSessionRef) {
 // [UI.isCurrentSessionBusy]: navigation is asynchronous, so the loaded
 // session briefly remains the parent after a frame is pushed, and the
 // parent is busy for as long as its delegation runs.
-func (m *UI) childDelegationBusy(frame sessionNavFrame) bool {
-	if frame.childSessionID == "" || m.com == nil || m.com.Workspace == nil {
+func childDelegationBusy(com *common.Common, frame sessionNavFrame) bool {
+	if frame.childSessionID == "" || com == nil || com.Workspace == nil {
 		return false
 	}
-	return m.com.Workspace.AgentIsSessionBusy(frame.childSessionID)
+	return com.Workspace.AgentIsSessionBusy(frame.childSessionID)
 }
 
 // freezeFinishedChildDelegation stops the viewed delegation's elapsed
@@ -896,7 +896,7 @@ func (m *UI) freezeFinishedChildDelegation() {
 	if frame.delegationDuration > 0 || frame.delegationStart.IsZero() {
 		return
 	}
-	if m.childDelegationBusy(*frame) {
+	if childDelegationBusy(m.com, *frame) {
 		frame.delegationSawBusy = true
 		return
 	}
@@ -997,7 +997,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 func (m *UI) initAgentAndReportModel(isOnboarding bool, model config.SelectedModel, generation uint64) tea.Cmd {
 	ws := m.com.Workspace
 	ctx := m.com.Context()
-	return m.updateAgentModelCmd(func() tea.Msg {
+	return updateAgentModelCmd(func() tea.Msg {
 		// InitCoderAgent brings the coder agent up for the first time
 		// (onboarding); it must complete before UpdateAgentModel touches
 		// it, so both run in this single off-thread step rather than as
@@ -1023,8 +1023,8 @@ func (m *UI) activeThreadBadgeCount() int {
 	return threads.ActiveCount(m.threadList.Threads())
 }
 
-func (m *UI) currentModelSupportsImages() bool {
-	cfg := m.com.Config()
+func currentModelSupportsImages(com *common.Common) bool {
+	cfg := com.Config()
 	if cfg == nil {
 		return false
 	}
@@ -1227,9 +1227,9 @@ func (m *UI) setTheme(id string) tea.Cmd {
 // compose a message and send it with the skill attached.
 // The name parameter is used as a fallback when the server does not
 // return one.
-func (m *UI) attachSkill(skillID, name string) tea.Cmd {
-	ws := m.com.Workspace
-	ctx := m.com.Context()
+func attachSkill(com *common.Common, skillID, name string) tea.Cmd {
+	ws := com.Workspace
+	ctx := com.Context()
 	return func() tea.Msg {
 		content, result, err := ws.ReadSkill(ctx, skillID)
 		if err != nil {

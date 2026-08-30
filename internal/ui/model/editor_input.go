@@ -113,7 +113,7 @@ func (e *editorState) openEditor(value string) tea.Cmd {
 // openEditor's closure so the tea.ExecProcess call — which takes over the
 // terminal — happens from Update once the scratch file is ready, not from
 // the cmd goroutine that prepared it.
-func (m *UI) execEditorCmd(msg openEditorReadyMsg) tea.Cmd {
+func execEditorCmd(msg openEditorReadyMsg) tea.Cmd {
 	return tea.ExecProcess(msg.cmd, func(err error) tea.Msg {
 		defer func() {
 			_ = os.Remove(msg.tmpPath)
@@ -139,26 +139,26 @@ func (m *UI) execEditorCmd(msg openEditorReadyMsg) tea.Cmd {
 // yolo mode or bang mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
 	if m.editor.bangMode {
-		m.editor.textarea.SetPromptFunc(4, m.bangPromptFunc)
+		m.editor.textarea.SetPromptFunc(4, func(info textarea.PromptInfo) string { return bangPromptFunc(m.com, info) })
 		return
 	}
 	if yolo {
-		m.editor.textarea.SetPromptFunc(4, m.yoloPromptFunc)
+		m.editor.textarea.SetPromptFunc(4, func(info textarea.PromptInfo) string { return yoloPromptFunc(m.com, info) })
 		return
 	}
-	m.editor.textarea.SetPromptFunc(2, m.normalPromptFunc)
+	m.editor.textarea.SetPromptFunc(2, func(info textarea.PromptInfo) string { return normalPromptFunc(m.com, info) })
 }
 
 // normalPromptFunc keeps the prompt width as whitespace so multiline text
 // stays aligned without visible prompt markers.
-func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
+func normalPromptFunc(com *common.Common, info textarea.PromptInfo) string {
 	return "  "
 }
 
 // yoloPromptFunc returns the yolo mode editor prompt style with warning icon
 // and colored dots.
-func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
-	t := m.com.Styles
+func yoloPromptFunc(com *common.Common, info textarea.PromptInfo) string {
+	t := com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
 			return t.Editor.PromptYoloIconFocused.Render()
@@ -171,8 +171,8 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
 // icon and dots.
-func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
-	t := m.com.Styles
+func bangPromptFunc(com *common.Common, info textarea.PromptInfo) string {
+	t := com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
 			return t.Editor.PromptBangIconFocused.Render()
@@ -458,7 +458,7 @@ func (m *UI) applyPasteFilesChecked(msg pasteFilesCheckedMsg) tea.Cmd {
 
 	var cmds []tea.Cmd
 	for _, path := range msg.paths {
-		cmds = append(cmds, m.handleFilePathPaste(path))
+		cmds = append(cmds, handleFilePathPaste(path))
 	}
 	return tea.Batch(cmds...)
 }
@@ -480,7 +480,7 @@ func hasPasteExceededThreshold(msg tea.PasteMsg) bool {
 }
 
 // handleFilePathPaste handles a pasted file path.
-func (m *UI) handleFilePathPaste(path string) tea.Cmd {
+func handleFilePathPaste(path string) tea.Cmd {
 	return func() tea.Msg {
 		fileInfo, err := os.Stat(path)
 		if err != nil {

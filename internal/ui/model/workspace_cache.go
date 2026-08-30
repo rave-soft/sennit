@@ -190,7 +190,7 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 // be re-probed after the rebuild lands (treated as IO — see the package doc
 // comment above), so the message drives the refresh instead of each call
 // site remembering to.
-func (m *UI) updateAgentModelCmd(pre tea.Cmd) tea.Cmd {
+func updateAgentModelCmd(pre tea.Cmd) tea.Cmd {
 	return tea.Sequence(pre, agentModelChangedCmd)
 }
 

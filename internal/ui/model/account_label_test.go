@@ -65,7 +65,7 @@ func TestRefreshAccountLabelCmd_MultipleAccounts_ReportsActiveLabel(t *testing.T
 		{ID: "acct-2", Label: "Личный Plus"},
 	})
 
-	cmd := u.refreshAccountLabelCmd("codex")
+	cmd := refreshAccountLabelCmd(u.com, "codex")
 	require.NotNil(t, cmd)
 	msg, ok := cmd().(accountLabelsLoadedMsg)
 	require.True(t, ok)
@@ -82,7 +82,7 @@ func TestRefreshAccountLabelCmd_SingleAccount_ReportsNoLabel(t *testing.T) {
 		{ID: "acct-1", Label: "Only Account"},
 	})
 
-	msg, ok := u.refreshAccountLabelCmd("codex")().(accountLabelsLoadedMsg)
+	msg, ok := refreshAccountLabelCmd(u.com, "codex")().(accountLabelsLoadedMsg)
 	require.True(t, ok)
 	require.False(t, msg.info.multiple)
 	require.Empty(t, msg.info.label)
@@ -93,7 +93,7 @@ func TestRefreshAccountLabelCmd_SingleAccount_ReportsNoLabel(t *testing.T) {
 // scheduled at all.
 func TestRefreshAccountLabelCmd_EmptyProviderID_NoCmd(t *testing.T) {
 	u, _ := newAccountLabelTestUI(t, "acct-1", nil)
-	require.Nil(t, u.refreshAccountLabelCmd(""))
+	require.Nil(t, refreshAccountLabelCmd(u.com, ""))
 }
 
 // TestRefreshAccountLabelCmd_ListErrorClearsCache mirrors the config-level
@@ -104,7 +104,7 @@ func TestRefreshAccountLabelCmd_ListErrorClearsCache(t *testing.T) {
 	})
 	ws.err = errors.New("boom")
 
-	msg, ok := u.refreshAccountLabelCmd("codex")().(accountLabelsLoadedMsg)
+	msg, ok := refreshAccountLabelCmd(u.com, "codex")().(accountLabelsLoadedMsg)
 	require.True(t, ok)
 	require.False(t, msg.info.multiple)
 	require.Empty(t, msg.info.label)

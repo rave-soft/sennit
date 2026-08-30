@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -119,7 +120,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.skillStates = msg.Payload.States
 		m.skillsVersion++
 	case dialog.ActionMCPAuthStarted:
-		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
+		cmds = append(cmds, authenticateMCP(m.com, msg.Ctx, msg.Name))
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
@@ -131,7 +132,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		case workspace.MCPEventStateChanged:
 			cmds = append(cmds, tea.Batch(
 				m.handleStateChanged(),
-				m.loadMCPromptsCmd(),
+				loadMCPromptsCmd(m.com),
 			))
 			return cmds, true
 		case workspace.MCPEventPromptsListChanged:
@@ -151,9 +152,9 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 // loadMCPromptsCmd loads the MCP prompts asynchronously. It snapshots the
 // workspace and context before returning the closure: callers pass the
 // result directly as a tea.Cmd, which runs off the Update goroutine.
-func (m *UI) loadMCPromptsCmd() tea.Cmd {
-	ws := m.com.Workspace
-	ctx := m.com.Context()
+func loadMCPromptsCmd(com *common.Common) tea.Cmd {
+	ws := com.Workspace
+	ctx := com.Context()
 	return func() tea.Msg {
 		prompts, err := ws.ListMCPPrompts(ctx)
 		if err != nil {

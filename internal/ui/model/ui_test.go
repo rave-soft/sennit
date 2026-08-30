@@ -20,7 +20,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 		t.Parallel()
 
 		ui := newTestUIWithConfig(t, nil)
-		require.False(t, ui.currentModelSupportsImages())
+		require.False(t, currentModelSupportsImages(ui.com))
 	})
 
 	t.Run("returns false when coder agent is missing", func(t *testing.T) {
@@ -31,7 +31,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 			Agents:    map[string]config.Agent{},
 		}
 		ui := newTestUIWithConfig(t, cfg)
-		require.False(t, ui.currentModelSupportsImages())
+		require.False(t, currentModelSupportsImages(ui.com))
 	})
 
 	t.Run("returns false when model is not found", func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 			},
 		}
 		ui := newTestUIWithConfig(t, cfg)
-		require.False(t, ui.currentModelSupportsImages())
+		require.False(t, currentModelSupportsImages(ui.com))
 	})
 
 	t.Run("returns true when current model supports images", func(t *testing.T) {
@@ -76,7 +76,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 		}
 
 		ui := newTestUIWithConfig(t, cfg)
-		require.True(t, ui.currentModelSupportsImages())
+		require.True(t, currentModelSupportsImages(ui.com))
 	})
 }
 

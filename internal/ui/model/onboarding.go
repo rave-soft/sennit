@@ -15,8 +15,8 @@ import (
 )
 
 // markProjectInitializedCmd marks the current project as initialized in the config.
-func (m *UI) markProjectInitializedCmd() tea.Cmd {
-	ws := m.com.Workspace
+func markProjectInitializedCmd(com *common.Common) tea.Cmd {
+	ws := com.Workspace
 	return func() tea.Msg {
 		if err := ws.MarkProjectInitialized(); err != nil {
 			return util.InfoMsg{
@@ -67,7 +67,7 @@ func (m *UI) initializeProject() tea.Cmd {
 		return sendMessageMsg{Content: initPrompt}
 	}
 	// Mark the project as initialized
-	cmds = append(cmds, initialize, m.markProjectInitializedCmd())
+	cmds = append(cmds, initialize, markProjectInitializedCmd(m.com))
 
 	return tea.Sequence(cmds...)
 }
@@ -77,7 +77,7 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 	// TODO: initialize the project
 	m.setState(uiLanding, uiFocusEditor)
 	// mark the project as initialized
-	return m.markProjectInitializedCmd()
+	return markProjectInitializedCmd(m.com)
 }
 
 // initializeView renders the project initialization prompt with Yes/No buttons.

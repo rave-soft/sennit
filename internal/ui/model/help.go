@@ -159,7 +159,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.ScrollPageUp,
 				k.Editor.ScrollPageDown,
 			}
-			if m.currentModelSupportsImages() {
+			if currentModelSupportsImages(m.com) {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
 			}
 			binds = append(binds, editorBinds)
@@ -215,7 +215,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Commands,
 				k.Editor.OpenEditor,
 			}
-			if m.currentModelSupportsImages() {
+			if currentModelSupportsImages(m.com) {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
 			}
 			binds = append(binds, editorBinds)
