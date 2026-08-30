@@ -170,10 +170,16 @@ func TestMakeRateLimitCallback_NonRateLimitProvider_ReturnsNil(t *testing.T) {
 }
 
 // TestMakeRateLimitCallback_SingleAccount_NoOp pins sabotage rule 2 at
-// this trigger: one account configured must never call ActivateAccount.
+// this trigger: one account configured must never call ActivateAccount,
+// but the 429 must still cost the account its normal backoff - a non-nil
+// error, not nil (which fantasy reads as "rotated, retry immediately" and
+// would fire the very next attempt at the still-limited account with no
+// delay at all). See makeRateLimitCallback's picked.ID == account branch.
 func TestMakeRateLimitCallback_SingleAccount_NoOp(t *testing.T) {
+	notifier := &recordingNotifier{}
 	co := authTestCoordinator(t,
 		withGlobalDataJSON(diskAuthProviderJSON),
+		withNotify(notifier),
 		withProvider(func(p *config.ProviderConfig) {
 			p.Rotation = &config.RotationConfig{Enabled: true}
 			p.Account = "only"
@@ -190,12 +196,15 @@ func TestMakeRateLimitCallback_SingleAccount_NoOp(t *testing.T) {
 	require.NotNil(t, cb)
 
 	err := cb(t.Context(), rateLimitErr(nil))
-	require.NoError(t, err)
+	require.Error(t, err, "a single account must not return nil - that tells fantasy credentials rotated and to retry with no backoff")
+	var exhausted *accounts.ErrAllExhausted
+	require.True(t, errors.As(err, &exhausted), "must report the no-rotation-happened verdict as *accounts.ErrAllExhausted")
 
 	after, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
 	require.Equal(t, before.APIKey, after.APIKey, "a single-account provider must never rotate its credentials")
 	require.Equal(t, beforeVersion, co.cfg.CredentialVersion(), "no ActivateAccount call means no credential-version bump")
+	require.Equal(t, 0, notifier.count("", notify.TypeAccountRotated), "no rotation happened, so no rotation notification either")
 }
 
 // TestMakeRateLimitCallback_RotatesAndAppliesNewCredentials is the core
@@ -556,6 +565,47 @@ func testRotationConfigStore(t *testing.T) (*config.ConfigStore, error) {
 	writeGlobalConfig(t, "{}")
 	env := testEnv(t)
 	return configruntime.Load(env.workingDir, "", false)
+}
+
+// ---------------------------------------------------------------------------
+// currentRotationAccount
+// ---------------------------------------------------------------------------
+
+// TestCurrentRotationAccount_ActiveForDifferentProvider_FallsBackToCaptured
+// is the regression test for the cross-provider trust bug: active can hold
+// a runtime makeAuthRefreshCallback built for whatever provider the CURRENT
+// config names, which may no longer be the provider this callback was built
+// for (the user switched the main model mid-turn). Trusting that runtime's
+// Account would mark/rotate an account this provider's Rotator never heard
+// of - the captured providerCfg.Account is what must come back instead.
+func TestCurrentRotationAccount_ActiveForDifferentProvider_FallsBackToCaptured(t *testing.T) {
+	t.Parallel()
+
+	providerCfg := config.ProviderConfig{ID: "provider-x", Account: "captured-account"}
+	otherProviderRuntime := &compiledRuntime{
+		providerCfg: config.ProviderConfig{ID: "provider-y", Account: "other-provider-account"},
+	}
+	active := newActiveRuntime(otherProviderRuntime)
+
+	got := currentRotationAccount(providerCfg, active)
+	require.Equal(t, "captured-account", got, "active describes a different provider, so the captured account must win")
+}
+
+// TestCurrentRotationAccount_ActiveForSameProvider_UsesLoaded is the
+// positive counterpart: when active does describe the SAME provider this
+// callback was built for, it is the live, post-rotation account and must be
+// preferred over the turn-stale captured one.
+func TestCurrentRotationAccount_ActiveForSameProvider_UsesLoaded(t *testing.T) {
+	t.Parallel()
+
+	providerCfg := config.ProviderConfig{ID: "provider-x", Account: "captured-account"}
+	sameProviderRuntime := &compiledRuntime{
+		providerCfg: config.ProviderConfig{ID: "provider-x", Account: "rotated-account"},
+	}
+	active := newActiveRuntime(sameProviderRuntime)
+
+	got := currentRotationAccount(providerCfg, active)
+	require.Equal(t, "rotated-account", got, "same provider: the loaded runtime's account is the live one")
 }
 
 // ---------------------------------------------------------------------------

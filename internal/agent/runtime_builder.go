@@ -741,9 +741,19 @@ func (b *runtimeBuilder) buildSubAgentRuntime(ctx context.Context, model Model) 
 // providerCfg carries the account that is actually live now. Falling back
 // to providerCfg.Account keeps this correct for callers that pass a nil
 // active (e.g. no top-level agent to rebuild for).
+//
+// active is shared with makeAuthRefreshCallback, which stores whatever
+// runtimeFor built for the CURRENT config - not necessarily this provider.
+// If the user switches the main model to a different provider mid-turn and
+// a 401 refresh runs on it while this provider is still streaming (a
+// sub-agent on a second provider, say), active now describes that other
+// provider. Trusting its Account blindly would mark/rotate an account this
+// provider's Rotator has never heard of. Only adopt the loaded runtime's
+// account when it was actually built for providerCfg; otherwise fall back
+// to the captured value exactly as when active is nil.
 func currentRotationAccount(providerCfg config.ProviderConfig, active *activeRuntime) string {
 	if active != nil {
-		if runtime := active.load(); runtime != nil {
+		if runtime := active.load(); runtime != nil && runtime.providerCfg.ID == providerCfg.ID {
 			return runtime.providerCfg.Account
 		}
 	}
@@ -943,12 +953,20 @@ func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig
 			return err
 		}
 		if picked.ID == account {
-			// Pick found nothing better to switch to (single-account
-			// provider, or debounced back onto the same still-usable
-			// account) - applying it would be a no-op ActivateAccount
-			// call for no reason, exactly what a single-account setup
-			// must never do.
-			return nil
+			// Pick found nothing better to switch to - most commonly a
+			// single-account provider, where Pick's one-candidate fast
+			// path hands back the very account MarkRateLimited just put
+			// on cooldown without even consulting it. Applying picked
+			// would be a no-op ActivateAccount call for no reason. But
+			// returning nil here would tell fantasy "credentials
+			// rotated, retry immediately" (RetryOptions.OnRateLimit),
+			// which fires the very next attempt at the still-limited
+			// account with no delay at all, burning a retry for
+			// nothing. Return ErrAllExhausted instead - Pick's own
+			// verdict for "no usable account right now" - so
+			// OnRateLimit's error path takes over and normal backoff
+			// applies before the retry.
+			return &accounts.ErrAllExhausted{ProviderID: providerCfg.ID}
 		}
 		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, inputs); err != nil {
 			slog.Warn("Rate-limit rotation: failed to apply picked account", "provider", providerCfg.ID, "error", err)
