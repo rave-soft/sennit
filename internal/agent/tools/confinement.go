@@ -123,17 +123,32 @@ func bashConfinementRefusal(permissions permission.Requester, command string) (m
 // all (sed -i, sort -o, find -delete, xxd with an output file, tee) is
 // left out, even though its common use is read-only. What a command does
 // with a redirect is not its concern — redirects are checked separately.
+// yq is deliberately absent even though its ordinary use is read-only:
+// `yq -i expr f.yaml` edits the file in place, the same shape of exception
+// this list's own rule already makes for sed -i and sort -o. jq has no
+// in-place flag, so it stays. tree stays too, since plain `tree` is common
+// enough to be worth keeping, but see writeDisqualifyingFlags below for the
+// same problem with `tree -o`.
 var readOnlyCommands = map[string]bool{
 	"cat": true, "head": true, "tail": true, "less": true, "more": true,
 	"wc": true, "diff": true, "cmp": true, "comm": true, "file": true, "stat": true,
 	"ls": true, "tree": true, "du": true, "df": true,
 	"md5sum": true, "sha1sum": true, "sha256sum": true, "sha512sum": true, "cksum": true,
 	"grep": true, "egrep": true, "fgrep": true, "rg": true, "ag": true,
-	"cut": true, "tr": true, "strings": true, "jq": true, "yq": true,
+	"cut": true, "tr": true, "strings": true, "jq": true,
 	"nl": true, "tac": true, "rev": true, "column": true, "fold": true, "expand": true,
 	"od": true, "hexdump": true, "realpath": true, "readlink": true,
 	"basename": true, "dirname": true, "test": true, "[": true,
 	"which": true, "type": true, "pwd": true, "true": true, "false": true, "echo": true, "printf": true,
+}
+
+// writeDisqualifyingFlags names, per command in readOnlyCommands, flags
+// that give an otherwise-read-only command a writing mode: `tree -o path`
+// writes the listing to path instead of only reading the directory tree.
+// A command with no entry here has no such flag, so every invocation
+// readOnlyCommands allows is read-only.
+var writeDisqualifyingFlags = map[string]map[string]bool{
+	"tree": {"-o": true},
 }
 
 // readOnlyGitSubcommands are the git subcommands that only inspect the
@@ -162,6 +177,9 @@ func readsOnlyFromArgs(args []*syntax.Word) bool {
 	}
 	name = filepath.Base(name)
 	if readOnlyCommands[name] {
+		if flags, gated := writeDisqualifyingFlags[name]; gated && hasFlag(args[1:], flags) {
+			return false
+		}
 		return true
 	}
 	if name != "git" {
@@ -209,6 +227,26 @@ func readsOnlyFromArgs(args []*syntax.Word) bool {
 		}
 	}
 	return true
+}
+
+// hasFlag reports whether any of args carries one of flags (compared on
+// the part before "="), the same check the git branch below makes for
+// --output and -O. It fails closed on an argument this static parse can't
+// resolve — a variable or substitution might itself expand to the flag
+// being looked for — the same reasoning as literalWordValue's other
+// callers in this file.
+func hasFlag(args []*syntax.Word, flags map[string]bool) bool {
+	for _, w := range args {
+		arg, ok := literalWordValue(w)
+		if !ok {
+			return true
+		}
+		flag, _, _ := strings.Cut(arg, "=")
+		if flags[flag] {
+			return true
+		}
+	}
+	return false
 }
 
 // literalAbsPathOutside reports the absolute path w statically evaluates

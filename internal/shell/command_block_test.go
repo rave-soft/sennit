@@ -309,6 +309,40 @@ func TestCommandsBlocker(t *testing.T) {
 	}
 }
 
+// TestCommandsBlocker_UnwrapsPathsAndWrapperPrefixes is the regression
+// test for CommandsBlocker comparing bannedCommands against args[0]
+// verbatim: /usr/bin/curl, env FOO=1 curl, timeout 5 curl and xargs curl
+// all missed the deny list because none of them literally was "curl". A
+// name that merely contains a banned command as a substring — curlywurly
+// — must still be let through: this is a name match, not a substring scan.
+func TestCommandsBlocker_UnwrapsPathsAndWrapperPrefixes(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       []string
+		shouldBlock bool
+	}{
+		{"absolute path to banned command", []string{"/usr/bin/curl", "https://example.com"}, true},
+		{"relative path to banned command", []string{"./curl", "https://example.com"}, true},
+		{"env with var assignment", []string{"env", "FOO=1", "curl", "https://example.com"}, true},
+		{"env with flag before command", []string{"env", "-i", "curl", "https://example.com"}, true},
+		{"timeout with duration", []string{"timeout", "5", "curl", "https://example.com"}, true},
+		{"timeout with flag and duration", []string{"timeout", "--signal=KILL", "5", "curl", "x"}, true},
+		{"xargs wrapping banned command", []string{"xargs", "curl"}, true},
+		{"nice wrapping sudo", []string{"nice", "sudo", "ls"}, true},
+		{"substring of a banned name is not blocked", []string{"curlywurly", "x"}, false},
+		{"unbanned command through env is not blocked", []string{"env", "echo", "hi"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			blocker := CommandsBlocker([]string{"curl", "sudo"})
+			result := blocker(tt.input)
+			require.Equal(t, tt.shouldBlock, result,
+				"Expected block=%v for input %v", tt.shouldBlock, tt.input)
+		})
+	}
+}
+
 func TestSplitArgsFlags(t *testing.T) {
 	tests := []struct {
 		name      string

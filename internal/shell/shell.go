@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -185,7 +186,11 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 	s.blockFuncs = blockFuncs
 }
 
-// CommandsBlocker creates a BlockFunc that blocks exact command matches
+// CommandsBlocker creates a BlockFunc that blocks exact command matches.
+// This is the model-facing deny list, not a sandbox boundary — nothing it
+// blocks was ever on the permission-prompt-free safe list, so a command
+// that slips past it still gets a permission prompt. The point of matching
+// carefully here is only that the deny list means what it says.
 func CommandsBlocker(cmds []string) BlockFunc {
 	bannedSet := make(map[string]struct{})
 	for _, cmd := range cmds {
@@ -196,9 +201,85 @@ func CommandsBlocker(cmds []string) BlockFunc {
 		if len(args) == 0 {
 			return false
 		}
-		_, ok := bannedSet[args[0]]
+		_, ok := bannedSet[realCommandName(args)]
 		return ok
 	}
+}
+
+// commandWrapperPrefixes are argv[0] names that run another command rather
+// than doing anything themselves. Comparing bannedCommands against args[0]
+// verbatim let `env curl …`, `timeout 5 curl …`, `xargs curl` and a plain
+// path like `/usr/bin/curl` all reach a denied command with no match, since
+// none of them is literally "curl". realCommandName unwraps these to find
+// the program actually being run.
+var commandWrapperPrefixes = map[string]bool{
+	"env": true, "nice": true, "nohup": true, "timeout": true,
+	"xargs": true, "command": true, "exec": true,
+}
+
+// realCommandName returns the base name of the program args actually runs,
+// unwrapping a chain of command-wrapper prefixes (env, nice, nohup,
+// timeout, xargs, command, exec) first. It is a best-effort match for the
+// deny list, not a sandbox: an option this doesn't recognize, or one of
+// these wrappers used in an unusual way, simply stops the unwrap early and
+// the wrapper's own name is matched instead.
+func realCommandName(args []string) string {
+	for len(args) > 0 && commandWrapperPrefixes[filepath.Base(args[0])] {
+		wrapper := filepath.Base(args[0])
+		args = args[1:]
+		switch wrapper {
+		case "env":
+			// `env FOO=1 BAR=2 -u BAZ curl …`: skip VAR=value
+			// assignments and flags — the next token is not
+			// reliably the command, unlike the other wrappers.
+			for len(args) > 0 && (strings.HasPrefix(args[0], "-") || isEnvAssignment(args[0])) {
+				args = args[1:]
+			}
+		case "timeout":
+			// `timeout --signal=KILL 5 curl …`: skip flags, then
+			// the duration itself — it is a separate token, not
+			// part of the command.
+			for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+				args = args[1:]
+			}
+			if len(args) > 0 {
+				args = args[1:]
+			}
+		default:
+			// nice, nohup, xargs, command, exec: skip any leading
+			// flags. This misses a flag that takes its value as a
+			// separate token (`nice -n 10 …`), but the deny list
+			// is best-effort already — see the doc comment above.
+			for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+				args = args[1:]
+			}
+		}
+	}
+	if len(args) == 0 {
+		return ""
+	}
+	return filepath.Base(args[0])
+}
+
+// isEnvAssignment reports whether tok has the shell's VAR=value shape:
+// an identifier (letters, digits, underscore, not starting with a digit)
+// followed by "=". env accepts any number of these before the command it
+// runs.
+func isEnvAssignment(tok string) bool {
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := 0; i < eq; i++ {
+		c := tok[i]
+		isLetter := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		isDigit := c >= '0' && c <= '9'
+		if isLetter || (i > 0 && isDigit) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // ArgumentsBlocker creates a BlockFunc that blocks specific subcommand

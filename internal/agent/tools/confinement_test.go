@@ -478,6 +478,38 @@ func TestReadsOnlyFromArgs_OutputFlagsDisqualify(t *testing.T) {
 	}
 }
 
+// TestReadsOnlyFromArgs_YqAndTreeCanWrite is the regression test for two
+// commands that used to sit in readOnlyCommands despite having a writing
+// mode. yq is removed outright, the same treatment sed -i and sort -o
+// already get, since it has no ordinary read-only-heavy use worth a gate:
+// even a plain `yq .` is no longer treated as read-only. tree keeps its
+// entry — plain `tree` is common enough to be worth keeping read-only —
+// but `tree -o` writes its listing to a file, so that one flag is gated
+// via writeDisqualifyingFlags. jq, which has no in-place flag, is
+// unaffected either way.
+func TestReadsOnlyFromArgs_YqAndTreeCanWrite(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{"yq -i writes in place", "yq -i .a=1 /outside/f.yaml", false},
+		{"yq plain read is no longer read-only", "yq . f.yaml", false},
+		{"tree -o writes output", "tree -o /outside/f", false},
+		{"tree plain read", "tree", true},
+		{"jq plain read stays read-only", "jq . f.json", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := readsOnlyFromArgs(callArgs(t, tt.command))
+			assert.Equal(t, tt.want, got, "readsOnlyFromArgs(%q)", tt.command)
+		})
+	}
+}
+
 func TestBashTool_ConfinedWorkspaceAllowsReadOnlyCommandsToReadOutside(t *testing.T) {
 	t.Parallel()
 
