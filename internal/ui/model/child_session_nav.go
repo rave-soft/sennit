@@ -65,6 +65,19 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 // captureDelegationRef snapshots everything the child-session panel needs
 // to describe a delegation — its ids, prompt-snippet label, agent name,
 // model/effort override and timing — while its chat item is still loaded.
+// nestedToolContainerRefs describes every delegation the chat is currently
+// showing. Walking the list is the chat's job and describing a delegation
+// is navigation's, which is why the two are separate calls: the walk
+// returns items, and the mapping to a ref happens here.
+func nestedToolContainerRefs(c *Chat) []childSessionRef {
+	items := c.NestedToolContainers()
+	refs := make([]childSessionRef, 0, len(items))
+	for _, item := range items {
+		refs = append(refs, captureDelegationRef(item))
+	}
+	return refs
+}
+
 func captureDelegationRef(item chat.ToolMessageItem) childSessionRef {
 	ref := childSessionRef{
 		messageID:  item.MessageID(),
@@ -94,7 +107,7 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	// to capture the parent's title for the breadcrumb.
 	parentTitle := m.sess.current.Title
 
-	siblings := m.chat.NestedToolContainerRefs()
+	siblings := nestedToolContainerRefs(m.chat)
 	siblingIndex := 0
 	for i, s := range siblings {
 		if s.messageID == messageID && s.toolCallID == toolCallID {

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"image"
 	"strings"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
@@ -104,6 +106,23 @@ type sidebarSig struct {
 // computeSidebarSig reads the current values of everything
 // updateSidebarScrollState's render depends on. It must stay cheap: it runs
 // every frame regardless of whether the cache hits.
+// sidebarScrollbarHideMsg is sent to hide the sidebar scrollbar after
+// timeout. It lived in chat.go next to the chat's own version of the same
+// timer, which is the only thing chat.go knew about *UI — an accident of
+// placement rather than a dependency.
+type sidebarScrollbarHideMsg struct {
+	owner *UI // see scrollbarHideMsg.owner
+	seq   int
+}
+
+// sidebarScrollbarHideCmd returns a command that sends a
+// sidebarScrollbarHideMsg after the timeout.
+func sidebarScrollbarHideCmd(owner *UI, seq int) tea.Cmd {
+	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
+		return sidebarScrollbarHideMsg{owner: owner, seq: seq}
+	})
+}
+
 func (m *UI) computeSidebarSig() sidebarSig {
 	sig := sidebarSig{
 		area:      m.lay.layout.sidebar,

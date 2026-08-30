@@ -45,12 +45,6 @@ type scrollbarHideMsg struct {
 	seq   int // sequence number to ignore stale messages
 }
 
-// sidebarScrollbarHideMsg is sent to hide the sidebar scrollbar after timeout.
-type sidebarScrollbarHideMsg struct {
-	owner *UI // see scrollbarHideMsg.owner
-	seq   int
-}
-
 // scrollbarHideCmd returns a command that sends a scrollbarHideMsg after the timeout.
 func scrollbarHideCmd(owner *Chat, seq int) tea.Cmd {
 	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
@@ -83,14 +77,6 @@ func chatWarmCmd(owner *Chat, seq int, delay time.Duration) tea.Cmd {
 	}
 	return tea.Tick(delay, func(_ time.Time) tea.Msg {
 		return chatWarmMsg{owner: owner, seq: seq}
-	})
-}
-
-// sidebarScrollbarHideCmd returns a command that sends a sidebarScrollbarHideMsg
-// after the timeout.
-func sidebarScrollbarHideCmd(owner *UI, seq int) tea.Cmd {
-	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
-		return sidebarScrollbarHideMsg{owner: owner, seq: seq}
 	})
 }
 
@@ -996,8 +982,8 @@ func (m *Chat) PlainToolItemAt(x, y int) bool {
 // holds the child session's items rather than the parent's, so a ref that
 // was only a pair of ids left the panel with nothing to describe the
 // sibling it cycled to.
-func (m *Chat) NestedToolContainerRefs() []childSessionRef {
-	refs := make([]childSessionRef, 0)
+func (m *Chat) NestedToolContainers() []chat.ToolMessageItem {
+	items := make([]chat.ToolMessageItem, 0)
 	for i := range m.list.Len() {
 		item := m.list.ItemAt(i)
 		toolItem, isTool := item.(chat.ToolMessageItem)
@@ -1007,9 +993,9 @@ func (m *Chat) NestedToolContainerRefs() []childSessionRef {
 		if _, isContainer := item.(chat.NestedToolContainer); !isContainer {
 			continue
 		}
-		refs = append(refs, captureDelegationRef(toolItem))
+		items = append(items, toolItem)
 	}
-	return refs
+	return items
 }
 
 // ToolStepCount returns the number of top-level tool-call items in the
