@@ -175,12 +175,17 @@ func stripContinuationPlaceholder(messages []fantasy.Message) ([]fantasy.Message
 }
 
 // wakeFromInboxIfIdle re-checks sessionID's completion inbox once this
-// session has just gone idle (see run()'s deferred cleanup, the only
-// caller) and starts a continuation attempt if anything eligible is
-// waiting. This is what catches a completion that arrived while the
-// session was busy but whose busy turn never reached another PrepareStep
-// to drain it via the ordinary mid-turn path - the common case, since
-// most turns are a single step.
+// session has just gone idle and starts a continuation attempt if anything
+// eligible is waiting. This is what catches a completion that arrived
+// while the session was busy but whose busy turn never reached another
+// PrepareStep to drain it via the ordinary mid-turn path - the common
+// case, since most turns are a single step.
+//
+// Two call sites: runTurn's own deferred cleanup (run_turn.go), the choke
+// point every turn exit passes through, and summarize's deferred teardown
+// (usage.go) - a summarize holds the active slot for the length of its own
+// request, which is exactly as capable of missing a completion as an
+// ordinary turn is.
 func (a *sessionAgent) wakeFromInboxIfIdle(ctx context.Context, sessionID string) {
 	if !a.wakeEligible(sessionID) {
 		return

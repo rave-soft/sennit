@@ -124,6 +124,24 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		a.clearActiveIfMatch(sessionID, ac)
 		cancel()
 
+		// A completion can land in the inbox while this summarize holds
+		// the active slot - wakeEligibleLocked requires s.active == nil,
+		// so DeliverTaskCompletion sees wakeEligible=false and the
+		// caller's own continuation attempt is dropped (SteerDropped).
+		// runTurn's own defer is the ordinary place this gets retried
+		// from, but that defer never runs here: this call *is* the
+		// active slot's owner for as long as the summary takes, and
+		// finishTurn's shouldSummarize path (claim != nil) calls this
+		// instead of clearing the slot itself. Without this call, a
+		// parked delegation session - most idle-sweep summarize
+		// candidates are exactly that, see markActivity below - would
+		// sit at StatusRunning until the watchdog notices, rather than
+		// picking the completion up the moment this summary finishes.
+		// Detached from ctx: this defer's own cancel() above ends
+		// genCtx, and callers on the finishTurn path hand in a ctx tied
+		// to the very turn that is winding down here.
+		a.wakeFromInboxIfIdle(context.WithoutCancel(ctx), sessionID)
+
 		// The queue handoff belongs to a summarize that owns the whole
 		// dispatch — the caller asked for a summary and nothing else.
 		// With claim != nil this runs *inside* finishTurn, before its

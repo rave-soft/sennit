@@ -833,7 +833,61 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		// assistant message by the time Stream errors (PrepareStep already
 		// succeeded for that step), so this gate does not skip that case.
 		if errors.Is(err, context.Canceled) || t.currentAssistant == nil {
-			return SteerRan, streamResult, nil, streamErr
+			// Keep this separate from the outer gate rather than folding
+			// it in: t.currentAssistant == nil still needs its own
+			// protection here even when err is context.Canceled - the
+			// one PrepareStep failure that reaches this branch today
+			// (foldSteering's own persist failure, see the comment
+			// above) re-queues its own rollback itself and can surface
+			// as a wrapped context.Canceled (a cancelled ctx failing a
+			// DB write mid-fold) just as easily as any other error.
+			// Draining the queue for that case would hand off to this
+			// same failure's own rollback instead of returning its
+			// error - exactly what the outer gate's comment already
+			// rules out. A genuine mid-stream cancellation always has a
+			// live assistant message by the time Stream returns
+			// (PrepareStep already succeeded for that step), so gating
+			// the hand-off on t.currentAssistant != nil costs that case
+			// nothing.
+			if !errors.Is(err, context.Canceled) || t.currentAssistant == nil {
+				return SteerRan, streamResult, nil, streamErr
+			}
+			// A cancel only clears what was queued at the instant
+			// dispatcher.cancel (or the caller's own ctx) fired. Between
+			// that moment and Stream actually observing it - a tool slow
+			// to notice ctx (bash, MCP, LSP), or handleStreamError's own
+			// DB writes just above - s.active is still this turn's, so a
+			// prompt submitted in that window takes the busy branch and
+			// queues behind it rather than being dropped by the cancel
+			// mark. Without draining here, that entry sat until some
+			// later turn's foldSteering happened to fold it (a
+			// RunID-less prompt) or until its own timeout (a
+			// RunID-bearing `thread_send`/`sennit run` caller) - nothing
+			// else ever looks at this session's queue once a canceled
+			// Stream returns.
+			//
+			// drainNext applies the cancel mark itself, so anything
+			// queued *before* the cancel is still dropped and reported
+			// through publishCanceledQueueDrops exactly as it would be
+			// from finishTurn's own handoff - only what arrived after
+			// the mark survives to be handed off as next.
+			//
+			// Deliberately narrower than completeTurn's full tail
+			// (release+notify+drain+RunComplete-ownership), not that
+			// tail itself: this turn's own RunComplete for call - the
+			// one that must report Cancelled, not the queued survivor's
+			// outcome - is already guaranteed by runTurn's deferred
+			// publisher above (the choke point every exit passes
+			// through, unconditionally on next), so there is no
+			// "outerOwesRunComplete" gap here for completeTurn's
+			// ownership logic to close, and no AgentFinished
+			// notification is owed for a turn that was canceled, not
+			// finished. Reusing completeTurn would only add an
+			// unrelated notification and a redundant (Once-guarded, but
+			// still misleading to read) second RunComplete decision.
+			_, next, canceledRunIDDrops := a.drainNext(call.SessionID)
+			a.publishCanceledQueueDrops(canceledRunIDDrops)
+			return SteerRan, streamResult, next, streamErr
 		}
 		// A non-cancel Stream error (a genuinely failed request, not a
 		// user cancellation) used to return here directly, skipping the
