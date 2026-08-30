@@ -100,6 +100,7 @@ var readOnlySafeMethods = []string{
 	"Config",
 	"CreateAgentToolSessionID",
 	"CurrentPlanUsage",
+	"CustomProviderTypes",
 	"ListCustomCommands",
 	"FileTrackerLastReadTime",
 	"FileTrackerListReadFiles",

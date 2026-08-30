@@ -111,6 +111,8 @@ func (a *testConfigAccessor) RefreshAccountLimits(ctx context.Context, providerI
 	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
 }
 
+func (a *testConfigAccessor) CustomProviderTypes() []string { return nil }
+
 // CurrentPlanUsage: no provider in these tests quotes usage.
 func (a *testConfigAccessor) CurrentPlanUsage(string) (accounts.Usage, bool) {
 	return accounts.Usage{}, false

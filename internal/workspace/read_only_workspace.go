@@ -444,6 +444,10 @@ func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID
 // CurrentPlanUsage is a read, so the read-only workspace answers it: an
 // attached thread shows the same plan line as the workspace it is attached
 // to.
+func (w *readOnlyWorkspace) CustomProviderTypes() []string {
+	return w.ws.CustomProviderTypes()
+}
+
 func (w *readOnlyWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool) {
 	return w.ws.CurrentPlanUsage(providerID)
 }

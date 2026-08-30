@@ -25,7 +25,8 @@ type stubConfigAccessor struct {
 	errs map[string]error
 }
 
-func (s *stubConfigAccessor) Config() *config.Config { return nil }
+func (s *stubConfigAccessor) Config() *config.Config        { return nil }
+func (s *stubConfigAccessor) CustomProviderTypes() []string { return nil }
 func (s *stubConfigAccessor) CurrentPlanUsage(string) (accounts.Usage, bool) {
 	return accounts.Usage{}, false
 }

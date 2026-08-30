@@ -340,6 +340,16 @@ type ConfigAccessor interface {
 	// the active account first activates a replacement, so the provider
 	// never ends up pointing at a deleted account.
 	RemoveAccount(scope config.Scope, providerID, accountID string) error
+	// CustomProviderTypes lists the provider types a custom provider may
+	// declare beyond catwalk's own catalog — the ones this build has a
+	// discovery enricher registered for.
+	//
+	// It is on the facade because the list is derived from that registry,
+	// not written down: a hardcoded copy in the form would drift the
+	// moment an enricher is added or removed, and importing the discovery
+	// engine into a dialog to read five strings is the trade this
+	// boundary exists to refuse.
+	CustomProviderTypes() []string
 	// SetProviderProxy sets providerID's provider-level proxy (the base
 	// UpdateAccount/ActivateAccount resolve an account's effective proxy
 	// against, see accounts.ResolveProxy) and republishes the active

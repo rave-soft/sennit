@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 )
@@ -127,4 +128,9 @@ func (w *AppWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool
 		return accounts.Usage{}, false
 	}
 	return u.Snapshot(), true
+}
+
+// CustomProviderTypes implements Workspace.
+func (w *AppWorkspace) CustomProviderTypes() []string {
+	return discover.RegisteredProviderTypes()
 }

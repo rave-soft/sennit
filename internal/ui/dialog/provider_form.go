@@ -12,7 +12,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
@@ -94,7 +93,7 @@ func NewProviderForm(com *common.Common) *ProviderForm {
 	m.apiKey.SetStyles(com.Styles.TextInput)
 	m.apiKey.Prompt = "> "
 
-	m.types = providerFormTypes()
+	m.types = providerFormTypes(com)
 	m.typeIdx = max(0, slices.Index(m.types, string(catwalk.TypeOpenAICompat)))
 
 	m.help = help.New()
@@ -111,15 +110,21 @@ func NewProviderForm(com *common.Common) *ProviderForm {
 }
 
 // providerFormTypes returns the valid `type` values for a custom provider:
-// catwalk's own catalog types union the custom provider types that have a
-// registered discover.Enricher (ollama, omlx, litellm, llamacpp, lmstudio).
-func providerFormTypes() []string {
+// catwalk's own catalog types union the ones this build has a discovery
+// enricher for (ollama, omlx, litellm, llamacpp, lmstudio).
+//
+// The second half comes from the workspace rather than from the discovery
+// package: it is a registry, and reading it here meant a dialog importing
+// the discovery engine to render a dropdown.
+func providerFormTypes(com *common.Common) []string {
 	known := catwalk.KnownProviderTypes()
 	types := make([]string, 0, len(known)+4)
 	for _, t := range known {
 		types = append(types, string(t))
 	}
-	types = append(types, discover.RegisteredProviderTypes()...)
+	if com != nil && com.Workspace != nil {
+		types = append(types, com.Workspace.CustomProviderTypes()...)
+	}
 	return types
 }
 
