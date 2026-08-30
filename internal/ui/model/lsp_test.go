@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -28,7 +28,7 @@ func TestLSPListShowsReadyAndCleanStatus(t *testing.T) {
 
 	sty := styles.SennitDark()
 	got := stripANSI(lspList(&sty, []LSPInfo{{
-		LSPClientInfo: workspace.LSPClientInfo{Name: "gopls", State: lsp.StateReady},
+		LSPClientInfo: workspace.LSPClientInfo{Name: "gopls", State: proto.LSPStateReady},
 		Diagnostics:   map[protocol.DiagnosticSeverity]int{},
 	}}, 60, 1))
 

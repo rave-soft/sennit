@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -25,7 +25,7 @@ type lspState struct {
 	// frame). LSP events refresh them off-thread with a TTL backstop; see
 	// lsp.go.
 	states        map[string]workspace.LSPClientInfo
-	diagnostics   map[string]lsp.DiagnosticCounts
+	diagnostics   map[string]proto.LSPDiagnosticCounts
 	fetchInFlight bool
 	// version bumps every time states/diagnostics are replaced (see
 	// applyLSPStates). The sidebar cache (sidebar.go) keys off it instead of
@@ -54,7 +54,7 @@ type lspStatesMsg struct {
 	uiOwned
 
 	states      map[string]workspace.LSPClientInfo
-	diagnostics map[string]lsp.DiagnosticCounts
+	diagnostics map[string]proto.LSPDiagnosticCounts
 }
 
 // LSPInfo wraps LSP client information with diagnostic counts by severity.
@@ -91,7 +91,7 @@ func (m *UI) dispatchLSPRefresh() tea.Cmd {
 	owner := m
 	return func() tea.Msg {
 		states := ws.LSPGetStates()
-		diagnostics := make(map[string]lsp.DiagnosticCounts, len(states))
+		diagnostics := make(map[string]proto.LSPDiagnosticCounts, len(states))
 		for name := range states {
 			diagnostics[name] = ws.LSPGetDiagnosticCounts(name)
 		}
@@ -198,29 +198,29 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		var description string
 		var diagnostics string
 		switch l.State {
-		case lsp.StateUnstarted:
+		case proto.LSPStateUnstarted:
 			icon = t.Resource.OfflineIcon.String()
 			description = t.Resource.StatusText.Render("unstarted")
-		case lsp.StateStopped:
+		case proto.LSPStateStopped:
 			icon = t.Resource.OfflineIcon.String()
 			description = t.Resource.StatusText.Render("stopped")
-		case lsp.StateStarting:
+		case proto.LSPStateStarting:
 			icon = t.Resource.BusyIcon.String()
 			description = t.Resource.StatusText.Render("starting...")
-		case lsp.StateReady:
+		case proto.LSPStateReady:
 			icon = t.Resource.EnabledIcon.String()
 			description = t.Resource.StatusText.Render("ready")
 			diagnostics = lspDiagnostics(t, l.Diagnostics)
 			if diagnostics == "" {
 				diagnostics = t.LSP.CleanDiagnostic.Render("no issues")
 			}
-		case lsp.StateError:
+		case proto.LSPStateError:
 			icon = t.Resource.ErrorIcon.String()
 			description = t.Resource.StatusText.Render("error")
-			if l.Error != nil {
-				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", l.Error.Error()))
+			if l.Error != "" {
+				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", l.Error))
 			}
-		case lsp.StateDisabled:
+		case proto.LSPStateDisabled:
 			icon = t.Resource.DisabledIcon.String()
 			description = t.Resource.StatusText.Render("disabled")
 		default:

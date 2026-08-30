@@ -21,7 +21,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -124,7 +123,11 @@ type UpdateAvailableMsg struct {
 }
 
 // LSPClientInfo is the frontend-facing LSP client state.
-type LSPClientInfo = lsp.ClientInfo
+//
+// It used to alias internal/lsp.ClientInfo, which carries a live *Client:
+// every consumer of this contract was handed the running LSP client along
+// with its name and state. The transport shape carries no handle.
+type LSPClientInfo = proto.LSPClientInfo
 
 // LSPEventType represents the type of LSP event.
 type LSPEventType string
@@ -138,7 +141,7 @@ const (
 type LSPEvent struct {
 	Type            LSPEventType
 	Name            string
-	State           lsp.ServerState
+	State           proto.LSPState
 	Error           error
 	DiagnosticCount int
 }
@@ -289,7 +292,7 @@ type LSPController interface {
 	LSPStart(ctx context.Context, path string)
 	LSPStopAll(ctx context.Context)
 	LSPGetStates() map[string]LSPClientInfo
-	LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts
+	LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts
 }
 
 // ConfigAccessor reads the resolved configuration and applies mutations to

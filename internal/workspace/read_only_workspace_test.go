@@ -12,7 +12,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -518,8 +517,8 @@ func (s *stubWorkspace) PrepareSessionChanges(ctx context.Context, sessionID str
 func (s *stubWorkspace) LSPStart(ctx context.Context, path string) { s.track("LSPStart") }
 func (s *stubWorkspace) LSPStopAll(ctx context.Context)            { s.track("LSPStopAll") }
 func (s *stubWorkspace) LSPGetStates() map[string]LSPClientInfo    { return nil }
-func (s *stubWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
-	return lsp.DiagnosticCounts{}
+func (s *stubWorkspace) LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts {
+	return proto.LSPDiagnosticCounts{}
 }
 
 // Config

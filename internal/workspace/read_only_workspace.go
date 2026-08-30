@@ -10,7 +10,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -633,7 +632,7 @@ func (w *readOnlyWorkspace) InitializePrompt() (string, error) {
 	return w.ws.InitializePrompt()
 }
 
-func (w *readOnlyWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+func (w *readOnlyWorkspace) LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts {
 	return w.ws.LSPGetDiagnosticCounts(name)
 }
 

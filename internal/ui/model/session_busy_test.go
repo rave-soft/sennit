@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -36,7 +35,7 @@ type countingWorkspace struct {
 	queued      []string
 	model       workspace.AgentModel
 	lspStates   map[string]workspace.LSPClientInfo
-	lspDiags    map[string]lsp.DiagnosticCounts
+	lspDiags    map[string]proto.LSPDiagnosticCounts
 
 	// threadsSupported/threads back SupportsThreads/ListThreads for the
 	// RPC-collapse test (TestThreadEventDispatchesOneListThreadsCall):
@@ -148,7 +147,7 @@ func (w *countingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
 	return w.lspStates
 }
 
-func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts {
 	w.lspDiagCalls++
 	return w.lspDiags[name]
 }
@@ -752,9 +751,9 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	m := newBusyUI(ws)
 	m.wsCache.agentCache.value.ready = true
 	m.lsp.states = map[string]workspace.LSPClientInfo{
-		"gopls": {Name: "gopls", State: lsp.StateReady, DiagnosticCount: 3},
+		"gopls": {Name: "gopls", State: proto.LSPStateReady, DiagnosticCount: 3},
 	}
-	m.lsp.diagnostics = map[string]lsp.DiagnosticCounts{
+	m.lsp.diagnostics = map[string]proto.LSPDiagnosticCounts{
 		"gopls": {Error: 2, Warning: 1},
 	}
 
@@ -864,7 +863,7 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 	ws := &countingWorkspace{
 		ready:     true,
 		lspStates: map[string]workspace.LSPClientInfo{"gopls": {Name: "gopls", DiagnosticCount: 3}},
-		lspDiags:  map[string]lsp.DiagnosticCounts{"gopls": {Error: 2, Warning: 1}},
+		lspDiags:  map[string]proto.LSPDiagnosticCounts{"gopls": {Error: 2, Warning: 1}},
 	}
 	m := newBusyUI(ws)
 	warmCaches(m, false)

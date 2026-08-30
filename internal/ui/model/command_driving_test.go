@@ -15,7 +15,6 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -349,8 +348,8 @@ func (w *cmdDrivingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo 
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
-	return lsp.DiagnosticCounts{}
+func (w *cmdDrivingWorkspace) LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts {
+	return proto.LSPDiagnosticCounts{}
 }
 
 func (w *cmdDrivingWorkspace) UpdatePreferredModel(config.Scope, config.SelectedModel) error {
