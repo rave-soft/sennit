@@ -136,16 +136,35 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 			}
 
 			// Create parent directories if they don't exist
-			if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+			destDir := filepath.Dir(filePath)
+			if err := os.MkdirAll(destDir, 0o755); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 			}
 
-			// Create the output file
-			outFile, err := os.Create(filePath)
+			// Write to a temp file in the destination directory rather than
+			// os.Create(filePath) directly, for two reasons: os.Create
+			// follows an existing symlink at filePath and truncates
+			// whatever it points at (a pre-existing or bash-created link
+			// out of a confined workspace would let a download clobber a
+			// file this tool was never granted access to), and truncating
+			// in place destroys a complete existing file the moment a
+			// download starts, even if it then fails or is cancelled
+			// partway through. Renaming a fully-copied temp file into place
+			// avoids both: the temp file is created fresh (never following
+			// a link), and filePath is only touched once the copy has
+			// succeeded.
+			outFile, err := os.CreateTemp(destDir, filepath.Base(filePath)+".*.tmp")
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to create output file: %w", err)
 			}
-			defer outFile.Close()
+			tmpPath := outFile.Name()
+			cleanupTmp := true
+			defer func() {
+				outFile.Close()
+				if cleanupTmp {
+					_ = os.Remove(tmpPath)
+				}
+			}()
 
 			// Copy data without an explicit size limit.
 			// The overall download is still constrained by the HTTP client's timeout
@@ -154,6 +173,13 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 			}
+			if err := outFile.Close(); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+			}
+			if err := os.Rename(tmpPath, filePath); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+			}
+			cleanupTmp = false
 
 			contentType := resp.Header.Get("Content-Type")
 			responseMsg := fmt.Sprintf("Successfully downloaded %d bytes to %s", bytesWritten, relPath)

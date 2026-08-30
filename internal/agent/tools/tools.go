@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -137,7 +138,20 @@ func requirePermission(ctx context.Context, perms permission.Requester, req perm
 // resolveWithinWorkdir resolves path to an absolute form and reports whether
 // it falls outside workingDir, so callers can gate access with a permission
 // request. err is non-nil only when workingDir or path cannot be resolved to
-// an absolute path (e.g. an unreadable cwd).
+// an absolute path (e.g. an unreadable cwd); the returned absPath is the
+// plain (symlink-unaware) absolute form, so callers still open exactly the
+// path they asked for.
+//
+// The outside test itself resolves symlinks first: without that, a
+// directory symlink lexically inside workingDir (e.g. "up" -> "../..",
+// created with the bash tool, whose relative target is invisible to the
+// static confinement check that gates bash) would pass the old
+// filepath.Abs-only prefix test while actually landing outside workingDir
+// once the OS follows the link. Resolution failing for any reason other
+// than "the path doesn't exist yet" (permission denied, a symlink loop, ...)
+// is treated as outside rather than surfaced as err, so a confinement check
+// fails closed instead of either erroring out or, worse, treating an
+// unresolvable path as safe.
 func resolveWithinWorkdir(workingDir, path string) (absPath string, outside bool, err error) {
 	absWorkingDir, err := filepath.Abs(workingDir)
 	if err != nil {
@@ -147,11 +161,70 @@ func resolveWithinWorkdir(workingDir, path string) (absPath string, outside bool
 	if err != nil {
 		return "", false, fmt.Errorf("resolving path: %w", err)
 	}
+
+	resolvedWorkingDir, err := resolveExistingAncestorSymlinks(absWorkingDir)
+	if err != nil {
+		return absPath, true, nil
+	}
+	resolvedPath, err := resolveExistingAncestorSymlinks(absPath)
+	if err != nil {
+		return absPath, true, nil
+	}
+
 	// fsext.HasPrefix treats a sibling like "..foo" as inside workingDir,
 	// unlike a bare strings.HasPrefix(relPath, "..") check, which would
 	// mistake it for an escape via "..".
-	outside = !fsext.HasPrefix(absPath, absWorkingDir)
+	outside = !fsext.HasPrefix(resolvedPath, resolvedWorkingDir)
 	return absPath, outside, nil
+}
+
+// resolveExistingAncestorSymlinks resolves symlinks in the longest existing
+// ancestor of path and re-appends whatever remainder does not exist yet.
+// filepath.EvalSymlinks fails outright on a path that doesn't exist, and the
+// common case here is a write's target — a file that is about to be
+// created inside a directory that does — so resolving the whole path
+// straight through would reject that ordinary case.
+//
+// EvalSymlinks also fails with ENOENT for a dangling symlink (one whose
+// target is absent), which looks identical to "this component doesn't
+// exist yet" unless the two are told apart: os.Lstat succeeds on a
+// dangling link (it stats the link itself, not its target) and only fails
+// with ErrNotExist when the name is genuinely absent. So on ENOENT, Lstat
+// the component first — present-but-unresolvable (a dangling link, or a
+// non-directory partway through the path) is reported as an error rather
+// than folded into the remainder, which the caller turns into "outside".
+// Without that check, "ln -s ../../evil up" (relative, so invisible to the
+// bash confinement check) then "write up/foo.txt" would resolve "up" as an
+// as-yet-nonexistent ordinary path component, report the write as inside,
+// and let the write's own MkdirAll follow the link out.
+func resolveExistingAncestorSymlinks(path string) (string, error) {
+	remainder := ""
+	dir := path
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			return filepath.Join(resolved, remainder), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		if _, lerr := os.Lstat(dir); lerr == nil {
+			// The component is there — it just can't be resolved (a
+			// dangling symlink, most likely). Fail closed rather than
+			// treat it as "doesn't exist yet".
+			return "", err
+		} else if !errors.Is(lerr, fs.ErrNotExist) {
+			return "", lerr
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Walked up to the filesystem root and even that could not be
+			// resolved; nothing left to try.
+			return "", err
+		}
+		remainder = filepath.Join(filepath.Base(dir), remainder)
+		dir = parent
+	}
 }
 
 // ensureParentDir creates the parent directory of filePath, as needed before

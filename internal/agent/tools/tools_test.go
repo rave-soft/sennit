@@ -93,6 +93,73 @@ func TestResolveWithinWorkdir(t *testing.T) {
 	require.True(t, filepath.IsAbs(absPath))
 }
 
+// TestResolveWithinWorkdir_DirectorySymlinkEscape pins DEFECT 1: a directory
+// symlink lexically inside workingDir (as "ln -s ../.. up" would create with
+// the bash tool) must not defeat the boundary check just because the plain
+// filepath.Abs form of "up/outside.txt" looks like it is inside workingDir.
+func TestResolveWithinWorkdir_DirectorySymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	workingDir := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+
+	// "up" -> "../..", so workingDir/up resolves to root's parent: outside
+	// workingDir even though "workingDir/up/outside.txt" is lexically inside
+	// it.
+	require.NoError(t, os.Symlink(filepath.Join("..", ".."), filepath.Join(workingDir, "up")))
+
+	_, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "up", "outside.txt"))
+	require.NoError(t, err)
+	require.True(t, outside, "a directory symlink must not defeat the workingDir boundary")
+}
+
+// TestResolveWithinWorkdir_WorkdirReachedThroughSymlink pins the other half
+// of DEFECT 1's fix: resolving symlinks in the boundary check must not make
+// a workingDir that is itself reached through a symlink (a common macOS
+// /tmp situation) report its own children as outside.
+func TestResolveWithinWorkdir_WorkdirReachedThroughSymlink(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	require.NoError(t, os.MkdirAll(real, 0o755))
+	linked := filepath.Join(root, "linked")
+	require.NoError(t, os.Symlink(real, linked))
+
+	_, outside, err := resolveWithinWorkdir(linked, filepath.Join(linked, "sub", "file.txt"))
+	require.NoError(t, err)
+	require.False(t, outside)
+}
+
+// TestResolveWithinWorkdir_DanglingSymlinkEscape pins the residual hole in
+// DEFECT 1's first fix: a symlink whose target does not exist ("up" ->
+// "../../evil", where "evil" is absent) makes EvalSymlinks fail with
+// ENOENT exactly like a path component that simply hasn't been created
+// yet. Folding the two together let "up/foo.txt" resolve as an
+// as-yet-nonexistent ordinary path and report as inside workingDir, even
+// though the write's own MkdirAll would follow the dangling link out.
+func TestResolveWithinWorkdir_DanglingSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	workingDir := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+
+	require.NoError(t, os.Symlink(filepath.Join("..", "..", "evil"), filepath.Join(workingDir, "up")))
+
+	_, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "up", "foo.txt"))
+	require.NoError(t, err)
+	require.True(t, outside, "a dangling symlink must not be treated as a not-yet-existing path component")
+}
+
+// TestResolveWithinWorkdir_GenuinelyMissingNestedPath makes sure the
+// dangling-symlink fix above does not overshoot: an ordinary nested path
+// with no symlink anywhere in it, none of whose components exist yet, must
+// still resolve as inside workingDir — that is the common case a write
+// tool relies on.
+func TestResolveWithinWorkdir_GenuinelyMissingNestedPath(t *testing.T) {
+	workingDir := t.TempDir()
+
+	_, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "newdir", "sub", "file.txt"))
+	require.NoError(t, err)
+	require.False(t, outside)
+}
+
 func TestEnsureParentDir(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "a", "b", "file.txt")
