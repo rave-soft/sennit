@@ -3,6 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -46,4 +49,56 @@ func TestHoverTool_RejectsWorkspaceEscape(t *testing.T) {
 			require.Contains(t, resp.Content, "file_path must be inside the workspace")
 		})
 	}
+}
+
+// TestHoverTool_RejectsNonPositiveLineOrCharacter is the regression test
+// for the fix to requests.Hover: once that method started subtracting one
+// to reach the LSP wire's 0-based position, an unvalidated line: 0 (which
+// is also HoverParams.Line's omitempty zero value, so a model that just
+// omits line reaches the same path) would underflow to line 4294967295
+// instead of being caught here.
+func TestHoverTool_RejectsNonPositiveLineOrCharacter(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	file := filepath.Join(root, "a.go")
+	require.NoError(t, os.WriteFile(file, []byte("package a\n"), 0o644))
+	tool := NewHoverTool(nil, root)
+
+	for _, tc := range []struct {
+		name       string
+		line, char int
+	}{
+		{"line omitted", 0, 1},
+		{"character omitted", 1, 0},
+		{"both omitted", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input, err := json.Marshal(HoverParams{FilePath: "a.go", Line: tc.line, Character: tc.char})
+			require.NoError(t, err)
+			resp, err := tool.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
+			require.NoError(t, err)
+			require.True(t, resp.IsError, "a non-positive line or character must be refused")
+			require.Contains(t, resp.Content, "1-based")
+		})
+	}
+}
+
+// TestLSPHoverThroughManagerConvertsPosition pins the fix to
+// requests.Hover: a 1-based file_path/line/character request must reach
+// the server as a 0-based position, the same conversion every other
+// position-based LSP request already applies.
+func TestLSPHoverThroughManagerConvertsPosition(t *testing.T) {
+	root := newLSPToolWorktree(t)
+	logPath := filepath.Join(root, "hover.log")
+	manager := newLSPToolE2EManagerWithEnv(t, root, "symbols", map[string]string{"SENNIT_LSP_TOOL_LOG": logPath})
+
+	resp := runToolWith(t, NewHoverTool(manager, root), t.Context(), HoverToolName, HoverParams{FilePath: "a.go", Line: 3, Character: 5})
+	require.False(t, resp.IsError)
+
+	contents, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	require.Contains(t, strings.TrimSpace(string(contents)), "line=2 character=4",
+		"Hover must send the 0-based position corresponding to the 1-based file_path/line/character it was given")
 }

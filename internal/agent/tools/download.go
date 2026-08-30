@@ -32,6 +32,10 @@ type DownloadPermissionsParams = proto.DownloadPermissionsParams
 
 const DownloadToolName = "download"
 
+// defaultDownloadTimeout bounds a download call that didn't specify a
+// timeout, now that the http.Client itself carries none - see NewDownloadTool.
+const defaultDownloadTimeout = 5 * time.Minute
+
 //go:embed download.md.tpl
 var downloadDescriptionTmpl []byte
 
@@ -52,7 +56,12 @@ func downloadDescription() string {
 
 func NewDownloadTool(permissions permission.Requester, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
-		client = newHTTPClient(5 * time.Minute) // Default 5 minute timeout for downloads
+		// No client.Timeout here: it would bound the whole request
+		// regardless of the caller-supplied timeout below, capping the
+		// documented 600s maximum at whatever this constant said. The
+		// per-call context timeout is the only bound now; defaultDownloadTimeout
+		// keeps an unspecified timeout from hanging forever.
+		client = newHTTPClient(0)
 	}
 	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		DownloadToolName,
@@ -103,13 +112,17 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 				return permResp, nil
 			}
 
-			// Handle timeout with context
-			requestCtx := ctx
+			// Handle timeout with context. The client itself carries no
+			// Timeout (see NewDownloadTool), so this is the only thing
+			// bounding the request; an unspecified timeout still falls back
+			// to defaultDownloadTimeout rather than being allowed to hang
+			// forever.
+			requestTimeout := defaultDownloadTimeout
 			if params.Timeout > 0 {
-				var cancel context.CancelFunc
-				requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
-				defer cancel()
+				requestTimeout = time.Duration(params.Timeout) * time.Second
 			}
+			requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+			defer cancel()
 
 			// A malformed URL or an unreachable target is information about
 			// what the model asked for, not about this process, so both
@@ -167,8 +180,8 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 			}()
 
 			// Copy data without an explicit size limit.
-			// The overall download is still constrained by the HTTP client's timeout
-			// and any upstream server limits.
+			// The overall download is still constrained by the per-call
+			// context timeout above and any upstream server limits.
 			bytesWritten, err := io.Copy(outFile, resp.Body)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)

@@ -57,8 +57,22 @@ func (r *Registry) beginRenewal(name string, owner attemptID, session *ClientSes
 		return attemptID{}, false
 	}
 	renewal := attemptID{gen: owner.gen, seq: r.authAttempt.Add(1)}
+	// updateStateLocked(..., StateError, ...) below already deletes
+	// r.owners[name] as part of retiring the errored attempt, so the
+	// previous owner must be captured before that call, not read back from
+	// r.owners afterwards (which would already be gone).
+	previousOwner := r.owners[name]
 	state, _ := r.states.Get(name)
 	cleanup := r.updateStateLocked(name, StateError, pingErr, nil, state.Counts)
+	// The attempt being replaced can never become the owner again (ownsLocked
+	// requires r.owners[name] == owner), so its reservation, if it holds one,
+	// would otherwise sit in tokenReservations for the rest of the process's
+	// life - only teardown prunes that map, and a healthy server can renew
+	// many times without ever tearing down. Deleting the exact (name,
+	// old-owner) key under the same lock as the owner swap below retires it
+	// atomically, so no other attempt can observe a moment where both the
+	// old and new owner appear to hold the reservation.
+	delete(r.tokenReservations, tokenWriteOwner{name: name, attempt: previousOwner})
 	r.owners[name] = renewal
 	r.publishMu.Unlock()
 	r.runStateCleanup(name, cleanup)

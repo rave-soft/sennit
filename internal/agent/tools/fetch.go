@@ -20,6 +20,10 @@ import (
 const (
 	FetchToolName = "fetch"
 	MaxFetchSize  = 100 * 1024 // 100KB
+
+	// defaultFetchTimeout bounds a fetch call that didn't specify a
+	// timeout, now that the http.Client itself carries none.
+	defaultFetchTimeout = 30 * time.Second
 )
 
 //go:embed fetch.md.tpl
@@ -45,7 +49,13 @@ func fetchDescription(availability toolAvailability) string {
 func NewFetchTool(permissions permission.Requester, workingDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	if client == nil {
-		client = newHTTPClient(30 * time.Second)
+		// No client.Timeout here: it would bound the whole request
+		// regardless of the caller-supplied timeout below, capping the
+		// documented 120s maximum at whatever this constant said (it used
+		// to be 30s, silently truncating any longer request). The
+		// per-call context timeout is the only bound now; defaultFetchTimeout
+		// below still keeps an unspecified timeout from hanging forever.
+		client = newHTTPClient(0)
 	}
 
 	return withToolParameterSchema(fantasy.NewParallelAgentTool(
@@ -92,13 +102,16 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 				return fantasy.NewTextErrorResponse("timeout must be between 0 and 120 seconds"), nil
 			}
 
-			// Handle timeout with context
-			requestCtx := ctx
+			// Handle timeout with context. The client itself carries no
+			// Timeout (see NewFetchTool), so this is the only thing bounding
+			// the request; an unspecified timeout still falls back to
+			// defaultFetchTimeout rather than being allowed to hang forever.
+			requestTimeout := defaultFetchTimeout
 			if params.Timeout > 0 {
-				var cancel context.CancelFunc
-				requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
-				defer cancel()
+				requestTimeout = time.Duration(params.Timeout) * time.Second
 			}
+			requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+			defer cancel()
 
 			// A malformed URL or an unreachable target is information about
 			// what the model asked for, not about this process, so both

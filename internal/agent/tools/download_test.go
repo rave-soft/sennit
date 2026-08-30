@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
@@ -60,4 +61,44 @@ func TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace(t *testing.T) {
 	downloaded, err := os.ReadFile(link)
 	require.NoError(t, err)
 	require.Equal(t, "downloaded content", string(downloaded))
+}
+
+// TestDownloadTool_DefaultClientDoesNotCapBelowCallerTimeout is download's
+// half of DEFECT 1 (see fetch_test.go's
+// TestFetchTool_DefaultClientDoesNotCapBelowCallerTimeout for the full
+// rationale): NewDownloadTool used to give its default client a fixed 5
+// minute http.Client.Timeout on top of the per-call context timeout
+// derived from the "timeout" parameter, so that fixed value - not the
+// caller's - was the real ceiling. A tool built with an explicit
+// low-Timeout client stands in for that old capped default and must still
+// get cut short; a tool built with client: nil - the actual production
+// default-construction path - must not.
+func TestDownloadTool_DefaultClientDoesNotCapBelowCallerTimeout(t *testing.T) {
+	t.Parallel()
+
+	const slowServerDelay = 300 * time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(slowServerDelay)
+		_, _ = w.Write([]byte("downloaded content"))
+	}))
+	t.Cleanup(server.Close)
+
+	perms := &mockPermissionService{}
+	// requested timeout (2s) comfortably exceeds both the slow server's
+	// delay and the stand-in "old cap" (100ms) below, so a failure here can
+	// only come from that fixed client-level cap, not from the request
+	// simply running long.
+	params := DownloadParams{URL: server.URL, FilePath: "out.txt", Timeout: 2}
+	input := mustJSONInput(t, params)
+
+	cappedClient := &http.Client{Timeout: 100 * time.Millisecond}
+	capped := NewDownloadTool(perms, t.TempDir(), cappedClient)
+	resp, err := capped.Run(confinedTestCtx(t), fantasy.ToolCall{ID: "call-1", Input: input})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "a client-level Timeout below the caller's requested timeout must still cut the request short")
+
+	uncapped := NewDownloadTool(perms, t.TempDir(), nil)
+	resp, err = uncapped.Run(confinedTestCtx(t), fantasy.ToolCall{ID: "call-2", Input: input})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "NewDownloadTool's default client (client: nil) must not impose a fixed cap below the caller's timeout")
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -57,6 +58,51 @@ func TestFetchToolNetworkFailureIsTextResponseNotError(t *testing.T) {
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "Failed to fetch URL")
 	require.Contains(t, resp.Content, wantErr.Error())
+}
+
+// TestFetchTool_DefaultClientDoesNotCapBelowCallerTimeout pins DEFECT 1:
+// NewFetchTool used to build its default client with a fixed 30s
+// http.Client.Timeout in addition to the per-call context timeout derived
+// from the "timeout" parameter. http.Client.Timeout bounds the whole
+// request regardless of context, so a caller-supplied timeout longer than
+// whatever that fixed value was got silently capped at it. Reproduced here
+// at a scale that doesn't require waiting on the real 30s/120s figures: a
+// tool built with an explicit low-Timeout client (standing in for "the old
+// capped default") still gets cut off even though it was asked for a
+// longer per-call timeout, while a tool built with client: nil - the
+// actual production default-construction path - honors that same longer
+// timeout, proving nothing in NewFetchTool's own default client caps it.
+func TestFetchTool_DefaultClientDoesNotCapBelowCallerTimeout(t *testing.T) {
+	t.Parallel()
+
+	const slowServerDelay = 300 * time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(slowServerDelay)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(server.Close)
+
+	perms := &stubPermissionService{granted: true}
+	// requested timeout (2s) comfortably exceeds both the slow server's
+	// delay and the stand-in "old cap" (100ms) below, so a failure here can
+	// only come from that fixed client-level cap, not from the request
+	// simply running long.
+	params := FetchParams{URL: server.URL, Format: "text", Timeout: 2}
+	input, err := json.Marshal(params)
+	require.NoError(t, err)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	cappedClient := &http.Client{Timeout: 100 * time.Millisecond}
+	capped := NewFetchTool(perms, t.TempDir(), cappedClient)
+	resp, err := capped.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "a client-level Timeout below the caller's requested timeout must still cut the request short")
+
+	uncapped := NewFetchTool(perms, t.TempDir(), nil)
+	resp, err = uncapped.Run(ctx, fantasy.ToolCall{ID: "call-2", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "NewFetchTool's default client (client: nil) must not impose a fixed cap below the caller's timeout")
+	require.Equal(t, "ok", resp.Content)
 }
 
 // TestTruncateToRuneBoundary pins the fix for content[:MaxFetchSize]

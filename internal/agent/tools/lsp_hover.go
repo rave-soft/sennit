@@ -41,9 +41,14 @@ func NewHoverTool(m *lsp.Manager, root string) fantasy.AgentTool {
 			if len(exact) != 1 {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("symbol %q is ambiguous or not found; specify file_path and position", p.Symbol)), nil
 			}
-			c, path, line, char = exact[0].client, exact[0].symbol.Path, exact[0].symbol.Line-1, exact[0].symbol.Character-1
+			// c.Hover takes 1-based line/character like the other position-based
+			// requests (see requests.go), so pass the symbol's position through
+			// unadjusted - a compensating -1 here used to double up with the
+			// conversion requests.Hover now does, landing one line up and one
+			// column left of the symbol.
+			c, path, line, char = exact[0].client, exact[0].symbol.Path, exact[0].symbol.Line, exact[0].symbol.Character
 		} else {
-			if p.FilePath == "" || p.Line < 0 || p.Character < 0 {
+			if p.FilePath == "" {
 				return fantasy.NewTextErrorResponse("provide symbol or file_path, line, and character"), nil
 			}
 			path = filepathext.SmartJoin(root, p.FilePath)
@@ -56,6 +61,15 @@ func NewHoverTool(m *lsp.Manager, root string) fantasy.AgentTool {
 			// erroring.
 			if rel, err := filepath.Rel(root, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				return fantasy.NewTextErrorResponse("file_path must be inside the workspace"), nil
+			}
+			// line and character are 1-based (requests.Hover subtracts one
+			// to reach the LSP wire position); line's zero value is also
+			// its omitempty zero value, so a plain "not provided" and an
+			// explicit "line 0" are indistinguishable and both must be
+			// rejected here rather than silently underflowing to line
+			// 4294967295 once converted.
+			if p.Line < 1 || p.Character < 1 {
+				return fantasy.NewTextErrorResponse("line and character must be 1-based positive positions"), nil
 			}
 			m.Start(ctx, path)
 			c = findLSPClient(m, path)

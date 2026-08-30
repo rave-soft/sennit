@@ -58,14 +58,33 @@ func runFakeLSPServer() {
 		var envelope struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
 		if err := json.Unmarshal(body, &envelope); err != nil {
 			continue
 		}
 		if logPath := os.Getenv("SENNIT_LSP_FAKE_LOG"); logPath != "" {
+			line := fmt.Sprintf("%d %s", os.Getpid(), envelope.Method)
+			// textDocument/hover's position is what
+			// TestClient_Hover_ConvertsToZeroBasedPosition checks: it pins
+			// requests.Hover as the one place that converts the model's
+			// 1-based line/character into the LSP wire's 0-based Position,
+			// so the log needs to carry what was actually sent, not just
+			// which method fired.
+			if envelope.Method == "textDocument/hover" {
+				var params struct {
+					Position struct {
+						Line      uint32 `json:"line"`
+						Character uint32 `json:"character"`
+					} `json:"position"`
+				}
+				if err := json.Unmarshal(envelope.Params, &params); err == nil {
+					line += fmt.Sprintf(" line=%d character=%d", params.Position.Line, params.Position.Character)
+				}
+			}
 			file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 			if err == nil {
-				_, _ = fmt.Fprintf(file, "%d %s\n", os.Getpid(), envelope.Method)
+				_, _ = fmt.Fprintln(file, line)
 				_ = file.Close()
 			}
 		}

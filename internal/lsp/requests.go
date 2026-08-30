@@ -58,7 +58,9 @@ func (q *requests) Hover(ctx context.Context, filepath string, line, character i
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return q.gen().client.RequestHover(ctx, filepath, protocol.Position{Line: uint32(line), Character: uint32(character)}) //nolint:wrapcheck
+	// NOTE: line and character should be 0-based.
+	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
+	return q.gen().client.RequestHover(ctx, filepath, protocol.Position{Line: uint32(line - 1), Character: uint32(character - 1)}) //nolint:wrapcheck
 }
 
 type WorkspaceSymbol struct {

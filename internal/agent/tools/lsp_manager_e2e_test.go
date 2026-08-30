@@ -86,6 +86,23 @@ func runLSPToolHelper() {
 			}
 		case "textDocument/hover":
 			result = `{"contents":{"kind":"markdown","value":"Exact() string"}}`
+			// TestLSPHoverThroughManagerConvertsPosition checks this log to
+			// confirm the position that reaches the server is 0-based, not
+			// the tool's 1-based file_path/line/character input.
+			if logPath := os.Getenv("SENNIT_LSP_TOOL_LOG"); logPath != "" {
+				var params struct {
+					Position struct {
+						Line      uint32 `json:"line"`
+						Character uint32 `json:"character"`
+					} `json:"position"`
+				}
+				if json.Unmarshal(request.Params, &params) == nil {
+					if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+						fmt.Fprintf(f, "line=%d character=%d\n", params.Position.Line, params.Position.Character)
+						f.Close()
+					}
+				}
+			}
 		}
 		response := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":%s}`, request.ID, result))
 		fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(response), response)
@@ -120,15 +137,24 @@ func readLSPToolFrame(r *bufio.Reader) ([]byte, error) {
 
 func newLSPToolE2EManager(t *testing.T, root, scenario string) *lsp.Manager {
 	t.Helper()
+	return newLSPToolE2EManagerWithEnv(t, root, scenario, nil)
+}
+
+func newLSPToolE2EManagerWithEnv(t *testing.T, root, scenario string, extraEnv map[string]string) *lsp.Manager {
+	t.Helper()
 	exe, err := os.Executable()
 	require.NoError(t, err)
 	autoLSP := false
+	env := map[string]string{lspToolHelperProcess: "1", "SENNIT_LSP_TOOL_SCENARIO": scenario, "SENNIT_LSP_TOOL_ROOT": root}
+	for k, v := range extraEnv {
+		env[k] = v
+	}
 	store := configtest.NewStore(t, &config.Config{
 		Options: &config.Options{AutoLSP: &autoLSP},
 		LSP: config.LSPs{"gopls": {
 			Command:     exe,
 			Args:        []string{"-test.run=^TestLSPToolHelperProcess$"},
-			Env:         map[string]string{lspToolHelperProcess: "1", "SENNIT_LSP_TOOL_SCENARIO": scenario, "SENNIT_LSP_TOOL_ROOT": root},
+			Env:         env,
 			FileTypes:   []string{"go"},
 			RootMarkers: []string{"go.mod"},
 			Timeout:     5,
