@@ -65,6 +65,7 @@ var refusedMethods = []string{
 	"RefreshAccountLimits",
 	"RefreshMCPTools",
 	"RefreshOAuthToken",
+	"PurgeAccounts",
 	"RemoveAccount",
 	"RemoveConfigField",
 	"RemoveThread",
@@ -377,6 +378,10 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"RemoveAccount": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.RemoveAccount(config.ScopeWorkspace, "provider", "account")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"PurgeAccounts": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.PurgeAccounts(config.ScopeWorkspace, "provider")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"SetProviderProxy": func(t *testing.T, ro *readOnlyWorkspace) {

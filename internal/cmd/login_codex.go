@@ -35,11 +35,7 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 	// otherwise borrows the Codex CLI's — someone behind a proxy has
 	// already told it about theirs.
 	if proxyURL == "" {
-		if cfg := ws.Config(); cfg != nil {
-			if pc, ok := cfg.Providers.Get(codex.ProviderID); ok {
-				proxyURL = pc.ProxyURL
-			}
-		}
+		proxyURL = configuredCodexProxy(ws)
 	}
 	if proxyURL == "" {
 		if fromCLI := codex.ProxyFromDisk(); fromCLI != "" {
@@ -87,12 +83,21 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 		}
 	}
 	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
-	if proxyURL == "" {
-		if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {
+	// Skip the write entirely when proxyURL is exactly what's already
+	// configured (the common case: no --proxy flag, nothing to change).
+	// This isn't just an optimization — proxyURL may be a resolved value
+	// pulled from ProxyFromDisk() while previousProxyURL is still an
+	// unresolved "$VAR" template, and writing the resolved form back would
+	// permanently replace the template on every login that didn't ask for
+	// a proxy change at all.
+	if proxyURL != previousProxyURL {
+		if proxyURL == "" {
+			if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {
+				return err
+			}
+		} else if err := ws.SetConfigField(config.ScopeGlobal, proxyKey, proxyURL); err != nil {
 			return err
 		}
-	} else if err := ws.SetConfigField(config.ScopeGlobal, proxyKey, proxyURL); err != nil {
-		return err
 	}
 
 	accountID := codex.AccountID(token.AccessToken)
@@ -167,6 +172,31 @@ func restoreCodexProxyField(ws workspace.ConfigAccessor, hadProxyURL bool, previ
 	if err != nil {
 		slog.Error("Failed to roll back Codex proxy setting after a failed login", "error", err)
 	}
+}
+
+// configuredCodexProxy returns the provider-level proxy the Codex provider
+// is already configured with, or "" if none.
+//
+// It reads ConfiguredProxyURL, not ProxyURL: ProxyURL is the *effective*
+// proxy — whatever the currently active account resolved to, which may be
+// that account's own override, or "none" forcing a direct connection (see
+// accounts.ResolveProxy) — while ConfiguredProxyURL is the provider-level
+// default as written in config. loginCodex falls back to this value when
+// --proxy is not passed, and then persists it back to providers.codex.
+// proxy_url; using the effective value there would promote one account's
+// route to every account's default on the next login, and would rewrite a
+// "$VAR" template to its resolved literal even though nothing asked for a
+// proxy change at all.
+func configuredCodexProxy(ws workspace.ConfigAccessor) string {
+	cfg := ws.Config()
+	if cfg == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get(codex.ProviderID)
+	if !ok {
+		return ""
+	}
+	return pc.ConfiguredProxyURL
 }
 
 // codexToken obtains a token, preferring an existing Codex CLI login on disk

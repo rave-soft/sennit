@@ -84,6 +84,15 @@ func (w *AppWorkspace) RemoveAccount(scope config.Scope, providerID, accountID s
 	return config.RemoveAccount(w.store, accStore, scope, providerID, accountID)
 }
 
+// PurgeAccounts implements Workspace by delegating to
+// config.PurgeAccounts, the deliberate way past RemoveAccount's
+// last-account refusal — see the interface's doc comment for which caller
+// is meant to use it and why.
+func (w *AppWorkspace) PurgeAccounts(scope config.Scope, providerID string) error {
+	accStore := w.accountStore()
+	return config.PurgeAccounts(w.store, accStore, scope, providerID)
+}
+
 // SetProviderProxy implements Workspace by delegating to
 // config.SetProviderProxy, exactly like UpdateAccount/RemoveAccount above.
 func (w *AppWorkspace) SetProviderProxy(providerID, proxy string) error {

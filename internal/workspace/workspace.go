@@ -340,6 +340,14 @@ type ConfigAccessor interface {
 	// the active account first activates a replacement, so the provider
 	// never ends up pointing at a deleted account.
 	RemoveAccount(scope config.Scope, providerID, accountID string) error
+	// PurgeAccounts deletes every account stored for providerID and
+	// clears the active-account pointer. It is what RemoveAccount's
+	// last-account refusal defers to: `sennit logout` is the one caller
+	// that is meant to leave a provider with no credential at all, and
+	// without this it could not — it removed the api_key/oauth fields
+	// while the account store kept the token, so `accounts use` handed
+	// the login straight back with no re-authentication.
+	PurgeAccounts(scope config.Scope, providerID string) error
 	// KnownProviders is the provider catalog this workspace was built
 	// with: the embedded list plus Codex, or nothing at all when
 	// disable_default_providers is set.

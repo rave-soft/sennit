@@ -573,6 +573,11 @@ func (s *stubWorkspace) RemoveAccount(scope config.Scope, providerID, accountID 
 	return nil
 }
 
+func (s *stubWorkspace) PurgeAccounts(scope config.Scope, providerID string) error {
+	s.track("PurgeAccounts")
+	return nil
+}
+
 func (s *stubWorkspace) SetProviderProxy(providerID, proxy string) error {
 	s.track("SetProviderProxy")
 	return nil

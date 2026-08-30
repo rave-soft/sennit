@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -98,6 +99,11 @@ func (a *realConfigAccessor) RemoveAccount(scope config.Scope, providerID, accou
 	return config.RemoveAccount(a.store, accStore, scope, providerID, accountID)
 }
 
+func (a *realConfigAccessor) PurgeAccounts(scope config.Scope, providerID string) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.PurgeAccounts(a.store, accStore, scope, providerID)
+}
+
 func (a *realConfigAccessor) SetProviderProxy(providerID, proxy string) error {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
 	return config.SetProviderProxy(a.store, accStore, providerID, proxy)
@@ -161,6 +167,14 @@ const authTestProviderID = "auth-test-provider"
 // tests need to control the account count precisely.
 func newAuthTestProvider(t *testing.T, ws *realConfigAccessor) {
 	t.Helper()
+	newAuthTestProviderWithID(t, ws, authTestProviderID)
+}
+
+// newAuthTestProviderWithID is newAuthTestProvider parameterized on the
+// provider ID, for tests (e.g. list ordering) that need more than one
+// throwaway provider in the same store.
+func newAuthTestProviderWithID(t *testing.T, ws *realConfigAccessor, providerID string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}]}`))
@@ -168,7 +182,7 @@ func newAuthTestProvider(t *testing.T, ws *realConfigAccessor) {
 	t.Cleanup(server.Close)
 
 	_, err := workspace.ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, workspace.ConfigureCustomProviderParams{
-		ID:      authTestProviderID,
+		ID:      providerID,
 		BaseURL: server.URL + "/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
 	})
@@ -336,6 +350,35 @@ func TestAuthList_UsageOnlyForCapableProvider(t *testing.T) {
 	// matter what its accounts' stored Usage looks like.
 	require.False(t, accounts.CapabilitiesOf("auth-test-provider").Usage,
 		"an api-key-style provider must not be treated as usage-reporting")
+}
+
+// TestAuthListAll_SortsProviders guards against a bug where authListAll
+// iterated cfg.Providers.Seq2() directly: csync.Map's iteration order
+// follows Go's randomized map order, so "sennit accounts list" (with no
+// provider argument) printed providers in a different order every run.
+// models.go's equivalent loop already collects IDs and sort.Strings them;
+// this pins that authListAll does the same.
+func TestAuthListAll_SortsProviders(t *testing.T) {
+	ws := newRealConfigAccessor(t)
+	// Chosen so alphabetical order differs from the two plausible
+	// insertion orders below, and so at least one run would have observed
+	// a mismatch pre-fix (map iteration order is randomized per process).
+	newAuthTestProviderWithID(t, ws, "zzz-provider")
+	newAuthTestProviderWithID(t, ws, "aaa-provider")
+	newAuthTestProviderWithID(t, ws, "mmm-provider")
+
+	for _, id := range []string{"zzz-provider", "aaa-provider", "mmm-provider"} {
+		require.NoError(t, authAddAPIKey(ws, id, "key-"+id))
+	}
+
+	restore := captureStdout(t)
+	require.NoError(t, authListAll(ws))
+	output := restore()
+
+	require.Less(t, strings.Index(output, "aaa-provider:"), strings.Index(output, "mmm-provider:"),
+		"providers must be listed in sorted order")
+	require.Less(t, strings.Index(output, "mmm-provider:"), strings.Index(output, "zzz-provider:"),
+		"providers must be listed in sorted order")
 }
 
 // TestReadSecretLine_NonTerminalPreservesSpaces pins the non-terminal

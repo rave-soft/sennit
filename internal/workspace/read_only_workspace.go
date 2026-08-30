@@ -434,6 +434,10 @@ func (w *readOnlyWorkspace) RemoveAccount(scope config.Scope, providerID, accoun
 	return w.readOnlyError("RemoveAccount")
 }
 
+func (w *readOnlyWorkspace) PurgeAccounts(scope config.Scope, providerID string) error {
+	return w.readOnlyError("PurgeAccounts")
+}
+
 func (w *readOnlyWorkspace) SetProviderProxy(providerID, proxy string) error {
 	return w.readOnlyError("SetProviderProxy")
 }

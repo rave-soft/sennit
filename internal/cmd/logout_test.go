@@ -24,6 +24,12 @@ type stubConfigAccessor struct {
 	// errs maps a config key to the error RemoveConfigField should
 	// return for it.
 	errs map[string]error
+	// purged records every provider id passed to PurgeAccounts, so a test
+	// can assert logout actually revoked the stored credential rather
+	// than only clearing the config fields.
+	purged []string
+	// purgeErr is what PurgeAccounts returns.
+	purgeErr error
 }
 
 func (s *stubConfigAccessor) Config() *config.Config             { return nil }
@@ -58,7 +64,12 @@ func (s *stubConfigAccessor) ListAccounts(string) ([]accounts.Account, error)   
 func (s *stubConfigAccessor) ActivateAccount(config.Scope, string, string) error { return nil }
 func (s *stubConfigAccessor) UpdateAccount(string, accounts.Account) error       { return nil }
 func (s *stubConfigAccessor) RemoveAccount(config.Scope, string, string) error   { return nil }
-func (s *stubConfigAccessor) SetProviderProxy(string, string) error              { return nil }
+
+func (s *stubConfigAccessor) PurgeAccounts(_ config.Scope, providerID string) error {
+	s.purged = append(s.purged, providerID)
+	return s.purgeErr
+}
+func (s *stubConfigAccessor) SetProviderProxy(string, string) error { return nil }
 
 func (s *stubConfigAccessor) RefreshAccountLimits(context.Context, string) ([]accounts.Account, error) {
 	return nil, nil

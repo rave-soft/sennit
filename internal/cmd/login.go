@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -61,7 +62,11 @@ sennit login -f copilot
 		force, _ := cmd.Flags().GetBool("force")
 		switch provider {
 		case "copilot", "github", "github-copilot":
-			return loginCopilot(ws, force)
+			// Plain `sennit login copilot` re-authenticates the existing
+			// account rather than deliberately adding a second one — see
+			// authAddOAuth, which is what `sennit accounts add copilot`
+			// goes through instead.
+			return loginCopilot(ws, force, false)
 		case "codex", "chatgpt", "openai-codex":
 			proxyURL, _ := cmd.Flags().GetString("proxy")
 			return loginCodex(ws, force, proxyURL)
@@ -76,7 +81,32 @@ func init() {
 	loginCmd.Flags().String("proxy", "", `Proxy for reaching the platform, e.g. http://host:port or socks5://host:port ("none" forces a direct connection). Codex only; saved with the provider so model requests use it too`)
 }
 
-func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
+// loginCopilot signs Sennit in to GitHub Copilot. forceNewAccount is
+// threaded through to RecordAccount: Copilot's OAuth token carries no
+// account identifier of its own (unlike Codex's JWT), so RecordAccount has
+// no way to tell "this is the same sign-in, refresh it" from "this is a
+// deliberate second account" without being told explicitly — see
+// accounts.LegacyCredential.ForceNewAccount's doc comment. `sennit login
+// copilot` passes false (a routine re-login updates the existing account);
+// `sennit accounts add copilot`, via authAddOAuth, passes true.
+// recordCopilotAccount persists token as a Copilot account.
+//
+// RecordAccount, not SetProviderAPIKey: the latter overwrites
+// providers.copilot.oauth outright, so a second sign-in (from `sennit
+// accounts add copilot`, or a device-code flow that couldn't tell it was
+// talking to an already-known account) clobbered the first account's token
+// instead of adding or updating one on record — contradicting
+// authAddOAuth's own doc comment and this command's Long help, and leaving
+// `sennit accounts use copilot <old>` pointing at a stale credential the
+// store still remembered.
+func recordCopilotAccount(ws workspace.ConfigAccessor, token *oauth.Token, forceNewAccount bool) (accounts.Account, error) {
+	return ws.RecordAccount(config.ScopeGlobal, "copilot", accounts.LegacyCredential{
+		Token:           token,
+		ForceNewAccount: forceNewAccount,
+	})
+}
+
+func loginCopilot(ws workspace.ConfigAccessor, force, forceNewAccount bool) error {
 	loginCtx, stop := getLoginContext()
 	defer stop()
 
@@ -151,7 +181,7 @@ func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
 		token = t
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "copilot", token); err != nil {
+	if _, err := recordCopilotAccount(ws, token, forceNewAccount); err != nil {
 		return err
 	}
 

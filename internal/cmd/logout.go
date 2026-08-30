@@ -103,6 +103,19 @@ func logoutProvider(ws workspace.ConfigAccessor, providerID, displayName string,
 			firstErr = err
 		}
 	}
+
+	// Removing the config fields alone left the credential on disk: the
+	// account store still held the OAuth token, and `sennit accounts use
+	// <provider> <id>` republished it — a logout that handed the login
+	// straight back with no re-authentication. RemoveAccount cannot do
+	// this (it refuses a provider's last account, pointing the user
+	// here), so logout goes through PurgeAccounts, which is that refusal's
+	// deliberate exception. Attempted even when a field removal failed,
+	// for the same reason the loop above does not short-circuit: a
+	// half-done logout must not leave the token behind.
+	if err := ws.PurgeAccounts(config.ScopeGlobal, providerID); err != nil && firstErr == nil {
+		firstErr = err
+	}
 	if firstErr != nil {
 		return firstErr
 	}

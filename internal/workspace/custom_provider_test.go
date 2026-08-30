@@ -99,6 +99,11 @@ func (a *testConfigAccessor) RemoveAccount(scope config.Scope, providerID, accou
 	return config.RemoveAccount(a.store, accStore, scope, providerID, accountID)
 }
 
+func (a *testConfigAccessor) PurgeAccounts(scope config.Scope, providerID string) error {
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	return config.PurgeAccounts(a.store, accStore, scope, providerID)
+}
+
 func (a *testConfigAccessor) SetProviderProxy(providerID, proxy string) error {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
 	return config.SetProviderProxy(a.store, accStore, providerID, proxy)

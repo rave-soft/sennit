@@ -5,8 +5,53 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/stretchr/testify/require"
 )
+
+// codexProviderConfigAccessor extends stubConfigAccessor with a Config()
+// that reports a single Codex provider entry, for configuredCodexProxy's
+// tests.
+type codexProviderConfigAccessor struct {
+	stubConfigAccessor
+	provider config.ProviderConfig
+}
+
+func (s *codexProviderConfigAccessor) Config() *config.Config {
+	return &config.Config{
+		Providers: csync.NewMap(map[string]config.ProviderConfig{
+			codex.ProviderID: s.provider,
+		}),
+	}
+}
+
+// TestConfiguredCodexProxy_UsesConfiguredNotEffective guards the fix for a
+// bug where loginCodex's no-flag proxy fallback read ProxyURL — the
+// *effective* proxy, resolved for whichever account happened to be active
+// — instead of ConfiguredProxyURL, the provider-level default. Reading the
+// effective value would promote one account's proxy (or "none", forcing a
+// direct connection) to every account's default on the next `sennit login
+// codex` with no --proxy flag.
+func TestConfiguredCodexProxy_UsesConfiguredNotEffective(t *testing.T) {
+	t.Parallel()
+
+	ws := &codexProviderConfigAccessor{provider: config.ProviderConfig{
+		ProxyURL:           "none",
+		ConfiguredProxyURL: "socks5://configured-proxy:1080",
+	}}
+
+	require.Equal(t, "socks5://configured-proxy:1080", configuredCodexProxy(ws))
+}
+
+// TestConfiguredCodexProxy_NoProviderYet covers a first-ever login, where
+// the Codex provider entry does not exist yet.
+func TestConfiguredCodexProxy_NoProviderYet(t *testing.T) {
+	t.Parallel()
+
+	ws := &stubConfigAccessor{}
+	require.Empty(t, configuredCodexProxy(ws))
+}
 
 // proxyRollbackConfigAccessor extends stubConfigAccessor with a
 // SetConfigField that records its calls, which restoreCodexProxyField's

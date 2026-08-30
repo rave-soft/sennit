@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -276,7 +277,7 @@ func authAddOAuth(ws workspace.ConfigAccessor, providerID string) error {
 	case "codex":
 		return loginCodex(ws, true, "")
 	case "copilot":
-		return loginCopilot(ws, true)
+		return loginCopilot(ws, true, true)
 	default:
 		return fmt.Errorf("provider %s has no OAuth sign-in flow", providerID)
 	}
@@ -341,8 +342,14 @@ func authListAll(ws workspace.ConfigAccessor) error {
 		return nil
 	}
 
-	found := false
+	var providerIDs []string
 	for providerID := range cfg.Providers.Seq2() {
+		providerIDs = append(providerIDs, providerID)
+	}
+	slices.Sort(providerIDs)
+
+	found := false
+	for _, providerID := range providerIDs {
 		accts, err := ws.ListAccounts(providerID)
 		if err != nil {
 			return err

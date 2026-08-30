@@ -96,9 +96,22 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 	}
 	defer func() { _ = t.Stop() }() // best-effort stop during shutdown
 
+	return runFollowLoop(ctx, t)
+}
+
+// runFollowLoop prints new log lines as t.Lines delivers them, until ctx is
+// cancelled or the tail dies.
+func runFollowLoop(ctx context.Context, t *tail.Tail) error {
 	for {
 		select {
-		case line := <-t.Lines:
+		case line, ok := <-t.Lines:
+			if !ok {
+				// nxadm/tail closes t.Lines on an internal error (unlike
+				// drainTailLines, which only ranges until the channel
+				// empties after a non-follow tail finishes); a receive
+				// after that yields a nil line, and line.Err would panic.
+				return t.Err()
+			}
 			if line.Err != nil {
 				continue
 			}
