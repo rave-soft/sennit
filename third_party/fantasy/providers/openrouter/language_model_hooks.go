@@ -99,7 +99,6 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 				thinkingBlock = responsesReasoningBlocks[detail.Index]
 			} else {
 				thinkingBlock = openai.ResponsesReasoningMetadata{}
-				responsesReasoningBlocks = append(responsesReasoningBlocks, thinkingBlock)
 			}
 
 			switch detail.Type {
@@ -112,6 +111,15 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 				thinkingBlock.ItemID = detail.ID
 			}
 
+			// detail.Index can be non-contiguous (a first detail already at
+			// index 1, or a gap): grow to fit before indexing rather than
+			// assuming the single append above kept pace with it.
+			if detail.Index >= len(responsesReasoningBlocks) {
+				responsesReasoningBlocks = append(
+					responsesReasoningBlocks,
+					make([]openai.ResponsesReasoningMetadata, detail.Index+1-len(responsesReasoningBlocks))...,
+				)
+			}
 			responsesReasoningBlocks[detail.Index] = thinkingBlock
 			continue
 		}
@@ -121,7 +129,6 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 				thinkingBlock = googleReasoningBlocks[detail.Index]
 			} else {
 				thinkingBlock = googleReasoningBlock{metadata: &google.ReasoningMetadata{}}
-				googleReasoningBlocks = append(googleReasoningBlocks, thinkingBlock)
 			}
 
 			switch detail.Type {
@@ -132,6 +139,15 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 				thinkingBlock.metadata.ToolID = detail.ID
 			}
 
+			// detail.Index can be non-contiguous (a first detail already at
+			// index 1, or a gap): grow to fit before indexing rather than
+			// assuming the single append above kept pace with it. Each
+			// filler slot needs its own non-nil metadata, same as the
+			// "else" branch above, since a later detail can still target
+			// it and dereference metadata.
+			for len(googleReasoningBlocks) <= detail.Index {
+				googleReasoningBlocks = append(googleReasoningBlocks, googleReasoningBlock{metadata: &google.ReasoningMetadata{}})
+			}
 			googleReasoningBlocks[detail.Index] = thinkingBlock
 			continue
 		}

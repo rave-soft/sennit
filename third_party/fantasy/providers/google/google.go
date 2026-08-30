@@ -847,15 +847,12 @@ func (g *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 
 			// we need to make sure that there is actual tokendata
 			if resp.UsageMetadata != nil && resp.UsageMetadata.TotalTokenCount != 0 {
+				// Gemini's usageMetadata is cumulative (and cachedContentTokenCount is
+				// a prompt-side constant repeated in every chunk), so the latest chunk
+				// already carries the running totals — summing across chunks would
+				// multiply cached/output tokens by the chunk count.
 				currentUsage := mapUsage(resp.UsageMetadata)
-				// if first usage chunk
-				if usage == nil {
-					usage = &currentUsage
-				} else {
-					usage.OutputTokens += currentUsage.OutputTokens
-					usage.ReasoningTokens += currentUsage.ReasoningTokens
-					usage.CacheReadTokens += currentUsage.CacheReadTokens
-				}
+				usage = &currentUsage
 			}
 
 			if len(resp.Candidates) > 0 && resp.Candidates[0].FinishReason != "" {

@@ -1125,8 +1125,8 @@ func (a *agent) prepareTools(tools []AgentTool, providerDefinedTools []ProviderD
 				"properties": info.Parameters,
 				"required":   info.Required,
 			}
-			schema.Normalize(inputSchema)
 		}
+		schema.Normalize(inputSchema)
 		preparedTools = append(preparedTools, FunctionTool{
 			Name:            info.Name,
 			Description:     info.Description,

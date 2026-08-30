@@ -57,22 +57,31 @@ func (r *Router) Route(ctx context.Context, req *jsonrpc2.Request) (any, error) 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Check if it's a notification (no ID)
-	if req.ID == (jsonrpc2.ID{}) {
+	// req.Params is a *json.RawMessage and is nil whenever the peer omits
+	// "params" (legal for e.g. workspace/workspaceFolders, and for any
+	// notification without params), so it must never be dereferenced blindly.
+	var params json.RawMessage
+	if req.Params != nil {
+		params = *req.Params
+	}
+
+	// Notifications are distinguished by req.Notif, not by a zero ID: a
+	// request can legitimately carry numeric id 0.
+	if req.Notif {
 		if handler, ok := r.notificationHandlers[req.Method]; ok {
-			handler(ctx, req.Method, *req.Params)
+			handler(ctx, req.Method, params)
 		}
 		return nil, nil
 	}
 
 	// It's a request
 	if handler, ok := r.handlers[req.Method]; ok {
-		return handler(ctx, req.Method, *req.Params)
+		return handler(ctx, req.Method, params)
 	}
 
 	// Use default handler if available
 	if r.defaultHandler != nil {
-		return r.defaultHandler(ctx, req.Method, *req.Params)
+		return r.defaultHandler(ctx, req.Method, params)
 	}
 
 	return nil, fmt.Errorf("no handler for method: %s", req.Method)

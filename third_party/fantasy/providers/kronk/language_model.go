@@ -164,28 +164,55 @@ func (l *languageModel) Generate(ctx context.Context, call fantasy.Call) (*fanta
 
 	var lastResponse model.ChatResponse
 	var fullContent string
+	// Kronk only sets Delta on chunks that carry tool calls; a plain "stop"
+	// final chunk has Delta == nil but still carries the finish reason, so
+	// it must be read regardless of Delta (see the same fix in Stream).
+	var sawFinishReason bool
 
 	for resp := range ch {
 		lastResponse = resp
 
-		if len(resp.Choices) > 0 && resp.Choices[0].Delta != nil {
-			switch resp.Choices[0].FinishReason() {
-			case model.FinishReasonError:
-				return nil, &fantasy.Error{Title: "model error", Message: resp.Choices[0].Delta.Content}
+		if len(resp.Choices) == 0 {
+			continue
+		}
+		choice := resp.Choices[0]
 
-			case model.FinishReasonStop, model.FinishReasonTool:
+		switch choice.FinishReason() {
+		case model.FinishReasonError:
+			msg := ""
+			if choice.Delta != nil {
+				msg = choice.Delta.Content
+			}
+			return nil, &fantasy.Error{Title: "model error", Message: msg}
+
+		case model.FinishReasonStop, model.FinishReasonTool:
+			sawFinishReason = true
+			if choice.Delta != nil {
 				// Final response already contains full accumulated content in Delta.Content,
 				// so we use it directly instead of continuing to accumulate.
-				fullContent = resp.Choices[0].Delta.Content
+				fullContent = choice.Delta.Content
+			}
 
-			default:
-				fullContent += resp.Choices[0].Delta.Content
+		default:
+			if choice.Delta != nil {
+				fullContent += choice.Delta.Content
 			}
 		}
 	}
 
 	if len(lastResponse.Choices) == 0 {
 		return nil, &fantasy.Error{Title: "no response", Message: "no response generated"}
+	}
+
+	// The SDK may close the channel mid-stream (e.g. ctx cancellation)
+	// without ever sending a chunk that carries a finish reason. Treating
+	// that as success would record a silently truncated turn as complete;
+	// every other provider adapter returns an error here instead.
+	if !sawFinishReason {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fantasy.NewIncompleteStreamError()
 	}
 
 	choice := lastResponse.Choices[0]
@@ -291,10 +318,11 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 			}
 
 			choice := resp.Choices[0]
-			if choice.Delta == nil {
-				continue
-			}
 
+			// Kronk only sets Delta on chunks that carry tool calls; a
+			// plain "stop" final chunk has Delta == nil but still carries
+			// Usage and FinishReason, so both must be read before the
+			// Delta-nil guard below skips the rest of the loop body.
 			if resp.Usage != nil {
 				usage = fantasy.Usage{
 					InputTokens:     int64(resp.Usage.PromptTokens),
@@ -313,6 +341,10 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 
 			if choice.FinishReason() != "" {
 				finishReason = choice.FinishReason()
+			}
+
+			if choice.Delta == nil {
+				continue
 			}
 
 			switch choice.FinishReason() {
@@ -580,6 +612,23 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 		mappedFinishReason := l.mapFinishReasonFunc(finishReason)
 		if len(toolCalls) > 0 {
 			mappedFinishReason = fantasy.FinishReasonToolCalls
+		}
+
+		// The SDK may close the channel mid-stream (e.g. ctx cancellation)
+		// without ever sending a chunk that carries a finish reason.
+		// Treating that as success would record a silently truncated turn
+		// as complete; every other provider adapter returns an error here
+		// instead of a normal Finish part.
+		if finishReason == "" && mappedFinishReason != fantasy.FinishReasonToolCalls {
+			err := ctx.Err()
+			if err == nil {
+				err = fantasy.NewIncompleteStreamError()
+			}
+			yield(fantasy.StreamPart{
+				Type:  fantasy.StreamPartTypeError,
+				Error: err,
+			})
+			return
 		}
 
 		yield(fantasy.StreamPart{
