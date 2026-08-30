@@ -12,7 +12,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	fang "charm.land/fang/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -27,6 +26,7 @@ import (
 	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/logo"
 	ui "github.com/rave-soft/sennit/internal/ui/model"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/version"
@@ -138,19 +138,28 @@ sennit --continue
 	},
 }
 
-var heartbit = lipgloss.NewStyle().Foreground(styles.BrandAccent).SetString(`
-    ▄▄▄▄▄▄▄▄    ▄▄▄▄▄▄▄▄
-  ███████████  ███████████
-████████████████████████████
-████████████████████████████
-██████████▀██████▀██████████
-██████████ ██████ ██████████
-▀▀██████▄████▄▄████▄██████▀▀
-  ████████████████████████
-    ████████████████████
-       ▀▀██████████▀▀
-           ▀▀▀▀▀▀
-`)
+// versionLogo renders the Sennit wordmark shown above `sennit --version`
+// in a terminal, in place of the ASCII heart that used to be there.
+//
+// The version it draws into the wordmark's meta row is truncated to the
+// width of the letterforms — that row is sized for the sidebar this logo
+// was written for. So the plain "sennit version X" line still follows it:
+// the art is decoration, the line is the answer, and a development
+// version string is far too long to fit.
+//
+// The default palette is used rather than the person's configured theme:
+// --version must answer without loading config, which is the whole reason
+// it is handled before PreRunE runs.
+func versionLogo() string {
+	t := styles.SennitDark()
+	return logo.Render(t.Logo.GradCanvas, version.Version, false, logo.Opts{
+		FieldColor:   t.Logo.FieldColor,
+		TitleColorA:  t.Logo.TitleColorA,
+		TitleColorB:  t.Logo.TitleColorB,
+		VendorColor:  t.Logo.VendorColor,
+		VersionColor: t.Logo.VersionColor,
+	})
+}
 
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
@@ -167,17 +176,21 @@ func Execute() {
 	slog.SetDefault(slog.New(slog.DiscardHandler))
 
 	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
-	// it forward to a bytes.Buffer, write the colored heartbit to it, and then
-	// finally prepend it in the version template.
+	// it forward to a bytes.Buffer, write the colored logo to it, and then
+	// use that as the whole version template.
 	// Unfortunately cobra doesn't give us a way to set a function to handle
 	// printing the version, and PreRunE runs after the version is already
 	// handled, so that doesn't work either.
 	// This is the only way I could find that works relatively well.
+	//
+	// Only when stdout is a terminal: a pipe gets the plain
+	// "sennit version X" line alone, which is what anything parsing this
+	// wants.
 	if term.IsTerminal(os.Stdout.Fd()) {
 		var b bytes.Buffer
 		w := colorprofile.NewWriter(os.Stdout, os.Environ())
 		w.Forward = &b
-		_, _ = w.WriteString(heartbit.String())
+		_, _ = w.WriteString(versionLogo())
 		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
 	}
 	if err := fang.Execute(
