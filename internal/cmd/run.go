@@ -236,7 +236,17 @@ func runAgent(
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				return nil
+				// The channel closed without a terminal event reaching
+				// this loop (ev.Done, handled below, always returns
+				// first when the producer delivers one). That only
+				// happens when our own ctx ended the run — a genuine
+				// clean finish always sends Done before closing — so
+				// report the cancellation instead of silently returning
+				// success and leaving a caller unable to tell a
+				// cancelled `sennit run` from a completed one by its
+				// exit code.
+				stopSpinner()
+				return ctx.Err()
 			}
 			if ev.Status != "" && spinner != nil {
 				spinner.SetLabel(ev.Status)

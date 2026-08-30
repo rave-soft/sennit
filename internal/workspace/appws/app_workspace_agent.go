@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -19,6 +20,16 @@ import (
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
+
+// terminalSendTimeout bounds sendFinal's wait for a receiver once ctx is
+// already done (see sendFinal below). A consumer that is still reading
+// rendezvouses with this send essentially immediately — it's already
+// parked in its own select — so this only needs to be long enough to
+// not be a hair-trigger under scheduler jitter; it is not standing in
+// for how long a real turn takes. Short enough that a consumer that has
+// genuinely stopped reading (e.g. the process is exiting) does not
+// wedge this goroutine's deferred cancel/close for long.
+const terminalSendTimeout = 200 * time.Millisecond
 
 // -- Agent --
 
@@ -338,6 +349,31 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			}
 		}
 
+		// sendFinal delivers the one terminal AgentRunEvent (Done: true)
+		// unconditionally, instead of racing it against ctx.Done() the way
+		// send does above. By the time a terminal event is ready, ctx is
+		// very often already done — a caller cancellation or timeout is
+		// exactly what most terminal events report — and selecting on
+		// ctx.Done() here would just race the delivery away: both cases
+		// become ready at the same instant, and Go picks between them at
+		// random, discarding the last event roughly half the time and
+		// turning a cancelled run into a silent success (see
+		// AgentRunStream's doc comment in workspace.go for the promised
+		// contract this broke). The consumer is not gone in that case —
+		// it is sitting in its own select loop, racing the same
+		// cancellation, about to read — so this blocks on a real send
+		// instead, bounded by a short fresh timer rather than ctx, so a
+		// consumer that has truly stopped reading still can't wedge this
+		// goroutine's deferred cancel/close forever.
+		sendFinal := func(ev workspace.AgentRunEvent) {
+			timer := time.NewTimer(terminalSendTimeout)
+			defer timer.Stop()
+			select {
+			case out <- ev:
+			case <-timer.C:
+			}
+		}
+
 		readBytes := make(map[string]int)
 		var printed bool
 		var lastStatus string
@@ -419,17 +455,17 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			case result := <-done:
 				if result.err != nil {
 					if errors.Is(result.err, context.Canceled) {
-						send(workspace.AgentRunEvent{Done: true})
+						sendFinal(workspace.AgentRunEvent{Done: true})
 						return
 					}
-					send(workspace.AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)})
+					sendFinal(workspace.AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)})
 					return
 				}
 				if err := drain(); err != nil {
-					send(workspace.AgentRunEvent{Done: true, Err: err})
+					sendFinal(workspace.AgentRunEvent{Done: true, Err: err})
 					return
 				}
-				send(workspace.AgentRunEvent{Done: true})
+				sendFinal(workspace.AgentRunEvent{Done: true})
 				return
 
 			case ev, ok := <-messageEvents:
@@ -443,13 +479,13 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 				}
 				if stop, err := emit(ev); stop {
 					if err != nil {
-						send(workspace.AgentRunEvent{Done: true, Err: err})
+						sendFinal(workspace.AgentRunEvent{Done: true, Err: err})
 					}
 					return
 				}
 
 			case <-ctx.Done():
-				send(workspace.AgentRunEvent{Done: true, Err: ctx.Err()})
+				sendFinal(workspace.AgentRunEvent{Done: true, Err: ctx.Err()})
 				return
 			}
 		}
