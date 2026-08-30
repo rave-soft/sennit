@@ -61,7 +61,12 @@ func languagePrepareModelCall(_ fantasy.LanguageModel, params *openaisdk.ChatCom
 		if err != nil {
 			return nil, err
 		}
-		if gatewayOpts, ok := extraFields["providerOptions"].(map[string]any); ok {
+		if outerOpts, ok := extraFields["providerOptions"].(map[string]any); ok {
+			gatewayOpts, ok := outerOpts["gateway"].(map[string]any)
+			if !ok {
+				gatewayOpts = map[string]any{}
+				outerOpts["gateway"] = gatewayOpts
+			}
 			gatewayOpts["byok"] = data
 		} else {
 			extraFields["providerOptions"] = map[string]any{
@@ -125,7 +130,6 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 				thinkingBlock = responsesReasoningBlocks[detail.Index]
 			} else {
 				thinkingBlock = openaipkg.ResponsesReasoningMetadata{}
-				responsesReasoningBlocks = append(responsesReasoningBlocks, thinkingBlock)
 			}
 
 			switch detail.Type {
@@ -136,6 +140,16 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 			}
 			if detail.ID != "" {
 				thinkingBlock.ItemID = detail.ID
+			}
+
+			// detail.Index can be non-contiguous (a first detail already at
+			// index 1, or a gap): grow to fit before indexing rather than
+			// assuming the single append above kept pace with it.
+			if detail.Index >= len(responsesReasoningBlocks) {
+				responsesReasoningBlocks = append(
+					responsesReasoningBlocks,
+					make([]openaipkg.ResponsesReasoningMetadata, detail.Index+1-len(responsesReasoningBlocks))...,
+				)
 			}
 			responsesReasoningBlocks[detail.Index] = thinkingBlock
 			continue
@@ -153,7 +167,6 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 					text     string
 					metadata *google.ReasoningMetadata
 				}{metadata: &google.ReasoningMetadata{}}
-				googleReasoningBlocks = append(googleReasoningBlocks, thinkingBlock)
 			}
 
 			switch detail.Type {
@@ -162,6 +175,19 @@ func languageModelExtraContent(choice openaisdk.ChatCompletionChoice) []fantasy.
 			case "reasoning.encrypted":
 				thinkingBlock.metadata.Signature = detail.Data
 				thinkingBlock.metadata.ToolID = detail.ID
+			}
+
+			// detail.Index can be non-contiguous (a first detail already at
+			// index 1, or a gap): grow to fit before indexing rather than
+			// assuming the single append above kept pace with it. Each
+			// filler slot needs its own non-nil metadata, same as the
+			// "else" branch above, since a later detail can still target
+			// it and dereference metadata.
+			for len(googleReasoningBlocks) <= detail.Index {
+				googleReasoningBlocks = append(googleReasoningBlocks, struct {
+					text     string
+					metadata *google.ReasoningMetadata
+				}{metadata: &google.ReasoningMetadata{}})
 			}
 			googleReasoningBlocks[detail.Index] = thinkingBlock
 			continue
@@ -1044,6 +1070,32 @@ func languageModelToPrompt(prompt fantasy.Prompt, _, model string) ([]openaisdk.
 						})
 					}
 					messages = append(messages, tr)
+				case fantasy.ToolResultContentTypeMedia:
+					output, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResultPart.Output)
+					if !ok {
+						warnings = append(warnings, fantasy.CallWarning{
+							Type:    fantasy.CallWarningTypeOther,
+							Message: "tool result output does not have the right type",
+						})
+						continue
+					}
+					// OpenAI Chat Completions tool messages cannot carry image
+					// or audio content directly; see ToolResultMediaMessages.
+					mediaMessages, mediaWarnings := openaipkg.ToolResultMediaMessages(output, toolResultPart.ToolCallID)
+					if cacheControl != nil && len(mediaMessages) > 0 {
+						mediaMessages[0].SetExtraFields(map[string]any{
+							"cache_control": map[string]string{
+								"type": cacheControl.Type,
+							},
+						})
+					}
+					messages = append(messages, mediaMessages...)
+					warnings = append(warnings, mediaWarnings...)
+				default:
+					warnings = append(warnings, fantasy.CallWarning{
+						Type:    fantasy.CallWarningTypeOther,
+						Message: fmt.Sprintf("tool result output type %q not supported", toolResultPart.Output.GetType()),
+					})
 				}
 			}
 		}
