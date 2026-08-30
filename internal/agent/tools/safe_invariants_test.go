@@ -125,7 +125,11 @@ func TestIsReadOnlyInvocation_UngatedEntriesAreAlwaysReadOnly(t *testing.T) {
 		if _, gated := argumentGatedSafeCommands[entry]; gated {
 			continue
 		}
-		require.True(t, isReadOnlyInvocation(entry, entry+" whatever it likes"))
+		// "whatever it likes" are all non-flag tokens, so even an
+		// entry with a flag gate (e.g. "git log") must still report
+		// read-only here — this test is about the token gate.
+		command := entry + " whatever it likes"
+		require.True(t, isReadOnlyInvocation(entry, command, command))
 	}
 	require.True(t, slices.Contains(safeCommands, "git log"))
 }

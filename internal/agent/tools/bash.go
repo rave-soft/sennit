@@ -242,24 +242,7 @@ func NewBashTool(permissions permission.Requester, workingDir string, attributio
 				return fantasy.NewTextErrorResponse(msg), nil
 			}
 
-			isSafeReadOnly := false
-			cmdLower := strings.ToLower(params.Command)
-
-			if !containsCommandChaining(params.Command) {
-				for _, safe := range safeCommands {
-					if strings.HasPrefix(cmdLower, safe) {
-						if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
-							// A failed gate does not break: it means this
-							// entry does not make the command read-only,
-							// not that no later entry can.
-							if isReadOnlyInvocation(safe, cmdLower) {
-								isSafeReadOnly = true
-								break
-							}
-						}
-					}
-				}
-			}
+			isSafeReadOnly := isSafeReadOnlyCommand(params.Command)
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {

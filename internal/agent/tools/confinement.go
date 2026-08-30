@@ -167,7 +167,9 @@ func readsOnlyFromArgs(args []*syntax.Word) bool {
 	if name != "git" {
 		return false
 	}
-	for _, w := range args[1:] {
+	subcommand := ""
+	rest := args[1:]
+	for i, w := range args[1:] {
 		arg, ok := literalWordValue(w)
 		if !ok {
 			return false
@@ -175,9 +177,38 @@ func readsOnlyFromArgs(args []*syntax.Word) bool {
 		if arg == "--no-pager" {
 			continue
 		}
-		return readOnlyGitSubcommands[arg]
+		subcommand = arg
+		rest = args[1+i+1:]
+		break
 	}
-	return false
+	if !readOnlyGitSubcommands[subcommand] {
+		return false
+	}
+	// A subcommand that only inspects the repository can still be handed
+	// a flag that names a write target or a program to run: `git diff
+	// --output=../x` truncates x, `git grep -O cmd` runs cmd on every
+	// matched file (see the matching gate in safe.go). Disqualify the
+	// invocation so the caller falls back to checking these arguments
+	// like any other command's, instead of skipping them as read-only.
+	for _, w := range rest {
+		arg, ok := literalWordValue(w)
+		if !ok {
+			// An argument this static parse can't resolve (a
+			// variable, a substitution) might itself be
+			// "--output=..." or "-O": treat it the same as every
+			// other unresolvable word in this function and refuse
+			// to call the invocation read-only.
+			return false
+		}
+		flag, _, _ := strings.Cut(arg, "=")
+		if flag == "--output" {
+			return false
+		}
+		if subcommand == "grep" && (flag == "-O" || flag == "--open-files-in-pager") {
+			return false
+		}
+	}
+	return true
 }
 
 // literalAbsPathOutside reports the absolute path w statically evaluates

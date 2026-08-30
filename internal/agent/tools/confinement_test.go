@@ -13,7 +13,9 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // mustJSONInput marshals v the way the agent runtime encodes tool-call
@@ -429,6 +431,53 @@ func TestBashTool_ConfinedWorkspaceLiteralGlobCharactersDoNotRequirePermission(t
 // `git diff --no-index /tmp/x f` (the model's way of showing a new file
 // whole) only made the thread route around the refusal. Arguments to a
 // known read-only command are not checked; /dev/null is never outside.
+// callArgs parses command's first statement as a simple command and
+// returns its args, for tests that exercise readsOnlyFromArgs directly.
+func callArgs(t *testing.T, command string) []*syntax.Word {
+	t.Helper()
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	require.NoError(t, err)
+	require.Len(t, file.Stmts, 1)
+	call, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
+	require.True(t, ok)
+	return call.Args
+}
+
+// TestReadsOnlyFromArgs_OutputFlagsDisqualify is the regression test for a
+// git invocation whose subcommand only inspects the repository but whose
+// arguments name a write target or a program to run: `git diff
+// --output=path` truncates and writes path, and `git grep -O cmd` runs cmd
+// on every matched file. Neither is read-only, so readsOnlyFromArgs must
+// not wave either past the confinement check.
+func TestReadsOnlyFromArgs_OutputFlagsDisqualify(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{"git diff plain", "git diff --stat HEAD", true},
+		{"git grep plain", "git grep -n pat", true},
+		{"git diff --output", "git diff --output=../x HEAD", false},
+		{"git log --output", "git log --output=../x -1", false},
+		{"git show --output", "git show --output=x HEAD", false},
+		{"git grep -O", "git grep -O cmd pat", false},
+		{"git grep --open-files-in-pager", "git grep --open-files-in-pager=cmd pat", false},
+		// A non-literal argument (a variable here) might itself expand
+		// to "--output=..." or "-O": this must fail closed, not be
+		// skipped as if it were harmless.
+		{"git diff with non-literal argument", "git diff --stat $FLAG HEAD", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := readsOnlyFromArgs(callArgs(t, tt.command))
+			assert.Equal(t, tt.want, got, "readsOnlyFromArgs(%q)", tt.command)
+		})
+	}
+}
+
 func TestBashTool_ConfinedWorkspaceAllowsReadOnlyCommandsToReadOutside(t *testing.T) {
 	t.Parallel()
 
