@@ -81,3 +81,65 @@ func reasoningChoice(t *testing.T, reasoningDetailsJSON string) openaisdk.ChatCo
 	require.NoError(t, json.Unmarshal([]byte(choiceJSON), &choice))
 	return choice
 }
+
+// TestLanguageModelStreamExtra_FormatSwitchMidStreamDoesNotPanic pins that
+// currentReasoningState.metadata/googleMetadata are allocated lazily. The
+// Reasoning Start block only allocates the field matching the *first*
+// detail's format; a later chunk whose detail switches to openai-responses
+// or google-gemini (after starting on a different format, e.g.
+// anthropic-claude) then dereferenced the still-nil field.
+func TestLanguageModelStreamExtra_FormatSwitchMidStreamDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	yield := func(fantasy.StreamPart) bool { return true }
+
+	t.Run("openai-responses detail after an anthropic-claude start", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := map[string]any{}
+		require.NotPanics(t, func() {
+			var cont bool
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `[
+				{"index": 0, "format": "anthropic-claude", "text": "thinking"}
+			]`), yield, ctx)
+			require.True(t, cont)
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `[
+				{"index": 0, "format": "openai-responses", "type": "reasoning.summary", "summary": "more"}
+			]`), yield, ctx)
+			require.True(t, cont)
+		})
+	})
+
+	t.Run("google-gemini detail after an anthropic-claude start", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := map[string]any{}
+		require.NotPanics(t, func() {
+			var cont bool
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `[
+				{"index": 0, "format": "anthropic-claude", "text": "thinking"}
+			]`), yield, ctx)
+			require.True(t, cont)
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `[
+				{"index": 0, "format": "google-gemini", "type": "reasoning.encrypted", "data": "cipher", "id": "tool-1"}
+			]`), yield, ctx)
+			require.True(t, cont)
+		})
+	})
+}
+
+// reasoningChunk builds an openaisdk.ChatCompletionChunk whose
+// Choices[0].Delta.RawJSON() carries the given reasoning_details array,
+// matching the shape languageModelStreamExtra parses via
+// json.Unmarshal(choice.Delta.RawJSON(), &ReasoningData{}).
+func reasoningChunk(t *testing.T, reasoningDetailsJSON string) openaisdk.ChatCompletionChunk {
+	t.Helper()
+
+	deltaJSON := fmt.Sprintf(`{"role":"assistant","content":"","reasoning_details":%s}`, reasoningDetailsJSON)
+	choiceJSON := fmt.Sprintf(`{"index":0,"delta":%s}`, deltaJSON)
+	chunkJSON := fmt.Sprintf(`{"id":"chunk-1","created":0,"model":"m","choices":[%s]}`, choiceJSON)
+
+	var chunk openaisdk.ChatCompletionChunk
+	require.NoError(t, json.Unmarshal([]byte(chunkJSON), &chunk))
+	return chunk
+}

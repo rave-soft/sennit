@@ -349,6 +349,13 @@ func languageModelStreamExtra(chunk openaisdk.ChatCompletionChunk, yield func(fa
 	// Reasoning delta
 	detail := reasoningData.ReasoningDetails[0]
 	if strings.HasPrefix(detail.Format, "openai-responses") || strings.HasPrefix(detail.Format, "xai-responses") {
+		// currentState.metadata is only allocated in the Reasoning Start
+		// block above when the first detail's own format matched. A later
+		// chunk can still switch formats mid-stream, so allocate lazily
+		// rather than assume it is already set.
+		if currentState.metadata == nil {
+			currentState.metadata = &openai.ResponsesReasoningMetadata{}
+		}
 		// Reasoning has ended
 		if detail.Data != "" {
 			currentState.metadata.EncryptedContent = &detail.Data
@@ -427,6 +434,12 @@ func languageModelStreamExtra(chunk openaisdk.ChatCompletionChunk, yield func(fa
 
 		// reasoning.encrypted type - end reasoning with signature
 		if detail.Type == "reasoning.encrypted" {
+			// Same lazy-allocation as the openai-responses branch above:
+			// a format switch mid-stream can reach here with googleMetadata
+			// still nil.
+			if currentState.googleMetadata == nil {
+				currentState.googleMetadata = &google.ReasoningMetadata{}
+			}
 			currentState.googleMetadata.Signature = detail.Data
 			currentState.googleMetadata.ToolID = detail.ID
 			metadata := fantasy.ProviderMetadata{

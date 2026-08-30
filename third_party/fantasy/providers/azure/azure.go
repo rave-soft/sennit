@@ -46,6 +46,13 @@ func New(opts ...Option) (fantasy.Provider, error) {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	if o.baseURL == "" {
+		// openai.New falls back to the public OpenAI API when the base
+		// URL is empty (cmp.Or(baseURL, openai.DefaultURL)), so a missing
+		// Azure endpoint would otherwise silently send the Azure key to
+		// api.openai.com and fail with a 401 that reads as a bad key.
+		return nil, &fantasy.Error{Title: "invalid argument", Message: "azure provider requires a base URL (WithBaseURL)"}
+	}
 	return openai.New(
 		append(
 			o.openaiOptions,

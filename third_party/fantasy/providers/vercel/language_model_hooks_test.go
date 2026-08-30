@@ -127,6 +127,72 @@ func TestLanguageModelExtraContent_NonContiguousReasoningIndexDoesNotPanic(t *te
 	})
 }
 
+// TestLanguageModelStreamExtra_BareReasoningThenTypedDetailDoesNotPanic pins
+// that a stream whose first reasoning chunk carries only the bare
+// `reasoning` string (no reasoning_details) does not panic once a later
+// chunk supplies a typed detail. The first chunk allocated
+// currentReasoningState without its metadata/googleMetadata fields (they are
+// only set inside the `len(reasoningData.ReasoningDetails) > 0` branch), and
+// a later openai-responses or google-gemini detail then dereferenced the
+// still-nil field. Whether the Vercel gateway actually interleaves chunks
+// this way in practice is unconfirmed; this pins the code path regardless.
+func TestLanguageModelStreamExtra_BareReasoningThenTypedDetailDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	yield := func(fantasy.StreamPart) bool { return true }
+
+	t.Run("openai-responses detail after bare reasoning start", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := map[string]any{}
+		require.NotPanics(t, func() {
+			var cont bool
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `"partial thought"`, nil), yield, ctx)
+			require.True(t, cont)
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `""`, `[
+				{"index": 0, "format": "openai-responses", "type": "reasoning.summary", "summary": "more"}
+			]`), yield, ctx)
+			require.True(t, cont)
+		})
+	})
+
+	t.Run("google-gemini detail after bare reasoning start", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := map[string]any{}
+		require.NotPanics(t, func() {
+			var cont bool
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `"partial thought"`, nil), yield, ctx)
+			require.True(t, cont)
+			ctx, cont = languageModelStreamExtra(reasoningChunk(t, `""`, `[
+				{"index": 0, "format": "google-gemini", "type": "reasoning.encrypted", "data": "cipher", "id": "tool-1"}
+			]`), yield, ctx)
+			require.True(t, cont)
+		})
+	})
+}
+
+// reasoningChunk builds an openaisdk.ChatCompletionChunk whose
+// Choices[0].Delta.RawJSON() carries the given `reasoning` string and
+// `reasoning_details` array, matching the shape languageModelStreamExtra
+// parses via json.Unmarshal(choice.Delta.RawJSON(), &ReasoningData{}).
+// reasoningDetailsJSON may be nil to omit the field entirely.
+func reasoningChunk(t *testing.T, reasoningJSON string, reasoningDetailsJSON any) openaisdk.ChatCompletionChunk {
+	t.Helper()
+
+	deltaJSON := fmt.Sprintf(`{"role":"assistant","content":"","reasoning":%s`, reasoningJSON)
+	if reasoningDetailsJSON != nil {
+		deltaJSON += fmt.Sprintf(`,"reasoning_details":%s`, reasoningDetailsJSON)
+	}
+	deltaJSON += "}"
+	choiceJSON := fmt.Sprintf(`{"index":0,"delta":%s}`, deltaJSON)
+	chunkJSON := fmt.Sprintf(`{"id":"chunk-1","created":0,"model":"m","choices":[%s]}`, choiceJSON)
+
+	var chunk openaisdk.ChatCompletionChunk
+	require.NoError(t, json.Unmarshal([]byte(chunkJSON), &chunk))
+	return chunk
+}
+
 // reasoningChoice builds an openaisdk.ChatCompletionChoice whose
 // Message.RawJSON() carries the given reasoning_details array, matching
 // the shape languageModelExtraContent parses via
