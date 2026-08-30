@@ -64,6 +64,18 @@ func lookupClosest(target string, walk func(walkFn func(cwd string, owner int) e
 	var found string
 
 	err := walk(func(cwd string, owner int) error {
+		// $HOME bounds the walk, so it is checked before probing rather
+		// than after. Checking it after a successful probe only stopped
+		// the walk when the target happened to exist at home: with no
+		// target there the walk carried on above it, all the way to the
+		// filesystem root, and would adopt a match from some directory
+		// outside the user's tree entirely — or abort with an ownership
+		// error from one, which is not this function's contract either
+		// (it reports "not found", it does not fail).
+		if Canonical(cwd) == Canonical(home.Dir()) {
+			return filepath.SkipAll
+		}
+
 		fpath := filepath.Join(cwd, target)
 
 		err := probeEnt(fpath, owner)
@@ -73,10 +85,6 @@ func lookupClosest(target string, walk func(walkFn func(cwd string, owner int) e
 
 		if err != nil {
 			return fmt.Errorf("error probing file %s: %w", fpath, err)
-		}
-
-		if Canonical(cwd) == Canonical(home.Dir()) {
-			return filepath.SkipAll
 		}
 
 		found = fpath

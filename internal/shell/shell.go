@@ -10,7 +10,6 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -291,7 +290,11 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 
 // exec executes commands using a cross-platform shell interpreter.
 func (s *Shell) exec(ctx context.Context, command string) (string, string, error) {
-	var stdout, stderr bytes.Buffer
+	// SyncBuffer, not bytes.Buffer: mvdan.cc/sh does not join a
+	// backgrounded job before Run returns, so a command containing
+	// "cmd &" can still be writing here after these are read below —
+	// the same race Run and the hook runner use SyncBuffer for.
+	var stdout, stderr SyncBuffer
 	err := s.execCommon(ctx, command, &stdout, &stderr)
 	return stdout.String(), stderr.String(), err
 }

@@ -3,6 +3,7 @@ package skills
 import (
 	"context"
 	"os"
+	"slices"
 	"sync"
 	"time"
 )
@@ -86,7 +87,26 @@ func WatchForChanges(ctx context.Context, cfg func() DiscoveryConfig, mgr *Manag
 		interval = ChangePollInterval
 	}
 
-	last := scanSkillFiles(cfg().ResolvePaths())
+	var (
+		lastSkillsPaths []string
+		lastResolved    []string
+	)
+	// ResolvePaths runs the config resolver, which is full shell expansion
+	// — a "$(op read ...)" skills path means a subprocess per call. This
+	// loop calls it on every tick, so the result is memoized against the
+	// unexpanded SkillsPaths it came from: a tick that sees the same
+	// configured paths reuses the previous expansion, and a config edit
+	// (the only thing that can change them) re-resolves once.
+	resolvePathsCached := func(c DiscoveryConfig) []string {
+		if slices.Equal(c.SkillsPaths, lastSkillsPaths) && lastResolved != nil {
+			return lastResolved
+		}
+		lastSkillsPaths = slices.Clone(c.SkillsPaths)
+		lastResolved = c.ResolvePaths()
+		return lastResolved
+	}
+
+	last := scanSkillFiles(resolvePathsCached(cfg()))
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -97,7 +117,7 @@ func WatchForChanges(ctx context.Context, cfg func() DiscoveryConfig, mgr *Manag
 			return
 		case <-ticker.C:
 			discoveryCfg := cfg()
-			current := scanSkillFiles(discoveryCfg.ResolvePaths())
+			current := scanSkillFiles(resolvePathsCached(discoveryCfg))
 			if !skillSnapshotsDiffer(last, current) {
 				continue
 			}

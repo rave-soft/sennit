@@ -39,10 +39,16 @@ var (
 	templateMu sync.Mutex
 	// templateEnabled gates the whole mechanism. Read under templateMu.
 	templateEnabled bool
-	// templatePath is the snapshot, produced on first use. Empty until
-	// then, and left empty if the snapshot could not be made — in which
+	// templateBytes is the snapshot, produced on first use. Nil until
+	// then, and left nil if the snapshot could not be made — in which
 	// case every Connect simply migrates for itself, as it always did.
-	templatePath string
+	//
+	// The snapshot is held in memory rather than left on disk: it is a
+	// schema-only database, it is written out again for every stamp
+	// anyway, and keeping it here means the temporary directory it was
+	// built in can be removed immediately instead of outliving the
+	// process that made it.
+	templateBytes []byte
 	// templateFailed records that snapshotting was tried and did not
 	// work, so it is not retried for every database afterwards.
 	templateFailed bool
@@ -82,40 +88,43 @@ func stampFromTemplate(ctx context.Context, dbPath string) bool {
 		// An existing database is not ours to overwrite.
 		return false
 	}
-	if templatePath == "" {
-		path, err := buildTemplate(ctx)
+	if templateBytes == nil {
+		contents, err := buildTemplate(ctx)
 		if err != nil {
 			templateFailed = true
 			return false
 		}
-		templatePath = path
+		templateBytes = contents
 	}
-	contents, err := os.ReadFile(templatePath)
-	if err != nil {
-		return false
-	}
-	return os.WriteFile(dbPath, contents, 0o600) == nil
+	return os.WriteFile(dbPath, templateBytes, 0o600) == nil
 }
 
 // buildTemplate migrates one database for real and snapshots it. Caller
 // holds templateMu, so this happens exactly once per process.
-func buildTemplate(ctx context.Context) (string, error) {
+func buildTemplate(ctx context.Context) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "sennit-db-template-*")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	// Nothing here outlives this function: the seed database and its WAL
+	// are scaffolding, and the snapshot is returned by value. Without
+	// this the directory — and on the error paths below, a half-built
+	// database inside it — was left in the system temp directory for the
+	// life of the machine.
+	defer os.RemoveAll(dir) //nolint:errcheck
+
 	seed := filepath.Join(dir, "seed.db")
 	conn, err := openDB(seed)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer conn.Close()
 	conn.SetMaxOpenConns(1)
 	if err := conn.PingContext(ctx); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := migrate(conn); err != nil {
-		return "", err
+		return nil, err
 	}
 	// VACUUM INTO writes a self-contained copy with no WAL alongside it,
 	// which is what makes the result safe to hand to a fresh open. A
@@ -124,9 +133,13 @@ func buildTemplate(ctx context.Context) (string, error) {
 	// checkpoint state happened to be.
 	template := filepath.Join(dir, "template.db")
 	if _, err := conn.ExecContext(ctx, "VACUUM INTO ?", template); err != nil {
-		return "", fmt.Errorf("snapshot the migrated database: %w", err)
+		return nil, fmt.Errorf("snapshot the migrated database: %w", err)
 	}
-	return template, nil
+	contents, err := os.ReadFile(template)
+	if err != nil {
+		return nil, fmt.Errorf("read the snapshot: %w", err)
+	}
+	return contents, nil
 }
 
 // migrate applies the migration chain to conn. Shared by openAndMigrate

@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -318,10 +319,21 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 	out := make([]string, 0, len(c.SkillsPaths))
 	for _, pth := range c.SkillsPaths {
 		expanded := home.Long(pth)
-		if strings.HasPrefix(expanded, "$") && c.Resolver != nil {
-			if resolved, err := c.Resolver(expanded); err == nil {
-				expanded = resolved
+		// Contains, not HasPrefix: a reference is just as legal in the
+		// middle of a path ("/data/$USER/skills") as at the front, and
+		// HasPrefix silently walked those unexpanded.
+		if strings.Contains(expanded, "$") && c.Resolver != nil {
+			resolved, err := c.Resolver(expanded)
+			if err != nil {
+				// Dropped rather than kept: an unresolved "$SKILLS_DIR"
+				// is not a directory name, and keeping it meant walking
+				// a literal relative path off the process's cwd —
+				// picking up whatever happened to sit there, or silently
+				// finding nothing, with no sign the reference had failed.
+				slog.Warn("Skipping skills path that could not be resolved", "path", pth, "error", err)
+				continue
 			}
+			expanded = resolved
 		}
 		out = append(out, expanded)
 	}
