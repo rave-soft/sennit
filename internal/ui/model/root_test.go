@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -561,7 +562,7 @@ func TestHandleThreadAttachedSupersededRequestIsStale(t *testing.T) {
 // test for the main screen losing its chat scrollbar for good: a terminal
 // resize while a thread is drilled into still reaches the main UI
 // (handleWindowSize broadcasts it), which puts its chat into the
-// "resizing" state and arms a settle timer. That timer's chatWarmMsg used
+// "resizing" state and arms a settle timer. That timer's chatlist.WarmMsg used
 // to be routed by active screen — to the thread's UI — so the main chat
 // never left "resizing", the state in which it skips the scrollbar. The
 // warm step must come back to the UI that armed it, whichever screen is on
@@ -580,11 +581,11 @@ func TestChatWarmStepReachesMainScreenWhileThreadIsOpen(t *testing.T) {
 	r.main.state = uiChat
 	model, cmd = r.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	r = model.(*Root)
-	require.True(t, r.main.chat.resizing, "a resize must put the main chat into its resizing state")
+	require.True(t, r.main.chat.Resizing(), "a resize must put the main chat into its resizing state")
 
 	// Pull the main chat's settle timer out of the returned cmd tree and
 	// feed its message back through Root, the way the runtime would.
-	var warm *chatWarmMsg
+	var warm *chatlist.WarmMsg
 	var walk func(c tea.Cmd)
 	walk = func(c tea.Cmd) {
 		if c == nil {
@@ -595,8 +596,8 @@ func TestChatWarmStepReachesMainScreenWhileThreadIsOpen(t *testing.T) {
 			for _, cc := range m {
 				walk(cc)
 			}
-		case chatWarmMsg:
-			if m.owner == r.main.chat {
+		case chatlist.WarmMsg:
+			if m.Owner == r.main.chat {
 				mm := m
 				warm = &mm
 			}
@@ -605,11 +606,11 @@ func TestChatWarmStepReachesMainScreenWhileThreadIsOpen(t *testing.T) {
 	walk(cmd)
 	require.NotNil(t, warm, "the main chat must have armed a warm step")
 
-	for i := 0; i < 8 && r.main.chat.resizing; i++ {
+	for i := 0; i < 8 && r.main.chat.Resizing(); i++ {
 		model, cmd = r.Update(*warm)
 		r = model.(*Root)
 		walk(cmd)
 	}
-	require.False(t, r.main.chat.resizing, "the main chat must leave resizing even while a thread is on top")
+	require.False(t, r.main.chat.Resizing(), "the main chat must leave resizing even while a thread is on top")
 	require.Equal(t, screenThread, r.active)
 }

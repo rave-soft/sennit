@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -39,7 +40,7 @@ type mouseState struct {
 // original case body would.
 func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	switch msg := msg.(type) {
-	case DelayedClickMsg:
+	case chatlist.DelayedClickMsg:
 		// Handle delayed single-click action (e.g., expansion, or
 		// navigating into a clicked child-session delegation). messageID
 		// and toolCallID come from the clicked item directly, not
@@ -285,8 +286,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				// runs on the cmd goroutine and must not read m off the
 				// Update loop.
 				clickTime := m.lastClickTime
-				cmds = append(cmds, tea.Tick(doubleClickThreshold, func(t time.Time) tea.Msg {
-					if time.Since(clickTime) >= doubleClickThreshold {
+				cmds = append(cmds, tea.Tick(chatlist.DoubleClickThreshold, func(t time.Time) tea.Msg {
+					if time.Since(clickTime) >= chatlist.DoubleClickThreshold {
 						return copyChatHighlightMsg{}
 					}
 					return nil

@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -68,7 +69,7 @@ func newSidebarCacheTestUI(t *testing.T) (*UI, *sidebarCacheWorkspace) {
 		com: com,
 		widgets: widgets{
 			status: NewStatus(com, nil),
-			chat:   NewChat(com, config.ScrollbarDefault),
+			chat:   chatlist.NewChat(com, config.ScrollbarDefault),
 			dialog: dialog.NewOverlay(),
 			header: newHeader(com),
 		},

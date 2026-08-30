@@ -2,6 +2,7 @@ package model
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 )
 
@@ -21,7 +22,7 @@ type widgets struct {
 	dialog *dialog.Overlay
 	status *Status
 	header *header
-	chat   *Chat
+	chat   *chatlist.Chat
 
 	// activeInline replaces the textarea when non-nil.
 	activeInline dialog.InlineEditor

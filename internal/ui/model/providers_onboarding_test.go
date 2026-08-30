@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	util "github.com/rave-soft/sennit/internal/ui/util"
@@ -222,7 +223,7 @@ func newOnboardingTestUI(ws *onboardingTestWorkspace, state uiState, action dial
 	ui := &UI{
 		com: com,
 		widgets: widgets{
-			chat:   NewChat(com, config.ScrollbarDefault),
+			chat:   chatlist.NewChat(com, config.ScrollbarDefault),
 			dialog: overlay,
 		},
 		editor: editorState{textarea: textarea.New()},

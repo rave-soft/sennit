@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
@@ -521,7 +522,7 @@ func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 		com: com,
 		widgets: widgets{
 			status: NewStatus(com, nil),
-			chat:   NewChat(com, config.ScrollbarDefault),
+			chat:   chatlist.NewChat(com, config.ScrollbarDefault),
 			dialog: dialog.NewOverlay(),
 		},
 		editor: editorState{

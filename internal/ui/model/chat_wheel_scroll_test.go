@@ -69,12 +69,12 @@ func TestWheelScrollUpKeepsMovingTheViewport(t *testing.T) {
 	t.Parallel()
 
 	u := wheelTestUI(t)
-	start, _ := u.chat.list.VisibleItemIndices()
+	start, _ := u.chat.VisibleItemIndices()
 
 	prev := start
 	for range 5 {
 		wheel(u, -3)
-		top, _ := u.chat.list.VisibleItemIndices()
+		top, _ := u.chat.VisibleItemIndices()
 		require.Less(t, top, prev, "every wheel tick must leave the viewport further up than the last")
 		prev = top
 	}
@@ -88,11 +88,11 @@ func TestWheelScrollUpAdoptsTheNearestVisibleMessage(t *testing.T) {
 	t.Parallel()
 
 	u := wheelTestUI(t)
-	selectedBefore := u.chat.list.Selected()
+	selectedBefore := u.chat.Selected()
 
 	wheel(u, -3)
 
-	require.NotEqual(t, selectedBefore, u.chat.list.Selected(),
+	require.NotEqual(t, selectedBefore, u.chat.Selected(),
 		"the selected message scrolled out of sight, so the selection must move")
 	require.True(t, u.chat.SelectedItemInView(), "the selection must be on screen after the tick")
 }

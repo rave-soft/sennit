@@ -44,7 +44,7 @@ func TestQueuedPromptStaysBelowTheAgentsWork(t *testing.T) {
 		Parts: []message.ContentPart{message.TextContent{Text: "working on it"}},
 	})
 
-	items := u.chat.messageItems()
+	items := u.chat.MessageItems()
 	last := items[len(items)-1]
 	require.Equal(t, "queued-prompt-1", last.ID())
 }

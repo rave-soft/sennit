@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
@@ -78,7 +79,7 @@ func newCursorTestUI(t *testing.T) *UI {
 		com: com,
 		widgets: widgets{
 			status: NewStatus(com, nil),
-			chat:   NewChat(com, config.ScrollbarDefault),
+			chat:   chatlist.NewChat(com, config.ScrollbarDefault),
 			dialog: dialog.NewOverlay(),
 			header: newHeader(com),
 		},
@@ -281,6 +282,6 @@ func TestClickWhileBrowsingChat_DoesNotMoveFocusStripe(t *testing.T) {
 		Button: uv.MouseLeft,
 	}))
 
-	require.Equal(t, 0, u.chat.list.Selected(),
+	require.Equal(t, 0, u.chat.Selected(),
 		"a mouse click must not move the keyboard-selected item")
 }

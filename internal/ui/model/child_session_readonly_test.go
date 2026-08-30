@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -113,7 +114,7 @@ func TestExitChildSessionRestoresEditorFocus(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	require.Equal(t, uiFocusEditor, u.focus)
-	require.False(t, u.chat.list.Focused())
+	require.False(t, u.chat.Focused())
 	require.True(t, u.editor.textarea.Focused(), "textarea.Focus() sets focused state synchronously")
 }
 
@@ -142,8 +143,8 @@ func TestHandleDelayedClickOnNestedContainer(t *testing.T) {
 
 	require.False(t, currentExpanded(t, item), "fresh item starts collapsed")
 
-	handled, openContainer, messageID, toolCallID := u.chat.HandleDelayedClick(DelayedClickMsg{
-		ClickID: u.chat.pendingClickID,
+	handled, openContainer, messageID, toolCallID := u.chat.HandleDelayedClick(chatlist.DelayedClickMsg{
+		ClickID: u.chat.PendingClickID(),
 		ItemIdx: 0,
 		X:       0,
 		Y:       0,
@@ -176,10 +177,10 @@ func TestHandleDelayedClickOnNestedContainer_KeyboardSelectionElsewhere(t *testi
 	// Keyboard selection sits on the unrelated first item, not the
 	// delegation being clicked.
 	u.chat.SetSelected(0)
-	require.NotEqual(t, 1, u.chat.list.Selected())
+	require.NotEqual(t, 1, u.chat.Selected())
 
-	handled, openContainer, messageID, toolCallID := u.chat.HandleDelayedClick(DelayedClickMsg{
-		ClickID: u.chat.pendingClickID,
+	handled, openContainer, messageID, toolCallID := u.chat.HandleDelayedClick(chatlist.DelayedClickMsg{
+		ClickID: u.chat.PendingClickID(),
 		ItemIdx: 1,
 		X:       0,
 		Y:       0,
@@ -209,8 +210,8 @@ func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
 	_, ok := item.(chat.Expandable)
 	require.False(t, ok, "a plain tool item must not implement chat.Expandable — there's nothing to expand")
 
-	handled, openContainer, _, _ := u.chat.HandleDelayedClick(DelayedClickMsg{
-		ClickID: u.chat.pendingClickID,
+	handled, openContainer, _, _ := u.chat.HandleDelayedClick(chatlist.DelayedClickMsg{
+		ClickID: u.chat.PendingClickID(),
 		ItemIdx: 0,
 		X:       0,
 		Y:       0,
@@ -251,7 +252,7 @@ func (drillInWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) s
 // regression test for the drill-in-broke-by-the-green-stripe-fix bug: a
 // real mouse click on a finished delegation block, driven through
 // UI.Update the same way the runtime delivers it (MouseClickMsg, then the
-// resulting DelayedClickMsg once the double-click window's tea.Tick
+// resulting chatlist.DelayedClickMsg once the double-click window's tea.Tick
 // fires), must still call enterChildSession. It broke because
 // HandleDelayedClick used to resolve the clicked item via
 // Chat.SelectedNestedToolContainer (which reads the keyboard-driven
@@ -281,7 +282,7 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: true}, nil, false, nil)
 	agentItem.SetMessageID("msg-agent")
 	agentItem.SetResult(&message.ToolResult{ToolCallID: "tc-agent", Content: "done"})
-	agentIdx := u.chat.list.Len()
+	agentIdx := u.chat.Len()
 	u.chat.AppendMessages(agentItem)
 	u.updateLayoutAndSize()
 
@@ -289,7 +290,7 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 	// list's own geometry, rather than hand-computing gap math.
 	clickY := -1
 	for y := 0; y < 200; y++ {
-		if idx, _ := u.chat.list.ItemIndexAtPosition(0, y); idx == agentIdx {
+		if idx, _ := u.chat.ItemIndexAtPosition(0, y); idx == agentIdx {
 			clickY = y
 			break
 		}
@@ -306,7 +307,7 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 	// Unwrap the tea.Batch the runtime would otherwise flatten for us (it
 	// may carry other standing cmds — e.g. animations — alongside the
 	// delayed-click tick), run each synchronously, and feed the resulting
-	// DelayedClickMsg back through Update exactly like the real event loop
+	// chatlist.DelayedClickMsg back through Update exactly like the real event loop
 	// would.
 	batch, ok := cmd().(tea.BatchMsg)
 	require.True(t, ok, "expected a tea.Batch containing the delayed-click tick")
@@ -316,13 +317,13 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 			continue
 		}
 		if msg := sub(); msg != nil {
-			if _, isDelayed := msg.(DelayedClickMsg); isDelayed {
+			if _, isDelayed := msg.(chatlist.DelayedClickMsg); isDelayed {
 				delayedMsg = msg
 				break
 			}
 		}
 	}
-	require.IsType(t, DelayedClickMsg{}, delayedMsg, "the batch must contain the delayed-click tick")
+	require.IsType(t, chatlist.DelayedClickMsg{}, delayedMsg, "the batch must contain the delayed-click tick")
 
 	_, _ = u.Update(delayedMsg)
 
