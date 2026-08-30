@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -607,32 +608,108 @@ func (s *ConfigStore) pinPreferredModelLocked(model SelectedModel) {
 // After a successful write, it automatically reloads config to keep in-memory
 // state fresh.
 //
+// ScopeGlobal deletes from every global layer, not just the one ConfigPath
+// would resolve: a global config is four layers (see globalConfigPaths), and
+// a key set by hand in ~/.config/sennit/sennit.json — the documented place
+// for it — would otherwise survive a "clear this setting" call made against
+// the data file alone, then come back on the next reload. See
+// RemoveRuntimeConfigField, which already does this for the same reason; any
+// other scope resolves its single file the same way every other mutator
+// does, through ConfigPath.
+//
 // The write is protected by an in-process mutex and a cross-process flock.
 //
-// Like SetConfigFields, the write and the staleness-snapshot refresh happen
-// under one stalenessMu section so a concurrent ConfigStaleness() can never
-// observe the new on-disk mtime against a stale snapshot and mistake this
-// process's own write for an external change. See SetConfigFields for the
-// full rationale.
+// Like SetConfigFields, the write(s) and the staleness-snapshot refresh
+// happen under one stalenessMu section so a concurrent ConfigStaleness() can
+// never observe the new on-disk mtime against a stale snapshot and mistake
+// this process's own write for an external change. See SetConfigFields for
+// the full rationale.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
-	s.stalenessMu.Lock()
-	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
-		v, sErr := sjson.Delete(string(data), key)
-		if sErr != nil {
-			return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+	if scope != ScopeGlobal {
+		s.stalenessMu.Lock()
+		err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+			v, sErr := sjson.Delete(string(data), key)
+			if sErr != nil {
+				return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+			}
+			return []byte(v), nil
+		})
+		if err == nil {
+			s.refreshStalenessSnapshotLocked(nil)
 		}
-		return []byte(v), nil
-	})
-	if err == nil {
+		s.stalenessMu.Unlock()
+		if err != nil {
+			return err
+		}
+
+		if err := s.autoReload(context.Background()); err != nil {
+			slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+		}
+
+		return nil
+	}
+
+	// One of the four global layers is a sennitrc sibling — a bash script,
+	// not JSON. sjson.Delete would happily mangle it, so every write here
+	// goes through the same errAtomicWriteNoop guard
+	// RemoveRuntimeConfigField uses: gjson never matches inside a shell
+	// file, so that layer is always skipped rather than rewritten.
+	//
+	// s.globalDataPath is unioned in explicitly, not assumed to already be
+	// globalConfigPaths()'s GlobalConfigData() entry: production always
+	// sets it to exactly that (see Load), but a store built directly
+	// against a stand-in data path (test doubles that never call Load)
+	// still deserves ConfigPath(ScopeGlobal)'s own file cleared — that is
+	// the one layer this method's doc comment promises is never skipped.
+	s.stalenessMu.Lock()
+	paths := globalConfigPaths()
+	if s.globalDataPath != "" && !slices.Contains(paths, s.globalDataPath) {
+		paths = append(paths, s.globalDataPath)
+	}
+	var wrote bool
+	var errs []error
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			continue // layer not present on this machine; nothing to clear
+		}
+		// atomicWrite returns nil for errAtomicWriteNoop (configfile.go),
+		// so a plain err == nil check cannot tell "this layer changed"
+		// from "this layer never had the key" — changed is set only on
+		// the branch that actually hands back new bytes, and wrote is
+		// driven off that instead of off the call's error.
+		var changed bool
+		if err := s.file.atomicWrite(path, func(data []byte) ([]byte, error) {
+			if !gjson.GetBytes(data, key).Exists() {
+				return nil, errAtomicWriteNoop
+			}
+			v, sErr := sjson.Delete(string(data), key)
+			if sErr != nil {
+				return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+			}
+			changed = true
+			return []byte(v), nil
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", path, err))
+		} else if changed {
+			wrote = true
+		}
+	}
+	if wrote {
 		s.refreshStalenessSnapshotLocked(nil)
 	}
 	s.stalenessMu.Unlock()
-	if err != nil {
+
+	if err := errors.Join(errs...); err != nil {
 		return err
 	}
 
-	if err := s.autoReload(context.Background()); err != nil {
-		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	// Only reload when a layer actually changed: every path being a noop
+	// (key never set) or absent is not a config change worth an autoReload
+	// round trip, including its provider-catalog and discovery work.
+	if wrote {
+		if err := s.autoReload(context.Background()); err != nil {
+			slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+		}
 	}
 
 	return nil

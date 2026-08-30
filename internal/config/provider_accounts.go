@@ -129,6 +129,17 @@ func RecordAccount(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 // maintains — see its doc comment for why disk and memory have to be
 // written in that order.
 //
+// Disabling the active account is the one edit that must NOT republish it:
+// every other activation path (the accounts dialog, `sennit accounts use`)
+// already refuses to activate a disabled account, and republishing it here
+// would leave the provider pointing at a "Disabled" account that keeps
+// serving live requests while Rotator.Pick, which only ever advances off
+// the current account, never gets a reason to move away from it either. So
+// a disable of the active account instead switches to
+// nextAccountAfterRemoval's pick — the same "next usable account" logic
+// RemoveAccount uses — falling back to leaving the provider with no active
+// account at all when account was the only one on record.
+//
 // This is the single implementation callers (AppWorkspace and any test
 // double standing in for it) must go through — see the doc comment on
 // RemoveAccount below for why a duplicated copy is the wrong shape here.
@@ -136,10 +147,45 @@ func UpdateAccount(store *ConfigStore, accStore accounts.Store, providerID strin
 	if err := accStore.Upsert(providerID, account); err != nil {
 		return fmt.Errorf("updating account %s for provider %s: %w", account.ID, providerID, err)
 	}
-	if pc, ok := store.Config().Providers.Get(providerID); ok && pc.Account == account.ID {
-		if err := store.ActivateAccount(ScopeGlobal, providerID, account); err != nil {
-			return fmt.Errorf("republishing updated active account %s for provider %s: %w", account.ID, providerID, err)
+	pc, ok := store.Config().Providers.Get(providerID)
+	if !ok || pc.Account != account.ID {
+		return nil
+	}
+
+	if account.Disabled {
+		existing, err := accStore.List(providerID)
+		if err != nil {
+			return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
 		}
+		next, hasNext := nextAccountAfterRemoval(existing, account.ID)
+		if !hasNext {
+			// No other account to fall back to: clear the active-account
+			// pointer rather than leave it naming a disabled account.
+			if err := store.RemoveConfigField(ScopeGlobal, ProviderFieldKey(providerID, "account")); err != nil {
+				return fmt.Errorf("clearing active account pointer for provider %s: %w", providerID, err)
+			}
+			// RemoveConfigField's own reload is a best-effort autoReload
+			// (skipped entirely when the store has no workingDir, e.g. a
+			// bare ConfigStore built for tests) — mirror ActivateAccount's
+			// explicit in-memory publish rather than depend on it, so the
+			// live ProviderConfig.Account is cleared even when that reload
+			// no-ops.
+			store.mutateInMemory(func(c *Config) {
+				if pc, ok := c.Providers.Get(providerID); ok {
+					pc.Account = ""
+					c.Providers.Set(providerID, pc)
+				}
+			})
+			return nil
+		}
+		if err := store.ActivateAccount(ScopeGlobal, providerID, next); err != nil {
+			return fmt.Errorf("activating replacement account for provider %s: %w", providerID, err)
+		}
+		return nil
+	}
+
+	if err := store.ActivateAccount(ScopeGlobal, providerID, account); err != nil {
+		return fmt.Errorf("republishing updated active account %s for provider %s: %w", account.ID, providerID, err)
 	}
 	return nil
 }
