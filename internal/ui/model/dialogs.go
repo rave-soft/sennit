@@ -182,7 +182,7 @@ func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
 	hasQueue := len(m.wsCache.promptQueueCache.value) > 0
 
 	var dockerMCPAvailable *bool
-	if available, known := config.DockerMCPAvailabilityCached(); known {
+	if available, known := m.com.Workspace.DockerMCPAvailable(); known {
 		dockerMCPAvailable = &available
 	}
 

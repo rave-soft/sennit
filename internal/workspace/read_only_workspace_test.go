@@ -582,6 +582,16 @@ func (s *stubWorkspace) RefreshAccountLimits(ctx context.Context, providerID str
 	return nil, nil
 }
 
+func (s *stubWorkspace) DockerMCPAvailable() (bool, bool) {
+	s.track("DockerMCPAvailable")
+	return false, false
+}
+
+func (s *stubWorkspace) RefreshDockerMCPAvailability() bool {
+	s.track("RefreshDockerMCPAvailability")
+	return false
+}
+
 func (s *stubWorkspace) CustomProviderTypes() []string {
 	s.track("CustomProviderTypes")
 	return nil

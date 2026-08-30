@@ -20,6 +20,10 @@ type commandsNamesTestWorkspace struct {
 
 func (w *commandsNamesTestWorkspace) SupportsThreads() bool { return false }
 
+// DockerMCPAvailable: unknown, so no Docker entry is offered and nothing
+// runs the probe.
+func (w *commandsNamesTestWorkspace) DockerMCPAvailable() (bool, bool) { return false, false }
+
 func (w *commandsNamesTestWorkspace) Config() *config.Config {
 	return w.cfg
 }

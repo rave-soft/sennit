@@ -56,7 +56,7 @@ var _ Dialog = (*Commands)(nil)
 
 func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{com: com, sessionID: sessionID, hasSession: hasSession, hasTodos: hasTodos, hasQueue: hasQueue, customCommands: customCommands, mcpPrompts: mcpPrompts}
-	if available, known := config.DockerMCPAvailabilityCached(); known {
+	if available, known := com.Workspace.DockerMCPAvailable(); known {
 		c.dockerMCPAvailable = &available
 	}
 	sd, err := newSelectDialog(com, selectDialogConfig{id: CommandsID, title: "Commands", maxWidth: defaultDialogMaxWidth, maxHeight: defaultDialogHeight, buildItems: c.commandItems, onSelect: func(id string) Action {
@@ -151,9 +151,14 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-func checkDockerMCPAvailabilityCmd() tea.Cmd {
+// checkDockerMCPAvailabilityCmd answers whether the Docker MCP gateway is
+// usable here. The answer costs a subprocess with a timeout, which is why
+// it runs off the Update loop — and why it is asked of the workspace
+// rather than run from the dialog.
+func checkDockerMCPAvailabilityCmd(com *common.Common) tea.Cmd {
+	ws := com.Workspace
 	return func() tea.Msg {
-		return dockerMCPAvailabilityCheckedMsg{available: config.RefreshDockerMCPAvailability()}
+		return dockerMCPAvailabilityCheckedMsg{available: ws.RefreshDockerMCPAvailability()}
 	}
 }
 
@@ -162,7 +167,7 @@ func (c *Commands) InitialCmd() tea.Cmd {
 		return nil
 	}
 	c.dockerMCPCheckInFlight = true
-	return checkDockerMCPAvailabilityCmd()
+	return checkDockerMCPAvailabilityCmd(c.com)
 }
 
 func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds, hasMCPPrompts bool) string {

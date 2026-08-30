@@ -10,7 +10,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/commands"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,19 +65,34 @@ func TestCommands_Restyle(t *testing.T) {
 
 // ---- checkDockerMCPAvailabilityCmd ----
 
+// dockerProbeWorkspace answers the availability probe without running one.
+type dockerProbeWorkspace struct {
+	workspace.Workspace
+	available bool
+}
+
+func (w *dockerProbeWorkspace) RefreshDockerMCPAvailability() bool { return w.available }
+
 // TestCheckDockerMCPAvailabilityCmd verifies the returned tea.Cmd yields a
-// dockerMCPAvailabilityCheckedMsg (the availability bool itself depends on
-// whether docker is installed in the test environment, so only the message
-// shape is pinned).
+// dockerMCPAvailabilityCheckedMsg carrying what the workspace answered.
+//
+// It used to run the real probe — `docker mcp version`, with a five-second
+// timeout — inside a unit test, and could only assert the message shape
+// because the answer depended on whether docker happened to be installed
+// on the machine running the test. Asking the workspace makes the answer
+// the test's to choose.
 func TestCheckDockerMCPAvailabilityCmd(t *testing.T) {
 	t.Parallel()
 
-	cmd := checkDockerMCPAvailabilityCmd()
-	require.NotNil(t, cmd)
+	for _, available := range []bool{true, false} {
+		com := &common.Common{Workspace: &dockerProbeWorkspace{available: available}}
+		cmd := checkDockerMCPAvailabilityCmd(com)
+		require.NotNil(t, cmd)
 
-	msg := cmd()
-	_, ok := msg.(dockerMCPAvailabilityCheckedMsg)
-	require.True(t, ok, "expected dockerMCPAvailabilityCheckedMsg, got %T", msg)
+		msg, ok := cmd().(dockerMCPAvailabilityCheckedMsg)
+		require.True(t, ok, "expected dockerMCPAvailabilityCheckedMsg, got %T", cmd())
+		require.Equal(t, available, msg.available)
+	}
 }
 
 // ---- Commands.InitialCmd ----

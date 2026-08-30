@@ -26,6 +26,10 @@ type slashCommandsTestWorkspace struct {
 
 func (w *slashCommandsTestWorkspace) SupportsThreads() bool { return false }
 
+// DockerMCPAvailable: unknown, so the palette offers no Docker entry and
+// nothing runs a probe.
+func (w *slashCommandsTestWorkspace) DockerMCPAvailable() (bool, bool) { return false, false }
+
 // SupportsTasks answers for the delegation list behind the panel's
 // agents section; no test here drives one.
 func (w *slashCommandsTestWorkspace) SupportsTasks() bool { return false }

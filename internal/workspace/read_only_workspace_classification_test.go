@@ -101,6 +101,8 @@ var readOnlySafeMethods = []string{
 	"CreateAgentToolSessionID",
 	"CurrentPlanUsage",
 	"CustomProviderTypes",
+	"DockerMCPAvailable",
+	"RefreshDockerMCPAvailability",
 	"ListCustomCommands",
 	"FileTrackerLastReadTime",
 	"FileTrackerListReadFiles",

@@ -461,6 +461,16 @@ type MCPController interface {
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
+	// DockerMCPAvailable reports the cached answer to "is the Docker MCP
+	// gateway usable here", and whether that answer is still fresh.
+	DockerMCPAvailable() (available, known bool)
+	// RefreshDockerMCPAvailability re-answers it and caches the result.
+	//
+	// Answering means running `docker mcp version` with a timeout, which
+	// is why it is on the facade: the command palette used to spawn that
+	// process itself, from a tea.Cmd, to decide whether to offer a menu
+	// entry.
+	RefreshDockerMCPAvailability() bool
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []MCPPendingAuthServer
 	MCPAuthURL(name string) string

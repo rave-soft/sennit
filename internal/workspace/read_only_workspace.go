@@ -444,6 +444,17 @@ func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID
 // CurrentPlanUsage is a read, so the read-only workspace answers it: an
 // attached thread shows the same plan line as the workspace it is attached
 // to.
+func (w *readOnlyWorkspace) DockerMCPAvailable() (available, known bool) {
+	return w.ws.DockerMCPAvailable()
+}
+
+// RefreshDockerMCPAvailability runs a probe and caches its answer, but it
+// changes nothing about this workspace or the project — it is a question
+// about the machine — so a read-only workspace may ask it.
+func (w *readOnlyWorkspace) RefreshDockerMCPAvailability() bool {
+	return w.ws.RefreshDockerMCPAvailability()
+}
+
 func (w *readOnlyWorkspace) CustomProviderTypes() []string {
 	return w.ws.CustomProviderTypes()
 }

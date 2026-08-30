@@ -121,3 +121,13 @@ func (w *AppWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer {
 func (w *AppWorkspace) MCPAuthURL(name string) string {
 	return w.app.MCP.MCPAuthURL(name)
 }
+
+// DockerMCPAvailable implements Workspace.
+func (w *AppWorkspace) DockerMCPAvailable() (available, known bool) {
+	return config.DockerMCPAvailabilityCached()
+}
+
+// RefreshDockerMCPAvailability implements Workspace.
+func (w *AppWorkspace) RefreshDockerMCPAvailability() bool {
+	return config.RefreshDockerMCPAvailability()
+}
