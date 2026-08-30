@@ -471,8 +471,8 @@ func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner S
 // through the steering hook, and this waits for it while still holding
 // opMu — which is what keeps handleRunComplete (which takes opMu too)
 // from acting on the older run's completion in between.
-func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, msg, runID string, attachments []Attachment, disp SendDisposition) (SendDisposition, error) {
-	decided, failed := l.steerDispatch(bgCtx, rt, id, sessionID, msg, runID, attachments)
+func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeState, coord Coordinator, id, sessionID, msg, runID string, attachments []Attachment, disp SendDisposition) (SendDisposition, error) {
+	decided, failed := l.steerDispatch(bgCtx, coord, id, sessionID, msg, runID, attachments)
 	return l.steerAwait(bgCtx, c, rt, id, sessionID, runID, disp, decided, failed)
 }
 
@@ -481,7 +481,10 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 // dispatch decision on the returned decided channel and any RunAccepted
 // error on failed. Both are buffered by one so the goroutine below never
 // blocks handing its result off.
-func (l *lifecycle) steerDispatch(bgCtx context.Context, rt *runtimeState, id, sessionID, msg, runID string, attachments []Attachment) (decided chan DispatchOutcome, failed chan error) {
+// The coordinator is passed in rather than re-read from the workspace: send
+// has already established that it is non-nil, and BeginAccepted below would
+// panic on a nil it re-read for itself.
+func (l *lifecycle) steerDispatch(bgCtx context.Context, coord Coordinator, id, sessionID, msg, runID string, attachments []Attachment) (decided chan DispatchOutcome, failed chan error) {
 	decided = make(chan DispatchOutcome, 1)
 	failed = make(chan error, 1)
 	var ranOwn atomic.Bool
@@ -492,7 +495,6 @@ func (l *lifecycle) steerDispatch(bgCtx context.Context, rt *runtimeState, id, s
 		default:
 		}
 	})
-	coord := rt.handle.Workspace().Coordinator()
 	// Reserved before dispatch for the reason startRun reserves: this call
 	// reaches the coordinator on a goroutine, and a cancel arriving in
 	// between must resolve to a definite answer rather than leaving a run
@@ -700,18 +702,33 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		// Which of those two it is, is exactly what the sender needs told
 		// back: read it now, before the dispatch below adds this message
 		// to the queue it is describing.
+		//
+		// Read the coordinator once, before anything is committed. It is
+		// documented as possibly nil (a workspace with no agent
+		// configured, or one whose rebuild has closed it), and both
+		// branches below dispatch into it. Resolving it up front is what
+		// keeps a nil from being discovered after the status is already
+		// StatusRunning: the person's branch would have panicked on it in
+		// steerDispatch's worker goroutine, and the agent's branch
+		// returned an error with the entity already marked running and no
+		// run left to publish the RunComplete that would clear it.
+		coord := rt.handle.Workspace().Coordinator()
+		if coord == nil {
+			// See startRun: nil is a documented possibility, and a panic
+			// in a worker goroutine takes the process with it.
+			slog.Error("Queued agent run has no coordinator to dispatch to", "component", "thread", "session_id", sessionID)
+			return SendDisposition{}, errors.New("thread: workspace has no agent coordinator")
+		}
 		var disp SendDisposition
-		if coord := rt.handle.Workspace().Coordinator(); coord != nil {
-			if busy, ahead := coord.SessionQueue(sessionID); busy {
-				disp = SendDisposition{Queued: true, Ahead: ahead}
-			}
+		if busy, ahead := coord.SessionQueue(sessionID); busy {
+			disp = SendDisposition{Queued: true, Ahead: ahead}
 		}
 		if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
 			return SendDisposition{}, err
 		}
 		runID := uuid.NewString()
 		if from == SenderPerson {
-			return l.steer(bgCtx, c, rt, id, sessionID, msg, runID, attachments, disp)
+			return l.steer(bgCtx, c, rt, coord, id, sessionID, msg, runID, attachments, disp)
 		}
 		c.mu.Lock()
 		rt.runID = runID
@@ -722,13 +739,6 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		// it is sent, and the reservation is what keeps that cancel from
 		// landing in the gap between this goroutine being scheduled and
 		// the coordinator admitting the call.
-		coord := rt.handle.Workspace().Coordinator()
-		if coord == nil {
-			// See startRun: nil is a documented possibility, and a panic
-			// in a worker goroutine takes the process with it.
-			slog.Error("Queued agent run has no coordinator to dispatch to", "component", "thread", "session_id", sessionID)
-			return SendDisposition{}, errors.New("thread: workspace has no agent coordinator")
-		}
 		accept := coord.BeginAccepted(sessionID)
 		l.goWorker(func() {
 			if err := coord.RunAccepted(WithRunID(bgCtx, runID), accept, sessionID, msg, nil); err != nil {
