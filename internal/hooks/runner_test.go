@@ -44,3 +44,32 @@ func TestRunner_DedupKeyIncludesFullConfig(t *testing.T) {
 	names := []string{agg.Hooks[0].Name, agg.Hooks[1].Name}
 	require.ElementsMatch(t, []string{"first", "second"}, names)
 }
+
+// TestRunner_BackgroundedJobDoesNotRaceOnOutputBuffers exercises a hook
+// that backgrounds a job (`cmd &`) before printing its decision. mvdan.cc/sh
+// does not wait for `&` jobs before Run returns, so the backgrounded job can
+// still be writing to stdout/stderr after runOne's goroutine sends on
+// `done` and the outer frame reads the buffers. This must use the real
+// shell.Run (not a mock) so the concurrent write actually happens; run
+// under -race to catch a regression to bytes.Buffer.
+func TestRunner_BackgroundedJobDoesNotRaceOnOutputBuffers(t *testing.T) {
+	t.Parallel()
+
+	r := &Runner{
+		hooks: []compiledHook{
+			{cfg: Hook{
+				Name:    "bg",
+				Command: `(sleep 0.05; echo late) & echo '{"decision":"allow"}'`,
+				Timeout: 5,
+			}},
+		},
+		runShell:   shell.Run,
+		cwd:        t.TempDir(),
+		abandonFor: abandonGrace,
+	}
+
+	agg, err := r.Run(t.Context(), "PreToolUse", "session-1", "bash", "{}")
+	require.NoError(t, err)
+	require.Len(t, agg.Hooks, 1)
+	require.Equal(t, "allow", agg.Hooks[0].Decision)
+}

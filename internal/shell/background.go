@@ -16,12 +16,12 @@ const (
 	CompletedJobRetentionMinutes = 8 * 60
 
 	// MaxSyncBufferHead is the number of bytes retained from the start of
-	// a syncBuffer's stream. Bytes beyond this are still counted (so the
+	// a SyncBuffer's stream. Bytes beyond this are still counted (so the
 	// dropped-byte marker is accurate) but never copied into the head.
 	MaxSyncBufferHead = 256 * 1024
 
 	// MaxSyncBufferTail is the number of bytes retained from the end of a
-	// syncBuffer's stream, via a fixed-size ring buffer that always holds
+	// SyncBuffer's stream, via a fixed-size ring buffer that always holds
 	// the most recently written bytes. Together with MaxSyncBufferHead
 	// this bounds a single stream to 512 KiB regardless of how much is
 	// written — MaxBackgroundJobs background shells each hold two streams
@@ -30,7 +30,7 @@ const (
 	MaxSyncBufferTail = 256 * 1024
 )
 
-// syncBuffer is a mutex-protected io.Writer with a bounded memory footprint:
+// SyncBuffer is a mutex-protected io.Writer with a bounded memory footprint:
 // it retains the first MaxSyncBufferHead bytes written and the last
 // MaxSyncBufferTail bytes, dropping whatever falls in between. This mirrors
 // the head+tail truncation [tools.TruncateOutput] already applies when
@@ -41,7 +41,7 @@ const (
 // The zero value is ready to use — [BackgroundShell] and RunAndCapture both
 // rely on that, so initialization happens lazily inside Write under the same
 // lock rather than through a constructor.
-type syncBuffer struct {
+type SyncBuffer struct {
 	mu sync.RWMutex
 
 	// bounded-buffer: writeLocked only ever appends up to the
@@ -59,7 +59,7 @@ type syncBuffer struct {
 // caps. It always reports len(p) written with a nil error — dropping the
 // middle of the stream must never look like a short write to callers such
 // as mvdan.cc/sh's interp, which treats one as fatal.
-func (sb *syncBuffer) Write(p []byte) (n int, err error) {
+func (sb *SyncBuffer) Write(p []byte) (n int, err error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 	sb.writeLocked(p)
@@ -68,7 +68,7 @@ func (sb *syncBuffer) Write(p []byte) (n int, err error) {
 
 // WriteString is the string equivalent of Write, avoiding a redundant
 // []byte(s) round trip through a second lock acquisition.
-func (sb *syncBuffer) WriteString(s string) (n int, err error) {
+func (sb *SyncBuffer) WriteString(s string) (n int, err error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 	sb.writeLocked([]byte(s))
@@ -82,7 +82,7 @@ func (sb *syncBuffer) WriteString(s string) (n int, err error) {
 // MaxSyncBufferHead: up to that point every byte already lives in head, so
 // a ring would only duplicate it, and the common case — a short command's
 // small output — must not pay for a 256 KiB allocation it never needs.
-func (sb *syncBuffer) writeLocked(p []byte) {
+func (sb *SyncBuffer) writeLocked(p []byte) {
 	prevTotal := sb.total
 	sb.total += int64(len(p))
 
@@ -109,7 +109,7 @@ func (sb *syncBuffer) writeLocked(p []byte) {
 // writeTailLocked copies p into the fixed-size tail ring buffer, keeping
 // only the most recently written MaxSyncBufferTail bytes. Callers must hold
 // sb.mu.
-func (sb *syncBuffer) writeTailLocked(p []byte) {
+func (sb *SyncBuffer) writeTailLocked(p []byte) {
 	if len(p) == 0 {
 		return
 	}
@@ -140,7 +140,7 @@ func (sb *syncBuffer) writeTailLocked(p []byte) {
 
 // tailBytesLocked returns the tail ring's contents in write order (oldest
 // first). Callers must hold sb.mu.
-func (sb *syncBuffer) tailBytesLocked() []byte {
+func (sb *SyncBuffer) tailBytesLocked() []byte {
 	if sb.tailLen < MaxSyncBufferTail {
 		// No wraparound yet: the ring has been written from index 0, so
 		// tailPos already equals tailLen and the data is contiguous.
@@ -162,7 +162,7 @@ func droppedMarker(dropped int64) string {
 // String returns the retained head, a dropped-byte marker if anything was
 // discarded, and the retained tail — reconstructing the exact original
 // content whenever total writes fit within the combined head+tail caps.
-func (sb *syncBuffer) String() string {
+func (sb *SyncBuffer) String() string {
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
 
@@ -196,7 +196,7 @@ func (sb *syncBuffer) String() string {
 // instead of building the (up to head+tail-sized) string just to measure
 // it. The one existing caller (RunAndCapture) only compares this against
 // zero, a comparison this definition preserves exactly.
-func (sb *syncBuffer) Len() int {
+func (sb *SyncBuffer) Len() int {
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
 
@@ -218,8 +218,8 @@ type BackgroundShell struct {
 	WorkingDir  string
 	ctx         context.Context
 	cancel      context.CancelFunc
-	stdout      *syncBuffer
-	stderr      *syncBuffer
+	stdout      *SyncBuffer
+	stderr      *SyncBuffer
 	done        chan struct{}
 	exitErr     error
 	completedAt atomic.Int64
@@ -244,7 +244,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 	bgShell := &BackgroundShell{
 		Command: command, Description: description, WorkingDir: workingDir,
 		Shell: NewShell(&Options{WorkingDir: workingDir, BlockFuncs: blockFuncs}),
-		ctx:   shellCtx, cancel: cancel, stdout: &syncBuffer{}, stderr: &syncBuffer{}, done: make(chan struct{}),
+		ctx:   shellCtx, cancel: cancel, stdout: &SyncBuffer{}, stderr: &SyncBuffer{}, done: make(chan struct{}),
 	}
 
 	m.mu.Lock()

@@ -68,7 +68,13 @@ func (f *filesync) openFile(ctx context.Context, path string) error {
 		return nil
 	}
 	uri := string(protocol.URIFromPath(path))
+	// Version is preset to 1 (didOpen's version) before the entry is
+	// published, not after: a concurrent notifyChange only ever sees this
+	// entry once GetOrSet has published it, so it can never race a
+	// post-hoc Store here and collide with, or overwrite, didOpen's
+	// version.
 	candidate := &OpenFileInfo{URI: protocol.DocumentURI(uri)}
+	candidate.Version.Store(1)
 	info := f.files.GetOrSet(uri, func() *OpenFileInfo { return candidate })
 	if info != candidate {
 		return nil // Already open or being opened by another caller.
@@ -77,7 +83,6 @@ func (f *filesync) openFile(ctx context.Context, path string) error {
 		f.files.Del(uri)
 		return err
 	}
-	info.Version.Store(1)
 	return nil
 }
 

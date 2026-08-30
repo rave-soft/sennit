@@ -11,7 +11,7 @@ import (
 
 func TestSyncBufferUnderHeadCapIsUntruncated(t *testing.T) {
 	t.Parallel()
-	var sb syncBuffer
+	var sb SyncBuffer
 	content := strings.Repeat("x", MaxSyncBufferHead/2)
 	n, err := sb.Write([]byte(content))
 	require.NoError(t, err)
@@ -22,7 +22,7 @@ func TestSyncBufferUnderHeadCapIsUntruncated(t *testing.T) {
 
 func TestSyncBufferOverCapRetainsHeadAndTailWithMarker(t *testing.T) {
 	t.Parallel()
-	var sb syncBuffer
+	var sb SyncBuffer
 
 	// Build content well past both caps, written in chunks so the ring
 	// buffer's wraparound path is exercised.
@@ -68,7 +68,7 @@ func TestSyncBufferJustOverHeadCapReproducesExactly(t *testing.T) {
 		full[i] = byte(i % 251)
 	}
 
-	var sb syncBuffer
+	var sb SyncBuffer
 	n, err := sb.Write(full)
 	require.NoError(t, err)
 	require.Equal(t, len(full), n)
@@ -79,12 +79,12 @@ func TestSyncBufferJustOverHeadCapReproducesExactly(t *testing.T) {
 // TestSyncBufferSmallWriteDoesNotAllocateTailRing pins the fix for the
 // regression where any write, however small, eagerly allocated the 256 KiB
 // tail ring. bash's synchronous path creates a BackgroundShell (two
-// syncBuffers) per invocation, not just for backgrounded commands, so that
+// SyncBuffers) per invocation, not just for backgrounded commands, so that
 // allocation must stay deferred until the stream actually outgrows head.
 func TestSyncBufferSmallWriteDoesNotAllocateTailRing(t *testing.T) {
 	t.Parallel()
 
-	var sb syncBuffer
+	var sb SyncBuffer
 	_, err := sb.Write([]byte("hello"))
 	require.NoError(t, err)
 	require.Nil(t, sb.tail, "tail ring must stay unallocated while the stream fits in head")
@@ -100,7 +100,7 @@ func TestSyncBufferLenMatchesStringLength(t *testing.T) {
 
 	t.Run("no drop", func(t *testing.T) {
 		t.Parallel()
-		var sb syncBuffer
+		var sb SyncBuffer
 		_, err := sb.Write([]byte(strings.Repeat("y", MaxSyncBufferHead+1024)))
 		require.NoError(t, err)
 		require.Equal(t, len(sb.String()), sb.Len())
@@ -108,7 +108,7 @@ func TestSyncBufferLenMatchesStringLength(t *testing.T) {
 
 	t.Run("with drop", func(t *testing.T) {
 		t.Parallel()
-		var sb syncBuffer
+		var sb SyncBuffer
 		_, err := sb.Write([]byte(strings.Repeat("z", 2*(MaxSyncBufferHead+MaxSyncBufferTail))))
 		require.NoError(t, err)
 		require.Equal(t, len(sb.String()), sb.Len())
@@ -124,11 +124,11 @@ func TestSyncBufferChunkedWritesMatchSingleWrite(t *testing.T) {
 		full[i] = byte(i % 251)
 	}
 
-	var whole syncBuffer
+	var whole SyncBuffer
 	_, err := whole.Write(full)
 	require.NoError(t, err)
 
-	var chunked syncBuffer
+	var chunked SyncBuffer
 	const chunk = 97 // deliberately not a multiple of the cap
 	for off := 0; off < len(full); off += chunk {
 		end := min(off+chunk, len(full))
@@ -137,7 +137,7 @@ func TestSyncBufferChunkedWritesMatchSingleWrite(t *testing.T) {
 	}
 
 	// Assert against the source bytes, not only against whole.String():
-	// comparing the two syncBuffers to each other would pass even if both
+	// comparing the two SyncBuffers to each other would pass even if both
 	// were wrong the same way, and the chunked path is the only one that
 	// exercises seeding the tail ring from head at the crossing write.
 	require.Equal(t, string(full), chunked.String())
@@ -147,7 +147,7 @@ func TestSyncBufferChunkedWritesMatchSingleWrite(t *testing.T) {
 func TestSyncBufferConcurrentWriteAndString(t *testing.T) {
 	t.Parallel()
 
-	var sb syncBuffer
+	var sb SyncBuffer
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
@@ -166,7 +166,7 @@ func TestSyncBufferConcurrentWriteAndString(t *testing.T) {
 }
 
 // TestProgressWriterIsBounded guards the streaming capture path against the
-// same unbounded growth syncBuffer was introduced to stop: the progress
+// same unbounded growth SyncBuffer was introduced to stop: the progress
 // callback still sees every byte, but the retained copy is capped.
 func TestProgressWriterIsBounded(t *testing.T) {
 	t.Parallel()

@@ -274,6 +274,47 @@ func TestWorkspaceClients_ScopedToRoot(t *testing.T) {
 	require.Equal(t, "go-lsp", clients[0].GetName())
 }
 
+// TestWorkspaceClients_EarlyExitCountsOnlyStartableServers pins that the
+// walk's early exit compares found servers against the ones actually
+// capable of starting (user-configured, or auto-start candidates whose
+// command is on PATH), not against every server in powernap's registry
+// (dozens, most not installed). Comparing against the full registry made
+// the early exit dead code; miscounting it the other way (e.g. zero) would
+// stop the walk before root is ever examined, breaking discovery entirely
+// — which is exactly what this test would catch.
+func TestWorkspaceClients_EarlyExitCountsOnlyStartableServers(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
+
+	cfg := configtest.NewStore(t, &config.Config{
+		Options: &config.Options{},
+		LSP: config.LSPs{
+			"go-lsp": {
+				Command:   "go-lsp-binary",
+				FileTypes: []string{"go"},
+			},
+		},
+	}, configtest.WithWorkingDir(dir))
+
+	mgr := NewManager(cfg)
+	// Isolate from whatever happens to be installed on this machine: no
+	// auto-start candidate from the default registry should count as
+	// startable, only the user-configured "go-lsp".
+	mgr.lookPath = func(string) (string, error) { return "", errors.New("not found") }
+
+	client := newTestClient()
+	client.name = "go-lsp"
+	client.SetServerState(StateReady)
+	mgr.clients.Set("go-lsp", client)
+
+	clients := mgr.WorkspaceClients(t.Context(), dir)
+
+	require.Len(t, clients, 1, "the user-configured server should still be discovered")
+	require.Equal(t, "go-lsp", clients[0].GetName())
+}
+
 // TestStartServer_StateRaceSafeUnderConcurrentUIReads pins the state
 // race: startServer writes the server state (Starting during Initialize,
 // Ready/Error afterwards) while a UI goroutine polls GetServerState. A

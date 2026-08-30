@@ -188,7 +188,12 @@ func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, 
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
-	var stdout, stderr bytes.Buffer
+	// mvdan.cc/sh does not join `cmd &` before Run returns (see
+	// [shell.RunAndCapture]'s comment for the same issue), so a hook that
+	// backgrounds a job can still be writing after runShell returns. Use
+	// the mutex-protected SyncBuffer instead of a plain bytes.Buffer to
+	// avoid a data race on the reads below.
+	var stdout, stderr shell.SyncBuffer
 	done := make(chan error, 1)
 	go func() {
 		done <- r.runShell(ctx, shell.RunOptions{

@@ -189,22 +189,43 @@ func UncommittedFiles(ctx context.Context, dir string) ([]FileChange, error) {
 	// that case: every file is new, so the by-hand line count below (which
 	// already fires for anything with no diff stats) covers it.
 	if _, err := run(ctx, repo, "rev-parse", "--verify", "-q", "HEAD"); err == nil {
-		numstat, err := run(ctx, repo, "diff", "--numstat", "HEAD", "--")
+		// -z: without it, a quoted path (non-ASCII or containing a special
+		// character) never matches the status map's key, silently falling
+		// back to the by-hand line count below for that file. -z also
+		// changes the rename record shape: "add\tdel\t" (no third field) is
+		// followed by two more NUL-terminated tokens, the old and new path.
+		numstat, err := runRaw(ctx, repo, "diff", "--numstat", "-z", "HEAD", "--")
 		if err != nil {
 			return nil, fmt.Errorf("git: diff stats: %w", err)
 		}
-		for line := range strings.Lines(numstat) {
-			parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "\t", 3)
-			if len(parts) != 3 {
+		tokens := strings.Split(numstat, "\x00")
+		for i := 0; i < len(tokens); i++ {
+			tok := tokens[i]
+			if tok == "" {
 				continue
 			}
-			change, ok := changes[parts[2]]
+			parts := strings.SplitN(tok, "\t", 3)
+			if len(parts) < 2 {
+				continue
+			}
+			path := ""
+			if len(parts) == 3 {
+				path = parts[2]
+			} else if i+2 < len(tokens) {
+				// Rename/copy: this token only carries add/del counts; the
+				// next two NUL-separated tokens are the old and new path.
+				// The map is keyed by the new path, matching how status -z
+				// records a rename above.
+				i += 2
+				path = tokens[i]
+			}
+			change, ok := changes[path]
 			if !ok {
 				continue
 			}
 			change.Additions, _ = strconv.Atoi(parts[0])
 			change.Deletions, _ = strconv.Atoi(parts[1])
-			changes[parts[2]] = change
+			changes[path] = change
 		}
 	}
 

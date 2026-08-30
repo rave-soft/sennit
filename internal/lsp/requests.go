@@ -51,6 +51,13 @@ func (q *requests) Rename(ctx context.Context, filepath string, line, character 
 
 // Hover returns hover information at a file position.
 func (q *requests) Hover(ctx context.Context, filepath string, line, character int) (*protocol.Hover, error) {
+	if err := q.ensureOpen(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	return q.gen().client.RequestHover(ctx, filepath, protocol.Position{Line: uint32(line), Character: uint32(character)}) //nolint:wrapcheck
 }
 

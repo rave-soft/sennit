@@ -371,7 +371,12 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 			found.Append(path)
 		}
 
-		if limit > 0 && found.Len() >= limit {
+		// Stop only once an entry beyond limit has actually been collected
+		// (>, not >=): stopping the instant found.Len() reaches limit can't
+		// distinguish "exactly limit entries total" from "there are more",
+		// and unconditionally reporting SkipAll as truncation below made
+		// the former look truncated too.
+		if limit > 0 && found.Len() > limit {
 			return filepath.SkipAll
 		}
 
@@ -382,5 +387,5 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 	}
 
 	matches, truncated := truncate(slices.Collect(found.Seq()), limit)
-	return matches, truncated || errors.Is(err, filepath.SkipAll), nil
+	return matches, truncated, nil
 }

@@ -306,13 +306,21 @@ func (r *runtime) Shutdown() {
 // against an already-closed process.
 func (r *runtime) restart(
 	diags *diagnosticsStore,
-	prepareFiles func(ctx context.Context, gen *clientGeneration) (commit func(), err error),
+	prepareSync func() func(ctx context.Context, gen *clientGeneration) (commit func(), err error),
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.shutdown {
 		return errClientShutdown
 	}
+
+	// The open-files snapshot must be taken under r.mu, not before it:
+	// snapshotting outside the gate lets two overlapping restarts
+	// interleave so that a file opened between the snapshot and this
+	// lock is silently dropped from the candidate's reopen set (it stays
+	// in f.files, so IsFileOpen reports true, but the new generation
+	// never got its didOpen).
+	prepareFiles := prepareSync()
 
 	oldGen := r.currentGeneration()
 	r.reportState(StateStopped)

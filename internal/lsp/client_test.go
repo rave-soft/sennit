@@ -191,6 +191,34 @@ func TestClient_RestartThenShutdownIsTerminal(t *testing.T) {
 	require.Error(t, newGen.ctx.Err())
 }
 
+// TestRuntime_RestartSnapshotsFilesUnderLock pins that restart takes the
+// open-files snapshot (by calling prepareSync) only after acquiring r.mu,
+// not before. Snapshotting outside the gate let two overlapping restarts
+// interleave so a file opened between the snapshot and the lock was
+// silently dropped from the candidate's reopen set — it stayed in
+// f.files (IsFileOpen kept reporting true) but the new generation never
+// received its didOpen. Using r.mu.TryLock() from inside the prepareSync
+// stub directly observes whether the lock is already held at the moment
+// the snapshot would be taken.
+func TestRuntime_RestartSnapshotsFilesUnderLock(t *testing.T) {
+	client := newFakeRuntimeClient(t, "test-restart-snapshot-lock")
+
+	called := false
+	prepareSync := func() func(ctx context.Context, gen *clientGeneration) (func(), error) {
+		called = true
+		if client.runtime.mu.TryLock() {
+			client.runtime.mu.Unlock()
+			t.Error("prepareSync was invoked before restart acquired r.mu")
+		}
+		return func(ctx context.Context, gen *clientGeneration) (func(), error) {
+			return func() {}, nil
+		}
+	}
+
+	require.NoError(t, client.runtime.restart(client.diagnostics, prepareSync))
+	require.True(t, called, "prepareSync was never invoked")
+}
+
 func newFakeRuntimeClient(t *testing.T, name string) *Client {
 	t.Helper()
 	exe, err := os.Executable()
@@ -1519,67 +1547,69 @@ func TestClient_FailedCandidateCleanupCannotBlockKillOrShutdown(t *testing.T) {
 	lockWaiterDone := make(chan error, 1)
 	restartDone := make(chan error, 1)
 	go func() {
-		restartErr := client.runtime.restart(client.diagnostics, func(ctx context.Context, gen *clientGeneration) (func(), error) {
-			candidate = gen
-			commit, prepareErr := prepare(ctx, gen)
-			if prepareErr != nil {
-				return nil, prepareErr
-			}
-			if notifyErr := gen.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{{
-				URI:  protocol.URIFromPath(dir),
-				Type: protocol.Changed,
-			}}); notifyErr != nil {
-				return nil, notifyErr
-			}
-			// Generous: this waits on a spawned process writing a log
-			// file, which a loaded Windows runner can take seconds to
-			// get to. Nothing is asserted by the wait being short - the
-			// deadline exists only so a server that never confirms
-			// fails with a reason instead of hanging.
-			deadline := time.Now().Add(30 * time.Second)
-			for {
-				contents, readErr := os.ReadFile(logPath)
-				if readErr == nil && strings.Contains(string(contents), " workspace/didChangeWatchedFiles") {
-					break
+		restartErr := client.runtime.restart(client.diagnostics, func() func(ctx context.Context, gen *clientGeneration) (func(), error) {
+			return func(ctx context.Context, gen *clientGeneration) (func(), error) {
+				candidate = gen
+				commit, prepareErr := prepare(ctx, gen)
+				if prepareErr != nil {
+					return nil, prepareErr
 				}
-				if time.Now().After(deadline) {
-					return nil, fmt.Errorf("fake server did not confirm stopped reader: %w", readErr)
+				if notifyErr := gen.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{{
+					URI:  protocol.URIFromPath(dir),
+					Type: protocol.Changed,
+				}}); notifyErr != nil {
+					return nil, notifyErr
 				}
-				time.Sleep(time.Millisecond)
-			}
+				// Generous: this waits on a spawned process writing a log
+				// file, which a loaded Windows runner can take seconds to
+				// get to. Nothing is asserted by the wait being short - the
+				// deadline exists only so a server that never confirms
+				// fails with a reason instead of hanging.
+				deadline := time.Now().Add(30 * time.Second)
+				for {
+					contents, readErr := os.ReadFile(logPath)
+					if readErr == nil && strings.Contains(string(contents), " workspace/didChangeWatchedFiles") {
+						break
+					}
+					if time.Now().After(deadline) {
+						return nil, fmt.Errorf("fake server did not confirm stopped reader: %w", readErr)
+					}
+					time.Sleep(time.Millisecond)
+				}
 
-			largeURI := string(protocol.URIFromPath(filepath.Join(dir, "blocked.go")))
-			go func() {
-				largeSendDone <- gen.client.NotifyDidOpenTextDocument(
-					context.Background(), largeURI, "go", 1, strings.Repeat("x", 8<<20),
-				)
-			}()
-			select {
-			case sendErr := <-largeSendDone:
-				// Whether the candidate process is still alive is the
-				// whole question here and the error alone does not say:
-				// "connection is closed" reads the same whether the send
-				// raced a transport we closed or whether the fake server
-				// died and took its end of the pipe with it. The wedge
-				// needs a live process that has stopped reading, so
-				// record which one happened.
-				return nil, fmt.Errorf("large send completed before process destruction (candidate still running: %t): %w",
-					gen.client.IsRunning(), sendErr)
-			case <-time.After(2 * time.Second):
+				largeURI := string(protocol.URIFromPath(filepath.Join(dir, "blocked.go")))
+				go func() {
+					largeSendDone <- gen.client.NotifyDidOpenTextDocument(
+						context.Background(), largeURI, "go", 1, strings.Repeat("x", 8<<20),
+					)
+				}()
+				select {
+				case sendErr := <-largeSendDone:
+					// Whether the candidate process is still alive is the
+					// whole question here and the error alone does not say:
+					// "connection is closed" reads the same whether the send
+					// raced a transport we closed or whether the fake server
+					// died and took its end of the pipe with it. The wedge
+					// needs a live process that has stopped reading, so
+					// record which one happened.
+					return nil, fmt.Errorf("large send completed before process destruction (candidate still running: %t): %w",
+						gen.client.IsRunning(), sendErr)
+				case <-time.After(2 * time.Second):
+				}
+				lockWaiterStarted := make(chan struct{})
+				go func() {
+					close(lockWaiterStarted)
+					lockWaiterDone <- gen.client.NotifyDidCloseTextDocument(context.Background(), largeURI)
+				}()
+				<-lockWaiterStarted
+				select {
+				case sendErr := <-lockWaiterDone:
+					return nil, fmt.Errorf("send-lock waiter completed while transport was blocked: %w", sendErr)
+				case <-time.After(time.Second):
+				}
+				close(blockedSend)
+				return commit, fmt.Errorf("force candidate cleanup after confirmed blocked send")
 			}
-			lockWaiterStarted := make(chan struct{})
-			go func() {
-				close(lockWaiterStarted)
-				lockWaiterDone <- gen.client.NotifyDidCloseTextDocument(context.Background(), largeURI)
-			}()
-			<-lockWaiterStarted
-			select {
-			case sendErr := <-lockWaiterDone:
-				return nil, fmt.Errorf("send-lock waiter completed while transport was blocked: %w", sendErr)
-			case <-time.After(time.Second):
-			}
-			close(blockedSend)
-			return commit, fmt.Errorf("force candidate cleanup after confirmed blocked send")
 		})
 		restartDone <- restartErr
 	}()

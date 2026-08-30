@@ -130,9 +130,9 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 	// interp does not wait for background jobs (`cmd &`) started inside
 	// Command before Run returns, so those goroutines can still be
 	// writing after this function reads the buffers below. Use the
-	// mutex-protected syncBuffer (shared with [BackgroundShell]) instead
+	// mutex-protected SyncBuffer (shared with [BackgroundShell]) instead
 	// of a plain bytes.Buffer to avoid a data race.
-	var stdout, stderr syncBuffer
+	var stdout, stderr SyncBuffer
 	opts.Stdout = &stdout
 	opts.Stderr = &stderr
 

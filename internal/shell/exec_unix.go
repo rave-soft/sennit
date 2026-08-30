@@ -59,6 +59,13 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 			Stdin:  hc.Stdin,
 			Stdout: hc.Stdout,
 			Stderr: hc.Stderr,
+			// A grandchild that re-setsid/setpgid's itself (a daemonizing
+			// server, `ssh -f`, a double-forker) survives the -pid kill
+			// below and can hold the stdout/stderr pipes open forever,
+			// which would otherwise hang Wait indefinitely. WaitDelay
+			// bounds that: once Wait observes the process exit, it force-
+			// closes the pipes after this long instead of waiting on EOF.
+			WaitDelay: killTimeout,
 		}
 		isolateProcess(&cmd)
 
@@ -81,6 +88,11 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 					}
 					_ = syscall.Kill(-pid, syscall.SIGKILL)
 					return
+				}
+				select {
+				case <-reaped:
+					return
+				default:
 				}
 				// Signal the child's process group (negative PID) so
 				// grandchildren also receive it.

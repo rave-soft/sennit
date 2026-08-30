@@ -243,6 +243,18 @@ func TestApplyTextEdit_UTF16(t *testing.T) {
 			},
 			expected: []string{"hi👋🏽later"},
 		},
+		{
+			name:  "delete entire line content leaves an empty line, not a removed line",
+			lines: []string{"a", "foo", "b"},
+			edit: protocol.TextEdit{
+				Range: protocol.Range{
+					Start: protocol.Position{Line: 1, Character: 0},
+					End:   protocol.Position{Line: 1, Character: 3},
+				},
+				NewText: "",
+			},
+			expected: []string{"a", "", "b"},
+		},
 	}
 
 	for _, tt := range tests {

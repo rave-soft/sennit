@@ -140,9 +140,10 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 
 	// Handle the edit
 	if edit.NewText == "" {
-		if prefix+suffix != "" {
-			result = append(result, prefix+suffix)
-		}
+		// Always emit the merged line, even when prefix+suffix is empty:
+		// dropping it here would delete the line itself instead of leaving
+		// an empty one, shifting every subsequent line.
+		result = append(result, prefix+suffix)
 	} else {
 		// Split new text into lines, being careful not to add extra newlines
 		// newLines := strings.Split(strings.TrimRight(edit.NewText, "\n"), "\n")

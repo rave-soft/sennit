@@ -81,7 +81,7 @@ SELECT
 FROM sessions
 WHERE created_at >= ? AND parent_session_id IS NULL
 GROUP BY project_path
-ORDER BY (prompt_tokens + completion_tokens) DESC;
+ORDER BY (COALESCE(SUM(prompt_tokens), 0) + COALESCE(SUM(completion_tokens), 0)) DESC;
 
 -- The queries below extend the raw-rows-for-a-window shape above to the
 -- two scopes `sennit stat` never needed but the TUI's /stats screen does:

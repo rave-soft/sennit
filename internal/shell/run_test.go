@@ -357,7 +357,7 @@ func TestWithoutHerdrEnv_SliceIndependence(t *testing.T) {
 // goroutine can still be writing to the output buffer after RunAndCapture
 // has already read it. Run with -race; it fails against a plain
 // bytes.Buffer and passes once stdout/stderr use the mutex-protected
-// syncBuffer.
+// SyncBuffer.
 func TestRunAndCapture_BackgroundJobRace(t *testing.T) {
 	result, err := RunAndCapture(t.Context(), RunOptions{
 		Command: "(sleep 0.05; echo bg) & echo fg",

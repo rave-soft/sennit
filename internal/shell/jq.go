@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/itchyny/gojq"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"mvdan.cc/sh/v3/interp"
 )
 
@@ -146,8 +147,13 @@ func handleJQ(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return interp.ExitStatus(3)
 	}
 
+	// Match every other handler (dispatch.go, exec_unix.go) in reading the
+	// interpreter's own cwd/env rather than the Sennit process's: a shell
+	// whose WorkingDir/Env has diverged (e.g. after `cd` or an inline
+	// assignment) must see jq behave the same way as every other command.
+	hc := interp.HandlerCtx(ctx)
 	opts := []gojq.CompilerOption{
-		gojq.WithEnvironLoader(os.Environ),
+		gojq.WithEnvironLoader(func() []string { return execEnvList(hc.Env) }),
 	}
 	if len(argNames) > 0 {
 		opts = append(opts, gojq.WithVariables(argNames))
@@ -160,7 +166,7 @@ func handleJQ(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	}
 
 	// Build input values.
-	inputs, err := readInputs(ctx, stdin, fileArgs, nullInput, rawInput, slurp)
+	inputs, err := readInputs(ctx, hc.Dir, stdin, fileArgs, nullInput, rawInput, slurp)
 	if err != nil {
 		// Prefer surfacing ctx cancellation verbatim so timeouts are
 		// distinguishable from user input errors.
@@ -220,7 +226,7 @@ func handleJQ(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 // still outlast ctx; the outer abandon-goroutine path in the hook
 // runner (internal/hooks/runner.go) is the authoritative enforcer for
 // that case.
-func readInputs(ctx context.Context, stdin io.Reader, files []string, nullInput, rawInput, slurp bool) ([]any, error) {
+func readInputs(ctx context.Context, dir string, stdin io.Reader, files []string, nullInput, rawInput, slurp bool) ([]any, error) {
 	if nullInput {
 		return []any{nil}, nil
 	}
@@ -228,7 +234,7 @@ func readInputs(ctx context.Context, stdin io.Reader, files []string, nullInput,
 	var readers []io.Reader
 	if len(files) > 0 {
 		for _, f := range files {
-			file, err := os.Open(f)
+			file, err := os.Open(filepathext.SmartJoin(dir, f))
 			if err != nil {
 				return nil, err
 			}

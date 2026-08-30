@@ -5,11 +5,54 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/interp"
+	"mvdan.cc/sh/v3/syntax"
 )
+
+// handlerCtx returns a context carrying a real interp.HandlerContext (Dir
+// set to dir, env inherited from the process), the same way builtinHandler
+// in run.go hands one to every builtin. handleJQ reads its cwd/env through
+// interp.HandlerCtx, which panics on a bare context, so any test that calls
+// handleJQ directly (rather than through [Run]) needs one of these — a
+// trivial script triggers the exec handler exactly once, which is enough to
+// capture the ctx it was given.
+func handlerCtx(t *testing.T, dir string) context.Context {
+	t.Helper()
+
+	var captured context.Context
+	runner, err := interp.New(
+		interp.Dir(dir),
+		interp.Env(expand.ListEnviron(os.Environ()...)),
+		interp.ExecHandlers(func(interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+			return func(ctx context.Context, args []string) error {
+				captured = ctx
+				return nil
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatalf("interp.New: %v", err)
+	}
+	line, err := syntax.NewParser().Parse(strings.NewReader("__handler_ctx_probe__"), "")
+	if err != nil {
+		t.Fatalf("parse probe command: %v", err)
+	}
+	if err := runner.Run(t.Context(), line); err != nil {
+		t.Fatalf("run probe command: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("exec handler was never invoked; no HandlerContext captured")
+	}
+	return captured
+}
 
 // TestJQ_CtxCancel verifies that handleJQ polls ctx during iteration and
 // returns ctx.Err() (not an interp.ExitStatus) when the context is
@@ -24,7 +67,8 @@ func TestJQ_CtxCancel(t *testing.T) {
 	const filter = "range(10000000)"
 	stdin := strings.NewReader("null\n")
 
-	ctx, cancel := context.WithCancel(t.Context())
+	base := handlerCtx(t, t.TempDir())
+	ctx, cancel := context.WithCancel(base)
 	// Cancel almost immediately so we catch the next iteration check.
 	cancel()
 
@@ -44,7 +88,8 @@ func TestJQ_CtxCancel(t *testing.T) {
 func TestJQ_CtxCancel_DuringFilter(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	base := handlerCtx(t, t.TempDir())
+	ctx, cancel := context.WithTimeout(base, 50*time.Millisecond)
 	defer cancel()
 
 	// 100M values; without ctx polling this would take many seconds to
@@ -121,7 +166,8 @@ func TestJQ_CtxCancel_MidReadAll(t *testing.T) {
 		chunkDelay: chunkDelay,
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
+	base := handlerCtx(t, t.TempDir())
+	ctx, cancel := context.WithCancel(base)
 	defer cancel()
 
 	// Cancel after enough time that several Read calls have completed
@@ -180,7 +226,8 @@ func (r failOnReadReader) Read(p []byte) (int, error) {
 func TestJQ_CtxCancel_PreCancel(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(t.Context())
+	base := handlerCtx(t, t.TempDir())
+	ctx, cancel := context.WithCancel(base)
 	cancel()
 
 	err := handleJQ(ctx, []string{"jq", "-R", "."},
@@ -199,7 +246,7 @@ func TestJQ_Success(t *testing.T) {
 
 	var stdout bytes.Buffer
 	err := handleJQ(
-		t.Context(),
+		handlerCtx(t, t.TempDir()),
 		[]string{"jq", "-c", ".a"},
 		strings.NewReader(`{"a":1}`),
 		&stdout, io.Discard,
@@ -221,7 +268,7 @@ func TestJQ_UnknownFlagBeforeFilter(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := handleJQ(
-		t.Context(),
+		handlerCtx(t, t.TempDir()),
 		[]string{"jq", "-x", ".a"},
 		strings.NewReader(`{"a":1}`),
 		&stdout, &stderr,
@@ -258,5 +305,52 @@ func TestJQRawInputDropsTheTrailingNewline(t *testing.T) {
 	want := []string{`"a"`, `"b"`, `"c"`}
 	if !slices.Equal(got, want) {
 		t.Fatalf("jq -R over three lines must yield three strings, got %q", got)
+	}
+}
+
+// TestJQ_UsesInterpreterCwdAndEnv verifies that jq resolves relative file
+// arguments against the interpreter's cwd (not the Sennit process cwd) and
+// that $ENV sees the interpreter's environment, not os.Environ(). Both
+// previously came from the process directly (os.Open, os.Environ), so a
+// shell whose WorkingDir/Env had diverged (e.g. after `cd` inside the
+// script) got the wrong file or the wrong environment.
+func TestJQ_UsesInterpreterCwdAndEnv(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "data.json"), []byte(`{"name":"pkg"}`), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		// jq's own cwd (dir) does not have data.json; only the interpreter's
+		// cwd after `cd sub` does. This only succeeds if jq resolves the
+		// relative path against hc.Dir, not the process cwd.
+		Command: `cd sub && jq .name data.json`,
+		Cwd:     dir,
+		Stdout:  &out,
+	})
+	if err != nil {
+		t.Fatalf("jq over a relative path after cd must succeed: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != `"pkg"` {
+		t.Fatalf("jq .name data.json = %q, want %q", got, `"pkg"`)
+	}
+
+	out.Reset()
+	err = Run(t.Context(), RunOptions{
+		Command: `FOO=1 jq -n '$ENV.FOO'`,
+		Cwd:     dir,
+		Stdout:  &out,
+	})
+	if err != nil {
+		t.Fatalf("jq -n over $ENV must succeed: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != `"1"` {
+		t.Fatalf(`jq -n '$ENV.FOO' = %q, want %q`, got, `"1"`)
 	}
 }

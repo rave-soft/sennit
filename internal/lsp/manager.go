@@ -153,9 +153,39 @@ func (s *Manager) WorkspaceClients(ctx context.Context, root string) []*Client {
 		return nil
 	}
 	servers := s.manager.GetServers()
+
+	// GetServers returns every server powernap knows (dozens, most not
+	// installed), so comparing found against len(servers) never triggers
+	// and the walk covers the whole tree regardless of root's size.
+	// Compare against the subset actually capable of starting instead:
+	// user-configured servers, plus auto-start candidates whose command
+	// is on PATH.
+	startable := 0
+	for name, server := range servers {
+		if s.isUserConfigured(name) {
+			startable++
+			continue
+		}
+		if skipAutoStartCommands[server.Command] {
+			continue
+		}
+		if _, err := s.lookPath(server.Command); err == nil {
+			startable++
+		}
+	}
+
 	found := make(map[string]bool)
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || len(found) == len(servers) {
+		if err != nil {
+			// A single unreadable file must not drop the rest of its
+			// directory; only bail out on the whole subtree when the
+			// entry itself is (or might be) a directory we can't read.
+			if d == nil || d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(found) == startable {
 			return filepath.SkipDir
 		}
 		if d.IsDir() {

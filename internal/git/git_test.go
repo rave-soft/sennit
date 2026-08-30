@@ -176,6 +176,34 @@ func TestUncommittedFiles(t *testing.T) {
 	}, files)
 }
 
+// TestUncommittedFiles_QuotedPath pins that a modified file whose name git
+// would otherwise quote in plain --numstat output (non-ASCII here) still
+// gets real add/delete counts from the numstat step, instead of silently
+// falling back to the by-hand whole-file line count. Without -z, git
+// quotes such paths (e.g. octal-escaping non-ASCII bytes) in numstat
+// output, which then never matches the status map's key (always raw
+// UTF-8), so the diff-stats step no-ops for that file.
+func TestUncommittedFiles_QuotedPath(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	const name = "café.txt"
+	writeFile(t, repo, name, "one\ntwo\n")
+	_, err := run(ctx, repo, "add", "-A")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "commit", "-m", "add "+name)
+	require.NoError(t, err)
+
+	writeFile(t, repo, name, "one\ntwo\nthree\n")
+
+	files, err := UncommittedFiles(ctx, repo)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, fsext.Canonical(filepath.Join(repo, name)), fsext.Canonical(files[0].Path))
+	require.Equal(t, 1, files[0].Additions, "numstat must match the quoted path and report the real line delta")
+	require.Equal(t, 0, files[0].Deletions)
+}
+
 // TestUncommittedFiles_UnbornHEAD guards a repo with no commits yet: HEAD
 // doesn't resolve to anything, so `git diff HEAD` fails outright and used
 // to make the whole call error out instead of just reporting every file as

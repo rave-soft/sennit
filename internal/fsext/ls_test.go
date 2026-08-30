@@ -51,6 +51,16 @@ func TestListDirectory(t *testing.T) {
 		require.True(t, truncated)
 		require.Len(t, files, 2)
 	})
+	// "no limit" above has exactly 3 matches; a limit of exactly 3 must not
+	// be reported as truncated (previously the walk stopped the instant it
+	// collected the limit-th entry, which couldn't distinguish "exactly
+	// limit entries total" from "there are more").
+	t.Run("limit equal to total count", func(t *testing.T) {
+		files, truncated, err := ListDirectory(tmp, nil, -1, 3)
+		require.NoError(t, err)
+		require.False(t, truncated, "limit exactly matching the total entry count must not report truncation")
+		require.Len(t, files, 3)
+	})
 }
 
 // TestListDirectorySkipsMergedFastIgnoreDirs pins a deliberate behavior
