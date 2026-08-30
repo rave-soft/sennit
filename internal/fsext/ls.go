@@ -205,13 +205,16 @@ func matchesFastIgnore(base string, isDir bool, ignorePatterns []string) bool {
 func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, isDir bool) bool {
 	base := filepath.Base(path)
 
-	if matchesFastIgnore(base, isDir, ignorePatterns) {
-		return true
-	}
-
-	// Don't apply gitignore rules to the root directory itself.
+	// Don't apply ignore rules to the root directory itself — including the
+	// fast-ignore set. A walk rooted at "vendor" (or "dist", "bin", etc.)
+	// was explicitly asked for by name; the ignore set exists to keep such
+	// directories out of *recursive* results, not to make them unlistable.
 	if path == dl.rootPath {
 		return false
+	}
+
+	if matchesFastIgnore(base, isDir, ignorePatterns) {
+		return true
 	}
 
 	relPath, err := filepath.Rel(dl.rootPath, path)
@@ -318,11 +321,13 @@ func (s *directoryVisitState) enter(dir string) {
 
 func (s *directoryVisitState) shouldIgnore(path string, ignorePatterns []string, isDir bool) bool {
 	base := filepath.Base(path)
-	if matchesFastIgnore(base, isDir, ignorePatterns) {
-		return true
-	}
+	// Same root exemption as directoryLister.shouldIgnore: keep this ahead
+	// of matchesFastIgnore or a walk rooted at e.g. "vendor" skips itself.
 	if path == s.rootPath {
 		return false
+	}
+	if matchesFastIgnore(base, isDir, ignorePatterns) {
+		return true
 	}
 	relPath, err := filepath.Rel(s.rootPath, path)
 	if err != nil {

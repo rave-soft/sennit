@@ -191,6 +191,46 @@ func TestListDirectory_SymlinkLoopDoesNotHang(t *testing.T) {
 	}
 }
 
+// TestListDirectory_RootNamedLikeFastIgnoreDir pins that a walk root whose
+// own basename is in fastIgnoreDirs (e.g. "vendor", "dist") still lists its
+// contents: the ignore set exists to keep such directories out of
+// *recursive* results, not to make them unlistable when asked for by name.
+// Exercises both directoryLister.shouldIgnore (via ListDirectory) and
+// directoryVisitState.shouldIgnore (via VisitDirectory), and confirms a
+// recursive listing from the parent still omits the directory entirely.
+func TestListDirectory_RootNamedLikeFastIgnoreDir(t *testing.T) {
+	for _, name := range []string{"vendor", "dist"} {
+		t.Run(name, func(t *testing.T) {
+			tmp := t.TempDir()
+			target := filepath.Join(tmp, name)
+			require.NoError(t, os.MkdirAll(target, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(target, "file.txt"), []byte("x"), 0o644))
+
+			// ListDirectory (directoryLister.shouldIgnore) rooted directly
+			// at the ignore-named directory must return its entries.
+			files, truncated, err := ListDirectory(target, nil, -1, -1)
+			require.NoError(t, err)
+			require.False(t, truncated)
+			require.Equal(t, []string{"file.txt"}, relPaths(t, files, target))
+
+			// VisitDirectory (directoryVisitState.shouldIgnore) rooted the
+			// same way must also see the entry.
+			var visited []string
+			require.NoError(t, VisitDirectory(target, nil, -1, func(p string) {
+				visited = append(visited, p)
+			}))
+			require.Equal(t, []string{filepath.Join(target, "file.txt")}, visited)
+
+			// Recursively listing from the parent must still omit the
+			// directory's contents — the fast-ignore set still applies to
+			// it as a descendant.
+			parentFiles, _, err := ListDirectory(tmp, nil, -1, -1)
+			require.NoError(t, err)
+			require.Empty(t, parentFiles)
+		})
+	}
+}
+
 func relPaths(tb testing.TB, in []string, base string) []string {
 	tb.Helper()
 	out := make([]string, 0, len(in))
