@@ -31,9 +31,13 @@ var builtinSkillsCache struct {
 	skills []*skills.Skill
 }
 
-func cachedBuiltinSkills() []*skills.Skill {
+// cachedBuiltinSkills reads the shipped skills once per process. The read
+// itself is the workspace's — discovery is not the panel's job — and the
+// cache stays here because it exists to keep a render path from repeating
+// the call, which is a UI concern.
+func cachedBuiltinSkills(com *common.Common) []*skills.Skill {
 	builtinSkillsCache.once.Do(func() {
-		builtinSkillsCache.skills = skills.DiscoverBuiltin()
+		builtinSkillsCache.skills = com.Workspace.BuiltinSkills()
 	})
 	return builtinSkillsCache.skills
 }
@@ -106,7 +110,7 @@ func (is *integrationsState) skillStatusItems(com *common.Common) []skillStatusI
 	// memoized slice, and this runs from a render path — sorting it in
 	// place would mutate shared state every other reader of the cache
 	// also sees.
-	builtin := slices.Clone(cachedBuiltinSkills())
+	builtin := slices.Clone(cachedBuiltinSkills(com))
 	slices.SortStableFunc(builtin, func(a, b *skills.Skill) int {
 		return strings.Compare(a.Name, b.Name)
 	})

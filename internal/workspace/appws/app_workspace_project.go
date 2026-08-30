@@ -52,3 +52,18 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 	mgr := w.app.Skills
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
+
+// ConfigProblems implements Workspace.
+func (w *AppWorkspace) ConfigProblems() []config.Problem {
+	return config.Doctor(w.store.Config())
+}
+
+// SkillStates implements Workspace.
+func (w *AppWorkspace) SkillStates() []*skills.SkillState {
+	return skills.GetLatestStates()
+}
+
+// BuiltinSkills implements Workspace.
+func (w *AppWorkspace) BuiltinSkills() []*skills.Skill {
+	return skills.DiscoverBuiltin()
+}

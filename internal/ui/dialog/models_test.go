@@ -7,6 +7,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -26,6 +27,12 @@ type modelsTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w modelsTestWorkspace) KnownProviders() []catwalk.Provider { return config.Providers(w.cfg) }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w modelsTestWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w modelsTestWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w modelsTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (w *modelsTestWorkspace) SupportsThreads() bool { return false }
 

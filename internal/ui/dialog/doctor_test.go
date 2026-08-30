@@ -9,6 +9,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -24,8 +25,12 @@ type doctorTestWorkspace struct {
 	states map[string]workspace.MCPClientInfo
 }
 
-// KnownProviders mirrors what the UI used to compute for itself:
-// the embedded catalog for this fake's config.
+// The three below mirror what the dialog used to run for itself, so these
+// tests still exercise the real diagnostic and the real catalog against
+// their own config. SkillStates is empty because no test here has a skill
+// catalog to report on.
+func (w doctorTestWorkspace) ConfigProblems() []config.Problem   { return config.Doctor(w.cfg) }
+func (w doctorTestWorkspace) SkillStates() []*skills.SkillState  { return nil }
 func (w doctorTestWorkspace) KnownProviders() []catwalk.Provider { return config.Providers(w.cfg) }
 
 func (w *doctorTestWorkspace) SupportsThreads() bool { return false }

@@ -672,6 +672,18 @@ func (w *readOnlyWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEnt
 	return w.ws.ListSkills(ctx)
 }
 
+func (w *readOnlyWorkspace) ConfigProblems() []config.Problem {
+	return w.ws.ConfigProblems()
+}
+
+func (w *readOnlyWorkspace) SkillStates() []*skills.SkillState {
+	return w.ws.SkillStates()
+}
+
+func (w *readOnlyWorkspace) BuiltinSkills() []*skills.Skill {
+	return w.ws.BuiltinSkills()
+}
+
 func (w *readOnlyWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {
 	return w.ws.ListCustomCommands(ctx)
 }

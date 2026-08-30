@@ -7,8 +7,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -228,6 +230,12 @@ type drillInWorkspace struct {
 
 // KnownProviders: no test here renders a provider list.
 func (w drillInWorkspace) KnownProviders() []catwalk.Provider { return nil }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w drillInWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w drillInWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w drillInWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (drillInWorkspace) SupportsThreads() bool { return false }
 

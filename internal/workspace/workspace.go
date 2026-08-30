@@ -399,6 +399,16 @@ type ProjectLifecycle interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	// ConfigProblems runs the config diagnostic and returns what it found.
+	// It answers from the config alone — see internal/doctor for the
+	// problems that depend on the machine or on discovery, which the
+	// caller merges in.
+	ConfigProblems() []config.Problem
+	// SkillStates is the outcome of the last skill discovery: what loaded
+	// and what failed to.
+	SkillStates() []*skills.SkillState
+	// BuiltinSkills are the skills shipped with the binary.
+	BuiltinSkills() []*skills.Skill
 	// ListCustomCommands returns everything the command palette offers
 	// under "user commands": the markdown commands found on disk, plus
 	// the user-invocable skills, already merged.

@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,12 @@ type rootTestWorkspace struct {
 
 // KnownProviders: no test here renders a provider list.
 func (w rootTestWorkspace) KnownProviders() []catwalk.Provider { return nil }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w rootTestWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w rootTestWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w rootTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (w *rootTestWorkspace) Config() *config.Config {
 	providers := csync.NewMap[string, config.ProviderConfig]()

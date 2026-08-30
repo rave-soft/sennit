@@ -12,7 +12,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/doctor"
-	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -239,9 +238,9 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 // environmentProblems is injected so tests can drive the dialog without
 // the real environment probe.
 func doctorProblemsWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) []config.Problem {
-	problems := config.Doctor(com.Config())
+	problems := com.Workspace.ConfigProblems()
 	problems = append(problems, environmentProblems()...)
-	problems = append(problems, doctor.SkillProblems(skills.GetLatestStates())...)
+	problems = append(problems, doctor.SkillProblems(com.Workspace.SkillStates())...)
 	// Sorted, because map iteration is random and this list is rendered:
 	// the MCP problems shuffled on every open, so the row under the
 	// cursor was a different server each time.

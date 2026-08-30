@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -144,6 +145,12 @@ type fileHistoryWorkspace struct {
 
 // KnownProviders: no test here renders a provider list.
 func (w fileHistoryWorkspace) KnownProviders() []catwalk.Provider { return nil }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w fileHistoryWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w fileHistoryWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w fileHistoryWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (fileHistoryWorkspace) PrepareSessionChanges(context.Context, string) ([]workspace.SessionFile, error) {
 	return nil, nil

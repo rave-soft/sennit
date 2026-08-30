@@ -9,6 +9,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -25,6 +26,12 @@ type themeTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w themeTestWorkspace) KnownProviders() []catwalk.Provider { return config.Providers(w.cfg) }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w themeTestWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w themeTestWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w themeTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (w *themeTestWorkspace) Config() *config.Config { return w.cfg }
 

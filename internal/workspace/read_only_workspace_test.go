@@ -593,6 +593,21 @@ func (s *stubWorkspace) RefreshDockerMCPAvailability() bool {
 	return false
 }
 
+func (s *stubWorkspace) ConfigProblems() []config.Problem {
+	s.track("ConfigProblems")
+	return nil
+}
+
+func (s *stubWorkspace) SkillStates() []*skills.SkillState {
+	s.track("SkillStates")
+	return nil
+}
+
+func (s *stubWorkspace) BuiltinSkills() []*skills.Skill {
+	s.track("BuiltinSkills")
+	return nil
+}
+
 func (s *stubWorkspace) KnownProviders() []catwalk.Provider {
 	s.track("KnownProviders")
 	return nil

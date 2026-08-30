@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
@@ -30,6 +31,12 @@ type slashCommandsTestWorkspace struct {
 func (w slashCommandsTestWorkspace) KnownProviders() []catwalk.Provider {
 	return config.Providers(w.cfg)
 }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w slashCommandsTestWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w slashCommandsTestWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w slashCommandsTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (w *slashCommandsTestWorkspace) SupportsThreads() bool { return false }
 

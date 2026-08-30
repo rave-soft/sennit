@@ -114,7 +114,14 @@ type cmdDrivingWorkspace struct {
 }
 
 // KnownProviders mirrors what the UI used to compute for itself: the
-// embedded catalog for this fake's config.
+// embedded catalog for this fake's config. BuiltinSkills likewise ships
+// what the binary ships, since the skills panel renders it.
+//
+// ConfigProblems and SkillStates are empty: these tests drive commands,
+// not the diagnostics behind them.
+func (w cmdDrivingWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w cmdDrivingWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w cmdDrivingWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 func (w *cmdDrivingWorkspace) KnownProviders() []catwalk.Provider {
 	return config.Providers(w.Config())
 }

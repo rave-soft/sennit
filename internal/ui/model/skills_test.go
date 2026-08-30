@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	uistyles "github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,12 +62,20 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 	require.True(t, hasBuiltin)
 }
 
+// builtinSkillsWorkspace answers BuiltinSkills with what the binary
+// ships, which is what the UI used to read directly.
+type builtinSkillsWorkspace struct {
+	workspace.Workspace
+}
+
+func (builtinSkillsWorkspace) BuiltinSkills() []*skills.Skill { return skills.DiscoverBuiltin() }
+
 // TestSkillStatusItemsDoesNotMutateBuiltinCache covers a regression:
 // skillStatusItems used to sort the process-global builtinSkillsCache.skills
 // slice in place. It is not parallel — it directly manipulates that shared
 // global, which would race with any other test reading it concurrently.
 func TestSkillStatusItemsDoesNotMutateBuiltinCache(t *testing.T) {
-	builtin := cachedBuiltinSkills()
+	builtin := cachedBuiltinSkills(&common.Common{Workspace: builtinSkillsWorkspace{}})
 	require.GreaterOrEqual(t, len(builtin), 2, "need at least two builtin skills for a reversal to be observable")
 
 	// Force a specific, guaranteed out-of-name-order arrangement so a

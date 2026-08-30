@@ -330,7 +330,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		},
 		integrationsState: integrationsState{
 			mcpStates:   make(map[string]workspace.MCPClientInfo),
-			skillStates: skills.GetLatestStates(),
+			skillStates: com.Workspace.SkillStates(),
 		},
 		notifyState: notifyState{
 			notifyBackend:       notification.NoopBackend{},
@@ -497,7 +497,7 @@ func (m *UI) checkConfigProblems() tea.Cmd {
 	if m.state == uiOnboarding {
 		return nil
 	}
-	n := len(config.Doctor(m.com.Config()))
+	n := len(m.com.Workspace.ConfigProblems())
 	if n == 0 {
 		return nil
 	}

@@ -11,6 +11,8 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/commands"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -74,6 +76,12 @@ type dockerProbeWorkspace struct {
 
 // KnownProviders: no test here renders a provider list.
 func (w dockerProbeWorkspace) KnownProviders() []catwalk.Provider { return nil }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w dockerProbeWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w dockerProbeWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w dockerProbeWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (w *dockerProbeWorkspace) RefreshDockerMCPAvailability() bool { return w.available }
 

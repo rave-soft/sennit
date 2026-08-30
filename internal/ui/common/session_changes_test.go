@@ -8,6 +8,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +20,14 @@ type attachedSessionChangesWorkspace struct {
 
 // KnownProviders: no test here renders a provider list.
 func (w attachedSessionChangesWorkspace) KnownProviders() []catwalk.Provider { return nil }
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w attachedSessionChangesWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w attachedSessionChangesWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w attachedSessionChangesWorkspace) BuiltinSkills() []*skills.Skill {
+	return skills.DiscoverBuiltin()
+}
 
 func (w *attachedSessionChangesWorkspace) Config() *config.Config {
 	return &config.Config{}

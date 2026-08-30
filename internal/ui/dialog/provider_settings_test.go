@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -25,6 +26,14 @@ type providerSettingsTestWorkspace struct {
 // the embedded catalog for this fake's config.
 func (w providerSettingsTestWorkspace) KnownProviders() []catwalk.Provider {
 	return config.Providers(w.cfg)
+}
+
+// SkillStates, BuiltinSkills: the skills panel reads these; no test
+// here has a catalog beyond what the binary ships.
+func (w providerSettingsTestWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w providerSettingsTestWorkspace) ConfigProblems() []config.Problem  { return nil }
+func (w providerSettingsTestWorkspace) BuiltinSkills() []*skills.Skill {
+	return skills.DiscoverBuiltin()
 }
 
 func (w *providerSettingsTestWorkspace) Config() *config.Config { return w.cfg }
