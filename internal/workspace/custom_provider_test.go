@@ -106,7 +106,9 @@ func (a *testConfigAccessor) SetProviderProxy(providerID, proxy string) error {
 
 func (a *testConfigAccessor) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
-	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID)
+	// A test accessor never fetches: no provider in these tests reports
+	// usage, so the fetcher is never reached.
+	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
 }
 
 func (a *testConfigAccessor) SetConfigField(scope config.Scope, key string, value any) error {

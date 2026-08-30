@@ -208,26 +208,23 @@ func SetProviderProxy(store *ConfigStore, accStore accounts.Store, providerID, p
 // concurrent requests without a cap.
 const refreshAccountLimitsConcurrency = 4
 
-// accountUsageFetcher matches codex.FetchUsage's signature. RefreshAccountLimits
-// takes it as a parameter (rather than calling codex.FetchUsage directly)
-// so a test can substitute a fake and exercise the concurrency/partial-
-// failure behavior without a real HTTP round trip; production always calls
-// through refreshAccountLimits with codex.FetchUsage itself.
-type accountUsageFetcher func(ctx context.Context, proxyURL, accessToken, accountID string) (codex.Usage, bool, error)
+// AccountUsageFetcher fetches one account's current rate-limit snapshot.
+// It reports (Usage{}, false, nil) when the provider answered without usage
+// headers, which is a normal outcome and not an error.
+//
+// The fetcher is a parameter rather than a package-level call so this file
+// does not have to know which provider reports usage or how. Today that is
+// Codex, and the wiring lives in internal/workspace/appws where the sign-in
+// packages already are: config describes accounts, and reaching a vendor's
+// HTTP endpoint from here would put a browser OAuth flow in the dependency
+// cone of a package that nearly everything imports.
+type AccountUsageFetcher func(ctx context.Context, proxyURL, accessToken, accountID string) (accounts.Usage, bool, error)
 
 // RefreshAccountLimits fetches a fresh rate-limit snapshot for every OAuth
 // account of providerID and persists it into accStore, then returns the
 // provider's accounts reflecting whatever was learned. Providers that
 // don't report usage (accounts.CapabilitiesOf(providerID).Usage false)
 // are a no-op: their accounts are returned unchanged.
-//
-// See refreshAccountLimits for the concurrency and failure-handling
-// contract; this just wires it to the real codex.FetchUsage.
-func RefreshAccountLimits(ctx context.Context, store *ConfigStore, accStore accounts.Store, providerID string) ([]accounts.Account, error) {
-	return refreshAccountLimits(ctx, store, accStore, providerID, codex.FetchUsage)
-}
-
-// refreshAccountLimits does the actual work behind RefreshAccountLimits.
 //
 // Accounts are refreshed concurrently, bounded by
 // refreshAccountLimitsConcurrency, each against its own effective proxy
@@ -244,7 +241,7 @@ func RefreshAccountLimits(ctx context.Context, store *ConfigStore, accStore acco
 // also the only OAuth one, so this is not specially guarded — a provider
 // combining Usage with a non-OAuth AuthKind would simply have nothing to
 // refresh.
-func refreshAccountLimits(ctx context.Context, store *ConfigStore, accStore accounts.Store, providerID string, fetch accountUsageFetcher) ([]accounts.Account, error) {
+func RefreshAccountLimits(ctx context.Context, store *ConfigStore, accStore accounts.Store, providerID string, fetch AccountUsageFetcher) ([]accounts.Account, error) {
 	if !accounts.CapabilitiesOf(providerID).Usage {
 		return accStore.List(providerID)
 	}
@@ -275,7 +272,7 @@ func refreshAccountLimits(ctx context.Context, store *ConfigStore, accStore acco
 			if err != nil || !ok {
 				return // leave the stored snapshot untouched
 			}
-			if err := accStore.RecordUsage(providerID, a.ID, u.Snapshot()); err != nil {
+			if err := accStore.RecordUsage(providerID, a.ID, u); err != nil {
 				// The fetch worked and the numbers are simply lost:
 				// worth a line, but not worth failing a refresh whose
 				// other accounts may well have been written.

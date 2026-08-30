@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 )
 
@@ -90,8 +91,25 @@ func (w *AppWorkspace) SetProviderProxy(providerID, proxy string) error {
 
 // RefreshAccountLimits implements Workspace by delegating to
 // config.RefreshAccountLimits, exactly like UpdateAccount/RemoveAccount
-// above.
+// above, and supplying the fetcher that knows how to ask a vendor.
+//
+// The wiring is here rather than in internal/config because reaching
+// Codex's HTTP endpoint means importing the package that also carries its
+// browser sign-in flow, and internal/config is imported by nearly
+// everything. Codex is the only provider that reports usage today, and
+// config's own guard (accounts.CapabilitiesOf) is what decides whether the
+// fetcher is called at all.
 func (w *AppWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
 	accStore := w.accountStore()
-	return config.RefreshAccountLimits(ctx, w.store, accStore, providerID)
+	return config.RefreshAccountLimits(ctx, w.store, accStore, providerID, fetchCodexUsage)
+}
+
+// fetchCodexUsage adapts codex.FetchUsage to config.AccountUsageFetcher by
+// converting the vendor's own shape into the stored snapshot.
+func fetchCodexUsage(ctx context.Context, proxyURL, accessToken, accountID string) (accounts.Usage, bool, error) {
+	u, ok, err := codex.FetchUsage(ctx, proxyURL, accessToken, accountID)
+	if err != nil || !ok {
+		return accounts.Usage{}, false, err
+	}
+	return u.Snapshot(), true, nil
 }

@@ -105,7 +105,9 @@ func (a *realConfigAccessor) SetProviderProxy(providerID, proxy string) error {
 
 func (a *realConfigAccessor) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
-	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID)
+	// No provider in these tests reports usage, so the fetcher is never
+	// reached; the real wiring lives in internal/workspace/appws.
+	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
 }
 
 func (a *realConfigAccessor) ImportCopilot() (*oauth.Token, bool) {

@@ -109,19 +109,19 @@ func TestRefreshAccountLimits_PersistsSuccessAndSkipsFailure(t *testing.T) {
 		ID: "keyed", AccountID: "acct-keyed", APIKey: "sk-does-not-matter",
 	}))
 
-	fetch := func(_ context.Context, _, accessToken, _ string) (codex.Usage, bool, error) {
+	fetch := func(_ context.Context, _, accessToken, _ string) (accounts.Usage, bool, error) {
 		switch accessToken {
 		case "tok-good":
-			return codex.Usage{Plan: "plus", Primary: codex.UsageWindow{UsedPercent: 42, WindowMinutes: 60 * 24 * 7}}, true, nil
+			return accounts.Usage{Plan: "plus", Primary: accounts.UsageWindow{UsedPercent: 42, WindowMinutes: 60 * 24 * 7}}, true, nil
 		case "tok-bad":
-			return codex.Usage{}, false, errors.New("boom")
+			return accounts.Usage{}, false, errors.New("boom")
 		default:
 			t.Fatalf("fetch called for unexpected token %q — api-key accounts must be skipped", accessToken)
-			return codex.Usage{}, false, nil
+			return accounts.Usage{}, false, nil
 		}
 	}
 
-	got, err := refreshAccountLimits(t.Context(), store, accStore, codex.ProviderID, fetch)
+	got, err := RefreshAccountLimits(t.Context(), store, accStore, codex.ProviderID, fetch)
 	require.NoError(t, err)
 	require.Len(t, got, 3)
 
@@ -150,12 +150,12 @@ func TestRefreshAccountLimits_NoUsageCapabilityIsNoOp(t *testing.T) {
 	}))
 
 	var calls atomic.Int32
-	fetch := func(context.Context, string, string, string) (codex.Usage, bool, error) {
+	fetch := func(context.Context, string, string, string) (accounts.Usage, bool, error) {
 		calls.Add(1)
-		return codex.Usage{}, false, nil
+		return accounts.Usage{}, false, nil
 	}
 
-	got, err := refreshAccountLimits(t.Context(), store, accStore, providerID, fetch)
+	got, err := RefreshAccountLimits(t.Context(), store, accStore, providerID, fetch)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Zero(t, calls.Load(), "fetch must not be called for a provider with no usage capability")
