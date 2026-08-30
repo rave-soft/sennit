@@ -220,3 +220,45 @@ func TestAltUpExitsChildSessionThroughUpdate(t *testing.T) {
 	require.Empty(t, u.sess.navStack, "ctrl+up must pop the nav stack through the normal key-routing path")
 	require.NotNil(t, cmd, "must return the loadSession cmd for the parent")
 }
+
+// TestNewSessionClearsChildSessionNav is a regression test: newSession
+// reset a dozen pieces of session state but left navStack alone, so
+// starting a new session (ctrl+n) while drilled into a delegation left
+// viewingChildSession() true — sendMessage kept refusing with "viewing
+// subagent session" on the freshly created session, with no key binding
+// left to escape it (alt+up is only bound in uiFocusMain, and ctrl+n moves
+// focus to the editor).
+func TestNewSessionClearsChildSessionNav(t *testing.T) {
+	t.Parallel()
+
+	u := newBusyUI(&countingWorkspace{})
+	u.sess.navStack = []sessionNavFrame{{parentSessionID: "parent-session", childSessionID: "child-1"}}
+	u.focus = uiFocusMain
+
+	cmd := u.newSession()
+
+	require.NotNil(t, cmd)
+	require.False(t, u.viewingChildSession(), "newSession must drop a stale nav stack")
+	require.Equal(t, uiFocusEditor, u.focus)
+}
+
+// TestSelectSessionClearsChildSessionNav is a regression test: picking a
+// session from the ctrl+s dialog while drilled into a delegation went
+// straight to requestSessionLoad without touching navStack, so the newly
+// loaded session inherited "viewing subagent session" from whatever was
+// drilled into before — same symptom as TestNewSessionClearsChildSessionNav,
+// different entry point.
+func TestSelectSessionClearsChildSessionNav(t *testing.T) {
+	t.Parallel()
+
+	u := newBusyUI(&countingWorkspace{})
+	u.sess.navStack = []sessionNavFrame{{parentSessionID: "parent-session", childSessionID: "child-1"}}
+	u.focus = uiFocusMain
+
+	cmd, handled := u.applySessionDialogAction(dialog.ActionSelectSession{Session: session.Session{ID: "s2"}})
+
+	require.True(t, handled)
+	require.NotNil(t, cmd)
+	require.False(t, u.viewingChildSession(), "selecting a session must drop a stale nav stack")
+	require.Equal(t, uiFocusEditor, u.focus)
+}

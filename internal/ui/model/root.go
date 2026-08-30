@@ -450,11 +450,16 @@ func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, nil
 	}
 	// An open dialog owns the pointer: clicking "through" a modal onto the
-	// toolbar behind it would act on a screen the user cannot see.
+	// toolbar behind it would act on a screen the user cannot see. Paste is
+	// forwarded too — the thread-create dialog's text inputs sit behind
+	// this same guard, and without it a pasted multi-line goal silently
+	// went nowhere while the main screen's dialogs kept receiving paste
+	// normally.
 	if r.dashboardDialog.HasDialogs() {
 		_, isMouse := msg.(tea.MouseMsg)
 		_, isWheel := msg.(common.CoalescedWheelMsg)
-		if isMouse || isWheel {
+		_, isPaste := msg.(tea.PasteMsg)
+		if isMouse || isWheel || isPaste {
 			action := r.dashboardDialog.Update(msg)
 			return r, r.handleDashboardDialogAction(action)
 		}

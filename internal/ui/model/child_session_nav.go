@@ -21,6 +21,24 @@ func (m *UI) viewingChildSession() bool {
 	return len(m.sess.navStack) > 0
 }
 
+// clearChildSessionNav drops the child-session navigation stack outright,
+// for callers that replace the current session rather than navigate out of
+// a delegation (new session, the session picker, a deleted-session
+// redirect). Left alone, navStack only shrinks via exitChildSession /
+// abandonChildSessionEntry, so a session swap that bypassed both stranded
+// the UI in "viewing subagent session": sendMessage kept refusing, the
+// threads/agents panels stayed hidden, and the breadcrumbs still pointed at
+// the abandoned child. Mirrors what those pop paths already do when they
+// empty the stack.
+func (m *UI) clearChildSessionNav() {
+	if len(m.sess.navStack) == 0 {
+		return
+	}
+	m.sess.navStack = nil
+	m.focus = uiFocusEditor
+	m.chat.Blur()
+}
+
 // childSessionSiblingCount returns the number of sibling delegations in the
 // top nav-stack frame, i.e. how many sub-agents alt+left/alt+right can cycle
 // through. Zero when not viewing a child session.

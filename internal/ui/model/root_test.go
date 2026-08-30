@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -251,6 +252,34 @@ func TestDashboardCoalescedWheelScrolls(t *testing.T) {
 
 	require.NotEqual(t, before, r.View().Content,
 		"the coalesced wheel event must reach the dashboard and scroll its list")
+}
+
+// TestDashboardDialogReceivesPaste is a regression test: handleDashboardMsg
+// forwarded only mouse and wheel events to dashboardDialog and dropped
+// everything else, so pasting a multi-line goal into the thread-create
+// dialog's text inputs silently did nothing, while the main screen's
+// dialogs kept receiving tea.PasteMsg normally.
+func TestDashboardDialogReceivesPaste(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	r = model.(*Root)
+	_, cmd := r.Update(ctrlE())
+	r = drainShowDashboard(t, r, cmd)
+	require.Equal(t, screenDashboard, r.active)
+
+	r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
+	require.True(t, r.dashboardDialog.HasDialogs())
+
+	before := r.View().Content
+	require.NotContains(t, before, "pasted-goal-text")
+
+	model, _ = r.Update(tea.PasteMsg{Content: "pasted-goal-text"})
+	r = model.(*Root)
+
+	require.Contains(t, r.View().Content, "pasted-goal-text",
+		"a paste must reach the dashboard dialog's focused text input")
 }
 
 // TestThreadEventMsgDroppedWhenNotAttached exercises both "no thread

@@ -159,8 +159,17 @@ type ActionAddAccount struct {
 // kicked off when the user picks a different account. Like
 // ActionAccountsLoaded, it is addressed back to this dialog rather than
 // whatever happens to be on top when it lands.
+//
+// providerID is checked in HandleMsg for the same reason
+// ActionAccountsLoaded.ProviderID is: DialogID routes by the AccountsID
+// constant, not by dialog instance. Activate in provider A's dialog, esc
+// before the write returns, then open provider B's dialog (same
+// AccountsID) — without the check, A's result closed B's dialog out from
+// under the user and refreshed B's sidebar label for an account switch
+// that happened on A.
 type accountActivatedMsg struct {
-	err error
+	providerID string
+	err        error
 }
 
 // DialogID implements [DialogAddressed].
@@ -226,6 +235,9 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		return nil
 
 	case accountActivatedMsg:
+		if msg.providerID != m.providerID {
+			return nil
+		}
 		if msg.err != nil {
 			return ActionCmd{util.ReportError(msg.err)}
 		}
@@ -388,7 +400,7 @@ func (m *Accounts) activateAccountCmd(providerID, id string) tea.Cmd {
 	ws := m.com.Workspace
 	return func() tea.Msg {
 		err := ws.ActivateAccount(config.ScopeGlobal, providerID, id)
-		return accountActivatedMsg{err: err}
+		return accountActivatedMsg{providerID: providerID, err: err}
 	}
 }
 

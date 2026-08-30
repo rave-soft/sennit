@@ -214,6 +214,7 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
+		m.clearChildSessionNav()
 		cmds = append(cmds, m.requestSessionLoad(msg.Session.ID))
 	case dialog.ActionNewSession:
 		var started bool

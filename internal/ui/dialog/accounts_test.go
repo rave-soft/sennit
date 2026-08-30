@@ -261,6 +261,25 @@ func TestAccounts_IgnoresLoadedResultForADifferentProvider(t *testing.T) {
 	require.Equal(t, providerID, dlg.providerID, "the dialog must stay addressed to its own provider")
 }
 
+// TestAccounts_IgnoresActivationResultForADifferentProvider is a
+// regression test: accountActivatedMsg was addressed only by the
+// AccountsID dialog constant, with no provider check. Activate an account
+// in provider A's dialog, esc before the write returns, then open provider
+// B's dialog (same AccountsID) — A's stale result used to land in B's
+// HandleMsg, closing it out from under the user and issuing a sidebar
+// refresh for B when it was A's active account that actually changed.
+func TestAccounts_IgnoresActivationResultForADifferentProvider(t *testing.T) {
+	providerID := "openai"
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	dlg := loadedAccounts(t, com, providerID)
+
+	action := dlg.HandleMsg(accountActivatedMsg{providerID: "anthropic"})
+
+	require.Nil(t, action, "a mismatched provider's activation result must be dropped, not acted on")
+	require.Equal(t, accountsStateList, dlg.state, "must not close on another provider's stale result")
+}
+
 func TestAccounts_SelectNonActiveAccount_NoIOInHandleMsg(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
