@@ -53,10 +53,7 @@ const maxTaskCascadeDepth = 3
 const continuationPromptPlaceholder = "(background delegation continuation)"
 
 // startContinuation dispatches an auto-woken continuation turn attempt
-// for sessionID. Only a delegation's own session ever gets here - a
-// session a person drives is filtered out before this, by
-// isDelegationSession, so nothing a person is having a conversation in
-// can restart itself while they are elsewhere. It carries no completions of its own — whatever is
+// for sessionID. It carries no completions of its own — whatever is
 // eligible to wake sits in the dispatcher's completion inbox exactly as
 // it does for the mid-turn case, and this call's own PrepareStep (step 0)
 // is what drains it, via drainCompletionsForStep, once (and only once)

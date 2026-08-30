@@ -1091,9 +1091,8 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 }
 
 // DeliverTaskCompletion enqueues completion into sessionID's completion
-// inbox and, if that leaves the session eligible (a delegation's own
-// session - never a person's, see isDelegationSession - that is idle and
-// not left canceled by the user), attempts a continuation turn for it. See
+// inbox and, if that leaves the session eligible (idle, not left
+// canceled by the user), attempts a continuation turn for it. See
 // dispatcher.enqueueCompletion and startContinuation. The attempt does
 // not itself drain anything - the completion stays in the inbox until
 // whichever turn actually becomes active drains it via PrepareStep, so a

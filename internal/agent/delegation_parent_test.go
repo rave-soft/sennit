@@ -56,12 +56,8 @@ func promptContains(prompt fantasy.Prompt, substr string) bool {
 // TestSendToParent_WakesIdleParentAndDeliversOnce proves the core
 // SendToParent path end to end: a mid-run ask reaches the parent
 // session's next step via an idle-wake continuation (mirroring
-// TestDeliverTaskCompletion_WakesIdleDelegationExactlyOnce), attributed
-// with the delegation's id/kind/name, and exactly once.
-//
-// The parent here is itself a delegation - a nested chain, the case that
-// has to keep waking, since no one is sitting in it to type. The
-// person-parent case is TestSendToParent_PersonsSessionIsNeverWoken.
+// TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce), attributed with
+// the delegation's id/kind/name, and exactly once.
 func TestSendToParent_WakesIdleParentAndDeliversOnce(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
@@ -81,8 +77,6 @@ func TestSendToParent_WakesIdleParentAndDeliversOnce(t *testing.T) {
 
 	const childSessionID = "child-session-ask"
 	registerSelfParent(sa, childSessionID, parentSess.ID)
-	// The parent is a delegation of its own, one level further up.
-	registerSelfParent(sa, parentSess.ID, "grandparent-session")
 
 	err = sa.SendToParent(t.Context(), childSessionID, "ask-marker-text")
 	require.NoError(t, err)
@@ -267,11 +261,11 @@ func TestSendToParent_NoRegisteredParentReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "no-such-session")
 }
 
-// TestSendToParent_PersonsSessionIsNeverWoken is the ask-side half of the
-// wake gate: a delegation speaking up mid-run must not restart the
-// conversation of the person who started it while they are elsewhere.
-// The ask waits in their inbox and is delivered on their next turn.
-func TestSendToParent_PersonsSessionIsNeverWoken(t *testing.T) {
+// TestSendToParent_PersonsSessionIsWokenToo is the ask-side half of the
+// wake path: a delegation speaking up mid-run reaches the person who
+// started it right away, rather than sitting unread until they happen to
+// type. It is the same continuation the completion side uses.
+func TestSendToParent_PersonsSessionIsWokenToo(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	model := &promptRecordingModel{text: "done"}
@@ -290,17 +284,14 @@ func TestSendToParent_PersonsSessionIsNeverWoken(t *testing.T) {
 	const childSessionID = "child-session-ask-person"
 	registerSelfParent(sa, childSessionID, parentSess.ID)
 
-	require.NoError(t, sa.SendToParent(t.Context(), childSessionID, "ask-waits-for-the-person"))
+	require.NoError(t, sa.SendToParent(t.Context(), childSessionID, "ask-reaches-the-person"))
 
-	time.Sleep(50 * time.Millisecond)
-	require.Zero(t, model.count(), "an ask must never start a turn in a session a person drives")
-
-	_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: parentSess.ID, Prompt: "hello"})
-	require.NoError(t, runErr)
+	require.Eventually(t, func() bool { return model.count() > 0 }, 2*time.Second, 5*time.Millisecond,
+		"an ask must wake the session that started the delegation")
 
 	prompts := model.snapshotPrompts()
-	require.Len(t, prompts, 1, "exactly one turn must have reached the model")
-	require.True(t, promptContains(prompts[0], "ask-waits-for-the-person"),
-		"the queued ask must reach the model on the person's next turn")
+	require.Len(t, prompts, 1, "exactly one continuation turn must have reached the model")
+	require.True(t, promptContains(prompts[0], "ask-reaches-the-person"),
+		"the woken turn must carry the ask")
 	require.Empty(t, sa.drainCompletionsForStep(parentSess.ID), "that turn must have drained the inbox")
 }

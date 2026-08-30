@@ -73,11 +73,8 @@ type Coordinator interface {
 	SetDelegationTools(threads tools.ThreadManager, tasks tools.TaskManager)
 	// DeliverTaskCompletion enqueues completion into sessionID's
 	// completion inbox for delivery on that session's next step (see
-	// runTurn.prepareStep). A delegation's own session, being work
-	// nobody is sitting in, is also woken for it if it is idle (see
-	// startContinuation and isDelegationSession); a session a person
-	// drives is never started by this - the completion waits for their
-	// next turn.
+	// runTurn.prepareStep), or starts a continuation turn immediately if
+	// the session is idle and eligible (see startContinuation).
 	// internal/thread calls this once a task reaches a terminal status,
 	// having resolved sessionID as the task's *parent* session - never
 	// the task's own child session.

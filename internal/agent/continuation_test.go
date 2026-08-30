@@ -94,16 +94,14 @@ func testCompletion(resultText string) TaskCompletion {
 	}
 }
 
-// TestDeliverTaskCompletion_WakesIdleDelegationExactlyOnce proves the
-// core wake path: a completion arriving at an idle delegation session -
-// a unit of work nobody is sitting in, the only kind that wakes at all
-// (see isDelegationSession) - starts exactly one continuation turn, the
-// model sees the completion in it, and - like the mid-turn fold case -
-// nothing about it is persisted as a fabricated user message: the
-// placeholder call.Prompt that got the turn started at all
-// (continuationPromptPlaceholder) is stripped by PrepareStep before the
-// model or the transcript ever see it.
-func TestDeliverTaskCompletion_WakesIdleDelegationExactlyOnce(t *testing.T) {
+// TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce proves the core
+// wake path: a completion arriving at an idle session starts exactly one
+// continuation turn, the model sees the completion in it, and - like the
+// mid-turn fold case - nothing about it is persisted as a fabricated
+// user message: the placeholder call.Prompt that got the turn started at
+// all (continuationPromptPlaceholder) is stripped by PrepareStep before
+// the model or the transcript ever see it.
+func TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	model := &promptRecordingModel{text: "done"}
@@ -122,8 +120,6 @@ func TestDeliverTaskCompletion_WakesIdleDelegationExactlyOnce(t *testing.T) {
 		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
 	})
 	require.NoError(t, err)
-
-	registerSelfParent(sa, sess.ID, "parent-session")
 
 	completion := testCompletion("wake-marker-text")
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
@@ -184,8 +180,6 @@ func TestDeliverTaskCompletion_LogsCarryNoPromptOrResultText(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	registerSelfParent(sa, sess.ID, "parent-session")
-
 	completion := TaskCompletion{
 		DelegationID:   "task-1",
 		Kind:           "task",
@@ -240,8 +234,6 @@ func TestDeliverTaskCompletion_PlaceholderNeverLeaksToModelOrHistory(t *testing.
 		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
 	})
 	require.NoError(t, err)
-
-	registerSelfParent(sa, sess.ID, "parent-session")
 
 	completion := testCompletion("leak-check-marker")
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
@@ -474,19 +466,15 @@ func TestDeliverTaskCompletion_RaceWithUserPromptStartsOnlyOneTurn(t *testing.T)
 
 		// The completion must survive the race exactly once - but which
 		// of its two resting places it lands in is genuinely the race's
-		// to decide, and both are correct. This is a person's own
-		// session (nothing registers it under delegationParents), so
-		// isDelegationSession is false and no auto-wake applies to it:
-		// enqueueCompletion returns wakeEligible false and
-		// DeliverTaskCompletion returns without attempting a
-		// continuation. The completion therefore reaches the model only
-		// if it made it into the inbox before the user's turn drained
-		// it in prepareStep; landing a moment later leaves it queued
-		// for that person's next real turn, which is the documented
-		// behavior (see isDelegationSession: "The completion is not
-		// lost; it waits in the inbox"). Asserting delivery outright
-		// would be asserting one particular winner of the very race
-		// this test exists to allow either way.
+		// to decide, and both are correct. It reaches the model if it
+		// made it into the inbox before the user's turn drained it in
+		// prepareStep, or if the wake attempt won and ran a
+		// continuation of its own; landing between those leaves it
+		// queued for the next turn instead, since a wake attempt on a
+		// session that is already busy drops rather than queues (see
+		// startContinuation). Asserting delivery outright would be
+		// asserting one particular winner of the very race this test
+		// exists to allow either way.
 		delivered := model.occurrences(completion.ResultText)
 		queued := completionInboxLen(sa, sess.ID)
 		require.Equal(t, 1, delivered+queued,
@@ -558,12 +546,17 @@ func TestDeliverTaskCompletion_CancelledParentDoesNotAutoStart(t *testing.T) {
 	require.True(t, sawUser, "the user's own prompt must still be present")
 }
 
-// TestDeliverTaskCompletion_PersonsSessionIsNeverWoken is the rule this
-// whole gate exists for: a session a person drives must not pick the
-// conversation back up on its own because a delegation they started an
-// hour ago finished. Nothing is lost - the completion waits in the inbox
-// and is folded into their next turn, ahead of their own prompt.
-func TestDeliverTaskCompletion_PersonsSessionIsNeverWoken(t *testing.T) {
+// TestDeliverTaskCompletion_PersonsSessionIsWokenToo is the rule the wake
+// path exists for: a delegation finishing has to reach the session that
+// started it, and the session a person drives is the one that started
+// most of them. It wakes on the report the same way a delegation's own
+// session does — which is what lets an orchestrating turn hand the work
+// to the next delegation without the person typing between them.
+//
+// The cost is deliberate and stated in docs/concepts/delegation.md: a
+// session left alone keeps working on what it was already given. Esc
+// twice stops it; options.background_agents turns delegation off.
+func TestDeliverTaskCompletion_PersonsSessionIsWokenToo(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	model := &promptRecordingModel{text: "done"}
@@ -572,7 +565,7 @@ func TestDeliverTaskCompletion_PersonsSessionIsNeverWoken(t *testing.T) {
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
 	// Prior history ending in an assistant message: the ordinary shape of
-	// "a task ran quietly after the assistant's last reply". No
+	// "a delegation finished after the assistant's last reply". No
 	// RegisterDelegationParent call - this is a person's own session.
 	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
 		Role:  message.Assistant,
@@ -580,40 +573,25 @@ func TestDeliverTaskCompletion_PersonsSessionIsNeverWoken(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	completion := testCompletion("must-wait-for-the-person")
+	completion := testCompletion("reaches-the-person's-session")
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
 
-	// Give any wrongly-triggered wake a moment to misbehave before
-	// asserting its absence.
-	time.Sleep(50 * time.Millisecond)
-	require.Zero(t, model.count(), "a session a person drives must never start a turn nobody asked for")
-	require.False(t, sa.IsSessionBusy(sess.ID))
-
-	// Their own next turn is what delivers it.
-	result, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hello"})
-	require.NoError(t, runErr)
-	require.NotNil(t, result)
+	require.Eventually(t, func() bool { return model.count() > 0 }, 2*time.Second, 5*time.Millisecond,
+		"a completion must wake the session that started the delegation")
 
 	prompts := model.snapshotPrompts()
-	require.Len(t, prompts, 1, "exactly one turn must have reached the model")
-	var sawCompletion, sawUser bool
-	for _, msg := range prompts[0] {
-		for _, part := range msg.Content {
-			text, ok := part.(fantasy.TextPart)
-			if !ok {
-				continue
-			}
-			if strings.Contains(text.Text, "must-wait-for-the-person") {
-				sawCompletion = true
-			}
-			if text.Text == "hello" {
-				sawUser = true
-			}
-		}
-	}
-	require.True(t, sawCompletion, "the queued completion must reach the model on the person's next turn")
-	require.True(t, sawUser, "their own prompt must still be present")
+	require.Len(t, prompts, 1, "exactly one continuation turn must have reached the model")
+	require.True(t, promptContains(prompts[0], "reaches-the-person's-session"),
+		"the woken turn must carry the completion")
 	require.Empty(t, sa.drainCompletionsForStep(sess.ID), "that turn must have drained the inbox")
+
+	// The placeholder that got the turn started is never persisted as a
+	// prompt the person did not type.
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	for _, m := range msgs {
+		require.NotContains(t, m.Content().String(), continuationPromptPlaceholder)
+	}
 }
 
 // probeDepthTool returns a tool that records the cascade depth it
@@ -872,8 +850,6 @@ func deliverThroughWake(t *testing.T, completion TaskCompletion) (string, int) {
 		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
 	})
 	require.NoError(t, err)
-
-	registerSelfParent(sa, sess.ID, "parent-session")
 
 	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
 	require.Eventually(t, func() bool { return model.count() > 0 }, 2*time.Second, 5*time.Millisecond)

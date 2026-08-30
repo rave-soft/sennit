@@ -84,10 +84,11 @@ func TestSummarize_WakesFromInboxAfterReleasingTheActiveSlot(t *testing.T) {
 		Messages:     env.messages,
 	}).(*sessionAgent)
 
-	// A parked delegation session (see isDelegationSession) is exactly
-	// what the idle sweep summarizes in practice - see markActivity's own
-	// comment on why the sweep reaches these sessions at all - and only a
-	// delegation session is eligible for the auto-wake path.
+	// A parked delegation session is exactly what the idle sweep
+	// summarizes in practice - see markActivity's own comment on why the
+	// sweep reaches these sessions at all - so that is the shape this
+	// test uses, though the wake path itself no longer asks what kind of
+	// session it is waking.
 	sa.RegisterDelegationParent(sess.ID, DelegationParent{
 		ParentSessionID: "parent-of-" + sess.ID,
 		DelegationID:    "delegation-1",

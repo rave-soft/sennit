@@ -369,10 +369,6 @@ func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
 		ChildSessionID: "child-session",
 		ResultText:     "background-task-result-once",
 	}
-	// A delegation's own session: the auto-retry this test is about is
-	// run()'s exit-hook wake, which only ever fires for one (see
-	// isDelegationSession).
-	registerSelfParent(sa, sess.ID, "parent-session")
 	// The low-level dispatcher primitive, not sa.DeliverTaskCompletion:
 	// DeliverTaskCompletion would itself attempt to wake a continuation
 	// immediately (the session is idle), which is not what this test is

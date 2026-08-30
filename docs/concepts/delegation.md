@@ -35,13 +35,18 @@ A task isn't polled for its result. Once it finishes, its outcome is
 delivered back automatically and shows up as a report at the next step of
 whatever turn created it.
 
-If that turn has already ended, the report waits: a session you drive is
-never restarted by a task finishing in the background. It reaches the model
-at the top of your next turn in that session, ahead of what you typed — so
-a task that finishes while you are elsewhere costs you nothing and surprises
-you with nothing. A delegation's *own* session is the exception, since
-nobody is sitting in it to type: it is woken by its own completions, which
-is how an agent that started sub-delegations resumes once they answer.
+If that turn has already ended, the report starts a new one: the session
+wakes on its own and picks the work back up, which is what lets a delegation
+hand off to the next one without you typing between them. This applies to
+every session — a delegation's own, and the one you are sitting in. A
+session you left therefore keeps going while you are elsewhere, spending
+tokens and editing files on the work it was already given; press Esc twice
+to stop it, or turn tasks off with `options.background_agents: false` if you
+want a session that never moves unless you ask it to.
+
+Nothing is lost if a wake cannot happen — the session is busy, you canceled
+it, or the continuation keeps failing. The report waits in the inbox and is
+folded into the top of the next turn instead, ahead of what you typed.
 
 A workspace allows at most 4 tasks running at once, and at most 2 of those
 started by any one turn — past either limit, starting another is refused

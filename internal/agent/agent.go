@@ -52,11 +52,10 @@ type SessionAgent interface {
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 	// DeliverTaskCompletion enqueues completion into sessionID's
-	// completion inbox and, if the session is a delegation's own (never
-	// a person's - see isDelegationSession), idle, and not left canceled
-	// by the user, starts a continuation turn for it. See dispatcher's
-	// completionInbox field, runTurn.prepareStep (the mid-turn delivery
-	// path), and startContinuation (the wake path).
+	// completion inbox and, if the session is idle and was not left
+	// canceled by the user, starts a continuation turn for it. See
+	// dispatcher's completionInbox field, runTurn.prepareStep (the
+	// mid-turn delivery path), and startContinuation (the wake path).
 	DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion)
 	// RegisterDelegationParent records where sessionID (a running
 	// delegation's own child session) should deliver a mid-run ask via
