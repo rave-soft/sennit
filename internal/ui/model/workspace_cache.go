@@ -342,11 +342,11 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	if cmd := m.threadList.staleRefreshCmd(m.com, true); cmd != nil {
+	if cmd := m.threadList.StaleRefreshCmd(m.com, true); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if m.state == uiChat && len(m.threadList.cache.Value) > 0 {
-		visible := activeDockThreads(m.threadList.cache.Value)
+	if m.state == uiChat && len(m.threadList.Threads()) > 0 {
+		visible := activeDockThreads(m.threadList.Threads())
 		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds

@@ -1,6 +1,6 @@
-package model
+package threads
 
-// threadsDashboard is the threads administration screen. It wraps a
+// Dashboard is the threads administration screen. It wraps a
 // list.List over the memoized thread cache (threads_cache.go) the same way
 // Chat wraps a list.List over messages: items are rebuilt from the cache
 // on load/event, never fetched directly from Draw/HandleKey.
@@ -39,53 +39,53 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// enterThreadMsg requests attaching to a thread's own workspace/session.
+// EnterMsg requests attaching to a thread's own workspace/session.
 // Consumed by the router (root.go).
-type enterThreadMsg struct {
-	id        string
-	sessionID string
-	// name is the thread's own name, carried through so the attached UI
+type EnterMsg struct {
+	ID        string
+	SessionID string
+	// Name is the thread's own name, carried through so the attached UI
 	// can show it as a breadcrumb without a second lookup.
-	name string
+	Name string
 }
 
-// openThreadCreateMsg requests opening the create-thread dialog. The dialog
+// OpenCreateMsg requests opening the create-thread dialog. The dialog
 // itself is implemented in a later step; this is a placeholder message so
 // the dashboard can be wired up ahead of it.
-type openThreadCreateMsg struct{}
+type OpenCreateMsg struct{}
 
-// mergeThreadMsg requests merging a completed thread's branch back into its
+// MergeMsg requests merging a completed thread's branch back into its
 // base branch.
-type mergeThreadMsg struct {
-	id string
+type MergeMsg struct {
+	ID string
 }
 
-// removeThreadMsg requests removing a thread, already confirmed by the
-// thread-remove-confirm dialog (see confirmRemoveThreadMsg).
-type removeThreadMsg struct {
-	id string
+// RemoveMsg requests removing a thread, already confirmed by the
+// thread-remove-confirm dialog (see ConfirmRemoveMsg).
+type RemoveMsg struct {
+	ID string
 }
 
-// confirmRemoveThreadMsg requests opening the remove-confirmation dialog
+// ConfirmRemoveMsg requests opening the remove-confirmation dialog
 // for a thread. Consumed by the router (root.go), which pushes
 // dialog.NewThreadRemoveConfirm onto dashboardDialog; that dialog's
-// ActionRemoveThreadConfirmed is what actually sends removeThreadMsg.
-type confirmRemoveThreadMsg struct {
-	id, name string
+// ActionRemoveThreadConfirmed is what actually sends RemoveMsg.
+type ConfirmRemoveMsg struct {
+	ID, Name string
 }
 
-// leaveDashboardMsg requests closing the dashboard and returning to the
+// LeaveMsg requests closing the dashboard and returning to the
 // main screen — what the Back button raises. Consumed by the router
 // (root.go), which owns the screen stack.
-type leaveDashboardMsg struct{}
+type LeaveMsg struct{}
 
-// cancelDelegationMsg requests cancelling a delegation's (task or thread)
+// CancelDelegationMsg requests cancelling a delegation's (task or thread)
 // in-flight run. Consumed by the router (root.go), which calls
 // Workspace.CancelTask or Workspace.CancelThread depending on kind — a
 // thread's cancel leaves its worktree and branch on disk, unlike Remove's
 // full teardown.
-type cancelDelegationMsg struct {
-	id, kind string
+type CancelDelegationMsg struct {
+	ID, Kind string
 }
 
 // threadsKeyMap holds the key bindings local to the threads dashboard. It
@@ -161,7 +161,7 @@ func (k threadsKeyMap) ShortHelp() []key.Binding {
 	}
 }
 
-// threadsDashboard is the threads administration screen: a title bar with
+// Dashboard is the threads administration screen: a title bar with
 // a Back button, a toolbar of action buttons, status filter tabs, the
 // thread table, a detail pane for the selected thread, and a help footer.
 //
@@ -169,10 +169,10 @@ func (k threadsKeyMap) ShortHelp() []key.Binding {
 // (threadsHitZone), the same recompute-don't-cache approach the session
 // panel's row hit-test uses: the layout depends on size, filter, and
 // selection, so a stale rect would send a click to the wrong action.
-type threadsDashboard struct {
+type Dashboard struct {
 	com    *common.Common
 	list   *list.List
-	cache  *threadListCache
+	cache  *ListCache
 	keyMap threadsKeyMap
 
 	filter threadsFilter
@@ -197,15 +197,15 @@ type threadsDashboard struct {
 	styleRev uint64
 }
 
-// newThreadsDashboard creates a new threads dashboard over the given shared
+// New creates a new threads dashboard over the given shared
 // thread list cache (threads_cache.go) — the same instance the main UI's
 // dock and header badge read, so all three stay in sync off a single
 // ListThreads round trip.
-func newThreadsDashboard(com *common.Common, cache *threadListCache) *threadsDashboard {
+func New(com *common.Common, cache *ListCache) *Dashboard {
 	l := list.NewList()
 	l.RegisterRenderCallback(list.FocusedRenderCallback(l))
 	l.Focus()
-	return &threadsDashboard{
+	return &Dashboard{
 		com:     com,
 		list:    l,
 		cache:   cache,
@@ -231,7 +231,7 @@ const (
 
 // chromeHeight is every row the screen spends on something other than the
 // table body, for the current selection.
-func (m *threadsDashboard) chromeHeight() int {
+func (m *Dashboard) chromeHeight() int {
 	h := threadsTitleHeight + threadsToolbarHeight + threadsTabsHeight +
 		threadsColumnsHeight + threadsRuleHeight + threadsFooterHeight
 	if d := m.detailHeight(); d > 0 {
@@ -242,7 +242,7 @@ func (m *threadsDashboard) chromeHeight() int {
 
 // detailHeight is how many rows the detail pane needs right now: none when
 // nothing is selected, otherwise one row per populated field.
-func (m *threadsDashboard) detailHeight() int {
+func (m *Dashboard) detailHeight() int {
 	sel := m.selected()
 	if sel == nil {
 		return 0
@@ -255,12 +255,12 @@ func (m *threadsDashboard) detailHeight() int {
 //
 // Returns a pointer to a copy, not &m.visible[idx]: under filterAll,
 // m.visible aliases the cache's backing array (see filterThreads), and
-// threadListCache.applyEvent deletes from that array in place on a
+// ListCache.applyEvent deletes from that array in place on a
 // DeletedEvent, shifting elements under any pointer taken into it. No
 // current caller holds the result across such a mutation, but returning
 // an alias into shared, mutable storage is a structural landmine — copy
 // out here instead of relying on every call site to stay careful.
-func (m *threadsDashboard) selected() *proto.Thread {
+func (m *Dashboard) selected() *proto.Thread {
 	idx := m.list.Selected()
 	if idx < 0 || idx >= len(m.visible) {
 		return nil
@@ -270,28 +270,28 @@ func (m *threadsDashboard) selected() *proto.Thread {
 }
 
 // SetSize resizes the dashboard, leaving room for the chrome around the
-// table. The list itself is sized inside rebuildItems, once the selection
+// table. The list itself is sized inside RebuildItems, once the selection
 // (which the detail pane's height, and so chromeHeight, depends on) has
 // actually been settled for the new dimensions.
-func (m *threadsDashboard) SetSize(width, height int) {
+func (m *Dashboard) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 	m.columns = computeThreadsColumns(max(0, width-2))
-	m.rebuildItems()
+	m.RebuildItems()
 }
 
 // SetActive sets whether the dashboard is showing. Becoming active
 // immediately dispatches a refresh if the cache isn't fresh, so the list
 // doesn't sit on stale data until the next TTL tick.
-func (m *threadsDashboard) SetActive(active bool) tea.Cmd {
+func (m *Dashboard) SetActive(active bool) tea.Cmd {
 	m.active = active
 	if !active {
 		return nil
 	}
-	if m.cache.cache.Fresh(threadsCacheTTL) {
+	if m.cache.Cache.Fresh(threadsCacheTTL) {
 		return nil
 	}
-	return m.cache.dispatchRefresh(m.com)
+	return m.cache.DispatchRefresh(m.com)
 }
 
 // Draw renders the administration screen top to bottom: title bar with a
@@ -299,7 +299,7 @@ func (m *threadsDashboard) SetActive(active bool) tea.Cmd {
 // detail pane for the selection, and the help footer. Hit zones for every
 // button and tab are rebuilt here, so a click always lands on what the
 // last frame actually painted.
-func (m *threadsDashboard) Draw(scr uv.Screen, area uv.Rectangle) {
+func (m *Dashboard) Draw(scr uv.Screen, area uv.Rectangle) {
 	t := m.com.Styles
 	m.zones = m.zones[:0]
 
@@ -374,8 +374,8 @@ func (m *threadsDashboard) Draw(scr uv.Screen, area uv.Rectangle) {
 // emptyText is the message shown in place of the table. It names the
 // reason the table is empty — no threads at all, versus a filter hiding
 // them — since the two need different next steps from the operator.
-func (m *threadsDashboard) emptyText() string {
-	if len(m.cache.cache.Value) == 0 {
+func (m *Dashboard) emptyText() string {
+	if len(m.cache.Cache.Value) == 0 {
 		return "No threads yet — press n or click + New to start one."
 	}
 	return fmt.Sprintf("No %s threads — press a to show all.", strings.ToLower(m.filter.label()))
@@ -390,7 +390,7 @@ func indentRect(r uv.Rectangle) uv.Rectangle {
 }
 
 // drawRule paints a full-width horizontal separator.
-func (m *threadsDashboard) drawRule(scr uv.Screen, rect uv.Rectangle) {
+func (m *Dashboard) drawRule(scr uv.Screen, rect uv.Rectangle) {
 	if rect.Dx() <= 0 {
 		return
 	}
@@ -400,10 +400,10 @@ func (m *threadsDashboard) drawRule(scr uv.Screen, rect uv.Rectangle) {
 
 // drawTitle paints the screen title, the total count, and the Back button
 // right-aligned on the same row.
-func (m *threadsDashboard) drawTitle(scr uv.Screen, rect uv.Rectangle) {
+func (m *Dashboard) drawTitle(scr uv.Screen, rect uv.Rectangle) {
 	t := m.com.Styles
 	title := t.Threads.Title.Render("Threads")
-	count := t.Threads.Subtle.Render(fmt.Sprintf("  %d total", len(m.cache.cache.Value)))
+	count := t.Threads.Subtle.Render(fmt.Sprintf("  %d total", len(m.cache.Cache.Value)))
 	uv.NewStyledString(title+count).Draw(scr, indentRect(rect))
 
 	back := m.renderButton(actionBack, true)
@@ -428,7 +428,7 @@ func (m *threadsDashboard) drawTitle(scr uv.Screen, rect uv.Rectangle) {
 // zone for each. Disabled buttons stay in place rather than disappearing:
 // a toolbar whose buttons move as the selection changes is one you have to
 // re-read every time.
-func (m *threadsDashboard) drawToolbar(scr uv.Screen, rect uv.Rectangle) {
+func (m *Dashboard) drawToolbar(scr uv.Screen, rect uv.Rectangle) {
 	sel := m.selected()
 	x := rect.Min.X + 1
 	for _, action := range threadsToolbarActions {
@@ -455,7 +455,7 @@ func (m *threadsDashboard) drawToolbar(scr uv.Screen, rect uv.Rectangle) {
 // renderButton styles one button for its current state. Hover is resolved
 // against the zone list from the previous frame, which is what the mouse
 // handler wrote into m.hovered.
-func (m *threadsDashboard) renderButton(action threadAction, enabled bool) string {
+func (m *Dashboard) renderButton(action threadAction, enabled bool) string {
 	t := m.com.Styles
 	style := t.Threads.ButtonIdle
 	switch {
@@ -472,7 +472,7 @@ func (m *threadsDashboard) renderButton(action threadAction, enabled bool) strin
 
 // isHovered reports whether the pointer is currently over the button for
 // action.
-func (m *threadsDashboard) isHovered(action threadAction) bool {
+func (m *Dashboard) isHovered(action threadAction) bool {
 	if m.hovered < 0 || m.hovered >= len(m.zones) {
 		return false
 	}
@@ -481,9 +481,9 @@ func (m *threadsDashboard) isHovered(action threadAction) bool {
 }
 
 // drawTabs paints the status filter tabs with their counts.
-func (m *threadsDashboard) drawTabs(scr uv.Screen, rect uv.Rectangle) {
+func (m *Dashboard) drawTabs(scr uv.Screen, rect uv.Rectangle) {
 	t := m.com.Styles
-	all := m.cache.cache.Value
+	all := m.cache.Cache.Value
 	x := rect.Min.X + 1
 	for _, f := range threadsFilters {
 		style := t.Threads.TabInactive
@@ -526,9 +526,9 @@ func shortHelpText(bindings []key.Binding, width int) string {
 
 // ApplyThreadsLoaded writes through an off-thread thread list fetch and
 // rebuilds the list items to reflect it.
-func (m *threadsDashboard) ApplyThreadsLoaded(msg threadsLoadedMsg) []tea.Cmd {
-	cmds, _ := m.cache.applyLoaded(m.com, msg)
-	m.rebuildItems()
+func (m *Dashboard) ApplyThreadsLoaded(msg LoadedMsg) []tea.Cmd {
+	cmds, _ := m.cache.ApplyLoaded(m.com, msg)
+	m.RebuildItems()
 	return cmds
 }
 
@@ -536,42 +536,57 @@ func (m *threadsDashboard) ApplyThreadsLoaded(msg threadsLoadedMsg) []tea.Cmd {
 // event into the cache, rebuilds the list, and — since applyThreadEvent
 // always invalidates the TTL — re-arms a refresh immediately while the
 // dashboard is active so the optimistic update is reconciled promptly.
-func (m *threadsDashboard) ApplyThreadEvent(evt pubsub.Event[proto.Thread]) tea.Cmd {
-	m.cache.applyEvent(evt)
-	m.rebuildItems()
+func (m *Dashboard) ApplyThreadEvent(evt pubsub.Event[proto.Thread]) tea.Cmd {
+	m.cache.ApplyEvent(evt)
+	m.RebuildItems()
 	if !m.active {
 		return nil
 	}
-	return m.cache.dispatchRefresh(m.com)
+	return m.cache.DispatchRefresh(m.com)
+}
+
+// Size is the area the dashboard was last laid out for. The router's test
+// checks that a resize reached it, which it used to do by reading the two
+// fields directly.
+func (m *Dashboard) Size() (width, height int) { return m.width, m.height }
+
+// Active reports whether the dashboard is the visible screen.
+func (m *Dashboard) Active() bool { return m.active }
+
+// InvalidateCache drops the memoized list, so the next Refresh actually
+// fetches rather than answering from the TTL window. The router calls it
+// after an action that changed thread state out of band.
+func (m *Dashboard) InvalidateCache() {
+	m.cache.Invalidate()
 }
 
 // Refresh dispatches an off-thread thread list re-fetch, bypassing the TTL.
 // Exposed for the router (root.go) to call after an action (merge/remove)
 // that changes thread state out of band, without reaching into the
 // unexported cache field itself.
-func (m *threadsDashboard) Refresh() tea.Cmd {
-	return m.cache.dispatchRefresh(m.com)
+func (m *Dashboard) Refresh() tea.Cmd {
+	return m.cache.DispatchRefresh(m.com)
 }
 
 // Tick is the TTL backstop, mirroring UI.staleWorkspaceRefreshCmds: called
 // at the tail of Update, it schedules an off-thread re-probe if the cache
 // has gone stale while the dashboard is active.
-func (m *threadsDashboard) Tick(active bool, com *common.Common) tea.Cmd {
-	return m.cache.staleRefreshCmd(com, active)
+func (m *Dashboard) Tick(active bool, com *common.Common) tea.Cmd {
+	return m.cache.StaleRefreshCmd(com, active)
 }
 
-// rebuildItems applies the active filter to the cache and converts the
+// RebuildItems applies the active filter to the cache and converts the
 // surviving threads into list items. The selection is kept on the same
 // thread across rebuilds where possible — a list that jumps back to the
 // top every time a status event lands is unusable while anything is
 // running.
-func (m *threadsDashboard) rebuildItems() {
+func (m *Dashboard) RebuildItems() {
 	var selectedID string
 	if sel := m.selected(); sel != nil {
 		selectedID = sel.ID
 	}
 
-	m.visible = filterThreads(m.cache.cache.Value, m.filter)
+	m.visible = filterThreads(m.cache.Cache.Value, m.filter)
 	items := make([]list.Item, len(m.visible))
 	for i, s := range m.visible {
 		items[i] = newThreadItem(m.com.Styles, s, m.columns)
@@ -606,12 +621,12 @@ func (m *threadsDashboard) rebuildItems() {
 }
 
 // setFilter switches the visible status class and rebuilds the table.
-func (m *threadsDashboard) setFilter(f threadsFilter) {
+func (m *Dashboard) setFilter(f threadsFilter) {
 	if m.filter == f {
 		return
 	}
 	m.filter = f
-	m.rebuildItems()
+	m.RebuildItems()
 	m.list.SetSelected(0)
 	m.list.ScrollToTop()
 	// The detail pane appears or disappears with the selection, so the
@@ -620,7 +635,7 @@ func (m *threadsDashboard) setFilter(f threadsFilter) {
 }
 
 // HandleMouseMotion updates hover feedback for the toolbar and tabs.
-func (m *threadsDashboard) HandleMouseMotion(msg tea.MouseMotionMsg) {
+func (m *Dashboard) HandleMouseMotion(msg tea.MouseMotionMsg) {
 	pt := image.Pt(msg.X, msg.Y)
 	m.hovered = -1
 	for i, z := range m.zones {
@@ -634,7 +649,7 @@ func (m *threadsDashboard) HandleMouseMotion(msg tea.MouseMotionMsg) {
 // HandleMouseClick routes a click to a button, a tab, or a table row.
 // Clicking a row only selects it — the action buttons are how a click
 // acts, so a mis-aimed click can never merge or remove anything.
-func (m *threadsDashboard) HandleMouseClick(msg tea.MouseClickMsg) (handled bool, cmd tea.Cmd) {
+func (m *Dashboard) HandleMouseClick(msg tea.MouseClickMsg) (handled bool, cmd tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return false, nil
 	}
@@ -667,7 +682,7 @@ func (m *threadsDashboard) HandleMouseClick(msg tea.MouseClickMsg) (handled bool
 }
 
 // HandleMouseWheel scrolls the table.
-func (m *threadsDashboard) HandleMouseWheel(msg tea.MouseWheelMsg) bool {
+func (m *Dashboard) HandleMouseWheel(msg tea.MouseWheelMsg) bool {
 	if !image.Pt(msg.X, msg.Y).In(m.listRect) {
 		return false
 	}
@@ -685,7 +700,7 @@ func (m *threadsDashboard) HandleMouseWheel(msg tea.MouseWheelMsg) bool {
 // rowAt maps a point inside the table body onto a thread index. Rows are
 // exactly one line tall with no gap, so the index is the scroll offset
 // plus the row's distance from the top of the body.
-func (m *threadsDashboard) rowAt(pt image.Point) (int, bool) {
+func (m *Dashboard) rowAt(pt image.Point) (int, bool) {
 	if !pt.In(m.listRect) || len(m.visible) == 0 {
 		return 0, false
 	}
@@ -698,30 +713,30 @@ func (m *threadsDashboard) rowAt(pt image.Point) (int, bool) {
 
 // runAction performs a toolbar action against the current selection. Key
 // bindings route here too, so a shortcut and its button can never drift.
-func (m *threadsDashboard) runAction(action threadAction) tea.Cmd {
+func (m *Dashboard) runAction(action threadAction) tea.Cmd {
 	sel := m.selected()
 	if !action.enabledFor(sel) {
 		return nil
 	}
 	switch action {
 	case actionNew:
-		return func() tea.Msg { return openThreadCreateMsg{} }
+		return func() tea.Msg { return OpenCreateMsg{} }
 	case actionOpen:
 		id, sessionID, name := sel.ID, sel.SessionID, sel.Name
-		return func() tea.Msg { return enterThreadMsg{id: id, sessionID: sessionID, name: name} }
+		return func() tea.Msg { return EnterMsg{ID: id, SessionID: sessionID, Name: name} }
 	case actionMerge:
 		id := sel.ID
-		return func() tea.Msg { return mergeThreadMsg{id: id} }
+		return func() tea.Msg { return MergeMsg{ID: id} }
 	case actionCancel:
 		id, kind := sel.ID, sel.Kind
-		return func() tea.Msg { return cancelDelegationMsg{id: id, kind: kind} }
+		return func() tea.Msg { return CancelDelegationMsg{ID: id, Kind: kind} }
 	case actionRemove:
 		id, name := sel.ID, sel.Name
-		return func() tea.Msg { return confirmRemoveThreadMsg{id: id, name: name} }
+		return func() tea.Msg { return ConfirmRemoveMsg{ID: id, Name: name} }
 	case actionRefresh:
-		return m.cache.dispatchRefresh(m.com)
+		return m.cache.DispatchRefresh(m.com)
 	case actionBack:
-		return func() tea.Msg { return leaveDashboardMsg{} }
+		return func() tea.Msg { return LeaveMsg{} }
 	default:
 		return nil
 	}
@@ -730,7 +745,7 @@ func (m *threadsDashboard) runAction(action threadAction) tea.Cmd {
 // HandleKey handles a key press while the dashboard has focus. Every
 // action key goes through runAction, the same entry point the toolbar
 // buttons use, so the two can never disagree about what is allowed.
-func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
+func (m *Dashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keyMap.Up):
 		m.list.SelectPrev()

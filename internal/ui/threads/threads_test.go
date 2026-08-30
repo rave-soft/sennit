@@ -1,4 +1,4 @@
-package model
+package threads
 
 import (
 	"image"
@@ -113,10 +113,10 @@ func TestThreadStatusStyleClasses(t *testing.T) {
 	}
 }
 
-func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *threadsDashboard {
+func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *Dashboard {
 	t.Helper()
 	com := &common.Common{Workspace: ws, Styles: testStyles()}
-	m := newThreadsDashboard(com, &threadListCache{})
+	m := New(com, &ListCache{})
 	m.SetSize(80, 20)
 	return m
 }
@@ -124,9 +124,9 @@ func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *threadsDas
 // TestThreadsDashboardRebuildItemsResizesListForDetailPane is the
 // regression test for the list rendering more rows than listRect could
 // show: SetSize used to size the list from chromeHeight() before
-// rebuildItems ever ran, so on first open — when m.visible is still empty
+// RebuildItems ever ran, so on first open — when m.visible is still empty
 // and m.selected() is nil — chromeHeight() ignored the detail pane the
-// first row's selection was about to add. rebuildItems must resize the
+// first row's selection was about to add. RebuildItems must resize the
 // list itself, after the selection it just settled is what chromeHeight
 // sees.
 func TestThreadsDashboardRebuildItemsResizesListForDetailPane(t *testing.T) {
@@ -137,10 +137,10 @@ func TestThreadsDashboardRebuildItemsResizesListForDetailPane(t *testing.T) {
 	require.Nil(t, m.selected())
 	beforeHeight := m.list.Height()
 
-	m.cache.cache.Value = []proto.Thread{{ID: "s1", Name: "one", Status: "running"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Name: "one", Status: "running"}}
+	m.RebuildItems()
 
-	require.NotNil(t, m.selected(), "rebuildItems lands on the first row when nothing was selected")
+	require.NotNil(t, m.selected(), "RebuildItems lands on the first row when nothing was selected")
 	wantHeight := max(0, m.height-m.chromeHeight())
 	require.Equal(t, wantHeight, m.list.Height(),
 		"the list must be sized off the chrome height of the now-selected row")
@@ -153,16 +153,16 @@ func TestThreadsDashboardHandleKeyEnter(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "s1", Name: "one"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Name: "one"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(enterThreadMsg)
+	msg, ok := cmd().(EnterMsg)
 	require.True(t, ok)
-	require.Equal(t, "s1", msg.id)
+	require.Equal(t, "s1", msg.ID)
 }
 
 func TestThreadsDashboardHandleKeyNew(t *testing.T) {
@@ -174,7 +174,7 @@ func TestThreadsDashboardHandleKeyNew(t *testing.T) {
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	_, ok := cmd().(openThreadCreateMsg)
+	_, ok := cmd().(OpenCreateMsg)
 	require.True(t, ok)
 }
 
@@ -183,16 +183,16 @@ func TestThreadsDashboardHandleKeyMerge(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "s1", Status: "completed"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Status: "completed"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "m", Code: 'm'})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(mergeThreadMsg)
+	msg, ok := cmd().(MergeMsg)
 	require.True(t, ok)
-	require.Equal(t, "s1", msg.id)
+	require.Equal(t, "s1", msg.ID)
 }
 
 func TestThreadsDashboardHandleKeyMergeSkipsAlreadyMerging(t *testing.T) {
@@ -200,8 +200,8 @@ func TestThreadsDashboardHandleKeyMergeSkipsAlreadyMerging(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "s1", Status: "merging"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Status: "merging"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "m", Code: 'm'})
@@ -214,40 +214,40 @@ func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "s1"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(confirmRemoveThreadMsg)
+	msg, ok := cmd().(ConfirmRemoveMsg)
 	require.True(t, ok, "x should request confirmation, not remove directly")
-	require.Equal(t, "s1", msg.id)
+	require.Equal(t, "s1", msg.ID)
 }
 
 // TestThreadsDashboardHandleKeyCancelTask proves the cancel key emits
-// cancelDelegationMsg for a non-terminal task row.
+// CancelDelegationMsg for a non-terminal task row.
 func TestThreadsDashboardHandleKeyCancelTask(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "t1", Kind: "task", Status: "running"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "t1", Kind: "task", Status: "running"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(cancelDelegationMsg)
+	msg, ok := cmd().(CancelDelegationMsg)
 	require.True(t, ok)
-	require.Equal(t, "t1", msg.id)
-	require.Equal(t, "task", msg.kind)
+	require.Equal(t, "t1", msg.ID)
+	require.Equal(t, "task", msg.Kind)
 }
 
 // TestThreadsDashboardHandleKeyCancelThread proves the cancel key also
-// emits cancelDelegationMsg for a non-terminal thread row: unlike a task,
+// emits CancelDelegationMsg for a non-terminal thread row: unlike a task,
 // cancelling a thread leaves its worktree and branch on disk rather than
 // tearing it down (see Manager.Cancel), so there is no reason to withhold
 // the key from a thread row the way an earlier step did.
@@ -256,17 +256,17 @@ func TestThreadsDashboardHandleKeyCancelThread(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "running"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "running"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(cancelDelegationMsg)
+	msg, ok := cmd().(CancelDelegationMsg)
 	require.True(t, ok)
-	require.Equal(t, "s1", msg.id)
-	require.Equal(t, "thread", msg.kind)
+	require.Equal(t, "s1", msg.ID)
+	require.Equal(t, "thread", msg.Kind)
 }
 
 // TestThreadsDashboardHandleKeyCancelSkipsTerminalTask proves cancel is a
@@ -276,8 +276,8 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalTask(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "t1", Kind: "task", Status: "completed"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "t1", Kind: "task", Status: "completed"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
@@ -293,8 +293,8 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalThread(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "merged"}}
-	m.rebuildItems()
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "merged"}}
+	m.RebuildItems()
 	m.list.SelectFirst()
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
@@ -302,59 +302,12 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalThread(t *testing.T) {
 	require.Nil(t, cmd, "an already-terminal thread should not re-trigger a cancel")
 }
 
-// TestCancelDelegationCmdCallsWorkspaceOnce drives the router end to end
-// for a task: a cancelDelegationMsg for one task's id must call
-// Workspace.CancelTask exactly once with that id — never any other
-// delegation's id, never CancelThread, and nothing about this path
-// touches Escape/the foreground-turn cancel.
-func TestCancelDelegationCmdCallsWorkspaceOnce(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsTestWorkspace{supported: true}
-	com := &common.Common{Workspace: ws, Styles: testStyles()}
-	r := &Root{com: com, dashboardDialog: nil}
-
-	_, cmd := r.Update(cancelDelegationMsg{id: "t1", kind: "task"})
-	require.NotNil(t, cmd)
-
-	msg := cmd()
-	done, ok := msg.(threadActionDoneMsg)
-	require.True(t, ok)
-	require.NoError(t, done.err)
-
-	require.Equal(t, []string{"t1"}, ws.cancelTaskCalls, "CancelTask must be called exactly once, with the selected task's id")
-	require.Empty(t, ws.cancelThreadCalls, "a task cancel must never call CancelThread")
-}
-
-// TestCancelDelegationCmdRoutesThreadKindToCancelThread is
-// TestCancelDelegationCmdCallsWorkspaceOnce's thread-kind sibling: a
-// cancelDelegationMsg for a thread must call Workspace.CancelThread, not
-// CancelTask.
-func TestCancelDelegationCmdRoutesThreadKindToCancelThread(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsTestWorkspace{supported: true}
-	com := &common.Common{Workspace: ws, Styles: testStyles()}
-	r := &Root{com: com, dashboardDialog: nil}
-
-	_, cmd := r.Update(cancelDelegationMsg{id: "s1", kind: "thread"})
-	require.NotNil(t, cmd)
-
-	msg := cmd()
-	done, ok := msg.(threadActionDoneMsg)
-	require.True(t, ok)
-	require.NoError(t, done.err)
-
-	require.Equal(t, []string{"s1"}, ws.cancelThreadCalls, "CancelThread must be called exactly once, with the selected thread's id")
-	require.Empty(t, ws.cancelTaskCalls, "a thread cancel must never call CancelTask")
-}
-
 func TestThreadsDashboardHandleKeyReload(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.Timestamp = time.Now() // fresh cache would normally skip a refresh
+	m.cache.Cache.Timestamp = time.Now() // fresh cache would normally skip a refresh
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "r", Code: 'r'})
 	require.True(t, handled)
@@ -390,7 +343,7 @@ func TestThreadsDashboardApplyThreadsLoadedRebuildsItems(t *testing.T) {
 	m := newTestThreadsDashboard(t, ws)
 
 	threads := []proto.Thread{{ID: "s1", Name: "one"}, {ID: "s2", Name: "two"}}
-	cmds := m.ApplyThreadsLoaded(threadsLoadedMsg{gen: m.cache.cache.Generation, threads: threads})
+	cmds := m.ApplyThreadsLoaded(LoadedMsg{Gen: m.cache.Cache.Generation, Threads: threads})
 	require.Nil(t, cmds)
 	require.Equal(t, 2, m.list.Len())
 }
@@ -413,12 +366,12 @@ func TestThreadsDashboardApplyThreadEventRebuildsItems(t *testing.T) {
 // dashboardWith builds a dashboard sized 120x30 over the given threads,
 // drawn once so its hit zones exist — clicking is only meaningful against
 // a frame that was actually painted.
-func dashboardWith(t *testing.T, threads ...proto.Thread) *threadsDashboard {
+func dashboardWith(t *testing.T, threads ...proto.Thread) *Dashboard {
 	t.Helper()
 	m := newTestThreadsDashboard(t, &threadsTestWorkspace{supported: true})
 	m.SetSize(120, 30)
-	m.cache.cache.Value = threads
-	m.rebuildItems()
+	m.cache.Cache.Value = threads
+	m.RebuildItems()
 	scr := uv.NewScreenBuffer(120, 30)
 	m.Draw(scr, scr.Bounds())
 	return m
@@ -426,7 +379,7 @@ func dashboardWith(t *testing.T, threads ...proto.Thread) *threadsDashboard {
 
 // zoneFor returns the hit zone of a toolbar button, so a test can click
 // exactly where the last frame drew it.
-func zoneFor(t *testing.T, m *threadsDashboard, action threadAction) threadsHitZone {
+func zoneFor(t *testing.T, m *Dashboard, action threadAction) threadsHitZone {
 	t.Helper()
 	for _, z := range m.zones {
 		if !z.isFilter && z.action == action {
@@ -438,7 +391,7 @@ func zoneFor(t *testing.T, m *threadsDashboard, action threadAction) threadsHitZ
 }
 
 // zoneForFilter returns the hit zone of a filter tab.
-func zoneForFilter(t *testing.T, m *threadsDashboard, f threadsFilter) threadsHitZone {
+func zoneForFilter(t *testing.T, m *Dashboard, f threadsFilter) threadsHitZone {
 	t.Helper()
 	for _, z := range m.zones {
 		if z.isFilter && z.filter == f {
@@ -449,7 +402,7 @@ func zoneForFilter(t *testing.T, m *threadsDashboard, f threadsFilter) threadsHi
 	return threadsHitZone{}
 }
 
-func clickAt(m *threadsDashboard, pt image.Point) (bool, tea.Cmd) {
+func clickAt(m *Dashboard, pt image.Point) (bool, tea.Cmd) {
 	return m.HandleMouseClick(tea.MouseClickMsg{X: pt.X, Y: pt.Y, Button: tea.MouseLeft})
 }
 
@@ -491,10 +444,10 @@ func TestThreadsDashboardClickRunsAction(t *testing.T) {
 	handled, cmd := clickAt(m, z.rect.Min)
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(enterThreadMsg)
+	msg, ok := cmd().(EnterMsg)
 	require.True(t, ok)
-	require.Equal(t, "t1", msg.id)
-	require.Equal(t, "sess", msg.sessionID)
+	require.Equal(t, "t1", msg.ID)
+	require.Equal(t, "sess", msg.SessionID)
 }
 
 // TestThreadsDashboardClickDisabledButtonDoesNothing proves a dimmed
@@ -565,17 +518,17 @@ func TestThreadsDashboardSelectionSurvivesRefresh(t *testing.T) {
 	m.list.SetSelected(1)
 	require.Equal(t, "t2", m.selected().ID)
 
-	m.cache.cache.Value = []proto.Thread{
+	m.cache.Cache.Value = []proto.Thread{
 		{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
 		{ID: "t2", Name: "two", Kind: "thread", Status: "completed"},
 	}
-	m.rebuildItems()
+	m.RebuildItems()
 	require.Equal(t, "t2", m.selected().ID)
 }
 
 // TestSelectedSurvivesConcurrentCacheDelete covers a regression: selected()
 // used to return &m.visible[idx], which under the All filter aliases the
-// threadListCache's backing array directly (see filterThreads). applyEvent's
+// ListCache's backing array directly (see filterThreads). applyEvent's
 // DeletedEvent handler removes from that array in place with
 // append(value[:i], value[i+1:]...), which shifts every element after the
 // deleted one down by one slot — silently overwriting whatever a
@@ -597,7 +550,7 @@ func TestSelectedSurvivesConcurrentCacheDelete(t *testing.T) {
 	// element (t3) down by one slot in the cache's backing array. If sel
 	// aliases that array, its target is now t3's data even though nothing
 	// ever assigned through sel.
-	m.cache.applyEvent(pubsub.Event[proto.Thread]{
+	m.cache.ApplyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.DeletedEvent,
 		Payload: proto.Thread{ID: "t1", Kind: "thread"},
 	})
@@ -638,7 +591,7 @@ func TestThreadsDashboardBackButtonLeaves(t *testing.T) {
 	handled, cmd := clickAt(m, z.rect.Min)
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	_, ok := cmd().(leaveDashboardMsg)
+	_, ok := cmd().(LeaveMsg)
 	require.True(t, ok)
 }
 

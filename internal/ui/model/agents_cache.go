@@ -13,7 +13,7 @@ package model
 // transcript is finished from that instant on — so liveness has to come from
 // the task record itself, which is what this cache holds.
 //
-// Deliberately separate from threadListCache rather than folded into it:
+// Deliberately separate from threads.ListCache rather than folded into it:
 // that cache is Kind-scoped to threads on both its fetch and its event path,
 // for good reasons documented there (a task has no worktree, is never
 // merged, and used to accumulate in the list and bury the threads). This is
@@ -91,7 +91,7 @@ func (c *agentListCache) applyLoaded(com *common.Common, msg agentsLoadedMsg) (c
 // change on the edge itself, then invalidates the TTL so a refresh
 // eventually reconciles with the authoritative list.
 //
-// Tasks only, the mirror of threadListCache.applyEvent's thread-only filter:
+// Tasks only, the mirror of threads.ListCache.applyEvent's thread-only filter:
 // the two kinds share one table and one lifecycle publisher.
 func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 	listcache.ApplyEvent(&c.cache, proto.ThreadKindTask, evt)

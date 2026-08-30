@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -76,13 +77,13 @@ type threadAttachment struct {
 type Root struct {
 	com             *common.Common
 	main            *UI
-	dashboard       *threadsDashboard // lazily created on first ctrl+e
-	dashboardDialog *dialog.Overlay   // hosts the thread-create dialog while on the dashboard screen
-	thread          *threadAttachment // non-nil while attached to a thread
+	dashboard       *threads.Dashboard // lazily created on first ctrl+e
+	dashboardDialog *dialog.Overlay    // hosts the thread-create dialog while on the dashboard screen
+	thread          *threadAttachment  // non-nil while attached to a thread
 	active          screenID
 
 	// pendingAttach is the ID of the thread the user most recently asked
-	// to drill into (enterThreadMsg) and whose attachThreadCmd has not
+	// to drill into (threads.EnterMsg) and whose attachThreadCmd has not
 	// answered yet. handleThreadAttached uses it to tell a wanted result
 	// from a stale one: a request can come from the dashboard or from the
 	// main screen's session panel (a click on a thread block), so "which
@@ -214,20 +215,20 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// and, while the dashboard is active, dispatch a second,
 			// redundant ListThreads. Only the dashboard's own list.Items
 			// need rebuilding to pick up the change.
-			r.dashboard.rebuildItems()
+			r.dashboard.RebuildItems()
 		}
 		return r, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
 		return r.handleKeyPress(msg)
 	case showThreadsDashboardMsg:
 		if r.dashboard == nil {
-			r.dashboard = newThreadsDashboard(r.com, &r.main.threadList)
+			r.dashboard = threads.New(r.com, &r.main.threadList)
 			r.dashboard.SetSize(r.width, r.height)
 		}
 		cmd := r.dashboard.SetActive(true)
 		r.active = screenDashboard
 		return r, cmd
-	case threadsLoadedMsg:
+	case threads.LoadedMsg:
 		// The shared cache (threads_cache.go) feeds the header badge and
 		// dock too, so the result always goes to the main screen first,
 		// regardless of which fetch — dashboard's or main's — actually
@@ -239,12 +240,12 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd := r.main.Update(msg)
 		cmds = append(cmds, cmd)
 		if r.dashboard != nil {
-			r.dashboard.rebuildItems()
+			r.dashboard.RebuildItems()
 		}
 		return r, tea.Batch(cmds...)
-	case enterThreadMsg:
-		r.pendingAttach = msg.id
-		return r, r.attachThreadCmd(msg.id, msg.sessionID, msg.name)
+	case threads.EnterMsg:
+		r.pendingAttach = msg.ID
+		return r, r.attachThreadCmd(msg.ID, msg.SessionID, msg.Name)
 	case leaveThreadRequestedMsg:
 		// The Back button at the top of a drilled-in thread. The thread's
 		// embedded UI raises this rather than acting itself: the
@@ -255,13 +256,13 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, r.leaveThreadToMain()
 	case threadAttachedMsg:
 		return r.handleThreadAttached(msg)
-	case mergeThreadMsg:
-		return r, r.mergeThreadCmd(msg.id)
-	case removeThreadMsg:
-		return r, r.removeThreadCmd(msg.id)
-	case cancelDelegationMsg:
-		return r, r.cancelDelegationCmd(msg.id, msg.kind)
-	case leaveDashboardMsg:
+	case threads.MergeMsg:
+		return r, r.mergeThreadCmd(msg.ID)
+	case threads.RemoveMsg:
+		return r, r.removeThreadCmd(msg.ID)
+	case threads.CancelDelegationMsg:
+		return r, r.cancelDelegationCmd(msg.ID, msg.Kind)
+	case threads.LeaveMsg:
 		// The dashboard's Back button. Same transition esc takes (see
 		// handleKeyPress), raised as a message because the dashboard does
 		// not own the screen stack — the router does.
@@ -271,11 +272,11 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.active = screenMain
 		r.pendingAttach = ""
 		return r, r.dashboard.SetActive(false)
-	case openThreadCreateMsg:
+	case threads.OpenCreateMsg:
 		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
 		return r, nil
-	case confirmRemoveThreadMsg:
-		r.dashboardDialog.OpenDialog(dialog.NewThreadRemoveConfirm(r.com, msg.id, msg.name))
+	case threads.ConfirmRemoveMsg:
+		r.dashboardDialog.OpenDialog(dialog.NewThreadRemoveConfirm(r.com, msg.ID, msg.Name))
 		return r, nil
 	case threadActionDoneMsg:
 		if msg.err != nil {
@@ -543,7 +544,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	}
 
 	// The result is wanted only if it answers the request the user is
-	// still waiting on — the most recent enterThreadMsg (from the dashboard
+	// still waiting on — the most recent threads.EnterMsg (from the dashboard
 	// or the main screen's session panel; see pendingAttach) — or is a
 	// duplicate response for the thread already attached (e.g. two Enter
 	// presses on the same dashboard row). Anything else means they've moved
@@ -649,7 +650,7 @@ func (r *Root) leaveThread() tea.Cmd {
 	cmd := r.detachThread()
 	built := r.dashboard == nil
 	if built {
-		r.dashboard = newThreadsDashboard(r.com, &r.main.threadList)
+		r.dashboard = threads.New(r.com, &r.main.threadList)
 		r.dashboard.SetSize(r.width, r.height)
 	}
 	r.active = screenDashboard
@@ -665,7 +666,7 @@ func (r *Root) leaveThread() tea.Cmd {
 	// The thread may have changed status while attached (e.g.
 	// completed); invalidate so the dashboard doesn't sit on a stale
 	// row until the TTL backstop catches up.
-	r.dashboard.cache.invalidate()
+	r.dashboard.InvalidateCache()
 	cmds = append(cmds, r.dashboard.Refresh())
 	return tea.Batch(cmds...)
 }

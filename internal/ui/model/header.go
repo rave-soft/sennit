@@ -140,7 +140,7 @@ func renderHeaderDetails(
 	}
 
 	// activeThreads counts pending/running/merging threads (see
-	// activeThreadCount in threads_cache.go); shown so a "ctrl+e" glance
+	// threads.ActiveCount in threads_cache.go); shown so a "ctrl+e" glance
 	// from the main chat confirms background threads are still alive
 	// without switching screens. Zero threads (the common case) renders
 	// nothing.

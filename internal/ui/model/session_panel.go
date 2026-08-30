@@ -60,7 +60,7 @@ func (m *UI) panelSpinnerWanted() bool {
 	if m.isAgentBusy() && hasInProgressTodo(m.sess.current.Todos) {
 		return true
 	}
-	for _, t := range m.threadList.cache.Value {
+	for _, t := range m.threadList.Threads() {
 		switch proto.ThreadStatus(t.Status) {
 		case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
 			return true
@@ -541,7 +541,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		// planPanelSection's doc comment — so shedPanelBlocks below is the
 		// only place either list gets trimmed, and only in a genuinely
 		// short terminal.
-		threads := planPanelSection(activeDockThreads(m.threadList.cache.Value), m.panel.threadsCollapsed)
+		threads := planPanelSection(activeDockThreads(m.threadList.Threads()), m.panel.threadsCollapsed)
 		plan.threadsActive = threads.active
 		plan.threadsExpanded = threads.expanded
 		plan.threads = threads.items

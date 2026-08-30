@@ -103,6 +103,6 @@ func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 // The dock's and indicator's own list-refresh backoff tests moved to
 // threads_cache_test.go (TestApplyThreadsLoadedErrorBacksOff,
 // TestApplyThreadsLoadedStaleGenerationFailureRedispatches): both caches
-// (and the dashboard's) collapsed onto the single threadListCache in
+// (and the dashboard's) collapsed onto the single threads.ListCache in
 // threads_cache.go, so there is exactly one list-refresh backoff path left
 // to pin instead of three copies of it.

@@ -17,7 +17,7 @@ func TestSessionPanelPlan_CollapsedThreadsKeepHeaderDropBlocks(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.Value = mkDockThreads(2)
+	u.threadList.Cache.Value = mkDockThreads(2)
 
 	expanded := u.sessionPanelPlan(100)
 	require.True(t, expanded.threadsExpanded)
@@ -58,7 +58,7 @@ func TestDrawSessionPanel_CollapsedThreadsHeaderIsClickable(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.Value = mkDockThreads(2)
+	u.threadList.Cache.Value = mkDockThreads(2)
 	u.panel.toggleThreadsCollapsed()
 
 	area := uv.Rect(0, 0, 60, 6)
