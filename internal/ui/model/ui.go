@@ -380,13 +380,13 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	// fresh by write-through toggles and off-thread refreshes so Update
 	// and View never probe the workspace synchronously.
 	yolo := com.Workspace.PermissionSkipRequests()
-	ui.wsCache.yoloCache.set(yolo)
+	ui.wsCache.yoloCache.Set(yolo)
 
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
 	// afterwards.
 	if com.Workspace.AgentIsReady() {
-		ui.wsCache.agentCache.set(agentReadyModel{ready: true, model: com.Workspace.AgentModel()})
+		ui.wsCache.agentCache.Set(agentReadyModel{ready: true, model: com.Workspace.AgentModel()})
 	}
 	ui.setEditorPrompt(yolo)
 	ui.editor.randomizePlaceholders()
@@ -1019,7 +1019,7 @@ func (m *UI) activeThreadBadgeCount() int {
 	if !m.surfacesThreads() {
 		return 0
 	}
-	return activeThreadCount(m.threadList.cache.value)
+	return activeThreadCount(m.threadList.cache.Value)
 }
 
 func (m *UI) currentModelSupportsImages() bool {
@@ -1062,7 +1062,7 @@ func (m *UI) isAgentBusy() bool {
 	if m.editor.bangCancel != nil {
 		return true
 	}
-	return m.wsCache.agentBusyCache.value
+	return m.wsCache.agentBusyCache.Value
 }
 
 // isCurrentSessionBusy reports whether the agent is generating for the session
@@ -1333,7 +1333,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.panel.todosScrollOffset = 0
 	m.wsCache.invalidateBusyCaches()
 	m.wsCache.invalidatePromptQueue()
-	m.wsCache.promptQueueCache.set(nil)
+	m.wsCache.promptQueueCache.Set(nil)
 	m.editor.historyReset()
 	ws := m.com.Workspace
 	ctx := m.com.Context()

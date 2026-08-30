@@ -7,6 +7,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,10 +38,10 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
 		threadID: "t1",
 		gen:      c.activityGen,
-		entryGen: entry.generation,
+		entryGen: entry.Generation,
 		err:      errors.New("read-only workspace: AttachThread is not allowed"),
 	})
-	require.False(t, c.activity["t1"].inFlight, "a failed probe must still clear its in-flight marker")
+	require.False(t, c.activity["t1"].InFlight, "a failed probe must still clear its in-flight marker")
 
 	require.Empty(t, c.staleThreadActivityRefreshCmds(com, visible),
 		"a probe that just failed must not be re-dispatched on the next Update")
@@ -48,7 +49,7 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 	// Once the backoff has elapsed, the probe is tried again: this is a
 	// hold-off, not a permanent giveup.
 	expired := c.activity["t1"]
-	expired.failedAt = time.Now().Add(-2 * listRefreshBackoff)
+	expired.FailedAt = time.Now().Add(-2 * listcache.RefreshBackoff)
 	c.activity["t1"] = expired
 	require.Len(t, c.staleThreadActivityRefreshCmds(com, visible), 1,
 		"the probe must resume once the backoff window has passed")
@@ -60,21 +61,21 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 func TestThreadActivitySuccessClearsBackoff(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activity: map[string]ttlCache[threadDockActivity]{
-		"t1": {inFlight: true, failedAt: time.Now()},
+	c := &threadsDockState{activity: map[string]listcache.TTLCache[threadDockActivity]{
+		"t1": {InFlight: true, FailedAt: time.Now()},
 	}}
 	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
 		threadID: "t1",
 		gen:      c.activityGen,
-		entryGen: c.activity["t1"].generation,
+		entryGen: c.activity["t1"].Generation,
 		activity: threadDockActivity{MessageCount: 4},
 	})
 
 	settled := c.activity["t1"]
-	require.False(t, settled.backingOff(listRefreshBackoff),
+	require.False(t, settled.BackingOff(listcache.RefreshBackoff),
 		"a successful probe must clear the recorded failure")
-	require.True(t, settled.fresh(threadsDockActivityTTL))
-	require.Equal(t, int64(4), c.activity["t1"].value.MessageCount)
+	require.True(t, settled.Fresh(threadsDockActivityTTL))
+	require.Equal(t, int64(4), c.activity["t1"].Value.MessageCount)
 }
 
 // TestThreadActivityStaleGenerationFailureIsNotRecorded: a failure that
@@ -83,8 +84,8 @@ func TestThreadActivitySuccessClearsBackoff(t *testing.T) {
 func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activity: map[string]ttlCache[threadDockActivity]{
-		"t1": {inFlight: true, generation: 3},
+	c := &threadsDockState{activity: map[string]listcache.TTLCache[threadDockActivity]{
+		"t1": {InFlight: true, Generation: 3},
 	}}
 	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
 		threadID: "t1",
@@ -93,9 +94,9 @@ func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 		err:      errors.New("boom"),
 	})
 
-	require.False(t, c.activity["t1"].inFlight)
+	require.False(t, c.activity["t1"].InFlight)
 	settled := c.activity["t1"]
-	require.False(t, settled.backingOff(listRefreshBackoff),
+	require.False(t, settled.BackingOff(listcache.RefreshBackoff),
 		"a stale-generation failure must not hold back the newer request that replaced it")
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -119,8 +120,8 @@ func TestThreadDockStatusLine(t *testing.T) {
 func TestDropActivityDiscardsCachedSnapshot(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activity: map[string]ttlCache[threadDockActivity]{
-		"s1": {value: threadDockActivity{MessageCount: 3}},
+	c := &threadsDockState{activity: map[string]listcache.TTLCache[threadDockActivity]{
+		"s1": {Value: threadDockActivity{MessageCount: 3}},
 	}}
 	c.dropActivity("s1")
 	_, ok := c.activity["s1"]
@@ -142,18 +143,18 @@ func TestStaleThreadActivityRefreshCmds(t *testing.T) {
 	}
 
 	c := &threadsDockState{
-		activity: map[string]ttlCache[threadDockActivity]{
-			"fresh": {timestamp: time.Now()},
-			"stale": {timestamp: time.Now().Add(-2 * threadsDockActivityTTL)},
+		activity: map[string]listcache.TTLCache[threadDockActivity]{
+			"fresh": {Timestamp: time.Now()},
+			"stale": {Timestamp: time.Now().Add(-2 * threadsDockActivityTTL)},
 		},
 	}
 
 	cmds := c.staleThreadActivityRefreshCmds(com, visible)
 	require.Len(t, cmds, 2)
-	require.True(t, c.activity["stale"].inFlight)
-	require.True(t, c.activity["unfetched"].inFlight)
-	require.False(t, c.activity["fresh"].inFlight)
-	require.False(t, c.activity["no-session"].inFlight)
+	require.True(t, c.activity["stale"].InFlight)
+	require.True(t, c.activity["unfetched"].InFlight)
+	require.False(t, c.activity["fresh"].InFlight)
+	require.False(t, c.activity["no-session"].InFlight)
 }
 
 func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
@@ -188,23 +189,23 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 	require.Equal(t, "view internal/ui/model/ui.go", loaded.activity.LastTool)
 	require.Equal(t, 1, ws.detachCalls)
 
-	c.activity = map[string]ttlCache[threadDockActivity]{"t1": {inFlight: true}}
+	c.activity = map[string]listcache.TTLCache[threadDockActivity]{"t1": {InFlight: true}}
 	c.applyThreadActivityLoaded(loaded)
-	require.False(t, c.activity["t1"].inFlight)
-	require.Equal(t, "doing task two", c.activity["t1"].value.InProgressTodo)
+	require.False(t, c.activity["t1"].InFlight)
+	require.Equal(t, "doing task two", c.activity["t1"].Value.InProgressTodo)
 }
 
 func TestApplyThreadActivityLoadedDiscardsStaleGen(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activityGen: 2, activity: map[string]ttlCache[threadDockActivity]{"t1": {inFlight: true}}}
+	c := &threadsDockState{activityGen: 2, activity: map[string]listcache.TTLCache[threadDockActivity]{"t1": {InFlight: true}}}
 	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
 		threadID: "t1",
 		gen:      1,
 		activity: threadDockActivity{MessageCount: 9},
 	})
-	require.False(t, c.activity["t1"].inFlight, "inFlight is always cleared")
-	require.Zero(t, c.activity["t1"].value, "a stale-gen result must not be written through")
+	require.False(t, c.activity["t1"].InFlight, "inFlight is always cleared")
+	require.Zero(t, c.activity["t1"].Value, "a stale-gen result must not be written through")
 }
 
 // dockThreadIDs extracts IDs in order, for asserting activeDockThreads'

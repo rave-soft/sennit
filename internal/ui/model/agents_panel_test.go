@@ -84,7 +84,7 @@ func TestAgentListCache_KeepsOnlyTasks(t *testing.T) {
 
 	var c agentListCache
 	c.applyEvent(pubsub.Event[proto.Thread]{Type: pubsub.CreatedEvent, Payload: liveDelegation("d1", "m$$c1")})
-	require.Len(t, c.cache.value, 1)
+	require.Len(t, c.cache.Value, 1)
 
 	c.applyEvent(pubsub.Event[proto.Thread]{Type: pubsub.CreatedEvent, Payload: proto.Thread{
 		ID: "t1", Kind: string(proto.ThreadKindThread), Status: "running",
@@ -92,15 +92,15 @@ func TestAgentListCache_KeepsOnlyTasks(t *testing.T) {
 	c.applyEvent(pubsub.Event[proto.Thread]{Type: pubsub.CreatedEvent, Payload: proto.Thread{
 		ID: "legacy", Status: "running",
 	}})
-	require.Len(t, c.cache.value, 1, "a thread — and a payload with no kind at all — belongs to the other cache")
+	require.Len(t, c.cache.Value, 1, "a thread — and a payload with no kind at all — belongs to the other cache")
 
 	running := liveDelegation("d1", "m$$c1")
 	running.Status = string(proto.ThreadStatusCompleted)
 	c.applyEvent(pubsub.Event[proto.Thread]{Type: pubsub.UpdatedEvent, Payload: running})
-	require.Equal(t, string(proto.ThreadStatusCompleted), c.cache.value[0].Status, "an update rewrites the row in place")
+	require.Equal(t, string(proto.ThreadStatusCompleted), c.cache.Value[0].Status, "an update rewrites the row in place")
 
 	c.applyEvent(pubsub.Event[proto.Thread]{Type: pubsub.DeletedEvent, Payload: proto.Thread{ID: "d1"}})
-	require.Empty(t, c.cache.value, "a removal is never kind-filtered — it would strand the row")
+	require.Empty(t, c.cache.Value, "a removal is never kind-filtered — it would strand the row")
 }
 
 // TestSessionPanelPlan_AgentsRows covers the agents section's natural row
@@ -112,7 +112,7 @@ func TestSessionPanelPlan_AgentsRows(t *testing.T) {
 	u := sessionUI()
 	require.Zero(t, u.sessionPanelPlan(100).agentsRows, "no delegations at all")
 
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$c1"), liveDelegation("d2", "m$$c2")}
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "m$$c1"), liveDelegation("d2", "m$$c2")}
 	plan := u.sessionPanelPlan(100)
 	require.Equal(t, 4, plan.agentsRows)
 	require.Equal(t, 1, plan.agentsHeaderRows)
@@ -128,7 +128,7 @@ func TestSessionPanelPlan_AgentsCollapsedKeepsHeader(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$c1")}
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "m$$c1")}
 	u.panel.agentsCollapsed = true
 
 	plan := u.sessionPanelPlan(100)
@@ -144,7 +144,7 @@ func TestDrawSessionPanel_AgentsSection(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$c1")}
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "m$$c1")}
 	u.updateLayoutAndSize()
 
 	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
@@ -200,7 +200,7 @@ func TestMouseClick_AgentBlockOpensItsTranscript(t *testing.T) {
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
 	u.com.Workspace = agentsPanelWorkspace{}
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "msg-7$$call-1")}
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "msg-7$$call-1")}
 	u.updateLayoutAndSize()
 
 	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
@@ -221,7 +221,7 @@ func TestMouseClick_AgentsHeaderCollapsesSection(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$c1")}
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "m$$c1")}
 	u.updateLayoutAndSize()
 
 	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
@@ -241,10 +241,10 @@ func TestPanelSpinner_RunningDelegationKeepsItTicking(t *testing.T) {
 	u := sessionUI()
 	require.False(t, u.panelSpinnerWanted())
 
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$c1")}
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "m$$c1")}
 	require.True(t, u.panelSpinnerWanted())
 
-	u.agentList.cache.value[0].ParentSessionID = "somebody-else"
+	u.agentList.cache.Value[0].ParentSessionID = "somebody-else"
 	require.False(t, u.panelSpinnerWanted(),
 		"another session's delegation is live work, but not this panel's")
 }
@@ -257,8 +257,8 @@ func TestSessionPanelRowLayout_AgentsAboveThreads(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$c1")}
-	u.threadList.cache.value = []proto.Thread{
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "m$$c1")}
+	u.threadList.cache.Value = []proto.Thread{
 		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
 	}
 	u.updateLayoutAndSize()
@@ -339,13 +339,13 @@ func TestSessionEvent_HidesPanelledDelegationsFromTranscript(t *testing.T) {
 	done := newItem("call-2", "split the C4 packages")
 	u.chat.SetMessages(running, done)
 
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "msg-7$$call-1")}
+	u.agentList.cache.Value = []proto.Thread{liveDelegation("d1", "msg-7$$call-1")}
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
 	require.Empty(t, running.Render(80), "the panel has it: no row in the transcript")
 	require.NotEmpty(t, done.Render(80), "the one the panel never had must stay in the transcript")
 
 	// It finished and left the panel, so the transcript is where it lands.
-	u.agentList.cache.value = nil
+	u.agentList.cache.Value = nil
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
 	require.NotEmpty(t, running.Render(80), "the panel let go: the block appears")
 }

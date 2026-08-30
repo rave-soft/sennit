@@ -60,13 +60,13 @@ func (m *UI) panelSpinnerWanted() bool {
 	if m.isAgentBusy() && hasInProgressTodo(m.sess.current.Todos) {
 		return true
 	}
-	for _, t := range m.threadList.cache.value {
+	for _, t := range m.threadList.cache.Value {
 		switch proto.ThreadStatus(t.Status) {
 		case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
 			return true
 		}
 	}
-	for _, a := range m.agentList.cache.value {
+	for _, a := range m.agentList.cache.Value {
 		if a.ParentSessionID == m.sess.current.ID && proto.ThreadStatus(a.Status) == proto.ThreadStatusRunning {
 			return true
 		}
@@ -91,7 +91,7 @@ func (m *UI) panelledDelegations() map[string]bool {
 	if !m.hasSession() || !m.panelSurfacesThreads() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
-	live := sessionDelegations(m.agentList.cache.value, m.sess.current.ID)
+	live := sessionDelegations(m.agentList.cache.Value, m.sess.current.ID)
 	if len(live) == 0 {
 		return nil
 	}
@@ -541,13 +541,13 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		// planPanelSection's doc comment — so shedPanelBlocks below is the
 		// only place either list gets trimmed, and only in a genuinely
 		// short terminal.
-		threads := planPanelSection(activeDockThreads(m.threadList.cache.value), m.panel.threadsCollapsed)
+		threads := planPanelSection(activeDockThreads(m.threadList.cache.Value), m.panel.threadsCollapsed)
 		plan.threadsActive = threads.active
 		plan.threadsExpanded = threads.expanded
 		plan.threads = threads.items
 		plan.threadsRows = threads.rows
 
-		agents := planPanelSection(sessionDelegations(m.agentList.cache.value, m.sess.current.ID), m.panel.agentsCollapsed)
+		agents := planPanelSection(sessionDelegations(m.agentList.cache.Value, m.sess.current.ID), m.panel.agentsCollapsed)
 		plan.agentsLive = agents.active
 		plan.agentsExpanded = agents.expanded
 		plan.agents = agents.items
@@ -583,7 +583,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.todosViewportRows = min(plan.todosContentRows, maxPanelTodosRows)
 	}
 
-	plan.queue = m.wsCache.promptQueueCache.value
+	plan.queue = m.wsCache.promptQueueCache.Value
 
 	headerRows := func() int {
 		if !plan.todosVisible {
@@ -1040,7 +1040,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning || status == proto.ThreadStatusMerging {
 					icon = m.panel.panelActivityIcon(m.com)
 				}
-				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].value))
+				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].Value))
 			},
 		})
 	m.panel.threads = plan.threads

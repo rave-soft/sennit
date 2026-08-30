@@ -23,7 +23,7 @@ package model
 //     correct and avoids pointless re-fetches on task churn.
 //   - Only the dock's and indicator's predecessors called ttlCache.fail on
 //     an error, so a failing refresh backed off. This cache's predecessor
-//     did neither, which is exactly the spin listRefreshBackoff (see
+//     did neither, which is exactly the spin listcache.RefreshBackoff (see
 //     threads_dock.go) exists to prevent — on the dashboard, only sheer
 //     luck (Tick was never wired up; see threads.go) kept it from
 //     happening. Kept: fail-and-back-off.
@@ -46,6 +46,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -56,7 +57,7 @@ var threadsCacheTTL = 5 * time.Second
 // threadListCache holds the memoized thread list (see the package doc
 // comment above) plus its TTL-cache and in-flight/generation bookkeeping.
 type threadListCache struct {
-	cache ttlCache[[]proto.Thread]
+	cache listcache.TTLCache[[]proto.Thread]
 }
 
 // threadsLoadedMsg delivers the result of an off-thread thread list fetch.
@@ -77,18 +78,18 @@ type threadsLoadedMsg struct {
 // tool's own delegation — it already renders inline in the chat that
 // started it, is never merged, and nothing ever removed a finished one, so
 // they only accumulated here, burying the threads this cache is about.
-func (c *threadListCache) ops() listCacheOps[threadsLoadedMsg] {
-	return listCacheOps[threadsLoadedMsg]{
-		label:    "threads",
-		ttl:      threadsCacheTTL,
-		backoff:  listRefreshBackoff,
-		kind:     proto.ThreadKindThread,
-		supports: func(ws workspace.Workspace) bool { return ws.SupportsThreads() },
-		fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListThreads(ctx) },
-		wrap: func(gen uint64, items []proto.Thread, err error) threadsLoadedMsg {
+func (c *threadListCache) ops() listcache.Ops[threadsLoadedMsg] {
+	return listcache.Ops[threadsLoadedMsg]{
+		Label:    "threads",
+		TTL:      threadsCacheTTL,
+		Backoff:  listcache.RefreshBackoff,
+		Kind:     proto.ThreadKindThread,
+		Supports: func(ws workspace.Workspace) bool { return ws.SupportsThreads() },
+		Fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListThreads(ctx) },
+		Wrap: func(gen uint64, items []proto.Thread, err error) threadsLoadedMsg {
 			return threadsLoadedMsg{gen: gen, threads: items, err: err}
 		},
-		unwrap: func(msg threadsLoadedMsg) (uint64, []proto.Thread, error) {
+		Unwrap: func(msg threadsLoadedMsg) (uint64, []proto.Thread, error) {
 			return msg.gen, msg.threads, msg.err
 		},
 	}
@@ -98,7 +99,7 @@ func (c *threadListCache) ops() listCacheOps[threadsLoadedMsg] {
 // goroutine, delivering a threadsLoadedMsg. It returns nil while a fetch is
 // already in flight, or if the workspace doesn't support threads.
 func (c *threadListCache) dispatchRefresh(com *common.Common) tea.Cmd {
-	return dispatchListRefresh(&c.cache, com, c.ops())
+	return listcache.DispatchRefresh(&c.cache, com, c.ops())
 }
 
 // applyLoaded stores an off-thread fetch result. Runs on the Update
@@ -108,7 +109,7 @@ func (c *threadListCache) dispatchRefresh(com *common.Common) tea.Cmd {
 // the dock's activityGen, say) check it instead of re-deriving the same
 // generation logic themselves.
 func (c *threadListCache) applyLoaded(com *common.Common, msg threadsLoadedMsg) (cmds []tea.Cmd, applied bool) {
-	return applyListLoaded(&c.cache, com, c.ops(), msg)
+	return listcache.ApplyLoaded(&c.cache, com, c.ops(), msg)
 }
 
 // invalidate marks the cached list stale and bumps the generation so any
@@ -116,7 +117,7 @@ func (c *threadListCache) applyLoaded(com *common.Common, msg threadsLoadedMsg) 
 // pubsub events (via applyEvent) and by any other handler that changes
 // thread state out of band.
 func (c *threadListCache) invalidate() {
-	c.cache.invalidate()
+	c.cache.Invalidate()
 }
 
 // applyEvent reacts to a thread pubsub event: it upserts (Created, Updated)
@@ -125,14 +126,14 @@ func (c *threadListCache) invalidate() {
 // refresh, then invalidates the TTL so a background refresh eventually
 // reconciles with the authoritative list.
 func (c *threadListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
-	applyListEvent(&c.cache, proto.ThreadKindThread, evt)
+	listcache.ApplyEvent(&c.cache, proto.ThreadKindThread, evt)
 }
 
 // staleRefreshCmd is the TTL backstop: while active and the memoized list
 // has outlived its TTL, it schedules an off-thread re-probe. It never does
 // IO itself.
 func (c *threadListCache) staleRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	return staleListRefreshCmd(&c.cache, com, active, c.ops())
+	return listcache.StaleRefreshCmd(&c.cache, com, active, c.ops())
 }
 
 // activeThreadCount reports how many of threads are pending, running, or

@@ -18,7 +18,7 @@ func TestSessionPanelPlan_ShedThreadsStayWholeBlocksAndAreCounted(t *testing.T) 
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.value = mkDockThreads(4)
+	u.threadList.cache.Value = mkDockThreads(4)
 
 	full := u.sessionPanelPlan(100)
 	require.Len(t, full.threads, 4)
@@ -43,10 +43,10 @@ func TestThreadsDock_RemovedThreadLeavesThePanelImmediately(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.value = mkDockThreads(3)
+	u.threadList.cache.Value = mkDockThreads(3)
 	require.Len(t, u.sessionPanelPlan(100).threads, 3)
 
-	gone := u.threadList.cache.value[1]
+	gone := u.threadList.cache.Value[1]
 	u.threadList.applyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.DeletedEvent,
 		Payload: gone,
@@ -66,15 +66,15 @@ func TestThreadsDock_StatusEventStillOnlyInvalidates(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.value = mkDockThreads(2)
-	changed := u.threadList.cache.value[0]
+	u.threadList.cache.Value = mkDockThreads(2)
+	changed := u.threadList.cache.Value[0]
 	changed.Status = "merged"
 
 	u.threadList.applyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: changed,
 	})
-	require.Len(t, u.threadList.cache.value, 2, "an update must not drop the row")
+	require.Len(t, u.threadList.cache.Value, 2, "an update must not drop the row")
 }
 
 // Drilling into a sub-agent's transcript must not bring the threads block
@@ -85,7 +85,7 @@ func TestSessionPanelPlan_NoThreadsBlockInASubAgentTranscript(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.value = mkDockThreads(3)
+	u.threadList.cache.Value = mkDockThreads(3)
 	require.Len(t, u.sessionPanelPlan(100).threads, 3, "precondition: the block shows on the session itself")
 
 	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{})
@@ -102,7 +102,7 @@ func TestSessionPanelPlan_ThreadsBlockReturnsOnLeavingTheSubAgent(t *testing.T) 
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.value = mkDockThreads(3)
+	u.threadList.cache.Value = mkDockThreads(3)
 	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{})
 	require.Empty(t, u.sessionPanelPlan(100).threads)
 

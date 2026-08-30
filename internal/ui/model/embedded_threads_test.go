@@ -18,7 +18,7 @@ func TestEmbeddedThreadUI_ShowsNoThreadsInItsPanel(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.value = mkDockThreads(2)
+	u.threadList.cache.Value = mkDockThreads(2)
 	require.Positive(t, u.sessionPanelPlan(100).threadsActive,
 		"precondition: the main screen does show them")
 
@@ -36,7 +36,7 @@ func TestEmbeddedThreadUI_ShowsNoThreadBadge(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadList.cache.set([]proto.Thread{{ID: "s1", Status: "running"}, {ID: "s2", Status: "pending"}, {ID: "s3", Status: "merging"}})
+	u.threadList.cache.Set([]proto.Thread{{ID: "s1", Status: "running"}, {ID: "s2", Status: "pending"}, {ID: "s3", Status: "merging"}})
 	require.Equal(t, 3, u.activeThreadBadgeCount())
 
 	u.embedded = true
@@ -77,15 +77,15 @@ func TestRoot_MainScreenResultsArriveWhileAThreadIsOpen(t *testing.T) {
 	r.active = screenThread
 
 	// A refresh the main screen started before the user drilled in.
-	gen, started := r.main.threadList.cache.begin()
+	gen, started := r.main.threadList.cache.Begin()
 	require.True(t, started)
 
 	r.Update(threadsLoadedMsg{gen: gen, threads: mkDockThreads(2)})
 
-	require.False(t, r.main.threadList.cache.inFlight,
+	require.False(t, r.main.threadList.cache.InFlight,
 		"the result must reach the screen that asked, or its next refresh never starts")
-	require.Len(t, r.main.threadList.cache.value, 2)
-	require.Empty(t, threadUI.threadList.cache.value,
+	require.Len(t, r.main.threadList.cache.Value, 2)
+	require.Empty(t, threadUI.threadList.cache.Value,
 		"and it must not land in the thread's own state")
 }
 
@@ -100,13 +100,13 @@ func TestRoot_MainScreenResultsSurviveTheDashboardToo(t *testing.T) {
 	r := newTestRoot(t, true)
 	r.active = screenDashboard
 
-	gen, started := r.main.threadList.cache.begin()
+	gen, started := r.main.threadList.cache.Begin()
 	require.True(t, started)
 
 	r.Update(threadsLoadedMsg{gen: gen, threads: mkDockThreads(4)})
 
-	require.False(t, r.main.threadList.cache.inFlight)
-	require.Len(t, r.main.threadList.cache.value, 4)
+	require.False(t, r.main.threadList.cache.InFlight)
+	require.Len(t, r.main.threadList.cache.Value, 4)
 }
 
 // TestRoot_ScreenBoundMessagesStillFollowTheActiveScreen: only results

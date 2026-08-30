@@ -284,7 +284,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}
-		m.wsCache.yoloCache.set(msg.Enabled)
+		m.wsCache.yoloCache.Set(msg.Enabled)
 		m.wsCache.busyFetchGen++
 		m.setEditorPrompt(msg.Enabled)
 		status := "disabled"
