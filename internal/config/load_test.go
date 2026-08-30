@@ -245,6 +245,44 @@ func TestApplyWorkspaceConfig(t *testing.T) {
 	})
 }
 
+// TestLoad_DefaultWorkspacePathNotMergedTwice guards against a bug where
+// .sennit/sennit.json, being both a project config layer (lookupConfigs)
+// and the default workspace overlay (applyWorkspaceConfig), was read and
+// merged into the config twice. go-jsons.Merge concatenates slices, so
+// every array in that file — hook lists, mcp/lsp args — ended up doubled.
+func TestLoad_DefaultWorkspacePathNotMergedTwice(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
+
+	workingDir := t.TempDir()
+	workspaceDir := filepath.Join(workingDir, ".sennit")
+	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+	workspacePath := filepath.Join(workspaceDir, appName+".json")
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{
+		"mcp": {"server": {"type": "stdio", "command": "run", "args": ["a", "b"]}},
+		"hooks": {"pre_tool_use": [{"command": "echo hi"}]}
+	}`), 0o644))
+	require.NoError(t, Trust(workingDir))
+
+	store, err := LoadData(workingDir, "", false)
+	require.NoError(t, err)
+
+	mcp, ok := store.Config().MCP["server"]
+	require.True(t, ok)
+	require.Equal(t, []string{"a", "b"}, mcp.Args)
+	require.Len(t, store.Config().Hooks["PreToolUse"], 1)
+
+	// The workspace path must be recorded (and therefore read) exactly once.
+	count := 0
+	for _, p := range store.loadedPaths {
+		if p == workspacePath {
+			count++
+		}
+	}
+	require.Equal(t, 1, count, "workspace path recorded more than once in loadedPaths: %v", store.loadedPaths)
+}
+
 func TestLoad_WorkspaceMergePreservesAgentsMarker(t *testing.T) {
 	workingDir := t.TempDir()
 	globalDir := t.TempDir()

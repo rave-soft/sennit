@@ -330,6 +330,35 @@ func RemoveAccount(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 	return nil
 }
 
+// PurgeAccounts deletes every account on record for providerID, bypassing
+// RemoveAccount's last-account guard. RemoveAccount refuses to go below one
+// account so a provider is never left "configured" with nowhere to point;
+// that is exactly wrong for a full sign-out — `sennit logout` means to
+// leave the provider with zero accounts, not one. Without this, the last
+// account's OAuth token sat untouched in accStore forever (RemoveAccount
+// pointed the user at `sennit logout`, which never actually called it),
+// and `sennit accounts use` could silently resurrect the "logged out"
+// session by reactivating it.
+//
+// It also clears providers.<id>.account, the pointer at the active
+// account's ID: left behind, it would name an account that no longer
+// exists.
+func PurgeAccounts(store *ConfigStore, accStore accounts.Store, scope Scope, providerID string) error {
+	existing, err := accStore.List(providerID)
+	if err != nil {
+		return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
+	}
+	for _, a := range existing {
+		if err := accStore.Remove(providerID, a.ID); err != nil {
+			return fmt.Errorf("removing account %s for provider %s: %w", a.ID, providerID, err)
+		}
+	}
+	if err := store.RemoveConfigField(scope, ProviderFieldKey(providerID, "account")); err != nil {
+		return fmt.Errorf("clearing active account pointer for provider %s: %w", providerID, err)
+	}
+	return nil
+}
+
 // nextAccountAfterRemoval picks the account RemoveAccount should activate
 // before deleting excludeID: the first non-disabled account other than
 // excludeID, or, if every other account is disabled, the first one

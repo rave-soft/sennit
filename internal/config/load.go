@@ -130,7 +130,15 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 }
 
 func applyWorkspaceConfig(cfg *Config, workingDir string, loadedPaths *[]string) error {
-	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
+	workspacePath := filepath.Clean(filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)))
+	// The default data directory (.sennit) is also a project config layer
+	// found by lookupConfigs, so with default settings this is the same file
+	// loadFromConfigPaths already merged in. Merging it again here would
+	// double every array (go-jsons.Merge concatenates slices) and record the
+	// same file twice in loadedPaths.
+	if slices.Contains(*loadedPaths, workspacePath) {
+		return nil
+	}
 	workspaceData, err := os.ReadFile(workspacePath)
 	if err != nil {
 		if os.IsNotExist(err) {

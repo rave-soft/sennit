@@ -69,3 +69,35 @@ func TestValidateHooksNormalizesEventNames(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateHooksMergesCollidingEventNamesInDeterministicOrder guards
+// against a bug where a config file carrying more than one spelling of the
+// same hook event (e.g. both "pre_tool_use" and "PRE_TOOL_USE", neither of
+// which is hooks.EventPreToolUse's own canonical spelling) had its hooks
+// merged in map iteration order — which Go randomizes per run — so the
+// merged list, and therefore hook execution order, varied from run to
+// run for the exact same config file.
+func TestValidateHooksMergesCollidingEventNamesInDeterministicOrder(t *testing.T) {
+	t.Parallel()
+
+	for range 20 {
+		cfg := &Config{
+			Hooks: map[string][]HookConfig{
+				"pre_tool_use":   {{Command: "first"}},
+				"PRE_TOOL_USE":   {{Command: "second"}},
+				"pretooluse":     {{Command: "third"}},
+				"Pre_Tool_Use_x": {{Command: "unrelated"}}, // does not normalize; left alone
+			},
+		}
+		require.NoError(t, cfg.ValidateHooks())
+
+		merged := cfg.Hooks[hooks.EventPreToolUse]
+		require.Len(t, merged, 3)
+		commands := make([]string, len(merged))
+		for i, h := range merged {
+			commands[i] = h.Command
+		}
+		require.Equal(t, []string{"second", "first", "third"}, commands,
+			"merge order must be a fixed function of the input, not map iteration order")
+	}
+}

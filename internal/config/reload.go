@@ -168,6 +168,40 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		}
 	}
 
+	// Carry forward each active account's resolved ProxyURL/APIKeyTemplate,
+	// independent of the credentialVersion race handled above. buildConfig
+	// (via providerload/loader.go) always rebuilds ProxyURL from disk —
+	// the provider-level default — because an account's effective proxy
+	// override only ever gets published in memory, by
+	// UpdateProviderAccount/ActivateAccount; it is never itself the value
+	// on disk. So *any* reload not caused by that narrow race (the file
+	// watcher, SetConfigField on an unrelated key, EnableDockerMCP,
+	// EnsureAccountMigrated, ...) would otherwise silently reset an active
+	// account's proxy back to the provider default while leaving the
+	// account "active".
+	//
+	// Guarded on ConfiguredProxyURL staying the same as well as Account: if
+	// the user actually edited the provider's own proxy_url on disk, that
+	// edit must win, not be shadowed by a stale in-memory override.
+	if current := s.Config(); startConfig != nil && current != nil && current.Providers != nil && cfg.Providers != nil {
+		for id, currentProvider := range current.Providers.Seq2() {
+			if currentProvider.Account == "" {
+				continue
+			}
+			provider, ok := cfg.Providers.Get(id)
+			if !ok || provider.Account != currentProvider.Account {
+				continue
+			}
+			if provider.ConfiguredProxyURL != currentProvider.ConfiguredProxyURL {
+				continue
+			}
+			provider.ProxyURL = currentProvider.ProxyURL
+			provider.APIKeyTemplate = currentProvider.APIKeyTemplate
+			provider.ApplyPostCredentialSetup(id)
+			cfg.Providers.Set(id, provider)
+		}
+	}
+
 	// presetModel (snapshotted before the slow work above) may now be
 	// stale: a concurrent OverridePreferredModel/pinPreferredModelLocked
 	// call could have pinned a different model while buildConfig's

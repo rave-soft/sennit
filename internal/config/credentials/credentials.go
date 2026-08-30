@@ -302,11 +302,20 @@ func (m *Manager) SignalAuthComplete(providerID string) {
 	m.authSignalMu.Lock()
 	defer m.authSignalMu.Unlock()
 	if ch, ok := m.authSignals[providerID]; ok {
-		delete(m.authSignals, providerID)
 		select {
 		case <-ch:
-			// Already closed by a previous signal; nothing to do.
+			// Already closed by a previous signal, with no
+			// WaitForTokenChange having consumed it yet — leave it in
+			// the map. Deleting it here (the old behavior) would drop
+			// the pre-signal on the floor: a second SignalAuthComplete
+			// call with no waiter in between would find this already-
+			// closed channel, delete it, and do nothing else, so the
+			// next WaitForTokenChange would register a brand new (open)
+			// channel and block for the full timeout instead of
+			// returning immediately. Only WaitForTokenChange itself
+			// removes a signal, once it has actually consumed it.
 		default:
+			delete(m.authSignals, providerID)
 			close(ch)
 		}
 	} else {

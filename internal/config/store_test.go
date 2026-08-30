@@ -944,6 +944,54 @@ func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
 	require.Equal(t, string(before), string(after), "a failed OAuth SetProviderAPIKey must not modify the config file")
 }
 
+// TestSetProviderAPIKey_TemplateResolvesLiveKeyAndKeepsTemplate covers a
+// bug where the string case wrote v (which may be a "$VAR"/"$(cmd)"
+// template, not a literal secret) straight to APIKey and never touched
+// APIKeyTemplate. The API-key dialog's TestConnection resolves the
+// template itself before probing, so it went green, but every real
+// request afterward — until the next reload happened to re-resolve it —
+// sent the literal "$VAR" string as the bearer token, and the 401 retry
+// path re-resolved the OLD template since APIKeyTemplate was never
+// updated to the new one.
+func TestSetProviderAPIKey_TemplateResolvesLiveKeyAndKeepsTemplate(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_TEST_API_KEY", "resolved-secret")
+
+	initialConfig := `{
+		"providers": {
+			"my-custom": {
+				"type": "openai-compat",
+				"base_url": "https://example.com/v1",
+				"name": "My Custom",
+				"api_key": "old-literal",
+				"models": [{"id": "custom-model", "name": "Custom Model"}]
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
+
+	store, err := loadRuntimeForTest(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "my-custom", "$SENNIT_TEST_API_KEY"))
+
+	pc, ok := store.Config().Providers.Get("my-custom")
+	require.True(t, ok)
+	require.Equal(t, "resolved-secret", pc.APIKey, "the live key must be the resolved value, not the raw template")
+	require.Equal(t, "$SENNIT_TEST_API_KEY", pc.APIKeyTemplate, "APIKeyTemplate must track the new template")
+
+	// The template, not the resolved secret, is what goes to disk.
+	raw, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, "$SENNIT_TEST_API_KEY", gjson.GetBytes(raw, "providers.my-custom.api_key").String())
+}
+
 // TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu is a regression test
 // for configureProviders' model-discovery step holding writeMu for the full
 // duration of the HTTP round trip. reloadFromDisk (and Load) run

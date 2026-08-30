@@ -508,8 +508,19 @@ func normalizeHookEvent(name string) string {
 // only validates up front so the user sees config errors at load time
 // rather than on the first tool call.
 func (c *Config) ValidateHooks() error {
-	// Normalize event name keys.
-	for event, eventHooks := range c.Hooks {
+	// Normalize event name keys, in sorted key order rather than map
+	// iteration order. A config file carrying more than one spelling of
+	// the same event (e.g. "pre_tool_use" and "PreToolUse") has each
+	// non-canonical key's hooks appended onto the canonical one below;
+	// ranging over the map directly made which spelling's hooks landed
+	// first — and therefore hook execution order — vary from run to run.
+	events := make([]string, 0, len(c.Hooks))
+	for event := range c.Hooks {
+		events = append(events, event)
+	}
+	slices.Sort(events)
+	for _, event := range events {
+		eventHooks := c.Hooks[event]
 		canonical := normalizeHookEvent(event)
 		if canonical != event {
 			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)

@@ -305,7 +305,23 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 	switch v := apiKey.(type) {
 	case string:
-		providerConfig.APIKey = v
+		// Mirror ActivateAccount: v may be a "$VAR"/"$(cmd)" template, not
+		// a literal secret, so it must be resolved before it becomes the
+		// live APIKey a request actually sends. Writing v straight to
+		// APIKey (the old behavior) published the raw template as the
+		// bearer token — TestConnection would resolve it and go green,
+		// but every real request until the next reload sent the literal
+		// "$VAR" string, and the 401 retry path re-resolved the OLD
+		// template since APIKeyTemplate was never updated to v either.
+		resolved, err := s.Resolve(v)
+		if err != nil {
+			return fmt.Errorf("resolving api key for provider %s: %w", providerID, err)
+		}
+		if resolved == "" {
+			return fmt.Errorf("api key for provider %s resolved to an empty value", providerID)
+		}
+		providerConfig.APIKey = resolved
+		providerConfig.APIKeyTemplate = v
 		fields[ProviderFieldKey(providerID, "api_key")] = v
 	case *oauth.Token:
 		isToken = true
@@ -336,6 +352,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 				current = providerConfig
 			}
 			current.APIKey = providerConfig.APIKey
+			current.APIKeyTemplate = providerConfig.APIKeyTemplate
 			current.OAuthToken = providerConfig.OAuthToken
 			current.ApplyPostCredentialSetup(providerID)
 			cfg.Providers.Set(providerID, current)
