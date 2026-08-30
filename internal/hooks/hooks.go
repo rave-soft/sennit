@@ -20,18 +20,13 @@ const (
 // killed-by-signal range (128+) so it can't be hit by accident.
 const HaltExitCode = 49
 
-// HookMetadata is embedded in tool response metadata so the UI can
-// display a hook indicator.
-type HookMetadata struct {
-	HookCount    int        `json:"hook_count"`
-	Decision     string     `json:"decision"`
-	Halt         bool       `json:"halt,omitempty"`
-	Reason       string     `json:"reason,omitempty"`
-	InputRewrite bool       `json:"input_rewrite,omitempty"`
-	Hooks        []HookInfo `json:"hooks,omitempty"`
-}
-
 // HookInfo identifies a single hook that ran and its individual result.
+//
+// It is mirrored by proto.HookInfo, which is what actually crosses into a
+// tool response's metadata: the chat renderer decodes that copy instead of
+// importing this package. TestHookInfoParityWithDomain in internal/proto
+// keeps the two in step — internal/agent copies between them field by
+// field, so one added here and forgotten there is written nowhere.
 type HookInfo struct {
 	Name         string `json:"name"`
 	Matcher      string `json:"matcher,omitempty"`

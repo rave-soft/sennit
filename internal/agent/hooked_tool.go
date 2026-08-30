@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/tidwall/sjson"
 )
 
@@ -99,15 +100,31 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	return resp, nil
 }
 
-// buildHookMetadata creates a HookMetadata from an AggregateResult.
-func buildHookMetadata(result hooks.AggregateResult) hooks.HookMetadata {
-	return hooks.HookMetadata{
+// buildHookMetadata converts an AggregateResult into the wire shape the
+// chat renderer decodes. The conversion is explicit, field by field,
+// because the two types answer different questions: AggregateResult is
+// what the runner computed (including Context and UpdatedInput, which are
+// acted on here and never shown), and proto.HookMetadata is what a reader
+// of the transcript needs to see.
+func buildHookMetadata(result hooks.AggregateResult) proto.HookMetadata {
+	infos := make([]proto.HookInfo, len(result.Hooks))
+	for i, h := range result.Hooks {
+		infos[i] = proto.HookInfo{
+			Name:         h.Name,
+			Matcher:      h.Matcher,
+			Decision:     h.Decision,
+			Halt:         h.Halt,
+			Reason:       h.Reason,
+			InputRewrite: h.InputRewrite,
+		}
+	}
+	return proto.HookMetadata{
 		HookCount:    result.HookCount,
 		Decision:     result.Decision.String(),
 		Halt:         result.Halt,
 		Reason:       result.Reason,
 		InputRewrite: result.UpdatedInput != "",
-		Hooks:        result.Hooks,
+		Hooks:        infos,
 	}
 }
 

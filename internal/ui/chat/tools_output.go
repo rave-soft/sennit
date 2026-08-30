@@ -7,7 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/hooks"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/stringext"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
@@ -82,7 +82,7 @@ func toolOutputHookIndicator(sty *styles.Styles, metadata string, width int) str
 		return ""
 	}
 	var meta struct {
-		Hook *hooks.HookMetadata `json:"hook"`
+		Hook *proto.HookMetadata `json:"hook"`
 	}
 	if err := json.Unmarshal([]byte(metadata), &meta); err != nil || meta.Hook == nil {
 		return ""
@@ -154,7 +154,7 @@ func truncateHookName(name string, maxWidth int) string {
 }
 
 // renderHookLine renders a single hook indicator line with aligned columns.
-func renderHookLine(sty *styles.Styles, hi hooks.HookInfo, rawName, detail string, maxNameWidth, maxMatcherWidth int) string {
+func renderHookLine(sty *styles.Styles, hi proto.HookInfo, rawName, detail string, maxNameWidth, maxMatcherWidth int) string {
 	name := sty.Tool.HookName.Render(rawName)
 	namePad := strings.Repeat(" ", max(0, maxNameWidth-lipgloss.Width(name)))
 
@@ -188,7 +188,7 @@ func renderHookLine(sty *styles.Styles, hi hooks.HookInfo, rawName, detail strin
 }
 
 // hookDetail returns the styled detail text for a single hook result.
-func hookDetail(sty *styles.Styles, hi hooks.HookInfo) string {
+func hookDetail(sty *styles.Styles, hi proto.HookInfo) string {
 	const (
 		okMessage      = "OK"
 		denialMessage  = "Denied"

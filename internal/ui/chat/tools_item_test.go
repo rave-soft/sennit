@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -67,13 +66,13 @@ func TestRawRenderWidth_BodyAndHookIndicatorShareWidth(t *testing.T) {
 	// width sensitive to the exact value passed in.
 	hookMeta := struct {
 		tools.BashResponseMetadata
-		Hook hooks.HookMetadata `json:"hook"`
+		Hook tools.HookMetadata `json:"hook"`
 	}{
 		BashResponseMetadata: tools.BashResponseMetadata{Output: "ok"},
-		Hook: hooks.HookMetadata{
+		Hook: tools.HookMetadata{
 			HookCount: 1,
 			Decision:  "allow",
-			Hooks:     []hooks.HookInfo{{Name: strings.Repeat("x", 100), Decision: "allow"}},
+			Hooks:     []tools.HookInfo{{Name: strings.Repeat("x", 100), Decision: "allow"}},
 		},
 	}
 	metaJSON, err := json.Marshal(hookMeta)
