@@ -1446,20 +1446,50 @@ func (b *runtimeBuilder) buildBedrockProvider(apiKey string, headers map[string]
 		opts = append(opts, bedrock.WithHeaders(headers))
 	}
 
+	usingAPIKeyAuth := false
 	switch {
 	case apiKey != "":
 		opts = append(opts, bedrock.WithAPIKey(apiKey))
+		usingAPIKeyAuth = true
 	case os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "":
 		opts = append(opts, bedrock.WithAPIKey(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")))
+		usingAPIKeyAuth = true
 	default:
 		// Skip, let the SDK do authentication.
 	}
 
 	switch providerID {
 	case string(catwalk.InferenceProviderBedrockEurope):
+		// The EU variant always forces its region: it exists specifically
+		// to pin requests to eu-west-1, so there is no "let the user's own
+		// region win" case here.
 		opts = append(opts, bedrock.WithRegion("eu-west-1"))
 	default:
-		opts = append(opts, bedrock.WithRegion("us-east-1"))
+		// Only force us-east-1 as a last resort, and only where it can
+		// actually change anything. fantasy's anthropic provider
+		// (anthropic.go:289-296) consults the region we pass here in two
+		// different ways depending on auth: with an API key or skipAuth it
+		// builds config via bedrockBasicAuthConfig, which already does
+		// cmp.Or(region, "us-east-1") and never looks at the environment -
+		// so our forcing it here changes nothing and the check below would
+		// be wasted work. Only the SDK-auth path (no API key) does
+		// cfg.Region = cmp.Or(bedrockRegion, cfg.Region) against a
+		// LoadDefaultConfig result, where any region we pass always wins
+		// over one the environment already supplies.
+		//
+		// We don't call LoadDefaultConfig ourselves to check: on a
+		// non-EC2 box with no AWS config, region resolution can fall
+		// through to the EC2 instance-metadata endpoint and stall a
+		// provider build (this runs on every config reload and model
+		// switch, not just once). AWS_REGION/AWS_DEFAULT_REGION is a
+		// cheaper, synchronous proxy for "the environment supplies a
+		// region" - it won't see a region set only in a shared AWS config
+		// profile, so a profile-only region still gets overridden to
+		// us-east-1, but it covers the common case without risking a
+		// network stall in the UI's path.
+		if !usingAPIKeyAuth && os.Getenv("AWS_REGION") == "" && os.Getenv("AWS_DEFAULT_REGION") == "" {
+			opts = append(opts, bedrock.WithRegion("us-east-1"))
+		}
 	}
 
 	return bedrock.New(opts...)
