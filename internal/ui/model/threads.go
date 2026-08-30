@@ -288,7 +288,7 @@ func (m *threadsDashboard) SetActive(active bool) tea.Cmd {
 	if !active {
 		return nil
 	}
-	if m.cache.cache.fresh(threadsCacheTTL) {
+	if m.cache.cache.Fresh(threadsCacheTTL) {
 		return nil
 	}
 	return m.cache.dispatchRefresh(m.com)
@@ -375,7 +375,7 @@ func (m *threadsDashboard) Draw(scr uv.Screen, area uv.Rectangle) {
 // reason the table is empty — no threads at all, versus a filter hiding
 // them — since the two need different next steps from the operator.
 func (m *threadsDashboard) emptyText() string {
-	if len(m.cache.cache.value) == 0 {
+	if len(m.cache.cache.Value) == 0 {
 		return "No threads yet — press n or click + New to start one."
 	}
 	return fmt.Sprintf("No %s threads — press a to show all.", strings.ToLower(m.filter.label()))
@@ -403,7 +403,7 @@ func (m *threadsDashboard) drawRule(scr uv.Screen, rect uv.Rectangle) {
 func (m *threadsDashboard) drawTitle(scr uv.Screen, rect uv.Rectangle) {
 	t := m.com.Styles
 	title := t.Threads.Title.Render("Threads")
-	count := t.Threads.Subtle.Render(fmt.Sprintf("  %d total", len(m.cache.cache.value)))
+	count := t.Threads.Subtle.Render(fmt.Sprintf("  %d total", len(m.cache.cache.Value)))
 	uv.NewStyledString(title+count).Draw(scr, indentRect(rect))
 
 	back := m.renderButton(actionBack, true)
@@ -483,7 +483,7 @@ func (m *threadsDashboard) isHovered(action threadAction) bool {
 // drawTabs paints the status filter tabs with their counts.
 func (m *threadsDashboard) drawTabs(scr uv.Screen, rect uv.Rectangle) {
 	t := m.com.Styles
-	all := m.cache.cache.value
+	all := m.cache.cache.Value
 	x := rect.Min.X + 1
 	for _, f := range threadsFilters {
 		style := t.Threads.TabInactive
@@ -571,7 +571,7 @@ func (m *threadsDashboard) rebuildItems() {
 		selectedID = sel.ID
 	}
 
-	m.visible = filterThreads(m.cache.cache.value, m.filter)
+	m.visible = filterThreads(m.cache.cache.Value, m.filter)
 	items := make([]list.Item, len(m.visible))
 	for i, s := range m.visible {
 		items[i] = newThreadItem(m.com.Styles, s, m.columns)

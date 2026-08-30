@@ -36,8 +36,8 @@ func TestLastAssistantModel(t *testing.T) {
 // a delegation often runs on a model the picker isn't pointing at.
 func TestViewedModelPrefersTheChildSessionsOwnModel(t *testing.T) {
 	u := newCursorTestUI(t)
-	u.wsCache.agentCache.value.ready = true
-	u.wsCache.agentCache.value.model = workspace.AgentModel{
+	u.wsCache.agentCache.Value.ready = true
+	u.wsCache.agentCache.Value.model = workspace.AgentModel{
 		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
 		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
 	}
@@ -59,8 +59,8 @@ func TestViewedModelPrefersTheChildSessionsOwnModel(t *testing.T) {
 // above: the sidebar line itself, not just the resolver behind it.
 func TestSidebarShowsTheChildSessionsModel(t *testing.T) {
 	u := newCursorTestUI(t)
-	u.wsCache.agentCache.value.ready = true
-	u.wsCache.agentCache.value.model = workspace.AgentModel{
+	u.wsCache.agentCache.Value.ready = true
+	u.wsCache.agentCache.Value.model = workspace.AgentModel{
 		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
 		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
 	}
@@ -118,8 +118,8 @@ func TestChildPanelNamesTheInheritedModel(t *testing.T) {
 // inside the delegation, and flipped between the two as messages arrived.
 func TestViewedModelIgnoresAnotherSessionsReading(t *testing.T) {
 	u := newCursorTestUI(t)
-	u.wsCache.agentCache.value.ready = true
-	u.wsCache.agentCache.value.model = workspace.AgentModel{
+	u.wsCache.agentCache.Value.ready = true
+	u.wsCache.agentCache.Value.model = workspace.AgentModel{
 		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
 		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
 	}
@@ -154,8 +154,8 @@ func TestViewedModelIgnoresAnotherSessionsReading(t *testing.T) {
 // there is the true answer rather than a leaked one.
 func TestViewedModelFallsBackToTheSelectionWithoutAPin(t *testing.T) {
 	u := newCursorTestUI(t)
-	u.wsCache.agentCache.value.ready = true
-	u.wsCache.agentCache.value.model = workspace.AgentModel{
+	u.wsCache.agentCache.Value.ready = true
+	u.wsCache.agentCache.Value.model = workspace.AgentModel{
 		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
 		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
 	}

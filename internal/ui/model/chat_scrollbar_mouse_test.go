@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
@@ -15,6 +16,16 @@ import (
 // scrollbarOverflowUI builds a chat UI with enough single-line messages that
 // the list overflows its viewport, then draws once so Chat.Draw populates
 // the scrollbar hit-testing fields (scrollbarShown, scrollbarColX, etc.).
+// scrollbarGeom is a reading of the chat's scrollbar layout. The fields
+// used to be read straight off the Chat; they are one call now that Chat
+// lives in its own package.
+type scrollbarGeom struct{ colX, trackHeight, thumbStart, thumbSize int }
+
+func geomOf(c *chatlist.Chat) scrollbarGeom {
+	colX, trackHeight, thumbStart, thumbSize := c.ScrollbarGeometry()
+	return scrollbarGeom{colX, trackHeight, thumbStart, thumbSize}
+}
+
 func scrollbarOverflowUI(t *testing.T) *UI {
 	t.Helper()
 
@@ -30,12 +41,12 @@ func scrollbarOverflowUI(t *testing.T) *UI {
 	}
 	u.updateLayoutAndSize()
 	// The default scrollbar mode only shows the scrollbar after scroll
-	// activity (see Chat.showScrollbar); trigger that directly rather than
+	// activity (see Chat.ShowScrollbar); trigger that directly rather than
 	// depending on a real scroll gesture.
-	u.chat.showScrollbar()
+	u.chat.ShowScrollbar()
 	u.drawForCursor()
 
-	require.True(t, u.chat.scrollbarShown, "the message list must overflow enough to show a scrollbar")
+	require.True(t, u.chat.ScrollbarShown(), "the message list must overflow enough to show a scrollbar")
 	return u
 }
 
@@ -49,8 +60,8 @@ func TestScrollbarDrag_MovesOffsetProportionally(t *testing.T) {
 
 	u := scrollbarOverflowUI(t)
 
-	colX := u.chat.scrollbarColX
-	trackHeight := u.chat.scrollbarTrackHeight
+	colX := geomOf(u.chat).colX
+	trackHeight := geomOf(u.chat).trackHeight
 	require.Positive(t, trackHeight)
 
 	screenX := u.lay.layout.main.Min.X + colX
@@ -58,14 +69,14 @@ func TestScrollbarDrag_MovesOffsetProportionally(t *testing.T) {
 	bottomY := u.lay.layout.main.Min.Y + trackHeight - 1
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{X: screenX, Y: topY, Button: uv.MouseLeft}))
-	require.True(t, u.chat.scrollbarDragging, "clicking the scrollbar column must start a drag")
+	require.True(t, u.chat.ScrollbarDragging(), "clicking the scrollbar column must start a drag")
 
-	offsetNearTop := u.chat.list.Offset()
+	offsetNearTop := u.chat.Offset()
 
 	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: screenX, Y: bottomY, Button: uv.MouseLeft}))
-	offsetNearBottom := u.chat.list.Offset()
+	offsetNearBottom := u.chat.Offset()
 
-	maxOffset := u.chat.list.TotalHeight() - 1 - u.chat.list.Height()
+	maxOffset := u.chat.TotalHeight() - 1 - u.chat.ListHeight()
 
 	require.Greater(t, offsetNearBottom, offsetNearTop,
 		"dragging the thumb down must increase the scroll offset")
@@ -73,7 +84,7 @@ func TestScrollbarDrag_MovesOffsetProportionally(t *testing.T) {
 		"dragging to near the bottom of the track must scroll close to the end of the content")
 
 	_, _ = u.Update(tea.MouseReleaseMsg(tea.Mouse{X: screenX, Y: bottomY, Button: uv.MouseLeft}))
-	require.False(t, u.chat.scrollbarDragging, "releasing the mouse must end the drag")
+	require.False(t, u.chat.ScrollbarDragging(), "releasing the mouse must end the drag")
 }
 
 // TestHandleScrollbarMouseUp_EndsDrag pins the direct Chat-level contract:
@@ -84,13 +95,13 @@ func TestHandleScrollbarMouseUp_EndsDrag(t *testing.T) {
 
 	u := scrollbarOverflowUI(t)
 
-	colX := u.chat.scrollbarColX
+	colX := geomOf(u.chat).colX
 	handled, _ := u.chat.HandleScrollbarMouseDown(colX, 0)
 	require.True(t, handled)
-	require.True(t, u.chat.scrollbarDragging)
+	require.True(t, u.chat.ScrollbarDragging())
 
 	require.True(t, u.chat.HandleScrollbarMouseUp())
-	require.False(t, u.chat.scrollbarDragging)
+	require.False(t, u.chat.ScrollbarDragging())
 
 	// A subsequent up call has nothing to end.
 	require.False(t, u.chat.HandleScrollbarMouseUp())
@@ -109,8 +120,8 @@ func TestScrollbarDrag_SuspendsFollowUntilReleasedAtBottom(t *testing.T) {
 	require.True(t, u.chat.Follow())
 	require.True(t, u.chat.AtBottom())
 
-	colX := u.chat.scrollbarColX
-	bottomY := u.chat.scrollbarThumbStart + u.chat.scrollbarThumbSize - 1
+	colX := geomOf(u.chat).colX
+	bottomY := geomOf(u.chat).thumbStart + geomOf(u.chat).thumbSize - 1
 	handled, _ := u.chat.HandleScrollbarMouseDown(colX, bottomY)
 	require.True(t, handled)
 	require.False(t, u.chat.Follow(),
@@ -118,13 +129,13 @@ func TestScrollbarDrag_SuspendsFollowUntilReleasedAtBottom(t *testing.T) {
 
 	handled, _ = u.chat.HandleScrollbarMouseDrag(colX, 0)
 	require.True(t, handled)
-	offsetAtTop := u.chat.list.Offset()
+	offsetAtTop := u.chat.Offset()
 	require.False(t, u.chat.Follow())
 	require.False(t, u.chat.AtBottom())
 
 	// A live progress tick must not pull the viewport back to the end.
 	_, _ = u.Update(spin.StepMsg{ID: "live-progress"})
-	require.Equal(t, offsetAtTop, u.chat.list.Offset())
+	require.Equal(t, offsetAtTop, u.chat.Offset())
 
 	require.True(t, u.chat.HandleScrollbarMouseUp())
 	require.False(t, u.chat.Follow(),
@@ -132,9 +143,9 @@ func TestScrollbarDrag_SuspendsFollowUntilReleasedAtBottom(t *testing.T) {
 
 	// A subsequent drag back to the end restores automatic progress following.
 	u.drawForCursor()
-	handled, _ = u.chat.HandleScrollbarMouseDown(u.chat.scrollbarColX, u.chat.scrollbarThumbStart)
+	handled, _ = u.chat.HandleScrollbarMouseDown(geomOf(u.chat).colX, geomOf(u.chat).thumbStart)
 	require.True(t, handled)
-	handled, _ = u.chat.HandleScrollbarMouseDrag(u.chat.scrollbarColX, u.chat.scrollbarTrackHeight-1)
+	handled, _ = u.chat.HandleScrollbarMouseDrag(geomOf(u.chat).colX, geomOf(u.chat).trackHeight-1)
 	require.True(t, handled)
 	require.False(t, u.chat.Follow(), "follow stays suspended for the entire drag")
 	require.True(t, u.chat.HandleScrollbarMouseUp())
@@ -177,7 +188,7 @@ func TestTextSelection_UnaffectedByScrollbarDrag(t *testing.T) {
 	_, _ = u.Update(tea.MouseReleaseMsg(tea.Mouse{X: dragX, Y: downY, Button: uv.MouseLeft}))
 
 	require.True(t, u.chat.HasHighlight(), "dragging across message text must still produce a text selection")
-	require.False(t, u.chat.scrollbarDragging, "a text-selection drag must never start a scrollbar drag")
+	require.False(t, u.chat.ScrollbarDragging(), "a text-selection drag must never start a scrollbar drag")
 }
 
 // TestScrollbarDrag_DoesNotMoveFocus pins the "mouse never changes focus"
@@ -192,8 +203,8 @@ func TestScrollbarDrag_DoesNotMoveFocus(t *testing.T) {
 	u.focus = uiFocusEditor
 	u.editor.textarea.Focus()
 
-	colX := u.chat.scrollbarColX
-	trackHeight := u.chat.scrollbarTrackHeight
+	colX := geomOf(u.chat).colX
+	trackHeight := geomOf(u.chat).trackHeight
 	screenX := u.lay.layout.main.Min.X + colX
 	topY := u.lay.layout.main.Min.Y
 	bottomY := u.lay.layout.main.Min.Y + trackHeight - 1
@@ -214,13 +225,13 @@ func TestScrollbarHitZone_NarrowWithoutHover(t *testing.T) {
 	t.Parallel()
 
 	u := scrollbarOverflowUI(t)
-	colX := u.chat.scrollbarColX
+	colX := geomOf(u.chat).colX
 	require.GreaterOrEqual(t, colX, 1)
 
 	handled, cmd := u.chat.HandleScrollbarMouseDown(colX-1, 0)
 	require.False(t, handled, "without hover, one column left of the scrollbar must miss")
 	require.Nil(t, cmd)
-	require.False(t, u.chat.scrollbarDragging)
+	require.False(t, u.chat.ScrollbarDragging())
 }
 
 // TestScrollbarHitZone_WidensAfterHover pins the widened zone: once a motion
@@ -231,7 +242,7 @@ func TestScrollbarHitZone_WidensAfterHover(t *testing.T) {
 	t.Parallel()
 
 	u := scrollbarOverflowUI(t)
-	colX := u.chat.scrollbarColX
+	colX := geomOf(u.chat).colX
 	require.GreaterOrEqual(t, colX, 1)
 
 	hovered := u.chat.ScrollbarHoverAt(colX-1, 0)
@@ -239,7 +250,7 @@ func TestScrollbarHitZone_WidensAfterHover(t *testing.T) {
 
 	handled, _ := u.chat.HandleScrollbarMouseDown(colX-1, 0)
 	require.True(t, handled, "with hover active, one column left of the scrollbar must hit")
-	require.True(t, u.chat.scrollbarDragging)
+	require.True(t, u.chat.ScrollbarDragging())
 }
 
 // TestScrollbarDrag_StartedFromWidenedZone_MovesOffset extends the widened
@@ -250,8 +261,8 @@ func TestScrollbarDrag_StartedFromWidenedZone_MovesOffset(t *testing.T) {
 	t.Parallel()
 
 	u := scrollbarOverflowUI(t)
-	colX := u.chat.scrollbarColX
-	trackHeight := u.chat.scrollbarTrackHeight
+	colX := geomOf(u.chat).colX
+	trackHeight := geomOf(u.chat).trackHeight
 	require.GreaterOrEqual(t, colX, 1)
 
 	screenX := u.lay.layout.main.Min.X + colX
@@ -260,15 +271,15 @@ func TestScrollbarDrag_StartedFromWidenedZone_MovesOffset(t *testing.T) {
 	bottomY := u.lay.layout.main.Min.Y + trackHeight - 1
 
 	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: wideX, Y: topY, Button: uv.MouseLeft}))
-	require.True(t, u.chat.scrollbarHover)
+	require.True(t, u.chat.ScrollbarHovered())
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{X: wideX, Y: topY, Button: uv.MouseLeft}))
-	require.True(t, u.chat.scrollbarDragging, "clicking in the widened zone must start a drag")
+	require.True(t, u.chat.ScrollbarDragging(), "clicking in the widened zone must start a drag")
 
-	offsetNearTop := u.chat.list.Offset()
+	offsetNearTop := u.chat.Offset()
 
 	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: wideX, Y: bottomY, Button: uv.MouseLeft}))
-	offsetNearBottom := u.chat.list.Offset()
+	offsetNearBottom := u.chat.Offset()
 
 	require.Greater(t, offsetNearBottom, offsetNearTop,
 		"a drag started from the widened hit zone must still scroll the list")
@@ -286,9 +297,9 @@ func TestScrollbarThumbOverlay_RendersWhenHovered(t *testing.T) {
 	w, h := u.lay.layout.main.Dx(), u.lay.layout.main.Dy()
 	area := uv.Rect(0, 0, w, h)
 
-	colX := u.chat.scrollbarColX
+	colX := geomOf(u.chat).colX
 	require.GreaterOrEqual(t, colX, 1, "need room to the left of the scrollbar column for the overlay")
-	thumbRow := u.chat.scrollbarThumbStart
+	thumbRow := geomOf(u.chat).thumbStart
 
 	scrNoHover := uv.NewScreenBuffer(w, h)
 	u.chat.Draw(scrNoHover, area)
@@ -297,7 +308,7 @@ func TestScrollbarThumbOverlay_RendersWhenHovered(t *testing.T) {
 	require.NotEqual(t, styles.ScrollbarThumb, cellNoHover.Content,
 		"without hover, the column left of the scrollbar must be plain chat text, not the thumb glyph")
 
-	u.chat.scrollbarHover = true
+	u.chat.SetScrollbarHovered(true)
 	scrHover := uv.NewScreenBuffer(w, h)
 	u.chat.Draw(scrHover, area)
 	cellHover := scrHover.CellAt(colX-1, thumbRow)

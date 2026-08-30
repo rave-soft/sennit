@@ -13,7 +13,7 @@ import (
 
 // TestMouseGolden captures rendered-screen snapshots for the mouse-driven
 // branches of UI.Update (tea.MouseClickMsg, tea.MouseMotionMsg,
-// tea.MouseReleaseMsg, DelayedClickMsg) ahead of extracting them into their
+// tea.MouseReleaseMsg, chatlist.DelayedClickMsg) ahead of extracting them into their
 // own file. Each subtest asserts, with a plain require, that the state the
 // branch is responsible for actually changed before taking the snapshot —
 // a snapshot alone would not catch that logic breaking, only that some
@@ -94,15 +94,14 @@ func TestMouseGolden(t *testing.T) {
 		// The default scrollbar mode only shows the scrollbar after scroll
 		// activity; trigger that directly rather than depending on a real
 		// scroll gesture (see chat_scrollbar_mouse_test.go).
-		m.chat.showScrollbar()
+		m.chat.ShowScrollbar()
 		// Draw once so Chat.Draw populates the scrollbar hit-testing fields
 		// (scrollbarColX, scrollbarTrackHeight, ...) before we compute a
 		// click position from them.
 		renderCmdDrivenUI(m)
-		require.True(t, m.chat.scrollbarShown, "the message list must overflow enough to show a scrollbar")
+		require.True(t, m.chat.ScrollbarShown(), "the message list must overflow enough to show a scrollbar")
 
-		colX := m.chat.scrollbarColX
-		trackHeight := m.chat.scrollbarTrackHeight
+		colX, trackHeight, _, _ := m.chat.ScrollbarGeometry()
 		require.Positive(t, trackHeight)
 
 		screenX := m.lay.layout.main.Min.X + colX
@@ -111,18 +110,18 @@ func TestMouseGolden(t *testing.T) {
 
 		_, cmd := m.Update(tea.MouseClickMsg(tea.Mouse{X: screenX, Y: topY, Button: uv.MouseLeft}))
 		runCmdTree(m, cmd, nil)
-		require.True(t, m.chat.scrollbarDragging, "clicking the scrollbar column must start a drag")
-		offsetNearTop := m.chat.list.Offset()
+		require.True(t, m.chat.ScrollbarDragging(), "clicking the scrollbar column must start a drag")
+		offsetNearTop := m.chat.Offset()
 
 		_, cmd = m.Update(tea.MouseMotionMsg(tea.Mouse{X: screenX, Y: bottomY, Button: uv.MouseLeft}))
 		runCmdTree(m, cmd, nil)
-		offsetNearBottom := m.chat.list.Offset()
+		offsetNearBottom := m.chat.Offset()
 		require.Greater(t, offsetNearBottom, offsetNearTop,
 			"dragging the thumb down must increase the scroll offset")
 
 		_, cmd = m.Update(tea.MouseReleaseMsg(tea.Mouse{X: screenX, Y: bottomY, Button: uv.MouseLeft}))
 		runCmdTree(m, cmd, nil)
-		require.False(t, m.chat.scrollbarDragging, "releasing the mouse must end the drag")
+		require.False(t, m.chat.ScrollbarDragging(), "releasing the mouse must end the drag")
 
 		golden.RequireEqual(t, renderCmdDrivenUI(m))
 	})

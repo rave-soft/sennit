@@ -36,6 +36,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -45,20 +46,6 @@ import (
 // costs an AttachThread round trip, not just a list. Package var so tests
 // can pin it.
 var threadsDockActivityTTL = 8 * time.Second
-
-// threadsRefreshBackoff is how long a failed thread-list or activity
-// refresh waits before being retried. Without it a refresh that fails every
-// time re-dispatches on every Update — and since the failure's own result
-// message is itself an Update, the loop feeds itself and pins the event
-// loop (observed: ~830 attempts a second, 10MB of identical error lines
-// every half minute, a UI that looks frozen and background work that looks
-// like it stopped on its own).
-//
-// Longer than any of the TTLs it backs: a repeatedly failing probe is worth
-// far less than a successful one, and the states that produce a permanent
-// failure (a read-only workspace, a removed worktree) do not resolve on
-// their own in seconds.
-var threadsRefreshBackoff = 30 * time.Second
 
 // threadDockActivity is a per-thread live snapshot fetched from the
 // thread's own session via AttachThread + GetSession.
@@ -79,7 +66,7 @@ type threadDockActivity struct {
 // generation bookkeeping.
 type threadsDockState struct {
 	// activity holds the last known live snapshot per thread ID.
-	activity map[string]ttlCache[threadDockActivity]
+	activity map[string]listcache.TTLCache[threadDockActivity]
 	// activityGen is bumped whenever the shared thread list changes, so a
 	// per-thread fetch that started before the thread list moved on (e.g.
 	// the thread was removed) is discarded when it lands, mirroring gen but
@@ -157,15 +144,15 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 	ws := com.Workspace
 	gen := c.activityGen
 	if c.activity == nil {
-		c.activity = make(map[string]ttlCache[threadDockActivity])
+		c.activity = make(map[string]listcache.TTLCache[threadDockActivity])
 	}
 	entry := c.activity[threadID]
-	entryGen, started := entry.begin()
+	entryGen, started := entry.Begin()
 	if !started {
 		return nil
 	}
 	c.activity[threadID] = entry
-	prev, hasPrev := entry.value, !entry.timestamp.IsZero()
+	prev, hasPrev := entry.Value, !entry.Timestamp.IsZero()
 	ctx := com.Context()
 	return func() tea.Msg {
 		attached, detach, err := ws.AttachThread(ctx, threadID)
@@ -224,17 +211,17 @@ func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoade
 	}
 	if msg.err != nil {
 		// Record the failure so the next Update backs off instead of
-		// re-dispatching immediately; see threadsRefreshBackoff.
-		entry.fail(msg.entryGen)
+		// re-dispatching immediately; see listcache.RefreshBackoff.
+		entry.Fail(msg.entryGen)
 		c.activity[msg.threadID] = entry
 		return
 	}
-	matchingEntry := entry.complete(msg.entryGen)
+	matchingEntry := entry.Complete(msg.entryGen)
 	c.activity[msg.threadID] = entry
 	if !matchingEntry || msg.gen != c.activityGen {
 		return
 	}
-	entry.set(msg.activity)
+	entry.Set(msg.activity)
 	c.activity[msg.threadID] = entry
 }
 
@@ -259,10 +246,10 @@ func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, vi
 			continue
 		}
 		if c.activity == nil {
-			c.activity = make(map[string]ttlCache[threadDockActivity])
+			c.activity = make(map[string]listcache.TTLCache[threadDockActivity])
 		}
 		activity := c.activity[t.ID]
-		if activity.inFlight || activity.fresh(threadsDockActivityTTL) || activity.backingOff(threadsRefreshBackoff) {
+		if activity.InFlight || activity.Fresh(threadsDockActivityTTL) || activity.BackingOff(listcache.RefreshBackoff) {
 			continue
 		}
 		if cmd := c.dispatchThreadActivityRefresh(com, t.ID, t.SessionID); cmd != nil {

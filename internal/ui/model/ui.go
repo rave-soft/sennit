@@ -24,6 +24,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
@@ -289,7 +290,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
 		scrollbarMode = cfg.Options.TUI.Scrollbar
 	}
-	ch := NewChat(com, scrollbarMode)
+	ch := chatlist.NewChat(com, scrollbarMode)
 
 	// Completions component
 	comp := completions.New(completions.PopupStyles{
@@ -379,13 +380,13 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	// fresh by write-through toggles and off-thread refreshes so Update
 	// and View never probe the workspace synchronously.
 	yolo := com.Workspace.PermissionSkipRequests()
-	ui.wsCache.yoloCache.set(yolo)
+	ui.wsCache.yoloCache.Set(yolo)
 
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
 	// afterwards.
 	if com.Workspace.AgentIsReady() {
-		ui.wsCache.agentCache.set(agentReadyModel{ready: true, model: com.Workspace.AgentModel()})
+		ui.wsCache.agentCache.Set(agentReadyModel{ready: true, model: com.Workspace.AgentModel()})
 	}
 	ui.setEditorPrompt(yolo)
 	ui.editor.randomizePlaceholders()
@@ -605,7 +606,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 		reflect.TypeFor[uv.UnknownOscEvent](), reflect.TypeFor[tea.FocusMsg](),
 		reflect.TypeFor[tea.BlurMsg](), reflect.TypeFor[tea.WindowSizeMsg](),
 		reflect.TypeFor[tea.KeyboardEnhancementsMsg](), reflect.TypeFor[spin.StepMsg](),
-		reflect.TypeFor[scrollbarHideMsg](), reflect.TypeFor[chatWarmMsg](),
+		reflect.TypeFor[chatlist.ScrollbarHideMsg](), reflect.TypeFor[chatlist.WarmMsg](),
 		reflect.TypeFor[sidebarScrollbarHideMsg](), reflect.TypeFor[spinner.TickMsg](),
 		reflect.TypeFor[uv.KittyGraphicsEvent]())
 
@@ -641,7 +642,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 		reflect.TypeFor[notificationSentMsg](), reflect.TypeFor[importCopilotResult]())
 
 	register((*UI).updateMouse,
-		reflect.TypeFor[DelayedClickMsg](), reflect.TypeFor[tea.MouseClickMsg](),
+		reflect.TypeFor[chatlist.DelayedClickMsg](), reflect.TypeFor[tea.MouseClickMsg](),
 		reflect.TypeFor[tea.MouseMotionMsg](), reflect.TypeFor[tea.MouseReleaseMsg](),
 		reflect.TypeFor[common.CoalescedWheelMsg]())
 
@@ -1018,7 +1019,7 @@ func (m *UI) activeThreadBadgeCount() int {
 	if !m.surfacesThreads() {
 		return 0
 	}
-	return activeThreadCount(m.threadList.cache.value)
+	return activeThreadCount(m.threadList.cache.Value)
 }
 
 func (m *UI) currentModelSupportsImages() bool {
@@ -1061,7 +1062,7 @@ func (m *UI) isAgentBusy() bool {
 	if m.editor.bangCancel != nil {
 		return true
 	}
-	return m.wsCache.agentBusyCache.value
+	return m.wsCache.agentBusyCache.Value
 }
 
 // isCurrentSessionBusy reports whether the agent is generating for the session
@@ -1332,7 +1333,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.panel.todosScrollOffset = 0
 	m.wsCache.invalidateBusyCaches()
 	m.wsCache.invalidatePromptQueue()
-	m.wsCache.promptQueueCache.set(nil)
+	m.wsCache.promptQueueCache.Set(nil)
 	m.editor.historyReset()
 	ws := m.com.Workspace
 	ctx := m.com.Context()

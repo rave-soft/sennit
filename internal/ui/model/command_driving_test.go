@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
@@ -521,7 +522,7 @@ func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 		com: com,
 		widgets: widgets{
 			status: NewStatus(com, nil),
-			chat:   NewChat(com, config.ScrollbarDefault),
+			chat:   chatlist.NewChat(com, config.ScrollbarDefault),
 			dialog: dialog.NewOverlay(),
 		},
 		editor: editorState{
@@ -542,10 +543,10 @@ func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 // warmCmdDrivenCaches marks all memoized workspace state fresh so only
 // explicit state transitions (not startup staleness) trigger refresh dispatches.
 func warmCmdDrivenCaches(m *UI) {
-	m.wsCache.agentBusyCache.set(false)
-	m.wsCache.yoloCache.set(false)
-	m.wsCache.agentCache.set(agentReadyModel{ready: true})
-	m.wsCache.promptQueueCache.set(m.wsCache.promptQueueCache.value)
+	m.wsCache.agentBusyCache.Set(false)
+	m.wsCache.yoloCache.Set(false)
+	m.wsCache.agentCache.Set(agentReadyModel{ready: true})
+	m.wsCache.promptQueueCache.Set(m.wsCache.promptQueueCache.Value)
 	m.lsp.checkedAt = time.Now()
 }
 
@@ -675,7 +676,7 @@ func TestCmdDriving_StaleResultGuard_DiscardedAndRedispatched(t *testing.T) {
 
 	// Optimistically set busy=true (simulates sendMessage's optimistic
 	// write), then bump the generation to simulate a state transition.
-	m.wsCache.agentBusyCache.set(true)
+	m.wsCache.agentBusyCache.Set(true)
 	m.wsCache.busyFetchGen++
 
 	// Simulate the stale probe arriving by dispatching it through a cmd
@@ -817,18 +818,18 @@ func TestCmdDriving_Routing_DistinctMsgTypes(t *testing.T) {
 
 	// 1. busyStateMsg → applyBusyState path. Start from the opposite
 	// readiness value so this proves the routing branch changed state.
-	m.wsCache.agentCache.value.ready = false
+	m.wsCache.agentCache.Value.ready = false
 	_, cmd := m.Update(busyStateMsg{gen: m.wsCache.busyFetchGen, ready: true, agentBusy: false})
 	_ = runCmdTree(m, cmd, nil)
-	require.True(t, m.wsCache.agentCache.value.ready, "busyStateMsg must route to applyBusyState")
+	require.True(t, m.wsCache.agentCache.Value.ready, "busyStateMsg must route to applyBusyState")
 
 	// 2. promptQueueMsg → applyPromptQueue path.
-	_, cmd = m.Update(promptQueueMsg{forSession: "s1", gen: m.wsCache.promptQueueCache.generation, prompts: []string{"p1"}})
+	_, cmd = m.Update(promptQueueMsg{forSession: "s1", gen: m.wsCache.promptQueueCache.Generation, prompts: []string{"p1"}})
 	_ = runCmdTree(m, cmd, nil)
-	require.Equal(t, 1, len(m.wsCache.promptQueueCache.value), "promptQueueMsg must update queue")
+	require.Equal(t, 1, len(m.wsCache.promptQueueCache.Value), "promptQueueMsg must update queue")
 
 	// 3. agentRunSubmittedMsg → invalidation + re-dispatch path.
-	m.wsCache.agentBusyCache.set(true)
+	m.wsCache.agentBusyCache.Set(true)
 	_, cmd = m.Update(agentRunSubmittedMsg{})
 	_ = runCmdTree(m, cmd, nil)
 	require.False(t, m.isAgentBusy(),
@@ -854,7 +855,7 @@ func TestCmdDriving_StalePromptQueue_WrongSession(t *testing.T) {
 
 	// The current session is "s1". A stale fetch from "s2" arrives via
 	// runCmdTree so the full Update → applyPromptQueue chain runs.
-	staleGen := m.wsCache.promptQueueCache.generation
+	staleGen := m.wsCache.promptQueueCache.Generation
 	staleCmd := func() tea.Msg {
 		return promptQueueMsg{
 			forSession: "s2",
@@ -864,10 +865,10 @@ func TestCmdDriving_StalePromptQueue_WrongSession(t *testing.T) {
 	}
 
 	_, freshCmd := driveCmdStep(m, staleCmd)
-	require.Zero(t, len(m.wsCache.promptQueueCache.value),
+	require.Zero(t, len(m.wsCache.promptQueueCache.Value),
 		"result from different session must not populate queue before refresh runs")
 	require.NotNil(t, freshCmd, "session-mismatched result must schedule a refresh")
-	require.True(t, m.wsCache.promptQueueCache.inFlight,
+	require.True(t, m.wsCache.promptQueueCache.InFlight,
 		"session-mismatched result must leave the replacement fetch in flight")
 
 	// Execute the replacement separately and verify the command performs its
@@ -1176,7 +1177,7 @@ func TestCmdDriving_LoadSession_FreshResultApplied(t *testing.T) {
 	require.Equal(t, "s-new", m.sess.current.ID, "session must be set")
 	require.GreaterOrEqual(t, m.chat.Len(), 1, "chat must contain the loaded message")
 	require.GreaterOrEqual(t, ws.agentReadyCalls, 1, "must probe AgentIsReady")
-	require.True(t, m.wsCache.agentCache.value.ready, "ready state must be cached")
+	require.True(t, m.wsCache.agentCache.Value.ready, "ready state must be cached")
 }
 
 func TestCmdDriving_LoadSession_NestedToolsApplied(t *testing.T) {

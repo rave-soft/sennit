@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -101,7 +102,7 @@ func TestDispatchThreadsRefreshNoopWhenInFlight(t *testing.T) {
 	c := &threadListCache{}
 
 	require.NotNil(t, c.dispatchRefresh(com))
-	require.True(t, c.cache.inFlight)
+	require.True(t, c.cache.InFlight)
 	require.Nil(t, c.dispatchRefresh(com))
 	require.Equal(t, 0, ws.calls, "the cmd wasn't run yet, so the workspace shouldn't have been probed")
 }
@@ -114,7 +115,7 @@ func TestDispatchThreadsRefreshNoopWhenUnsupported(t *testing.T) {
 	c := &threadListCache{}
 
 	require.Nil(t, c.dispatchRefresh(com))
-	require.False(t, c.cache.inFlight)
+	require.False(t, c.cache.InFlight)
 }
 
 func TestApplyThreadsLoadedWritesThrough(t *testing.T) {
@@ -123,14 +124,14 @@ func TestApplyThreadsLoadedWritesThrough(t *testing.T) {
 	want := []proto.Thread{{ID: "s1", Name: "one"}, {ID: "s2", Name: "two"}}
 	ws := &threadsTestWorkspace{supported: true, threads: want}
 	com := &common.Common{Workspace: ws}
-	c := &threadListCache{cache: ttlCache[[]proto.Thread]{inFlight: true}}
+	c := &threadListCache{cache: listcache.TTLCache[[]proto.Thread]{InFlight: true}}
 
-	cmds, applied := c.applyLoaded(com, threadsLoadedMsg{gen: c.cache.generation, threads: want})
+	cmds, applied := c.applyLoaded(com, threadsLoadedMsg{gen: c.cache.Generation, threads: want})
 	require.Nil(t, cmds)
 	require.True(t, applied)
-	require.False(t, c.cache.inFlight)
-	require.Equal(t, want, c.cache.value)
-	require.WithinDuration(t, time.Now(), c.cache.timestamp, time.Second)
+	require.False(t, c.cache.InFlight)
+	require.Equal(t, want, c.cache.Value)
+	require.WithinDuration(t, time.Now(), c.cache.Timestamp, time.Second)
 }
 
 func TestApplyThreadsLoadedDiscardsStaleGenerationAndRedispatches(t *testing.T) {
@@ -138,7 +139,7 @@ func TestApplyThreadsLoadedDiscardsStaleGenerationAndRedispatches(t *testing.T) 
 
 	ws := &threadsTestWorkspace{supported: true, threads: []proto.Thread{{ID: "fresh"}}}
 	com := &common.Common{Workspace: ws}
-	c := &threadListCache{cache: ttlCache[[]proto.Thread]{inFlight: true, generation: 5}}
+	c := &threadListCache{cache: listcache.TTLCache[[]proto.Thread]{InFlight: true, Generation: 5}}
 
 	// A result carrying an older generation (e.g. an invalidation raced the
 	// in-flight fetch) must be discarded, not written through, and a fresh
@@ -146,13 +147,13 @@ func TestApplyThreadsLoadedDiscardsStaleGenerationAndRedispatches(t *testing.T) 
 	cmds, applied := c.applyLoaded(com, threadsLoadedMsg{gen: 4, threads: []proto.Thread{{ID: "stale"}}})
 	require.Len(t, cmds, 1)
 	require.False(t, applied)
-	require.Nil(t, c.cache.value, "stale result must not be written through")
-	require.True(t, c.cache.inFlight, "the re-dispatch should mark in-flight again")
+	require.Nil(t, c.cache.Value, "stale result must not be written through")
+	require.True(t, c.cache.InFlight, "the re-dispatch should mark in-flight again")
 
 	msg := cmds[0]() // run the re-dispatched cmd synchronously
 	loaded, ok := msg.(threadsLoadedMsg)
 	require.True(t, ok)
-	require.Equal(t, c.cache.generation, loaded.gen)
+	require.Equal(t, c.cache.Generation, loaded.gen)
 	require.Equal(t, ws.threads, loaded.threads)
 }
 
@@ -160,13 +161,13 @@ func TestThreadsCacheFreshness(t *testing.T) {
 	t.Parallel()
 
 	c := &threadListCache{}
-	require.False(t, c.cache.fresh(threadsCacheTTL), "zero-value checkedAt is never fresh")
+	require.False(t, c.cache.Fresh(threadsCacheTTL), "zero-value checkedAt is never fresh")
 
-	c.cache.timestamp = time.Now()
-	require.True(t, c.cache.fresh(threadsCacheTTL))
+	c.cache.Timestamp = time.Now()
+	require.True(t, c.cache.Fresh(threadsCacheTTL))
 
-	c.cache.timestamp = time.Now().Add(-2 * threadsCacheTTL)
-	require.False(t, c.cache.fresh(threadsCacheTTL))
+	c.cache.Timestamp = time.Now().Add(-2 * threadsCacheTTL)
+	require.False(t, c.cache.Fresh(threadsCacheTTL))
 }
 
 func TestInvalidateThreadsBumpsGenAndDiscardsInFlightResult(t *testing.T) {
@@ -175,13 +176,13 @@ func TestInvalidateThreadsBumpsGenAndDiscardsInFlightResult(t *testing.T) {
 	ws := &threadsTestWorkspace{supported: true}
 	com := &common.Common{Workspace: ws}
 	c := &threadListCache{}
-	c.cache.timestamp = time.Now()
+	c.cache.Timestamp = time.Now()
 
 	cmd := c.dispatchRefresh(com) // captures gen 0
 	require.NotNil(t, cmd)
 
 	c.invalidate() // a concurrent event bumps gen to 1, clears checkedAt
-	require.False(t, c.cache.fresh(threadsCacheTTL))
+	require.False(t, c.cache.Fresh(threadsCacheTTL))
 
 	msg := cmd() // the in-flight fetch (still gen 0) lands
 	result, ok := msg.(threadsLoadedMsg)
@@ -191,53 +192,53 @@ func TestInvalidateThreadsBumpsGenAndDiscardsInFlightResult(t *testing.T) {
 	cmds, applied := c.applyLoaded(com, result)
 	require.Len(t, cmds, 1, "stale-gen result should be discarded and re-dispatched")
 	require.False(t, applied)
-	require.Zero(t, c.cache.timestamp, "the discarded result must not mark the cache fresh again")
+	require.Zero(t, c.cache.Timestamp, "the discarded result must not mark the cache fresh again")
 }
 
 func TestApplyThreadEventUpsertsCreatedAndUpdated(t *testing.T) {
 	t.Parallel()
 
-	c := &threadListCache{cache: ttlCache[[]proto.Thread]{value: []proto.Thread{{ID: "s1", Status: "running"}}}}
-	c.cache.timestamp = time.Now()
+	c := &threadListCache{cache: listcache.TTLCache[[]proto.Thread]{Value: []proto.Thread{{ID: "s1", Status: "running"}}}}
+	c.cache.Timestamp = time.Now()
 
 	// Created: no existing row with this ID, so it's appended.
 	c.applyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.CreatedEvent,
 		Payload: proto.Thread{ID: "s2", Status: "running"},
 	})
-	require.Len(t, c.cache.value, 2)
-	require.False(t, c.cache.fresh(threadsCacheTTL), "the event should invalidate the TTL")
+	require.Len(t, c.cache.Value, 2)
+	require.False(t, c.cache.Fresh(threadsCacheTTL), "the event should invalidate the TTL")
 
-	c.cache.timestamp = time.Now()
+	c.cache.Timestamp = time.Now()
 	// Updated: existing row with this ID is replaced in place.
 	c.applyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: proto.Thread{ID: "s1", Status: "merged"},
 	})
-	require.Len(t, c.cache.value, 2)
+	require.Len(t, c.cache.Value, 2)
 	idx := -1
-	for i, s := range c.cache.value {
+	for i, s := range c.cache.Value {
 		if s.ID == "s1" {
 			idx = i
 		}
 	}
 	require.GreaterOrEqual(t, idx, 0)
-	require.Equal(t, "merged", c.cache.value[idx].Status)
-	require.False(t, c.cache.fresh(threadsCacheTTL))
+	require.Equal(t, "merged", c.cache.Value[idx].Status)
+	require.False(t, c.cache.Fresh(threadsCacheTTL))
 }
 
 func TestApplyThreadEventRemovesOnDeleted(t *testing.T) {
 	t.Parallel()
 
-	c := &threadListCache{cache: ttlCache[[]proto.Thread]{value: []proto.Thread{{ID: "s1"}, {ID: "s2"}}}}
-	c.cache.timestamp = time.Now()
+	c := &threadListCache{cache: listcache.TTLCache[[]proto.Thread]{Value: []proto.Thread{{ID: "s1"}, {ID: "s2"}}}}
+	c.cache.Timestamp = time.Now()
 
 	c.applyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.DeletedEvent,
 		Payload: proto.Thread{ID: "s1"},
 	})
-	require.Equal(t, []proto.Thread{{ID: "s2"}}, c.cache.value)
-	require.False(t, c.cache.fresh(threadsCacheTTL))
+	require.Equal(t, []proto.Thread{{ID: "s2"}}, c.cache.Value)
+	require.False(t, c.cache.Fresh(threadsCacheTTL))
 }
 
 func TestStaleThreadsRefreshCmdOnlyWhenActiveAndStale(t *testing.T) {
@@ -251,8 +252,8 @@ func TestStaleThreadsRefreshCmdOnlyWhenActiveAndStale(t *testing.T) {
 
 	require.NotNil(t, c.staleRefreshCmd(com, true), "stale cache while active should refresh")
 
-	c.cache.inFlight = false
-	c.cache.timestamp = time.Now()
+	c.cache.InFlight = false
+	c.cache.Timestamp = time.Now()
 	require.Nil(t, c.staleRefreshCmd(com, true), "fresh cache should not refresh")
 }
 
@@ -260,13 +261,13 @@ func TestApplyThreadsLoadedErrorPreservesCachedValue(t *testing.T) {
 	t.Parallel()
 
 	want := []proto.Thread{{ID: "known-good"}}
-	c := &threadListCache{cache: ttlCache[[]proto.Thread]{value: want, timestamp: time.Now(), inFlight: true}}
+	c := &threadListCache{cache: listcache.TTLCache[[]proto.Thread]{Value: want, Timestamp: time.Now(), InFlight: true}}
 
 	cmds, applied := c.applyLoaded(nil, threadsLoadedMsg{err: errors.New("boom")})
 	require.Empty(t, cmds)
 	require.False(t, applied)
-	require.Equal(t, want, c.cache.value)
-	require.False(t, c.cache.inFlight)
+	require.Equal(t, want, c.cache.Value)
+	require.False(t, c.cache.InFlight)
 }
 
 // TestApplyThreadsLoadedErrorBacksOff proves the fix for the divergence
@@ -315,7 +316,7 @@ func TestApplyThreadsLoadedStaleGenerationFailureRedispatches(t *testing.T) {
 	cmds, applied := c.applyLoaded(com, loaded)
 	require.NotEmpty(t, cmds, "a superseded failure must still re-dispatch the authoritative refresh")
 	require.False(t, applied)
-	require.False(t, c.cache.backingOff(threadsRefreshBackoff),
+	require.False(t, c.cache.BackingOff(listcache.RefreshBackoff),
 		"and it must not record a backoff that would stall that re-dispatch")
 }
 
@@ -329,7 +330,7 @@ func TestStaleRefreshCmdStopsPollingWhenEmpty(t *testing.T) {
 	ws := &threadsTestWorkspace{supported: true}
 	com := &common.Common{Workspace: ws}
 	c := &threadListCache{}
-	c.cache.set(nil)
+	c.cache.Set(nil)
 
 	require.Nil(t, c.staleRefreshCmd(com, true), "an empty, fetched list must not be re-polled")
 
@@ -427,14 +428,14 @@ func TestApplyThreadEventIgnoresTasks(t *testing.T) {
 	t.Parallel()
 
 	c := &threadListCache{}
-	c.cache.set([]proto.Thread{{ID: "thr-1", Kind: "thread"}})
+	c.cache.Set([]proto.Thread{{ID: "thr-1", Kind: "thread"}})
 
 	c.applyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.CreatedEvent,
 		Payload: proto.Thread{ID: "task-1", Kind: "task", Status: "running"},
 	})
 
-	require.Equal(t, []proto.Thread{{ID: "thr-1", Kind: "thread"}}, c.cache.value,
+	require.Equal(t, []proto.Thread{{ID: "thr-1", Kind: "thread"}}, c.cache.Value,
 		"a task must not appear in a list scoped to threads")
 }
 
@@ -444,7 +445,7 @@ func TestApplyThreadEventUpsertsThreads(t *testing.T) {
 	t.Parallel()
 
 	c := &threadListCache{}
-	c.cache.set([]proto.Thread{{ID: "thr-1", Kind: "thread", Status: "running"}})
+	c.cache.Set([]proto.Thread{{ID: "thr-1", Kind: "thread", Status: "running"}})
 
 	c.applyEvent(pubsub.Event[proto.Thread]{
 		Type:    pubsub.UpdatedEvent,
@@ -458,7 +459,7 @@ func TestApplyThreadEventUpsertsThreads(t *testing.T) {
 	require.Equal(t, []proto.Thread{
 		{ID: "thr-1", Kind: "thread", Status: "completed"},
 		{ID: "thr-2", Kind: "thread"},
-	}, c.cache.value)
+	}, c.cache.Value)
 }
 
 // A payload from before Kind existed describes a thread: the field is
@@ -472,5 +473,5 @@ func TestApplyThreadEventTreatsEmptyKindAsThread(t *testing.T) {
 		Payload: proto.Thread{ID: "thr-1"},
 	})
 
-	require.Equal(t, []proto.Thread{{ID: "thr-1"}}, c.cache.value)
+	require.Equal(t, []proto.Thread{{ID: "thr-1"}}, c.cache.Value)
 }

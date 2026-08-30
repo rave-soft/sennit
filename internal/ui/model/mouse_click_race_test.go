@@ -8,6 +8,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +54,7 @@ func TestMouseReleaseCopyTick_UsesClickTimeAtReleaseTime(t *testing.T) {
 	// double-click's mouse-down handler does. The delayed action must
 	// still resolve against the click time at release, not this later one.
 	go func() {
-		time.Sleep(doubleClickThreshold - 100*time.Millisecond)
+		time.Sleep(chatlist.DoubleClickThreshold - 100*time.Millisecond)
 		u.lastClickTime = time.Now()
 	}()
 

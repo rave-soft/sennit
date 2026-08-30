@@ -102,7 +102,7 @@ func TestDrawChildSessionPanel_ShowsModelEffortTokensAndNoNavigation(t *testing.
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.wsCache.agentBusyCache.set(true)
+	u.wsCache.agentBusyCache.Set(true)
 
 	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	u.drawChildSessionPanel(scr, u.lay.layout.editor)
@@ -129,7 +129,7 @@ func TestChildSessionCurrentActivity_OmitsLastToolWhenNotRunning(t *testing.T) {
 		chat.NewToolMessageItem(u.com.Styles, "m1",
 			message.ToolCall{ID: "tc-1", Name: "grep", Input: `{"pattern":"login"}`, Finished: true}, nil, false, nil),
 	)
-	u.wsCache.agentBusyCache.set(false)
+	u.wsCache.agentBusyCache.Set(false)
 
 	activity := u.childSessionCurrentActivity()
 	require.Contains(t, activity, "step 1")
@@ -229,7 +229,7 @@ func TestDrawChildSessionPanel_DoneShowsFrozenDuration(t *testing.T) {
 	u := newChildSessionPanelTestUI(t)
 	u.sess.navStack[len(u.sess.navStack)-1].delegationStart = time.Now().Add(-10 * time.Minute)
 	u.sess.navStack[len(u.sess.navStack)-1].delegationDuration = 83 * time.Second
-	u.wsCache.agentBusyCache.set(false)
+	u.wsCache.agentBusyCache.Set(false)
 
 	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	u.drawChildSessionPanel(scr, u.lay.layout.editor)
@@ -250,7 +250,7 @@ func TestDrawChildSessionPanel_UnknownDurationOmitsTime(t *testing.T) {
 	u := newChildSessionPanelTestUI(t)
 	u.sess.navStack[len(u.sess.navStack)-1].delegationStart = time.Time{}
 	u.sess.navStack[len(u.sess.navStack)-1].delegationDuration = 0
-	u.wsCache.agentBusyCache.set(false)
+	u.wsCache.agentBusyCache.Set(false)
 
 	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	u.drawChildSessionPanel(scr, u.lay.layout.editor)

@@ -104,8 +104,8 @@ func TestSidebarRendersPlanLine(t *testing.T) {
 
 	// modelInfo renders whatever model the workspace cache holds; point it
 	// at Codex the same way a signed-in user would.
-	u.wsCache.agentCache.value.ready = true
-	u.wsCache.agentCache.value.model = *codexModel()
+	u.wsCache.agentCache.Value.ready = true
+	u.wsCache.agentCache.Value.model = *codexModel()
 
 	rendered := u.modelInfo(60)
 	require.Contains(t, strings.Join(strings.Fields(rendered), " "), "Pro · 42% of weekly limit")

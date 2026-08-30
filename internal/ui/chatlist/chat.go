@@ -1,4 +1,4 @@
-package model
+package chatlist
 
 import (
 	"image"
@@ -22,7 +22,7 @@ import (
 
 // Constants for multi-click detection.
 const (
-	doubleClickThreshold = 400 * time.Millisecond // 0.4s is typical double-click threshold
+	DoubleClickThreshold = 400 * time.Millisecond // 0.4s is typical double-click threshold
 	clickTolerance       = 2                      // x,y tolerance for double/tripple click
 )
 
@@ -34,21 +34,21 @@ type DelayedClickMsg struct {
 	X, Y    int
 }
 
-// scrollbarHideMsg is sent to hide the scrollbar after the timeout period.
-type scrollbarHideMsg struct {
-	// owner is the Chat whose timer produced this message. Root
+// ScrollbarHideMsg is sent to hide the scrollbar after the timeout period.
+type ScrollbarHideMsg struct {
+	// Owner is the Chat whose timer produced this message. Root
 	// broadcasts it to every screen's UI (see Root.Update), so each
 	// handler must drop the ones that aren't its own — the main screen's
 	// chat and a drilled-in thread's chat run independent timers whose
 	// seqs can collide.
-	owner *Chat
-	seq   int // sequence number to ignore stale messages
+	Owner *Chat
+	Seq   int // sequence number to ignore stale messages
 }
 
-// scrollbarHideCmd returns a command that sends a scrollbarHideMsg after the timeout.
-func scrollbarHideCmd(owner *Chat, seq int) tea.Cmd {
-	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
-		return scrollbarHideMsg{owner: owner, seq: seq}
+// ScrollbarHideCmd returns a command that sends a ScrollbarHideMsg after the timeout.
+func ScrollbarHideCmd(owner *Chat, seq int) tea.Cmd {
+	return tea.Tick(ScrollbarHideDuration, func(_ time.Time) tea.Msg {
+		return ScrollbarHideMsg{Owner: owner, Seq: seq}
 	})
 }
 
@@ -61,22 +61,22 @@ const resizeSettleDuration = 120 * time.Millisecond
 // more than a frame or so, even on slow-to-render items.
 const warmBatchSize = 25
 
-// chatWarmMsg drives one incremental cache-warming step. The first one is
+// WarmMsg drives one incremental cache-warming step. The first one is
 // delayed until the resize settles; the rest fire immediately, one per
 // batch, so warming spreads across frames instead of blocking.
-type chatWarmMsg struct {
-	owner *Chat // see scrollbarHideMsg.owner
-	seq   int   // guards against stale timers from superseded resizes
+type WarmMsg struct {
+	Owner *Chat // see ScrollbarHideMsg.Owner
+	Seq   int   // guards against stale timers from superseded resizes
 }
 
-// chatWarmCmd schedules the next warming step after delay (zero fires as
+// WarmCmd schedules the next warming step after delay (zero fires as
 // soon as the runtime delivers it).
-func chatWarmCmd(owner *Chat, seq int, delay time.Duration) tea.Cmd {
+func WarmCmd(owner *Chat, seq int, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
-		return func() tea.Msg { return chatWarmMsg{owner: owner, seq: seq} }
+		return func() tea.Msg { return WarmMsg{Owner: owner, Seq: seq} }
 	}
 	return tea.Tick(delay, func(_ time.Time) tea.Msg {
-		return chatWarmMsg{owner: owner, seq: seq}
+		return WarmMsg{Owner: owner, Seq: seq}
 	})
 }
 
@@ -150,8 +150,8 @@ type Chat struct {
 	warmNext        int
 }
 
-// scrollbarHideDuration is how long the scrollbar remains visible after scroll activity.
-const scrollbarHideDuration = 2 * time.Second
+// ScrollbarHideDuration is how long the scrollbar remains visible after scroll activity.
+const ScrollbarHideDuration = 2 * time.Second
 
 // chatDrawCache holds the pre-decoded form of the last list.Render output.
 // The cache is keyed by the rendered string and the screen's width method
@@ -216,19 +216,19 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	// Determine visibility based on scrollbar mode.
-	showScrollbar := false
+	ShowScrollbar := false
 	switch m.scrollbarMode {
 	case config.ScrollbarAlways:
-		showScrollbar = needsScrollbar
+		ShowScrollbar = needsScrollbar
 	case config.ScrollbarDefault:
-		showScrollbar = needsScrollbar && m.scrollbarVisible
+		ShowScrollbar = needsScrollbar && m.scrollbarVisible
 	case config.ScrollbarNever:
-		showScrollbar = false
+		ShowScrollbar = false
 	}
 
 	// Reserve space for scrollbar only when visible.
 	scrollbarWidth := 0
-	if showScrollbar {
+	if ShowScrollbar {
 		scrollbarWidth = 1
 	}
 
@@ -255,7 +255,7 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	// Draw scrollbar if visible and needed. Only reached when not resizing
-	// (showScrollbar requires it), so TotalHeight is already computed and
+	// (ShowScrollbar requires it), so TotalHeight is already computed and
 	// cached above.
 	if scrollbarWidth > 0 {
 		contentSize := m.list.TotalHeight() - 1
@@ -323,7 +323,7 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 // cell-by-cell, since both decode ANSI sequences and use the same width
 // method.
 func newChatDrawCache(rendered string, method ansi.Method) *chatDrawCache {
-	w, h := renderedBounds(rendered, method)
+	w, h := RenderedBounds(rendered, method)
 	if w <= 0 {
 		w = 1
 	}
@@ -340,13 +340,13 @@ func newChatDrawCache(rendered string, method ansi.Method) *chatDrawCache {
 	}
 }
 
-// renderedBounds returns the (width, height) cell extent of rendered
+// RenderedBounds returns the (width, height) cell extent of rendered
 // when laid out by method. Width is the widest line's StringWidth (which
 // strips ANSI sequences and tallies cells via method, exactly like
 // printString); height is the line count. Both match what
 // uv.StyledString.Draw will write into a buffer whose WidthMethod is
 // method, so the cache buffer is always sized to fit the live content.
-func renderedBounds(rendered string, method ansi.Method) (w, h int) {
+func RenderedBounds(rendered string, method ansi.Method) (w, h int) {
 	for line := range strings.SplitSeq(rendered, "\n") {
 		w = max(w, method.StringWidth(line))
 		h++
@@ -379,16 +379,16 @@ func (m *Chat) BeginResize() tea.Cmd {
 	m.resizing = true
 	m.resizeSettleSeq++
 	m.warmNext = 0
-	return chatWarmCmd(m, m.resizeSettleSeq, resizeSettleDuration)
+	return WarmCmd(m, m.resizeSettleSeq, resizeSettleDuration)
 }
 
 // WarmStep renders the next batch of messages into the width cache and
 // returns a command to continue warming plus whether warming finished. On
 // completion the resize suppression is cleared so the next draw recomputes
-// the (now instant) total height and scrollbar. A stale seq — from a resize
+// the (now instant) total height and scrollbar. A stale Seq — from a resize
 // that has since been superseded — is a no-op returning (nil, false).
-func (m *Chat) WarmStep(seq int) (cmd tea.Cmd, done bool) {
-	if seq != m.resizeSettleSeq {
+func (m *Chat) WarmStep(Seq int) (cmd tea.Cmd, done bool) {
+	if Seq != m.resizeSettleSeq {
 		return nil, false
 	}
 	m.warmNext = m.list.Prewarm(m.warmNext, warmBatchSize)
@@ -396,7 +396,7 @@ func (m *Chat) WarmStep(seq int) (cmd tea.Cmd, done bool) {
 		m.resizing = false
 		return nil, true
 	}
-	return chatWarmCmd(m, seq, 0), false
+	return WarmCmd(m, Seq, 0), false
 }
 
 // SetSize sets the size of the chat view port.
@@ -432,7 +432,7 @@ func (m *Chat) Len() int {
 // InvalidateRenderCaches drops cached rendered output on every message
 // item so the next draw re-renders with the current styles.
 func (m *Chat) InvalidateRenderCaches() {
-	chat.ClearItemCaches(m.messageItems())
+	chat.ClearItemCaches(m.MessageItems())
 }
 
 // Restyle repaints the whole conversation in the current palette: cached
@@ -440,14 +440,14 @@ func (m *Chat) InvalidateRenderCaches() {
 // cannot re-read (spinner gradients) are rebuilt. The returned command
 // re-arms the animations that had to be rebuilt.
 func (m *Chat) Restyle() tea.Cmd {
-	items := m.messageItems()
+	items := m.MessageItems()
 	chat.ClearItemCaches(items)
 	m.list.InvalidateAll()
 	return chat.RestyleItems(items)
 }
 
-// messageItems returns the list's items as [chat.MessageItem]s.
-func (m *Chat) messageItems() []chat.MessageItem {
+// MessageItems returns the list's items as [chat.MessageItem]s.
+func (m *Chat) MessageItems() []chat.MessageItem {
 	items := make([]chat.MessageItem, 0, m.list.Len())
 	for i := range m.list.Len() {
 		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
@@ -652,7 +652,7 @@ func (m *Chat) ScrollToBottom() tea.Cmd {
 func (m *Chat) ScrollToTop() tea.Cmd {
 	m.list.ScrollToTop()
 	m.follow = false // Disable follow mode when user scrolls up
-	return m.showScrollbar()
+	return m.ShowScrollbar()
 }
 
 // ScrollBy scrolls the chat view by the given number of line deltas.
@@ -665,41 +665,41 @@ func (m *Chat) ScrollBy(lines int) tea.Cmd {
 		// Scrolling down re-enables follow when we reach the bottom.
 		m.follow = true
 	}
-	return m.showScrollbar()
+	return m.ShowScrollbar()
 }
 
 // ScrollToSelected scrolls the chat view to the selected item.
 func (m *Chat) ScrollToSelected() tea.Cmd {
 	m.list.ScrollToSelected()
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
-	return m.showScrollbar()
+	return m.ShowScrollbar()
 }
 
 // ScrollToIndex scrolls the chat view to the item at the given index.
 func (m *Chat) ScrollToIndex(index int) tea.Cmd {
 	m.list.ScrollToIndex(index)
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
-	return m.showScrollbar()
+	return m.ShowScrollbar()
 }
 
-// showScrollbar makes the scrollbar visible and returns a command to hide it after timeout.
-func (m *Chat) showScrollbar() tea.Cmd {
+// ShowScrollbar makes the scrollbar visible and returns a command to hide it after timeout.
+func (m *Chat) ShowScrollbar() tea.Cmd {
 	// Only start timer for "default" mode
 	if m.scrollbarMode != config.ScrollbarDefault {
 		return nil
 	}
 	m.scrollbarVisible = true
 	m.scrollbarHideSeq++
-	return scrollbarHideCmd(m, m.scrollbarHideSeq)
+	return ScrollbarHideCmd(m, m.scrollbarHideSeq)
 }
 
 // HideScrollbar hides the scrollbar if the sequence matches.
-func (m *Chat) HideScrollbar(seq int) {
+func (m *Chat) HideScrollbar(Seq int) {
 	// Only hide scrollbar for "default" mode
 	if m.scrollbarMode != config.ScrollbarDefault {
 		return
 	}
-	if seq == m.scrollbarHideSeq {
+	if Seq == m.scrollbarHideSeq {
 		m.scrollbarVisible = false
 	}
 }
@@ -1129,7 +1129,7 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 	// Detect multi-click (double/triple)
 	now := time.Now()
-	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
+	if now.Sub(m.lastClickTime) <= DoubleClickThreshold &&
 		abs(x-m.lastClickX) <= clickTolerance &&
 		abs(y-m.lastClickY) <= clickTolerance {
 		m.clickCount++
@@ -1165,7 +1165,7 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 		// Schedule delayed click action (e.g., expansion) after a short delay.
 		// If a double-click occurs, the clickID will be invalidated.
-		cmd = tea.Tick(doubleClickThreshold, func(t time.Time) tea.Msg {
+		cmd = tea.Tick(DoubleClickThreshold, func(t time.Time) tea.Msg {
 			return DelayedClickMsg{
 				ClickID: clickID,
 				ItemIdx: itemIdx,
@@ -1670,4 +1670,77 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// The four below expose what a test outside this package legitimately
+// asks of the list without reaching through to it. They existed as
+// `chat.list.X` reads while Chat lived in internal/ui/model, which is
+// exactly the kind of access that stops a component from being one.
+
+// Focused reports whether the list has keyboard focus.
+func (m *Chat) Focused() bool { return m.list.Focused() }
+
+// Selected is the index of the selected item, or -1 when nothing is.
+func (m *Chat) Selected() int { return m.list.Selected() }
+
+// Offset is the list's current scroll offset in lines.
+func (m *Chat) Offset() int { return m.list.Offset() }
+
+// ItemIndexAtPosition reports which item covers a point, and where within
+// that item the point falls.
+func (m *Chat) ItemIndexAtPosition(x, y int) (index, offset int) {
+	return m.list.ItemIndexAtPosition(x, y)
+}
+
+// The five below answer questions a test on the screen side legitimately
+// has about the component's state, without it reaching through to a
+// field. They are read-only and cheap; each names what a caller outside
+// this package actually asked for while Chat lived in internal/ui/model.
+
+// Resizing reports whether a resize is still settling — the window has
+// changed and the message cache is being warmed a batch at a time.
+func (m *Chat) Resizing() bool { return m.resizing }
+
+// PendingClickID is the id a delayed click will carry, so a test can
+// deliver the DelayedClickMsg the component is waiting for.
+func (m *Chat) PendingClickID() int { return m.pendingClickID }
+
+// ScrollbarShown reports whether the list overflows enough to draw one.
+func (m *Chat) ScrollbarShown() bool { return m.scrollbarShown }
+
+// ScrollbarDragging reports whether a scrollbar drag is in progress.
+func (m *Chat) ScrollbarDragging() bool { return m.scrollbarDragging }
+
+// ScrollbarGeometry is where the scrollbar is drawn: the column it
+// occupies, the height of its track, and where the thumb sits within it.
+// A mouse test needs all four to aim a click at the thumb, the track above
+// it, or the column beside it.
+func (m *Chat) ScrollbarGeometry() (colX, trackHeight, thumbStart, thumbSize int) {
+	return m.scrollbarColX, m.scrollbarTrackHeight, m.scrollbarThumbStart, m.scrollbarThumbSize
+}
+
+// ScrollbarHovered reports whether the pointer is over the scrollbar, and
+// SetScrollbarHovered forces that state. The setter exists for the drawing
+// test, which has to put the component into a hover it cannot reach by
+// moving a mouse across a screen buffer.
+func (m *Chat) ScrollbarHovered() bool { return m.scrollbarHover }
+
+func (m *Chat) SetScrollbarHovered(hovered bool) { m.scrollbarHover = hovered }
+
+// ListHeight is the viewport height the list renders into.
+func (m *Chat) ListHeight() int { return m.list.Height() }
+
+// TotalHeight is the rendered height of every item, which is what the
+// viewport scrolls through.
+func (m *Chat) TotalHeight() int { return m.list.TotalHeight() }
+
+// RenderList renders the list to a string, the way Draw does before
+// caching it.
+func (m *Chat) RenderList() string { return m.list.Render() }
+
+// VisibleItemIndices is the range of items currently on screen, as
+// [first, last]. A test asserting that something is scrolled out of view
+// needs it, and reaching through to the list to ask was how it did so.
+func (m *Chat) VisibleItemIndices() (first, last int) {
+	return m.list.VisibleItemIndices()
 }

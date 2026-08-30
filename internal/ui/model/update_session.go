@@ -122,7 +122,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// invalidatePromptQueue above already zeroed the cache's timestamp
 		// (marking it stale) and bumped its generation; only the displayed
 		// items belong to the departed session and need clearing too.
-		m.wsCache.promptQueueCache.value = nil
+		m.wsCache.promptQueueCache.Value = nil
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -318,7 +318,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			m.editor.pendingSendQueue = nil
 		}
 		cmds = append(cmds, util.ReportError(msg.Err))
-		m.wsCache.agentBusyCache.set(false)
+		m.wsCache.agentBusyCache.Set(false)
 		if !msg.creating && len(m.editor.pendingSendQueue) > 0 {
 			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 		}

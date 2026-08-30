@@ -38,7 +38,7 @@ func TestHoverDoesNotScrollTheChat(t *testing.T) {
 	fillChat(t, m, 60)
 	m.chat.ScrollToTop()
 
-	before := m.chat.list.Offset()
+	before := m.chat.Offset()
 	require.False(t, m.chat.Dragging(), "nothing is being dragged in this test")
 
 	// A pointer sweep along the bottom of the window, no button held.
@@ -46,5 +46,5 @@ func TestHoverDoesNotScrollTheChat(t *testing.T) {
 		m.Update(tea.MouseMotionMsg{X: 20, Y: m.lay.height - 1})
 	}
 
-	require.Equal(t, before, m.chat.list.Offset(), "hovering must not scroll the chat")
+	require.Equal(t, before, m.chat.Offset(), "hovering must not scroll the chat")
 }

@@ -30,6 +30,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -57,17 +58,17 @@ type workspaceCacheState struct {
 	// event-driven with a TTL backstop, fetched off-thread by
 	// dispatchPromptQueueRefresh; the queue count is always
 	// len(promptQueueCache.value).
-	promptQueueCache ttlCache[[]string]
+	promptQueueCache listcache.TTLCache[[]string]
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (treated as IO — see the package doc comment above). Reads
 	// never probe; refreshes happen off-thread.
-	agentBusyCache    ttlCache[bool]
-	yoloCache         ttlCache[bool]
+	agentBusyCache    listcache.TTLCache[bool]
+	yoloCache         listcache.TTLCache[bool]
 	busyFetchInFlight bool
 	// agentCache memoizes the coordinator readiness/model (treated as IO;
 	// modelInfo renders it every frame). Seeded at construction, refreshed
 	// by the same off-thread probe as agentBusyCache/yoloCache above.
-	agentCache ttlCache[agentReadyModel]
+	agentCache listcache.TTLCache[agentReadyModel]
 	// busyFetchGen is bumped by every busy/permission state transition; a
 	// stale in-flight probe result is discarded and re-fetched instead of
 	// clobbering newer state. It gates agentBusyCache, yoloCache, and
@@ -141,8 +142,8 @@ func (s *sessionState) currentSessionID() string {
 // it lands. Called by handlers for events that change agent or permission
 // state.
 func (c *workspaceCacheState) invalidateBusyCaches() {
-	c.agentBusyCache.invalidate()
-	c.yoloCache.invalidate()
+	c.agentBusyCache.Invalidate()
+	c.yoloCache.Invalidate()
 	c.busyFetchGen++
 }
 
@@ -152,7 +153,7 @@ func (c *workspaceCacheState) invalidateBusyCaches() {
 // queue state. Callers that already know the authoritative new value
 // re-freshen it with a follow-up set, per ttlCache's invalidate doc.
 func (c *workspaceCacheState) invalidatePromptQueue() {
-	c.promptQueueCache.invalidate()
+	c.promptQueueCache.Invalidate()
 }
 
 // dispatchBusyRefresh returns a command that probes the workspace busy and
@@ -207,9 +208,9 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		return nil
 	}
 	prevYolo := m.yoloModeCached()
-	m.wsCache.agentBusyCache.set(msg.agentBusy)
-	m.wsCache.yoloCache.set(msg.yolo)
-	m.wsCache.agentCache.set(agentReadyModel{ready: msg.ready, model: msg.model})
+	m.wsCache.agentBusyCache.Set(msg.agentBusy)
+	m.wsCache.yoloCache.Set(msg.yolo)
+	m.wsCache.agentCache.Set(agentReadyModel{ready: msg.ready, model: msg.model})
 	if prevYolo != msg.yolo {
 		// A remote/async toggle changed yolo mode: update the editor
 		// prompt function so the prompt icon/style tracks the new mode.
@@ -230,17 +231,17 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 // nil while a fetch is already in flight. With no active session the queue
 // is simply cleared.
 func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
-	if m.wsCache.promptQueueCache.inFlight || m.com == nil || m.com.Workspace == nil {
+	if m.wsCache.promptQueueCache.InFlight || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
 	if !m.hasSession() {
-		hadItems := len(m.wsCache.promptQueueCache.value) != 0
+		hadItems := len(m.wsCache.promptQueueCache.Value) != 0
 		// Bump the generation so any in-flight fetch scoped to the
 		// now-departed session is discarded rather than repopulating the
 		// queue, then write the now-authoritative empty queue through as
 		// fresh.
 		m.wsCache.invalidatePromptQueue()
-		m.wsCache.promptQueueCache.set(nil)
+		m.wsCache.promptQueueCache.Set(nil)
 		if hadItems {
 			m.updateLayoutAndSize()
 		}
@@ -248,7 +249,7 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	}
 	ws := m.com.Workspace
 	sessionID := m.sess.current.ID
-	gen, started := m.wsCache.promptQueueCache.begin()
+	gen, started := m.wsCache.promptQueueCache.Begin()
 	if !started {
 		return nil
 	}
@@ -268,7 +269,7 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	// complete clears the in-flight marker unconditionally (even when the
 	// session-scope check below rejects the result), matching complete's
 	// contract of always being called once per dispatched fetch.
-	genOK := m.wsCache.promptQueueCache.complete(msg.gen)
+	genOK := m.wsCache.promptQueueCache.Complete(msg.gen)
 	if msg.forSession != m.sess.currentSessionID() || !genOK {
 		// The fetch raced a session switch or a newer queue transition
 		// (submit, clear, invalidation). Discard the stale result and
@@ -279,8 +280,8 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		}
 		return nil
 	}
-	countChanged := len(msg.prompts) != len(m.wsCache.promptQueueCache.value)
-	m.wsCache.promptQueueCache.set(msg.prompts)
+	countChanged := len(msg.prompts) != len(m.wsCache.promptQueueCache.Value)
+	m.wsCache.promptQueueCache.Set(msg.prompts)
 	if countChanged {
 		// A row-count change moves the panel/chat split; anything else
 		// (item text edited in place) is picked up on the next draw, since
@@ -299,12 +300,12 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	if !m.wsCache.agentBusyCache.fresh(busyCacheTTL) || !m.wsCache.yoloCache.fresh(busyCacheTTL) {
+	if !m.wsCache.agentBusyCache.Fresh(busyCacheTTL) || !m.wsCache.yoloCache.Fresh(busyCacheTTL) {
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if m.hasSession() && !m.wsCache.promptQueueCache.fresh(promptQueueTTL) {
+	if m.hasSession() && !m.wsCache.promptQueueCache.Fresh(promptQueueTTL) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -344,8 +345,8 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 	if cmd := m.threadList.staleRefreshCmd(m.com, true); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if m.state == uiChat && len(m.threadList.cache.value) > 0 {
-		visible := activeDockThreads(m.threadList.cache.value)
+	if m.state == uiChat && len(m.threadList.cache.Value) > 0 {
+		visible := activeDockThreads(m.threadList.cache.Value)
 		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds
@@ -390,5 +391,5 @@ func (m *UI) toggleYoloMode() tea.Cmd {
 // write through the cache; the Update-tail backstop keeps it bounded-stale
 // otherwise.
 func (m *UI) yoloModeCached() bool {
-	return m.wsCache.yoloCache.value
+	return m.wsCache.yoloCache.Value
 }

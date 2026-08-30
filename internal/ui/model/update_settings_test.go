@@ -603,7 +603,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 
 		cmds, _ := m.updateSettings(yoloToggledMsg{Enabled: true, generation: 1}, nil)
 
-		require.True(t, m.wsCache.yoloCache.value)
+		require.True(t, m.wsCache.yoloCache.Value)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
 		require.True(t, ok)
 		require.Equal(t, "Yolo mode enabled", got.Msg)
@@ -616,7 +616,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 
 		cmds, _ := m.updateSettings(yoloToggledMsg{Enabled: false, generation: 1}, nil)
 
-		require.False(t, m.wsCache.yoloCache.value)
+		require.False(t, m.wsCache.yoloCache.Value)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
 		require.True(t, ok)
 		require.Equal(t, "Yolo mode disabled", got.Msg)

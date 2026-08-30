@@ -11,6 +11,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/rave-soft/sennit/internal/spin"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
@@ -114,19 +115,19 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				cmds = append(cmds, cmd)
 			}
 		}
-	case scrollbarHideMsg:
+	case chatlist.ScrollbarHideMsg:
 		// Root broadcasts these to every screen (see Root.Update); the
 		// owner tag says whose timer this is.
-		if m.state == uiChat && msg.owner == m.chat {
-			m.chat.HideScrollbar(msg.seq)
+		if m.state == uiChat && msg.Owner == m.chat {
+			m.chat.HideScrollbar(msg.Seq)
 		}
-	case chatWarmMsg:
+	case chatlist.WarmMsg:
 		// A resize has settled; warm the message cache one batch at a time
 		// so the scrollbar recompute never blocks the UI thread. Owner
-		// check as for scrollbarHideMsg: warming the wrong chat would
+		// check as for chatlist.ScrollbarHideMsg: warming the wrong chat would
 		// clear its resizing flag early, or never clear this one's.
-		if m.state == uiChat && msg.owner == m.chat {
-			cmd, done := m.chat.WarmStep(msg.seq)
+		if m.state == uiChat && msg.Owner == m.chat {
+			cmd, done := m.chat.WarmStep(msg.Seq)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			} else if done {

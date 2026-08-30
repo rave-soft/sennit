@@ -51,7 +51,7 @@ func TestChatDenseToolGroup_NoGapBetweenConsecutiveOneLinerTools(t *testing.T) {
 
 	u.chat.SetMessages(view, grep, glob, reply)
 
-	out := u.chat.list.Render()
+	out := u.chat.RenderList()
 	lines := strings.Split(out, "\n")
 
 	require.GreaterOrEqual(t, len(lines), 5,

@@ -26,6 +26,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/spin"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -327,7 +328,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		switch msg.(type) {
-		case spinner.TickMsg, spin.StepMsg, chatWarmMsg, scrollbarHideMsg, sidebarScrollbarHideMsg:
+		case spinner.TickMsg, spin.StepMsg, chatlist.WarmMsg, chatlist.ScrollbarHideMsg, sidebarScrollbarHideMsg:
 			// Animation ticks keep themselves alive: the handler that
 			// receives one returns the command that schedules the next.
 			// Route one by active screen and the loop does not stall, it

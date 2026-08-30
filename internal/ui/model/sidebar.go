@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/logo"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -111,14 +112,14 @@ type sidebarSig struct {
 // timer, which is the only thing chat.go knew about *UI — an accident of
 // placement rather than a dependency.
 type sidebarScrollbarHideMsg struct {
-	owner *UI // see scrollbarHideMsg.owner
+	owner *UI // see chatlist.ScrollbarHideMsg.owner
 	seq   int
 }
 
 // sidebarScrollbarHideCmd returns a command that sends a
 // sidebarScrollbarHideMsg after the timeout.
 func sidebarScrollbarHideCmd(owner *UI, seq int) tea.Cmd {
-	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
+	return tea.Tick(chatlist.ScrollbarHideDuration, func(_ time.Time) tea.Msg {
 		return sidebarScrollbarHideMsg{owner: owner, seq: seq}
 	})
 }

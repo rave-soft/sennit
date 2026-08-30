@@ -32,6 +32,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -45,7 +46,7 @@ var agentsCacheTTL = 3 * time.Second
 // agentListCache holds the memoized delegation list plus its TTL-cache and
 // in-flight/generation bookkeeping.
 type agentListCache struct {
-	cache ttlCache[[]proto.Thread]
+	cache listcache.TTLCache[[]proto.Thread]
 }
 
 // agentsLoadedMsg delivers the result of an off-thread task list fetch.
@@ -61,17 +62,18 @@ type agentsLoadedMsg struct {
 // ops builds the listCacheOps that plug delegations' specifics (fetch call,
 // support gate, Kind filter, log label) into the shared machinery in
 // list_cache.go.
-func (c *agentListCache) ops() listCacheOps[agentsLoadedMsg] {
-	return listCacheOps[agentsLoadedMsg]{
-		label:    "delegations",
-		ttl:      agentsCacheTTL,
-		kind:     proto.ThreadKindTask,
-		supports: func(ws workspace.Workspace) bool { return ws.SupportsTasks() },
-		fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListTasks(ctx) },
-		wrap: func(gen uint64, items []proto.Thread, err error) agentsLoadedMsg {
+func (c *agentListCache) ops() listcache.Ops[agentsLoadedMsg] {
+	return listcache.Ops[agentsLoadedMsg]{
+		Label:    "delegations",
+		TTL:      agentsCacheTTL,
+		Backoff:  listcache.RefreshBackoff,
+		Kind:     proto.ThreadKindTask,
+		Supports: func(ws workspace.Workspace) bool { return ws.SupportsTasks() },
+		Fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListTasks(ctx) },
+		Wrap: func(gen uint64, items []proto.Thread, err error) agentsLoadedMsg {
 			return agentsLoadedMsg{gen: gen, agents: items, err: err}
 		},
-		unwrap: func(msg agentsLoadedMsg) (uint64, []proto.Thread, error) {
+		Unwrap: func(msg agentsLoadedMsg) (uint64, []proto.Thread, error) {
 			return msg.gen, msg.agents, msg.err
 		},
 	}
@@ -81,7 +83,7 @@ func (c *agentListCache) ops() listCacheOps[agentsLoadedMsg] {
 // goroutine. applied reports whether msg was written through, as opposed to
 // discarded for a stale generation or a failure.
 func (c *agentListCache) applyLoaded(com *common.Common, msg agentsLoadedMsg) (cmds []tea.Cmd, applied bool) {
-	return applyListLoaded(&c.cache, com, c.ops(), msg)
+	return listcache.ApplyLoaded(&c.cache, com, c.ops(), msg)
 }
 
 // applyEvent reacts to a delegation pubsub event: it upserts (Created,
@@ -92,7 +94,7 @@ func (c *agentListCache) applyLoaded(com *common.Common, msg agentsLoadedMsg) (c
 // Tasks only, the mirror of threadListCache.applyEvent's thread-only filter:
 // the two kinds share one table and one lifecycle publisher.
 func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
-	applyListEvent(&c.cache, proto.ThreadKindTask, evt)
+	listcache.ApplyEvent(&c.cache, proto.ThreadKindTask, evt)
 }
 
 // staleRefreshCmd is the TTL backstop: while active and the memoized list
@@ -104,7 +106,7 @@ func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 // does: a session that never delegates anything must not re-list forever,
 // and a delegation's own create event is what starts the section moving.
 func (c *agentListCache) staleRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	return staleListRefreshCmd(&c.cache, com, active, c.ops())
+	return listcache.StaleRefreshCmd(&c.cache, com, active, c.ops())
 }
 
 // sessionDelegations filters agents down to the live delegations of

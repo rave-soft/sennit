@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
@@ -69,7 +70,7 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 // showing. Walking the list is the chat's job and describing a delegation
 // is navigation's, which is why the two are separate calls: the walk
 // returns items, and the mapping to a ref happens here.
-func nestedToolContainerRefs(c *Chat) []childSessionRef {
+func nestedToolContainerRefs(c *chatlist.Chat) []childSessionRef {
 	items := c.NestedToolContainers()
 	refs := make([]childSessionRef, 0, len(items))
 	for _, item := range items {

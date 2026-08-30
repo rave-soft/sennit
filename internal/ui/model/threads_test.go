@@ -137,7 +137,7 @@ func TestThreadsDashboardRebuildItemsResizesListForDetailPane(t *testing.T) {
 	require.Nil(t, m.selected())
 	beforeHeight := m.list.Height()
 
-	m.cache.cache.value = []proto.Thread{{ID: "s1", Name: "one", Status: "running"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "s1", Name: "one", Status: "running"}}
 	m.rebuildItems()
 
 	require.NotNil(t, m.selected(), "rebuildItems lands on the first row when nothing was selected")
@@ -153,7 +153,7 @@ func TestThreadsDashboardHandleKeyEnter(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "s1", Name: "one"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "s1", Name: "one"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -183,7 +183,7 @@ func TestThreadsDashboardHandleKeyMerge(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "s1", Status: "completed"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "s1", Status: "completed"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -200,7 +200,7 @@ func TestThreadsDashboardHandleKeyMergeSkipsAlreadyMerging(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "s1", Status: "merging"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "s1", Status: "merging"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -214,7 +214,7 @@ func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "s1"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "s1"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -233,7 +233,7 @@ func TestThreadsDashboardHandleKeyCancelTask(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "t1", Kind: "task", Status: "running"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "t1", Kind: "task", Status: "running"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -256,7 +256,7 @@ func TestThreadsDashboardHandleKeyCancelThread(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "running"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "running"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -276,7 +276,7 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalTask(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "t1", Kind: "task", Status: "completed"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "t1", Kind: "task", Status: "completed"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -293,7 +293,7 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalThread(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "merged"}}
+	m.cache.cache.Value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "merged"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -354,7 +354,7 @@ func TestThreadsDashboardHandleKeyReload(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.cache.timestamp = time.Now() // fresh cache would normally skip a refresh
+	m.cache.cache.Timestamp = time.Now() // fresh cache would normally skip a refresh
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "r", Code: 'r'})
 	require.True(t, handled)
@@ -390,7 +390,7 @@ func TestThreadsDashboardApplyThreadsLoadedRebuildsItems(t *testing.T) {
 	m := newTestThreadsDashboard(t, ws)
 
 	threads := []proto.Thread{{ID: "s1", Name: "one"}, {ID: "s2", Name: "two"}}
-	cmds := m.ApplyThreadsLoaded(threadsLoadedMsg{gen: m.cache.cache.generation, threads: threads})
+	cmds := m.ApplyThreadsLoaded(threadsLoadedMsg{gen: m.cache.cache.Generation, threads: threads})
 	require.Nil(t, cmds)
 	require.Equal(t, 2, m.list.Len())
 }
@@ -417,7 +417,7 @@ func dashboardWith(t *testing.T, threads ...proto.Thread) *threadsDashboard {
 	t.Helper()
 	m := newTestThreadsDashboard(t, &threadsTestWorkspace{supported: true})
 	m.SetSize(120, 30)
-	m.cache.cache.value = threads
+	m.cache.cache.Value = threads
 	m.rebuildItems()
 	scr := uv.NewScreenBuffer(120, 30)
 	m.Draw(scr, scr.Bounds())
@@ -565,7 +565,7 @@ func TestThreadsDashboardSelectionSurvivesRefresh(t *testing.T) {
 	m.list.SetSelected(1)
 	require.Equal(t, "t2", m.selected().ID)
 
-	m.cache.cache.value = []proto.Thread{
+	m.cache.cache.Value = []proto.Thread{
 		{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
 		{ID: "t2", Name: "two", Kind: "thread", Status: "completed"},
 	}

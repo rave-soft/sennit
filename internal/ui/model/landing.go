@@ -15,8 +15,8 @@ import (
 // every frame, and workspace calls are treated as IO that must not run
 // synchronously in Update or View (see workspace_cache.go).
 func (m *UI) selectedModel() *workspace.AgentModel {
-	if m.wsCache.agentCache.value.ready {
-		model := m.wsCache.agentCache.value.model
+	if m.wsCache.agentCache.Value.ready {
+		model := m.wsCache.agentCache.Value.model
 		return &model
 	}
 	return nil

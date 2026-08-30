@@ -93,7 +93,7 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		generation = m.editor.pendingSendGen
 	} else {
 		sessionID = m.sess.current.ID
-		m.wsCache.agentBusyCache.set(true)
+		m.wsCache.agentBusyCache.Set(true)
 		m.wsCache.busyFetchGen++
 		m.wsCache.invalidatePromptQueue()
 	}
@@ -144,7 +144,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Gate on the memoized ready state: esc is a hot key and AgentIsReady
 	// is treated as IO — see workspace_cache.go.
-	if !m.wsCache.agentCache.value.ready {
+	if !m.wsCache.agentCache.Value.ready {
 		return nil
 	}
 
@@ -173,14 +173,14 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
 	// count (event-driven) instead of a synchronous workspace probe.
-	if len(m.wsCache.promptQueueCache.value) > 0 {
+	if len(m.wsCache.promptQueueCache.Value) > 0 {
 		m.com.Workspace.AgentClearQueue(m.sess.current.ID)
 		m.clearQueuedPrompts()
 		// Bump the queue generation so a fetch started before this clear
 		// cannot land and repopulate the pill we just emptied, then write
 		// the now-authoritative empty queue through as fresh.
 		m.wsCache.invalidatePromptQueue()
-		m.wsCache.promptQueueCache.set(nil)
+		m.wsCache.promptQueueCache.Set(nil)
 		m.updateLayoutAndSize()
 		return nil
 	}

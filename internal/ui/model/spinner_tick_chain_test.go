@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -38,7 +39,7 @@ func spinningAssistantItem(t *testing.T, sty *styles.Styles, id string) chat.Mes
 // caller of RestartPausedVisibleAnimations) ever brings it back.
 func TestOffscreenSpinnerKeepsItsTickChain(t *testing.T) {
 	com := common.DefaultCommon(context.Background(), &countingWorkspace{})
-	c := NewChat(com, config.ScrollbarDefault)
+	c := chatlist.NewChat(com, config.ScrollbarDefault)
 
 	spinning := spinningAssistantItem(t, com.Styles, "m-spin")
 	items := []chat.MessageItem{spinning}
@@ -59,7 +60,7 @@ func TestOffscreenSpinnerKeepsItsTickChain(t *testing.T) {
 	require.True(t, ok, "arming must schedule a step")
 
 	// The chat is pinned to the bottom, so the first item is off-screen.
-	first, _ := c.list.VisibleItemIndices()
+	first, _ := c.VisibleItemIndices()
 	require.Positive(t, first, "the spinning item must be scrolled out for this test")
 
 	next := c.Animate(step)

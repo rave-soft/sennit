@@ -19,16 +19,16 @@ func TestPageKeysScrollChatWhileEditorFocused(t *testing.T) {
 	require.Equal(t, uiFocusEditor, u.focus, "the editor must hold focus for this test to mean anything")
 
 	u.chat.ScrollToBottom()
-	bottom := u.chat.list.Offset()
+	bottom := u.chat.Offset()
 	require.Positive(t, bottom, "content must overflow for paging to be observable")
 
 	_, _ = u.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
-	afterPageUp := u.chat.list.Offset()
+	afterPageUp := u.chat.Offset()
 	require.Less(t, afterPageUp, bottom, "pgup must scroll the conversation up")
 	require.False(t, u.chat.Follow(), "scrolling up must leave follow mode")
 
 	_, _ = u.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
-	require.Greater(t, u.chat.list.Offset(), afterPageUp, "pgdown must scroll back down")
+	require.Greater(t, u.chat.Offset(), afterPageUp, "pgdown must scroll back down")
 }
 
 // TestPageKeysDoNotTypeIntoEditor pins the other half of the fix: the page
