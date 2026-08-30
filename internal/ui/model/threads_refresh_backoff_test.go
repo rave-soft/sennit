@@ -48,7 +48,7 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 	// Once the backoff has elapsed, the probe is tried again: this is a
 	// hold-off, not a permanent giveup.
 	expired := c.activity["t1"]
-	expired.failedAt = time.Now().Add(-2 * threadsRefreshBackoff)
+	expired.failedAt = time.Now().Add(-2 * listRefreshBackoff)
 	c.activity["t1"] = expired
 	require.Len(t, c.staleThreadActivityRefreshCmds(com, visible), 1,
 		"the probe must resume once the backoff window has passed")
@@ -71,7 +71,7 @@ func TestThreadActivitySuccessClearsBackoff(t *testing.T) {
 	})
 
 	settled := c.activity["t1"]
-	require.False(t, settled.backingOff(threadsRefreshBackoff),
+	require.False(t, settled.backingOff(listRefreshBackoff),
 		"a successful probe must clear the recorded failure")
 	require.True(t, settled.fresh(threadsDockActivityTTL))
 	require.Equal(t, int64(4), c.activity["t1"].value.MessageCount)
@@ -95,7 +95,7 @@ func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 
 	require.False(t, c.activity["t1"].inFlight)
 	settled := c.activity["t1"]
-	require.False(t, settled.backingOff(threadsRefreshBackoff),
+	require.False(t, settled.backingOff(listRefreshBackoff),
 		"a stale-generation failure must not hold back the newer request that replaced it")
 }
 

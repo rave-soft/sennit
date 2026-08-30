@@ -65,6 +65,7 @@ func (c *agentListCache) ops() listCacheOps[agentsLoadedMsg] {
 	return listCacheOps[agentsLoadedMsg]{
 		label:    "delegations",
 		ttl:      agentsCacheTTL,
+		backoff:  listRefreshBackoff,
 		kind:     proto.ThreadKindTask,
 		supports: func(ws workspace.Workspace) bool { return ws.SupportsTasks() },
 		fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListTasks(ctx) },

@@ -49,9 +49,32 @@ import (
 // handful of function values and constants) on every call rather than
 // stored on the cache struct, so threadListCache/agentListCache stay
 // zero-value-safe the way ttlCache itself is.
+// listRefreshBackoff is how long a failed list or activity refresh waits before being retried. Without it a refresh that fails every
+// time re-dispatches on every Update — and since the failure's own result
+// message is itself an Update, the loop feeds itself and pins the event
+// loop (observed: ~830 attempts a second, 10MB of identical error lines
+// every half minute, a UI that looks frozen and background work that looks
+// like it stopped on its own).
+//
+// It is the default every list picks in its own ops (see backoff there),
+// not something the shared machinery reaches for: a list that wants a
+// different one should say so rather than inherit this by accident.
+//
+// Longer than any of the TTLs it backs: a repeatedly failing probe is worth
+// far less than a successful one, and the states that produce a permanent
+// failure (a read-only workspace, a removed worktree) do not resolve on
+// their own in seconds.
+var listRefreshBackoff = 30 * time.Second
+
 type listCacheOps[Msg any] struct {
-	label    string           // for slog.Error's "Failed to list <label>"
-	ttl      time.Duration    // staleRefreshCmd's freshness window
+	label string        // for slog.Error's "Failed to list <label>"
+	ttl   time.Duration // staleRefreshCmd's freshness window
+	// backoff is how long to wait before re-probing after a failed fetch.
+	// It used to be read from a threads-specific package variable inside
+	// staleListRefreshCmd, which meant every other list — the agents cache
+	// today, anything added tomorrow — silently inherited the threads
+	// backoff without saying so anywhere.
+	backoff  time.Duration
 	kind     proto.ThreadKind // which pubsub events this cache's applyEvent accepts
 	supports func(workspace.Workspace) bool
 	fetch    func(context.Context, workspace.Workspace) ([]proto.Thread, error)
@@ -168,7 +191,7 @@ func threadEventMatchesKind(payloadKind, target proto.ThreadKind) bool {
 // it (the timestamp is zeroed then) — don't re-poll forever for a workspace
 // with nothing in this particular list.
 func staleListRefreshCmd[Msg any](cache *ttlCache[[]proto.Thread], com *common.Common, active bool, ops listCacheOps[Msg]) tea.Cmd {
-	if !active || cache.fresh(ops.ttl) || cache.backingOff(threadsRefreshBackoff) {
+	if !active || cache.fresh(ops.ttl) || cache.backingOff(ops.backoff) {
 		return nil
 	}
 	if len(cache.value) == 0 && !cache.timestamp.IsZero() {

@@ -315,7 +315,7 @@ func TestApplyThreadsLoadedStaleGenerationFailureRedispatches(t *testing.T) {
 	cmds, applied := c.applyLoaded(com, loaded)
 	require.NotEmpty(t, cmds, "a superseded failure must still re-dispatch the authoritative refresh")
 	require.False(t, applied)
-	require.False(t, c.cache.backingOff(threadsRefreshBackoff),
+	require.False(t, c.cache.backingOff(listRefreshBackoff),
 		"and it must not record a backoff that would stall that re-dispatch")
 }
 

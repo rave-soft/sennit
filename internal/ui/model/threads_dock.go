@@ -46,20 +46,6 @@ import (
 // can pin it.
 var threadsDockActivityTTL = 8 * time.Second
 
-// threadsRefreshBackoff is how long a failed thread-list or activity
-// refresh waits before being retried. Without it a refresh that fails every
-// time re-dispatches on every Update — and since the failure's own result
-// message is itself an Update, the loop feeds itself and pins the event
-// loop (observed: ~830 attempts a second, 10MB of identical error lines
-// every half minute, a UI that looks frozen and background work that looks
-// like it stopped on its own).
-//
-// Longer than any of the TTLs it backs: a repeatedly failing probe is worth
-// far less than a successful one, and the states that produce a permanent
-// failure (a read-only workspace, a removed worktree) do not resolve on
-// their own in seconds.
-var threadsRefreshBackoff = 30 * time.Second
-
 // threadDockActivity is a per-thread live snapshot fetched from the
 // thread's own session via AttachThread + GetSession.
 type threadDockActivity struct {
@@ -224,7 +210,7 @@ func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoade
 	}
 	if msg.err != nil {
 		// Record the failure so the next Update backs off instead of
-		// re-dispatching immediately; see threadsRefreshBackoff.
+		// re-dispatching immediately; see listRefreshBackoff.
 		entry.fail(msg.entryGen)
 		c.activity[msg.threadID] = entry
 		return
@@ -262,7 +248,7 @@ func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, vi
 			c.activity = make(map[string]ttlCache[threadDockActivity])
 		}
 		activity := c.activity[t.ID]
-		if activity.inFlight || activity.fresh(threadsDockActivityTTL) || activity.backingOff(threadsRefreshBackoff) {
+		if activity.inFlight || activity.fresh(threadsDockActivityTTL) || activity.backingOff(listRefreshBackoff) {
 			continue
 		}
 		if cmd := c.dispatchThreadActivityRefresh(com, t.ID, t.SessionID); cmd != nil {

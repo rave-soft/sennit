@@ -23,7 +23,7 @@ package model
 //     correct and avoids pointless re-fetches on task churn.
 //   - Only the dock's and indicator's predecessors called ttlCache.fail on
 //     an error, so a failing refresh backed off. This cache's predecessor
-//     did neither, which is exactly the spin threadsRefreshBackoff (see
+//     did neither, which is exactly the spin listRefreshBackoff (see
 //     threads_dock.go) exists to prevent — on the dashboard, only sheer
 //     luck (Tick was never wired up; see threads.go) kept it from
 //     happening. Kept: fail-and-back-off.
@@ -81,6 +81,7 @@ func (c *threadListCache) ops() listCacheOps[threadsLoadedMsg] {
 	return listCacheOps[threadsLoadedMsg]{
 		label:    "threads",
 		ttl:      threadsCacheTTL,
+		backoff:  listRefreshBackoff,
 		kind:     proto.ThreadKindThread,
 		supports: func(ws workspace.Workspace) bool { return ws.SupportsThreads() },
 		fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListThreads(ctx) },
