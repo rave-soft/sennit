@@ -51,7 +51,18 @@ type agentListCache struct {
 }
 
 // agentsLoadedMsg delivers the result of an off-thread task list fetch.
+//
+// uiOwned, not uimsg.MainScreenOwned: agentViewsRefreshCmds is a *UI method
+// (gated on panelSurfacesThreads() && state == uiChat && hasSession()), and
+// an attached thread's embedded UI is itself a *UI that can dispatch this
+// same fetch for its own session panel. Tagging it MainScreenOwned would
+// misroute a thread UI's own fetch to the main screen instead of back to
+// the thread — the fetch that started it never gets its result, so its
+// InFlight flag never clears and the thread's own agents section freezes
+// exactly the way the main screen's did before this marker existed.
 type agentsLoadedMsg struct {
+	uiOwned
+
 	// gen is the generation captured when the fetch was dispatched; a
 	// result that no longer matches began before a newer state transition
 	// and is discarded, then re-fetched.
@@ -62,8 +73,10 @@ type agentsLoadedMsg struct {
 
 // ops builds the listCacheOps that plug delegations' specifics (fetch call,
 // support gate, Kind filter, log label) into the shared machinery in
-// list_cache.go.
-func (c *agentListCache) ops() listcache.Ops[agentsLoadedMsg] {
+// list_cache.go. owner is stamped onto the result so Root can hand it back
+// to the *UI that dispatched the fetch instead of routing it by whichever
+// screen is active when it lands — see agentsLoadedMsg's doc comment.
+func (c *agentListCache) ops(owner *UI) listcache.Ops[agentsLoadedMsg] {
 	return listcache.Ops[agentsLoadedMsg]{
 		Label:    "delegations",
 		TTL:      agentsCacheTTL,
@@ -72,7 +85,7 @@ func (c *agentListCache) ops() listcache.Ops[agentsLoadedMsg] {
 		Supports: func(ws workspace.Workspace) bool { return ws.SupportsTasks() },
 		Fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListTasks(ctx) },
 		Wrap: func(gen uint64, items []proto.Thread, err error) agentsLoadedMsg {
-			return agentsLoadedMsg{gen: gen, agents: items, err: err}
+			return agentsLoadedMsg{uiOwned: uiOwned{owner: owner}, gen: gen, agents: items, err: err}
 		},
 		Unwrap: func(msg agentsLoadedMsg) (uint64, []proto.Thread, error) {
 			return msg.gen, msg.agents, msg.err
@@ -83,8 +96,8 @@ func (c *agentListCache) ops() listcache.Ops[agentsLoadedMsg] {
 // applyLoaded stores an off-thread fetch result. Runs on the Update
 // goroutine. applied reports whether msg was written through, as opposed to
 // discarded for a stale generation or a failure.
-func (c *agentListCache) applyLoaded(com *common.Common, msg agentsLoadedMsg) (cmds []tea.Cmd, applied bool) {
-	return listcache.ApplyLoaded(&c.cache, com, c.ops(), msg)
+func (c *agentListCache) applyLoaded(com *common.Common, owner *UI, msg agentsLoadedMsg) (cmds []tea.Cmd, applied bool) {
+	return listcache.ApplyLoaded(&c.cache, com, c.ops(owner), msg)
 }
 
 // applyEvent reacts to a delegation pubsub event: it upserts (Created,
@@ -106,8 +119,8 @@ func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 // (the timestamp is zeroed then), the same way the thread list's backstop
 // does: a session that never delegates anything must not re-list forever,
 // and a delegation's own create event is what starts the section moving.
-func (c *agentListCache) staleRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	return listcache.StaleRefreshCmd(&c.cache, com, active, c.ops())
+func (c *agentListCache) staleRefreshCmd(com *common.Common, owner *UI, active bool) tea.Cmd {
+	return listcache.StaleRefreshCmd(&c.cache, com, active, c.ops(owner))
 }
 
 // sessionDelegations filters agents down to the live delegations of

@@ -65,7 +65,7 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, cmd)
 		}
 	case agentsLoadedMsg:
-		loadCmds, _ := m.agentList.applyLoaded(m.com, msg)
+		loadCmds, _ := m.agentList.applyLoaded(m.com, m, msg)
 		cmds = append(cmds, loadCmds...)
 		// The freshly listed delegations may introduce (or retire) live
 		// work for the panel's spinner to animate.

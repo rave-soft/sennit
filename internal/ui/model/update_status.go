@@ -13,7 +13,12 @@ import (
 )
 
 // cancelTimerExpiredMsg is sent when the cancel timer expires.
-type cancelTimerExpiredMsg struct{}
+//
+// uiOwned: dispatched by cancelTimerCmd. Routed by active screen instead,
+// an expiry that lands while the dashboard is up never clears isCanceling,
+// so the esc-to-cancel affordance is stuck reading "press again to
+// confirm" for the rest of the session.
+type cancelTimerExpiredMsg struct{ uiOwned }
 
 // updateStatus handles the status-line branches of UI.Update: info/clear
 // messages, server notices, update-available and connection notices, agent

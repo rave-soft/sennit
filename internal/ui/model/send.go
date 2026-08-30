@@ -98,16 +98,17 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		m.wsCache.invalidatePromptQueue()
 	}
 
+	owner := m
 	return func() tea.Msg {
 		if err := ws.AgentReadyErr(); err != nil {
-			return sendMessageErrorMsg{Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, creating: creating}
+			return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, creating: creating}
 		}
 		if creating {
 			created, err := ws.CreateSession(ctx, "New Session")
 			if err != nil {
-				return sendMessageErrorMsg{Err: err, generation: generation, creating: true}
+				return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, creating: true}
 			}
-			return createSessionMsg{session: created, content: content, attachments: attachments, generation: generation}
+			return createSessionMsg{uiOwned: uiOwned{owner: owner}, session: created, content: content, attachments: attachments, generation: generation}
 		}
 		common.StartTurn(sessionID)
 		for _, path := range reads {
@@ -117,20 +118,22 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		if err := ws.AgentRun(ctx, sessionID, content, attachments...); err != nil && !errors.Is(err, context.Canceled) {
 			if quota, ok := workspace.GetProviderQuotaInfo(err); ok {
 				link := styles.Dialog.OAuth.Link.Hyperlink(quota.SettingsURL, "id=copilot").Render(quota.SettingsURL)
-				return sendMessageErrorMsg{Err: fmt.Errorf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quota.Model, link), generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
+				return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: fmt.Errorf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quota.Model, link), generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
 			}
-			return sendMessageErrorMsg{Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
+			return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
 		}
-		return agentRunSubmittedMsg{sessionID: sessionID, loadGeneration: loadGeneration}
+		return agentRunSubmittedMsg{uiOwned: uiOwned{owner: owner}, sessionID: sessionID, loadGeneration: loadGeneration}
 	}
 }
 
 const cancelTimerDuration = 2 * time.Second
 
-// cancelTimerCmd creates a command that expires the cancel timer.
-func cancelTimerCmd() tea.Cmd {
+// cancelTimerCmd creates a command that expires the cancel timer, owned by
+// owner so Root hands the expiry back to the *UI that started it rather
+// than to whichever screen is active two seconds later.
+func cancelTimerCmd(owner *UI) tea.Cmd {
 	return tea.Tick(cancelTimerDuration, func(time.Time) tea.Msg {
-		return cancelTimerExpiredMsg{}
+		return cancelTimerExpiredMsg{uiOwned: uiOwned{owner: owner}}
 	})
 }
 
@@ -187,5 +190,5 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// First escape press - set canceling state and start timer.
 	m.isCanceling = true
-	return cancelTimerCmd()
+	return cancelTimerCmd(m)
 }

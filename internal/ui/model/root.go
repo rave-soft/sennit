@@ -794,4 +794,11 @@ var (
 	_ uiOwnedMsg = lspStatesMsg{}
 	_ uiOwnedMsg = sessionsLoadedMsg{}
 	_ uiOwnedMsg = loadSessionMsg{}
+	_ uiOwnedMsg = agentsLoadedMsg{}
+	_ uiOwnedMsg = shellResultMsg{}
+	_ uiOwnedMsg = agentRunSubmittedMsg{}
+	_ uiOwnedMsg = sendMessageErrorMsg{}
+	_ uiOwnedMsg = createSessionMsg{}
+	_ uiOwnedMsg = bangSessionCreatedMsg{}
+	_ uiOwnedMsg = cancelTimerExpiredMsg{}
 )

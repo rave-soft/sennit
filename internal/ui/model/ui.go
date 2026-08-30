@@ -658,7 +658,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 
 	register((*UI).updateThreads,
 		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[threads.LoadedMsg](),
-		reflect.TypeFor[threads.DockActivityLoadedMsg]())
+		reflect.TypeFor[threads.DockActivityLoadedMsg](), reflect.TypeFor[agentsLoadedMsg]())
 
 	return g
 }
@@ -1258,7 +1258,15 @@ type importCopilotResult struct {
 // sendMessageErrorMsg carries an error from a sendMessage cmd. The Update
 // handler converts it into a util.InfoMsg and clears the optimistic busy
 // state (already done inside the cmd).
+//
+// uiOwned: dispatched by sendMessageNow and runShellCommandInternal's
+// session-create path. Routed by active screen instead, an error that
+// lands while the dashboard is up never clears pendingSendActive (or,
+// for the creating path, pendingSendLoading), so every later send just
+// queues behind a turn that already failed.
 type sendMessageErrorMsg struct {
+	uiOwned
+
 	Err            error
 	generation     uint64
 	sessionID      string
@@ -1269,7 +1277,13 @@ type sendMessageErrorMsg struct {
 // bangSessionCreatedMsg is returned by runShellCommandInternal when a bang
 // command triggered a session creation; the Update handler uses it to load
 // the session and then starts the shell command.
+//
+// uiOwned for the same reason as sendMessageErrorMsg: dropped on the
+// dashboard, the shell command it was meant to start never runs and
+// pendingSendLoading never clears.
 type bangSessionCreatedMsg struct {
+	uiOwned
+
 	session        session.Session
 	command        string
 	isFirstMessage bool

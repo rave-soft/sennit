@@ -14,7 +14,17 @@ type openEditorMsg struct {
 	Text string
 }
 
+// shellResultMsg carries a bang command's completion. uiOwned: dispatched by
+// runShellCommandInternal and, like shellStreamMsg's pending item, scoped to
+// the *UI that started the run. Routed by active screen instead, a result
+// that lands while the dashboard is up (Threads is not gated on busy, so
+// ctrl+e is always reachable mid-run) was dropped — the pending ShellItem
+// spun forever, bangCancel stayed set (blocking isAgentBusy()'s callers
+// until a double-esc), and pendingSendActive stayed true so every later
+// sendMessage queued behind it with nothing left to drain the queue.
 type shellResultMsg struct {
+	uiOwned
+
 	PendingID  string // ID of the pending ShellItem to update.
 	Command    string
 	Output     string
@@ -158,12 +168,13 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		generation := m.editor.pendingSendGen
 		workspace := m.com.Workspace
 		ctx := m.com.Context()
+		owner := m
 		cmds = append(cmds, func() tea.Msg {
 			newSession, err := workspace.CreateSession(ctx, "New Session")
 			if err != nil {
-				return sendMessageErrorMsg{Err: err, generation: generation, creating: true}
+				return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, creating: true}
 			}
-			return bangSessionCreatedMsg{session: newSession, command: command, isFirstMessage: isFirstMessage, generation: generation}
+			return bangSessionCreatedMsg{uiOwned: uiOwned{owner: owner}, session: newSession, command: command, isFirstMessage: isFirstMessage, generation: generation}
 		})
 		return tea.Batch(cmds...)
 	}
@@ -208,10 +219,12 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	m.editor.bangCancel = cancel
 
 	workspace := m.com.Workspace
+	owner := m
 	cmds = append(cmds, func() tea.Msg {
 		resp, err := workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
 		close(streamCh)
 		result := shellResultMsg{
+			uiOwned:    uiOwned{owner: owner},
 			PendingID:  pendingID,
 			Command:    command,
 			Output:     resp.Output,

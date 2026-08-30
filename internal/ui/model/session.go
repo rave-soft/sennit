@@ -77,7 +77,13 @@ type sessionFilesUpdatesMsg struct {
 // createSessionMsg carries a newly created session and the captured send
 // parameters so that Update can apply the session creation and then
 // dispatch the AgentRun cmd.
+//
+// uiOwned for the same reason as sendMessageErrorMsg (ui.go): dropped on
+// the dashboard, the captured send never runs and pendingSendLoading never
+// clears.
 type createSessionMsg struct {
+	uiOwned
+
 	session     session.Session
 	content     string
 	attachments []message.Attachment

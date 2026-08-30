@@ -114,7 +114,14 @@ type promptQueueMsg struct {
 // agentRunSubmittedMsg reports that AgentRun accepted a prompt (it either
 // started a run or was enqueued behind one), so busy and queue state should
 // be re-fetched.
+//
+// uiOwned: dispatched by sendMessageNow. Routed by active screen instead,
+// a submission that lands while the dashboard is up never clears
+// pendingSendActive, so every prompt sent after that queues forever behind
+// a turn the UI thinks never started.
 type agentRunSubmittedMsg struct {
+	uiOwned
+
 	sessionID      string
 	loadGeneration uint64
 }
@@ -367,7 +374,7 @@ func (m *UI) agentViewsRefreshCmds() []tea.Cmd {
 	if !m.panelSurfacesThreads() || m.state != uiChat || !m.hasSession() {
 		return nil
 	}
-	if cmd := m.agentList.staleRefreshCmd(m.com, true); cmd != nil {
+	if cmd := m.agentList.staleRefreshCmd(m.com, m, true); cmd != nil {
 		return []tea.Cmd{cmd}
 	}
 	return nil
