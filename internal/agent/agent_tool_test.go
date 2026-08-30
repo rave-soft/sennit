@@ -303,3 +303,20 @@ func TestAgentTool_ChildSessionIdentityOptional(t *testing.T) {
 	require.Len(t, fake.created, 1)
 	require.Empty(t, fake.created[0].SessionID)
 }
+
+// TestDelegatedAgentPrompt_KeepsTheDefinitionAndAddsTheContract pins the
+// two halves of a named agent's system prompt: the person's own file is
+// carried through untouched and first, and the reporting contract closes
+// it. A definition that silently lost its contract would leave the agent
+// answering "done" to a caller that never sees anything else.
+func TestDelegatedAgentPrompt_KeepsTheDefinitionAndAddsTheContract(t *testing.T) {
+	t.Parallel()
+
+	const definition = "You are the architect. Investigate, then write a spec."
+	built := delegatedAgentPrompt(definition)
+
+	require.True(t, strings.HasPrefix(built, definition), "the person's definition comes first, verbatim")
+	require.True(t, strings.HasSuffix(built, delegatedAgentContract), "the contract closes the prompt")
+	require.Contains(t, built, "your final message is the entire report")
+	require.NotContains(t, delegatedAgentContract, "{{", "the contract is appended to a template and must not be one")
+}

@@ -31,6 +31,28 @@ var delegationReportContract string
 // comes back.
 var agentToolDescription = agentToolPurpose + "\n" + delegationReportContract
 
+// delegatedAgentContract is the other half of that handoff, told to the
+// delegation rather than to its caller: your last message is the report,
+// and it is all anyone gets.
+//
+// A named agent's system prompt is otherwise entirely the person's own
+// file in .sennit/agents - nothing in it comes from Sennit - so without
+// this the agent has no way to know its transcript is never read, that
+// the caller cannot come back with a question (a sub-agent build has
+// neither ask_parent nor question - see gateAllows), or that a bare
+// "done" strands the work it just finished.
+//
+//go:embed templates/delegated_agent.md
+var delegatedAgentContract string
+
+// delegatedAgentPrompt is a named agent's system prompt: what the person
+// wrote it to be, then how it answers. The person's definition comes
+// first so the contract reads as the closing word on the handoff, and it
+// is appended as plain text - the definition is a template, this is not.
+func delegatedAgentPrompt(definition string) string {
+	return definition + "\n\n" + delegatedAgentContract
+}
+
 // AgentParams is deliberately limited to the work to delegate. Delegations are
 // always asynchronous; a tool call is only an acknowledgement of launch.
 type AgentParams struct {

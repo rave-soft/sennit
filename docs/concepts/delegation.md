@@ -85,6 +85,13 @@ keep separate conversations, and the same agent keeps separate conversations
 under different parents — which is what makes a thread's delegations stay
 inside that thread, since a thread runs on its own session.
 
+A named agent's system prompt is its markdown file, plus one thing Sennit
+appends: how it reports back. Nobody reads a delegation's transcript, and a
+delegated agent has neither `ask_parent` nor `question`, so its final message
+is the whole handoff — what came of the work, the absolute paths it touched,
+the checks it actually ran, and what it left undone. You do not have to write
+that into every agent file; it is there whatever the file says.
+
 Each delegation still gets its own session, so each call remains its own
 block in the transcript and drills into just that call. The memory lives in
 what the agent is shown, not in where the messages are stored, and it is

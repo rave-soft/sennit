@@ -1126,7 +1126,7 @@ func (d *delegationFinalizer) buildCustomAgentTool(_ context.Context, id string,
 					if !ok {
 						return nil, nil, fmt.Errorf("agent %q is no longer configured", id)
 					}
-					systemPrompt, err := prompt.NewPrompt(id, definition.Prompt, prompt.WithWorkingDir(d.cfg.WorkingDir()))
+					systemPrompt, err := prompt.NewPrompt(id, delegatedAgentPrompt(definition.Prompt), prompt.WithWorkingDir(d.cfg.WorkingDir()))
 					if err != nil {
 						return nil, nil, fmt.Errorf("parse prompt: %w", err)
 					}
