@@ -1,4 +1,4 @@
-package model
+package threads
 
 // Memoized state for the threads dock: a compact panel that sits above the
 // chat input and shows a handful of active background threads, each with a
@@ -38,6 +38,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
+	"github.com/rave-soft/sennit/internal/ui/uimsg"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -47,9 +48,9 @@ import (
 // can pin it.
 var threadsDockActivityTTL = 8 * time.Second
 
-// threadDockActivity is a per-thread live snapshot fetched from the
+// DockActivity is a per-thread live snapshot fetched from the
 // thread's own session via AttachThread + GetSession.
-type threadDockActivity struct {
+type DockActivity struct {
 	// InProgressTodo is the ActiveForm (falling back to Content) of the
 	// session's in-progress todo, empty if there is none.
 	InProgressTodo string
@@ -61,12 +62,12 @@ type threadDockActivity struct {
 	MessageCount int64
 }
 
-// threadsDockState holds the dock's per-thread live activity (see the
+// DockState holds the dock's per-thread live activity (see the
 // package doc comment above) and its independent TTL-cache/in-flight/
 // generation bookkeeping.
-type threadsDockState struct {
+type DockState struct {
 	// activity holds the last known live snapshot per thread ID.
-	activity map[string]listcache.TTLCache[threadDockActivity]
+	activity map[string]listcache.TTLCache[DockActivity]
 	// activityGen is bumped whenever the shared thread list changes, so a
 	// per-thread fetch that started before the thread list moved on (e.g.
 	// the thread was removed) is discarded when it lands, mirroring gen but
@@ -82,11 +83,21 @@ type threadsDockState struct {
 // longer exists is otherwise silently harmless — nothing reads it once the
 // thread is gone from the shared list — but there is no reason to keep it
 // or let its next TTL tick attach to a thread that isn't there.
-func (c *threadsDockState) dropActivity(id string) {
+// ActivityOf is the per-thread activity the dock last learned, if any.
+func (c *DockState) ActivityOf(threadID string) DockActivity {
+	return c.activity[threadID].Value
+}
+
+// InvalidateActivity marks the per-thread activity as belonging to an older
+// list, so results still in flight for the previous one are discarded. The
+// screen calls it after the thread list itself changed.
+func (c *DockState) InvalidateActivity() { c.activityGen++ }
+
+func (c *DockState) DropActivity(id string) {
 	delete(c.activity, id)
 }
 
-// activeDockThreads filters threads down to the ones worth showing in the
+// ActiveDockThreads filters threads down to the ones worth showing in the
 // dock as live work: pending, running, or merging (mirroring
 // threads.ActiveCount's status set), plus idle. Idle is deliberately included
 // here even though Status.Active() excludes it (see thread/types.go's
@@ -97,54 +108,54 @@ func (c *threadsDockState) dropActivity(id string) {
 // running/merging and from a terminal status. Results are sorted stably by
 // CreatedAt ascending so the oldest (first started) thread leads, giving
 // deterministic dock ordering.
-func activeDockThreads(threads []proto.Thread) []proto.Thread {
+func ActiveDockThreads(threads []proto.Thread) []proto.Thread {
 	var active []proto.Thread
 	for _, t := range threads {
 		if proto.ThreadStatus(t.Status).Active() || proto.ThreadStatus(t.Status) == proto.ThreadStatusIdle {
 			active = append(active, t)
 		}
 	}
-	sortThreadsByCreation(active)
+	SortByCreation(active)
 	return active
 }
 
-// sortThreadsByCreation orders delegations oldest-first, in place and
+// SortByCreation orders delegations oldest-first, in place and
 // stably, so the first one started leads and the order does not shuffle
 // under a refresh. Shared with the panel's agents section (see
 // sessionDelegations), which wants the same guarantee for the same reason.
-func sortThreadsByCreation(items []proto.Thread) {
+func SortByCreation(items []proto.Thread) {
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].CreatedAt < items[j].CreatedAt
 	})
 }
 
-// threadDockActivityLoadedMsg delivers the result of an off-thread
+// DockActivityLoadedMsg delivers the result of an off-thread
 // AttachThread + GetSession fetch for a single thread's live activity.
-type threadDockActivityLoadedMsg struct {
-	mainScreenOwned
+type DockActivityLoadedMsg struct {
+	uimsg.MainScreenOwned
 	threadID string
 	// gen is the activityGen captured when the fetch was dispatched; see
-	// threadsDockState.activityGen.
+	// DockState.activityGen.
 	gen      uint64
 	entryGen uint64
-	activity threadDockActivity
+	activity DockActivity
 	err      error
 }
 
 // dispatchThreadActivityRefresh returns a command that attaches to
 // threadID's own isolated workspace, reads its session, and reduces it to
-// a threadDockActivity, delivering a threadDockActivityLoadedMsg. It always
+// a DockActivity, delivering a DockActivityLoadedMsg. It always
 // detaches, even on error, and always delivers a message (with a zero
 // activity on failure) so the caller's inFlight flag is cleared rather than
 // left stuck. Guards against a nil workspace like the other dispatchers.
-func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, threadID, sessionID string) tea.Cmd {
+func (c *DockState) dispatchThreadActivityRefresh(com *common.Common, threadID, sessionID string) tea.Cmd {
 	if com == nil || com.Workspace == nil {
 		return nil
 	}
 	ws := com.Workspace
 	gen := c.activityGen
 	if c.activity == nil {
-		c.activity = make(map[string]listcache.TTLCache[threadDockActivity])
+		c.activity = make(map[string]listcache.TTLCache[DockActivity])
 	}
 	entry := c.activity[threadID]
 	entryGen, started := entry.Begin()
@@ -158,17 +169,17 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 		attached, detach, err := ws.AttachThread(ctx, threadID)
 		if err != nil {
 			slog.Error("Failed to attach thread for dock activity", "thread", threadID, "error", err)
-			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
+			return DockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 		defer detach()
 
 		sess, err := attached.GetSession(ctx, sessionID)
 		if err != nil {
 			slog.Error("Failed to get session for dock activity", "thread", threadID, "error", err)
-			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
+			return DockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 
-		activity := threadDockActivity{MessageCount: sess.MessageCount}
+		activity := DockActivity{MessageCount: sess.MessageCount}
 		for _, todo := range sess.Todos {
 			if todo.Status != session.TodoStatusInProgress {
 				continue
@@ -196,7 +207,7 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 		} else {
 			activity.LastTool = lastToolSummary(msgs)
 		}
-		return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, activity: activity}
+		return DockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, activity: activity}
 	}
 }
 
@@ -204,7 +215,7 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 // through, discarding it if it started before a newer thread-list
 // generation (the activityGen check), and always clearing the per-thread
 // inFlight flag. Runs on the Update goroutine.
-func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoadedMsg) {
+func (c *DockState) ApplyActivityLoaded(msg DockActivityLoadedMsg) {
 	entry, ok := c.activity[msg.threadID]
 	if !ok {
 		return
@@ -230,7 +241,7 @@ func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoade
 // cached activity is missing or has outlived threadsDockActivityTTL.
 // Threads without a session yet (SessionID == "") are skipped — there's
 // nothing to attach to.
-func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, visible []proto.Thread) []tea.Cmd {
+func (c *DockState) StaleActivityRefreshCmds(com *common.Common, visible []proto.Thread) []tea.Cmd {
 	// Activity needs AttachThread, which a read-only workspace refuses
 	// unconditionally — that happens whenever the user is inside a thread
 	// that could not be reactivated. Backing off would already stop the
@@ -246,7 +257,7 @@ func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, vi
 			continue
 		}
 		if c.activity == nil {
-			c.activity = make(map[string]listcache.TTLCache[threadDockActivity])
+			c.activity = make(map[string]listcache.TTLCache[DockActivity])
 		}
 		activity := c.activity[t.ID]
 		if activity.InFlight || activity.Fresh(threadsDockActivityTTL) || activity.BackingOff(listcache.RefreshBackoff) {
@@ -274,15 +285,15 @@ func lastToolSummary(msgs []message.Message) string {
 	return ""
 }
 
-// threadDockGoalFirstLine returns the first line of a thread's goal/prompt
+// DockGoalFirstLine returns the first line of a thread's goal/prompt
 // text, trimmed of surrounding whitespace — the dock shows one line per
 // thread and leaves wrapping/truncation for the drawing step.
-func threadDockGoalFirstLine(goal string) string {
+func DockGoalFirstLine(goal string) string {
 	line, _, _ := strings.Cut(goal, "\n")
 	return strings.TrimSpace(line)
 }
 
-// threadDockStatusLine builds the dock's per-thread status text: the step
+// DockStatusLine builds the dock's per-thread status text: the step
 // count plus what the thread is doing right now — its in-progress todo
 // when there is one (a todo says more about intent than a raw tool name,
 // matching renderPanelStatusLine's priority), else its last tool call —
@@ -290,7 +301,7 @@ func threadDockGoalFirstLine(goal string) string {
 // at all, always suffixed with the elapsed time. Doesn't add the leading
 // spinner/arrow — that's a rendering concern for the drawing step to
 // prepend.
-func threadDockStatusLine(status proto.ThreadStatus, activity threadDockActivity, elapsed time.Duration) string {
+func DockStatusLine(status proto.ThreadStatus, activity DockActivity, elapsed time.Duration) string {
 	var parts []string
 	if activity.MessageCount > 0 {
 		parts = append(parts, fmt.Sprintf("step %d", activity.MessageCount))

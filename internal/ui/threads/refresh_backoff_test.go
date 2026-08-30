@@ -1,4 +1,4 @@
-package model
+package threads
 
 import (
 	"errors"
@@ -30,12 +30,12 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 	com := &common.Common{Workspace: ws}
 	visible := []proto.Thread{{ID: "t1", SessionID: "sess-1"}}
 
-	c := &threadsDockState{}
-	cmds := c.staleThreadActivityRefreshCmds(com, visible)
+	c := &DockState{}
+	cmds := c.StaleActivityRefreshCmds(com, visible)
 	require.Len(t, cmds, 1, "the first probe should be dispatched")
 
 	entry := c.activity["t1"]
-	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
+	c.ApplyActivityLoaded(DockActivityLoadedMsg{
 		threadID: "t1",
 		gen:      c.activityGen,
 		entryGen: entry.Generation,
@@ -43,7 +43,7 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 	})
 	require.False(t, c.activity["t1"].InFlight, "a failed probe must still clear its in-flight marker")
 
-	require.Empty(t, c.staleThreadActivityRefreshCmds(com, visible),
+	require.Empty(t, c.StaleActivityRefreshCmds(com, visible),
 		"a probe that just failed must not be re-dispatched on the next Update")
 
 	// Once the backoff has elapsed, the probe is tried again: this is a
@@ -51,7 +51,7 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 	expired := c.activity["t1"]
 	expired.FailedAt = time.Now().Add(-2 * listcache.RefreshBackoff)
 	c.activity["t1"] = expired
-	require.Len(t, c.staleThreadActivityRefreshCmds(com, visible), 1,
+	require.Len(t, c.StaleActivityRefreshCmds(com, visible), 1,
 		"the probe must resume once the backoff window has passed")
 }
 
@@ -61,14 +61,14 @@ func TestThreadActivityRefreshBacksOffAfterFailure(t *testing.T) {
 func TestThreadActivitySuccessClearsBackoff(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activity: map[string]listcache.TTLCache[threadDockActivity]{
+	c := &DockState{activity: map[string]listcache.TTLCache[DockActivity]{
 		"t1": {InFlight: true, FailedAt: time.Now()},
 	}}
-	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
+	c.ApplyActivityLoaded(DockActivityLoadedMsg{
 		threadID: "t1",
 		gen:      c.activityGen,
 		entryGen: c.activity["t1"].Generation,
-		activity: threadDockActivity{MessageCount: 4},
+		activity: DockActivity{MessageCount: 4},
 	})
 
 	settled := c.activity["t1"]
@@ -84,10 +84,10 @@ func TestThreadActivitySuccessClearsBackoff(t *testing.T) {
 func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activity: map[string]listcache.TTLCache[threadDockActivity]{
+	c := &DockState{activity: map[string]listcache.TTLCache[DockActivity]{
 		"t1": {InFlight: true, Generation: 3},
 	}}
-	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
+	c.ApplyActivityLoaded(DockActivityLoadedMsg{
 		threadID: "t1",
 		gen:      c.activityGen,
 		entryGen: 1,
@@ -103,6 +103,6 @@ func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 // The dock's and indicator's own list-refresh backoff tests moved to
 // threads_cache_test.go (TestApplyThreadsLoadedErrorBacksOff,
 // TestApplyThreadsLoadedStaleGenerationFailureRedispatches): both caches
-// (and the dashboard's) collapsed onto the single threads.ListCache in
+// (and the dashboard's) collapsed onto the single ListCache in
 // threads_cache.go, so there is exactly one list-refresh backoff path left
 // to pin instead of three copies of it.

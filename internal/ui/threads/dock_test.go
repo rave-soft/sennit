@@ -1,4 +1,4 @@
-package model
+package threads
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func TestActiveDockThreadsFiltersAndSorts(t *testing.T) {
 		{ID: "c-merging", Status: "merging", CreatedAt: 20},
 	}
 
-	active := activeDockThreads(threads)
+	active := ActiveDockThreads(threads)
 	require.Len(t, active, 3)
 	require.Equal(t, []string{"a-pending", "c-merging", "b-running"}, dockThreadIDs(active))
 }
@@ -44,7 +44,7 @@ func TestActiveDockThreadsIncludesIdle(t *testing.T) {
 		{ID: "done", Kind: "thread", Status: "completed", CreatedAt: 3},
 	}
 
-	active := activeDockThreads(threads)
+	active := ActiveDockThreads(threads)
 	require.ElementsMatch(t, []string{"idle-thread", "idle-task"}, dockThreadIDs(active))
 }
 
@@ -65,9 +65,9 @@ func TestThreadDockStatusWordIdleIsExplicit(t *testing.T) {
 func TestThreadDockGoalFirstLine(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "", threadDockGoalFirstLine(""))
-	require.Equal(t, "fix the bug", threadDockGoalFirstLine("  fix the bug  "))
-	require.Equal(t, "first line", threadDockGoalFirstLine("first line\nsecond line\nthird line"))
+	require.Equal(t, "", DockGoalFirstLine(""))
+	require.Equal(t, "fix the bug", DockGoalFirstLine("  fix the bug  "))
+	require.Equal(t, "first line", DockGoalFirstLine("first line\nsecond line\nthird line"))
 }
 
 func TestThreadDockStatusLine(t *testing.T) {
@@ -77,7 +77,7 @@ func TestThreadDockStatusLine(t *testing.T) {
 
 	// The step count and the in-progress todo are both shown; the todo
 	// wins over the last tool call as the activity segment.
-	line := threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{
+	line := DockStatusLine(proto.ThreadStatusRunning, DockActivity{
 		InProgressTodo: "writing tests",
 		LastTool:       "bash go test ./...",
 		MessageCount:   7,
@@ -85,31 +85,31 @@ func TestThreadDockStatusLine(t *testing.T) {
 	require.Equal(t, "step 7 · → writing tests · 4m03s", line)
 
 	// Without a todo, the last tool call fills the activity segment.
-	line = threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{
+	line = DockStatusLine(proto.ThreadStatusRunning, DockActivity{
 		LastTool:     "Read internal/ui/model/ui.go",
 		MessageCount: 7,
 	}, elapsed)
 	require.Equal(t, "step 7 · → Read internal/ui/model/ui.go · 4m03s", line)
 
 	// Just a step count when there's neither todo nor tool activity.
-	line = threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{
+	line = DockStatusLine(proto.ThreadStatusRunning, DockActivity{
 		MessageCount: 7,
 	}, elapsed)
 	require.Equal(t, "step 7 · 4m03s", line)
 
 	// Falls back to the thread's own status word when there's no activity
 	// at all.
-	line = threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{}, elapsed)
+	line = DockStatusLine(proto.ThreadStatusRunning, DockActivity{}, elapsed)
 	require.Equal(t, "running… · 4m03s", line)
 
-	line = threadDockStatusLine(proto.ThreadStatusPending, threadDockActivity{}, elapsed)
+	line = DockStatusLine(proto.ThreadStatusPending, DockActivity{}, elapsed)
 	require.Equal(t, "pending · 4m03s", line)
 
-	line = threadDockStatusLine(proto.ThreadStatusMerging, threadDockActivity{}, elapsed)
+	line = DockStatusLine(proto.ThreadStatusMerging, DockActivity{}, elapsed)
 	require.Equal(t, "merging… · 4m03s", line)
 
 	// The elapsed suffix is always present, regardless of branch.
-	require.Contains(t, threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{}, 45*time.Second), "45s")
+	require.Contains(t, DockStatusLine(proto.ThreadStatusRunning, DockActivity{}, 45*time.Second), "45s")
 }
 
 // TestDropActivityDiscardsCachedSnapshot proves the Deleted-event cleanup
@@ -120,10 +120,10 @@ func TestThreadDockStatusLine(t *testing.T) {
 func TestDropActivityDiscardsCachedSnapshot(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activity: map[string]listcache.TTLCache[threadDockActivity]{
-		"s1": {Value: threadDockActivity{MessageCount: 3}},
+	c := &DockState{activity: map[string]listcache.TTLCache[DockActivity]{
+		"s1": {Value: DockActivity{MessageCount: 3}},
 	}}
-	c.dropActivity("s1")
+	c.DropActivity("s1")
 	_, ok := c.activity["s1"]
 	require.False(t, ok)
 }
@@ -142,14 +142,14 @@ func TestStaleThreadActivityRefreshCmds(t *testing.T) {
 		{ID: "unfetched", SessionID: "sess-new"}, // dispatched: never fetched
 	}
 
-	c := &threadsDockState{
-		activity: map[string]listcache.TTLCache[threadDockActivity]{
+	c := &DockState{
+		activity: map[string]listcache.TTLCache[DockActivity]{
 			"fresh": {Timestamp: time.Now()},
 			"stale": {Timestamp: time.Now().Add(-2 * threadsDockActivityTTL)},
 		},
 	}
 
-	cmds := c.staleThreadActivityRefreshCmds(com, visible)
+	cmds := c.StaleActivityRefreshCmds(com, visible)
 	require.Len(t, cmds, 2)
 	require.True(t, c.activity["stale"].InFlight)
 	require.True(t, c.activity["unfetched"].InFlight)
@@ -175,12 +175,12 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 	ws := &threadsDockTestWorkspace{supported: true, attachWS: attached}
 	com := &common.Common{Workspace: ws}
 
-	c := &threadsDockState{}
+	c := &DockState{}
 	cmd := c.dispatchThreadActivityRefresh(com, "t1", "sess-1")
 	require.NotNil(t, cmd)
 
 	msg := cmd()
-	loaded, ok := msg.(threadDockActivityLoadedMsg)
+	loaded, ok := msg.(DockActivityLoadedMsg)
 	require.True(t, ok)
 	require.Equal(t, "t1", loaded.threadID)
 	require.NoError(t, loaded.err)
@@ -189,8 +189,8 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 	require.Equal(t, "view internal/ui/model/ui.go", loaded.activity.LastTool)
 	require.Equal(t, 1, ws.detachCalls)
 
-	c.activity = map[string]listcache.TTLCache[threadDockActivity]{"t1": {InFlight: true}}
-	c.applyThreadActivityLoaded(loaded)
+	c.activity = map[string]listcache.TTLCache[DockActivity]{"t1": {InFlight: true}}
+	c.ApplyActivityLoaded(loaded)
 	require.False(t, c.activity["t1"].InFlight)
 	require.Equal(t, "doing task two", c.activity["t1"].Value.InProgressTodo)
 }
@@ -198,17 +198,17 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 func TestApplyThreadActivityLoadedDiscardsStaleGen(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{activityGen: 2, activity: map[string]listcache.TTLCache[threadDockActivity]{"t1": {InFlight: true}}}
-	c.applyThreadActivityLoaded(threadDockActivityLoadedMsg{
+	c := &DockState{activityGen: 2, activity: map[string]listcache.TTLCache[DockActivity]{"t1": {InFlight: true}}}
+	c.ApplyActivityLoaded(DockActivityLoadedMsg{
 		threadID: "t1",
 		gen:      1,
-		activity: threadDockActivity{MessageCount: 9},
+		activity: DockActivity{MessageCount: 9},
 	})
 	require.False(t, c.activity["t1"].InFlight, "inFlight is always cleared")
 	require.Zero(t, c.activity["t1"].Value, "a stale-gen result must not be written through")
 }
 
-// dockThreadIDs extracts IDs in order, for asserting activeDockThreads'
+// dockThreadIDs extracts IDs in order, for asserting ActiveDockThreads'
 // filter+sort result concisely.
 func dockThreadIDs(threads []proto.Thread) []string {
 	ids := make([]string, len(threads))

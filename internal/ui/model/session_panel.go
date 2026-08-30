@@ -32,18 +32,19 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // threadDockStatusText builds one thread's live status text for its
-// block's second row: threadDockStatusLine over the thread's cached
+// block's second row: threads.DockStatusLine over the thread's cached
 // activity, with the elapsed time measured from CreatedAt — not UpdatedAt,
 // which is bumped on every status transition (see thread/store.go
 // SetStatus), so it tracks "last activity", not "how long has this thread
 // been running"; the panel wants the latter.
-func threadDockStatusText(t proto.Thread, activity threadDockActivity) string {
+func threadDockStatusText(t proto.Thread, activity threads.DockActivity) string {
 	elapsed := time.Since(time.Unix(t.CreatedAt, 0))
-	return threadDockStatusLine(proto.ThreadStatus(t.Status), activity, elapsed)
+	return threads.DockStatusLine(proto.ThreadStatus(t.Status), activity, elapsed)
 }
 
 // panelSpinnerWanted reports whether the panel currently shows any live
@@ -321,13 +322,13 @@ func sessionPanelThreadsHeaderText(active int, expanded bool) string {
 // block's second row: its status word plus how long it has been going,
 // measured from CreatedAt — the same shape (and the same helper) as a
 // thread's line, minus the live activity. A task has no per-entity activity
-// probe behind it the way a thread does (threadsDockState.activity, paid
+// probe behind it the way a thread does (threads.DockState.activity, paid
 // for with an AttachThread round trip into the thread's own workspace); a
 // delegation's own transcript is one drill-in away in this very workspace,
 // which is what the block's click is for.
 func delegationBlockStatusText(t proto.Thread) string {
 	elapsed := time.Since(time.Unix(t.CreatedAt, 0))
-	return threadDockStatusLine(proto.ThreadStatus(t.Status), threadDockActivity{}, elapsed)
+	return threads.DockStatusLine(proto.ThreadStatus(t.Status), threads.DockActivity{}, elapsed)
 }
 
 // delegationBlockName is the name a delegation's block carries. A task's
@@ -541,7 +542,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		// planPanelSection's doc comment — so shedPanelBlocks below is the
 		// only place either list gets trimmed, and only in a genuinely
 		// short terminal.
-		threads := planPanelSection(activeDockThreads(m.threadList.Threads()), m.panel.threadsCollapsed)
+		threads := planPanelSection(threads.ActiveDockThreads(m.threadList.Threads()), m.panel.threadsCollapsed)
 		plan.threadsActive = threads.active
 		plan.threadsExpanded = threads.expanded
 		plan.threads = threads.items
@@ -999,7 +1000,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		m.panel.hoveredAgent, panelBlockDrawSpec{
 			count: len(plan.agents), more: plan.agentsMore, footer: "…and %d more agents",
 			name: func(i int) string { return m.delegationBlockName(m.com, plan.agents[i]) },
-			task: func(i int) string { return threadDockGoalFirstLine(plan.agents[i].Goal) },
+			task: func(i int) string { return threads.DockGoalFirstLine(plan.agents[i].Goal) },
 			line2: func(i int) string {
 				item := plan.agents[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
@@ -1033,14 +1034,14 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				}
 				return name
 			},
-			task: func(i int) string { return threadDockGoalFirstLine(plan.threads[i].Goal) },
+			task: func(i int) string { return threads.DockGoalFirstLine(plan.threads[i].Goal) },
 			line2: func(i int) string {
 				item := plan.threads[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
 				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning || status == proto.ThreadStatusMerging {
 					icon = m.panel.panelActivityIcon(m.com)
 				}
-				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].Value))
+				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.ActivityOf(item.ID)))
 			},
 		})
 	m.panel.threads = plan.threads

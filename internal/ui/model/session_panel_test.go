@@ -49,7 +49,7 @@ func TestThreadDockStatusText(t *testing.T) {
 		ID: "t1", Name: "fix-auth", Goal: "Refactor login flow to OAuth2",
 		Status: "running", CreatedAt: time.Now().Add(-4 * time.Minute).Unix(),
 	}
-	activity := threadDockActivity{MessageCount: 12, LastTool: "bash go test ./..."}
+	activity := threads.DockActivity{MessageCount: 12, LastTool: "bash go test ./..."}
 
 	status := threadDockStatusText(th, activity)
 	require.Contains(t, status, "step 12 · → bash go test ./... · ")

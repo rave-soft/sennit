@@ -30,6 +30,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/threads"
+	"github.com/rave-soft/sennit/internal/ui/uimsg"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -314,7 +315,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// header badge stop refreshing for good. That is the stale panel:
 		// drill into a thread once while a refresh is out, and the panel
 		// behind you never updates again.
-		if _, ok := msg.(mainScreenMsg); ok {
+		if _, ok := msg.(uimsg.MainScreenMsg); ok {
 			_, cmd := r.main.Update(msg)
 			return r, cmd
 		}
@@ -781,25 +782,12 @@ type uiOwned struct{ owner *UI }
 
 func (o uiOwned) ownerUI() *UI { return o.owner }
 
-// mainScreenMsg marks a message that belongs to the main session screen no
-// matter which screen is currently on top — the result of a refresh only
-// the main screen ever starts. Root delivers these to r.main directly
-// rather than to the active screen; see the reasoning in Update.
-//
-// Embed mainScreenOwned in the message type to claim this.
-type mainScreenMsg interface{ isMainScreenMsg() }
-
-// mainScreenOwned is the embeddable implementation of mainScreenMsg.
-type mainScreenOwned struct{}
-
-func (mainScreenOwned) isMainScreenMsg() {}
-
 // Compile-time proof that each main-owned message actually claims the
 // interface. Embedding a struct whose method shares its own type name
 // silently fails to promote that method, so without these the marker can
 // look present and do nothing.
 var (
-	_ mainScreenMsg = threadDockActivityLoadedMsg{}
+	_ uimsg.MainScreenMsg = threads.DockActivityLoadedMsg{}
 
 	_ uiOwnedMsg = busyStateMsg{}
 	_ uiOwnedMsg = promptQueueMsg{}

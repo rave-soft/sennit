@@ -31,6 +31,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rave-soft/sennit/internal/ui/listcache"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -346,8 +347,8 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	if m.state == uiChat && len(m.threadList.Threads()) > 0 {
-		visible := activeDockThreads(m.threadList.Threads())
-		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
+		visible := threads.ActiveDockThreads(m.threadList.Threads())
+		cmds = append(cmds, m.threadsDock.StaleActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds
 }

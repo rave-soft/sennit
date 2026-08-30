@@ -31,7 +31,7 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// only its own kind (see agentListCache.applyEvent).
 		m.agentList.applyEvent(msg)
 		if msg.Type == pubsub.DeletedEvent {
-			m.threadsDock.dropActivity(msg.Payload.ID)
+			m.threadsDock.DropActivity(msg.Payload.ID)
 			delete(m.threadLastStatus, msg.Payload.ID)
 		}
 		cmds = append(cmds, m.threadViewsRefreshCmds()...)
@@ -57,8 +57,8 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, loadCmds...)
 		if applied {
 			// The freshly listed threads may have added or retired
-			// per-thread activity; see threadsDockState.activityGen.
-			m.threadsDock.activityGen++
+			// per-thread activity; see threads.DockState.activityGen.
+			m.threadsDock.InvalidateActivity()
 		}
 		// The freshly listed threads may introduce (or retire) live work.
 		if cmd := m.syncPanelSpinner(); cmd != nil {
@@ -76,8 +76,8 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// enters or leaves the panel — and so when the transcript has to
 		// stop or start showing it. See Chat.SetDelegationsHidden.
 		m.chat.SetDelegationsHidden(m.panelledDelegations())
-	case threadDockActivityLoadedMsg:
-		m.threadsDock.applyThreadActivityLoaded(msg)
+	case threads.DockActivityLoadedMsg:
+		m.threadsDock.ApplyActivityLoaded(msg)
 	}
 	return cmds, false
 }

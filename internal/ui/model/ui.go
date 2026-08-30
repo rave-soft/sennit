@@ -208,7 +208,7 @@ type UI struct {
 	// threadsDock holds the session panel's per-thread live activity
 	// (in-progress todo, message count). See threads_dock.go /
 	// session_panel.go.
-	threadsDock threadsDockState
+	threadsDock threads.DockState
 
 	// mouseState holds UI-level hover/click bookkeeping. See mouse.go.
 	mouseState
@@ -658,7 +658,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 
 	register((*UI).updateThreads,
 		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[threads.LoadedMsg](),
-		reflect.TypeFor[threadDockActivityLoadedMsg]())
+		reflect.TypeFor[threads.DockActivityLoadedMsg]())
 
 	return g
 }

@@ -106,7 +106,7 @@ func TestNotifyThreadCompletion_PrunesEntryOnTerminalTransition(t *testing.T) {
 // TestUpdateThreads_DeletedEventPrunesThreadLastStatus covers the other
 // pruning path required by §7: a thread removed via pubsub.DeletedEvent
 // must have its threadLastStatus entry dropped too, mirroring the existing
-// threadsDock.dropActivity(id) cleanup for the same event.
+// threadsDock.DropActivity(id) cleanup for the same event.
 func TestUpdateThreads_DeletedEventPrunesThreadLastStatus(t *testing.T) {
 	t.Parallel()
 

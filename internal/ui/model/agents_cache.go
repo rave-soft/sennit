@@ -33,6 +33,7 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/listcache"
+	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -112,7 +113,7 @@ func (c *agentListCache) staleRefreshCmd(com *common.Common, active bool) tea.Cm
 // sessionDelegations filters agents down to the live delegations of
 // parentSessionID — the ones worth a block in that session's panel: pending,
 // running or merging (proto.ThreadStatus.Active, mirroring
-// activeDockThreads) plus idle, which is a delegation whose run is not in
+// threads.ActiveDockThreads) plus idle, which is a delegation whose run is not in
 // flight this instant but which has not finished either and must not read as
 // done. Sorted stably by CreatedAt ascending, so the first one started leads
 // and the order does not shuffle under a refresh.
@@ -134,6 +135,6 @@ func sessionDelegations(agents []proto.Thread, parentSessionID string) []proto.T
 			live = append(live, a)
 		}
 	}
-	sortThreadsByCreation(live)
+	threads.SortByCreation(live)
 	return live
 }
