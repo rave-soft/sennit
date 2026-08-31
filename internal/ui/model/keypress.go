@@ -216,7 +216,7 @@ func (m *UI) handleEditorKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cm
 	// Double-Esc clears the draft outright (see the Editor.Escape
 	// case below): any key other than Escape breaks the sequence.
 	if !key.Matches(msg, m.keyMap.Editor.Escape) {
-		m.editor.lastKeyWasEsc = false
+		m.editor.escape.nonEscape()
 	}
 
 	// Handle completions if open.
@@ -370,8 +370,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 			}
 		}
 	case key.Matches(msg, m.keyMap.Editor.Escape):
-		consecutive := m.editor.lastKeyWasEsc
-		m.editor.lastKeyWasEsc = true
+		consecutive := m.editor.escape.escape()
 		if !consecutive {
 			// First Esc: its own job (exit history nav to the draft,
 			// or whatever the textarea itself does with Escape).
@@ -382,7 +381,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 			// changes again. Applied after handleHistoryEscape so
 			// it hides relative to the value Esc left behind (e.g.
 			// the restored draft), not the pre-Esc value.
-			m.editor.ghostHiddenFor = m.editor.textarea.Value()
+			m.editor.escape.hideGhostFor(m.editor.textarea.Value())
 		} else {
 			// Second Esc right after the first: the first one
 			// already did whatever it could (exited history nav,

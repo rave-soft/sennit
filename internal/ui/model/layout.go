@@ -587,7 +587,7 @@ func (m *UI) activeGhostTail() string {
 		return ""
 	}
 	full := m.editor.ghostSuggestionFor(value)
-	if full == "" || m.editor.ghostHiddenFor == value {
+	if full == "" || m.editor.escape.hidesGhostFor(value) {
 		return ""
 	}
 	return full[len(value):]

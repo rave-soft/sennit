@@ -43,15 +43,8 @@ type editorState struct {
 	// history owns prompt navigation and history-derived ghost suggestions.
 	promptHistory promptHistoryState
 
-	// ghostHiddenFor holds the textarea value at the moment Esc hid the
-	// suggestion. The hide only applies while the value is unchanged.
-	ghostHiddenFor string
-
-	// lastKeyWasEsc tracks whether the immediately preceding key event was
-	// Escape, so a second consecutive Esc can clear the draft outright
-	// (see the Editor.Escape case in UI.handleKeyPressMsg). Reset by any
-	// other key.
-	lastKeyWasEsc bool
+	// escape owns consecutive Escape behavior and ghost-suggestion suppression.
+	escape editorEscapeState
 }
 
 // textareaWord returns the current word at the cursor position.

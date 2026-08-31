@@ -180,10 +180,8 @@ func TestEscThenTypingBreaksDoubleEscSequence(t *testing.T) {
 	u.editor.promptHistory.index = -1
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
-	require.True(t, u.editor.lastKeyWasEsc)
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "!"})
-	require.False(t, u.editor.lastKeyWasEsc, "typing must break the Esc-Esc sequence")
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.NotEmpty(t, u.editor.textarea.Value(), "this Esc is the first of a new sequence, not a clearing second Esc")
