@@ -94,6 +94,21 @@ type threadControl struct {
 	// resolution is Delegation.ParentSessionID on the row, read directly
 	// by resolveDeliveryTarget — not this field.
 	parentSessionID string
+	// reports counts the terminal completions already delivered for this
+	// delegation. It is not always 1: task_send reactivates a finished
+	// task (see TaskManager.Send), which runs it again, which finishes it
+	// again, which reports again — three times over for one task on the
+	// day this was added, and the parent's woken turn dispatched fresh
+	// work on each one, so from the outside a follow-up conversation with
+	// one delegation looked exactly like the same item being re-run.
+	// Carried onto the event so the reader can tell the difference (see
+	// TaskCompletion.PriorReports).
+	//
+	// In memory only, and deliberately: it describes one conversation as
+	// it is happening. A report delivered after a restart says "first"
+	// again, which is the right answer to give somebody whose context no
+	// longer holds the earlier ones either.
+	reports int
 }
 
 // ErrManagerClosed is returned by mutating manager operations once shutdown
@@ -1225,8 +1240,14 @@ func (l *lifecycle) deliverStoredCompletion(ctx context.Context, handle Handle, 
 	if st.TerminalAt != 0 {
 		terminalAt = time.Unix(0, st.TerminalAt)
 	}
+	c := l.control(st.ID)
+	c.mu.Lock()
+	priorReports := c.reports
+	c.reports++
+	c.mu.Unlock()
 	target.Coordinator().DeliverTaskCompletion(ctx, parentSessionID, TaskCompletion{
 		DelegationID:   st.ID,
+		PriorReports:   priorReports,
 		Kind:           string(st.Kind),
 		Name:           st.Name,
 		Goal:           st.Goal,

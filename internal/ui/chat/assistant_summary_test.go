@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -219,4 +221,51 @@ func TestSummaryStreamingShowsOnlySpinner(t *testing.T) {
 	require.NotContains(t, out, "half a thought",
 		"a running summarize must not stream its reasoning into the chat")
 	require.False(t, strings.Contains(out, summaryText))
+}
+
+// TestSummaryHintIsItsOwnLine pins the two-line shape. The hint used to
+// trail the counts in parentheses, where it read as a footnote to the
+// numbers and was the first thing a narrow window truncated away — and
+// it is the only thing on the row saying the row opens at all.
+func TestSummaryHintIsItsOwnLine(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAssistantMessageItem(&sty, summaryMessage("s1", 47000, 8000)).(*AssistantMessageItem)
+
+	lines := strings.Split(item.Render(80), "\n")
+	require.Len(t, lines, 2)
+	require.Contains(t, lines[0], summaryHeaderLabel)
+	require.NotContains(t, lines[0], summaryHeaderHint,
+		"the hint must not ride along on the line the counts are truncated from")
+	require.Contains(t, lines[1], summaryHeaderHint)
+}
+
+// TestSummaryOpensOnAClick is the fix for the complaint that started
+// this: the row said "space to expand" and the pointer did nothing, so
+// the affordance people actually reach for first was the one that was
+// not wired up.
+func TestSummaryOpensOnAClick(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAssistantMessageItem(&sty, summaryMessage("s1", 47000, 8000)).(*AssistantMessageItem)
+
+	for _, y := range []int{0, 1} {
+		require.True(t, item.HandleMouseClick(ansi.MouseLeft, 0, y),
+			"both rows of a collapsed summary must be clickable (row %d)", y)
+		require.True(t, item.HoverableAt(0, y, 80),
+			"and must highlight where they can be clicked (row %d)", y)
+	}
+	require.False(t, item.HandleMouseClick(ansi.MouseLeft, 0, 2),
+		"nothing below the header belongs to the control")
+
+	require.True(t, item.ToggleExpanded())
+	out := item.Render(80)
+	require.Contains(t, out, "ZZQUUX", "the click must open the body")
+
+	// Open, the header is one row: the one that closes it again. A click
+	// in the text below must not close what the person is reading.
+	require.True(t, item.HandleMouseClick(ansi.MouseLeft, 0, 0))
+	require.False(t, item.HandleMouseClick(ansi.MouseLeft, 0, 1))
 }

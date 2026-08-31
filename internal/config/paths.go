@@ -80,11 +80,84 @@ func GlobalDBDir() string {
 	return filepath.Dir(GlobalConfig())
 }
 
-// GlobalLogFile returns the path to the single log file shared by every
-// project, ~/.config/sennit/logs/sennit.log by default (alongside the
-// shared database — see GlobalDBDir).
+// GlobalLogDir returns the directory holding every process's log,
+// ~/.config/sennit/logs by default (alongside the shared database — see
+// GlobalDBDir).
+func GlobalLogDir() string {
+	return filepath.Join(GlobalDBDir(), "logs")
+}
+
+// GlobalLogFile returns the path to *this process's own* log file,
+// ~/.config/sennit/logs/sennit-<pid>.log by default.
+//
+// It used to be one file shared by every sennit on the machine, which
+// reads fine until two of them are running — and several usually are,
+// since a sennit works in one session and a person works on more than
+// one thing. Ten processes started in a single day once wrote to one
+// file, and the result was unreadable in a specific and expensive way:
+// three unrelated top-level sessions appeared to be dispatching
+// delegations at the same time, which is exactly the shape of the bug
+// the wake path had just been fixed for. Half an hour went into proving
+// it was three sennits and not one.
+//
+// A file per process makes that question unaskable. Both the writer
+// (log.Setup) and the in-process readers (the sennit_logs and
+// agent_trace tools) resolve through here, so they agree on which file
+// is "the log" without being told; `sennit logs`, which runs in a
+// process of its own and means somebody else's log, resolves through
+// LatestGlobalLogFile instead.
 func GlobalLogFile() string {
-	return filepath.Join(GlobalDBDir(), "logs", brand.LogFile)
+	return filepath.Join(GlobalLogDir(), fmt.Sprintf("%s-%d.log", brand.Slug, os.Getpid()))
+}
+
+// isRunLogName reports whether name is a log written by a running
+// sennit, as opposed to a panic dump (RecoverPanic writes
+// sennit-panic-<name>-<time>.log into this same directory). A panic dump
+// is by definition the newest file the moment it lands, so without this
+// `sennit logs` would answer a request for the running sennit's log with
+// a single stack trace. internal/log's own sweep keeps the same
+// distinction, for the other reason: a panic dump is the last thing
+// anyone would want tidied away.
+func isRunLogName(name string) bool {
+	return strings.HasSuffix(name, ".log") && !strings.Contains(name, "-panic-")
+}
+
+// LatestGlobalLogFile returns the most recently written log in
+// GlobalLogDir — for a reader that means "the sennit that is running",
+// not its own process. That is `sennit logs`, which is a separate
+// process every time and would otherwise resolve to a log file it just
+// created and never wrote to.
+//
+// The legacy shared sennit.log is included in the search rather than
+// special-cased: on an install that predates per-process logs it is the
+// only file there, and it is still the newest until something writes a
+// new one. When the directory is empty or unreadable, this returns this
+// process's own path, so a caller's "no logs yet" message names a
+// plausible file.
+func LatestGlobalLogFile() string {
+	dir := GlobalLogDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return GlobalLogFile()
+	}
+	var newest string
+	var newestAt int64
+	for _, entry := range entries {
+		if entry.IsDir() || !isRunLogName(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if at := info.ModTime().UnixNano(); at > newestAt {
+			newest, newestAt = filepath.Join(dir, entry.Name()), at
+		}
+	}
+	if newest == "" {
+		return GlobalLogFile()
+	}
+	return newest
 }
 
 // GlobalAccountsFile returns the path to the provider account store,

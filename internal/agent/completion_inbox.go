@@ -75,6 +75,18 @@ type TaskCompletion struct {
 	// Message is the ask text for a mid-run event (IsMessage true).
 	// Unused for a terminal completion.
 	Message string
+	// PriorReports is how many terminal completions this same delegation
+	// has already delivered to this session - 0 for the ordinary case,
+	// which is a delegation running once and reporting once.
+	//
+	// It is ever anything else because task_send reactivates a finished
+	// task: it runs again, finishes again, and reports again. Each report
+	// wakes the parent, and a woken parent's turn tends to dispatch the
+	// next piece of work - so without this, a follow-up conversation with
+	// one delegation is indistinguishable from the same item being redone
+	// from the top, and the reader treats a second answer to a question
+	// it already answered as a new one.
+	PriorReports int
 	// OrphanedFrom names, nearest first, the delegations whose own
 	// sessions were already cancelled when this report arrived for them,
 	// and which therefore never read it: the report was handed one level
@@ -448,6 +460,7 @@ func formatTaskCompletion(c TaskCompletion) string {
 	var b strings.Builder
 	b.WriteString("[system-generated delegation report - not user input]\n")
 	fmt.Fprintf(&b, "A background %s has finished.\n", c.Kind)
+	writeRepeatNotice(&b, c)
 	writeOrphanTrail(&b, c)
 	fmt.Fprintf(&b, "id: %s\n", c.DelegationID)
 	fmt.Fprintf(&b, "name: %s\n", c.Name)
@@ -460,6 +473,32 @@ func formatTaskCompletion(c TaskCompletion) string {
 		fmt.Fprintf(&b, "\nResult:\n%s", c.ResultText)
 	}
 	return b.String()
+}
+
+// writeRepeatNotice says, when this is not the delegation's first
+// report, that the reader has heard from it before. A delegation reports
+// once per run and task_send starts it running again, so a second report
+// means the reader's own follow-up came back answered - not that the
+// work restarted itself, and not that the goal needs dispatching afresh.
+func writeRepeatNotice(b *strings.Builder, c TaskCompletion) {
+	if c.PriorReports <= 0 {
+		return
+	}
+	fmt.Fprintf(b, "You have heard from it %s before: this is what came back after the follow-up you sent, "+
+		"not a fresh run of the original goal.\n", timesEnglish(c.PriorReports))
+}
+
+// timesEnglish renders a small count the way the sentence above needs to
+// read it.
+func timesEnglish(n int) string {
+	switch n {
+	case 1:
+		return "once"
+	case 2:
+		return "twice"
+	default:
+		return fmt.Sprintf("%d times", n)
+	}
 }
 
 // writeOrphanTrail explains, when there is anything to explain, why a

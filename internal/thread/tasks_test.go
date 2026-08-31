@@ -1215,3 +1215,39 @@ func TestTaskManager_CancelTellsTheParentSession(t *testing.T) {
 	require.Equal(t, string(thread.StatusCancelled), delivered.completion.Status)
 	require.Contains(t, delivered.completion.Error, "no longer needed")
 }
+
+// TestTaskManager_SecondReportIsMarkedAsARepeat covers what a follow-up
+// conversation with a delegation looks like from the parent's side.
+//
+// task_send reactivates a finished task, so it runs again, finishes
+// again, and reports again — and each report wakes the parent, whose
+// woken turn tends to dispatch the next piece of work. One task in
+// production reported "completed" three times in thirteen minutes for
+// this reason, and read from outside it was indistinguishable from the
+// same item being redone from the top. The count is what lets the reader
+// tell "here is the answer to what you just asked me" from "here is that
+// finished, again".
+func TestTaskManager_SecondReportIsMarkedAsARepeat(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+	publishSuccess(t, parentApp, st.SessionID)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 }, eventuallyTimeout, eventuallyTick)
+	require.Zero(t, coord.deliveredCompletions()[0].completion.PriorReports,
+		"a delegation's first report is nobody's repeat")
+
+	// The parent asks a follow-up, which is what puts a finished task
+	// back to work.
+	_, err = tasks.Send(t.Context(), st.ID, "one more thing")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
+	publishSuccess(t, parentApp, st.SessionID)
+
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 2 }, eventuallyTimeout, eventuallyTick)
+	require.Equal(t, 1, coord.deliveredCompletions()[1].completion.PriorReports,
+		"the answer to a follow-up must not read as the original goal finishing all over again")
+}

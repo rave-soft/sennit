@@ -823,13 +823,16 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 
 // TestGlobalLogFile verifies the log file lives alongside the shared
 // database (both under GlobalDBDir), under SENNIT_GLOBAL_CONFIG so tests
-// stay hermetic and never touch the real ~/.config/sennit.
+// stay hermetic and never touch the real ~/.config/sennit. The name is
+// per process rather than the shared sennit.log it once was — see
+// TestGlobalLogFile_IsPerProcess in paths_test.go for why.
 func TestGlobalLogFile(t *testing.T) {
 	globalDir := t.TempDir()
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 
 	got := GlobalLogFile()
+	name := fmt.Sprintf("sennit-%d.log", os.Getpid())
 
-	require.Equal(t, filepath.Join(GlobalDBDir(), "logs", "sennit.log"), got)
-	require.Equal(t, filepath.Join(globalDir, "logs", "sennit.log"), got)
+	require.Equal(t, filepath.Join(GlobalDBDir(), "logs", name), got)
+	require.Equal(t, filepath.Join(globalDir, "logs", name), got)
 }

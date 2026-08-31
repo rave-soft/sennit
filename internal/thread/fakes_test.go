@@ -226,6 +226,7 @@ func (a *testCoordinatorAdapter) DeliverTaskCompletion(ctx context.Context, pare
 		Error:          completion.Error,
 		Depth:          completion.Depth,
 		TerminalAt:     completion.TerminalAt,
+		PriorReports:   completion.PriorReports,
 	})
 }
 
@@ -431,6 +432,7 @@ func (f *fakeCoordinator) DeliverTaskCompletion(_ context.Context, sessionID str
 		Error:          completion.Error,
 		Depth:          completion.Depth,
 		TerminalAt:     completion.TerminalAt,
+		PriorReports:   completion.PriorReports,
 	}})
 }
 

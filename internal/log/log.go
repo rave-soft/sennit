@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +38,17 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 			MaxAge:     30,    // Days
 			Compress:   false, // Enable compression
 		}
+		// A log file is per process now (see config.GlobalLogFile), and
+		// pids are reused: without this, a run that happened to draw the
+		// pid of a dead one would append to its log and put two
+		// unrelated processes back in one file — the exact thing the
+		// split exists to prevent. Rotating an existing file costs one
+		// rename and guarantees each run starts on a blank one.
+		if info, err := os.Stat(logFile); err == nil && info.Size() > 0 {
+			if err := logRotator.Rotate(); err != nil {
+				fmt.Fprintf(os.Stderr, "could not rotate the previous log at %s: %v\n", logFile, err)
+			}
+		}
 
 		level := slog.LevelInfo
 		if debug {
@@ -62,13 +74,58 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 			}
 		}
 
-		slog.SetDefault(slog.New(slog.NewMultiHandler(handlers...)))
+		// pid on every record as well as in the file name: logs get
+		// concatenated, pasted into issues, and grepped across the whole
+		// directory, and in any of those the file name is gone while the
+		// question "was this all one sennit?" is exactly the one being
+		// asked.
+		slog.SetDefault(slog.New(slog.NewMultiHandler(handlers...)).With("pid", os.Getpid()))
 		initialized.Store(true)
+		go sweepStaleLogs(filepath.Dir(logFile), logFile)
 	})
 }
 
 func Initialized() bool {
 	return initialized.Load()
+}
+
+// staleLogAge is how long a log outlives the process that wrote it. It
+// matches lumberjack's own MaxAge above, which is what bounds a single
+// file's rotated backups: one file per process only helps if the
+// directory does not grow one file per run forever.
+const staleLogAge = 30 * 24 * time.Hour
+
+// sweepStaleLogs deletes logs in dir last written more than staleLogAge
+// ago, skipping keep (this process's own, which a clock skew could
+// otherwise make look ancient).
+//
+// Best-effort and deliberately quiet: this runs for tidiness, on a
+// goroutine, and a log directory that cannot be swept is not a reason to
+// report anything to somebody who was trying to start an agent. It is
+// also why nothing here uses slog — it runs as slog is being installed.
+func sweepStaleLogs(dir, keep string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-staleLogAge)
+	for _, entry := range entries {
+		// Panic dumps (RecoverPanic, below) share this directory and are
+		// the one thing here nobody would want tidied away on a timer.
+		// config.isRunLogName draws the same line for the same files.
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".log") || strings.Contains(entry.Name(), "-panic-") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if path == keep {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		_ = os.Remove(path)
+	}
 }
 
 // panicLogPath resolves the full path for a panic log file named

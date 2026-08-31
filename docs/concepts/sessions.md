@@ -7,7 +7,15 @@ SQLite database at `~/.config/sennit/sennit.db` — or in `$SENNIT_GLOBAL_CONFIG
 directory when that is set. Each row is tagged with the project's absolute
 path.
 
-Logs are unified the same way, at `~/.config/sennit/logs/sennit.log`.
+Logs are not: they live together in `~/.config/sennit/logs`, but each
+running sennit writes its own `sennit-<pid>.log` there. Two sennits are
+running more often than not — one works in one session, and a person
+works on more than one thing — and interleaved in a single file their
+delegations read as one process doing several things at once, which is
+exactly what a real fault in the wake path looks like. `sennit logs`
+follows whichever is newest; every record also carries its `pid`, so
+concatenated logs stay readable. Logs untouched for 30 days are swept on
+startup; panic dumps are left alone.
 
 A project's own `.sennit/` directory holds only its config overrides, its
 agents and skills, thread worktrees, and a single-instance lock file. No

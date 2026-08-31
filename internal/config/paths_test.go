@@ -1,11 +1,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // TestWorktreeRoot_PicksUpGitInitMidSession guards against caching a
@@ -97,5 +99,71 @@ func TestGlobalAccountsFile_SitsBesideGlobalConfig(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
 	if filepath.Dir(GlobalAccountsFile()) != filepath.Dir(GlobalConfig()) {
 		t.Fatalf("GlobalAccountsFile() did not follow SENNIT_GLOBAL_CONFIG to %q", dir)
+	}
+}
+
+// TestGlobalLogFile_IsPerProcess pins the property the split exists for:
+// two sennits running at once must not share a log file. They regularly
+// do run at once — a sennit works in one session, and a person works on
+// more than one thing — and when ten of them wrote to one file, three
+// unrelated top-level sessions appeared to be dispatching delegations
+// simultaneously, which is indistinguishable on the page from the wake
+// bug that had just been fixed.
+func TestGlobalLogFile_IsPerProcess(t *testing.T) {
+	t.Setenv("SENNIT_GLOBAL_CONFIG", t.TempDir())
+
+	path := GlobalLogFile()
+	if filepath.Dir(path) != GlobalLogDir() {
+		t.Fatalf("GlobalLogFile() = %q, want it inside %q", path, GlobalLogDir())
+	}
+	if want := fmt.Sprintf("sennit-%d.log", os.Getpid()); filepath.Base(path) != want {
+		t.Fatalf("GlobalLogFile() = %q, want basename %q", path, want)
+	}
+}
+
+// TestLatestGlobalLogFile_PicksTheRunningSennitNotThisProcess covers what
+// `sennit logs` needs. It runs in a process of its own every time, so its
+// own GlobalLogFile names a file nothing ever wrote to; what the person
+// asking meant is the sennit that is running, in the next terminal.
+//
+// The panic dump is the trap: RecoverPanic writes one into this same
+// directory, and it is by definition the newest file the moment it lands.
+// Without the exclusion, asking for the running sennit's log would answer
+// with a single stack trace.
+func TestLatestGlobalLogFile_PicksTheRunningSennitNotThisProcess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	logs := GlobalLogDir()
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	write := func(name string, age time.Duration) string {
+		path := filepath.Join(logs, name)
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().Add(-age)
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	write("sennit-1.log", time.Hour)
+	running := write("sennit-2.log", time.Minute)
+	write("sennit-panic-ui-20260831-160000.log", 0)
+
+	if got := LatestGlobalLogFile(); got != running {
+		t.Fatalf("LatestGlobalLogFile() = %q, want %q", got, running)
+	}
+}
+
+// TestLatestGlobalLogFile_FallsBackToThisProcess keeps a caller's "no
+// logs yet" message able to name a plausible file on a fresh install.
+func TestLatestGlobalLogFile_FallsBackToThisProcess(t *testing.T) {
+	t.Setenv("SENNIT_GLOBAL_CONFIG", t.TempDir())
+
+	if got, want := LatestGlobalLogFile(), GlobalLogFile(); got != want {
+		t.Fatalf("LatestGlobalLogFile() = %q, want %q", got, want)
 	}
 }

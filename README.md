@@ -188,9 +188,12 @@ project's state elsewhere.
 Sessions, messages, and history for every project are kept in a single
 SQLite database at `~/.config/sennit/sennit.db` (or `$SENNIT_GLOBAL_CONFIG`'s
 directory, when set), with each row tagged by the project's absolute path —
-there is no more one database per project. Logs are similarly unified at
-`~/.config/sennit/logs/sennit.log` (`sennit dirs` prints both, `sennit logs`
-tails the latter, `sennit gc` prunes old history). A project's own `.sennit/`
+there is no more one database per project. Logs share a directory but not
+a file: each running sennit writes its own
+`~/.config/sennit/logs/sennit-<pid>.log`, since two of them running at
+once is the normal case and interleaving them makes both unreadable
+(`sennit dirs` prints both locations, `sennit logs` tails the newest log,
+`sennit gc` prunes old history). A project's own `.sennit/`
 directory holds only what you author — `sennitrc`, `agents/`, `skills/` — plus
 a single-instance lock file. Nothing
 imports a per-project database from before that move: Sennit ships no

@@ -931,13 +931,24 @@ func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 	if btn != ansi.MouseLeft {
 		return false
 	}
-	// Only the thinking box is clickable; other regions of the assistant
-	// message should not trigger expansion.
+	// A summary's header is a control, and reaching for a disclosure
+	// triangle with the pointer is what people do before they read the
+	// hint beside it. Its own rows only: a click in the opened text
+	// below must not close the thing the person is reading.
+	if a.isSummary() {
+		return y >= 0 && y < a.summaryClickHeight()
+	}
+	// Otherwise only the thinking box is clickable; other regions of the
+	// assistant message should not trigger expansion.
 	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight
 }
 
-// HoverableAt matches the thinking box's click target.
+// HoverableAt matches whatever HandleMouseClick treats as the click
+// target, so the row highlights exactly where clicking does something.
 func (a *AssistantMessageItem) HoverableAt(_ int, y, _ int) bool {
+	if a.isSummary() {
+		return y >= 0 && y < a.summaryClickHeight()
+	}
 	return a.thinkingBoxHeight > 0 && y >= 0 && y < a.thinkingBoxHeight
 }
 

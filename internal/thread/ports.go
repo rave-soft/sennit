@@ -176,6 +176,10 @@ type TaskCompletion struct {
 	Error          string
 	Depth          int
 	TerminalAt     time.Time
+	// PriorReports is how many terminal completions this same delegation
+	// has already delivered to this same parent - 0 for the ordinary
+	// case. See threadControl.reports for why it is ever anything else.
+	PriorReports int
 	// Acknowledge clears the durable outbox only after the parent turn has
 	// successfully folded this completion into a model step.
 	Acknowledge func(context.Context) error

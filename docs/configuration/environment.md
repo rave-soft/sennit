@@ -18,7 +18,7 @@ defaults it resolves from.
 | Config | `~/.config/sennit/` | `%USERPROFILE%\.config\sennit\` |
 | State data | `~/.local/share/sennit/` | `%LOCALAPPDATA%\sennit\` |
 | Session database | `~/.config/sennit/sennit.db` | `%USERPROFILE%\.config\sennit\sennit.db` |
-| Logs | `~/.config/sennit/logs/sennit.log` | …`\logs\sennit.log` |
+| Logs | `~/.config/sennit/logs/sennit-<pid>.log` | …`\logs\sennit-<pid>.log` |
 | Project state | `<project>/.sennit/` | `<project>\.sennit\` |
 
 `$XDG_CONFIG_HOME` and `$XDG_DATA_HOME` are honoured where set.

@@ -142,7 +142,7 @@ sennit logs -f    # tail the log
 ```
 
 By default: config at `~/.config/sennit/`, the shared session database at
-`~/.config/sennit/sennit.db`, logs at `~/.config/sennit/logs/sennit.log`, and a
+`~/.config/sennit/sennit.db`, logs at `~/.config/sennit/logs/sennit-<pid>.log`, and a
 per-project `.sennit/` holding only that project's config overrides and a lock
 file. [Sessions and data storage](concepts/sessions.md) has the details, plus
 how to prune history with `sennit gc`.

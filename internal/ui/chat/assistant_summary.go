@@ -36,7 +36,14 @@ const (
 	summaryExpandedGlyph  = "▾"
 
 	summaryHeaderLabel = "Context compacted"
-	summaryHeaderHint  = "space to expand"
+	// summaryHeaderHint names both ways in, on a line of its own rather
+	// than in parentheses after the counts. Trailing on the header line
+	// it read as a footnote to the numbers and got truncated first on a
+	// narrow window - and it was the only thing on the row telling anyone
+	// the row opened at all. Clicking is the half people reach for
+	// without being told, so it is the half that had to actually work;
+	// see [AssistantMessageItem.HandleMouseClick].
+	summaryHeaderHint = "space or click to expand"
 )
 
 // isSummary reports whether this item renders a summarize pass's output.
@@ -84,13 +91,36 @@ func (a *AssistantMessageItem) renderSummaryHeader(width int) string {
 			presentation.FormatTokenCount(after),
 		)
 	}
-	if !a.summaryExpanded {
-		text += "  (" + summaryHeaderHint + ")"
-	}
 	if width > 0 {
 		text = ansi.Truncate(text, width, "…")
 	}
-	return a.sty.Messages.Notice.Render(text)
+	rendered := a.sty.Messages.Notice.Render(text)
+	if a.summaryExpanded {
+		return rendered
+	}
+	// The hint indents under the label rather than under the glyph, so
+	// the disclosure triangle stays the leftmost thing on the row and
+	// the two lines read as one control.
+	hint := "  " + summaryHeaderHint
+	if width > 0 {
+		hint = ansi.Truncate(hint, width, "…")
+	}
+	return rendered + "\n" + a.sty.Messages.Notice.Render(hint)
+}
+
+// summaryClickHeight is how many rows of a summary item are the header,
+// and therefore the click target. Two while collapsed (the label and its
+// hint), one once open - the row that closes it again.
+//
+// A constant rather than a measurement: renderSummaryHeader is the only
+// thing that decides this shape, it is right here, and a click target
+// read back from a cached render would go stale exactly when the row
+// changed shape.
+func (a *AssistantMessageItem) summaryClickHeight() int {
+	if a.summaryExpanded {
+		return 1
+	}
+	return 2
 }
 
 // renderCollapsedSummary renders the whole item while the summary is

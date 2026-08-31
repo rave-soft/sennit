@@ -43,12 +43,17 @@ var logsCmd = &cobra.Command{
 		if _, _, err := initConfig(cmd, false); err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
-		logsFile := config.GlobalLogFile()
+		// The newest log in the directory, not this process's own: logs
+		// are per process now (see config.GlobalLogFile), and `sennit
+		// logs` is always a process of its own asking about somebody
+		// else's - usually the sennit running in the next terminal.
+		logsFile := config.LatestGlobalLogFile()
 		_, err = os.Stat(logsFile)
 		if os.IsNotExist(err) {
-			log.Warn("No logs found yet; sennit.log is created on first run.")
+			log.Warn("No logs found yet; a log file is created on first run.")
 			return nil
 		}
+		log.Info("Reading logs", "file", logsFile)
 
 		if follow {
 			return followLogs(cmd.Context(), logsFile, tailLines)

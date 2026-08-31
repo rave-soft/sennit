@@ -171,6 +171,7 @@ func (a *coordinatorAdapter) DeliverTaskCompletion(ctx context.Context, parentSe
 		Error:          completion.Error,
 		Depth:          completion.Depth,
 		TerminalAt:     completion.TerminalAt,
+		PriorReports:   completion.PriorReports,
 		Acknowledge:    completion.Acknowledge,
 	})
 }
