@@ -189,3 +189,52 @@ func (a *sessionAgent) wakeFromInboxIfIdle(ctx context.Context, sessionID string
 	}
 	a.startContinuation(ctx, sessionID, "session went idle with a completion already queued")
 }
+
+// SetLiveSession records the session this sennit is working in and then
+// re-checks what could not be woken while some other session held that
+// standing. The stored id is the whole of the wake path's authority (see
+// wakeAllowed), so moving it is itself an event: a completion that was
+// refused a wake a minute ago may be eligible the instant it moves.
+//
+// Without the re-check a report that lands for a session that is not the
+// live one has only two ways left to reach it - the person types, or some
+// unrelated turn in that session happens to end and run
+// wakeFromInboxIfIdle. A delegation that *failed* is exactly the case
+// where neither happens: the session has nothing else in flight to end,
+// and the person is sitting in front of a session that has visibly
+// stopped. Observed in the wild as a five-minute stall, ended only by an
+// idle-summarize teardown that happened to take the wake path on its way
+// out.
+//
+// Overrides the promoted dispatcher method of the same name; every caller
+// reaches it through the SessionAgent interface, so the sweep is not
+// bypassable by reaching for the embedded field.
+func (a *sessionAgent) SetLiveSession(sessionID string) {
+	a.dispatcher.SetLiveSession(sessionID)
+	if sessionID == "" {
+		// The landing screen: nothing is live, so nothing is wakeable.
+		return
+	}
+	a.wakeQueuedForLiveSession()
+}
+
+// wakeQueuedForLiveSession starts a continuation attempt for every
+// session that now has both something queued and the standing to be
+// woken for it.
+//
+// It sweeps every session rather than the newly live one alone because
+// wakeAllowed's authority covers a whole tree: a delegation of the live
+// session, parked waiting on children of its own, is exactly as
+// unwakeable while another tree is live, and exactly as stuck once it is
+// not. wakeEligible re-applies the full gate (live tree, idle, not
+// cancelled, still has an inbox) per session, so a sweep can only start
+// turns that were already owed one.
+func (a *sessionAgent) wakeQueuedForLiveSession() {
+	for sessionID := range a.states.Seq2() {
+		if !a.wakeEligible(sessionID) {
+			continue
+		}
+		a.startContinuation(context.Background(), sessionID,
+			"session became the one being worked in with a completion already queued")
+	}
+}

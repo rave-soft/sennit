@@ -1094,3 +1094,53 @@ func TestDeliverTaskCompletion_CancelledPersonSessionStillWaits(t *testing.T) {
 	require.Len(t, sa.drainCompletionsForStep(sess.ID), 1,
 		"and the report must be waiting for them, not redirected anywhere")
 }
+
+// TestSetLiveSession_WakesWhatCouldNotBeWokenBefore is the other half of
+// TestDeliverTaskCompletion_OtherSessionIsNeverWoken: a report that was
+// correctly refused a wake while its session was not the live one must
+// be taken up the moment it becomes live, not left for the person to
+// unstick by typing.
+//
+// From the bug it was written for: a delegation failed on a provider
+// stream error while its parent was not the session on screen, the
+// report was enqueued with nobody to start a turn for it, and the
+// session then sat visibly dead for five minutes - the parent had
+// nothing else in flight whose exit could run wakeFromInboxIfIdle, so
+// what finally moved it was an unrelated idle-summarize teardown.
+func TestSetLiveSession_WakesWhatCouldNotBeWokenBefore(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &promptRecordingModel{text: "done"}
+	sa := testSessionAgent(env, model, "system").(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
+	})
+	require.NoError(t, err)
+
+	// The person is working somewhere else entirely when the delegation
+	// fails, so the report is enqueued and nothing starts.
+	sa.SetLiveSession("a-different-session")
+	failed := testCompletion("")
+	failed.Status = "failed"
+	failed.Error = "stall-marker-text"
+	sa.DeliverTaskCompletion(t.Context(), sess.ID, failed)
+
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, model.count(), "a session nobody is working in must never start a turn")
+
+	// They open the session the report was addressed to.
+	sa.SetLiveSession(sess.ID)
+
+	require.Eventually(t, func() bool { return model.count() > 0 }, 2*time.Second, 5*time.Millisecond,
+		"opening the session must take up the report waiting in it")
+	require.Empty(t, sa.drainCompletionsForStep(sess.ID), "the report must have been consumed by that turn")
+
+	prompts := model.snapshotPrompts()
+	require.Len(t, prompts, 1, "exactly one turn must have reached the model")
+	require.True(t, promptContains(prompts[0], "stall-marker-text"),
+		"the failure the delegation reported must be what that turn carries")
+}
