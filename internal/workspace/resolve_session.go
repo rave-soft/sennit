@@ -7,6 +7,13 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 )
 
+type sessionResolver interface {
+	CreateSession(ctx context.Context, title string) (session.Session, error)
+	GetSession(ctx context.Context, sessionID string) (session.Session, error)
+	GetLastSession(ctx context.Context) (session.Session, error)
+	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
+}
+
 // ResolveSession resolves which session a non-interactive run should
 // use. If continueSessionID is set it must name an existing top-level
 // session (not a child session, not an agent-tool session). If
@@ -16,8 +23,8 @@ import (
 // This is shared across Workspace implementations (via cmd/run.go) so
 // `sennit run` behaves identically regardless of which one is in use; it
 // is a free function rather than an interface method because it only
-// needs the operations SessionStore already exposes.
-func ResolveSession(ctx context.Context, ws SessionStore, continueSessionID string, useLast bool, title string) (session.Session, error) {
+// needs sessionResolver's four operations.
+func ResolveSession(ctx context.Context, ws sessionResolver, continueSessionID string, useLast bool, title string) (session.Session, error) {
 	switch {
 	case continueSessionID != "":
 		if _, _, ok := ws.ParseAgentToolSessionID(continueSessionID); ok {

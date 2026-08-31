@@ -10,15 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeSessionWorkspace is a minimal Workspace test double covering
-// only the methods ResolveSession calls (GetSession, ListSessions,
-// CreateSession, ParseAgentToolSessionID). It embeds the Workspace
-// interface (left nil) so it satisfies the full interface at compile
-// time without stubbing every method; calling anything else panics,
-// which is fine since these tests only exercise ResolveSession.
 type fakeSessionWorkspace struct {
-	Workspace
-
 	sessions []session.Session
 	created  []session.Session
 }
@@ -36,10 +28,6 @@ func (w *fakeSessionWorkspace) GetSession(_ context.Context, id string) (session
 		}
 	}
 	return session.Session{}, sql.ErrNoRows
-}
-
-func (w *fakeSessionWorkspace) ListSessions(context.Context) ([]session.Session, error) {
-	return w.sessions, nil
 }
 
 // GetLastSession mirrors the SQL query's scope (top-level sessions only,
@@ -72,6 +60,11 @@ func (w *fakeSessionWorkspace) ParseAgentToolSessionID(sessionID string) (string
 	}
 	return parts[0], parts[1], true
 }
+
+var (
+	_ sessionResolver = (*fakeSessionWorkspace)(nil)
+	_ sessionResolver = SessionStore(nil)
+)
 
 func TestResolveSession_NewSession(t *testing.T) {
 	t.Parallel()
