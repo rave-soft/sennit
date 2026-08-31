@@ -2,8 +2,6 @@ package model
 
 import (
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -23,10 +21,7 @@ func (m *UI) openExternalEditorGuarded(cmds []tea.Cmd) (out []tea.Cmd, started b
 	if m.isAgentBusy() {
 		return append(cmds, util.ReportWarn("Agent is working, please wait...")), false
 	}
-	editorValue := m.editor.textarea.Value()
-	if m.editor.bangMode {
-		editorValue = "!" + editorValue
-	}
+	editorValue := m.editor.bang.draftValue(m.editor.textarea.Value())
 	return append(cmds, m.editor.openEditor(editorValue)), true
 }
 
@@ -312,8 +307,8 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 			return cmds, nil, true
 		}
 
-		if m.editor.bangMode && value != "" {
-			m.editor.bangMode = false
+		if m.editor.bang.isActive() && value != "" {
+			m.editor.bang.exit()
 			m.setEditorPrompt(m.yoloModeCached())
 			m.editor.randomizePlaceholders()
 			m.editor.historyReset()
@@ -420,9 +415,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	}
 
 	// Bang mode: backspace on already-empty prompt exits.
-	if m.editor.bangMode && m.editor.bangWasEmpty && msg.Code == tea.KeyBackspace {
-		m.editor.bangMode = false
-		m.editor.bangWasEmpty = false
+	if msg.Code == tea.KeyBackspace && m.editor.bang.exitOnEmptyBackspace() {
 		m.setEditorPrompt(m.yoloModeCached())
 		return cmds
 	}
@@ -437,7 +430,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	// Trigger completions on @. Suppressed in bang mode: "@" is
 	// just a character in a shell command (e.g. "git log @{u}"),
 	// not a file-mention trigger.
-	if msg.String() == "@" && !m.editor.completions.open && !m.editor.bangMode {
+	if msg.String() == "@" && !m.editor.completions.open && !m.editor.bang.isActive() {
 		// Only show if beginning of prompt or after whitespace.
 		if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 			depth, limit := m.com.Config().Options.TUI.Completions.Limits()
@@ -453,7 +446,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	// "/" mid-message is just a character. Suppressed in bang
 	// mode: a shell command is very plausibly an absolute path
 	// like "/usr/bin/env", not a command trigger.
-	if msg.String() == "/" && !m.editor.completions.open && !m.editor.bangMode && curValue == "" {
+	if msg.String() == "/" && !m.editor.completions.open && !m.editor.bang.isActive() && curValue == "" {
 		m.editor.completions.openCommands(
 			curIdx, m.completionsPosition(), m.completionsMaxWidth(), m.commandCompletionItems(),
 		)
@@ -468,35 +461,11 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	prevHeight := m.editor.textarea.Height()
 	cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
-	// Bang mode: enter when "!" is typed at the start of the
-	// prompt, optionally preceded by whitespace (either on an
-	// empty/whitespace-only prompt or prepended to existing text).
-	// Exit on backspace clearing the last character.
 	newVal := m.editor.textarea.Value()
-	trimmedNew := strings.TrimLeftFunc(newVal, unicode.IsSpace)
-	trimmedCur := strings.TrimLeftFunc(curValue, unicode.IsSpace)
-	if !m.editor.bangMode && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
-		m.editor.bangMode = true
-		m.editor.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
-		// Strip leading whitespace and the "!" from the textarea
-		// while preserving the cursor position relative to the
-		// command text.
-		col := m.editor.textarea.Column()
-		line := m.editor.textarea.Line()
-		stripped := trimmedNew[1:] // ok: ascii — strips the literal "!" bang prefix
-		m.editor.textarea.SetValue(stripped)
-		// col is a rune column (SetCursorColumn's units); the stripped
-		// prefix must be measured the same way, or a multi-byte rune in
-		// the leading whitespace throws the cursor off.
-		prefixRunes := utf8.RuneCountInString(newVal) - utf8.RuneCountInString(stripped)
-		m.editor.textarea.SetCursorColumn(max(0, col-prefixRunes))
-		_ = line // cursor line doesn't change; prefix removed
+	if m.editor.bang.enterFromLeadingPrefix(&m.editor.textarea, curValue, m.editor.textarea.Column()) {
 		m.setEditorPrompt(m.yoloModeCached())
-	} else if m.editor.bangMode && newVal == "" && curValue != "" {
-		// Just cleared last character; mark empty, stay in bang mode.
-		m.editor.bangWasEmpty = true
-	} else if m.editor.bangMode && newVal != "" {
-		m.editor.bangWasEmpty = false
+	} else {
+		m.editor.bang.updateEmpty(curValue, newVal)
 	}
 
 	// Any text modification becomes the current draft.

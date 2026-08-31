@@ -579,7 +579,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 // shown right now (wrong focus, completions open, bang mode, empty input,
 // no match, or hidden by a preceding Esc).
 func (m *UI) activeGhostTail() string {
-	if m.focus != uiFocusEditor || m.editor.completions.open || m.editor.bangMode {
+	if m.focus != uiFocusEditor || m.editor.completions.open || m.editor.bang.isActive() {
 		return ""
 	}
 	value := m.editor.textarea.Value()

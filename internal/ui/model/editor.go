@@ -1,7 +1,6 @@
 package model
 
 import (
-	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -11,7 +10,7 @@ import (
 
 // editorState holds the prompt editor's own state: the textarea, the
 // attachment list, the completions popup bookkeeping, bang (!) shell-mode
-// flags, and prompt history navigation.
+// lifecycle, and prompt history navigation.
 //
 // Most of the logic that touches these fields still lives on *UI (in ui.go
 // and history.go) because it also reads layout, session, dialog, or
@@ -34,19 +33,12 @@ type editorState struct {
 	// completions owns the @-mention / "/"-command popup lifecycle.
 	completions completionsLifecycleState
 
-	// bangMode tracks whether the editor is in bang (!) shell mode.
-	bangMode     bool
-	bangWasEmpty bool // true when bang prompt became empty on last keystroke
+	// bang owns the bang (!) shell-mode lifecycle.
+	bang bangModeState
 
 	// pendingSendState owns sends accepted by the editor until their target
 	// session accepts them. See send_state.go.
 	pendingSend pendingSendState
-
-	// bangCancel cancels a running bang-mode shell command. Nil when no
-	// bang command is in progress. Set by runShellCommand, cleared by
-	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
-	// Escape works for bang commands the same way it does for agent runs.
-	bangCancel context.CancelFunc
 
 	// history owns prompt navigation and history-derived ghost suggestions.
 	promptHistory promptHistoryState
@@ -121,10 +113,7 @@ func (e *editorState) updateHistoryDraft(oldValue string) {
 // Esc) would silently drop out of bang mode — the textarea's raw Value()
 // never carries the "!" once it's been stripped on entry.
 func (e *editorState) draftValue() string {
-	if e.bangMode {
-		return "!" + e.textarea.Value()
-	}
-	return e.textarea.Value()
+	return e.bang.draftValue(e.textarea.Value())
 }
 
 // historyReset resets the history, but does not clear the message

@@ -107,9 +107,9 @@ func TestGhostTextSuppressedByCompletionsOrBangMode(t *testing.T) {
 	require.Empty(t, u.activeGhostTail(), "must not predict while completions popup is open")
 	u.editor.completions.open = false
 
-	u.editor.bangMode = true
+	u.editor.bang.enter(false)
 	require.Empty(t, u.activeGhostTail(), "must not predict in bang mode")
-	u.editor.bangMode = false
+	u.editor.bang.exit()
 
 	require.Equal(t, " world", u.activeGhostTail(), "sanity check: prediction active with both flags cleared")
 }

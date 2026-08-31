@@ -130,19 +130,7 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 // is stripped when entering bang mode and re-added when leaving it so
 // the visible text always reflects the correct state.
 func (m *UI) syncBangModeFromTextarea() {
-	val := m.editor.textarea.Value()
-	hasBang := strings.HasPrefix(val, "!")
-	if hasBang {
-		if !m.editor.bangMode {
-			m.editor.bangMode = true
-			m.editor.bangWasEmpty = false
-		}
-		m.editor.textarea.SetValue(strings.TrimPrefix(val, "!"))
-		m.editor.textarea.MoveToBegin()
-	} else if m.editor.bangMode {
-		m.editor.bangMode = false
-		m.editor.bangWasEmpty = false
-	}
+	m.editor.bang.syncFromTextarea(&m.editor.textarea)
 	m.setEditorPrompt(m.yoloModeCached())
 }
 

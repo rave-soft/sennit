@@ -92,18 +92,12 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// left set, the editor stayed "busy" for the rest of the
 			// session with nothing running behind it.
 			m.editor.pendingSend.finishActive()
-			if m.editor.bangCancel != nil {
-				m.editor.bangCancel()
-				m.editor.bangCancel = nil
-			}
+			m.editor.bang.cancelRunning()
 			break
 		}
 		m.editor.pendingSend.finishActive()
 		// Clear the bang cancel func — command is done.
-		if m.editor.bangCancel != nil {
-			m.editor.bangCancel()
-			m.editor.bangCancel = nil
-		}
+		m.editor.bang.cancelRunning()
 		// Complete the pending shell item if it exists, otherwise create a new one.
 		completed := false
 		if msg.PendingID != "" {
@@ -214,7 +208,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	})
 
 	ctx, cancel := context.WithCancel(m.com.Context())
-	m.editor.bangCancel = cancel
+	m.editor.bang.setCancel(cancel)
 
 	workspace := m.com.Workspace
 	owner := m

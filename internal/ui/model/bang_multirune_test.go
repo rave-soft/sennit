@@ -27,11 +27,11 @@ func TestBangEntryMultiRuneKeystrokeMultiByteWhitespace(t *testing.T) {
 
 	emSpace := string(rune(0x2003))
 	typeText(u, emSpace)
-	require.False(t, u.editor.bangMode)
+	require.False(t, u.editor.bang.isActive())
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "!xyz"})
 
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.Equal(t, "xyz", u.editor.textarea.Value())
 	require.Equal(t, 3, u.editor.textarea.Column(),
 		"cursor must be shifted left by the removed prefix's rune count, not its byte count")

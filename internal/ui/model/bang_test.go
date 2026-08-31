@@ -17,13 +17,13 @@ func TestBangTypedAtEmptyEditorEntersBangMode(t *testing.T) {
 	u := newSlashTestUI(t)
 	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "!", Code: '!'})
 
-	require.True(t, u.editor.bangMode)
-	require.True(t, u.editor.bangWasEmpty)
+	require.True(t, u.editor.bang.isActive())
+	require.True(t, u.editor.bang.isEmpty())
 	require.Empty(t, u.editor.textarea.Value(), "the leading '!' is stripped, not shown")
 
 	typeText(u, "echo hi")
 	require.Equal(t, "echo hi", u.editor.textarea.Value())
-	require.False(t, u.editor.bangWasEmpty)
+	require.False(t, u.editor.bang.isEmpty())
 }
 
 // TestBangBackspaceOnEmptyExits covers the exit path symmetric to entry:
@@ -34,10 +34,10 @@ func TestBangBackspaceOnEmptyExits(t *testing.T) {
 
 	u := newSlashTestUI(t)
 	typeText(u, "!")
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	require.False(t, u.editor.bangMode)
+	require.False(t, u.editor.bang.isActive())
 	require.Empty(t, u.editor.textarea.Value())
 }
 
@@ -51,11 +51,11 @@ func TestBangEnterClearsBangModeAndDispatchesShell(t *testing.T) {
 	u := newSlashTestUI(t)
 	u.sess.current = &session.Session{ID: "sess-1"} // has a session already; skip CreateSession
 	typeText(u, "!echo hi")
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 
 	cmd := u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	require.False(t, u.editor.bangMode, "Enter exits bang mode")
+	require.False(t, u.editor.bang.isActive(), "Enter exits bang mode")
 	require.Empty(t, u.editor.textarea.Value(), "the editor is cleared")
 	require.NotNil(t, cmd, "Enter must dispatch the shell command")
 }
@@ -74,7 +74,7 @@ func TestBangSuppressesSlashCompletions(t *testing.T) {
 	u := newSlashTestUI(t)
 	typeText(u, "!/usr/bin/env")
 
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.False(t, u.editor.completions.open, "'/' must not open the command popup in bang mode")
 	require.Equal(t, "/usr/bin/env", u.editor.textarea.Value())
 }
@@ -85,7 +85,7 @@ func TestBangSuppressesAtCompletions(t *testing.T) {
 	u := newSlashTestUI(t)
 	typeText(u, "!git log @{u}")
 
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.False(t, u.editor.completions.open, "'@' must not open the file-mention popup in bang mode")
 	require.Equal(t, "git log @{u}", u.editor.textarea.Value())
 }
@@ -114,11 +114,11 @@ func TestBangHistoryUpEntersBangModeFromPlainEditor(t *testing.T) {
 	u.editor.promptHistory.index = -1
 
 	require.True(t, u.historyPrev())
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.Equal(t, "echo one", u.editor.textarea.Value())
 
 	require.True(t, u.historyPrev())
-	require.False(t, u.editor.bangMode, "the older entry is a plain message, not a bang command")
+	require.False(t, u.editor.bang.isActive(), "the older entry is a plain message, not a bang command")
 	require.Equal(t, "a plain message", u.editor.textarea.Value())
 }
 
@@ -134,16 +134,16 @@ func TestEscapeAfterHistoryNavRestoresBangDraft(t *testing.T) {
 	u := newEscTestUI(t)
 	u.editor.promptHistory.messages = []string{"older message"}
 	u.editor.promptHistory.index = -1
-	u.editor.bangMode = true
+	u.editor.bang.enter(false)
 	u.editor.textarea.InsertString("ls -la")
 
 	require.True(t, u.historyPrev())
 	require.Equal(t, "older message", u.editor.textarea.Value())
-	require.False(t, u.editor.bangMode, "the history entry itself has no bang prefix")
+	require.False(t, u.editor.bang.isActive(), "the history entry itself has no bang prefix")
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.Equal(t, "ls -la", u.editor.textarea.Value(), "first Esc restores the draft")
-	require.True(t, u.editor.bangMode, "bang mode must be restored along with the draft")
+	require.True(t, u.editor.bang.isActive(), "bang mode must be restored along with the draft")
 }
 
 // TestBangModeDraftSurvivesHistoryNavigation is the end-to-end version of
@@ -156,7 +156,7 @@ func TestBangModeDraftSurvivesHistoryNavigation(t *testing.T) {
 	u.editor.promptHistory.messages = []string{"previous prompt"}
 
 	typeText(u, "!ls -la")
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.Equal(t, "ls -la", u.editor.textarea.Value())
 
 	// Move to the start so Up enters history navigation instead of normal
@@ -164,9 +164,9 @@ func TestBangModeDraftSurvivesHistoryNavigation(t *testing.T) {
 	u.editor.textarea.CursorStart()
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyUp})
 	require.Equal(t, "previous prompt", u.editor.textarea.Value())
-	require.False(t, u.editor.bangMode)
+	require.False(t, u.editor.bang.isActive())
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.Equal(t, "ls -la", u.editor.textarea.Value(), "Esc restores the in-progress bang draft")
-	require.True(t, u.editor.bangMode, "bang mode must be restored along with the draft")
+	require.True(t, u.editor.bang.isActive(), "bang mode must be restored along with the draft")
 }

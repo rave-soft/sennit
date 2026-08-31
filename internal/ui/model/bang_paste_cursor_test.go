@@ -39,7 +39,7 @@ func TestCheckBangModeAfterPasteMultiByteWhitespace(t *testing.T) {
 	require.True(t, ok, "expected the async stat-check message, got %T", msg)
 	u.applyPasteFilesChecked(msg)
 
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.Equal(t, "echo", u.editor.textarea.Value())
 	require.Equal(t, 2, u.editor.textarea.Column(),
 		"cursor must be shifted left by the removed prefix's rune count, not its byte count")

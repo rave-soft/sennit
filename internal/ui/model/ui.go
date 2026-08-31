@@ -751,14 +751,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Textarea placeholder logic
 		if m.viewingChildSession() {
 			m.editor.textarea.Placeholder = "viewing subagent session · " + m.exitChildSessionShortcut() + " to return"
-		} else if m.editor.bangMode {
+		} else if m.editor.bang.isActive() {
 			m.editor.textarea.Placeholder = "Run a shell command"
 		} else if m.isAgentBusy() {
 			m.editor.textarea.Placeholder = m.editor.workingPlaceholder
 		} else {
 			m.editor.textarea.Placeholder = m.editor.readyPlaceholder
 		}
-		if !m.editor.bangMode && m.yoloModeCached() {
+		if !m.editor.bang.isActive() && m.yoloModeCached() {
 			m.editor.textarea.Placeholder = "Yolo mode!"
 		}
 	}
@@ -1055,7 +1055,7 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 // is treated as IO); the value is refreshed off-thread, see
 // workspace_cache.go.
 func (m *UI) isAgentBusy() bool {
-	if m.editor.bangCancel != nil {
+	if m.editor.bang.isRunning() {
 		return true
 	}
 	return m.wsCache.agentBusyCache.Value

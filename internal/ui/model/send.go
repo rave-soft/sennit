@@ -144,10 +144,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.isCanceling = false
 
 		// Cancel a running bang command if one is in progress.
-		if m.editor.bangCancel != nil {
-			m.editor.bangCancel()
-			m.editor.bangCancel = nil
-		}
+		m.editor.bang.cancelRunning()
 
 		m.com.Workspace.AgentCancel(m.sess.current.ID)
 		// A cancel clears the agent's queue too, so nothing is left

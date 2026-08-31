@@ -105,11 +105,11 @@ func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {
 	u.editor.promptHistory.index = -1
 
 	require.True(t, u.historyPrev())
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.Equal(t, "echo one", u.editor.textarea.Value())
 
 	require.True(t, u.historyPrev())
-	require.True(t, u.editor.bangMode)
+	require.True(t, u.editor.bang.isActive())
 	require.Equal(t, "echo two", u.editor.textarea.Value())
 }
 

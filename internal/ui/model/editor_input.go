@@ -15,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -147,7 +145,7 @@ func execEditorCmd(msg openEditorReadyMsg) tea.Cmd {
 // setEditorPrompt configures the textarea prompt function based on whether
 // yolo mode or bang mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
-	if m.editor.bangMode {
+	if m.editor.bang.isActive() {
 		m.editor.textarea.SetPromptFunc(4, func(info textarea.PromptInfo) string { return bangPromptFunc(m.com, info) })
 		return
 	}
@@ -344,25 +342,9 @@ func (e *editorState) randomizePlaceholders() {
 // optional whitespace followed by "!". It strips the prefix and adjusts
 // the cursor, mirroring the keypress bang-mode entry logic.
 func (m *UI) checkBangModeAfterPaste() {
-	if m.editor.bangMode {
-		return
+	if m.editor.bang.enterFromLeadingPrefix(&m.editor.textarea, "", m.editor.textarea.Column()) {
+		m.setEditorPrompt(m.yoloModeCached())
 	}
-	val := m.editor.textarea.Value()
-	trimmed := strings.TrimLeftFunc(val, unicode.IsSpace)
-	if !strings.HasPrefix(trimmed, "!") {
-		return
-	}
-	m.editor.bangMode = true
-	m.editor.bangWasEmpty = true
-	stripped := trimmed[1:] // ok: ascii — strips the literal "!" bang prefix
-	m.editor.textarea.SetValue(stripped)
-	col := m.editor.textarea.Column()
-	// col is a rune column (SetCursorColumn's units); the stripped prefix
-	// must be measured the same way, or a multi-byte rune in the leading
-	// whitespace throws the cursor off.
-	prefixRunes := utf8.RuneCountInString(val) - utf8.RuneCountInString(stripped)
-	m.editor.textarea.SetCursorColumn(max(0, col-prefixRunes))
-	m.setEditorPrompt(m.yoloModeCached())
 }
 
 // handlePasteMsg handles a paste message.
