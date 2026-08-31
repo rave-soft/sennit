@@ -296,7 +296,7 @@ func TestThreadEventMsgDroppedWhenNotAttached(t *testing.T) {
 	})
 
 	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
-	r.thread = &threadAttachment{threadID: "s1", ui: threadUI}
+	r.attachment.thread = &threadAttachment{threadID: "s1", ui: threadUI}
 	r.active = screenThread
 
 	require.NotPanics(t, func() {
@@ -312,7 +312,7 @@ func TestThreadEventMsgReachesAttachedThread(t *testing.T) {
 
 	r := newTestRoot(t, true)
 	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
-	r.thread = &threadAttachment{threadID: "s1", ui: threadUI}
+	r.attachment.thread = &threadAttachment{threadID: "s1", ui: threadUI}
 	r.active = screenThread
 
 	_, cmd := r.Update(threadEventMsg{threadID: "s1", inner: tea.WindowSizeMsg{Width: 80, Height: 24}})
@@ -329,7 +329,7 @@ func TestHandleThreadAttachedAdaptsNeutralSubscriber(t *testing.T) {
 
 	r := newTestRoot(t, true)
 	ws := &neutralSubscriberWorkspace{}
-	r.pendingAttach = "thread-1"
+	r.attachment.pendingID = "thread-1"
 	detachCalls := 0
 	delivered := make([]tea.Msg, 0, 1)
 	r.SetSend(func(msg tea.Msg) {
@@ -355,8 +355,8 @@ func TestHandleThreadAttachedAdaptsNeutralSubscriber(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "thread-1", event.threadID)
 	require.Equal(t, inner, event.inner)
-	require.Equal(t, 91, r.thread.ui.lay.width)
-	require.Equal(t, 37, r.thread.ui.lay.height)
+	require.Equal(t, 91, r.attachment.thread.ui.lay.width)
+	require.Equal(t, 37, r.attachment.thread.ui.lay.height)
 
 	stop := r.detachThread()
 	require.NotNil(t, stop)
@@ -378,7 +378,7 @@ func TestAltUpAtThreadTopLevelReturnsToMain(t *testing.T) {
 
 	r := newTestRoot(t, true)
 	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
-	r.thread = &threadAttachment{threadID: "s1", ui: threadUI}
+	r.attachment.thread = &threadAttachment{threadID: "s1", ui: threadUI}
 	r.active = screenThread
 
 	model, cmd := r.Update(tea.KeyPressMsg{Mod: tea.ModAlt, Code: tea.KeyUp})
@@ -388,7 +388,7 @@ func TestAltUpAtThreadTopLevelReturnsToMain(t *testing.T) {
 	}
 
 	require.Equal(t, screenMain, r.active)
-	require.Nil(t, r.thread, "leaveThreadToMain must tear down the attachment")
+	require.Nil(t, r.attachment.thread, "leaveThreadToMain must tear down the attachment")
 }
 
 // TestLeaveThreadToMain covers the method directly: it tears down the
@@ -401,7 +401,7 @@ func TestLeaveThreadToMain(t *testing.T) {
 	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
 
 	stopped, detached := false, false
-	r.thread = &threadAttachment{
+	r.attachment.thread = &threadAttachment{
 		threadID: "s1",
 		ui:       threadUI,
 		stop:     func() { stopped = true },
@@ -411,7 +411,7 @@ func TestLeaveThreadToMain(t *testing.T) {
 
 	cmd := r.leaveThreadToMain()
 	require.Equal(t, screenMain, r.active)
-	require.Nil(t, r.thread)
+	require.Nil(t, r.attachment.thread)
 	require.False(t, stopped, "stop must run inside the returned cmd, not on the event loop")
 	require.False(t, detached, "detach must run inside the returned cmd, not synchronously")
 
@@ -440,7 +440,7 @@ func TestDetachThreadDoesNotJoinTheEventPumpOnTheEventLoop(t *testing.T) {
 
 	release := make(chan struct{})
 	stopReturned := make(chan struct{})
-	r.thread = &threadAttachment{
+	r.attachment.thread = &threadAttachment{
 		threadID: "s1",
 		ui:       threadUI,
 		stop: func() {
@@ -460,7 +460,7 @@ func TestDetachThreadDoesNotJoinTheEventPumpOnTheEventLoop(t *testing.T) {
 		t.Fatal("leaving a thread blocked the event loop on its own event pump")
 	}
 	require.Equal(t, screenMain, r.active)
-	require.Nil(t, r.thread)
+	require.Nil(t, r.attachment.thread)
 
 	// The teardown itself is allowed to block; it just may not do so where
 	// the event loop can see it.
@@ -497,7 +497,7 @@ func runBatchCmd(t *testing.T, cmd tea.Cmd) {
 // TestHandleThreadAttachedTearsDownPreviousAttachment is the regression test
 // for the leak in handleThreadAttached: a second threadAttachedMsg for a
 // thread that's already attached (e.g. a double Enter on the same dashboard
-// row) used to overwrite r.thread outright, leaking the first attachment's
+// row) used to overwrite r.attachment.thread outright, leaking the first attachment's
 // SubscribeWith pump goroutine and never releasing its workspace. Both
 // teardown funcs on the first attachment must now run exactly once, and the
 // second attachment must become the one installed.
@@ -521,11 +521,11 @@ func TestHandleThreadAttachedTearsDownPreviousAttachment(t *testing.T) {
 	// The fake workspace doesn't implement threadEventSubscriber, so stop()
 	// stays the no-op default; wire our own counter onto the installed
 	// attachment directly to observe it running through detachThread.
-	r.thread.stop = func() { firstStopCalls++ }
+	r.attachment.thread.stop = func() { firstStopCalls++ }
 	runBatchCmd(t, cmd)
 	require.Equal(t, screenThread, r.active)
-	require.NotNil(t, r.thread)
-	first := r.thread
+	require.NotNil(t, r.attachment.thread)
+	first := r.attachment.thread
 
 	secondWS := &rootTestWorkspace{}
 	model, cmd = r.Update(threadAttachedMsg{
@@ -533,7 +533,7 @@ func TestHandleThreadAttachedTearsDownPreviousAttachment(t *testing.T) {
 		detach: func() { secondDetachCalls++ },
 	})
 	r = model.(*Root)
-	require.NotSame(t, first, r.thread, "the second attachment must replace the first")
+	require.NotSame(t, first, r.attachment.thread, "the second attachment must replace the first")
 	require.Equal(t, screenThread, r.active)
 	require.Equal(t, 0, firstStopCalls, "stop must run inside the returned cmd, not synchronously")
 	require.Equal(t, 0, firstDetachCalls, "detach must run inside the returned cmd, not synchronously")
@@ -563,7 +563,7 @@ func TestHandleThreadAttachedStaleAfterLeavingDashboard(t *testing.T) {
 	r = model.(*Root)
 
 	require.Equal(t, screenMain, r.active, "a stale attach must not yank the screen")
-	require.Nil(t, r.thread)
+	require.Nil(t, r.attachment.thread)
 	require.False(t, detached, "detach must run inside the returned cmd, not synchronously")
 
 	require.NotNil(t, cmd)
@@ -587,7 +587,7 @@ func TestHandleThreadAttachedFromMainScreenPanel(t *testing.T) {
 	model, cmd := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "panel"})
 	r = model.(*Root)
 	require.NotNil(t, cmd, "threads.EnterMsg must start an attach")
-	require.Equal(t, "s1", r.pendingAttach)
+	require.Equal(t, "s1", r.attachment.pendingID)
 
 	detached := false
 	model, cmd = r.Update(threadAttachedMsg{
@@ -598,9 +598,9 @@ func TestHandleThreadAttachedFromMainScreenPanel(t *testing.T) {
 	runBatchCmd(t, cmd)
 
 	require.Equal(t, screenThread, r.active, "the attach the user asked for must open the thread")
-	require.NotNil(t, r.thread)
-	require.Equal(t, "s1", r.thread.threadID)
-	require.Empty(t, r.pendingAttach, "an answered request is no longer pending")
+	require.NotNil(t, r.attachment.thread)
+	require.Equal(t, "s1", r.attachment.thread.threadID)
+	require.Empty(t, r.attachment.pendingID, "an answered request is no longer pending")
 	require.False(t, detached, "the wanted attachment must stay installed, not be released")
 }
 
@@ -659,10 +659,10 @@ func TestHandleThreadAttachedSupersededRequestIsStale(t *testing.T) {
 	})
 	r = model.(*Root)
 	require.Equal(t, screenDashboard, r.active, "a superseded attach must not take the screen")
-	require.Nil(t, r.thread)
+	require.Nil(t, r.attachment.thread)
 	runBatchCmd(t, cmd)
 	require.True(t, detached, "the superseded attachment's workspace must be released")
-	require.Equal(t, "s2", r.pendingAttach, "the latest request is still pending")
+	require.Equal(t, "s2", r.attachment.pendingID, "the latest request is still pending")
 }
 
 // TestChatWarmStepReachesMainScreenWhileThreadIsOpen is the regression

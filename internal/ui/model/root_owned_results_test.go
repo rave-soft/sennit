@@ -112,7 +112,7 @@ func TestRootRoutesAnOwnedResultAwayFromTheOtherUI(t *testing.T) {
 	ws := &countingWorkspace{ready: true, agentBusy: true}
 	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
 	threadUI := newBusyUI(ws)
-	r.thread = &threadAttachment{threadID: "t1", ui: threadUI}
+	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
 	r.active = screenThread
 
 	cmd := threadUI.dispatchBusyRefresh()

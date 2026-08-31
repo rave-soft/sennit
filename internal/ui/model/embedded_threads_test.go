@@ -74,7 +74,7 @@ func TestRoot_MainScreenResultsArriveWhileAThreadIsOpen(t *testing.T) {
 
 	r := newTestRoot(t, true)
 	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
-	r.thread = &threadAttachment{threadID: "t1", ui: threadUI}
+	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
 	r.active = screenThread
 
 	// A refresh the main screen started before the user drilled in.
@@ -118,7 +118,7 @@ func TestRoot_ScreenBoundMessagesStillFollowTheActiveScreen(t *testing.T) {
 
 	r := newTestRoot(t, true)
 	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
-	r.thread = &threadAttachment{threadID: "t1", ui: threadUI}
+	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
 	r.active = screenThread
 
 	r.Update(tea.WindowSizeMsg{Width: 100, Height: 40})

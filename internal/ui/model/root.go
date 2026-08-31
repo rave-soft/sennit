@@ -74,25 +74,55 @@ type threadAttachment struct {
 	detach   func() // releases the attached workspace (from AttachThread)
 }
 
+// threadAttachmentState owns the requested and currently attached thread.
+// Its release method removes the attachment before its potentially blocking
+// teardown runs in a command, so late events cannot reach a replacement.
+type threadAttachmentState struct {
+	thread    *threadAttachment
+	pendingID string
+}
+
+func (s *threadAttachmentState) release() tea.Cmd {
+	if s.thread == nil {
+		return nil
+	}
+	thread := s.thread
+	s.thread = nil
+	if thread.stop == nil && thread.detach == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if thread.stop != nil {
+			thread.stop()
+		}
+		if thread.detach != nil {
+			thread.detach()
+		}
+		return nil
+	}
+}
+
+func (s *threadAttachmentState) cleanup() {
+	if s.thread == nil {
+		return
+	}
+	if s.thread.stop != nil {
+		s.thread.stop()
+	}
+	if s.thread.detach != nil {
+		s.thread.detach()
+	}
+	s.thread = nil
+}
+
 // Root is the top-level tea.Model. See the package doc comment above.
 type Root struct {
 	com             *common.Common
 	main            *UI
 	dashboard       *threads.Dashboard // lazily created on first ctrl+e
 	dashboardDialog *dialog.Overlay    // hosts the thread-create dialog while on the dashboard screen
-	thread          *threadAttachment  // non-nil while attached to a thread
+	attachment      threadAttachmentState
 	active          screenID
-
-	// pendingAttach is the ID of the thread the user most recently asked
-	// to drill into (threads.EnterMsg) and whose attachThreadCmd has not
-	// answered yet. handleThreadAttached uses it to tell a wanted result
-	// from a stale one: a request can come from the dashboard or from the
-	// main screen's session panel (a click on a thread block), so "which
-	// screen is active" alone cannot say whether the user is still waiting
-	// — the main screen is both where a panel click starts and where an
-	// abandoned dashboard request lands. Cleared when the answer arrives
-	// or when the user navigates away (leaves the dashboard or a thread).
-	pendingAttach string
 
 	// send delivers messages back into the Bubble Tea event loop from
 	// outside Update (the per-thread SubscribeWith pump runs its own
@@ -156,7 +186,7 @@ func (r *Root) Init() tea.Cmd {
 func (r *Root) View() tea.View {
 	switch r.active {
 	case screenThread:
-		return r.thread.ui.View()
+		return r.attachment.thread.ui.View()
 	case screenDashboard:
 		return r.dashboardView()
 	default:
@@ -199,8 +229,8 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A message from an attached thread's own event pump. Racing a
 		// detach is expected (the pump's goroutine can't be joined
 		// synchronously), so a mismatch is silently dropped, not an error.
-		if r.thread != nil && r.thread.threadID == msg.threadID {
-			_, cmd := r.thread.ui.Update(msg.inner)
+		if r.attachment.thread != nil && r.attachment.thread.threadID == msg.threadID {
+			_, cmd := r.attachment.thread.ui.Update(msg.inner)
 			return r, cmd
 		}
 		return r, nil
@@ -245,7 +275,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return r, tea.Batch(cmds...)
 	case threads.EnterMsg:
-		r.pendingAttach = msg.ID
+		r.attachment.pendingID = msg.ID
 		return r, r.attachThreadCmd(msg.ID, msg.SessionID, msg.Name)
 	case leaveThreadRequestedMsg:
 		// The Back button at the top of a drilled-in thread. The thread's
@@ -271,7 +301,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		r.active = screenMain
-		r.pendingAttach = ""
+		r.attachment.pendingID = ""
 		return r, r.dashboard.SetActive(false)
 	case threads.OpenCreateMsg:
 		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
@@ -355,16 +385,16 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmds []tea.Cmd
 			_, cmd := r.main.Update(msg)
 			cmds = append(cmds, cmd)
-			if r.thread != nil {
-				_, cmd := r.thread.ui.Update(msg)
+			if r.attachment.thread != nil {
+				_, cmd := r.attachment.thread.ui.Update(msg)
 				cmds = append(cmds, cmd)
 			}
 			return r, tea.Batch(cmds...)
 		}
 		switch r.active {
 		case screenThread:
-			if r.thread != nil {
-				_, cmd := r.thread.ui.Update(msg)
+			if r.attachment.thread != nil {
+				_, cmd := r.attachment.thread.ui.Update(msg)
 				return r, cmd
 			}
 			return r, nil
@@ -389,8 +419,8 @@ func (r *Root) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	if r.dashboard != nil {
 		r.dashboard.SetSize(msg.Width, msg.Height)
 	}
-	if r.thread != nil {
-		_, cmd := r.thread.ui.Update(msg)
+	if r.attachment.thread != nil {
+		_, cmd := r.attachment.thread.ui.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 	return r, tea.Batch(cmds...)
@@ -407,17 +437,17 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case toggle && r.active == screenDashboard:
 			r.active = screenMain
-			r.pendingAttach = ""
+			r.attachment.pendingID = ""
 			r.dashboard.SetActive(false)
 			return r, nil
 		case toggle && r.active == screenThread:
 			return r, r.leaveThread()
 		case key.Matches(msg, dialog.CloseKey) && r.active == screenDashboard && !r.dashboardDialog.HasDialogs():
 			r.active = screenMain
-			r.pendingAttach = ""
+			r.attachment.pendingID = ""
 			r.dashboard.SetActive(false)
 			return r, nil
-		case r.active == screenThread && key.Matches(msg, r.main.KeyMap().Chat.ExitChildSession) && !r.thread.ui.viewingChildSession():
+		case r.active == screenThread && key.Matches(msg, r.main.KeyMap().Chat.ExitChildSession) && !r.attachment.thread.ui.viewingChildSession():
 			// alt+up at the top of a drilled-in thread (no child session of
 			// its own to step out of first) returns straight to the main
 			// screen, not the dashboard — mirrors leaveThread's teardown but
@@ -433,7 +463,7 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case screenDashboard:
 		return r.handleDashboardKey(msg)
 	case screenThread:
-		_, cmd := r.thread.ui.Update(msg)
+		_, cmd := r.attachment.thread.ui.Update(msg)
 		return r, cmd
 	default:
 		_, cmd := r.main.Update(msg)
@@ -559,8 +589,8 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	// thread nobody is waiting for. pendingAttach holds only the latest
 	// request, so an older request for a different thread that lands later
 	// is stale by construction.
-	current := msg.id == r.pendingAttach ||
-		(r.active == screenThread && r.thread != nil && r.thread.threadID == msg.id)
+	current := msg.id == r.attachment.pendingID ||
+		(r.active == screenThread && r.attachment.thread != nil && r.attachment.thread.threadID == msg.id)
 	if !current {
 		if msg.detach == nil {
 			return r, nil
@@ -571,7 +601,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 			return nil
 		}
 	}
-	r.pendingAttach = ""
+	r.attachment.pendingID = ""
 
 	com := common.DefaultCommon(r.com.Context(), msg.ws)
 	childUI := New(com, msg.sessionID, false, WithEmbedded(), WithBreadcrumbRoot(msg.name))
@@ -591,7 +621,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	// leak the previous attachment's pump goroutine or workspace.
 	detachCmd := r.detachThread()
 
-	r.thread = &threadAttachment{
+	r.attachment.thread = &threadAttachment{
 		threadID: msg.id,
 		name:     msg.name,
 		ws:       msg.ws,
@@ -609,41 +639,11 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	return r, tea.Batch(cmds...)
 }
 
-// detachThread stops the attached thread's event pump and releases its
-// workspace, leaving r.active for the caller to set. Shared by leaveThread
-// and leaveThreadToMain, which differ only in where they land and whether
-// the dashboard needs a refresh.
-//
-// Both halves of the teardown run inside the returned tea.Cmd rather than
-// here, because this runs on the Bubble Tea event loop, inside Update.
-// detach may do IO (e.g. shutting down a client connection), and stop waits
-// for the SubscribeWith pump goroutine to exit — which deadlocks the whole
-// TUI if done here: that goroutine delivers its events through
-// tea.Program.Send, which parks until the event loop takes the message, and
-// the event loop is precisely what is waiting for it. Cancelling the
-// subscription does not break the cycle, since the pump is parked in the
-// send rather than at its select. Dropping r.thread now is what makes this
-// safe to defer: any event the pump still delivers no longer matches an
-// attachment and is discarded (see the threadEventMsg case in Update).
+// detachThread releases the attached thread without blocking the event loop.
+// The attachment state owns the teardown details and removes the attachment
+// before the returned command runs, so late pump events are discarded.
 func (r *Root) detachThread() tea.Cmd {
-	if r.thread == nil {
-		return nil
-	}
-	thread := r.thread
-	r.thread = nil
-
-	if thread.stop == nil && thread.detach == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		if thread.stop != nil {
-			thread.stop()
-		}
-		if thread.detach != nil {
-			thread.detach()
-		}
-		return nil
-	}
+	return r.attachment.release()
 }
 
 // leaveThread tears down the attached thread and returns to the dashboard.
@@ -660,7 +660,7 @@ func (r *Root) leaveThread() tea.Cmd {
 		r.dashboard.SetSize(r.width, r.height)
 	}
 	r.active = screenDashboard
-	r.pendingAttach = ""
+	r.attachment.pendingID = ""
 
 	var cmds []tea.Cmd
 	if cmd != nil {
@@ -685,7 +685,7 @@ func (r *Root) leaveThread() tea.Cmd {
 func (r *Root) leaveThreadToMain() tea.Cmd {
 	cmd := r.detachThread()
 	r.active = screenMain
-	r.pendingAttach = ""
+	r.attachment.pendingID = ""
 	return cmd
 }
 
@@ -755,16 +755,7 @@ func (r *Root) createThreadCmd(name, goal string) tea.Cmd {
 // cmd/root.go after program.Run() returns — best-effort, since there is no
 // further chance to surface an error through the (now-stopped) TUI.
 func (r *Root) Cleanup() {
-	if r.thread == nil {
-		return
-	}
-	if r.thread.stop != nil {
-		r.thread.stop()
-	}
-	if r.thread.detach != nil {
-		r.thread.detach()
-	}
-	r.thread = nil
+	r.attachment.cleanup()
 }
 
 // uiOwnedMsg marks the result of work a specific *UI started, so Root can
