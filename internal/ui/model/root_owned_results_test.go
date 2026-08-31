@@ -86,7 +86,7 @@ func TestRootDeliversAgentsLoadedToTheUIThatAskedForIt(t *testing.T) {
 func TestRootDeliversShellResultToTheUIThatAskedForIt(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
 	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
-	r.main.editor.pendingSendActive = true
+	r.main.editor.pendingSend.active = true
 
 	r.active = screenDashboard
 
@@ -100,7 +100,7 @@ func TestRootDeliversShellResultToTheUIThatAskedForIt(t *testing.T) {
 	}
 	r.Update(msg)
 
-	require.False(t, r.main.editor.pendingSendActive,
+	require.False(t, r.main.editor.pendingSend.active,
 		"the shell result must reach the UI that dispatched it, whatever screen is on top")
 }
 

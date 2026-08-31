@@ -1332,9 +1332,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.sess.files = nil
 	m.sess.filesVersion++
 	m.sess.fileReads = nil
-	m.editor.pendingSendQueue = nil
-	m.editor.pendingSendGen = 0
-	m.editor.pendingSendLoading = false
+	m.editor.pendingSend.discardForNewSession()
 	m.setState(uiLanding, uiFocusEditor)
 	m.editor.textarea.Focus()
 	m.chat.Blur()

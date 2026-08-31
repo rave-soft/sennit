@@ -55,9 +55,9 @@ func TestSecondSubmitDispatchesAfterAcceptInsteadOfQueueing(t *testing.T) {
 	runCmds(m, cmd)
 
 	require.Equal(t, []string{"first"}, ws.agentRunCalls)
-	require.False(t, m.editor.pendingSendActive,
+	require.False(t, m.editor.pendingSend.active,
 		"agentRunSubmittedMsg must clear pendingSendActive once AgentRun returns at accept time")
-	require.Empty(t, m.editor.pendingSendQueue)
+	require.Empty(t, m.editor.pendingSend.queue)
 
 	// The agent is still busy (ws.agentBusy stays true, standing in for
 	// the still-running first turn); a second submit must still reach
@@ -68,5 +68,5 @@ func TestSecondSubmitDispatchesAfterAcceptInsteadOfQueueing(t *testing.T) {
 
 	require.Equal(t, []string{"first", "second"}, ws.agentRunCalls,
 		"second submit must be dispatched to the workspace, not parked in pendingSendQueue")
-	require.Empty(t, m.editor.pendingSendQueue)
+	require.Empty(t, m.editor.pendingSend.queue)
 }

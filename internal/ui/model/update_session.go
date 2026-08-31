@@ -50,8 +50,8 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.editor.pendingSendActive = false
-		if len(m.editor.pendingSendQueue) > 0 {
+		m.editor.pendingSend.finishActive()
+		if m.editor.pendingSend.hasQueued() {
 			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 		}
 	case loadSessionMsg:
@@ -60,9 +60,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		if msg.err != nil {
 			// On error: discard pending sends and clear stale queue.
-			m.editor.pendingSendQueue = nil
-			m.editor.pendingSendGen = 0
-			m.editor.pendingSendLoading = false
+			m.editor.pendingSend.discardLoading()
 			// The nav frame rolls back below, so m.sess.current is (or
 			// remains) the parent session — but nothing else resets
 			// loadExpectedID. Left pointing at the session that just failed
@@ -147,24 +145,19 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.editor.historyReset()
 		cmds = append(cmds, m.sess.loadPromptHistory(m.com))
 
-		m.editor.pendingSendLoading = false
-		m.editor.pendingSendActive = false
-		if len(m.editor.pendingSendQueue) > 0 {
+		m.editor.pendingSend.finishLoading()
+		m.editor.pendingSend.finishActive()
+		if m.editor.pendingSend.hasQueued() {
 			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 		}
 		m.updateLayoutAndSize()
 
 	case createSessionMsg:
-		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
+		if !m.editor.pendingSend.acceptsLoadingResult(msg.generation) {
 			return cmds, false
 		}
 		expectedLoadGeneration := m.sess.loadGen + 1
-		for i := range m.editor.pendingSendQueue {
-			if m.editor.pendingSendQueue[i].generation == msg.generation {
-				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
-				m.editor.pendingSendQueue[i].loadGeneration = expectedLoadGeneration
-			}
-		}
+		m.editor.pendingSend.bindQueuedToSession(msg.generation, msg.session.ID, expectedLoadGeneration)
 		if m.lay.forceCompactMode {
 			m.lay.isCompact = true
 		}
@@ -172,13 +165,13 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.setState(uiChat, m.focus)
 		// Request loading the chat for the new session, then dispatch
 		// sendMessage once the session is loaded.
-		m.editor.pendingSendQueue = append([]sendQueueItem{{
+		m.editor.pendingSend.enqueueFront(sendQueueItem{
 			content:        msg.content,
 			attachments:    msg.attachments,
 			generation:     msg.generation,
 			sessionID:      msg.session.ID,
 			loadGeneration: expectedLoadGeneration,
-		}}, m.editor.pendingSendQueue...)
+		})
 		cmds = append(cmds, m.requestSessionLoad(msg.session.ID))
 		return cmds, true
 
@@ -313,30 +306,31 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if !msg.creating && m.sess.loadExpectedID != "" && (msg.sessionID != m.sess.loadExpectedID || msg.loadGeneration != m.sess.loadGen) {
 			break
 		}
-		m.editor.pendingSendActive = false
-		if msg.creating && msg.generation == m.editor.pendingSendGen {
-			m.editor.pendingSendLoading = false
-			m.editor.pendingSendQueue = nil
+		m.editor.pendingSend.finishActive()
+		if msg.creating && m.editor.pendingSend.matchesGeneration(msg.generation) {
+			m.editor.pendingSend.rejectCreation()
 		}
 		cmds = append(cmds, util.ReportError(msg.Err))
 		m.wsCache.agentBusyCache.Set(false)
-		if !msg.creating && len(m.editor.pendingSendQueue) > 0 {
+		if !msg.creating && m.editor.pendingSend.hasQueued() {
 			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 		}
 
 	case sendPendingQueueMsg:
-		if m.editor.pendingSendActive || len(m.editor.pendingSendQueue) == 0 || m.sess.current == nil {
+		if m.sess.current == nil {
 			break
 		}
-		item := m.editor.pendingSendQueue[0]
-		m.editor.pendingSendQueue = m.editor.pendingSendQueue[1:]
+		item, ok := m.editor.pendingSend.dequeue()
+		if !ok {
+			break
+		}
 		if item.sessionID != m.sess.current.ID || item.loadGeneration != m.sess.loadGen {
-			if len(m.editor.pendingSendQueue) > 0 {
+			if m.editor.pendingSend.hasQueued() {
 				cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 			}
 			break
 		}
-		m.editor.pendingSendActive = true
+		m.editor.pendingSend.beginActive()
 		if item.bang {
 			cmds = append(cmds, m.runShellCommandInternal(item.content, item.isFirstMessage))
 		} else {
@@ -344,24 +338,19 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 
 	case bangSessionCreatedMsg:
-		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
+		if !m.editor.pendingSend.acceptsLoadingResult(msg.generation) {
 			break
 		}
 		expectedLoadGeneration := m.sess.loadGen + 1
-		for i := range m.editor.pendingSendQueue {
-			if m.editor.pendingSendQueue[i].generation == msg.generation {
-				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
-				m.editor.pendingSendQueue[i].loadGeneration = expectedLoadGeneration
-			}
-		}
-		m.editor.pendingSendQueue = append([]sendQueueItem{{
+		m.editor.pendingSend.bindQueuedToSession(msg.generation, msg.session.ID, expectedLoadGeneration)
+		m.editor.pendingSend.enqueueFront(sendQueueItem{
 			content:        msg.command,
 			generation:     msg.generation,
 			sessionID:      msg.session.ID,
 			loadGeneration: expectedLoadGeneration,
 			bang:           true,
 			isFirstMessage: msg.isFirstMessage,
-		}}, m.editor.pendingSendQueue...)
+		})
 		m.sess.current = &msg.session
 		m.setState(uiChat, m.focus)
 		cmds = append(cmds, m.requestSessionLoad(msg.session.ID))

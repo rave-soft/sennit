@@ -47,11 +47,9 @@ type editorState struct {
 	bangMode     bool
 	bangWasEmpty bool // true when bang prompt became empty on last keystroke
 
-	// pendingSendQueue holds FIFO sends received while a session is loading.
-	pendingSendQueue   []sendQueueItem
-	pendingSendGen     uint64
-	pendingSendLoading bool
-	pendingSendActive  bool
+	// pendingSendState owns sends accepted by the editor until their target
+	// session accepts them. See send_state.go.
+	pendingSend pendingSendState
 
 	// bangCancel cancels a running bang-mode shell command. Nil when no
 	// bang command is in progress. Set by runShellCommand, cleared by

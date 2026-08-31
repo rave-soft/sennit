@@ -26,16 +26,6 @@ type sendPendingQueueMsg struct{}
 type notificationSentMsg struct{}
 
 // sendQueueItem holds one pending-send entry with generation tracking.
-type sendQueueItem struct {
-	content        string
-	attachments    []message.Attachment
-	generation     uint64
-	sessionID      string
-	loadGeneration uint64
-	bang           bool
-	isFirstMessage bool
-}
-
 // sendMessage sends a message with the given content and attachments.
 // All I/O (AgentReadyErr, CreateSession, AgentRun) runs inside a tea.Cmd
 // so that the Update goroutine is never blocked.
@@ -44,7 +34,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
 	if m.sess.current != nil && m.sess.loadExpectedID != "" && m.sess.loadExpectedID != m.sess.current.ID {
-		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
+		m.editor.pendingSend.enqueue(sendQueueItem{
 			content:        content,
 			attachments:    attachments,
 			sessionID:      m.sess.loadExpectedID,
@@ -53,8 +43,8 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return nil
 	}
 	if m.sess.current != nil {
-		if m.editor.pendingSendActive {
-			m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
+		if m.editor.pendingSend.activeNow() {
+			m.editor.pendingSend.enqueue(sendQueueItem{
 				content:        content,
 				attachments:    attachments,
 				sessionID:      m.sess.current.ID,
@@ -62,7 +52,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			})
 			return nil
 		}
-		m.editor.pendingSendActive = true
+		m.editor.pendingSend.beginActive()
 		// A busy session queues this prompt instead of running it, and
 		// nothing is persisted until the running turn takes it. Show it
 		// as waiting rather than letting it vanish until then.
@@ -74,8 +64,8 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 }
 
 func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) tea.Cmd {
-	if m.sess.current == nil && m.editor.pendingSendLoading {
-		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{content: content, attachments: attachments, generation: m.editor.pendingSendGen})
+	if m.sess.current == nil && m.editor.pendingSend.loadingNow() {
+		m.editor.pendingSend.enqueue(sendQueueItem{content: content, attachments: attachments, generation: m.editor.pendingSend.generationNow()})
 		return nil
 	}
 
@@ -84,13 +74,11 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 	reads := append([]string(nil), m.sess.fileReads...)
 	ctx := m.com.Context()
 	sessionID := ""
-	generation := m.editor.pendingSendGen
+	generation := m.editor.pendingSend.generationNow()
 	loadGeneration := m.sess.loadGen
 	creating := m.sess.current == nil
 	if creating {
-		m.editor.pendingSendLoading = true
-		m.editor.pendingSendGen++
-		generation = m.editor.pendingSendGen
+		generation = m.editor.pendingSend.beginLoading()
 	} else {
 		sessionID = m.sess.current.ID
 		m.wsCache.agentBusyCache.Set(true)

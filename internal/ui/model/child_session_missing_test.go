@@ -136,7 +136,7 @@ func TestFailedChildLoadClearsLoadExpectedID(t *testing.T) {
 
 	cmd := u.sendMessage("hello")
 	require.NotNil(t, cmd, "the prompt must run against the parent, not queue for the missing child")
-	require.Empty(t, u.editor.pendingSendQueue,
+	require.Empty(t, u.editor.pendingSend.queue,
 		"the prompt must not be queued for a session that will never resolve")
 }
 

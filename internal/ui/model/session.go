@@ -97,8 +97,7 @@ func (m *UI) requestSessionLoad(sessionID string) tea.Cmd {
 func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	m.sess.loadGen++
 	if m.sess.loadExpectedID != "" && m.sess.loadExpectedID != sessionID {
-		m.editor.pendingSendQueue = nil
-		m.editor.pendingSendActive = false
+		m.editor.pendingSend.discardForSessionChange()
 	}
 	m.sess.loadExpectedID = sessionID
 	generation := m.sess.loadGen

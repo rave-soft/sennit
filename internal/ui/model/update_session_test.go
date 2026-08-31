@@ -131,13 +131,13 @@ func TestUpdateSession_AgentRunSubmittedMsg(t *testing.T) {
 		warmCaches(m, false)
 		m.sess.loadExpectedID = "s-expected"
 		m.sess.loadGen = 5
-		m.editor.pendingSendActive = true
+		m.editor.pendingSend.active = true
 
 		cmds, done := m.updateSession(agentRunSubmittedMsg{sessionID: "s-other", loadGeneration: 5}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.editor.pendingSendActive, "a stale reply must not clear pendingSendActive")
+		require.True(t, m.editor.pendingSend.active, "a stale reply must not clear pendingSendActive")
 	})
 
 	t.Run("matching load expectation clears pendingSendActive and refreshes", func(t *testing.T) {
@@ -147,12 +147,12 @@ func TestUpdateSession_AgentRunSubmittedMsg(t *testing.T) {
 		warmCaches(m, false)
 		m.sess.loadExpectedID = "s1"
 		m.sess.loadGen = 5
-		m.editor.pendingSendActive = true
+		m.editor.pendingSend.active = true
 
 		cmds, done := m.updateSession(agentRunSubmittedMsg{sessionID: "s1", loadGeneration: 5}, nil)
 
 		require.False(t, done)
-		require.False(t, m.editor.pendingSendActive)
+		require.False(t, m.editor.pendingSend.active)
 		require.NotEmpty(t, cmds)
 	})
 
@@ -161,7 +161,7 @@ func TestUpdateSession_AgentRunSubmittedMsg(t *testing.T) {
 		ws := &countingWorkspace{ready: true}
 		m := newBusyUI(ws)
 		warmCaches(m, false)
-		m.editor.pendingSendQueue = []sendQueueItem{{content: "queued"}}
+		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
 
 		cmds, _ := m.updateSession(agentRunSubmittedMsg{}, nil)
 
@@ -200,16 +200,16 @@ func TestUpdateSession_LoadSessionMsg(t *testing.T) {
 		m := newBusyUI(&countingWorkspace{ready: true})
 		m.sess.loadGen = 1
 		m.sess.loadExpectedID = "s1"
-		m.editor.pendingSendQueue = []sendQueueItem{{content: "queued"}}
-		m.editor.pendingSendGen = 3
-		m.editor.pendingSendLoading = true
+		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
+		m.editor.pendingSend.generation = 3
+		m.editor.pendingSend.loading = true
 
 		cmds, done := m.updateSession(loadSessionMsg{gen: 1, sessionID: "s1", err: errors.New("load failed")}, nil)
 
 		require.False(t, done)
-		require.Nil(t, m.editor.pendingSendQueue)
-		require.Zero(t, m.editor.pendingSendGen)
-		require.False(t, m.editor.pendingSendLoading)
+		require.Nil(t, m.editor.pendingSend.queue)
+		require.Zero(t, m.editor.pendingSend.generation)
+		require.False(t, m.editor.pendingSend.loading)
 		require.Len(t, cmds, 1)
 		got, ok := cmds[0]().(util.InfoMsg)
 		require.True(t, ok)
@@ -273,7 +273,7 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 	t.Run("no pending send in flight is a pass-through", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendLoading = false
+		m.editor.pendingSend.loading = false
 
 		cmds, done := m.updateSession(createSessionMsg{generation: 1}, nil)
 
@@ -284,8 +284,8 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 	t.Run("mismatched generation is a pass-through", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendLoading = true
-		m.editor.pendingSendGen = 2
+		m.editor.pendingSend.loading = true
+		m.editor.pendingSend.generation = 2
 
 		cmds, done := m.updateSession(createSessionMsg{generation: 1}, nil)
 
@@ -296,8 +296,8 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 	t.Run("success adopts the new session and requests its load", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendLoading = true
-		m.editor.pendingSendGen = 1
+		m.editor.pendingSend.loading = true
+		m.editor.pendingSend.generation = 1
 		m.state = uiLanding
 		newSess := session.Session{ID: "s-new"}
 
@@ -310,8 +310,8 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 		require.True(t, done, "createSessionMsg always takes the early-return path")
 		require.Equal(t, uiChat, m.state)
 		require.Equal(t, "s-new", m.sess.current.ID)
-		require.Len(t, m.editor.pendingSendQueue, 1)
-		require.Equal(t, "hi", m.editor.pendingSendQueue[0].content)
+		require.Len(t, m.editor.pendingSend.queue, 1)
+		require.Equal(t, "hi", m.editor.pendingSend.queue[0].content)
 		require.Len(t, cmds, 1)
 		require.NotNil(t, cmds[0])
 	})
@@ -476,7 +476,7 @@ func TestUpdateSession_SendMessageErrorMsg(t *testing.T) {
 		m := newBusyUI(&countingWorkspace{ready: true})
 		m.sess.loadExpectedID = "s1"
 		m.sess.loadGen = 5
-		m.editor.pendingSendActive = true
+		m.editor.pendingSend.active = true
 
 		cmds, done := m.updateSession(sendMessageErrorMsg{
 			Err:            errors.New("nope"),
@@ -486,16 +486,16 @@ func TestUpdateSession_SendMessageErrorMsg(t *testing.T) {
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.editor.pendingSendActive, "a stale error must not touch pending-send state")
+		require.True(t, m.editor.pendingSend.active, "a stale error must not touch pending-send state")
 	})
 
 	t.Run("creating clears the pending-send queue on matching generation", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendLoading = true
-		m.editor.pendingSendGen = 3
-		m.editor.pendingSendQueue = []sendQueueItem{{content: "queued"}}
-		m.editor.pendingSendActive = true
+		m.editor.pendingSend.loading = true
+		m.editor.pendingSend.generation = 3
+		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
+		m.editor.pendingSend.active = true
 
 		cmds, done := m.updateSession(sendMessageErrorMsg{
 			Err:        errors.New("create failed"),
@@ -504,21 +504,21 @@ func TestUpdateSession_SendMessageErrorMsg(t *testing.T) {
 		}, nil)
 
 		require.False(t, done)
-		require.False(t, m.editor.pendingSendActive)
-		require.False(t, m.editor.pendingSendLoading)
-		require.Nil(t, m.editor.pendingSendQueue)
+		require.False(t, m.editor.pendingSend.active)
+		require.False(t, m.editor.pendingSend.loading)
+		require.Nil(t, m.editor.pendingSend.queue)
 		require.NotEmpty(t, cmds)
 	})
 
 	t.Run("non-creating error with a queued item schedules a drain", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendActive = true
-		m.editor.pendingSendQueue = []sendQueueItem{{content: "queued"}}
+		m.editor.pendingSend.active = true
+		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
 
 		cmds, _ := m.updateSession(sendMessageErrorMsg{Err: errors.New("send failed")}, nil)
 
-		require.False(t, m.editor.pendingSendActive)
+		require.False(t, m.editor.pendingSend.active)
 		var sawDrain bool
 		for _, c := range cmds {
 			if c == nil {
@@ -550,14 +550,14 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
-		m.editor.pendingSendActive = true
-		m.editor.pendingSendQueue = []sendQueueItem{{content: "queued"}}
+		m.editor.pendingSend.active = true
+		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
 
 		cmds, done := m.updateSession(sendPendingQueueMsg{}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.Len(t, m.editor.pendingSendQueue, 1, "the queue must not be drained while a send is active")
+		require.Len(t, m.editor.pendingSend.queue, 1, "the queue must not be drained while a send is active")
 	})
 
 	t.Run("stale item for a different session is dropped and the drain re-scheduled", func(t *testing.T) {
@@ -565,7 +565,7 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 		m := newBusyUI(&countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 		m.sess.loadGen = 5
-		m.editor.pendingSendQueue = []sendQueueItem{
+		m.editor.pendingSend.queue = []sendQueueItem{
 			{content: "stale", sessionID: "s-other", loadGeneration: 5},
 			{content: "next", sessionID: "s1", loadGeneration: 5},
 		}
@@ -573,9 +573,9 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 		cmds, done := m.updateSession(sendPendingQueueMsg{}, nil)
 
 		require.False(t, done)
-		require.False(t, m.editor.pendingSendActive)
-		require.Len(t, m.editor.pendingSendQueue, 1, "the stale item must be dropped")
-		require.Equal(t, "next", m.editor.pendingSendQueue[0].content)
+		require.False(t, m.editor.pendingSend.active)
+		require.Len(t, m.editor.pendingSend.queue, 1, "the stale item must be dropped")
+		require.Equal(t, "next", m.editor.pendingSend.queue[0].content)
 		require.Len(t, cmds, 1)
 		_, ok := cmds[0]().(sendPendingQueueMsg)
 		require.True(t, ok)
@@ -585,15 +585,15 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
-		m.editor.pendingSendQueue = []sendQueueItem{
+		m.editor.pendingSend.queue = []sendQueueItem{
 			{content: "echo hi", sessionID: "s1", bang: true},
 		}
 
 		cmds, done := m.updateSession(sendPendingQueueMsg{}, nil)
 
 		require.False(t, done)
-		require.True(t, m.editor.pendingSendActive)
-		require.Empty(t, m.editor.pendingSendQueue)
+		require.True(t, m.editor.pendingSend.active)
+		require.Empty(t, m.editor.pendingSend.queue)
 		require.Len(t, cmds, 1)
 		require.NotNil(t, cmds[0])
 	})
@@ -602,14 +602,14 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
-		m.editor.pendingSendQueue = []sendQueueItem{
+		m.editor.pendingSend.queue = []sendQueueItem{
 			{content: "hello", sessionID: "s1"},
 		}
 
 		cmds, done := m.updateSession(sendPendingQueueMsg{}, nil)
 
 		require.False(t, done)
-		require.True(t, m.editor.pendingSendActive)
+		require.True(t, m.editor.pendingSend.active)
 		require.Len(t, cmds, 1)
 		require.NotNil(t, cmds[0])
 	})
@@ -621,7 +621,7 @@ func TestUpdateSession_BangSessionCreatedMsg(t *testing.T) {
 	t.Run("no pending send in flight is dropped", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendLoading = false
+		m.editor.pendingSend.loading = false
 
 		cmds, done := m.updateSession(bangSessionCreatedMsg{generation: 1}, nil)
 
@@ -632,8 +632,8 @@ func TestUpdateSession_BangSessionCreatedMsg(t *testing.T) {
 	t.Run("mismatched generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendLoading = true
-		m.editor.pendingSendGen = 2
+		m.editor.pendingSend.loading = true
+		m.editor.pendingSend.generation = 2
 
 		cmds, done := m.updateSession(bangSessionCreatedMsg{generation: 1}, nil)
 
@@ -644,8 +644,8 @@ func TestUpdateSession_BangSessionCreatedMsg(t *testing.T) {
 	t.Run("success adopts the session and queues the bang command", func(t *testing.T) {
 		t.Parallel()
 		m := newBusyUI(&countingWorkspace{ready: true})
-		m.editor.pendingSendLoading = true
-		m.editor.pendingSendGen = 1
+		m.editor.pendingSend.loading = true
+		m.editor.pendingSend.generation = 1
 		m.state = uiLanding
 		newSess := session.Session{ID: "s-bang"}
 
@@ -659,9 +659,9 @@ func TestUpdateSession_BangSessionCreatedMsg(t *testing.T) {
 		require.False(t, done)
 		require.Equal(t, uiChat, m.state)
 		require.Equal(t, "s-bang", m.sess.current.ID)
-		require.Len(t, m.editor.pendingSendQueue, 1)
-		require.True(t, m.editor.pendingSendQueue[0].bang)
-		require.Equal(t, "echo hi", m.editor.pendingSendQueue[0].content)
+		require.Len(t, m.editor.pendingSend.queue, 1)
+		require.True(t, m.editor.pendingSend.queue[0].bang)
+		require.Equal(t, "echo hi", m.editor.pendingSend.queue[0].content)
 		require.Len(t, cmds, 1)
 		require.NotNil(t, cmds[0])
 	})

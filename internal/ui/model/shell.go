@@ -91,14 +91,14 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// over either way, and bangCancel is what isAgentBusy reads:
 			// left set, the editor stayed "busy" for the rest of the
 			// session with nothing running behind it.
-			m.editor.pendingSendActive = false
+			m.editor.pendingSend.finishActive()
 			if m.editor.bangCancel != nil {
 				m.editor.bangCancel()
 				m.editor.bangCancel = nil
 			}
 			break
 		}
-		m.editor.pendingSendActive = false
+		m.editor.pendingSend.finishActive()
 		// Clear the bang cancel func — command is done.
 		if m.editor.bangCancel != nil {
 			m.editor.bangCancel()
@@ -128,7 +128,7 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			}
 		}
 		cmds = append(cmds, m.sess.loadPromptHistory(m.com))
-		if len(m.editor.pendingSendQueue) > 0 {
+		if m.editor.pendingSend.hasQueued() {
 			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 		}
 	}
@@ -142,7 +142,7 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
 	if m.sess.current != nil {
-		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
+		m.editor.pendingSend.enqueue(sendQueueItem{
 			content:        command,
 			sessionID:      m.sess.current.ID,
 			loadGeneration: m.sess.loadGen,
@@ -159,13 +159,11 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cmd {
 	var cmds []tea.Cmd
 	if !m.hasSession() {
-		if m.editor.pendingSendLoading {
-			m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{content: command, generation: m.editor.pendingSendGen, bang: true})
+		if m.editor.pendingSend.loadingNow() {
+			m.editor.pendingSend.enqueue(sendQueueItem{content: command, generation: m.editor.pendingSend.generationNow(), bang: true})
 			return nil
 		}
-		m.editor.pendingSendLoading = true
-		m.editor.pendingSendGen++
-		generation := m.editor.pendingSendGen
+		generation := m.editor.pendingSend.beginLoading()
 		workspace := m.com.Workspace
 		ctx := m.com.Context()
 		owner := m
