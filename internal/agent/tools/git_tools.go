@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/proto"
 )
 
@@ -119,7 +120,7 @@ func gitRepo(ctx context.Context, dir string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if wd != root && !strings.HasPrefix(wd, root+string(filepath.Separator)) {
+	if !fsext.HasPrefix(wd, root) {
 		return "", "", fmt.Errorf("working directory is outside git worktree")
 	}
 	return root, wd, nil
@@ -145,8 +146,8 @@ func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-func safeGitPaths(dir string, in []string) ([]string, error) {
-	root, wd, err := gitRepo(context.Background(), dir)
+func safeGitPaths(ctx context.Context, dir string, in []string) ([]string, error) {
+	root, wd, err := gitRepo(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -156,11 +157,11 @@ func safeGitPaths(dir string, in []string) ([]string, error) {
 			return nil, fmt.Errorf("invalid path %q", path)
 		}
 		joined := filepath.Clean(filepath.Join(wd, path))
-		if joined != root && !strings.HasPrefix(joined, root+string(filepath.Separator)) {
+		if !fsext.HasPrefix(joined, root) {
 			return nil, fmt.Errorf("path outside worktree: %q", path)
 		}
 		rel, err := filepath.Rel(wd, joined)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if err != nil || !fsext.HasPrefix(joined, wd) {
 			return nil, fmt.Errorf("path outside working directory: %q", path)
 		}
 		out = append(out, filepath.ToSlash(rel))
@@ -204,7 +205,7 @@ func gitError(err error) (fantasy.ToolResponse, error) {
 
 func NewGitStatusTool(dir string) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(GitStatusToolName, "Read current git worktree status.", func(ctx context.Context, p GitStatusParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-		paths, err := safeGitPaths(dir, p.Paths)
+		paths, err := safeGitPaths(ctx, dir, p.Paths)
 		if err != nil {
 			return gitError(err)
 		}
@@ -289,7 +290,7 @@ func parseGitStatus(data []byte) ([]gitStatusEntry, error) {
 
 func NewGitLogTool(dir string) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(GitLogToolName, "Read git commit history from the current worktree.", func(ctx context.Context, p GitLogParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-		paths, err := safeGitPaths(dir, p.Paths)
+		paths, err := safeGitPaths(ctx, dir, p.Paths)
 		if err != nil {
 			return gitError(err)
 		}
@@ -365,7 +366,7 @@ func parseGitLog(data []byte) ([]gitLogEntry, error) {
 
 func NewGitDiffTool(dir string) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(GitDiffToolName, "Read a git diff from the current worktree.", func(ctx context.Context, p GitDiffParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-		paths, err := safeGitPaths(dir, p.Paths)
+		paths, err := safeGitPaths(ctx, dir, p.Paths)
 		if err != nil {
 			return gitError(err)
 		}

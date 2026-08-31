@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -277,6 +278,30 @@ func TestHasPrefix(t *testing.T) {
 			path:     filepath.Join(string(filepath.Separator), "ab"),
 			prefix:   filepath.Join(string(filepath.Separator), "a"),
 			expected: false,
+		},
+		{
+			name:     "relative path resolves cleanly",
+			path:     filepath.Join("root", "child", "..", "child", "file"),
+			prefix:   "root",
+			expected: true,
+		},
+		{
+			name:     "relative path escaping root",
+			path:     filepath.Join("root", "..", "sibling"),
+			prefix:   "root",
+			expected: false,
+		},
+		{
+			name:     "absolute path is not within relative root",
+			path:     filepath.Join(string(filepath.Separator), "root", "child"),
+			prefix:   "root",
+			expected: false,
+		},
+		{
+			name:     "case follows platform path semantics",
+			path:     filepath.Join(string(filepath.Separator), "root", "child"),
+			prefix:   filepath.Join(string(filepath.Separator), "ROOT"),
+			expected: runtime.GOOS == "windows",
 		},
 	}
 

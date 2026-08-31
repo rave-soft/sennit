@@ -3,13 +3,12 @@ package tools
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"charm.land/fantasy"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
@@ -52,14 +51,7 @@ func NewHoverTool(m *lsp.Manager, root string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("provide symbol or file_path, line, and character"), nil
 			}
 			path = filepathext.SmartJoin(root, p.FilePath)
-			// Matches lsp_workspace_symbols.go's check: rel == ".." alone
-			// only catches an exact escape to the workspace's own parent
-			// (file_path: ".."). A deeper escape like "../x" produces
-			// rel == "../x", which that bare comparison let through
-			// unnoticed - as would an absolute path outside root, which
-			// filepath.Rel likewise resolves to a "../..." rel instead of
-			// erroring.
-			if rel, err := filepath.Rel(root, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			if !fsext.HasPrefix(path, root) {
 				return fantasy.NewTextErrorResponse("file_path must be inside the workspace"), nil
 			}
 			// line and character are 1-based (requests.Hover subtracts one

@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
@@ -51,7 +52,7 @@ func workspaceSymbolMatches(ctx context.Context, m *lsp.Manager, root, query, ki
 		}
 		for _, x := range got {
 			rel, err := filepath.Rel(base, x.Path)
-			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			if err != nil || !fsext.HasPrefix(x.Path, base) {
 				continue
 			}
 			if path != "" && filepath.ToSlash(rel) != filepath.ToSlash(path) && !strings.HasPrefix(filepath.ToSlash(rel), strings.TrimSuffix(filepath.ToSlash(path), "/")+"/") {

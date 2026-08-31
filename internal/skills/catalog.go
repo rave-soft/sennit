@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 // SourceType describes where a visible skill comes from.
@@ -117,8 +119,7 @@ func skillLabel(skillPaths []string, workingDir string, skill *Skill) (string, S
 	cleanFile := filepath.Clean(skill.SkillFilePath)
 	for _, base := range skillPaths {
 		cleanBase := filepath.Clean(base)
-		rel, err := filepath.Rel(cleanBase, cleanFile)
-		if err != nil || escapesParent(rel) {
+		if !fsext.HasPrefix(cleanFile, cleanBase) {
 			continue
 		}
 
@@ -132,10 +133,6 @@ func skillLabel(skillPaths []string, workingDir string, skill *Skill) (string, S
 	}
 
 	return string(SourceUser) + ":" + filepath.Base(filepath.Dir(cleanFile)), SourceUser
-}
-
-func escapesParent(rel string) bool {
-	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func isProjectSkillPath(basePath, workingDir string) bool {
@@ -152,9 +149,5 @@ func isProjectSkillPath(basePath, workingDir string) bool {
 	}
 	cleanBase := filepath.Clean(absBase)
 	cleanWD := filepath.Clean(absWD)
-	rel, err := filepath.Rel(cleanWD, cleanBase)
-	if err != nil {
-		return false
-	}
-	return !escapesParent(rel)
+	return fsext.HasPrefix(cleanBase, cleanWD)
 }

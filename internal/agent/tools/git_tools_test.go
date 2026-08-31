@@ -155,6 +155,15 @@ func TestParseNumstatRenameAndByteBudget(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSafeGitPathsUsesToolContext(t *testing.T) {
+	dir := gitToolRepo(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := safeGitPaths(ctx, dir, []string{"file"})
+	require.Error(t, err)
+}
+
 func TestGitLogEmptyRepositoryAndPathEscape(t *testing.T) {
 	dir := gitToolRepo(t)
 	r, m := callGitTool[GitLogParams, gitMeta](t, NewGitLogTool(dir), GitLogToolName, GitLogParams{})
