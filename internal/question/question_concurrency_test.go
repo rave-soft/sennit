@@ -47,13 +47,33 @@ func TestAskRefusesASecondQuestionWhileOneIsPending(t *testing.T) {
 
 	// The first is still answerable, which is the point: it was not
 	// displaced by the refused one.
-	require.True(t, s.Answer([]Answer{{QuestionID: "first-q1", FillInText: "because"}}))
+	require.True(t, s.Answer("first", []Answer{{QuestionID: "first-q1", FillInText: "because"}}))
 	require.NoError(t, <-first)
 }
 
 // TestCancelTwiceIsANoOpNotAPanic covers two clients dismissing the same
 // form, or a cancel racing a session teardown: closing an already-closed
 // channel is fatal, so the second call has to find nothing to close.
+func TestAnswerRejectsStaleBatch(t *testing.T) {
+	t.Parallel()
+
+	s := NewService()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Ask(context.Background(), testRequest("current"))
+		done <- err
+	}()
+	require.Eventually(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.pendingID == "current"
+	}, 2*time.Second, 5*time.Millisecond)
+
+	require.False(t, s.Answer("stale", []Answer{{QuestionID: "current-q1"}}))
+	require.True(t, s.Answer("current", []Answer{{QuestionID: "current-q1", FillInText: "current answer"}}))
+	require.NoError(t, <-done)
+}
+
 func TestCancelTwiceIsANoOpNotAPanic(t *testing.T) {
 	t.Parallel()
 

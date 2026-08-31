@@ -269,7 +269,7 @@ type PermissionResolver interface {
 // QuestionResponder resolves or cancels a pending agent question.
 type QuestionResponder interface {
 	// QuestionAnswer resolves the pending question with responses.
-	QuestionAnswer(responses []question.Answer) bool
+	QuestionAnswer(batchID string, responses []question.Answer) bool
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
 }

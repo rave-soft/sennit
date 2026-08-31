@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1083,6 +1084,27 @@ func TestFlushAll_DrainsQueuedUpdateUnderConcurrentWrites(t *testing.T) {
 // Windows that is not merely a logged error: the connection it takes
 // keeps the file open, and the directory cannot be removed, which failed
 // tests that had already passed.
+func TestUpdateAfterCloseRejectsTerminalAndNonTerminalState(t *testing.T) {
+	t.Parallel()
+
+	for _, terminal := range []bool{false, true} {
+		t.Run(fmt.Sprintf("terminal=%t", terminal), func(t *testing.T) {
+			t.Parallel()
+
+			svc, sessID := newTestService(t, WithDebounce(time.Hour))
+			msg, err := svc.Create(t.Context(), sessID, CreateMessageParams{Role: Assistant})
+			require.NoError(t, err)
+			require.NoError(t, svc.Close(t.Context()))
+
+			msg.AppendContent("late")
+			if terminal {
+				msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
+			}
+			require.ErrorIs(t, svc.Update(t.Context(), msg), ErrClosed)
+		})
+	}
+}
+
 func TestCloseStopsTimersSoNothingWritesAfterwards(t *testing.T) {
 	t.Parallel()
 
@@ -1102,10 +1124,10 @@ func TestCloseStopsTimersSoNothingWritesAfterwards(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "hello", stored.Content().Text)
 
-	// ...and a further update arms nothing: well past the debounce
+	// ...and a further update is rejected: well past the debounce
 	// window, the store still holds what Close left there.
 	msg.AppendContent(" again")
-	require.NoError(t, svc.Update(t.Context(), msg))
+	require.ErrorIs(t, svc.Update(t.Context(), msg), ErrClosed)
 	time.Sleep(100 * time.Millisecond)
 
 	stored, err = svc.Get(t.Context(), msg.ID)

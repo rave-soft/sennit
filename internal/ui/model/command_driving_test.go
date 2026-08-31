@@ -91,6 +91,7 @@ type cmdDrivingWorkspace struct {
 	currentSessionIDs       []string
 
 	questionAnswerCalls    int
+	questionAnswerBatchID  string
 	questionAnswerResponse []question.Answer
 	questionCancelCalls    int
 
@@ -476,8 +477,9 @@ func (w *cmdDrivingWorkspace) PrepareSessionChanges(ctx context.Context, session
 	return workspace.AggregateSessionFiles(files), nil
 }
 
-func (w *cmdDrivingWorkspace) QuestionAnswer(responses []question.Answer) bool {
+func (w *cmdDrivingWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
 	w.questionAnswerCalls++
+	w.questionAnswerBatchID = batchID
 	w.questionAnswerResponse = responses
 	return false
 }

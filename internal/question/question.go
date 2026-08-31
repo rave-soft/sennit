@@ -193,7 +193,7 @@ type Service interface {
 	Ask(ctx context.Context, req Request) ([]Answer, error)
 
 	// Answer resolves the pending question with the given answers.
-	Answer(answers []Answer) bool
+	Answer(batchID string, answers []Answer) bool
 
 	// Cancel cancels the pending question. Returns false if no
 	// question is pending.
@@ -296,16 +296,18 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 
 // Answer resolves the pending question. Returns false if no
 // question is pending (already answered or cancelled).
-func (s *questionService) Answer(answers []Answer) bool {
+func (s *questionService) Answer(batchID string, answers []Answer) bool {
 	s.mu.Lock()
-	batchID := s.pendingID
-	ch := s.pending
-	s.mu.Unlock()
-
-	if ch == nil {
+	if s.pending == nil || s.pendingID != batchID {
+		s.mu.Unlock()
 		return false
 	}
+	ch := s.pending
+	s.pending = nil
+	s.cancelled = nil
+	s.pendingID = ""
 	ch <- answers
+	s.mu.Unlock()
 
 	// Publish a notification so non-answering clients can dismiss
 	// their open question forms.

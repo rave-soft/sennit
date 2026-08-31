@@ -324,7 +324,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			ro.PermissionSetSkipRequests(true)
 		},
 		"QuestionAnswer": func(t *testing.T, ro *readOnlyWorkspace) {
-			require.False(t, ro.QuestionAnswer(nil))
+			require.False(t, ro.QuestionAnswer("", nil))
 		},
 		"QuestionCancel": func(t *testing.T, ro *readOnlyWorkspace) {
 			require.False(t, ro.QuestionCancel())

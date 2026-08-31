@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -21,6 +22,8 @@ import (
 // (finish/error/cancel/tool-call structural changes) bypass the
 // debounce and flush synchronously.
 const defaultUpdateDebounce = 33 * time.Millisecond
+
+var ErrClosed = errors.New("message store is closed")
 
 // Service is the public interface to the message store.
 //
@@ -302,6 +305,10 @@ func (s *service) Update(ctx context.Context, msg message.Message) error {
 	// that explicitly opted out via [WithDebounce].
 	if s.debounce <= 0 {
 		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return ErrClosed
+		}
 		p, ok := s.pending[msg.ID]
 		if ok && p.deleted {
 			// The message was deleted -- possibly by a stream landing
@@ -323,6 +330,10 @@ func (s *service) Update(ctx context.Context, msg message.Message) error {
 	}
 
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrClosed
+	}
 	p, ok := s.pending[msg.ID]
 	if ok && p.deleted {
 		// See the debounce<=0 branch above: a deleted message's stream

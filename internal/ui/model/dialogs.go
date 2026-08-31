@@ -518,7 +518,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	ws := m.com.Workspace
 	form.OnAnswer = func(responses []question.Answer) tea.Cmd {
 		return func() tea.Msg {
-			ws.QuestionAnswer(responses)
+			ws.QuestionAnswer(batch.ID, responses)
 			return nil
 		}
 	}

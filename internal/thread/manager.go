@@ -110,16 +110,9 @@ type Manager struct {
 	shutdownOnce    sync.Once
 	shutdownStarted chan struct{}
 	shutdownDone    chan struct{}
-	// shutdownCancel cancels the context handed to the cleanup goroutine
-	// started inside shutdownOnce.Do — see Shutdown. It is written once,
-	// inside that Do, and read afterwards by every Shutdown call
-	// (possibly from a different goroutine than the one that ran Do).
-	// sync.Once.Do only guarantees happens-before for callers that
-	// actually waited on it, which every Shutdown call does by
-	// construction: Do either runs the closure itself (writing the field
-	// before ever reading it) or blocks until the concurrent Do call
-	// returns, so no reader can observe shutdownCancel before it is set.
-	shutdownCancel context.CancelFunc
+	shutdownMu      sync.Mutex
+	shutdownWaiters int
+	shutdownCancel  context.CancelFunc
 }
 
 // NewManager constructs a Manager. Callers must only do so for
@@ -1000,11 +993,7 @@ func (m *Manager) PermissionsFor(delegationID string) permission.Service {
 //
 // The cleanup below runs on its own context rather than ctx, since ctx
 // belongs to whichever caller happens to be waiting and m.ctx is already
-// cancelled by the time the goroutine starts. That context is shared by
-// every concurrent Shutdown call, and the first caller to give up on
-// waiting cancels it for all of them: the cleanup work is not meant to
-// outlive every caller that asked for it, so once nobody is left waiting
-// there is no reason to keep releasing runtimes gracefully.
+// cancelled by the time the goroutine starts.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -1051,12 +1040,21 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			close(m.shutdownDone)
 		}()
 	})
+	m.shutdownMu.Lock()
+	m.shutdownWaiters++
+	m.shutdownMu.Unlock()
+	defer func() {
+		m.shutdownMu.Lock()
+		m.shutdownWaiters--
+		if m.shutdownWaiters == 0 {
+			m.shutdownCancel()
+		}
+		m.shutdownMu.Unlock()
+	}()
 	select {
 	case <-m.shutdownDone:
-		m.shutdownCancel()
 		return nil
 	case <-ctx.Done():
-		m.shutdownCancel()
 		return ctx.Err()
 	}
 }

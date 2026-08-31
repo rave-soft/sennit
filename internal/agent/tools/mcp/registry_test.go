@@ -68,6 +68,63 @@ func TestClose_SharedRegistryBrokerSurvivesOneOfTwoWorkspacesClosing(t *testing.
 // been given their own registry) must not affect each other's broker at
 // all — closing one must never touch the other's event stream,
 // refcounted or not.
+func TestRegistry_CloseContinuesAfterCallerCancellation(t *testing.T) {
+	r := NewRegistry()
+	r.ArmInit()
+	waiter := &tokenWrite{done: make(chan struct{})}
+	r.publishMu.Lock()
+	r.tokenWrites[tokenWriteOwner{name: "blocked", attempt: attemptID{gen: 1, seq: 1}}] = map[*tokenWrite]struct{}{waiter: {}}
+	r.publishMu.Unlock()
+	sub := r.SubscribeEvents(context.Background())
+
+	firstCtx, firstCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer firstCancel()
+	require.ErrorIs(t, r.Close(firstCtx), context.DeadlineExceeded)
+
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- r.Close(context.Background()) }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("repeated Close returned before shared cleanup completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	select {
+	case _, ok := <-sub:
+		if !ok {
+			t.Fatal("broker shut down before shared cleanup completed")
+		}
+	default:
+	}
+
+	close(waiter.done)
+	require.NoError(t, <-secondDone)
+	select {
+	case _, ok := <-sub:
+		require.False(t, ok)
+	case <-time.After(2 * time.Second):
+		t.Fatal("broker did not shut down after shared cleanup completed")
+	}
+	require.NoError(t, r.Close(context.Background()))
+}
+
+func TestRegistry_CloseReturnsEachCallersContextError(t *testing.T) {
+	r := NewRegistry()
+	r.ArmInit()
+	waiter := &tokenWrite{done: make(chan struct{})}
+	r.publishMu.Lock()
+	r.tokenWrites[tokenWriteOwner{name: "blocked", attempt: attemptID{gen: 1, seq: 1}}] = map[*tokenWrite]struct{}{waiter: {}}
+	r.publishMu.Unlock()
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, r.Close(cancelledCtx), context.Canceled)
+	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer deadlineCancel()
+	require.ErrorIs(t, r.Close(deadlineCtx), context.DeadlineExceeded)
+	close(waiter.done)
+	require.NoError(t, r.Close(context.Background()))
+}
+
 func TestRegistry_CloseIsolatedPerInstance(t *testing.T) {
 	regA := NewRegistry()
 	regB := NewRegistry()

@@ -103,7 +103,7 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	require.True(t, IsReadOnlyError(err))
 
 	// Question resolution denied.
-	require.False(t, ro.QuestionAnswer(nil))
+	require.False(t, ro.QuestionAnswer("", nil))
 	require.False(t, ro.QuestionCancel())
 
 	// Permission mutations denied.
@@ -481,7 +481,7 @@ func (s *stubWorkspace) PermissionSkipRequests() bool        { return false }
 func (s *stubWorkspace) PermissionSetSkipRequests(skip bool) { s.track("PermissionSetSkipRequests") }
 
 // QuestionResponder
-func (s *stubWorkspace) QuestionAnswer(responses []question.Answer) bool {
+func (s *stubWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
 	s.track("QuestionAnswer")
 	return false
 }

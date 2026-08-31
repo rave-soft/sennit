@@ -626,6 +626,8 @@ type fakeSpawner struct {
 	// context that actually gets cancelled, rather than one that lingers
 	// on context.Background() forever.
 	blockReleaseUntilCtxDone bool
+	releaseEntered           chan struct{}
+	releaseBlock             chan struct{}
 	// noCoordinator, when set, leaves the spawned App's AgentCoordinator
 	// nil instead of installing a fakeCoordinator — for tests exercising
 	// the "workspace with no agent configured" path (Workspace.Coordinator
@@ -690,6 +692,15 @@ func (s *fakeSpawner) Release(ctx context.Context, id string) error {
 	_, statErr := os.Stat(id)
 	sawWorktree := statErr == nil
 
+	if s.releaseEntered != nil {
+		close(s.releaseEntered)
+	}
+	if s.releaseBlock != nil {
+		select {
+		case <-s.releaseBlock:
+		case <-ctx.Done():
+		}
+	}
 	if s.blockReleaseUntilCtxDone {
 		<-ctx.Done()
 	}

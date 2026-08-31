@@ -181,6 +181,8 @@ type Registry struct {
 	// still needs the shutdown-gating this provides.
 	refMu          sync.Mutex
 	liveWorkspaces int
+	closeOnce      sync.Once
+	closeDone      chan struct{}
 }
 
 // NewRegistry creates an empty, ready-to-use MCP registry.
@@ -200,6 +202,7 @@ func NewRegistry() *Registry {
 		allTools:          csync.NewMap[string, []*Tool](),
 		allResources:      csync.NewMap[string, []*Resource](),
 		allPrompts:        csync.NewMap[string, []*Prompt](),
+		closeDone:         make(chan struct{}),
 	}
 	r.connectionManager = &connectionManager{reg: r}
 	r.authCoordinator = &authCoordinator{reg: r, authFlows: map[string]*authFlow{}}
@@ -321,12 +324,26 @@ func (r *Registry) Close(ctx context.Context) error {
 	if !shutdown {
 		return nil
 	}
+	r.closeOnce.Do(func() {
+		go func() {
+			r.close(context.Background())
+			close(r.closeDone)
+		}()
+	})
+	select {
+	case <-r.closeDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
+func (r *Registry) close(ctx context.Context) {
 	// Invalidate and detach everything before any potentially blocking close.
 	r.publishMu.Lock()
 	if r.closing {
 		r.publishMu.Unlock()
-		return nil
+		return
 	}
 	r.closing = true
 	names := map[string]struct{}{}
@@ -391,12 +408,8 @@ func (r *Registry) Close(ctx context.Context) error {
 	case <-done:
 	case <-ctx.Done():
 	}
-	writeErr := waitTokenWrites(ctx, writeWaiters)
+	_ = waitTokenWrites(ctx, writeWaiters)
 	r.broker.Shutdown()
-	if writeErr != nil {
-		return writeErr
-	}
-	return ctx.Err()
 }
 
 const lifecycleCleanupTimeout = 2 * time.Second

@@ -312,7 +312,7 @@ func (w *readOnlyWorkspace) PermissionSetSkipRequests(skip bool) {
 
 // -- Questions (all denied) --
 
-func (w *readOnlyWorkspace) QuestionAnswer(responses []question.Answer) bool {
+func (w *readOnlyWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
 	return false
 }
 

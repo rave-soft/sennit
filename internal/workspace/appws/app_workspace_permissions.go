@@ -95,8 +95,8 @@ func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 
 // -- Questions --
 
-func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
-	return w.app.Questions.Answer(responses)
+func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+	return w.app.Questions.Answer(batchID, responses)
 }
 
 func (w *AppWorkspace) QuestionCancel() bool {

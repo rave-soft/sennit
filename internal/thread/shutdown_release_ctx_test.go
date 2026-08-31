@@ -47,6 +47,40 @@ func TestManager_ShutdownCancelsReleaseWhenCallerGivesUp(t *testing.T) {
 // path counterpart to the test above: when Shutdown's cleanup finishes
 // before the caller's ctx expires, Release must see a context that is still
 // live for the whole call, not one pre-emptively cancelled.
+func TestManager_ConcurrentShutdownKeepsCleanupAliveForRemainingCaller(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	spawner.releaseEntered = make(chan struct{})
+	spawner.releaseBlock = make(chan struct{})
+
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name: "concurrent-shutdown", Goal: "go", MergePolicy: thread.MergeManual,
+	})
+	require.NoError(t, err)
+
+	longDone := make(chan error, 1)
+	go func() { longDone <- mgr.Shutdown(context.Background()) }()
+	select {
+	case <-spawner.releaseEntered:
+	case <-time.After(eventuallyTimeout):
+		t.Fatal("Release did not start")
+	}
+
+	shortCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	shortDone := make(chan error, 1)
+	go func() { shortDone <- mgr.Shutdown(shortCtx) }()
+	require.ErrorIs(t, <-shortDone, context.DeadlineExceeded)
+	require.NoError(t, spawner.releaseCtxErrAt(st.WorktreePath))
+
+	close(spawner.releaseBlock)
+	require.NoError(t, <-longDone)
+	require.Equal(t, 1, spawner.releases(st.WorktreePath))
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusInterrupted, got.Status)
+}
+
 func TestManager_ShutdownReleasesOnLiveContextWhenCallerWaits(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
