@@ -341,6 +341,16 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
+	// Record what the compaction was worth before the finishing Update,
+	// so one write persists the numbers and one pubsub event carries them
+	// to a chat already rendering the row. "Before" is the summarize
+	// request's own prompt — the whole conversation, as the provider
+	// counted it — rather than the session's counters, which the next
+	// turn overwrites; "after" is the summary that replaces it, reusing
+	// the same fallback the session's own completion count uses when a
+	// provider reports no usage.
+	summaryMessage.SummaryBeforeTokens = promptTokensOf(resp.Response.Usage)
+	summaryMessage.SummaryAfterTokens = summaryCompletionTokens(resp.Response.Usage, summaryMessage)
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, time.Now().Unix(), "", "")
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {

@@ -110,7 +110,7 @@ INSERT INTO messages (
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
-RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin
+RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin, summary_before_tokens, summary_after_tokens
 `
 
 type CreateMessageParams struct {
@@ -148,6 +148,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.Provider,
 		&i.IsSummaryMessage,
 		&i.Origin,
+		&i.SummaryBeforeTokens,
+		&i.SummaryAfterTokens,
 	)
 	return i, err
 }
@@ -173,7 +175,7 @@ func (q *Queries) DeleteSessionMessages(ctx context.Context, sessionID string) e
 }
 
 const getMessage = `-- name: GetMessage :one
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin, summary_before_tokens, summary_after_tokens
 FROM messages
 WHERE id = ? LIMIT 1
 `
@@ -193,6 +195,8 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 		&i.Provider,
 		&i.IsSummaryMessage,
 		&i.Origin,
+		&i.SummaryBeforeTokens,
+		&i.SummaryAfterTokens,
 	)
 	return i, err
 }
@@ -219,7 +223,7 @@ func (q *Queries) LastMessageActivity(ctx context.Context, sessionID string) (in
 }
 
 const listAllUserMessages = `-- name: ListAllUserMessages :many
-SELECT messages.id, messages.session_id, messages.role, messages.parts, messages.model, messages.created_at, messages.updated_at, messages.finished_at, messages.provider, messages.is_summary_message, messages.origin
+SELECT messages.id, messages.session_id, messages.role, messages.parts, messages.model, messages.created_at, messages.updated_at, messages.finished_at, messages.provider, messages.is_summary_message, messages.origin, messages.summary_before_tokens, messages.summary_after_tokens
 FROM messages
 JOIN sessions ON sessions.id = messages.session_id
 WHERE messages.role = 'user'
@@ -256,6 +260,8 @@ func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 			&i.Provider,
 			&i.IsSummaryMessage,
 			&i.Origin,
+			&i.SummaryBeforeTokens,
+			&i.SummaryAfterTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -271,7 +277,7 @@ func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 }
 
 const listMessagesBySession = `-- name: ListMessagesBySession :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin, summary_before_tokens, summary_after_tokens
 FROM messages
 WHERE session_id = ?
 ORDER BY created_at ASC
@@ -298,6 +304,8 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 			&i.Provider,
 			&i.IsSummaryMessage,
 			&i.Origin,
+			&i.SummaryBeforeTokens,
+			&i.SummaryAfterTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -316,7 +324,7 @@ const listMessagesBySessionIDs = `-- name: ListMessagesBySessionIDs :many
 WITH input AS (
     SELECT CAST(?1 AS TEXT) AS session_ids_json
 )
-SELECT messages.id, messages.session_id, messages.role, messages.parts, messages.model, messages.created_at, messages.updated_at, messages.finished_at, messages.provider, messages.is_summary_message, messages.origin
+SELECT messages.id, messages.session_id, messages.role, messages.parts, messages.model, messages.created_at, messages.updated_at, messages.finished_at, messages.provider, messages.is_summary_message, messages.origin, messages.summary_before_tokens, messages.summary_after_tokens
 FROM messages
 WHERE messages.session_id IN (
     SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
@@ -345,6 +353,8 @@ func (q *Queries) ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson s
 			&i.Provider,
 			&i.IsSummaryMessage,
 			&i.Origin,
+			&i.SummaryBeforeTokens,
+			&i.SummaryAfterTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -425,7 +435,7 @@ func (q *Queries) ListUnfinishedAssistantMessages(ctx context.Context, projectPa
 }
 
 const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin, summary_before_tokens, summary_after_tokens
 FROM messages
 WHERE session_id = ? AND role = 'user' AND origin = 'person'
 ORDER BY created_at DESC
@@ -452,6 +462,8 @@ func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID strin
 			&i.Provider,
 			&i.IsSummaryMessage,
 			&i.Origin,
+			&i.SummaryBeforeTokens,
+			&i.SummaryAfterTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -471,17 +483,27 @@ UPDATE messages
 SET
     parts = ?,
     finished_at = ?,
+    summary_before_tokens = ?,
+    summary_after_tokens = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?
 `
 
 type UpdateMessageParams struct {
-	Parts      string        `json:"parts"`
-	FinishedAt sql.NullInt64 `json:"finished_at"`
-	ID         string        `json:"id"`
+	Parts               string        `json:"parts"`
+	FinishedAt          sql.NullInt64 `json:"finished_at"`
+	SummaryBeforeTokens int64         `json:"summary_before_tokens"`
+	SummaryAfterTokens  int64         `json:"summary_after_tokens"`
+	ID                  string        `json:"id"`
 }
 
 func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) error {
-	_, err := q.db.ExecContext(ctx, updateMessage, arg.Parts, arg.FinishedAt, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateMessage,
+		arg.Parts,
+		arg.FinishedAt,
+		arg.SummaryBeforeTokens,
+		arg.SummaryAfterTokens,
+		arg.ID,
+	)
 	return err
 }

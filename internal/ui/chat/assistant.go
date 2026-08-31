@@ -226,6 +226,11 @@ type AssistantMessageItem struct {
 	// thinking text, which burns CPU and starves the terminal emulator
 	// during long reasoning traces.
 	streamingThinking streamingMarkdown
+
+	// summaryExpanded opens a summarize pass's output, which renders as
+	// a single collapsed row otherwise. Meaningful only when the
+	// message carries IsSummaryMessage; see assistant_summary.go.
+	summaryExpanded bool
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -319,6 +324,13 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 func (a *AssistantMessageItem) renderRaw(width int, keys assistantSectionKeys) string {
 	cappedWidth := cappedMessageWidth(width)
 
+	// A collapsed summary is a row, not a message: it never reaches
+	// renderMessageContent, so none of its text — or its reasoning —
+	// streams into the window. See assistant_summary.go.
+	if a.summaryIsCollapsed() {
+		return a.renderCollapsedSummary(cappedWidth)
+	}
+
 	var spinner string
 	if a.isSpinning() {
 		spinner = a.renderSpinning()
@@ -326,6 +338,19 @@ func (a *AssistantMessageItem) renderRaw(width int, keys assistantSectionKeys) s
 
 	content, height := a.renderMessageContent(cappedWidth, keys)
 	highlightedContent := a.renderHighlighted(content, cappedWidth, height)
+	// An expanded summary keeps its header, so the row the person opened
+	// is still there to close again and the text below it stays labelled
+	// as a compaction rather than reading as an ordinary reply. The
+	// header is unconditional: a summary that came back empty must still
+	// leave a row to collapse, or expanding it would make it disappear.
+	if a.isSummary() {
+		header := a.renderSummaryHeader(cappedWidth)
+		if highlightedContent == "" {
+			highlightedContent = header
+		} else {
+			highlightedContent = header + "\n\n" + highlightedContent
+		}
+	}
 	if spinner != "" {
 		if highlightedContent != "" {
 			highlightedContent += "\n\n"
@@ -442,9 +467,18 @@ func (a *AssistantMessageItem) compositionKey() uint64 {
 		finishedFlag = 1
 		reason = string(a.message.FinishReason())
 	}
-	// Length-prefixed framing keeps the finished flag and the reason
-	// string from blending into one another.
-	return fnvFields([]byte{finishedFlag}, []byte(reason))
+	// A summary's collapsed/expanded state changes which of the two
+	// render shapes runs, and no section's own key moves when it flips,
+	// so it belongs here. toggleSummaryExpanded also drops the caches
+	// outright; this keeps the key honest for anything that reaches a
+	// render without going through the toggle (a rebuilt item, say).
+	var summaryFlag byte
+	if a.summaryExpanded {
+		summaryFlag = 1
+	}
+	// Length-prefixed framing keeps the flags and the reason string from
+	// blending into one another.
+	return fnvFields([]byte{finishedFlag}, []byte{summaryFlag}, []byte(reason))
 }
 
 // renderMessageContent renders the message content including thinking, main
@@ -834,6 +868,12 @@ func (a *AssistantMessageItem) clearCache() {
 // there is nothing to expand, and mutating the view mode would
 // thrash the thinking-section cache key for no visible benefit.
 func (a *AssistantMessageItem) ToggleExpanded() bool {
+	// A summary's toggle is about the summary, not about its reasoning:
+	// routing it through the thinking cycle would make the row
+	// unopenable whenever the summarize pass happened not to think.
+	if a.isSummary() {
+		return a.toggleSummaryExpanded()
+	}
 	if strings.TrimSpace(a.message.ReasoningContent().Thinking) == "" {
 		return a.thinkingViewMode != thinkingCollapsed
 	}

@@ -31,6 +31,8 @@ UPDATE messages
 SET
     parts = ?,
     finished_at = ?,
+    summary_before_tokens = ?,
+    summary_after_tokens = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?;
 

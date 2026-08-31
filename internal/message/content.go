@@ -282,6 +282,27 @@ type Message struct {
 	UpdatedAt        int64
 	IsSummaryMessage bool
 	Origin           Origin
+
+	// SummaryBeforeTokens and SummaryAfterTokens size what a compacted
+	// context cost and what it now costs: the tokens the conversation
+	// occupied when it was handed to the summarize pass, and the tokens
+	// the summary that replaced it occupies. Both are zero on every
+	// message that is not a finished summary, and on summaries written
+	// before the counts were recorded at all — the collapsed summary row
+	// renders without numbers rather than claiming a saving of zero.
+	SummaryBeforeTokens int64
+	SummaryAfterTokens  int64
+}
+
+// SummarySavings reports the before/after token counts of a compacted
+// context, and whether they are known at all. A summary written before
+// the counts existed, or one whose pass reported no usage, returns
+// ok=false — which the UI must render as "no numbers", never as zero.
+func (m *Message) SummarySavings() (before, after int64, ok bool) {
+	if !m.IsSummaryMessage || m.SummaryBeforeTokens <= 0 {
+		return 0, 0, false
+	}
+	return m.SummaryBeforeTokens, m.SummaryAfterTokens, true
 }
 
 func (m *Message) Content() TextContent {

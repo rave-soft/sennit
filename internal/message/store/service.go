@@ -582,6 +582,14 @@ func (s *service) write(ctx context.Context, msg message.Message) error {
 		ID:         msg.ID,
 		Parts:      string(parts),
 		FinishedAt: finishedAt,
+		// Carried on every update rather than written by a query of
+		// their own: the summarize pass sets them on the snapshot it
+		// then hands to Update, so the same write that persists the
+		// finished summary also persists its numbers, and the same
+		// pubsub event carries them to a chat that is already showing
+		// the row. Zero for every message that is not a summary.
+		SummaryBeforeTokens: msg.SummaryBeforeTokens,
+		SummaryAfterTokens:  msg.SummaryAfterTokens,
 	}); err != nil {
 		return err
 	}
@@ -755,5 +763,8 @@ func (s *service) fromDBItem(item db.Message) (message.Message, error) {
 		UpdatedAt:        item.UpdatedAt,
 		IsSummaryMessage: item.IsSummaryMessage != 0,
 		Origin:           message.Origin(item.Origin),
+
+		SummaryBeforeTokens: item.SummaryBeforeTokens,
+		SummaryAfterTokens:  item.SummaryAfterTokens,
 	}, nil
 }

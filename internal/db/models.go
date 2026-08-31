@@ -26,17 +26,19 @@ type LatencyEvent struct {
 }
 
 type Message struct {
-	ID               string         `json:"id"`
-	SessionID        string         `json:"session_id"`
-	Role             string         `json:"role"`
-	Parts            string         `json:"parts"`
-	Model            sql.NullString `json:"model"`
-	CreatedAt        int64          `json:"created_at"`
-	UpdatedAt        int64          `json:"updated_at"`
-	FinishedAt       sql.NullInt64  `json:"finished_at"`
-	Provider         sql.NullString `json:"provider"`
-	IsSummaryMessage int64          `json:"is_summary_message"`
-	Origin           string         `json:"origin"`
+	ID                  string         `json:"id"`
+	SessionID           string         `json:"session_id"`
+	Role                string         `json:"role"`
+	Parts               string         `json:"parts"`
+	Model               sql.NullString `json:"model"`
+	CreatedAt           int64          `json:"created_at"`
+	UpdatedAt           int64          `json:"updated_at"`
+	FinishedAt          sql.NullInt64  `json:"finished_at"`
+	Provider            sql.NullString `json:"provider"`
+	IsSummaryMessage    int64          `json:"is_summary_message"`
+	Origin              string         `json:"origin"`
+	SummaryBeforeTokens int64          `json:"summary_before_tokens"`
+	SummaryAfterTokens  int64          `json:"summary_after_tokens"`
 }
 
 type ReadFile struct {
