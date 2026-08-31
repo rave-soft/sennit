@@ -114,10 +114,9 @@ func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
 func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 	prevHeight := m.editor.textarea.Height()
 	// Return to current draft when browsing history.
-	if m.editor.promptHistory.index >= 0 {
-		m.editor.promptHistory.index = -1
+	if draft, ok := m.editor.promptHistory.restoreDraft(); ok {
 		m.editor.textarea.Reset()
-		m.editor.textarea.InsertString(m.editor.promptHistory.draft)
+		m.editor.textarea.InsertString(draft)
 		m.syncBangModeFromTextarea()
 		return m.updateTextareaWithPrevHeight(nil, prevHeight)
 	}
@@ -150,19 +149,12 @@ func (m *UI) syncBangModeFromTextarea() {
 // historyPrev changes the text area content to the previous message in the history
 // it returns false if it could not find the previous message.
 func (m *UI) historyPrev() bool {
-	if len(m.editor.promptHistory.messages) == 0 {
+	entry, ok := m.editor.promptHistory.previous(m.editor.draftValue())
+	if !ok {
 		return false
 	}
-	if m.editor.promptHistory.index == -1 {
-		m.editor.promptHistory.draft = m.editor.draftValue()
-	}
-	nextIndex := m.editor.promptHistory.index + 1
-	if nextIndex >= len(m.editor.promptHistory.messages) {
-		return false
-	}
-	m.editor.promptHistory.index = nextIndex
 	m.editor.textarea.Reset()
-	m.editor.textarea.InsertString(m.editor.promptHistory.messages[nextIndex])
+	m.editor.textarea.InsertString(entry)
 	m.editor.textarea.MoveToBegin()
 	m.syncBangModeFromTextarea()
 	return true
@@ -171,20 +163,12 @@ func (m *UI) historyPrev() bool {
 // historyNext changes the text area content to the next message in the history
 // it returns false if it could not find the next message.
 func (m *UI) historyNext() bool {
-	if m.editor.promptHistory.index < 0 {
+	entry, ok := m.editor.promptHistory.next()
+	if !ok {
 		return false
 	}
-	nextIndex := m.editor.promptHistory.index - 1
-	if nextIndex < 0 {
-		m.editor.promptHistory.index = -1
-		m.editor.textarea.Reset()
-		m.editor.textarea.InsertString(m.editor.promptHistory.draft)
-		m.syncBangModeFromTextarea()
-		return true
-	}
-	m.editor.promptHistory.index = nextIndex
 	m.editor.textarea.Reset()
-	m.editor.textarea.InsertString(m.editor.promptHistory.messages[nextIndex])
+	m.editor.textarea.InsertString(entry)
 	m.syncBangModeFromTextarea()
 	return true
 }

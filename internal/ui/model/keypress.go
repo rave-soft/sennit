@@ -394,8 +394,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 			// etc.), so this one wipes the draft outright instead
 			// of leaving stale text sitting in the editor.
 			prevHeight := m.editor.textarea.Height()
-			m.editor.promptHistory.index = -1
-			m.editor.promptHistory.draft = ""
+			m.editor.historyReset()
 			m.editor.textarea.Reset()
 			m.syncBangModeFromTextarea()
 			if cmd := m.updateTextareaWithPrevHeight(nil, prevHeight); cmd != nil {

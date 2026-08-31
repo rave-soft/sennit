@@ -57,24 +57,11 @@ type editorState struct {
 	// Escape works for bang commands the same way it does for agent runs.
 	bangCancel context.CancelFunc
 
-	// promptHistory holds up/down navigation state through previous
-	// messages.
-	promptHistory struct {
-		messages []string
-		index    int
-		draft    string
-	}
-
-	// ghostQuery/ghostSuggestion memoize the last prefix-scan result so
-	// Draw() (called every frame) doesn't rescan history when the input
-	// hasn't changed since the last computation.
-	ghostQuery      string
-	ghostSuggestion string
+	// history owns prompt navigation and history-derived ghost suggestions.
+	promptHistory promptHistoryState
 
 	// ghostHiddenFor holds the textarea value at the moment Esc hid the
-	// suggestion. The hide only applies while the value is unchanged;
-	// typing anything (which changes the value) implicitly un-hides it,
-	// so no separate invalidation call is needed anywhere else.
+	// suggestion. The hide only applies while the value is unchanged.
 	ghostHiddenFor string
 
 	// lastKeyWasEsc tracks whether the immediately preceding key event was
@@ -166,8 +153,7 @@ func (e *editorState) isAtEditorEnd() bool {
 // updateHistoryDraft updates history state when text is modified.
 func (e *editorState) updateHistoryDraft(oldValue string) {
 	if e.textarea.Value() != oldValue {
-		e.promptHistory.draft = e.draftValue()
-		e.promptHistory.index = -1
+		e.promptHistory.recordDraft(oldValue, e.draftValue())
 	}
 }
 
@@ -188,8 +174,7 @@ func (e *editorState) draftValue() string {
 // historyReset resets the history, but does not clear the message
 // it just sets the current draft to empty and the position in the history.
 func (e *editorState) historyReset() {
-	e.promptHistory.index = -1
-	e.promptHistory.draft = ""
+	e.promptHistory.reset()
 }
 
 // ghostSuggestionFor returns the most recent prompt-history entry that
@@ -199,18 +184,5 @@ func (e *editorState) historyReset() {
 // see historyPrev), so the first prefix match found scanning forward is the
 // one to use.
 func (e *editorState) ghostSuggestionFor(value string) string {
-	if value == e.ghostQuery {
-		return e.ghostSuggestion
-	}
-	e.ghostQuery = value
-	e.ghostSuggestion = ""
-	if value != "" {
-		for _, msg := range e.promptHistory.messages {
-			if len(msg) > len(value) && strings.HasPrefix(msg, value) {
-				e.ghostSuggestion = msg
-				break
-			}
-		}
-	}
-	return e.ghostSuggestion
+	return e.promptHistory.suggestionFor(value)
 }

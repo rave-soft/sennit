@@ -106,9 +106,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.applyAccountLabelsLoaded(msg)
 
 	case promptHistoryLoadedMsg:
-		m.editor.promptHistory.messages = msg.messages
-		m.editor.promptHistory.index = -1
-		m.editor.promptHistory.draft = ""
+		m.editor.promptHistory.load(msg.messages)
 
 	case pubsub.Event[workspace.LSPEvent]:
 		// Refresh the memoized LSP state off-thread: LSPGetStates is treated
