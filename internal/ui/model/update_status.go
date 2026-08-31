@@ -44,37 +44,19 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
 		}
-		m.status.SetInfoMsg(msg)
-		ttl := msg.TTL
-		if ttl <= 0 {
-			ttl = DefaultStatusTTL
-		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl, m.nextStatusSeq()))
+		cmds = append(cmds, m.status.ShowInfo(msg))
 	case workspace.UpdateAvailableMsg:
 		text := fmt.Sprintf("Sennit update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
 			text = fmt.Sprintf("This is a development version of Sennit. The latest version is v%s.", msg.LatestVersion)
 		}
-		ttl := 10 * time.Second
-		m.status.SetInfoMsg(util.InfoMsg{
+		cmds = append(cmds, m.status.ShowInfo(util.InfoMsg{
 			Type: util.InfoTypeUpdate,
 			Msg:  text,
-			TTL:  ttl,
-		})
-		cmds = append(cmds, clearInfoMsgCmd(ttl, m.nextStatusSeq()))
+			TTL:  10 * time.Second,
+		}))
 	case util.ClearStatusMsg:
-		// Only the timer armed for the message currently on screen may
-		// clear it; an older one has been superseded.
-		if msg.Seq == m.statusSeq {
-			m.status.ClearInfoMsg()
-		}
+		m.status.ClearInfoMsg(msg.Seq)
 	}
 	return cmds, false
-}
-
-// nextStatusSeq stamps the status-line message about to be shown and
-// returns the stamp for its clear timer. See util.ClearStatusMsg.
-func (m *UI) nextStatusSeq() int {
-	m.statusSeq++
-	return m.statusSeq
 }

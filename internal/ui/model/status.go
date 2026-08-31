@@ -18,11 +18,12 @@ const DefaultStatusTTL = 5 * time.Second
 
 // Status is the status bar and help model.
 type Status struct {
-	com      *common.Common
-	hideHelp bool
-	help     help.Model
-	helpKm   help.KeyMap
-	msg      util.InfoMsg
+	com        *common.Common
+	hideHelp   bool
+	help       help.Model
+	helpKm     help.KeyMap
+	msg        util.InfoMsg
+	messageSeq int
 }
 
 // NewStatus creates a new status bar and help model.
@@ -42,18 +43,25 @@ func (s *Status) Restyle() {
 	s.help.Styles = s.com.Styles.Help
 }
 
-// SetInfoMsg sets the status info message.
-func (s *Status) SetInfoMsg(msg util.InfoMsg) {
+// ShowInfo displays msg and returns a timer command that can clear only this
+// message. Replacing a message advances its generation, so a stale timer
+// cannot clear the newer one.
+func (s *Status) ShowInfo(msg util.InfoMsg) tea.Cmd {
+	s.messageSeq++
 	s.msg = msg
+	return clearInfoMsgCmd(statusTTL(msg.TTL), s.messageSeq)
 }
 
 // InfoMsg returns the current status info message (for tests and callers
 // that need to inspect what's currently shown).
 func (s *Status) InfoMsg() util.InfoMsg { return s.msg }
 
-// ClearInfoMsg clears the status info message.
-func (s *Status) ClearInfoMsg() {
-	s.msg = util.InfoMsg{}
+// ClearInfoMsg clears the message only when seq belongs to the current
+// message. Timers for messages that have been replaced are ignored.
+func (s *Status) ClearInfoMsg(seq int) {
+	if seq == s.messageSeq {
+		s.msg = util.InfoMsg{}
+	}
 }
 
 // SetWidth sets the width of the status bar and help view.
@@ -119,6 +127,14 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	info := msgStyle.Render(msg)
 
 	uv.NewStyledString(ind+info).Draw(scr, area)
+}
+
+// statusTTL replaces a non-positive message TTL with the status default.
+func statusTTL(ttl time.Duration) time.Duration {
+	if ttl <= 0 {
+		return DefaultStatusTTL
+	}
+	return ttl
 }
 
 // clearInfoMsgCmd returns a command that clears the info message after the
