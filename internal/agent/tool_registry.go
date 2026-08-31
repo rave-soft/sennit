@@ -31,7 +31,8 @@ type buildToolsCtx struct {
 	backgroundAgentsOn bool
 	toolAvailability   tools.ToolAvailabilityOption
 
-	inputs runtimeToolInputs
+	inputs     runtimeToolInputs
+	runtimeCfg runtimeConfigSnapshot
 }
 
 // toolSpec lists the exact static tool names built by a row. Their gate is
@@ -131,28 +132,28 @@ func toolSpecs() []toolSpec {
 		{coreToolNames(), func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			f := b.inputs
 			return []fantasy.AgentTool{
-				tools.NewBashTool(f.permissions, rb.cfg.WorkingDir(), b.cfg.Attribution(), b.modelID, f.background, b.toolAvailability),
-				tools.NewGitStatusTool(rb.cfg.WorkingDir()),
-				tools.NewGitDiffTool(rb.cfg.WorkingDir()),
-				tools.NewGitLogTool(rb.cfg.WorkingDir()),
-				tools.NewSennitInfoTool(rb.cfg, rb.mcp, f.lspManager, b.allSkills, b.activeSkills, b.skillTracker, b.inputs.skillStates),
+				tools.NewBashTool(f.permissions, b.runtimeCfg.workingDir, b.cfg.Attribution(), b.modelID, f.background, b.toolAvailability),
+				tools.NewGitStatusTool(b.runtimeCfg.workingDir),
+				tools.NewGitDiffTool(b.runtimeCfg.workingDir),
+				tools.NewGitLogTool(b.runtimeCfg.workingDir),
+				tools.NewSennitInfoTool(b.runtimeCfg, rb.mcp, f.lspManager, b.allSkills, b.activeSkills, b.skillTracker, b.inputs.skillStates),
 				tools.NewSennitLogsTool(b.logFile),
 				tools.NewAgentTraceTool(b.logFile),
 				tools.NewJobOutputTool(f.background),
 				tools.NewJobKillTool(f.background),
-				tools.NewDownloadTool(f.permissions, rb.cfg.WorkingDir(), nil),
-				tools.NewEditTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
-				tools.NewMultiEditTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
-				tools.NewFetchTool(f.permissions, rb.cfg.WorkingDir(), nil, b.toolAvailability),
-				tools.NewWebFetchTool(f.permissions, rb.cfg.WorkingDir(), nil, b.toolAvailability),
-				tools.NewWebSearchTool(f.permissions, rb.cfg.WorkingDir(), nil, b.searchBackend, b.toolAvailability),
-				tools.NewGlobTool(rb.cfg.WorkingDir(), b.cfg.Glob()),
-				tools.NewSearchTool(rb.cfg.WorkingDir(), b.cfg.Grep()),
-				tools.NewLsTool(f.permissions, rb.cfg.WorkingDir(), b.cfg.Ls()),
+				tools.NewDownloadTool(f.permissions, b.runtimeCfg.workingDir, nil),
+				tools.NewEditTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewMultiEditTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewFetchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.toolAvailability),
+				tools.NewWebFetchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.toolAvailability),
+				tools.NewWebSearchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.searchBackend, b.toolAvailability),
+				tools.NewGlobTool(b.runtimeCfg.workingDir, b.cfg.Glob()),
+				tools.NewSearchTool(b.runtimeCfg.workingDir, b.cfg.Grep()),
+				tools.NewLsTool(f.permissions, b.runtimeCfg.workingDir, b.cfg.Ls()),
 				tools.NewTodosTool(f.sessions),
-				tools.NewReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, rb.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
-				tools.NewMultiReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, rb.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
-				tools.NewWriteTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
+				tools.NewReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
+				tools.NewMultiReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
+				tools.NewWriteTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
 			}, nil
 		}},
 
@@ -202,16 +203,16 @@ func toolSpecs() []toolSpec {
 		{[]string{"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			f := b.inputs
 			return []fantasy.AgentTool{
-				tools.NewDiagnosticsTool(f.lspManager, rb.cfg.WorkingDir()),
-				tools.NewReferencesTool(f.lspManager, rb.cfg.WorkingDir()),
+				tools.NewDiagnosticsTool(f.lspManager, b.runtimeCfg.workingDir),
+				tools.NewReferencesTool(f.lspManager, b.runtimeCfg.workingDir),
 				tools.NewLSPRestartTool(f.lspManager),
-				tools.NewSymbolsTool(f.lspManager, rb.cfg.WorkingDir()),
-				tools.NewWorkspaceSymbolsTool(f.lspManager, rb.cfg.WorkingDir()),
-				tools.NewHoverTool(f.lspManager, rb.cfg.WorkingDir()),
-				tools.NewDefinitionTool(f.lspManager, rb.cfg.WorkingDir()),
-				tools.NewCallHierarchyTool(f.lspManager, rb.cfg.WorkingDir()),
-				tools.NewRenameTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
-				tools.NewReplaceSymbolTool(f.lspManager, f.permissions, f.history, f.filetracker, rb.cfg.WorkingDir()),
+				tools.NewSymbolsTool(f.lspManager, b.runtimeCfg.workingDir),
+				tools.NewWorkspaceSymbolsTool(f.lspManager, b.runtimeCfg.workingDir),
+				tools.NewHoverTool(f.lspManager, b.runtimeCfg.workingDir),
+				tools.NewDefinitionTool(f.lspManager, b.runtimeCfg.workingDir),
+				tools.NewCallHierarchyTool(f.lspManager, b.runtimeCfg.workingDir),
+				tools.NewRenameTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewReplaceSymbolTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
 			}, nil
 		}},
 
@@ -220,8 +221,8 @@ func toolSpecs() []toolSpec {
 		// gates the per-server tools built outside this table).
 		{[]string{"list_mcp_resources", "read_mcp_resource"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
-				tools.NewListMCPResourcesTool(rb.cfg, rb.mcp, b.inputs.permissions),
-				tools.NewReadMCPResourceTool(rb.cfg, rb.mcp, b.inputs.permissions),
+				tools.NewListMCPResourcesTool(b.runtimeCfg, rb.mcp, b.inputs.permissions),
+				tools.NewReadMCPResourceTool(b.runtimeCfg, rb.mcp, b.inputs.permissions),
 			}, nil
 		}},
 	}

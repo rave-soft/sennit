@@ -68,6 +68,54 @@ import (
 // running, and a build never takes a dispatch lock. The readiness
 // goroutines that call into it (see turnDispatcher.buildAgent) are started
 // by the dispatcher, not by this component.
+type runtimeConfigSnapshot struct {
+	config                  *config.Config
+	resolver                config.VariableResolver
+	workingDir              string
+	overrides               config.RuntimeOverrides
+	loadedPaths             []string
+	staleness               config.StalenessResult
+	reserveMCPTokenMutation func(string, config.MCPConfig) (config.MCPTokenMutation, bool)
+	setMCPToken             func(*config.MCPTokenMutation, *oauth.Token) (bool, error)
+	clearMCPToken           func(*config.MCPTokenMutation, *oauth.Token) (bool, error)
+}
+
+func (s runtimeConfigSnapshot) Config() *config.Config {
+	return s.config
+}
+
+func (s runtimeConfigSnapshot) Resolver() config.VariableResolver {
+	return s.resolver
+}
+
+func (s runtimeConfigSnapshot) WorkingDir() string {
+	return s.workingDir
+}
+
+func (s runtimeConfigSnapshot) Overrides() config.RuntimeOverrides {
+	return s.overrides
+}
+
+func (s runtimeConfigSnapshot) LoadedPaths() []string {
+	return slices.Clone(s.loadedPaths)
+}
+
+func (s runtimeConfigSnapshot) ConfigStaleness() config.StalenessResult {
+	return s.staleness
+}
+
+func (s runtimeConfigSnapshot) ReserveMCPTokenMutation(name string, expected config.MCPConfig) (config.MCPTokenMutation, bool) {
+	return s.reserveMCPTokenMutation(name, expected)
+}
+
+func (s runtimeConfigSnapshot) SetMCPToken(reservation *config.MCPTokenMutation, token *oauth.Token) (bool, error) {
+	return s.setMCPToken(reservation, token)
+}
+
+func (s runtimeConfigSnapshot) ClearMCPToken(reservation *config.MCPTokenMutation, expectedToken *oauth.Token) (bool, error) {
+	return s.clearMCPToken(reservation, expectedToken)
+}
+
 type runtimeToolInputs struct {
 	allSkills, activeSkills []*skills.Skill
 	skillTracker            *skills.Tracker
@@ -200,12 +248,16 @@ func (b *runtimeBuilder) mergeCallOptions(model Model, cfg config.ProviderConfig
 // config reload hand different tools in the same set different values.
 // One snapshot means every tool here sees the same config.
 func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, inputs runtimeToolInputs) ([]fantasy.AgentTool, error) {
+	return b.buildToolsForConfig(ctx, agent, isSubAgent, inputs, b.runtimeConfigSnapshot())
+}
+
+func (b *runtimeBuilder) buildToolsForConfig(ctx context.Context, agent config.Agent, isSubAgent bool, inputs runtimeToolInputs, snapshot runtimeConfigSnapshot) ([]fantasy.AgentTool, error) {
 	if inputs.toolBuildErr != nil {
 		return nil, inputs.toolBuildErr
 	}
-	cfg := newAgentConfig(b.cfg.Config())
+	cfg := newAgentConfig(snapshot.config)
 
-	bctx, err := b.newBuildToolsCtx(cfg, agent, isSubAgent, inputs)
+	bctx, err := b.newBuildToolsCtx(cfg, snapshot, agent, isSubAgent, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +268,7 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 	}
 
 	filteredTools := filterToolsByAllowlist(allTools, agent)
-	filteredTools = appendAllowedMCPTools(filteredTools, b, inputs, agent)
+	filteredTools = appendAllowedMCPTools(filteredTools, b, inputs, agent, snapshot)
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
@@ -224,7 +276,7 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 	// Build hook runner if PreToolUse hooks are configured.
 	var hookRunner *hooks.Runner
 	if preToolHooks := cfg.PreToolUseHooks(); len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, b.cfg.WorkingDir(), b.cfg.WorkingDir())
+		hookRunner = hooks.NewRunner(preToolHooks, snapshot.workingDir, snapshot.workingDir)
 	}
 
 	// Wrap tools with hook interception for the top-level agent only.
@@ -241,8 +293,8 @@ func (b *runtimeBuilder) buildTools(ctx context.Context, agent config.Agent, isS
 // gates and builds against, from the current web-search backend and the
 // already-collected runtime inputs (skills, delegation tools, background
 // agents).
-func (b *runtimeBuilder) newBuildToolsCtx(cfg agentConfig, agent config.Agent, isSubAgent bool, inputs runtimeToolInputs) (*buildToolsCtx, error) {
-	searchBackend, err := b.webSearchBackend()
+func (b *runtimeBuilder) newBuildToolsCtx(cfg agentConfig, snapshot runtimeConfigSnapshot, agent config.Agent, isSubAgent bool, inputs runtimeToolInputs) (*buildToolsCtx, error) {
+	searchBackend, err := webSearchBackend(snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("web_search: %w", err)
 	}
@@ -265,6 +317,7 @@ func (b *runtimeBuilder) newBuildToolsCtx(cfg agentConfig, agent config.Agent, i
 		backgroundAgentsOn: inputs.backgroundAgentsOn,
 		toolAvailability:   tools.ResolveSystemToolAvailability(),
 		inputs:             inputs,
+		runtimeCfg:         snapshot,
 	}, nil
 }
 
@@ -315,8 +368,8 @@ func filterToolsByAllowlist(allTools []fantasy.AgentTool, agent config.Agent) []
 // appendAllowedMCPTools appends the MCP tools agent.AllowedMCP permits (nil
 // means no restrictions; an empty, non-nil map means none allowed) to
 // filteredTools.
-func appendAllowedMCPTools(filteredTools []fantasy.AgentTool, b *runtimeBuilder, inputs runtimeToolInputs, agent config.Agent) []fantasy.AgentTool {
-	for _, tool := range tools.GetMCPTools(b.mcp, inputs.permissions, b.cfg, b.cfg.WorkingDir()) {
+func appendAllowedMCPTools(filteredTools []fantasy.AgentTool, b *runtimeBuilder, inputs runtimeToolInputs, agent config.Agent, snapshot runtimeConfigSnapshot) []fantasy.AgentTool {
+	for _, tool := range tools.GetMCPTools(b.mcp, inputs.permissions, snapshot, snapshot.workingDir) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)
@@ -347,26 +400,39 @@ func appendAllowedMCPTools(filteredTools []fantasy.AgentTool, b *runtimeBuilder,
 // api_key and proxy_url run through the same shell-expansion resolver used
 // for provider api_key/proxy_url.
 func (b *runtimeBuilder) webSearchBackend() (tools.SearchBackend, error) {
+	return webSearchBackend(b.runtimeConfigSnapshot())
+}
+
+func webSearchBackend(snapshot runtimeConfigSnapshot) (tools.SearchBackend, error) {
 	var opts config.WebSearchOptions
-	if ws := b.cfg.Config().Options.WebSearch; ws != nil {
+	if ws := snapshot.config.Options.WebSearch; ws != nil {
 		opts = *ws
 	}
-	return tools.NewSearchBackend(opts, b.cfg.Resolver(), nil)
+	return tools.NewSearchBackend(opts, snapshot.resolver, nil)
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (b *runtimeBuilder) buildAgentModel(ctx context.Context, isSubAgent bool) (Model, error) {
-	modelCfg := b.cfg.Config().Model
+	return b.buildAgentModelForConfig(ctx, b.cfg.Config(), isSubAgent)
+}
+
+func (b *runtimeBuilder) buildAgentModelForConfig(ctx context.Context, runtimeCfg *config.Config, isSubAgent bool) (Model, error) {
+	return b.buildAgentModelForSnapshot(ctx, runtimeConfigSnapshot{config: runtimeCfg, resolver: runtimeCfg.RuntimeResolver(), workingDir: b.cfg.WorkingDir()}, isSubAgent)
+}
+
+func (b *runtimeBuilder) buildAgentModelForSnapshot(ctx context.Context, snapshot runtimeConfigSnapshot, isSubAgent bool) (Model, error) {
+	runtimeCfg := snapshot.config
+	modelCfg := runtimeCfg.Model
 	if modelCfg.Model == "" {
 		return Model{}, errModelNotSelected
 	}
 
-	providerCfg, ok := b.cfg.Config().Providers.Get(modelCfg.Provider)
+	providerCfg, ok := runtimeCfg.Providers.Get(modelCfg.Provider)
 	if !ok {
 		return Model{}, errModelProviderNotConfigured
 	}
 
-	return b.buildModel(ctx, providerCfg, modelCfg, isSubAgent)
+	return b.buildModelForSnapshot(ctx, providerCfg, modelCfg, isSubAgent, snapshot)
 }
 
 // buildCustomAgentModel builds the Model for an agent whose Model field
@@ -410,7 +476,11 @@ func (b *runtimeBuilder) buildCustomAgentModel(ctx context.Context, agent config
 // they word a not-found error, which is why each keeps that part to
 // itself and reports a bare errModelNotFound here for the caller to wrap.
 func (b *runtimeBuilder) buildModel(ctx context.Context, providerCfg config.ProviderConfig, selected config.SelectedModel, isSubAgent bool) (Model, error) {
-	provider, err := b.buildProvider(providerCfg, selected, isSubAgent)
+	return b.buildModelForSnapshot(ctx, providerCfg, selected, isSubAgent, b.runtimeConfigSnapshot())
+}
+
+func (b *runtimeBuilder) buildModelForSnapshot(ctx context.Context, providerCfg config.ProviderConfig, selected config.SelectedModel, isSubAgent bool, snapshot runtimeConfigSnapshot) (Model, error) {
+	provider, err := b.buildProviderForSnapshot(providerCfg, selected, isSubAgent, snapshot)
 	if err != nil {
 		return Model{}, err
 	}
@@ -494,32 +564,48 @@ func (b *runtimeBuilder) invalidateRuntime(ctx context.Context, reason string, m
 	b.localVersion.Store(nextVersion)
 }
 
+func (b *runtimeBuilder) runtimeConfigSnapshot() runtimeConfigSnapshot {
+	published := b.cfg.RuntimeSnapshot()
+	return runtimeConfigSnapshot{
+		config:                  published.Config,
+		resolver:                published.Resolver,
+		workingDir:              published.WorkingDir,
+		overrides:               published.Overrides,
+		loadedPaths:             published.LoadedPaths,
+		staleness:               published.Staleness,
+		reserveMCPTokenMutation: b.cfg.ReserveMCPTokenMutation,
+		setMCPToken:             b.cfg.SetMCPToken,
+		clearMCPToken:           b.cfg.ClearMCPToken,
+	}
+}
+
 func (b *runtimeBuilder) runtimeFor(ctx context.Context, inputs runtimeToolInputs) (*compiledRuntime, error) {
 	return b.runtime.getOrBuild(ctx, b.runtimeKey, func(ctx context.Context, key runtimeKey) (*compiledRuntime, error) {
-		model, err := b.buildAgentModel(ctx, false)
+		runtimeCfg := b.runtimeConfigSnapshot()
+		model, err := b.buildAgentModelForSnapshot(ctx, runtimeCfg, false)
 		if err != nil {
 			return nil, err
 		}
-		agentCfg, ok := b.cfg.Config().Agents[config.AgentCoder]
+		agentCfg, ok := runtimeCfg.config.Agents[config.AgentCoder]
 		if !ok {
 			return nil, errCoderAgentNotConfigured
 		}
-		builtTools, err := b.buildTools(ctx, agentCfg, false, inputs)
+		builtTools, err := b.buildToolsForConfig(ctx, agentCfg, false, inputs, runtimeCfg)
 		if err != nil {
 			return nil, err
 		}
-		runtimePrompt, err := coderPrompt(prompt.WithWorkingDir(b.cfg.WorkingDir()))
+		runtimePrompt, err := coderPrompt(prompt.WithWorkingDir(runtimeCfg.workingDir))
 		if err != nil {
 			return nil, err
 		}
-		systemPrompt, err := runtimePrompt.Build(ctx, model.Model.Provider(), model.Model.Model(), b.cfg)
+		systemPrompt, err := runtimePrompt.Build(ctx, model.Model.Provider(), model.Model.Model(), runtimeCfg)
 		if err != nil {
 			return nil, err
 		}
 		if len(builtTools) > 0 {
 			builtTools[len(builtTools)-1].SetProviderOptions(cacheControlOptions())
 		}
-		providerCfg, ok := b.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+		providerCfg, ok := runtimeCfg.config.Providers.Get(model.ModelCfg.Provider)
 		if !ok {
 			return nil, errModelProviderNotConfigured
 		}
@@ -532,8 +618,8 @@ func (b *runtimeBuilder) runtimeFor(ctx context.Context, inputs runtimeToolInput
 			frequencyPenalty: freqPenalty, presencePenalty: presPenalty,
 			maxOutputTokens:      maxTokens,
 			systemPromptPrefix:   providerCfg.SystemPromptPrefix,
-			disableAutoSummarize: b.cfg.Config().Options.DisableAutoSummarize,
-			autoSummarizeAt:      b.cfg.Config().Options.AutoSummarizeAt,
+			disableAutoSummarize: runtimeCfg.config.Options.DisableAutoSummarize,
+			autoSummarizeAt:      runtimeCfg.config.Options.AutoSummarizeAt,
 		}, nil
 	})
 }
@@ -1190,7 +1276,10 @@ func (b *runtimeBuilder) runAWSAuthRefresh(ctx context.Context, providerCfg conf
 // client. Proxying and debug logging compose: when both are set, requests
 // go through the proxy and are logged.
 func (b *runtimeBuilder) buildProviderHTTPClient(proxyURL string) (*http.Client, error) {
-	debug := b.cfg.Config().Options.Debug
+	return buildProviderHTTPClient(proxyURL, b.cfg.Config().Options.Debug)
+}
+
+func buildProviderHTTPClient(proxyURL string, debug bool) (*http.Client, error) {
 	if proxyURL == "" && !debug {
 		return nil, nil
 	}
@@ -1207,7 +1296,7 @@ func (b *runtimeBuilder) buildProviderHTTPClient(proxyURL string) (*http.Client,
 	return &http.Client{Transport: transport}, nil
 }
 
-func (b *runtimeBuilder) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID, proxyURL string, debug bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 	authIsBearer := false
 
@@ -1231,7 +1320,7 @@ func (b *runtimeBuilder) buildAnthropicProvider(baseURL, apiKey string, headers 
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	httpClient, err := b.buildProviderHTTPClient(proxyURL)
+	httpClient, err := buildProviderHTTPClient(proxyURL, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -1282,12 +1371,12 @@ func (t *stripHeaderTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return base.RoundTrip(req)
 }
 
-func (b *runtimeBuilder) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, providerID, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, providerID, proxyURL string, debug bool) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	httpClient, err := b.buildProviderHTTPClient(proxyURL)
+	httpClient, err := buildProviderHTTPClient(proxyURL, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -1313,11 +1402,11 @@ func (b *runtimeBuilder) buildOpenaiProvider(baseURL, apiKey string, headers map
 	return openai.New(opts...)
 }
 
-func (b *runtimeBuilder) buildOpenrouterProvider(_, apiKey string, headers map[string]string, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildOpenrouterProvider(_, apiKey string, headers map[string]string, proxyURL string, debug bool) (fantasy.Provider, error) {
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
-	if httpClient, err := b.buildProviderHTTPClient(proxyURL); err != nil {
+	if httpClient, err := buildProviderHTTPClient(proxyURL, debug); err != nil {
 		return nil, err
 	} else if httpClient != nil {
 		opts = append(opts, openrouter.WithHTTPClient(httpClient))
@@ -1328,11 +1417,11 @@ func (b *runtimeBuilder) buildOpenrouterProvider(_, apiKey string, headers map[s
 	return openrouter.New(opts...)
 }
 
-func (b *runtimeBuilder) buildVercelProvider(_, apiKey string, headers map[string]string, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildVercelProvider(_, apiKey string, headers map[string]string, proxyURL string, debug bool) (fantasy.Provider, error) {
 	opts := []vercel.Option{
 		vercel.WithAPIKey(apiKey),
 	}
-	if httpClient, err := b.buildProviderHTTPClient(proxyURL); err != nil {
+	if httpClient, err := buildProviderHTTPClient(proxyURL, debug); err != nil {
 		return nil, err
 	} else if httpClient != nil {
 		opts = append(opts, vercel.WithHTTPClient(httpClient))
@@ -1343,7 +1432,7 @@ func (b *runtimeBuilder) buildVercelProvider(_, apiKey string, headers map[strin
 	return vercel.New(opts...)
 }
 
-func (b *runtimeBuilder) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, proxyURL string, debug bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -1364,11 +1453,11 @@ func (b *runtimeBuilder) buildOpenaiCompatProvider(baseURL, apiKey string, heade
 		if err != nil {
 			return nil, err
 		}
-		httpClient = copilot.NewClient(isSubAgent, b.cfg.Config().Options.Debug, proxyTransport)
+		httpClient = copilot.NewClient(isSubAgent, debug, proxyTransport)
 	}
 	if httpClient == nil {
 		var err error
-		httpClient, err = b.buildProviderHTTPClient(proxyURL)
+		httpClient, err = buildProviderHTTPClient(proxyURL, debug)
 		if err != nil {
 			return nil, err
 		}
@@ -1388,13 +1477,13 @@ func (b *runtimeBuilder) buildOpenaiCompatProvider(baseURL, apiKey string, heade
 	return openaicompat.New(opts...)
 }
 
-func (b *runtimeBuilder) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string, proxyURL string, debug bool) (fantasy.Provider, error) {
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
-	httpClient, err := b.buildProviderHTTPClient(proxyURL)
+	httpClient, err := buildProviderHTTPClient(proxyURL, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -1453,9 +1542,9 @@ func (t *azureAPIVersionTransport) RoundTrip(req *http.Request) (*http.Response,
 	return base.RoundTrip(req)
 }
 
-func (b *runtimeBuilder) buildBedrockProvider(apiKey string, headers map[string]string, providerID, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildBedrockProvider(apiKey string, headers map[string]string, providerID, proxyURL string, debug bool) (fantasy.Provider, error) {
 	var opts []bedrock.Option
-	if httpClient, err := b.buildProviderHTTPClient(proxyURL); err != nil {
+	if httpClient, err := buildProviderHTTPClient(proxyURL, debug); err != nil {
 		return nil, err
 	} else if httpClient != nil {
 		opts = append(opts, bedrock.WithHTTPClient(httpClient))
@@ -1513,12 +1602,12 @@ func (b *runtimeBuilder) buildBedrockProvider(apiKey string, headers map[string]
 	return bedrock.New(opts...)
 }
 
-func (b *runtimeBuilder) buildGoogleProvider(baseURL, apiKey string, headers map[string]string, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildGoogleProvider(baseURL, apiKey string, headers map[string]string, proxyURL string, debug bool) (fantasy.Provider, error) {
 	opts := []google.Option{
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
-	if httpClient, err := b.buildProviderHTTPClient(proxyURL); err != nil {
+	if httpClient, err := buildProviderHTTPClient(proxyURL, debug); err != nil {
 		return nil, err
 	} else if httpClient != nil {
 		opts = append(opts, google.WithHTTPClient(httpClient))
@@ -1529,9 +1618,9 @@ func (b *runtimeBuilder) buildGoogleProvider(baseURL, apiKey string, headers map
 	return google.New(opts...)
 }
 
-func (b *runtimeBuilder) buildGoogleVertexProvider(headers map[string]string, options map[string]string, proxyURL string) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildGoogleVertexProvider(headers map[string]string, options map[string]string, proxyURL string, debug bool) (fantasy.Provider, error) {
 	opts := []google.Option{}
-	if httpClient, err := b.buildProviderHTTPClient(proxyURL); err != nil {
+	if httpClient, err := buildProviderHTTPClient(proxyURL, debug); err != nil {
 		return nil, err
 	} else if httpClient != nil {
 		opts = append(opts, google.WithHTTPClient(httpClient))
@@ -1559,7 +1648,11 @@ func (b *runtimeBuilder) isAnthropicThinking(model config.SelectedModel) bool {
 // buildProvider returns a fantasy.Provider for the configured provider,
 // resolving its API key and base URL through the config's shell-expansion
 // resolver.
-func (b *runtimeBuilder) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
+func (b *runtimeBuilder) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
+	return b.buildProviderForSnapshot(providerCfg, model, false, b.runtimeConfigSnapshot())
+}
+
+func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, snapshot runtimeConfigSnapshot) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
@@ -1580,11 +1673,11 @@ func (b *runtimeBuilder) buildProvider(providerCfg config.ProviderConfig, model 
 	// here rather than dropping it: the call still proceeds on what it
 	// has, which is what it did before, but the reason is now on the
 	// record.
-	apiKey, err := b.cfg.Resolve(providerCfg.APIKey)
+	apiKey, err := snapshot.resolver.ResolveValue(providerCfg.APIKey)
 	if err != nil {
 		slog.Warn("Failed to resolve provider API key", "provider", providerCfg.ID, "error", err)
 	}
-	baseURL, err := b.cfg.Resolve(providerCfg.BaseURL)
+	baseURL, err := snapshot.resolver.ResolveValue(providerCfg.BaseURL)
 	if err != nil {
 		slog.Warn("Failed to resolve provider base URL", "provider", providerCfg.ID, "error", err)
 	}
@@ -1593,27 +1686,27 @@ func (b *runtimeBuilder) buildProvider(providerCfg config.ProviderConfig, model 
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		if opencodeMessagesModels[model.Model] {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL)
+			return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 		}
 	}
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return b.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL)
+		return b.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case anthropic.Name:
-		return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL)
+		return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case openrouter.Name:
-		return b.buildOpenrouterProvider(baseURL, apiKey, headers, providerCfg.ProxyURL)
+		return b.buildOpenrouterProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case vercel.Name:
-		return b.buildVercelProvider(baseURL, apiKey, headers, providerCfg.ProxyURL)
+		return b.buildVercelProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case azure.Name:
-		return b.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, providerCfg.ProxyURL)
+		return b.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case bedrock.Name:
-		return b.buildBedrockProvider(apiKey, headers, providerCfg.ID, providerCfg.ProxyURL)
+		return b.buildBedrockProvider(apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case google.Name:
-		return b.buildGoogleProvider(baseURL, apiKey, headers, providerCfg.ProxyURL)
+		return b.buildGoogleProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case "google-vertex":
-		return b.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.ProxyURL)
+		return b.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	case openaicompat.Name:
 		switch providerCfg.ID {
 		case string(catwalk.InferenceProviderZAI):
@@ -1625,14 +1718,14 @@ func (b *runtimeBuilder) buildProvider(providerCfg config.ProviderConfig, model 
 				extraBody = map[string]any{}
 			}
 			extraBody["tool_stream"] = true
-			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, extraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL)
+			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, extraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 		}
-		return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL)
+		return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 	default:
 		// Known custom providers (litellm, ollama, omlx) are
 		// openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL)
+			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL, snapshot.config.Options.Debug)
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

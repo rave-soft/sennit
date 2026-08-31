@@ -79,7 +79,7 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{}, "some-provider", "")
+		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{}, "some-provider", "", false)
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Equal(t, "akey", captured.Header.Get("X-Api-Key"))
@@ -90,7 +90,7 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "pre-existing")
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAnthropicProvider(server.URL, "Bearer akey", map[string]string{}, "some-provider", "")
+		provider, err := c.builder.buildAnthropicProvider(server.URL, "Bearer akey", map[string]string{}, "some-provider", "", false)
 		require.NoError(t, err)
 		require.Equal(t, "pre-existing", os.Getenv("ANTHROPIC_API_KEY"), "the fix must not mutate the process environment")
 		probe(t, provider, "claude-3")
@@ -102,7 +102,7 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "pre-existing")
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{}, string(catwalk.InferenceProviderMiniMax), "")
+		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{}, string(catwalk.InferenceProviderMiniMax), "", false)
 		require.NoError(t, err)
 		require.Equal(t, "pre-existing", os.Getenv("ANTHROPIC_API_KEY"))
 		probe(t, provider, "abab6.5")
@@ -114,7 +114,7 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "pre-existing")
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{}, string(catwalk.InferenceProviderMiniMaxChina), "")
+		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{}, string(catwalk.InferenceProviderMiniMaxChina), "", false)
 		require.NoError(t, err)
 		probe(t, provider, "abab6.5")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -128,11 +128,11 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "ambient-key")
 		c := newProxyTestCoordinator(t, false)
 
-		_, err := c.builder.buildAnthropicProvider("http://example.test", "Bearer akey", map[string]string{}, "some-provider", "")
+		_, err := c.builder.buildAnthropicProvider("http://example.test", "Bearer akey", map[string]string{}, "some-provider", "", false)
 		require.NoError(t, err)
 
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAnthropicProvider(server.URL, "", map[string]string{}, "some-provider", "")
+		provider, err := c.builder.buildAnthropicProvider(server.URL, "", map[string]string{}, "some-provider", "", false)
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Equal(t, "ambient-key", captured.Header.Get("X-Api-Key"))
@@ -142,7 +142,7 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, "some-provider", "")
+		provider, err := c.builder.buildAnthropicProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, "some-provider", "", false)
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Equal(t, "v", captured.Header.Get("X-Custom"))
@@ -151,7 +151,7 @@ func TestBuildAnthropicProvider(t *testing.T) {
 	t.Run("invalid proxy URL surfaces an error and no provider", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildAnthropicProvider("", "akey", map[string]string{}, "some-provider", "://bad")
+		provider, err := c.builder.buildAnthropicProvider("", "akey", map[string]string{}, "some-provider", "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -167,7 +167,7 @@ func TestBuildOpenaiProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildOpenaiProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, "openai", "")
+		provider, err := c.builder.buildOpenaiProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, "openai", "", false)
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -178,7 +178,7 @@ func TestBuildOpenaiProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildOpenaiProvider(server.URL, "akey", map[string]string{}, codex.ProviderID, "")
+		provider, err := c.builder.buildOpenaiProvider(server.URL, "akey", map[string]string{}, codex.ProviderID, "", false)
 		require.NoError(t, err)
 		probe(t, provider, "gpt-5")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -187,7 +187,7 @@ func TestBuildOpenaiProvider(t *testing.T) {
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildOpenaiProvider("", "akey", map[string]string{}, "openai", "://bad")
+		provider, err := c.builder.buildOpenaiProvider("", "akey", map[string]string{}, "openai", "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -203,7 +203,7 @@ func TestBuildOpenaiCompatProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildOpenaiCompatProvider(server.URL, "akey", map[string]string{}, nil, "some-vendor", false, "")
+		provider, err := c.builder.buildOpenaiCompatProvider(server.URL, "akey", map[string]string{}, nil, "some-vendor", false, "", false)
 		require.NoError(t, err)
 		probe(t, provider, "some-model")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -214,7 +214,7 @@ func TestBuildOpenaiCompatProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		extraBody := map[string]any{"tool_stream": true}
-		provider, err := c.builder.buildOpenaiCompatProvider(server.URL, "akey", map[string]string{}, extraBody, "some-vendor", false, "")
+		provider, err := c.builder.buildOpenaiCompatProvider(server.URL, "akey", map[string]string{}, extraBody, "some-vendor", false, "", false)
 		require.NoError(t, err)
 		probe(t, provider, "some-model")
 		var body map[string]any
@@ -226,7 +226,7 @@ func TestBuildOpenaiCompatProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildOpenaiCompatProvider(server.URL, "akey", map[string]string{}, nil, string(catwalk.InferenceProviderCopilot), false, "")
+		provider, err := c.builder.buildOpenaiCompatProvider(server.URL, "akey", map[string]string{}, nil, string(catwalk.InferenceProviderCopilot), false, "", false)
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4o")
 		require.NotEmpty(t, captured.Header.Get("X-Initiator"))
@@ -235,7 +235,7 @@ func TestBuildOpenaiCompatProvider(t *testing.T) {
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildOpenaiCompatProvider("http://example.test", "akey", map[string]string{}, nil, "some-vendor", false, "://bad")
+		provider, err := c.builder.buildOpenaiCompatProvider("http://example.test", "akey", map[string]string{}, nil, "some-vendor", false, "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -250,7 +250,7 @@ func TestBuildAzureProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAzureProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, nil, "")
+		provider, err := c.builder.buildAzureProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, nil, "", false)
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4o")
 		require.Equal(t, "akey", captured.Header.Get("Api-Key"))
@@ -271,7 +271,7 @@ func TestBuildAzureProvider(t *testing.T) {
 		// than merely that construction does not error.
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildAzureProvider(server.URL, "akey", map[string]string{}, map[string]string{"apiVersion": "2024-05-05"}, "")
+		provider, err := c.builder.buildAzureProvider(server.URL, "akey", map[string]string{}, map[string]string{"apiVersion": "2024-05-05"}, "", false)
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4o")
 		values, err := url.ParseQuery(captured.Query)
@@ -282,7 +282,7 @@ func TestBuildAzureProvider(t *testing.T) {
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildAzureProvider("http://example.test", "akey", map[string]string{}, nil, "://bad")
+		provider, err := c.builder.buildAzureProvider("http://example.test", "akey", map[string]string{}, nil, "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -297,7 +297,7 @@ func TestBuildGoogleProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
-		provider, err := c.builder.buildGoogleProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, "")
+		provider, err := c.builder.buildGoogleProvider(server.URL, "akey", map[string]string{"X-Custom": "v"}, "", false)
 		require.NoError(t, err)
 		probe(t, provider, "gemini-2.5-pro")
 		require.Equal(t, "akey", captured.Header.Get("X-Goog-Api-Key"))
@@ -307,7 +307,7 @@ func TestBuildGoogleProvider(t *testing.T) {
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildGoogleProvider("http://example.test", "akey", map[string]string{}, "://bad")
+		provider, err := c.builder.buildGoogleProvider("http://example.test", "akey", map[string]string{}, "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -330,7 +330,7 @@ func TestBuildOpenrouterAndVercelProvider(t *testing.T) {
 	t.Run("openrouter: construction wires all options without error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildOpenrouterProvider("ignored-base-url", "akey", map[string]string{"X-Custom": "v"}, "")
+		provider, err := c.builder.buildOpenrouterProvider("ignored-base-url", "akey", map[string]string{"X-Custom": "v"}, "", false)
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -338,7 +338,7 @@ func TestBuildOpenrouterAndVercelProvider(t *testing.T) {
 	t.Run("openrouter: invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildOpenrouterProvider("", "akey", map[string]string{}, "://bad")
+		provider, err := c.builder.buildOpenrouterProvider("", "akey", map[string]string{}, "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -346,7 +346,7 @@ func TestBuildOpenrouterAndVercelProvider(t *testing.T) {
 	t.Run("vercel: construction wires all options without error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildVercelProvider("ignored-base-url", "akey", map[string]string{"X-Custom": "v"}, "")
+		provider, err := c.builder.buildVercelProvider("ignored-base-url", "akey", map[string]string{"X-Custom": "v"}, "", false)
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -354,7 +354,7 @@ func TestBuildOpenrouterAndVercelProvider(t *testing.T) {
 	t.Run("vercel: invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildVercelProvider("", "akey", map[string]string{}, "://bad")
+		provider, err := c.builder.buildVercelProvider("", "akey", map[string]string{}, "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -378,7 +378,7 @@ func TestBuildBedrockProvider(t *testing.T) {
 	t.Run("explicit API key builds without error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildBedrockProvider("akey", map[string]string{"X-Custom": "v"}, "some-provider", "")
+		provider, err := c.builder.buildBedrockProvider("akey", map[string]string{"X-Custom": "v"}, "some-provider", "", false)
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -386,7 +386,7 @@ func TestBuildBedrockProvider(t *testing.T) {
 	t.Run("AWS_BEARER_TOKEN_BEDROCK env fallback builds without error", func(t *testing.T) {
 		t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "env-token")
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildBedrockProvider("", map[string]string{}, "some-provider", "")
+		provider, err := c.builder.buildBedrockProvider("", map[string]string{}, "some-provider", "", false)
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -394,7 +394,7 @@ func TestBuildBedrockProvider(t *testing.T) {
 	t.Run("no API key at all still builds, deferring to the SDK's credential chain", func(t *testing.T) {
 		t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildBedrockProvider("", map[string]string{}, "some-provider", "")
+		provider, err := c.builder.buildBedrockProvider("", map[string]string{}, "some-provider", "", false)
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -402,7 +402,7 @@ func TestBuildBedrockProvider(t *testing.T) {
 	t.Run("bedrock-europe and the default both build without error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildBedrockProvider("akey", map[string]string{}, string(catwalk.InferenceProviderBedrockEurope), "")
+		provider, err := c.builder.buildBedrockProvider("akey", map[string]string{}, string(catwalk.InferenceProviderBedrockEurope), "", false)
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -410,7 +410,7 @@ func TestBuildBedrockProvider(t *testing.T) {
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildBedrockProvider("akey", map[string]string{}, "some-provider", "://bad")
+		provider, err := c.builder.buildBedrockProvider("akey", map[string]string{}, "some-provider", "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -428,7 +428,7 @@ func TestBuildGoogleVertexProvider(t *testing.T) {
 	t.Run("construction wires project/location and headers without error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildGoogleVertexProvider(map[string]string{"X-Custom": "v"}, map[string]string{"project": "proj", "location": "us-central1"}, "")
+		provider, err := c.builder.buildGoogleVertexProvider(map[string]string{"X-Custom": "v"}, map[string]string{"project": "proj", "location": "us-central1"}, "", false)
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -436,7 +436,7 @@ func TestBuildGoogleVertexProvider(t *testing.T) {
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		provider, err := c.builder.buildGoogleVertexProvider(map[string]string{}, nil, "://bad")
+		provider, err := c.builder.buildGoogleVertexProvider(map[string]string{}, nil, "://bad", false)
 		require.Error(t, err)
 		require.Nil(t, provider)
 	})
@@ -454,7 +454,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "openai", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gpt-4"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gpt-4"})
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -466,7 +466,7 @@ func TestBuildProvider(t *testing.T) {
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "anthropic", APIKey: "akey", BaseURL: server.URL}
 		model := config.SelectedModel{Model: "claude-3", Think: true}
-		provider, err := c.builder.buildProvider(providerCfg, model, false)
+		provider, err := c.builder.buildProvider(providerCfg, model)
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Equal(t, "interleaved-thinking-2025-05-14", captured.Header.Get("Anthropic-Beta"))
@@ -481,7 +481,7 @@ func TestBuildProvider(t *testing.T) {
 			ExtraHeaders: map[string]string{"anthropic-beta": "other-beta-2024"},
 		}
 		model := config.SelectedModel{Model: "claude-3", Think: true}
-		provider, err := c.builder.buildProvider(providerCfg, model, false)
+		provider, err := c.builder.buildProvider(providerCfg, model)
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Equal(t, "other-beta-2024,interleaved-thinking-2025-05-14", captured.Header.Get("Anthropic-Beta"))
@@ -492,7 +492,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "anthropic", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "claude-3"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "claude-3"})
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Empty(t, captured.Header.Get("Anthropic-Beta"))
@@ -506,7 +506,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderOpenCodeGo),
 			APIKey: "akey", BaseURL: server.URL + "/v1",
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "qwen3.7-max"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "qwen3.7-max"})
 		require.NoError(t, err)
 		probe(t, provider, "qwen3.7-max")
 		// The anthropic builder was used (X-Api-Key), not openaicompat
@@ -524,7 +524,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderOpenCodeGo),
 			APIKey: "akey", BaseURL: server.URL,
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-other-model"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-other-model"})
 		require.NoError(t, err)
 		probe(t, provider, "some-other-model")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -535,7 +535,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "azure", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gpt-4o"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gpt-4o"})
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4o")
 		require.Equal(t, "akey", captured.Header.Get("Api-Key"))
@@ -546,7 +546,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "google", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"})
 		require.NoError(t, err)
 		probe(t, provider, "gemini-2.5-pro")
 		require.Equal(t, "akey", captured.Header.Get("X-Goog-Api-Key"))
@@ -556,7 +556,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "google-vertex", ExtraParams: map[string]string{"project": "p", "location": "us-central1"}}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -565,7 +565,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "bedrock", APIKey: "akey"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "claude-3"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "claude-3"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -574,7 +574,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "openrouter", APIKey: "akey"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -583,7 +583,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "vercel", APIKey: "akey"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -596,7 +596,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderZAI),
 			APIKey: "akey", BaseURL: server.URL,
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "glm-5"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "glm-5"})
 		require.NoError(t, err)
 		probe(t, provider, "glm-5")
 		var body map[string]any
@@ -618,7 +618,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderZAI),
 			APIKey: "akey", BaseURL: server.URL, ExtraBody: sharedExtraBody,
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "glm-5"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "glm-5"})
 		require.NoError(t, err)
 		probe(t, provider, "glm-5")
 		require.NotContains(t, sharedExtraBody, "tool_stream", "buildProvider must not write into the caller's ExtraBody map")
@@ -630,7 +630,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "openai-compat", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"})
 		require.NoError(t, err)
 		probe(t, provider, "some-model")
 		var body map[string]any
@@ -643,7 +643,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "ollama", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "llama3"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "llama3"})
 		require.NoError(t, err)
 		probe(t, provider, "llama3")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -653,7 +653,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "totally-unknown"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "m"}, false)
+		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "m"})
 		require.Error(t, err)
 		require.Nil(t, provider)
 		require.Contains(t, err.Error(), "totally-unknown")

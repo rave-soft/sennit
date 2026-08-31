@@ -188,6 +188,42 @@ func (s *ConfigStore) Version() uint64 {
 	return s.version.Load()
 }
 
+// RuntimeSnapshot is one published runtime configuration generation.
+type RuntimeSnapshot struct {
+	Config      *Config
+	Resolver    VariableResolver
+	WorkingDir  string
+	Overrides   RuntimeOverrides
+	LoadedPaths []string
+	Staleness   StalenessResult
+}
+
+// RuntimeSnapshot captures config, resolver, and publication metadata under
+// the lock that serializes every in-memory publication.
+func (s *ConfigStore) RuntimeSnapshot() RuntimeSnapshot {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
+
+	cfg := s.Config()
+	var model *SelectedModel
+	if s.overrides.Model != nil {
+		m := *s.overrides.Model
+		model = &m
+	}
+	return RuntimeSnapshot{
+		Config:     cfg,
+		Resolver:   cfg.RuntimeResolver(),
+		WorkingDir: s.workingDir,
+		Overrides: RuntimeOverrides{
+			SkipPermissionRequests: s.overrides.SkipPermissionRequests,
+			EnabledChannels:        slices.Clone(s.overrides.EnabledChannels),
+			Model:                  model,
+		},
+		LoadedPaths: slices.Clone(s.loadedPaths),
+		Staleness:   s.ConfigStaleness(),
+	}
+}
+
 func (s *ConfigStore) CredentialVersion() uint64 {
 	return s.credentialVersion.Load()
 }
