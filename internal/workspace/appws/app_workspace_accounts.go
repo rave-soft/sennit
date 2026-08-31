@@ -2,7 +2,6 @@ package appws
 
 import (
 	"context"
-	"fmt"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
@@ -17,18 +16,18 @@ import (
 // fresh on every call rather than cached on AppWorkspace: FileStore is a
 // thin, stateless wrapper over the file path (see its doc comment — it
 // holds no in-memory cache), so there is nothing worth keeping alive
-// between calls. Every account-mutating method below shares this one
-// helper instead of repeating the same accounts.NewFileStore call.
+// between calls.
 func (w *AppWorkspace) accountStore() *accounts.FileStore {
 	return accounts.NewFileStore(config.GlobalAccountsFile())
 }
 
-// RecordAccount implements Workspace by delegating to config.RecordAccount.
-// See accountStore's doc comment for why the store is opened fresh via that
-// helper rather than cached on AppWorkspace.
+func (w *AppWorkspace) accounts() *config.AccountsService {
+	return config.NewAccountsService(w.store, w.accountStore(), fetchCodexUsage)
+}
+
+// RecordAccount implements Workspace.
 func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
-	accStore := w.accountStore()
-	a, err := config.RecordAccount(w.store, accStore, scope, providerID, cred)
+	a, err := w.accounts().Record(scope, providerID, cred)
 	if err != nil {
 		return accounts.Account{}, err
 	}
@@ -36,83 +35,39 @@ func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred
 	return a, nil
 }
 
-// ListAccounts implements Workspace by delegating to the account store.
-// See accountStore's comment for why the store is opened fresh here
-// rather than cached on AppWorkspace. It first folds any pre-existing
-// single credential into the store (config.EnsureAccountMigrated), so a
-// user who authenticated before the multi-account feature existed sees
-// their own account here instead of an empty list.
+// ListAccounts implements Workspace.
 func (w *AppWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
-	accStore := w.accountStore()
-	if err := config.EnsureAccountMigrated(w.store, accStore, providerID); err != nil {
-		return nil, err
-	}
-	return accStore.List(providerID)
+	return w.accounts().List(providerID)
 }
 
-// ActivateAccount implements Workspace by looking up accountID and
-// delegating the switch to config.ConfigStore.ActivateAccount.
+// ActivateAccount implements Workspace.
 func (w *AppWorkspace) ActivateAccount(scope config.Scope, providerID, accountID string) error {
-	accStore := w.accountStore()
-	a, ok, err := accStore.Get(providerID, accountID)
-	if err != nil {
-		return fmt.Errorf("looking up account %s for provider %s: %w", accountID, providerID, err)
-	}
-	if !ok {
-		return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
-	}
-	return w.store.ActivateAccount(scope, providerID, a)
+	return w.accounts().Activate(scope, providerID, accountID)
 }
 
-// UpdateAccount implements Workspace by delegating to config.UpdateAccount.
-// The account store is opened fresh here rather than cached on
-// AppWorkspace — see accountStore's comment above for why. The rules
-// themselves (upsert, then republish if active) live in config.UpdateAccount
-// so this stays a thin wrapper: see that function's doc comment for why a
-// second copy of the logic here would be the wrong shape.
+// UpdateAccount implements Workspace.
 func (w *AppWorkspace) UpdateAccount(providerID string, account accounts.Account) error {
-	accStore := w.accountStore()
-	return config.UpdateAccount(w.store, accStore, providerID, account)
+	return w.accounts().Update(providerID, account)
 }
 
-// RemoveAccount implements Workspace by delegating to config.RemoveAccount,
-// which owns the actual rules (refuse the last account, activate a
-// replacement before deleting the active one) — see its doc comment for
-// why those rules must not be duplicated here or in a test double.
+// RemoveAccount implements Workspace.
 func (w *AppWorkspace) RemoveAccount(scope config.Scope, providerID, accountID string) error {
-	accStore := w.accountStore()
-	return config.RemoveAccount(w.store, accStore, scope, providerID, accountID)
+	return w.accounts().Remove(scope, providerID, accountID)
 }
 
-// PurgeAccounts implements Workspace by delegating to
-// config.PurgeAccounts, the deliberate way past RemoveAccount's
-// last-account refusal — see the interface's doc comment for which caller
-// is meant to use it and why.
+// PurgeAccounts implements Workspace.
 func (w *AppWorkspace) PurgeAccounts(scope config.Scope, providerID string) error {
-	accStore := w.accountStore()
-	return config.PurgeAccounts(w.store, accStore, scope, providerID)
+	return w.accounts().Purge(scope, providerID)
 }
 
-// SetProviderProxy implements Workspace by delegating to
-// config.SetProviderProxy, exactly like UpdateAccount/RemoveAccount above.
+// SetProviderProxy implements Workspace.
 func (w *AppWorkspace) SetProviderProxy(providerID, proxy string) error {
-	accStore := w.accountStore()
-	return config.SetProviderProxy(w.store, accStore, providerID, proxy)
+	return w.accounts().SetProviderProxy(providerID, proxy)
 }
 
-// RefreshAccountLimits implements Workspace by delegating to
-// config.RefreshAccountLimits, exactly like UpdateAccount/RemoveAccount
-// above, and supplying the fetcher that knows how to ask a vendor.
-//
-// The wiring is here rather than in internal/config because reaching
-// Codex's HTTP endpoint means importing the package that also carries its
-// browser sign-in flow, and internal/config is imported by nearly
-// everything. Codex is the only provider that reports usage today, and
-// config's own guard (accounts.CapabilitiesOf) is what decides whether the
-// fetcher is called at all.
+// RefreshAccountLimits implements Workspace.
 func (w *AppWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
-	accStore := w.accountStore()
-	return config.RefreshAccountLimits(ctx, w.store, accStore, providerID, fetchCodexUsage)
+	return w.accounts().RefreshLimits(ctx, providerID)
 }
 
 // fetchCodexUsage adapts codex.FetchUsage to config.AccountUsageFetcher by
