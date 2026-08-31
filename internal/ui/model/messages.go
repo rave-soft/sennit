@@ -186,7 +186,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		m.sess.lastUserMessageTime = msg.CreatedAt
 		// The agent has taken this prompt: drop the placeholder that was
 		// standing in for it while it waited in the queue.
-		m.deliverQueuedPrompt(msg.Content().Text)
+		m.queued.deliver(m.chat, msg.Content().Text)
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Config())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
@@ -255,7 +255,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com))
 	}
-	m.refloatQueuedPrompts()
+	m.queued.refloat(m.chat, m.com.Styles)
 	return tea.Sequence(cmds...)
 }
 
@@ -326,7 +326,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	m.chat.AppendMessages(items...)
-	m.refloatQueuedPrompts()
+	m.queued.refloat(m.chat, m.com.Styles)
 	if m.chat.Follow() {
 		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 			cmds = append(cmds, cmd)

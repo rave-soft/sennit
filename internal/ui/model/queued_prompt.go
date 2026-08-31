@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // queuedPromptState tracks the prompts this client has submitted while the
@@ -30,61 +32,50 @@ type queuedPrompt struct {
 	text string
 }
 
-// showQueuedPrompt puts a placeholder for text at the bottom of the chat.
-// Called when a prompt is submitted into a busy session.
-func (m *UI) showQueuedPrompt(text string) {
+// show puts a placeholder for text at the bottom of chat. Called when a
+// prompt is submitted into a busy session.
+func (s *queuedPromptState) show(ch *chatlist.Chat, styles *styles.Styles, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	m.queued.seq++
-	item := queuedPrompt{id: fmt.Sprintf("queued-prompt-%d", m.queued.seq), text: text}
-	m.queued.items = append(m.queued.items, item)
-	m.chat.AppendMessages(chat.NewQueuedUserMessageItem(m.com.Styles, item.id, item.text))
+	s.seq++
+	item := queuedPrompt{id: fmt.Sprintf("queued-prompt-%d", s.seq), text: text}
+	s.items = append(s.items, item)
+	ch.AppendMessages(chat.NewQueuedUserMessageItem(styles, item.id, item.text))
 }
 
-// deliverQueuedPrompt drops the placeholder for text, if there is one,
-// because the real message has just arrived — the agent took the prompt
-// and persisted it. Matching is by text: a queued prompt has no id to
-// correlate on until it becomes a message, and the person's own words are
-// what the placeholder was showing.
-func (m *UI) deliverQueuedPrompt(text string) {
+// deliver drops the placeholder for text, if there is one, because the real
+// message has just arrived and the agent took the prompt. Matching is by text:
+// a queued prompt has no id to correlate on until it becomes a message.
+func (s *queuedPromptState) deliver(ch *chatlist.Chat, text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return
 	}
-	for i, item := range m.queued.items {
+	for i, item := range s.items {
 		if strings.TrimSpace(item.text) != text {
 			continue
 		}
-		m.chat.RemoveMessage(item.id)
-		m.queued.items = append(m.queued.items[:i], m.queued.items[i+1:]...)
+		ch.RemoveMessage(item.id)
+		s.items = append(s.items[:i], s.items[i+1:]...)
 		return
 	}
 }
 
-// clearQueuedPrompts drops every placeholder. Used where the queue itself
-// goes away — escape clearing it, or a session switch replacing the chat.
-func (m *UI) clearQueuedPrompts() {
-	for _, item := range m.queued.items {
-		m.chat.RemoveMessage(item.id)
+// clear drops every placeholder when the agent queue goes away.
+func (s *queuedPromptState) clear(ch *chatlist.Chat) {
+	for _, item := range s.items {
+		ch.RemoveMessage(item.id)
 	}
-	m.queued.items = nil
+	s.items = nil
 }
 
-// refloatQueuedPrompts moves the placeholders back to the end of the chat
-// after something else was appended.
-//
-// A queued prompt has not been said yet, so it must not sit above the
-// agent's continuing work as though it had been: the turn keeps producing
-// tool calls and replies while the prompt waits, and every one of them
-// would otherwise be appended after it. Keeping the placeholders pinned at
-// the bottom is what makes "still waiting" readable.
-func (m *UI) refloatQueuedPrompts() {
-	if len(m.queued.items) == 0 {
-		return
-	}
-	for _, item := range m.queued.items {
-		m.chat.RemoveMessage(item.id)
-		m.chat.AppendMessages(chat.NewQueuedUserMessageItem(m.com.Styles, item.id, item.text))
+// refloat moves placeholders back to the end of chat after another item is
+// appended. A queued prompt has not been said yet, so it must remain below the
+// agent's continuing work.
+func (s *queuedPromptState) refloat(ch *chatlist.Chat, styles *styles.Styles) {
+	for _, item := range s.items {
+		ch.RemoveMessage(item.id)
+		ch.AppendMessages(chat.NewQueuedUserMessageItem(styles, item.id, item.text))
 	}
 }

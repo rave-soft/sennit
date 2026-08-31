@@ -14,7 +14,7 @@ import (
 func TestQueuedPromptIsVisibleUntilTheAgentTakesIt(t *testing.T) {
 	u := newCursorTestUI(t)
 
-	u.showQueuedPrompt("also update the docs")
+	u.queued.show(u.chat, u.com.Styles, "also update the docs")
 	require.Equal(t, 1, u.chat.Len())
 	require.NotNil(t, u.chat.MessageItem("queued-prompt-1"))
 
@@ -37,7 +37,7 @@ func TestQueuedPromptIsVisibleUntilTheAgentTakesIt(t *testing.T) {
 func TestQueuedPromptStaysBelowTheAgentsWork(t *testing.T) {
 	u := newCursorTestUI(t)
 
-	u.showQueuedPrompt("also update the docs")
+	u.queued.show(u.chat, u.com.Styles, "also update the docs")
 	u.appendSessionMessage(message.Message{
 		ID:    "assistant-1",
 		Role:  message.Assistant,
@@ -54,11 +54,11 @@ func TestQueuedPromptStaysBelowTheAgentsWork(t *testing.T) {
 func TestIdenticalQueuedPromptsAreSeparateEntries(t *testing.T) {
 	u := newCursorTestUI(t)
 
-	u.showQueuedPrompt("go on")
-	u.showQueuedPrompt("go on")
+	u.queued.show(u.chat, u.com.Styles, "go on")
+	u.queued.show(u.chat, u.com.Styles, "go on")
 	require.Equal(t, 2, u.chat.Len())
 
-	u.deliverQueuedPrompt("go on")
+	u.queued.deliver(u.chat, "go on")
 	require.Len(t, u.queued.items, 1)
 	require.Nil(t, u.chat.MessageItem("queued-prompt-1"))
 	require.NotNil(t, u.chat.MessageItem("queued-prompt-2"))
@@ -69,10 +69,25 @@ func TestIdenticalQueuedPromptsAreSeparateEntries(t *testing.T) {
 func TestClearQueuedPromptsDropsThemAll(t *testing.T) {
 	u := newCursorTestUI(t)
 
-	u.showQueuedPrompt("one")
-	u.showQueuedPrompt("two")
-	u.clearQueuedPrompts()
+	u.queued.show(u.chat, u.com.Styles, "one")
+	u.queued.show(u.chat, u.com.Styles, "two")
+	u.queued.clear(u.chat)
 
 	require.Zero(t, u.chat.Len())
 	require.Empty(t, u.queued.items)
+}
+
+func TestQueuedPromptStateIgnoresBlankPromptAndKeepsIDsUniqueAfterClear(t *testing.T) {
+	u := newCursorTestUI(t)
+
+	u.queued.show(u.chat, u.com.Styles, " \t\n")
+	require.Zero(t, u.queued.seq)
+	require.Empty(t, u.queued.items)
+
+	u.queued.show(u.chat, u.com.Styles, "first")
+	u.queued.clear(u.chat)
+	u.queued.show(u.chat, u.com.Styles, "second")
+
+	require.Equal(t, "queued-prompt-2", u.queued.items[0].id)
+	require.NotNil(t, u.chat.MessageItem("queued-prompt-2"))
 }

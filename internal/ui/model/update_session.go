@@ -101,7 +101,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.sess.modelUsed = msg.modelUsed
 		// The chat is about to be replaced wholesale; placeholders belong
 		// to the list that is going away.
-		m.clearQueuedPrompts()
+		m.queued.clear(m.chat)
 		m.sidebar.offset = 0
 		m.sess.files = msg.files
 		m.sess.filesVersion++

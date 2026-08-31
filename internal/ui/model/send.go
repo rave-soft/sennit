@@ -57,7 +57,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		// nothing is persisted until the running turn takes it. Show it
 		// as waiting rather than letting it vanish until then.
 		if m.isAgentBusy() {
-			m.showQueuedPrompt(content)
+			m.queued.show(m.chat, m.com.Styles, content)
 		}
 	}
 	return m.sendMessageNow(content, attachments...)
@@ -152,7 +152,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.com.Workspace.AgentCancel(m.sess.current.ID)
 		// A cancel clears the agent's queue too, so nothing is left
 		// waiting for these placeholders to stand in for.
-		m.clearQueuedPrompts()
+		m.queued.clear(m.chat)
 		// Stop the spinning todo indicator and drop the memoized busy
 		// state the cancel just changed; the session panel reads
 		// m.panel.isSpinning fresh on every draw, and again once the
@@ -166,7 +166,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 	// count (event-driven) instead of a synchronous workspace probe.
 	if len(m.wsCache.promptQueueCache.Value) > 0 {
 		m.com.Workspace.AgentClearQueue(m.sess.current.ID)
-		m.clearQueuedPrompts()
+		m.queued.clear(m.chat)
 		// Bump the queue generation so a fetch started before this clear
 		// cannot land and repopulate the pill we just emptied, then write
 		// the now-authoritative empty queue through as fresh.
