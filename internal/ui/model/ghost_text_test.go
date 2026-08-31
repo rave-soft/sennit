@@ -103,9 +103,9 @@ func TestGhostTextSuppressedByCompletionsOrBangMode(t *testing.T) {
 	u.editor.promptHistory.messages = []string{"hello world"}
 	u.editor.textarea.SetValue("hello")
 
-	u.editor.completionsOpen = true
+	u.editor.completions.open = true
 	require.Empty(t, u.activeGhostTail(), "must not predict while completions popup is open")
-	u.editor.completionsOpen = false
+	u.editor.completions.open = false
 
 	u.editor.bangMode = true
 	require.Empty(t, u.activeGhostTail(), "must not predict in bang mode")

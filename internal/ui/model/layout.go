@@ -209,10 +209,10 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.status.Draw(scr, layout.status)
 
 	// Draw completions popup if open
-	if !isOnboarding && m.editor.completionsOpen && m.editor.completions.HasItems() {
-		w, h := m.editor.completions.Size()
-		x := m.editor.completionsPositionStart.X
-		y := m.editor.completionsPositionStart.Y - h
+	if !isOnboarding && m.editor.completions.open && m.editor.completions.popup.HasItems() {
+		w, h := m.editor.completions.popup.Size()
+		x := m.editor.completions.anchor.X
+		y := m.editor.completions.anchor.Y - h
 
 		screenW := area.Dx()
 		if x+w > screenW {
@@ -221,7 +221,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		x = max(0, x)
 		y = max(0, y+m.editorAttachmentsRowOffset())
 
-		completionsView := uv.NewStyledString(m.editor.completions.Render())
+		completionsView := uv.NewStyledString(m.editor.completions.popup.Render())
 		completionsView.Draw(scr, image.Rectangle{
 			Min: image.Pt(x, y),
 			Max: image.Pt(x+w, y+h),
@@ -579,7 +579,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 // shown right now (wrong focus, completions open, bang mode, empty input,
 // no match, or hidden by a preceding Esc).
 func (m *UI) activeGhostTail() string {
-	if m.focus != uiFocusEditor || m.editor.completionsOpen || m.editor.bangMode {
+	if m.focus != uiFocusEditor || m.editor.completions.open || m.editor.bangMode {
 		return ""
 	}
 	value := m.editor.textarea.Value()

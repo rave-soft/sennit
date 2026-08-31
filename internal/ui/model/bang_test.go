@@ -75,7 +75,7 @@ func TestBangSuppressesSlashCompletions(t *testing.T) {
 	typeText(u, "!/usr/bin/env")
 
 	require.True(t, u.editor.bangMode)
-	require.False(t, u.editor.completionsOpen, "'/' must not open the command popup in bang mode")
+	require.False(t, u.editor.completions.open, "'/' must not open the command popup in bang mode")
 	require.Equal(t, "/usr/bin/env", u.editor.textarea.Value())
 }
 
@@ -86,7 +86,7 @@ func TestBangSuppressesAtCompletions(t *testing.T) {
 	typeText(u, "!git log @{u}")
 
 	require.True(t, u.editor.bangMode)
-	require.False(t, u.editor.completionsOpen, "'@' must not open the file-mention popup in bang mode")
+	require.False(t, u.editor.completions.open, "'@' must not open the file-mention popup in bang mode")
 	require.Equal(t, "git log @{u}", u.editor.textarea.Value())
 }
 
@@ -97,8 +97,8 @@ func TestSlashAndAtCompletionsUnaffectedOutsideBangMode(t *testing.T) {
 
 	u := newSlashTestUI(t)
 	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "/", Code: '/'})
-	require.True(t, u.editor.completionsOpen)
-	require.Equal(t, completionsModeCommand, u.editor.completionsMode)
+	require.True(t, u.editor.completions.open)
+	require.Equal(t, completionsModeCommand, u.editor.completions.mode)
 }
 
 // TestBangGhostSuggestionRestoredThroughHistory verifies "!"-prefixed

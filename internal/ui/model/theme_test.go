@@ -69,19 +69,19 @@ func TestSetTheme_RepaintsOpenCompletions(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	u.editor.completions = completions.New(completions.PopupStyles{
+	u.editor.completions.popup = completions.New(completions.PopupStyles{
 		Normal:  u.com.Styles.Completions.Normal,
 		Focused: u.com.Styles.Completions.Focused,
 		Match:   u.com.Styles.Completions.Match,
 		Muted:   u.com.Styles.Completions.Muted,
 		Border:  u.com.Styles.Completions.Border,
 	})
-	u.editor.completions.SetItems([]completions.FileCompletionValue{{Path: "main.go"}}, nil)
-	before := u.editor.completions.Render()
+	u.editor.completions.popup.SetItems([]completions.FileCompletionValue{{Path: "main.go"}}, nil)
+	before := u.editor.completions.popup.Render()
 
 	u.setTheme(styles.PaletteGraphiteAmber.ID)
 
-	require.NotEqual(t, before, u.editor.completions.Render(),
+	require.NotEqual(t, before, u.editor.completions.popup.Render(),
 		"the open completions popup kept the previous palette")
 }
 

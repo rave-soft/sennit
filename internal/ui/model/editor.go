@@ -2,13 +2,11 @@ package model
 
 import (
 	"context"
-	"image"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 
 	"github.com/rave-soft/sennit/internal/ui/attachments"
-	"github.com/rave-soft/sennit/internal/ui/completions"
 )
 
 // editorState holds the prompt editor's own state: the textarea, the
@@ -33,15 +31,8 @@ type editorState struct {
 	// attachments is the file/text attachment list shown above the editor.
 	attachments *attachments.Attachments
 
-	// completions is the @-mention / "/"-command completions popup; the
-	// fields below track its open/mode/query/anchor state as the user
-	// types.
-	completions              *completions.Completions
-	completionsOpen          bool
-	completionsMode          completionsMode
-	completionsStartIndex    int
-	completionsQuery         string
-	completionsPositionStart image.Point // x,y where user typed '@' or '/'
+	// completions owns the @-mention / "/"-command popup lifecycle.
+	completions completionsLifecycleState
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
 	bangMode     bool
@@ -71,24 +62,6 @@ type editorState struct {
 	lastKeyWasEsc bool
 }
 
-// completionsMode selects what the completions popup is currently offering:
-// "@" file/resource mentions, or "/" commands.
-type completionsMode int
-
-const (
-	completionsModeFile completionsMode = iota
-	completionsModeCommand
-)
-
-// closeCompletions closes the completions popup and resets state.
-func (e *editorState) closeCompletions() {
-	e.completionsOpen = false
-	e.completionsMode = completionsModeFile
-	e.completionsQuery = ""
-	e.completionsStartIndex = 0
-	e.completions.Close()
-}
-
 // textareaWord returns the current word at the cursor position.
 func (e *editorState) textareaWord() string {
 	return e.textarea.Word()
@@ -113,23 +86,6 @@ func (e *editorState) textareaCursorOffset() int {
 	row := []rune(lines[line])
 	col := min(e.textarea.Column(), len(row))
 	return offset + len(string(row[:col]))
-}
-
-// insertCompletionText replaces the @query in the textarea with the given text.
-// Returns false if the replacement cannot be performed.
-func (e *editorState) insertCompletionText(text string) bool {
-	value := e.textarea.Value()
-	if e.completionsStartIndex > len(value) {
-		return false
-	}
-
-	word := e.textareaWord()
-	endIdx := min(e.completionsStartIndex+len(word), len(value))
-	newValue := value[:e.completionsStartIndex] + text + value[endIdx:]
-	e.textarea.SetValue(newValue)
-	e.textarea.MoveToEnd()
-	e.textarea.InsertRune(' ')
-	return true
 }
 
 // isAtEditorStart returns true if we are at the 0 line and 0 col in the textarea.

@@ -27,14 +27,14 @@ func TestAtTriggerMidTextUsesCursorPosition(t *testing.T) {
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "@", Code: '@'})
 
-	require.True(t, u.editor.completionsOpen)
+	require.True(t, u.editor.completions.open)
 	require.Equal(t, "hi @world", u.editor.textarea.Value())
-	require.Equal(t, 3, u.editor.completionsStartIndex,
+	require.Equal(t, 3, u.editor.completions.startIndex,
 		"completion must start where '@' was typed, not at the end of the buffer")
 
 	// "@world" (no space between "@" and "world") is one contiguous word,
 	// so the completion replaces the whole thing, same as it would at the
 	// end of a buffer — insertCompletionText also appends a trailing space.
-	require.True(t, u.editor.insertCompletionText("there.go"))
+	require.True(t, u.editor.completions.replace(&u.editor.textarea, "there.go"))
 	require.Equal(t, "hi there.go ", u.editor.textarea.Value())
 }

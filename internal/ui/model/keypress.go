@@ -225,24 +225,24 @@ func (m *UI) handleEditorKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cm
 	}
 
 	// Handle completions if open.
-	if m.editor.completionsOpen {
-		if msg, ok := m.editor.completions.Update(msg); ok {
+	if m.editor.completions.open {
+		if msg, ok := m.editor.completions.popup.Update(msg); ok {
 			switch msg := msg.(type) {
 			case completions.SelectionMsg[completions.FileCompletionValue]:
 				cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
 				if !msg.KeepOpen {
-					m.editor.closeCompletions()
+					m.editor.completions.close()
 				}
 			case completions.SelectionMsg[completions.ResourceCompletionValue]:
 				cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
 				if !msg.KeepOpen {
-					m.editor.closeCompletions()
+					m.editor.completions.close()
 				}
 			case completions.SelectionMsg[completions.CommandCompletionValue]:
 				if msg.InsertOnly {
 					// Tab: fill in the command name so the user can
 					// type arguments, without running it.
-					m.editor.insertCompletionText("/" + msg.Value.Title)
+					m.editor.completions.replace(&m.editor.textarea, "/"+msg.Value.Title)
 				} else {
 					// Enter: run the command immediately and clear
 					// the editor, same as picking it from the
@@ -252,9 +252,9 @@ func (m *UI) handleEditorKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cm
 						cmds = append(cmds, m.applyDialogAction(action))
 					}
 				}
-				m.editor.closeCompletions()
+				m.editor.completions.close()
 			case completions.ClosedMsg:
-				m.editor.closeCompletions()
+				m.editor.completions.close()
 			}
 			return cmds, tea.Batch(cmds...), true
 		}
@@ -340,7 +340,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 	case key.Matches(msg, m.keyMap.Editor.Newline):
 		prevHeight := m.editor.textarea.Height()
 		m.editor.textarea.InsertRune('\n')
-		m.editor.closeCompletions()
+		m.editor.completions.close()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 	case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 		cmd := m.handleHistoryUp(msg)
@@ -437,17 +437,14 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	// Trigger completions on @. Suppressed in bang mode: "@" is
 	// just a character in a shell command (e.g. "git log @{u}"),
 	// not a file-mention trigger.
-	if msg.String() == "@" && !m.editor.completionsOpen && !m.editor.bangMode {
+	if msg.String() == "@" && !m.editor.completions.open && !m.editor.bangMode {
 		// Only show if beginning of prompt or after whitespace.
 		if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
-			m.editor.completionsOpen = true
-			m.editor.completionsMode = completionsModeFile
-			m.editor.completionsQuery = ""
-			m.editor.completionsStartIndex = curIdx
-			m.editor.completionsPositionStart = m.completionsPosition()
 			depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-			m.editor.completions.SetMaxWidth(m.completionsMaxWidth())
-			cmds = append(cmds, m.editor.completions.Open(depth, limit, func() []completions.ResourceCompletionValue { return loadMCPResourceCompletions(m.com) }))
+			cmds = append(cmds, m.editor.completions.openFiles(
+				curIdx, m.completionsPosition(), m.completionsMaxWidth(), depth, limit,
+				func() []completions.ResourceCompletionValue { return loadMCPResourceCompletions(m.com) },
+			))
 		}
 	}
 
@@ -456,14 +453,10 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	// "/" mid-message is just a character. Suppressed in bang
 	// mode: a shell command is very plausibly an absolute path
 	// like "/usr/bin/env", not a command trigger.
-	if msg.String() == "/" && !m.editor.completionsOpen && !m.editor.bangMode && curValue == "" {
-		m.editor.completionsOpen = true
-		m.editor.completionsMode = completionsModeCommand
-		m.editor.completionsQuery = ""
-		m.editor.completionsStartIndex = curIdx
-		m.editor.completionsPositionStart = m.completionsPosition()
-		m.editor.completions.SetMaxWidth(m.completionsMaxWidth())
-		m.editor.completions.OpenCommands(m.commandCompletionItems())
+	if msg.String() == "/" && !m.editor.completions.open && !m.editor.bangMode && curValue == "" {
+		m.editor.completions.openCommands(
+			curIdx, m.completionsPosition(), m.completionsMaxWidth(), m.commandCompletionItems(),
+		)
 	}
 
 	// remove the details if they are open when user starts typing
@@ -513,33 +506,10 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	// Skip filtering on the initial @ or / keystroke: for @ the
 	// items are still loading async, and for / the query is
 	// empty anyway (OpenCommands already populated the list).
-	if m.editor.completionsOpen && msg.String() != "@" && msg.String() != "/" {
-		newValue := m.editor.textarea.Value()
-		newIdx := len(newValue)
-
-		// Close completions if cursor moved before start.
-		if newIdx <= m.editor.completionsStartIndex {
-			m.editor.closeCompletions()
-		} else if msg.String() == "space" {
-			// Close on space.
-			m.editor.closeCompletions()
-		} else {
-			// Extract current word and filter.
-			triggerChar := "@"
-			if m.editor.completionsMode == completionsModeCommand {
-				triggerChar = "/"
-			}
-			word := m.editor.textareaWord()
-			if strings.HasPrefix(word, triggerChar) {
-				// len(triggerChar), not 1: the trigger is a variable, and a
-				// multi-byte one would leave a broken rune at the front of
-				// the query.
-				m.editor.completionsQuery = word[len(triggerChar):]
-				m.editor.completions.Filter(m.editor.completionsQuery)
-			} else if m.editor.completionsOpen {
-				m.editor.closeCompletions()
-			}
-		}
+	if m.editor.completions.open && msg.String() != "@" && msg.String() != "/" {
+		m.editor.completions.updateQuery(
+			m.editor.textareaCursorOffset(), m.editor.textareaWord(), msg.String() == "space",
+		)
 	}
 	return cmds
 }

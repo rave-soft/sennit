@@ -310,7 +310,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		com: com,
 		editor: editorState{
 			textarea:    ta,
-			completions: comp,
+			completions: completionsLifecycleState{popup: comp},
 		},
 		widgets: widgets{
 			dialog: dialog.NewOverlay(),
@@ -726,8 +726,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		case completions.CompletionItemsLoadedMsg:
-			if m.editor.completionsOpen {
-				m.editor.completions.SetItems(msg.Files, msg.Resources)
+			if m.editor.completions.open {
+				m.editor.completions.setItems(msg.Files, msg.Resources)
 			}
 		case fimage.PreviewPreparedMsg:
 			if action := m.dialog.UpdateDialog(dialog.FilePickerID, msg); action != nil {
@@ -1182,8 +1182,8 @@ func (m *UI) setTheme(id string) tea.Cmd {
 	// Editor widgets copy their styles at construction and live for the
 	// whole session, so they keep the old palette unless told otherwise.
 	m.editor.textarea.SetStyles(t.Editor.Textarea)
-	if m.editor.completions != nil {
-		m.editor.completions.SetStyles(completions.PopupStyles{
+	if m.editor.completions.popup != nil {
+		m.editor.completions.popup.SetStyles(completions.PopupStyles{
 			Normal:         t.Completions.Normal,
 			Focused:        t.Completions.Focused,
 			Match:          t.Completions.Match,

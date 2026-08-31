@@ -72,7 +72,7 @@ func newSlashTestUI(t *testing.T) *UI {
 	u.dialog = dialog.NewOverlay()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 	s := lipgloss.NewStyle()
-	u.editor.completions = completions.New(completions.PopupStyles{
+	u.editor.completions.popup = completions.New(completions.PopupStyles{
 		Normal: s, Focused: s, Match: s, Muted: s, Border: s, ScrollbarThumb: s, ScrollbarTrack: s,
 	})
 	return u
@@ -94,10 +94,10 @@ func TestSlashOnEmptyEditorOpensCommandCompletions(t *testing.T) {
 	u := newSlashTestUI(t)
 	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "/", Code: '/'})
 
-	require.True(t, u.editor.completionsOpen)
-	require.Equal(t, completionsModeCommand, u.editor.completionsMode)
-	require.True(t, u.editor.completions.IsOpen())
-	require.True(t, u.editor.completions.HasItems())
+	require.True(t, u.editor.completions.open)
+	require.Equal(t, completionsModeCommand, u.editor.completions.mode)
+	require.True(t, u.editor.completions.popup.IsOpen())
+	require.True(t, u.editor.completions.popup.HasItems())
 	require.Equal(t, "/", u.editor.textarea.Value(), "the '/' itself is still typed into the editor")
 	require.False(t, u.dialog.ContainsDialog(dialog.CommandsID), "the modal palette must not open")
 }
@@ -112,7 +112,7 @@ func TestSlashMidTextIsPlainCharacter(t *testing.T) {
 	typeText(u, "hello")
 	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "/", Code: '/'})
 
-	require.False(t, u.editor.completionsOpen)
+	require.False(t, u.editor.completions.open)
 	require.Equal(t, "hello/", u.editor.textarea.Value())
 }
 
@@ -124,9 +124,9 @@ func TestSlashFiltersAsUserTypes(t *testing.T) {
 	u := newSlashTestUI(t)
 	typeText(u, "/mod")
 
-	require.True(t, u.editor.completionsOpen)
-	require.Equal(t, "mod", u.editor.completionsQuery)
-	require.True(t, u.editor.completions.HasItems())
+	require.True(t, u.editor.completions.open)
+	require.Equal(t, "mod", u.editor.completions.query)
+	require.True(t, u.editor.completions.popup.HasItems())
 }
 
 // TestSlashEnterRunsActionAndClearsEditor: Enter on a selected command runs
@@ -137,14 +137,14 @@ func TestSlashEnterRunsActionAndClearsEditor(t *testing.T) {
 
 	u := newSlashTestUI(t)
 	typeText(u, "/help")
-	require.True(t, u.editor.completionsOpen)
+	require.True(t, u.editor.completions.open)
 
 	require.False(t, u.status.ShowingAll())
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.True(t, u.status.ShowingAll(), "Enter must run the selected command's action")
 	require.Empty(t, u.editor.textarea.Value(), "the editor is cleared after running a command")
-	require.False(t, u.editor.completionsOpen)
+	require.False(t, u.editor.completions.open)
 }
 
 // TestSlashTabInsertsNameWithoutRunning: Tab fills in the command's name
@@ -155,13 +155,13 @@ func TestSlashTabInsertsNameWithoutRunning(t *testing.T) {
 
 	u := newSlashTestUI(t)
 	typeText(u, "/help")
-	require.True(t, u.editor.completionsOpen)
+	require.True(t, u.editor.completions.open)
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
 
 	require.False(t, u.status.ShowingAll(), "Tab must not run the command")
 	require.Equal(t, "/help ", u.editor.textarea.Value())
-	require.False(t, u.editor.completionsOpen)
+	require.False(t, u.editor.completions.open)
 }
 
 // TestSlashEscClosesPopupKeepsText: Esc exits command mode but leaves
@@ -171,11 +171,11 @@ func TestSlashEscClosesPopupKeepsText(t *testing.T) {
 
 	u := newSlashTestUI(t)
 	typeText(u, "/foo")
-	require.True(t, u.editor.completionsOpen)
+	require.True(t, u.editor.completions.open)
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	require.False(t, u.editor.completionsOpen)
+	require.False(t, u.editor.completions.open)
 	require.Equal(t, "/foo", u.editor.textarea.Value())
 }
 

@@ -204,7 +204,7 @@ type fileCompletionMsg struct {
 // replacing the @query, and adds the file as an attachment.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	prevHeight := m.editor.textarea.Height()
-	if !m.editor.insertCompletionText(path) {
+	if !m.editor.completions.replace(&m.editor.textarea, path) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
@@ -261,7 +261,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	displayText := cmp.Or(item.Title, item.URI)
 
 	prevHeight := m.editor.textarea.Height()
-	if !m.editor.insertCompletionText(displayText) {
+	if !m.editor.completions.replace(&m.editor.textarea, displayText) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
