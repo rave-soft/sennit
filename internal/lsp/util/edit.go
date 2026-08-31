@@ -201,12 +201,22 @@ func applyDocumentChange(change protocol.DocumentChange, encoding powernap.Offse
 			return fmt.Errorf("invalid URI: %w", err)
 		}
 
+		ignoreIfNotExists := change.DeleteFile.Options != nil && change.DeleteFile.Options.IgnoreIfNotExists
 		if change.DeleteFile.Options != nil && change.DeleteFile.Options.Recursive {
+			if _, err := os.Stat(path); err != nil {
+				if ignoreIfNotExists && os.IsNotExist(err) {
+					return nil
+				}
+				return fmt.Errorf("failed to stat file: %w", err)
+			}
 			if err := os.RemoveAll(path); err != nil {
 				return fmt.Errorf("failed to delete directory recursively: %w", err)
 			}
 		} else {
 			if err := os.Remove(path); err != nil {
+				if ignoreIfNotExists && os.IsNotExist(err) {
+					return nil
+				}
 				return fmt.Errorf("failed to delete file: %w", err)
 			}
 		}
@@ -226,11 +236,16 @@ func applyDocumentChange(change protocol.DocumentChange, encoding powernap.Offse
 			return err
 		}
 
-		if change.RenameFile.Options != nil {
-			if !change.RenameFile.Options.Overwrite {
-				if _, err := os.Stat(newPath); err == nil {
-					return fmt.Errorf("target file already exists and overwrite is not allowed: %s", newPath)
+		overwrite := change.RenameFile.Options != nil && change.RenameFile.Options.Overwrite
+		ignoreIfExists := change.RenameFile.Options != nil && change.RenameFile.Options.IgnoreIfExists
+		if !overwrite {
+			if _, err := os.Stat(newPath); err == nil {
+				if ignoreIfExists {
+					return nil
 				}
+				return fmt.Errorf("target file already exists and overwrite is not allowed: %s", newPath)
+			} else if !os.IsNotExist(err) {
+				return fmt.Errorf("failed to stat target file: %w", err)
 			}
 		}
 		if err := os.Rename(oldPath, newPath); err != nil {

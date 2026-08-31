@@ -94,6 +94,7 @@ func TestCancelTwiceIsANoOpNotAPanic(t *testing.T) {
 
 	require.True(t, s.Cancel())
 	require.False(t, s.Cancel(), "the second cancel has nothing left to cancel")
+	require.False(t, s.Answer("cancel-me", []Answer{{QuestionID: "cancel-me-q1"}}))
 	require.ErrorIs(t, <-done, ErrCancelled)
 }
 

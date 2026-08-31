@@ -394,6 +394,64 @@ func TestApplyDocumentChange_CreateFile(t *testing.T) {
 	})
 }
 
+func TestApplyDocumentChange_DeleteFileOptions(t *testing.T) {
+	t.Parallel()
+
+	missing := filepath.Join(t.TempDir(), "missing.txt")
+	change := protocol.DocumentChange{DeleteFile: &protocol.DeleteFile{
+		URI:     protocol.URIFromPath(missing),
+		Options: &protocol.DeleteFileOptions{IgnoreIfNotExists: true},
+	}}
+	require.NoError(t, applyDocumentChange(change, powernap.UTF16))
+
+	change.DeleteFile.Options.IgnoreIfNotExists = false
+	require.Error(t, applyDocumentChange(change, powernap.UTF16))
+}
+
+func TestApplyDocumentChange_RenameFileOptions(t *testing.T) {
+	t.Parallel()
+
+	newChange := func(oldPath, newPath string, opts *protocol.RenameFileOptions) protocol.DocumentChange {
+		return protocol.DocumentChange{RenameFile: &protocol.RenameFile{
+			OldURI:  protocol.URIFromPath(oldPath),
+			NewURI:  protocol.URIFromPath(newPath),
+			Options: opts,
+		}}
+	}
+
+	t.Run("no options refuses an existing target", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		oldPath := filepath.Join(dir, "old.txt")
+		newPath := filepath.Join(dir, "new.txt")
+		require.NoError(t, os.WriteFile(oldPath, []byte("old"), 0o644))
+		require.NoError(t, os.WriteFile(newPath, []byte("new"), 0o644))
+
+		require.Error(t, applyDocumentChange(newChange(oldPath, newPath, nil), powernap.UTF16))
+		content, err := os.ReadFile(newPath)
+		require.NoError(t, err)
+		require.Equal(t, "new", string(content))
+	})
+
+	t.Run("ignoreIfExists preserves both files", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		oldPath := filepath.Join(dir, "old.txt")
+		newPath := filepath.Join(dir, "new.txt")
+		require.NoError(t, os.WriteFile(oldPath, []byte("old"), 0o644))
+		require.NoError(t, os.WriteFile(newPath, []byte("new"), 0o644))
+
+		opts := &protocol.RenameFileOptions{IgnoreIfExists: true}
+		require.NoError(t, applyDocumentChange(newChange(oldPath, newPath, opts), powernap.UTF16))
+		oldContent, err := os.ReadFile(oldPath)
+		require.NoError(t, err)
+		require.Equal(t, "old", string(oldContent))
+		newContent, err := os.ReadFile(newPath)
+		require.NoError(t, err)
+		require.Equal(t, "new", string(newContent))
+	})
+}
+
 func TestRangesOverlap(t *testing.T) {
 	t.Parallel()
 

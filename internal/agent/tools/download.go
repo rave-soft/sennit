@@ -16,6 +16,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 )
@@ -189,7 +190,7 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 			if err := outFile.Close(); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 			}
-			if err := os.Rename(tmpPath, filePath); err != nil {
+			if err := fsext.ReplaceFile(tmpPath, filePath); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 			}
 			cleanupTmp = false

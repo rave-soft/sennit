@@ -166,6 +166,14 @@ const renameRetryBudget = 2 * time.Second
 // handle on the destination, so transient failures are retried with
 // backoff. On other platforms isTransientRenameError is always false
 // and this is a plain os.Rename.
+func ReplaceFile(tmp, path string) error {
+	if err := renameFile(tmp, path); err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(path))
+	return nil
+}
+
 func renameFile(tmp, path string) error {
 	var slept time.Duration
 	delay := time.Millisecond

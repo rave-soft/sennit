@@ -329,7 +329,11 @@ func (s *questionService) Cancel() bool {
 	s.mu.Lock()
 	batchID := s.pendingID
 	cancelCh := s.cancelled
-	s.cancelled = nil
+	if cancelCh != nil {
+		s.pending = nil
+		s.cancelled = nil
+		s.pendingID = ""
+	}
 	s.mu.Unlock()
 
 	if cancelCh == nil {
