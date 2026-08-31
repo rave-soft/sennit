@@ -1137,3 +1137,81 @@ func TestTaskManager_WaitingOnItsOwnDelegationIsNotFinished(t *testing.T) {
 		return false
 	}, eventuallyTimeout, eventuallyTick, "and the parent must be told then")
 }
+
+// TestTaskManager_CancelReachesTheWholeSubtree proves a cancel follows
+// the delegation tree down rather than stopping at the task named. A
+// task's own delegations exist to answer it, and one that has been
+// cancelled will never read their answers — but left running they go on
+// editing the same workspace with nothing above them, which is exactly
+// what happened the night this was written.
+//
+// The bystander is the other half of the claim: the sweep must follow
+// parent pointers, not cancel every task in the workspace.
+func TestTaskManager_CancelReachesTheWholeSubtree(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "the delegated work", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	child, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "a piece of it", ParentSessionID: parent.SessionID})
+	require.NoError(t, err)
+	grandchild, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "a piece of that", ParentSessionID: child.SessionID})
+	require.NoError(t, err)
+	bystander, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "unrelated work", ParentSessionID: "someone-elses-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 4 }, eventuallyTimeout, eventuallyTick)
+
+	require.NoError(t, tasks.Cancel(t.Context(), parent.ID, "wrong approach"))
+
+	for _, id := range []string{parent.ID, child.ID, grandchild.ID} {
+		got, err := store.Get(t.Context(), id)
+		require.NoError(t, err)
+		require.Equal(t, thread.StatusCancelled, got.Status,
+			"a delegation of a cancelled task has nobody left to report to and must be stopped too")
+	}
+	childRow, err := store.Get(t.Context(), child.ID)
+	require.NoError(t, err)
+	require.Contains(t, childRow.Error, parent.ID,
+		"a task cancelled along with its parent must say which cancel took it")
+	require.Contains(t, childRow.Error, "wrong approach",
+		"and must carry the reason the person or agent actually gave")
+
+	stillRunning, err := store.Get(t.Context(), bystander.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, thread.StatusCancelled, stillRunning.Status,
+		"the sweep must follow parent pointers, not cancel the whole workspace")
+}
+
+// TestTaskManager_CancelTellsTheParentSession proves cancelling a task
+// delivers the outcome to the session waiting on it, the way every other
+// terminal status already did.
+//
+// Cancel was the one terminal outcome that used to be silent here, and
+// silence is the worst of them to pick: a parent that has been taught to
+// end its turn and wait for a report — which is how waiting for a
+// delegation is spelled — then waits for one that is never coming. It is
+// no answer that the canceller is usually the parent and gets the tool
+// result: nothing says the canceller is the parent (a delegation can
+// cancel its own child, and once famously cancelled itself), and a
+// duplicate line in a transcript costs incomparably less than a session
+// idle until morning.
+func TestTaskManager_CancelTellsTheParentSession(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+	require.Empty(t, coord.deliveredCompletions(), "nothing is reported while the task is still running")
+
+	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "no longer needed"))
+
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 }, eventuallyTimeout, eventuallyTick)
+	delivered := coord.deliveredCompletions()[0]
+	require.Equal(t, "parent-sess", delivered.sessionID)
+	require.Equal(t, st.ID, delivered.completion.DelegationID)
+	require.Equal(t, string(thread.StatusCancelled), delivered.completion.Status)
+	require.Contains(t, delivered.completion.Error, "no longer needed")
+}

@@ -1705,3 +1705,49 @@ func TestClient_RestartPublishesReadyOnlyWithCandidate(t *testing.T) {
 	require.Equal(t, StateReady, client.GetServerState())
 	client.Shutdown()
 }
+
+// TestClient_DirectoryRootMarkerDoesNotFailReadiness is named after the
+// commonest configuration in the whole server catalogue: ".git" is a
+// root marker for well over a hundred servers in powernap's lsps.json,
+// and in every ordinary checkout it is a directory — only a git worktree
+// makes it a file.
+//
+// A directory marks the root perfectly well, but there is nothing to
+// didOpen and reading one fails with EISDIR. That error used to fail the
+// whole file sync, so WaitForServerReady failed, so the client was left
+// at StateError — which reusableClient refuses to hand back, so every
+// single Start shut the server down and spawned another. gopls was
+// restarted 280 times in one morning and never once got to warm up.
+func TestClient_DirectoryRootMarkerDoesNotFailReadiness(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o755))
+	logPath := filepath.Join(dir, "lsp.log")
+	client, err := New("test-directory-root-marker", config.LSPConfig{
+		Command:     exe,
+		FileTypes:   []string{"mod"},
+		RootMarkers: []string{"go.mod", ".git"},
+		Env: map[string]string{
+			fakeLSPServerEnv:      "1",
+			"SENNIT_LSP_FAKE_LOG": logPath,
+		},
+	}, config.NewShellVariableResolver(testenv.New(map[string]string{})), dir, false)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+
+	require.NoError(t, client.WaitForServerReady(ctx),
+		"a directory root marker must be skipped, not read")
+	require.Equal(t, StateReady, client.GetServerState(),
+		"an errored client is replaced on the next Start, which is what made this a restart loop")
+
+	contents, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	require.Contains(t, string(contents), "textDocument/didOpen",
+		"the file marker beside it must still be opened")
+	client.Shutdown()
+}

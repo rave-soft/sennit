@@ -1109,6 +1109,28 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 // dispatchDecision) drops cleanly without losing or duplicating
 // completion's content.
 func (a *sessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion) {
+	// A report for a delegation that was cancelled goes one level up
+	// rather than into a session no turn will ever run in again - see
+	// deadDelegationTarget for why that session in particular is the
+	// dead end. The hop lands on DeliverTaskCompletion again (possibly
+	// another App's, for a thread), so a chain of cancelled delegations
+	// unwinds one level per hop until it reaches a session that is
+	// merely idle. OrphanedFrom bounds it: delegation chains are capped
+	// at maxTaskCascadeDepth, and a registration cycle that outran the
+	// cap would otherwise recurse forever.
+	if parent, dead := a.deadDelegationTarget(sessionID); dead {
+		if len(completion.OrphanedFrom) > maxTaskCascadeDepth+2 {
+			slog.Warn("Dropping a report that could not find a living session to report to",
+				"delegation", completion.DelegationID, "session", sessionID, "hops", len(completion.OrphanedFrom))
+			return
+		}
+		slog.Info("Reporting to a cancelled delegation's own parent instead",
+			"delegation", completion.DelegationID, "cancelled_session", sessionID,
+			"cancelled_delegation", parent.DelegationID, "to_session", parent.ParentSessionID)
+		completion.OrphanedFrom = append(append([]string(nil), completion.OrphanedFrom...), parent.Name)
+		parent.Parent.DeliverTaskCompletion(ctx, parent.ParentSessionID, completion)
+		return
+	}
 	if !a.enqueueCompletion(sessionID, completion) {
 		return
 	}

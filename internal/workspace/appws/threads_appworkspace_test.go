@@ -147,6 +147,9 @@ func (f *fakeThreadSessions) CreateTaskSession(_ context.Context, id, parentSess
 
 type fakeThreadCoordinator struct {
 	agent.Coordinator
+
+	mu        sync.Mutex
+	delivered []deliveredCompletion
 }
 
 func (f *fakeThreadCoordinator) Run(_ context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
@@ -170,6 +173,24 @@ func (f *fakeThreadCoordinator) SetDelegationTools(tools.ThreadManager, tools.Ta
 func (f *fakeThreadCoordinator) RegisterDelegationParent(string, agent.DelegationParent) {}
 
 func (f *fakeThreadCoordinator) SendToParent(context.Context, string, string) error { return nil }
+
+// DeliverTaskCompletion records that a delegation's terminal outcome
+// reached a parent session at all. Cancelling a task delivers now the
+// same way finishing one does (see thread.lifecycle.cancel), so this is
+// no longer a method the embedded nil Coordinator can be left to
+// "implement".
+func (f *fakeThreadCoordinator) DeliverTaskCompletion(_ context.Context, sessionID string, completion agent.TaskCompletion) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delivered = append(f.delivered, deliveredCompletion{sessionID: sessionID, completion: completion})
+}
+
+// deliveredCompletion is one call to DeliverTaskCompletion, kept so a
+// test can assert both where a completion went and what it said.
+type deliveredCompletion struct {
+	sessionID  string
+	completion agent.TaskCompletion
+}
 
 type fakeThreadHandle struct {
 	id  string

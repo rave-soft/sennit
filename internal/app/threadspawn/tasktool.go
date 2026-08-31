@@ -99,14 +99,15 @@ func (a *agentToolTaskManager) Output(ctx context.Context, id string, limit int)
 
 func toTaskInfo(st thread.Thread) tools.TaskInfo {
 	return tools.TaskInfo{
-		ID:            st.ID,
-		Goal:          st.Goal,
-		SessionID:     st.SessionID,
-		Status:        string(st.Status),
-		ResultSummary: st.ResultSummary,
-		Error:         st.Error,
-		CreatedAt:     st.CreatedAt,
-		UpdatedAt:     st.UpdatedAt,
-		CompletedAt:   st.CompletedAt,
+		ID:              st.ID,
+		Goal:            st.Goal,
+		SessionID:       st.SessionID,
+		ParentSessionID: st.ParentSessionID,
+		Status:          string(st.Status),
+		ResultSummary:   st.ResultSummary,
+		Error:           st.Error,
+		CreatedAt:       st.CreatedAt,
+		UpdatedAt:       st.UpdatedAt,
+		CompletedAt:     st.CompletedAt,
 	}
 }

@@ -1014,3 +1014,83 @@ func TestWakeAllowed_FollowsTheDelegationChainToTheLiveSession(t *testing.T) {
 	d.RegisterDelegationParent("b", DelegationParent{ParentSessionID: "a"})
 	require.False(t, d.wakeAllowed("a"))
 }
+
+// TestDeliverTaskCompletion_CancelledDelegationReportsToItsParentInstead
+// is the last-resort rule for a report with nowhere to go.
+//
+// A cancelled delegation's session is the one delivery target with
+// nobody behind it: no person will type into it and no turn will ever
+// start there again, so a report left in its inbox is a report thrown
+// away. That is not a hypothetical — a grandchild delegation once worked
+// for nine minutes after its own parent had been cancelled, filed its
+// report into that parent's dead inbox, and the session actually waiting
+// for the work sat idle until morning. So the report goes one level up,
+// labeled with the delegation that never read it, because "your
+// delegation was cancelled and here is what its child managed to do" is
+// a different event from an ordinary report.
+func TestDeliverTaskCompletion_CancelledDelegationReportsToItsParentInstead(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &promptRecordingModel{text: "done"}
+	sa := testSessionAgent(env, model, "system").(*sessionAgent)
+
+	person, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), person.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
+	})
+	require.NoError(t, err)
+
+	dead, err := env.sessions.Create(t.Context(), "the cancelled delegation")
+	require.NoError(t, err)
+	sa.RegisterDelegationParent(dead.ID, DelegationParent{
+		Parent:          sa,
+		ParentSessionID: person.ID,
+		DelegationID:    "task-1",
+		Kind:            "task",
+		Name:            "developer-junior",
+	})
+	sa.SetLiveSession(person.ID)
+	// The delegation is cancelled: from here nothing will ever run in
+	// its session again.
+	sa.Cancel(dead.ID)
+
+	sa.DeliverTaskCompletion(t.Context(), dead.ID, testCompletion("nine minutes of work"))
+
+	require.Eventually(t, func() bool { return model.count() > 0 }, 2*time.Second, 5*time.Millisecond,
+		"a report addressed to a cancelled delegation must reach the nearest session still working")
+
+	prompts := model.snapshotPrompts()
+	require.Len(t, prompts, 1)
+	require.True(t, promptContains(prompts[0], "nine minutes of work"),
+		"the work itself must survive the redirect")
+	require.True(t, promptContains(prompts[0], "developer-junior"),
+		"and must say which cancelled delegation it was meant for")
+	require.Empty(t, sa.drainCompletionsForStep(dead.ID),
+		"nothing may be left behind in the dead session's inbox")
+}
+
+// TestDeliverTaskCompletion_CancelledPersonSessionStillWaits is the
+// boundary of the rule above. A person's session is never over — they
+// pressed Esc, and they will be back — so its inbox is a queue, not a
+// dead end, and a report must stay in it rather than be handed to
+// somebody else.
+func TestDeliverTaskCompletion_CancelledPersonSessionStillWaits(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &promptRecordingModel{text: "done"}
+	sa := testSessionAgent(env, model, "system").(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	sa.SetLiveSession(sess.ID)
+	sa.Cancel(sess.ID)
+
+	sa.DeliverTaskCompletion(t.Context(), sess.ID, testCompletion("waits-for-the-person"))
+
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, model.count(), "a session the person canceled must not be woken")
+	require.Len(t, sa.drainCompletionsForStep(sess.ID), 1,
+		"and the report must be waiting for them, not redirected anywhere")
+}

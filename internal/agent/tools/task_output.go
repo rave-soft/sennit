@@ -38,6 +38,14 @@ func NewTaskOutputTool(manager TaskManager) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("limit must be between 0 and 100"), nil
 			}
 
+			scope, failed, err := scopeTasks(ctx, manager, TaskOutputToolName)
+			if err != nil || failed != nil {
+				return derefResponse(failed), err
+			}
+			if refusal, refused := scope.refuse(params.ID, "read"); refused {
+				return refusal, nil
+			}
+
 			out, err := manager.Output(ctx, params.ID, params.Limit)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

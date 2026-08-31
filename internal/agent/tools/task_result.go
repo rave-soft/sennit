@@ -33,6 +33,14 @@ func NewTaskResultTool(manager TaskManager) fantasy.AgentTool {
 				return invalidParam("id"), nil
 			}
 
+			scope, failed, err := scopeTasks(ctx, manager, TaskResultToolName)
+			if err != nil || failed != nil {
+				return derefResponse(failed), err
+			}
+			if refusal, refused := scope.refuse(params.ID, "read"); refused {
+				return refusal, nil
+			}
+
 			ti, err := manager.Get(ctx, params.ID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

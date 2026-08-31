@@ -423,3 +423,13 @@ func confinementRefusal(permissions permission.Requester, filePath string) (mess
 		abs, dir, dir,
 	), true
 }
+
+// derefResponse unwraps an optional tool response, for the call sites
+// that forward a helper's "return this as-is" result. A nil response is
+// the zero one, which is what a tool returns alongside a non-nil error.
+func derefResponse(resp *fantasy.ToolResponse) fantasy.ToolResponse {
+	if resp == nil {
+		return fantasy.ToolResponse{}
+	}
+	return *resp
+}

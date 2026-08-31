@@ -42,7 +42,20 @@ func NewTaskCancelTool(manager TaskManager, permissions permission.Requester) fa
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, missingSessionID("task_cancel")
+				return fantasy.ToolResponse{}, missingSessionID(TaskCancelToolName)
+			}
+
+			// Only the tasks this caller started, however many levels
+			// down. A delegation reaching for its own id here - the
+			// mistake that made this check exist - stops its own turn
+			// dead, taking its report and its children with it. See
+			// taskScope.
+			scope, failed, err := scopeTasks(ctx, manager, TaskCancelToolName)
+			if err != nil || failed != nil {
+				return derefResponse(failed), err
+			}
+			if refusal, refused := scope.refuse(params.ID, "cancel"); refused {
+				return refusal, nil
 			}
 
 			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{

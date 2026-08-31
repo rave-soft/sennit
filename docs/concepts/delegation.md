@@ -63,6 +63,40 @@ started by any one turn — past either limit, starting another is refused
 rather than queued. A chain of delegations starting further delegations is
 capped at 3 levels deep.
 
+## Every task tool answers from where you stand
+
+The tasks form a tree, and `task_list`, `task_result`, `task_output`,
+`task_send` and `task_cancel` all read it from one place: the session the
+call came from. Each reaches that session's own subtree — the tasks it
+started, and the tasks those started, at any depth — and nothing else. A
+delegation cannot cancel itself, cannot cancel the delegation it hangs
+under, and cannot reach across to a sibling's work; the session you type
+into still sees every task under it, and none from the conversation you
+had last week.
+
+The rule reads like tidiness and is not. Before it existed, a delegated
+agent meaning to stop one of the two tasks it had started passed its own
+id to `task_cancel` — its own row was in the listing and nothing checked
+whose it was. It killed its own turn mid-sentence. The report it owed the
+session waiting on it died with it, its own child went on editing the
+repository for nine more minutes with nobody left above it, and the work
+stopped where it stood until morning.
+
+Cancelling a task cancels everything it started, for the second half of
+that same story: a delegation exists to answer the one that dispatched
+it, and once that one is stopped, its children are running for nobody —
+still holding concurrency slots, still raising permission prompts, still
+writing to the workspace.
+
+And a report addressed to a delegation that was cancelled goes to
+whoever started it instead. A cancelled delegation's session is the one
+inbox in the system with nobody behind it: no person will type into it
+and no turn will ever begin there again, so anything left in it is
+thrown away. What arrives one level up is labeled with the delegation
+that never read it — "your delegation was cancelled, here is what its
+own child managed to finish" is a different thing from an ordinary
+report, and the reader has to be able to tell.
+
 Turn the feature off entirely with `options.background_agents: false` in
 `sennit.json`: the model can no longer start a background task and the
 task-management tools stop being offered. A task already running when the

@@ -872,10 +872,10 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	}
 	var final Thread
 	var err error
+	c.mu.Lock()
+	depth := c.depth
+	c.mu.Unlock()
 	if st.Kind == KindTask {
-		c.mu.Lock()
-		depth := c.depth
-		c.mu.Unlock()
 		final, err = l.finalizeTask(ctx, st, StatusCancelled, reason, "", 0, depth)
 	} else {
 		final, err = l.setStatus(ctx, st.ID, StatusCancelled, reason, "", 0)
@@ -883,9 +883,26 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	if err != nil {
 		return fmt.Errorf("cancel finalization: %w", err)
 	}
-	if final.ID != "" {
-		slog.Info("Delegation reached terminal status", "id", st.ID, "kind", st.Kind, "status", StatusCancelled)
+	if final.ID == "" {
+		return nil
 	}
+	slog.Info("Delegation reached terminal status", "id", st.ID, "kind", st.Kind, "status", StatusCancelled)
+	// Told to the session waiting on it, exactly as every other terminal
+	// status is (see finalizeRunComplete). A cancel is the one terminal
+	// outcome that used to be silent here, and silence was the worst of
+	// them to pick: the parent is left holding a delegation it thinks is
+	// still working, so it does the thing a well-behaved parent is
+	// supposed to do — end its turn and wait for a report that is never
+	// coming. That the canceller often *is* the parent, and gets the
+	// tool result too, does not cover it: nothing says the canceller is
+	// the parent, and the second telling is a duplicate line in a
+	// transcript rather than a night spent idle.
+	//
+	// rt.handle rather than nil: a task with no ParentApp configured
+	// resolves its target through the handle (see
+	// Manager.resolveDeliveryTarget), and the runtime is still in hand
+	// here even though c.runtime has already been cleared above.
+	l.deliverStoredCompletion(ctx, rt.handle, final, depth)
 	return nil
 }
 

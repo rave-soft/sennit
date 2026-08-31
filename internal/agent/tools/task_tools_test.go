@@ -91,6 +91,12 @@ func (f *fakeTaskManager) Output(_ context.Context, id string, _ int) (TaskOutpu
 	return f.outputs[id], nil
 }
 
+// callerSession is the session every callTaskTool call arrives on. The
+// task_* tools answer from their caller's place in the delegation tree
+// (see taskScope), so a fixture task is only visible to these tests when
+// it is parented to this session - which is what the tools are for.
+const callerSession = "caller-session"
+
 func skipPermissions(t *testing.T) permission.Service {
 	t.Helper()
 	return permission.NewPermissionService(t.TempDir(), true, nil)
@@ -100,7 +106,7 @@ func callTaskTool(t *testing.T, tool fantasy.AgentTool, params any) fantasy.Tool
 	t.Helper()
 	input, err := json.Marshal(params)
 	require.NoError(t, err)
-	resp, err := tool.Run(context.WithValue(t.Context(), SessionIDContextKey, "caller-session"),
+	resp, err := tool.Run(context.WithValue(t.Context(), SessionIDContextKey, callerSession),
 		fantasy.ToolCall{ID: "call-1", Input: string(input)})
 	require.NoError(t, err)
 	return resp
@@ -108,7 +114,7 @@ func callTaskTool(t *testing.T, tool fantasy.AgentTool, params any) fantasy.Tool
 
 func TestTaskListTool_ListsTasks(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1", Goal: "look into X", Status: "running"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Goal: "look into X", Status: "running"}
 
 	resp := callTaskTool(t, NewTaskListTool(manager), TaskListParams{})
 	require.False(t, resp.IsError)
@@ -136,7 +142,7 @@ func TestTaskListTool_SurfacesManagerError(t *testing.T) {
 
 func TestTaskResultTool_ReturnsFinalAnswerWhenCompleted(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "completed", ResultSummary: "the answer is 42"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "completed", ResultSummary: "the answer is 42"}
 
 	resp := callTaskTool(t, NewTaskResultTool(manager), TaskResultParams{ID: "t1"})
 	require.False(t, resp.IsError)
@@ -145,7 +151,7 @@ func TestTaskResultTool_ReturnsFinalAnswerWhenCompleted(t *testing.T) {
 
 func TestTaskResultTool_ReportsStatusWhenStillRunning(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 
 	resp := callTaskTool(t, NewTaskResultTool(manager), TaskResultParams{ID: "t1"})
 	require.False(t, resp.IsError)
@@ -158,19 +164,23 @@ func TestTaskResultTool_MissingID(t *testing.T) {
 	require.True(t, resp.IsError)
 }
 
-// TestTaskResultTool_WrongKindRejection proves the tool relays the
-// "not a task" rejection a real TaskManager.Get returns for a thread's
-// id (see internal/thread's TestTaskManager_GetRejectsThreadID for the
-// guard itself) as a clear tool error, not a crash or a silent result.
+// TestTaskResultTool_WrongKindRejection proves a thread's id is
+// rejected with a clear tool error rather than a crash or a silent
+// result. The rejection now comes from the scope check ahead of the
+// manager (a thread is never among the tasks a session started, so it
+// can never be in scope) rather than from TaskManager.Get's own kind
+// guard behind it - which is why it names the thread_* tools instead of
+// saying "is not a task".
 func TestTaskResultTool_WrongKindRejection(t *testing.T) {
 	resp := callTaskTool(t, NewTaskResultTool(newFakeTaskManager()), TaskResultParams{ID: "a-thread-id"})
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "is not a task")
+	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
+	require.Contains(t, resp.Content, "thread_* tools")
 }
 
 func TestTaskCancelTool_CancelsRunningTask(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 	tool := NewTaskCancelTool(manager, skipPermissions(t))
 
 	resp := callTaskTool(t, tool, TaskCancelParams{ID: "t1", Reason: "no longer needed"})
@@ -196,13 +206,13 @@ func TestTaskCancelTool_WrongKindRejection(t *testing.T) {
 	tool := NewTaskCancelTool(manager, skipPermissions(t))
 	resp := callTaskTool(t, tool, TaskCancelParams{ID: "a-thread-id"})
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "is not a task")
+	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
 	require.Empty(t, manager.cancelCalls, "rejected id must never reach a resolved Cancel")
 }
 
 func TestTaskSendTool_SendsMessage(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 
 	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "keep going"})
 	require.False(t, resp.IsError)
@@ -218,7 +228,7 @@ func TestTaskSendTool_SendsMessage(t *testing.T) {
 // delivered. See SendOutcome.
 func TestTaskSendTool_ReportsQueuedDelivery(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 	manager.sendOutcome = SendOutcome{Queued: true, Ahead: 2}
 
 	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "wrap up"})
@@ -235,7 +245,7 @@ func TestTaskSendTool_ReportsQueuedDelivery(t *testing.T) {
 
 func TestTaskSendTool_MissingFields(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 	tool := NewTaskSendTool(manager)
 
 	resp := callTaskTool(t, tool, TaskSendParams{Message: "hi"})
@@ -251,13 +261,13 @@ func TestTaskSendTool_WrongKindRejection(t *testing.T) {
 	manager := newFakeTaskManager()
 	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "a-thread-id", Message: "hi"})
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "is not a task")
+	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
 	require.Empty(t, manager.sendCalls, "rejected id must never reach a resolved Send")
 }
 
 func TestTaskOutputTool_ReturnsMessages(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession}
 	manager.outputs["t1"] = TaskOutput{
 		Messages: []TaskOutputMessage{
 			{Role: "user", Text: "investigate X"},
@@ -278,7 +288,7 @@ func TestTaskOutputTool_ReturnsMessages(t *testing.T) {
 // so in the response text, not just silently hand back a partial tail.
 func TestTaskOutputTool_ReportsTruncation(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession}
 	manager.outputs["t1"] = TaskOutput{
 		Messages: []TaskOutputMessage{
 			{Role: "user", Text: "message 3"},
@@ -299,7 +309,7 @@ func TestTaskOutputTool_ReportsTruncation(t *testing.T) {
 
 func TestTaskOutputTool_EmptyWhenNoMessages(t *testing.T) {
 	manager := newFakeTaskManager()
-	manager.tasks["t1"] = TaskInfo{ID: "t1"}
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession}
 
 	resp := callTaskTool(t, NewTaskOutputTool(manager), TaskOutputParams{ID: "t1"})
 	require.False(t, resp.IsError)
@@ -314,5 +324,137 @@ func TestTaskOutputTool_MissingID(t *testing.T) {
 func TestTaskOutputTool_WrongKindRejection(t *testing.T) {
 	resp := callTaskTool(t, NewTaskOutputTool(newFakeTaskManager()), TaskOutputParams{ID: "a-thread-id"})
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "is not a task")
+	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
+}
+
+// seedDelegationTree wires the shape every scope test needs: the calling
+// session is itself a delegation ("self"), running under "ancestor",
+// with "child" and "grandchild" below it and "sibling" off to the side.
+func seedDelegationTree(manager *fakeTaskManager) {
+	manager.tasks["ancestor"] = TaskInfo{ID: "ancestor", SessionID: "ancestor-sess", ParentSessionID: "person-sess", Status: "running"}
+	manager.tasks["self"] = TaskInfo{ID: "self", SessionID: callerSession, ParentSessionID: "ancestor-sess", Status: "running"}
+	manager.tasks["sibling"] = TaskInfo{ID: "sibling", SessionID: "sibling-sess", ParentSessionID: "ancestor-sess", Status: "running"}
+	manager.tasks["child"] = TaskInfo{ID: "child", SessionID: "child-sess", ParentSessionID: callerSession, Status: "running"}
+	manager.tasks["grandchild"] = TaskInfo{ID: "grandchild", SessionID: "grandchild-sess", ParentSessionID: "child-sess", Status: "running"}
+}
+
+// TestTaskCancelTool_RefusesTheCallersOwnTask is the sharp test for the
+// scope rule, and it is named after a real failure: a delegated agent
+// meant to stop one of the tasks it had started, passed its own id
+// instead — its own row was in the listing and nothing checked whose it
+// was — and killed its own turn. Its report to the session waiting on it
+// died with it, and that session sat idle for six hours.
+func TestTaskCancelTool_RefusesTheCallersOwnTask(t *testing.T) {
+	manager := newFakeTaskManager()
+	seedDelegationTree(manager)
+
+	resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: "self"})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "the task you are running as")
+	require.Empty(t, manager.cancelCalls, "a delegation must never be able to cancel itself")
+}
+
+// TestTaskCancelTool_RefusesAnAncestor covers the other direction: a
+// delegation reaching up and stopping the very turn that is waiting on
+// it. What it has to say upward belongs in its report.
+func TestTaskCancelTool_RefusesAnAncestor(t *testing.T) {
+	manager := newFakeTaskManager()
+	seedDelegationTree(manager)
+
+	resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: "ancestor"})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "running under")
+	require.Empty(t, manager.cancelCalls)
+}
+
+// TestTaskCancelTool_RefusesASibling proves the rule is the subtree and
+// not merely a self-check: a task started by the same parent is not this
+// caller's work to stop.
+func TestTaskCancelTool_RefusesASibling(t *testing.T) {
+	manager := newFakeTaskManager()
+	seedDelegationTree(manager)
+
+	resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: "sibling"})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "among the tasks you started")
+	require.Empty(t, manager.cancelCalls)
+}
+
+// TestTaskCancelTool_AllowsTheWholeSubtree is what keeps the rule from
+// being a refusal that breaks the feature: everything the caller
+// actually started, at any depth, still goes through.
+func TestTaskCancelTool_AllowsTheWholeSubtree(t *testing.T) {
+	for _, id := range []string{"child", "grandchild"} {
+		t.Run(id, func(t *testing.T) {
+			manager := newFakeTaskManager()
+			seedDelegationTree(manager)
+
+			resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: id})
+
+			require.False(t, resp.IsError, resp.Content)
+			require.Len(t, manager.cancelCalls, 1)
+			require.Equal(t, id, manager.cancelCalls[0].id)
+		})
+	}
+}
+
+// TestTaskSendTool_RefusesTheCallersOwnTask proves task_send carries the
+// same guard as task_cancel: sending to your own id feeds your own
+// session, and sending upward drives the turn that is waiting on you.
+func TestTaskSendTool_RefusesTheCallersOwnTask(t *testing.T) {
+	manager := newFakeTaskManager()
+	seedDelegationTree(manager)
+
+	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "self", Message: "keep going"})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "the task you are running as")
+	require.Empty(t, manager.sendCalls)
+}
+
+// TestTaskListTool_ShowsOnlyTheCallersSubtree is the listing half of the
+// same rule, and it is what makes the refusals above teachable rather
+// than surprising: a model cannot reach for an id it was never shown.
+func TestTaskListTool_ShowsOnlyTheCallersSubtree(t *testing.T) {
+	manager := newFakeTaskManager()
+	seedDelegationTree(manager)
+
+	resp := callTaskTool(t, NewTaskListTool(manager), TaskListParams{})
+	require.False(t, resp.IsError)
+
+	var meta TaskListResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	listed := make([]string, 0, len(meta.Tasks))
+	for _, ti := range meta.Tasks {
+		listed = append(listed, ti.ID)
+	}
+	require.ElementsMatch(t, []string{"child", "grandchild"}, listed,
+		"a delegation sees what it started - not itself, not what it runs under, not a sibling's work")
+}
+
+// TestTaskListTool_PersonsSessionSeesEverythingItStarted proves the rule
+// costs the ordinary case nothing: a session nobody delegated sits above
+// the forest, and its subtree is all of its own work at every depth.
+func TestTaskListTool_PersonsSessionSeesEverythingItStarted(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["a"] = TaskInfo{ID: "a", SessionID: "a-sess", ParentSessionID: callerSession, Status: "running"}
+	manager.tasks["b"] = TaskInfo{ID: "b", SessionID: "b-sess", ParentSessionID: "a-sess", Status: "running"}
+	// A conversation from another day, left where it was. Its tasks are
+	// no part of this session's work and must not be listed as if they
+	// were.
+	manager.tasks["stale"] = TaskInfo{ID: "stale", SessionID: "stale-sess", ParentSessionID: "last-week-sess", Status: "running"}
+
+	resp := callTaskTool(t, NewTaskListTool(manager), TaskListParams{})
+	require.False(t, resp.IsError)
+
+	var meta TaskListResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	listed := make([]string, 0, len(meta.Tasks))
+	for _, ti := range meta.Tasks {
+		listed = append(listed, ti.ID)
+	}
+	require.ElementsMatch(t, []string{"a", "b"}, listed)
 }

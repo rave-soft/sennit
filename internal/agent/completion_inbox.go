@@ -75,6 +75,14 @@ type TaskCompletion struct {
 	// Message is the ask text for a mid-run event (IsMessage true).
 	// Unused for a terminal completion.
 	Message string
+	// OrphanedFrom names, nearest first, the delegations whose own
+	// sessions were already cancelled when this report arrived for them,
+	// and which therefore never read it: the report was handed one level
+	// further up instead of being left in an inbox nobody would ever
+	// drain. Empty for the ordinary case, which is every case where the
+	// session a delegation reports to is still a session. Its length is
+	// also what bounds the walk - see sessionAgent.DeliverTaskCompletion.
+	OrphanedFrom []string
 }
 
 // enqueueCompletion appends completion to sessionID's completion inbox
@@ -246,6 +254,46 @@ func (d *dispatcher) wakeEligible(sessionID string) bool {
 	return d.wakeEligibleLocked(s)
 }
 
+// deadDelegationTarget reports where a completion addressed to sessionID
+// should go instead, when sessionID is a delegation's own session that
+// has been cancelled.
+//
+// A cancelled delegation session is the one delivery target with nobody
+// behind it. Every other unwakeable session is merely unwakeable *now*:
+// a person's session comes back the moment they open it, a busy one
+// drains its inbox at its next step, a delegation that simply finished
+// its goal can still be woken by its own children (that is how a
+// delegation waits for them). A cancelled delegation is finished for
+// good - no person will ever type into it, and nothing will ever start
+// another turn there - so a report left in its inbox is a report thrown
+// away. That is not theoretical either: the night this was written, a
+// grandchild delegation worked for nine minutes after its parent had
+// been cancelled, then filed its report into that parent's dead inbox,
+// and the session actually waiting for the work sat idle until morning.
+//
+// So the report goes to whoever started the cancelled delegation, which
+// is the nearest thing to an interested party still standing. Not
+// silently: it arrives labeled with the delegation that never read it
+// (see TaskCompletion.OrphanedFrom), because "your delegation was
+// cancelled and here is what its own child managed to do" is a different
+// event from an ordinary report, and the parent has to be able to tell.
+func (d *dispatcher) deadDelegationTarget(sessionID string) (DelegationParent, bool) {
+	parent, ok := d.delegationParents.Get(sessionID)
+	if !ok {
+		// Not a delegation: this is a session of the person's own, and
+		// it is only ever between turns, never over.
+		return DelegationParent{}, false
+	}
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.cancelled {
+		return DelegationParent{}, false
+	}
+	return parent, true
+}
+
 // SetLiveSession records the one session this sennit is working in.
 // Reported on every session load, create and select (see
 // App.ReportCurrentSession), and "" while there is none - the landing
@@ -400,6 +448,7 @@ func formatTaskCompletion(c TaskCompletion) string {
 	var b strings.Builder
 	b.WriteString("[system-generated delegation report - not user input]\n")
 	fmt.Fprintf(&b, "A background %s has finished.\n", c.Kind)
+	writeOrphanTrail(&b, c)
 	fmt.Fprintf(&b, "id: %s\n", c.DelegationID)
 	fmt.Fprintf(&b, "name: %s\n", c.Name)
 	fmt.Fprintf(&b, "goal: %s\n", c.Goal)
@@ -413,6 +462,21 @@ func formatTaskCompletion(c TaskCompletion) string {
 	return b.String()
 }
 
+// writeOrphanTrail explains, when there is anything to explain, why a
+// report about work nobody here dispatched is being shown to this
+// session: the delegation that did dispatch it was cancelled, so its
+// report came here instead (see sessionAgent.DeliverTaskCompletion).
+// Without this line the event reads as a task the reader never started
+// finishing out of nowhere.
+func writeOrphanTrail(b *strings.Builder, c TaskCompletion) {
+	if len(c.OrphanedFrom) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "It was not started by you: it was delegated by %s, which was cancelled before it could read this. "+
+		"You are being told because you are the nearest session still working.\n",
+		strings.Join(c.OrphanedFrom, ", delegated in turn by "))
+}
+
 // formatDelegationMessage renders a mid-run ask (IsMessage true) as
 // plain text for the model. Its leading line deliberately reads
 // differently from formatTaskCompletion's "has finished" line - a
@@ -423,6 +487,7 @@ func formatDelegationMessage(c TaskCompletion) string {
 	var b strings.Builder
 	b.WriteString("[system-generated delegation report - not user input]\n")
 	fmt.Fprintf(&b, "A running background %s is asking you something.\n", c.Kind)
+	writeOrphanTrail(&b, c)
 	fmt.Fprintf(&b, "id: %s\n", c.DelegationID)
 	fmt.Fprintf(&b, "name: %s\n", c.Name)
 	fmt.Fprintf(&b, "child_session: %s\n", c.ChildSessionID)

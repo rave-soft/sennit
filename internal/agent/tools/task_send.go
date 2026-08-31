@@ -36,6 +36,18 @@ func NewTaskSendTool(manager TaskManager) fantasy.AgentTool {
 				return invalidParam("message"), nil
 			}
 
+			// Scoped exactly like task_cancel, against exactly the same
+			// mistake: a delegation that sends to its own id feeds its
+			// own session, and one that sends upward drives the turn
+			// that is waiting on it. See taskScope.
+			scope, failed, err := scopeTasks(ctx, manager, TaskSendToolName)
+			if err != nil || failed != nil {
+				return derefResponse(failed), err
+			}
+			if refusal, refused := scope.refuse(params.ID, "send to"); refused {
+				return refusal, nil
+			}
+
 			outcome, err := manager.Send(ctx, params.ID, params.Message)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

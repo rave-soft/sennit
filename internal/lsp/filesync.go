@@ -184,10 +184,25 @@ func (f *filesync) prepareSyncOn(ctx context.Context, gen *clientGeneration, use
 	}
 	for _, marker := range f.rootMarkers {
 		path := filepath.Join(f.cwd, marker)
-		if _, err := os.Stat(path); err != nil {
+		info, err := os.Stat(path)
+		if err != nil {
 			if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("stat root marker %s: %w", path, err)
 			}
+			continue
+		}
+		// A root marker names a directory at least as often as a file:
+		// ".git" is the most common marker in the whole server catalogue
+		// (see powernap's lsps.json) and is a directory in every ordinary
+		// checkout — only a worktree makes it a file. It marks the root
+		// perfectly well, but there is nothing to didOpen, and reading it
+		// fails with EISDIR. That error failed the whole sync, so
+		// WaitForServerReady failed, so the client was left at
+		// StateError — which reusableClient refuses to hand back, so
+		// every single Start shut the server down and spawned a fresh
+		// one. gopls never got to warm up in any Go repo with a plain
+		// .git directory.
+		if info.IsDir() {
 			continue
 		}
 		if err := openCandidate(path); err != nil {

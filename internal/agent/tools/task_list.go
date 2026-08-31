@@ -33,10 +33,12 @@ func NewTaskListTool(manager TaskManager) fantasy.AgentTool {
 		TaskListToolName,
 		renderToolDescription(taskListDescriptionTpl),
 		func(ctx context.Context, params TaskListParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			tasks, err := manager.List(ctx)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
+			scope, failed, err := scopeTasks(ctx, manager, TaskListToolName)
+			if err != nil || failed != nil {
+				return derefResponse(failed), err
 			}
+			// The caller's own subtree, not the workspace: see taskScope.
+			tasks := scope.subtree()
 
 			if len(tasks) == 0 {
 				return fantasy.WithResponseMetadata(

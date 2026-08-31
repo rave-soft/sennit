@@ -15,6 +15,10 @@ after the turn it is already running finishes. When it says the message was
 queued, the task has not been informed yet — do not count on it having
 acted on the message.
 
+Like `task_cancel`, this reaches only the tasks you started. Your own id
+is refused, and so is that of a delegation you are running under: what
+you have to say to whoever is waiting on you belongs in your report.
+
 Parameters:
 - `id` (required): the task's ID (see `task_list`).
 - `message` (required): the instruction to send.

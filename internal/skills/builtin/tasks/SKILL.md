@@ -48,6 +48,12 @@ refining work already in flight → steering (say it, don't dispatch anything).
   id; sibling completions may arrive in any order. `task_result` is for
   checking in on one that hasn't reported back yet, not the normal way to
   receive it.
+- A report can reach you for work you did not start. When a task is
+  cancelled, its own session is over for good — nothing will ever run there
+  again — so anything still owed to it is handed to whoever started it
+  instead, labeled with the cancelled delegation it was meant for. Read it as
+  what it is: the tail end of work that has lost its owner, and now yours to
+  decide about.
 
 ## Limits
 
@@ -66,11 +72,23 @@ refining work already in flight → steering (say it, don't dispatch anything).
 
 ## Monitoring and follow-up
 
-- `task_list` — every task in the workspace and its current status.
+Every one of these tools answers from where you are standing in the
+delegation tree: they reach the tasks *you* started, and the tasks those
+started, however many levels down. Nothing else. Your own task is not among
+them — you are not one of your own background tasks — and neither is the
+delegation you are running under, nor a sibling's work. Passing your own id
+to `task_cancel` is refused rather than obeyed: it once was not, and the
+agent that did it stopped its own turn dead, taking its report with it. If
+you want to stop working, end your turn with your report.
+
+- `task_list` — the tasks you started, at any depth, and their statuses.
 - `task_result` — a specific task's outcome once it has one.
 - `task_send` — queue a follow-up message into a task's own session. Refused
   once the task has been cancelled.
-- `task_cancel` — stop a task's in-flight run.
+- `task_cancel` — stop a task's in-flight run, and the runs of every task it
+  started: work delegated by something you just stopped has nobody left to
+  report to, and left running it would keep editing the workspace with
+  nothing above it watching.
 - `task_output` — a tail of a task's own transcript (user/assistant text
   only), for checking on progress without waiting for it to finish.
 

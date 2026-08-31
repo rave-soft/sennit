@@ -424,9 +424,23 @@ func (t *TaskManager) Get(ctx context.Context, id string) (Thread, error) {
 // Cancel stops id's in-flight run and leaves it at the terminal
 // [StatusCancelled] with reason recorded as its Error. A task has no
 // merge flow or other kind-specific state to refuse this for — every
-// task is cancellable in any non-terminal status — so this is a thin
-// Get-then-delegate wrapper; see [lifecycle.cancel] for the mechanics
-// shared with [Manager.Cancel].
+// task is cancellable in any non-terminal status — see [lifecycle.cancel]
+// for the mechanics shared with [Manager.Cancel].
+//
+// The cancel reaches id's whole subtree, not id alone. A task's own
+// delegations exist to answer it, and a cancelled task is never going to
+// read their answers: left running they go on holding concurrency slots,
+// go on prompting for permissions, and — the reason this is not merely
+// untidy — go on editing the workspace with nothing above them that will
+// ever look at the result. That is not a hypothetical: a delegation once
+// cancelled itself by accident and its child kept rewriting files for
+// nine more minutes afterwards, reporting at the end into a session that
+// had been dead the whole time.
+//
+// Only id's failure is returned. A descendant that will not cancel is
+// logged and the sweep continues: the caller asked for id to stop, and
+// abandoning the rest of the subtree partway through would leave exactly
+// the unsupervised runs this exists to prevent.
 func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 	// Detached before the read below, not just around the write: a
 	// cancel arriving on a dead context could not even load the task to
@@ -436,6 +450,7 @@ func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 	// Admitted like every other mutation: without this a cancel could
 	// start after Shutdown had closed admission and begun joining
 	// workers, and then tear down state those workers were still using.
+	// Held across the descendants below too, as one operation.
 	admitted, err := t.lc.beginOp()
 	if err != nil {
 		return err
@@ -445,7 +460,68 @@ func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 	if err != nil {
 		return err
 	}
-	return t.lc.cancel(ctx, st, reason)
+	// The subtree is read before st is cancelled, but cancelling st is
+	// what stops it dispatching anything new, so the two orders differ
+	// only by a task created in the microseconds between them. Reading
+	// first is the safer of the two: a listing taken after the cancel
+	// would miss nothing, while cancelling first and then failing to
+	// list would leave the whole subtree running.
+	descendants := t.descendantsOf(ctx, st)
+	cancelErr := t.lc.cancel(ctx, st, reason)
+	for _, child := range descendants {
+		childReason := fmt.Sprintf("the task this was delegated by (%s) was cancelled", st.ID)
+		if reason != "" {
+			childReason += ": " + reason
+		}
+		if err := t.lc.cancel(ctx, child, childReason); err != nil {
+			slog.Error("Failed to cancel a delegation of a cancelled task",
+				"component", "thread", "task", child.ID, "parent_task", st.ID, "error", err)
+		}
+	}
+	return cancelErr
+}
+
+// descendantsOf returns every task below st, nearest first. A task's own
+// child session (Thread.SessionID) is the ParentSessionID of everything
+// it delegates, so the flat listing is a parent-pointer forest and this
+// is a breadth-first walk down it.
+//
+// A listing that cannot be read yields nothing rather than an error: the
+// cancel the caller actually asked for must still happen, and a sweep
+// that cannot see the subtree has nothing to say about it.
+func (t *TaskManager) descendantsOf(ctx context.Context, st Thread) []Thread {
+	if st.SessionID == "" {
+		return nil
+	}
+	all, err := t.List(ctx)
+	if err != nil {
+		slog.Warn("Could not list the delegations of a task being cancelled",
+			"component", "thread", "task", st.ID, "error", err)
+		return nil
+	}
+	byParent := make(map[string][]Thread, len(all))
+	for _, child := range all {
+		byParent[child.ParentSessionID] = append(byParent[child.ParentSessionID], child)
+	}
+	var out []Thread
+	// seen guards the walk rather than a depth limit: a store that
+	// somehow described a cycle would otherwise hang the cancel.
+	seen := map[string]struct{}{st.ID: {}}
+	for frontier := []string{st.SessionID}; len(frontier) > 0; {
+		session := frontier[0]
+		frontier = frontier[1:]
+		for _, child := range byParent[session] {
+			if _, ok := seen[child.ID]; ok {
+				continue
+			}
+			seen[child.ID] = struct{}{}
+			out = append(out, child)
+			if child.SessionID != "" {
+				frontier = append(frontier, child.SessionID)
+			}
+		}
+	}
+	return out
 }
 
 // Send dispatches message into id's session, reactivating it first if its

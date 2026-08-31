@@ -42,15 +42,20 @@ type TaskRunFactory func(ctx context.Context, childSessionID string) (run func(c
 // of the git-worktree fields Thread carries for the thread overlay (a
 // task has no worktree, branch, or merge policy).
 type TaskInfo struct {
-	ID            string
-	Goal          string
-	SessionID     string
-	Status        string
-	ResultSummary string
-	Error         string
-	CreatedAt     int64
-	UpdatedAt     int64
-	CompletedAt   int64
+	ID   string
+	Goal string
+	// SessionID is the task's own child session; ParentSessionID is the
+	// session that started it. Together they are the parent pointers the
+	// tasks form their tree by, which is what scopes every task_* tool to
+	// its caller's own subtree - see taskScope.
+	SessionID       string
+	ParentSessionID string
+	Status          string
+	ResultSummary   string
+	Error           string
+	CreatedAt       int64
+	UpdatedAt       int64
+	CompletedAt     int64
 }
 
 // TaskOutputMessage mirrors internal/thread.TaskOutputMessage.
