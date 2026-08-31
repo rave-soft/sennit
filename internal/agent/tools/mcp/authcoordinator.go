@@ -84,10 +84,6 @@ func (ac *authCoordinator) PendingAuthMCPs(cfg ConfigProvider) []PendingAuthServ
 // Only one browser-suppressed flow per server may be in progress. The
 // returned cancel function aborts the flow without waiting; use it when the
 // caller's context is cancelled.
-func BeginAuth(cfg ConfigProvider, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
-	return defaultRegistry.BeginAuth(cfg, name)
-}
-
 func (ac *authCoordinator) BeginAuth(cfg ConfigProvider, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
 	m, exists := cfg.Config().MCP[name]
 	if !exists {

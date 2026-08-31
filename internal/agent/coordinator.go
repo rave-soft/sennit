@@ -238,10 +238,9 @@ type CoordinatorOptions struct {
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
 	Interactive bool
-	// MCP is the per-workspace MCP registry. Every consumer that used to
-	// reach for the mcp package's shared defaultRegistry now goes through
-	// this instance so two workspaces in one process don't share sessions,
-	// states, or auth handlers keyed by MCP server name.
+	// MCP is the per-workspace MCP registry. Consumers receive this instance
+	// explicitly so two workspaces in one process don't share sessions, states,
+	// or auth handlers keyed by MCP server name.
 	MCP *mcp.Registry
 	// Threads is nil-safe: when nil, the thread_* tools are simply
 	// omitted from the top-level agent's tool list. It is normally wired
@@ -327,6 +326,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	// buildAgent because only the coordinator's own agent ever runs one.
 	if sa, ok := agent.(*sessionAgent); ok {
 		sa.continuationRunner = c.dispatcher.runContinuation
+		sa.continuationContext = c.dispatcher.lifecycle.context
 	}
 	// Started last, once there is an agent for it to summarize through.
 	// It ends with the coordinator: Close cancels the lifecycle context
@@ -564,9 +564,8 @@ func (c *coordinator) RefreshSkills(allSkills, activeSkills []*skills.Skill) {
 // production call sites (app.Bootstrap) run discovery in advance and
 // pass the results via the manager;
 // reaching this path means a caller bypassed both. It deliberately does
-// NOT publish to the package-level broker — there are no subscribers in
-// that case, so doing so would be misleading without delivering the
-// snapshot anywhere useful.
+// NOT publish a snapshot — no consumer is available in that case, so doing
+// so would be misleading without delivering it anywhere useful.
 func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
 	opts := cfg.Config().Options
 	var paths, disabled []string

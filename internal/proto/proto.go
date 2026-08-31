@@ -1,25 +1,5 @@
 package proto
 
-// ServerNoticeLevel mirrors the UI's status-line severity taxonomy
-// without depending on it, so core code can flag a notice's
-// severity without importing internal/ui.
-type ServerNoticeLevel string
-
-const (
-	ServerNoticeLevelInfo  ServerNoticeLevel = "info"
-	ServerNoticeLevelWarn  ServerNoticeLevel = "warn"
-	ServerNoticeLevelError ServerNoticeLevel = "error"
-)
-
-// ServerNotice carries a human-readable notice for display in the
-// UI's status area. It is the payload core code publishes instead of
-// reaching into internal/ui/util directly; the UI converts it to its
-// own util.InfoMsg on receipt.
-type ServerNotice struct {
-	Level   ServerNoticeLevel `json:"level"`
-	Message string            `json:"message"`
-}
-
 // QuestionItem is a single question within a batch.
 type QuestionItem struct {
 	ID          string           `json:"id"`

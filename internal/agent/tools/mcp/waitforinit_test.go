@@ -8,30 +8,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// swapInitGate replaces the package-global defaultRegistry.initDone channel that WaitForInit
-// waits on with a fresh, open one for the duration of the test, restoring the
-// original in cleanup. This lets each test drive WaitForInit deterministically
-// (by closing the returned channel to signal "init complete") instead of
-// branching on whether an earlier test already closed the process-wide
-// one-shot. The tests that use it are not parallel and nothing else touches the
-// gate during a unit-test run, so the swap is race-free.
-func swapInitGate(t *testing.T) chan struct{} {
+// swapInitGate replaces a registry's initDone channel with a fresh, open one
+// for the duration of the test. This lets each test drive WaitForInit
+// deterministically without shared process state.
+func swapInitGate(t *testing.T, r *Registry) chan struct{} {
 	t.Helper()
-	orig := defaultRegistry.initDone
-	defaultRegistry.initDone = make(chan struct{})
+	orig := r.initDone
+	r.initDone = make(chan struct{})
 
-	defaultRegistry.initMu.Lock()
-	origStarted := defaultRegistry.initStarted
-	defaultRegistry.initStarted = true
-	defaultRegistry.initMu.Unlock()
+	r.initMu.Lock()
+	origStarted := r.initStarted
+	r.initStarted = true
+	r.initMu.Unlock()
 
 	t.Cleanup(func() {
-		defaultRegistry.initDone = orig
-		defaultRegistry.initMu.Lock()
-		defaultRegistry.initStarted = origStarted
-		defaultRegistry.initMu.Unlock()
+		r.initDone = orig
+		r.initMu.Lock()
+		r.initStarted = origStarted
+		r.initMu.Unlock()
 	})
-	return defaultRegistry.initDone
+	return r.initDone
 }
 
 // TestWaitForInit_BlocksUntilInitCompletes pins the contract the coordinator
@@ -40,17 +36,18 @@ func swapInitGate(t *testing.T) chan struct{} {
 // registry so slow-to-start servers (e.g. stdio Python via uv) have registered
 // their tools first.
 func TestWaitForInit_BlocksUntilInitCompletes(t *testing.T) {
-	gate := swapInitGate(t)
+	r := NewRegistry()
+	gate := swapInitGate(t, r)
 
 	// Init not done yet: WaitForInit must block until the context expires.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	require.ErrorIs(t, WaitForInit(ctx), context.DeadlineExceeded,
+	require.ErrorIs(t, r.WaitForInit(ctx), context.DeadlineExceeded,
 		"WaitForInit must block while initialization is in flight")
 
 	// Once initialization completes (the gate closes), WaitForInit returns nil.
 	close(gate)
-	require.NoError(t, WaitForInit(context.Background()),
+	require.NoError(t, r.WaitForInit(context.Background()),
 		"WaitForInit must return once initialization has completed")
 }
 
@@ -60,56 +57,58 @@ func TestWaitForInit_BlocksUntilInitCompletes(t *testing.T) {
 // blocking on a channel that will never close. Before the fix it blocked until
 // ctx was cancelled, hanging coordinator.run's readyWg forever.
 func TestWaitForInit_ReturnsWhenNotArmed(t *testing.T) {
+	r := NewRegistry()
 	// Ensure the gate looks unarmed regardless of test ordering.
-	defaultRegistry.initMu.Lock()
-	orig := defaultRegistry.initStarted
-	defaultRegistry.initStarted = false
-	defaultRegistry.initMu.Unlock()
+	r.initMu.Lock()
+	orig := r.initStarted
+	r.initStarted = false
+	r.initMu.Unlock()
 	t.Cleanup(func() {
-		defaultRegistry.initMu.Lock()
-		defaultRegistry.initStarted = orig
-		defaultRegistry.initMu.Unlock()
+		r.initMu.Lock()
+		r.initStarted = orig
+		r.initMu.Unlock()
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	require.NoError(t, WaitForInit(ctx),
+	require.NoError(t, r.WaitForInit(ctx),
 		"WaitForInit must return immediately when initialization was never armed")
 }
 
 // TestWaitForInit_ToolsVisibleAfterInit is the regression test for the bug the
-// coordinator fix addresses: buildTools read defaultRegistry.allTools concurrently with MCP
+// coordinator fix addresses: buildTools read r.allTools concurrently with MCP
 // initialization, so a slow server's tools were silently missing from the LLM's
 // palette even though sennit_info later reported the server as connected. Gating
 // on WaitForInit fixes it — any tool registered before initialization completes
 // must be visible once WaitForInit returns.
 func TestWaitForInit_ToolsVisibleAfterInit(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-waitforinit-tools"
 	t.Cleanup(func() {
-		if s, ok := defaultRegistry.sessions.Take(name); ok {
+		if s, ok := r.sessions.Take(name); ok {
 			_ = s.Close()
 		}
-		defaultRegistry.allTools.Del(name)
-		defaultRegistry.states.Del(name)
+		r.allTools.Del(name)
+		r.states.Del(name)
 	})
 
 	sess, _ := liveSession(t, "slow_tool")
-	gate := swapInitGate(t)
+	gate := swapInitGate(t, r)
 
 	// A slow MCP server registers its tools, then initialization completes
 	// (the gate closes). close(gate) happens-after the registration, and
 	// WaitForInit returning happens-after observing the close, so the tools are
 	// guaranteed visible once WaitForInit returns.
 	go func() {
-		defaultRegistry.sessions.Set(name, sess)
-		defaultRegistry.allTools.Set(name, []*Tool{{Name: "slow_tool"}})
-		defaultRegistry.updateState(name, StateConnected, nil, sess, Counts{Tools: 1})
+		r.sessions.Set(name, sess)
+		r.allTools.Set(name, []*Tool{{Name: "slow_tool"}})
+		r.updateState(name, StateConnected, nil, sess, Counts{Tools: 1})
 		close(gate)
 	}()
 
-	require.NoError(t, WaitForInit(context.Background()))
+	require.NoError(t, r.WaitForInit(context.Background()))
 
-	tools, ok := defaultRegistry.allTools.Get(name)
+	tools, ok := r.allTools.Get(name)
 	require.True(t, ok, "a slow server's tools must be visible after WaitForInit returns")
 	require.Len(t, tools, 1)
 	require.Equal(t, "slow_tool", tools[0].Name)

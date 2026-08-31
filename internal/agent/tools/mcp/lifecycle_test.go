@@ -16,7 +16,7 @@ import (
 
 // liveSession spins up a real in-memory MCP server exposing a single tool and
 // returns a connected client session wrapped as a *ClientSession, mirroring
-// what defaultRegistry.createSession produces in production. The returned context is the one
+// what r.createSession produces in production. The returned context is the one
 // bound to the session's cancel func, so a test can assert the session was
 // actually closed (ctx cancelled) rather than merely dropped. Both sides are
 // torn down via t.Cleanup.
@@ -86,41 +86,42 @@ func liveSessionWithCapabilities(t *testing.T, toolName, promptName, resourceURI
 // TestUpdateState_ErrorClosesSessionAndClearsTools pins the primary fix: a
 // StateError transition must (1) remove the session from the map, (2) actually
 // close it so its child process/pipes are released, and (3) clear its tools
-// from the registry. Before the fix defaultRegistry.updateState only did a bare
-// defaultRegistry.sessions.Del(name): the session was leaked and its tools lingered, so
+// from the registry. Before the fix r.updateState only did a bare
+// r.sessions.Del(name): the session was leaked and its tools lingered, so
 // sennit_info kept reading "connected, N tools" while the LLM's tool list and
 // the live session had diverged.
 func TestUpdateState_ErrorClosesSessionAndClearsTools(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-error-cleanup"
 	t.Cleanup(func() {
-		defaultRegistry.sessions.Del(name)
-		defaultRegistry.allTools.Del(name)
-		defaultRegistry.states.Del(name)
+		r.sessions.Del(name)
+		r.allTools.Del(name)
+		r.states.Del(name)
 	})
 
 	sess, sessCtx := liveSession(t, "do_thing")
-	defaultRegistry.sessions.Set(name, sess)
-	defaultRegistry.allTools.Set(name, []*Tool{{Name: "do_thing"}})
+	r.sessions.Set(name, sess)
+	r.allTools.Set(name, []*Tool{{Name: "do_thing"}})
 
 	// Preconditions: tool registered and session live.
-	_, ok := defaultRegistry.allTools.Get(name)
+	_, ok := r.allTools.Get(name)
 	require.True(t, ok)
 	require.NoError(t, sessCtx.Err(), "session context must be live before the error")
 
-	defaultRegistry.updateState(name, StateError, errors.New("stdio pipe broke"), nil, Counts{Tools: 1})
+	r.updateState(name, StateError, errors.New("stdio pipe broke"), nil, Counts{Tools: 1})
 
 	// The dead session is removed from the map...
-	_, ok = defaultRegistry.sessions.Get(name)
-	require.False(t, ok, "errored session must be removed from the defaultRegistry.sessions map")
+	_, ok = r.sessions.Get(name)
+	require.False(t, ok, "errored session must be removed from the r.sessions map")
 
 	// ...actually closed (its context is cancelled, not merely dropped)...
 	require.ErrorIs(t, sessCtx.Err(), context.Canceled, "errored session must be closed, not just dropped from the map")
 
 	// ...and its tools cleared from the registry the agent sends to the LLM.
-	_, ok = defaultRegistry.allTools.Get(name)
+	_, ok = r.allTools.Get(name)
 	require.False(t, ok, "errored session's tools must be cleared from the registry")
 
-	info, ok := GetState(name)
+	info, ok := r.GetState(name)
 	require.True(t, ok)
 	require.Equal(t, StateError, info.State)
 }
@@ -174,9 +175,10 @@ func TestUpdateState_ErrorDetachesBeforeClosingOutsidePublishLock(t *testing.T) 
 }
 
 func TestUpdateState_ConfigBookkeeping(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-config-bookkeeping"
 	t.Cleanup(func() {
-		defaultRegistry.states.Del(name)
+		r.states.Del(name)
 	})
 
 	base := config.MCPConfig{Type: config.MCPHttp, URL: "https://example.com/mcp"}
@@ -184,28 +186,28 @@ func TestUpdateState_ConfigBookkeeping(t *testing.T) {
 	changed.URL = "https://other.com/mcp"
 
 	// Connecting records the config and clears any pending attempt.
-	defaultRegistry.updateState(name, StateStarting, nil, nil, Counts{}, withPending(base))
-	defaultRegistry.updateState(name, StateConnected, nil, nil, Counts{}, withConfig(base))
-	info, _ := GetState(name)
+	r.updateState(name, StateStarting, nil, nil, Counts{}, withPending(base))
+	r.updateState(name, StateConnected, nil, nil, Counts{}, withConfig(base))
+	info, _ := r.GetState(name)
 	require.Equal(t, base, info.Config, "connected state must record its config")
 	require.Nil(t, info.PendingConfig, "connected state must clear the pending config")
 
 	// Starting records the config the attempt is connecting with.
-	defaultRegistry.updateState(name, StateStarting, nil, nil, Counts{}, withPending(changed))
-	info, _ = GetState(name)
+	r.updateState(name, StateStarting, nil, nil, Counts{}, withPending(changed))
+	info, _ = r.GetState(name)
 	require.NotNil(t, info.PendingConfig, "starting state must record the pending config")
 	require.Equal(t, changed, *info.PendingConfig)
 	require.Equal(t, base, info.Config, "starting must not disturb the last connected config")
 
 	// An error preserves both so reconcile can still reason about the server.
-	defaultRegistry.updateState(name, StateError, errors.New("boom"), nil, Counts{})
-	info, _ = GetState(name)
+	r.updateState(name, StateError, errors.New("boom"), nil, Counts{})
+	info, _ = r.GetState(name)
 	require.Equal(t, base, info.Config, "error must preserve the connected config")
 	require.NotNil(t, info.PendingConfig, "error must preserve the pending config")
 
 	// Disabling clears both so a re-enable with an unchanged config restarts.
-	defaultRegistry.updateState(name, StateDisabled, nil, nil, Counts{})
-	info, _ = GetState(name)
+	r.updateState(name, StateDisabled, nil, nil, Counts{})
+	info, _ = r.GetState(name)
 	require.Equal(t, config.MCPConfig{}, info.Config, "disabled must clear the connected config")
 	require.Nil(t, info.PendingConfig, "disabled must clear the pending config")
 }
@@ -216,26 +218,27 @@ func TestUpdateState_ConfigBookkeeping(t *testing.T) {
 // capabilities the agent can no longer fulfil — the same state/registry
 // divergence the tool clear exists to prevent.
 func TestUpdateState_ErrorClearsPromptsAndResources(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-error-clears-all"
 	t.Cleanup(func() {
-		defaultRegistry.sessions.Del(name)
-		defaultRegistry.allTools.Del(name)
-		defaultRegistry.allPrompts.Del(name)
-		defaultRegistry.allResources.Del(name)
-		defaultRegistry.states.Del(name)
+		r.sessions.Del(name)
+		r.allTools.Del(name)
+		r.allPrompts.Del(name)
+		r.allResources.Del(name)
+		r.states.Del(name)
 	})
 
-	defaultRegistry.allTools.Set(name, []*Tool{{Name: "do_thing"}})
-	defaultRegistry.allPrompts.Set(name, []*Prompt{{Name: "a_prompt"}})
-	defaultRegistry.allResources.Set(name, []*Resource{{Name: "a_resource"}})
+	r.allTools.Set(name, []*Tool{{Name: "do_thing"}})
+	r.allPrompts.Set(name, []*Prompt{{Name: "a_prompt"}})
+	r.allResources.Set(name, []*Resource{{Name: "a_resource"}})
 
-	defaultRegistry.updateState(name, StateError, errors.New("pipe broke"), nil, Counts{})
+	r.updateState(name, StateError, errors.New("pipe broke"), nil, Counts{})
 
-	_, ok := defaultRegistry.allTools.Get(name)
+	_, ok := r.allTools.Get(name)
 	require.False(t, ok, "errored session's tools must be cleared")
-	_, ok = defaultRegistry.allPrompts.Get(name)
+	_, ok = r.allPrompts.Get(name)
 	require.False(t, ok, "errored session's prompts must be cleared")
-	_, ok = defaultRegistry.allResources.Get(name)
+	_, ok = r.allResources.Get(name)
 	require.False(t, ok, "errored session's resources must be cleared")
 }
 
@@ -396,15 +399,16 @@ func TestGetOrRenewClient_CancelledContextOnFirstPingLeavesSessionAlone(t *testi
 }
 
 func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-renew-concurrency"
 	const workers = 8
 
 	t.Cleanup(func() {
-		if s, ok := defaultRegistry.sessions.Take(name); ok {
+		if s, ok := r.sessions.Take(name); ok {
 			_ = s.Close()
 		}
-		defaultRegistry.allTools.Del(name)
-		defaultRegistry.states.Del(name)
+		r.allTools.Del(name)
+		r.states.Del(name)
 	})
 
 	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
@@ -413,12 +417,12 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	// renewal.
 	dead, _ := liveSession(t, "send_message")
 	require.NoError(t, dead.Close())
-	owner, err := defaultRegistry.beginAttempt(name)
+	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
-	defaultRegistry.publishMu.Lock()
-	defaultRegistry.sessions.Set(name, dead)
-	defaultRegistry.sessionOwners[name] = owner
-	defaultRegistry.publishMu.Unlock()
+	r.publishMu.Lock()
+	r.sessions.Set(name, dead)
+	r.sessionOwners[name] = owner
+	r.publishMu.Unlock()
 
 	// Pre-build enough live replacements that the buggy (unserialized) path
 	// could consume more than one; the fix must consume exactly one.
@@ -435,19 +439,19 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	})
 
 	var created atomic.Int32
-	origNewSession := defaultRegistry.newSession
-	defaultRegistry.newSession = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID, config.VariableResolver, bool) (*ClientSession, error) {
+	origNewSession := r.newSession
+	r.newSession = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID, config.VariableResolver, bool) (*ClientSession, error) {
 		created.Add(1)
 		return <-replacements, nil
 	}
-	t.Cleanup(func() { defaultRegistry.newSession = origNewSession })
+	t.Cleanup(func() { r.newSession = origNewSession })
 
 	var wg sync.WaitGroup
 	results := make([]*ClientSession, workers)
 	errs := make([]error, workers)
 	for i := range workers {
 		wg.Go(func() {
-			results[i], errs[i] = defaultRegistry.getOrRenewClient(context.Background(), cfg, name)
+			results[i], errs[i] = r.getOrRenewClient(context.Background(), cfg, name)
 		})
 	}
 	wg.Wait()
@@ -455,7 +459,7 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	require.Equal(t, int32(1), created.Load(),
 		"exactly one renewal must occur; concurrent callers must reuse the renewed session")
 
-	final, ok := defaultRegistry.sessions.Get(name)
+	final, ok := r.sessions.Get(name)
 	require.True(t, ok, "a live session must remain registered after concurrent renewals")
 	for i := range workers {
 		require.NoError(t, errs[i])
@@ -471,45 +475,46 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 // lazy renew re-registers them — so a regression in any leg (tools left stale
 // on error, or tools never restored on renew) fails here.
 func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-error-then-renew"
 	t.Cleanup(func() {
-		if s, ok := defaultRegistry.sessions.Take(name); ok {
+		if s, ok := r.sessions.Take(name); ok {
 			_ = s.Close()
 		}
-		defaultRegistry.allTools.Del(name)
-		defaultRegistry.states.Del(name)
+		r.allTools.Del(name)
+		r.states.Del(name)
 	})
 
 	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
 	// 1. Initial connect registers the tool via the live publishSession seam
-	// (what defaultRegistry.initClient calls after establishing a session).
+	// (what r.initClient calls after establishing a session).
 	sess1, _ := liveSession(t, "send_message")
-	owner1, err := defaultRegistry.beginAttempt(name)
+	owner1, err := r.beginAttempt(name)
 	require.NoError(t, err)
-	err = defaultRegistry.publishSession(context.Background(), name, cfg.Config().MCP[name], owner1, sess1)
+	err = r.publishSession(context.Background(), name, cfg.Config().MCP[name], owner1, sess1)
 	require.NoError(t, err)
-	_, ok := defaultRegistry.allTools.Get(name)
+	_, ok := r.allTools.Get(name)
 	require.True(t, ok, "tool should be registered after the initial connect")
 
 	// 2. The session drops mid-conversation -> StateError. Post-fix this clears
 	//    the tools and closes the dead session.
-	defaultRegistry.updateState(name, StateError, errors.New("pipe broke"), nil, Counts{Tools: 1})
-	_, ok = defaultRegistry.allTools.Get(name)
+	r.updateState(name, StateError, errors.New("pipe broke"), nil, Counts{Tools: 1})
+	_, ok = r.allTools.Get(name)
 	require.False(t, ok, "tools must be cleared when the session errors")
-	_, ok = defaultRegistry.sessions.Get(name)
+	_, ok = r.sessions.Get(name)
 	require.False(t, ok, "errored session must be removed from the map")
 
 	// 3. The lazy renew path creates a fresh session and MUST re-register the
 	//    tools. The bug was that it never did: the LLM's tool list stayed empty
 	//    and every subsequent call returned "tool not found".
 	sess2, _ := liveSession(t, "send_message")
-	owner2, err := defaultRegistry.beginAttempt(name)
+	owner2, err := r.beginAttempt(name)
 	require.NoError(t, err)
-	err = defaultRegistry.publishSession(context.Background(), name, cfg.Config().MCP[name], owner2, sess2)
+	err = r.publishSession(context.Background(), name, cfg.Config().MCP[name], owner2, sess2)
 	require.NoError(t, err)
 
-	got, ok := defaultRegistry.allTools.Get(name)
+	got, ok := r.allTools.Get(name)
 	require.True(t, ok, "tools must be restored after the session is renewed")
 	require.Len(t, got, 1)
 	require.Equal(t, "send_message", got[0].Name)
@@ -521,15 +526,16 @@ func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
 // the old prompt/resource counts, GetState would again advertise capabilities
 // absent from the registries.
 func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-renew-prompts-resources"
 	t.Cleanup(func() {
-		if s, ok := defaultRegistry.sessions.Take(name); ok {
+		if s, ok := r.sessions.Take(name); ok {
 			_ = s.Close()
 		}
-		defaultRegistry.allTools.Del(name)
-		defaultRegistry.allPrompts.Del(name)
-		defaultRegistry.allResources.Del(name)
-		defaultRegistry.states.Del(name)
+		r.allTools.Del(name)
+		r.allPrompts.Del(name)
+		r.allResources.Del(name)
+		r.states.Del(name)
 	})
 
 	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
@@ -537,39 +543,39 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 	// Seed a dead session so the renewal path runs.
 	dead, _ := liveSession(t, "send_message")
 	require.NoError(t, dead.Close())
-	owner, err := defaultRegistry.beginAttempt(name)
+	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
-	defaultRegistry.publishMu.Lock()
-	defaultRegistry.sessions.Set(name, dead)
-	defaultRegistry.sessionOwners[name] = owner
-	defaultRegistry.publishMu.Unlock()
+	r.publishMu.Lock()
+	r.sessions.Set(name, dead)
+	r.sessionOwners[name] = owner
+	r.publishMu.Unlock()
 	// Stale counts that must be recomputed, not preserved.
-	defaultRegistry.updateState(name, StateConnected, nil, dead, Counts{Tools: 1, Prompts: 1, Resources: 1})
+	r.updateState(name, StateConnected, nil, dead, Counts{Tools: 1, Prompts: 1, Resources: 1})
 
 	replacement := liveSessionWithCapabilities(t, "send_message", "a_prompt", "res://thing")
-	origNewSession := defaultRegistry.newSession
-	defaultRegistry.newSession = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID, config.VariableResolver, bool) (*ClientSession, error) {
+	origNewSession := r.newSession
+	r.newSession = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID, config.VariableResolver, bool) (*ClientSession, error) {
 		return replacement, nil
 	}
-	t.Cleanup(func() { defaultRegistry.newSession = origNewSession })
+	t.Cleanup(func() { r.newSession = origNewSession })
 
-	sess, err := defaultRegistry.getOrRenewClient(context.Background(), cfg, name)
+	sess, err := r.getOrRenewClient(context.Background(), cfg, name)
 	require.NoError(t, err)
 	require.Same(t, replacement, sess)
 
-	tools, ok := defaultRegistry.allTools.Get(name)
+	tools, ok := r.allTools.Get(name)
 	require.True(t, ok, "tools must be restored on renewal")
 	require.Len(t, tools, 1)
 
-	prompts, ok := defaultRegistry.allPrompts.Get(name)
+	prompts, ok := r.allPrompts.Get(name)
 	require.True(t, ok, "prompts must be restored on renewal")
 	require.Len(t, prompts, 1)
 
-	resources, ok := defaultRegistry.allResources.Get(name)
+	resources, ok := r.allResources.Get(name)
 	require.True(t, ok, "resources must be restored on renewal")
 	require.Len(t, resources, 1)
 
-	info, ok := GetState(name)
+	info, ok := r.GetState(name)
 	require.True(t, ok)
 	require.Equal(t, StateConnected, info.State)
 	require.Equal(t, Counts{Tools: 1, Prompts: 1, Resources: 1}, info.Counts,
@@ -588,13 +594,14 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 // renewed session off context.WithoutCancel(ctx) instead, so the session
 // outlives the tool call that happened to trigger the renewal.
 func TestGetOrRenewClient_RenewalDetachesFromCallerContext(t *testing.T) {
+	r := NewRegistry()
 	const name = "test-renew-detached-ctx"
 	t.Cleanup(func() {
-		if s, ok := defaultRegistry.sessions.Take(name); ok {
+		if s, ok := r.sessions.Take(name); ok {
 			_ = s.Close()
 		}
-		defaultRegistry.allTools.Del(name)
-		defaultRegistry.states.Del(name)
+		r.allTools.Del(name)
+		r.states.Del(name)
 	})
 
 	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
@@ -602,29 +609,29 @@ func TestGetOrRenewClient_RenewalDetachesFromCallerContext(t *testing.T) {
 	// Seed a dead session so the renewal path runs.
 	dead, _ := liveSession(t, "send_message")
 	require.NoError(t, dead.Close())
-	owner, err := defaultRegistry.beginAttempt(name)
+	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
-	defaultRegistry.publishMu.Lock()
-	defaultRegistry.sessions.Set(name, dead)
-	defaultRegistry.sessionOwners[name] = owner
-	defaultRegistry.publishMu.Unlock()
+	r.publishMu.Lock()
+	r.sessions.Set(name, dead)
+	r.sessionOwners[name] = owner
+	r.publishMu.Unlock()
 
 	replacement, _ := liveSession(t, "send_message")
 	t.Cleanup(func() { _ = replacement.Close() })
 
 	var capturedCtx context.Context
-	origNewSession := defaultRegistry.newSession
-	defaultRegistry.newSession = func(ctx context.Context, _ ConfigProvider, _ string, _ config.MCPConfig, _ attemptID, _ config.VariableResolver, _ bool) (*ClientSession, error) {
+	origNewSession := r.newSession
+	r.newSession = func(ctx context.Context, _ ConfigProvider, _ string, _ config.MCPConfig, _ attemptID, _ config.VariableResolver, _ bool) (*ClientSession, error) {
 		capturedCtx = ctx
 		return replacement, nil
 	}
-	t.Cleanup(func() { defaultRegistry.newSession = origNewSession })
+	t.Cleanup(func() { r.newSession = origNewSession })
 
 	// Simulate the tool call's own ctx: it is what a lazy renewal is
 	// triggered under (mcp-tools.go), and it is cancelled the moment that
 	// tool call returns.
 	callerCtx, cancelCaller := context.WithCancel(context.Background())
-	sess, err := defaultRegistry.getOrRenewClient(callerCtx, cfg, name)
+	sess, err := r.getOrRenewClient(callerCtx, cfg, name)
 	require.NoError(t, err)
 	require.Same(t, replacement, sess)
 	require.NotNil(t, capturedCtx, "newSession must have been called for the renewal")

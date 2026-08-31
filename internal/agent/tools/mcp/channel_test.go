@@ -340,9 +340,10 @@ func waitForEvent(t *testing.T, ch <-chan pubsub.Event[Event]) (Event, bool) {
 }
 
 func TestChannelConnGateOpenInjects(t *testing.T) {
+	r := NewRegistry()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sub := defaultRegistry.broker.Subscribe(ctx)
+	sub := r.broker.Subscribe(ctx)
 
 	gate := newChannelGate()
 	gate.resolve(true)
@@ -354,7 +355,7 @@ func TestChannelConnGateOpenInjects(t *testing.T) {
 		}},
 		name: "webhook",
 		gate: gate,
-		reg:  defaultRegistry,
+		reg:  r,
 	}
 
 	// The channel notification is swallowed; the next Read returns passthrough.
@@ -383,9 +384,10 @@ func TestChannelConnGateOpenInjects(t *testing.T) {
 }
 
 func TestChannelConnGateClosedDropsEvents(t *testing.T) {
+	r := NewRegistry()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sub := defaultRegistry.broker.Subscribe(ctx)
+	sub := r.broker.Subscribe(ctx)
 
 	gate := newChannelGate()
 	gate.resolve(false) // closed: not opted in / not a channel
@@ -397,7 +399,7 @@ func TestChannelConnGateClosedDropsEvents(t *testing.T) {
 		}},
 		name: "webhook",
 		gate: gate,
-		reg:  defaultRegistry,
+		reg:  r,
 	}
 
 	msg, err := conn.Read(ctx)
@@ -414,9 +416,10 @@ func TestChannelConnGateClosedDropsEvents(t *testing.T) {
 }
 
 func TestChannelConnMalformedPayloadDropped(t *testing.T) {
+	r := NewRegistry()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sub := defaultRegistry.broker.Subscribe(ctx)
+	sub := r.broker.Subscribe(ctx)
 
 	gate := newChannelGate()
 	gate.resolve(true)
@@ -428,7 +431,7 @@ func TestChannelConnMalformedPayloadDropped(t *testing.T) {
 		}},
 		name: "webhook",
 		gate: gate,
-		reg:  defaultRegistry,
+		reg:  r,
 	}
 
 	if _, err := conn.Read(ctx); err != nil {
@@ -441,22 +444,22 @@ func TestChannelConnMalformedPayloadDropped(t *testing.T) {
 
 // TestPublishChannelMessageUsesMustDeliver proves channel messages are
 // published through the must-deliver path, not the lossy Publish path.
-// A small-buffer defaultRegistry.broker is saturated; a lossy publish would drop the channel
+// A small-buffer broker is saturated; a lossy publish would drop the channel
 // event, but must-deliver blocks (bounded) and delivers it.
 func TestPublishChannelMessageUsesMustDeliver(t *testing.T) {
-	// Temporarily swap the package-level defaultRegistry.broker for a tiny one so we can
-	// saturate it.
+	r := NewRegistry()
+	// Replace this local registry's broker with a tiny one so we can saturate it.
 	small := pubsub.NewBrokerWithOptions[Event](1)
-	prev := defaultRegistry.broker
-	defaultRegistry.broker = small
-	t.Cleanup(func() { defaultRegistry.broker = prev })
+	prev := r.broker
+	r.broker = small
+	t.Cleanup(func() { r.broker = prev })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sub := defaultRegistry.broker.Subscribe(ctx)
+	sub := r.broker.Subscribe(ctx)
 
 	// Fill the buffer with one event so the next publish must block-deliver.
-	defaultRegistry.broker.Publish(pubsub.CreatedEvent, Event{Type: EventStateChanged})
+	r.broker.Publish(pubsub.CreatedEvent, Event{Type: EventStateChanged})
 
 	// Start draining in the background so the must-deliver send can complete.
 	type received struct {
@@ -474,7 +477,7 @@ func TestPublishChannelMessageUsesMustDeliver(t *testing.T) {
 	}()
 
 	raw, _ := json.Marshal(channelParams{Content: "channel msg"})
-	defaultRegistry.publishChannelMessage(ctx, "webhook", raw)
+	r.publishChannelMessage(ctx, "webhook", raw)
 
 	// The first drain picks up the fill event; the channel event is now in
 	// the buffer. Read it.
@@ -506,9 +509,10 @@ func TestPublishChannelMessageUsesMustDeliver(t *testing.T) {
 // Connect window), then resolves the gate to open and verifies the buffered
 // message is published.
 func TestChannelConnBuffersDuringUndecidedGate(t *testing.T) {
+	r := NewRegistry()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sub := defaultRegistry.broker.Subscribe(ctx)
+	sub := r.broker.Subscribe(ctx)
 
 	gate := newChannelGate() // starts undecided
 	conn := &channelConn{
@@ -518,7 +522,7 @@ func TestChannelConnBuffersDuringUndecidedGate(t *testing.T) {
 		}},
 		name: "webhook",
 		gate: gate,
-		reg:  defaultRegistry,
+		reg:  r,
 	}
 
 	// Read while gate is undecided. The channel notification is intercepted
@@ -541,7 +545,7 @@ func TestChannelConnBuffersDuringUndecidedGate(t *testing.T) {
 	if len(buffered) != 1 {
 		t.Fatalf("expected 1 buffered message, got %d", len(buffered))
 	}
-	defaultRegistry.publishChannelMessage(ctx, "webhook", buffered[0])
+	r.publishChannelMessage(ctx, "webhook", buffered[0])
 
 	got, ok := waitForEvent(t, sub)
 	if !ok {
@@ -582,9 +586,10 @@ func TestChannelGateCopiesAcceptedPayload(t *testing.T) {
 }
 
 func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
+	r := NewRegistry()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sub := defaultRegistry.broker.Subscribe(ctx)
+	sub := r.broker.Subscribe(ctx)
 
 	gate := newChannelGate()
 	conn := &channelConn{
@@ -594,7 +599,7 @@ func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
 		}},
 		name: "webhook",
 		gate: gate,
-		reg:  defaultRegistry,
+		reg:  r,
 	}
 
 	if _, err := conn.Read(ctx); err != nil {

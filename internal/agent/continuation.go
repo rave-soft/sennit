@@ -98,11 +98,14 @@ func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason 
 
 	slog.Info("Continuation started", "session", sessionID, "reason", reason)
 
-	// Detached from ctx's cancellation (ctx here is internal/thread's own
-	// long-lived lifecycle context, canceled at workspace shutdown) but
-	// not from its values, mirroring how Run's own title-generation
-	// goroutine (agent.go) detaches from its triggering call's context.
-	runCtx := context.WithoutCancel(ctx)
+	// A continuation must outlive the short caller context that delivered a
+	// completion, but not the coordinator that owns the agent. The coordinator
+	// wires its lifecycle context here; standalone agents retain their caller
+	// context rather than silently losing cancellation through WithoutCancel.
+	runCtx := ctx
+	if a.continuationContext != nil {
+		runCtx = a.continuationContext()
+	}
 	// Wait out the backoff for a session whose continuations have been
 	// failing. Zero on the ordinary path, so a finished delegation still
 	// reaches the model immediately; see continuationRetryBackoff.

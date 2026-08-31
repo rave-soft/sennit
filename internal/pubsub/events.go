@@ -30,7 +30,6 @@ const (
 	PayloadTypeUpdateAvailable        PayloadType = "update_available"
 	PayloadTypeQuestionRequest        PayloadType = "question_batch_request"
 	PayloadTypeQuestionNotification   PayloadType = "question_batch_notification"
-	PayloadTypeServerNotice           PayloadType = "server_notice"
 	PayloadTypeThreadEvent            PayloadType = "thread_event"
 )
 

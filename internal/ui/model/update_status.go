@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -51,20 +50,6 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			ttl = DefaultStatusTTL
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl, m.nextStatusSeq()))
-	case pubsub.Event[proto.ServerNotice]:
-		// Notices from core code arrive as the transport-neutral
-		// proto.ServerNotice so that code doesn't need to depend on
-		// internal/ui; convert to util.InfoMsg here at the boundary.
-		info := util.InfoMsg{
-			Type: serverNoticeLevelToInfoType(msg.Payload.Level),
-			Msg:  msg.Payload.Message,
-		}
-		m.status.SetInfoMsg(info)
-		ttl := info.TTL
-		if ttl <= 0 {
-			ttl = DefaultStatusTTL
-		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl, m.nextStatusSeq()))
 	case workspace.UpdateAvailableMsg:
 		text := fmt.Sprintf("Sennit update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -85,19 +70,6 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	}
 	return cmds, false
-}
-
-// serverNoticeLevelToInfoType maps the transport-neutral
-// proto.ServerNoticeLevel to the UI's own status-line severity type.
-func serverNoticeLevelToInfoType(level proto.ServerNoticeLevel) util.InfoType {
-	switch level {
-	case proto.ServerNoticeLevelWarn:
-		return util.InfoTypeWarn
-	case proto.ServerNoticeLevelError:
-		return util.InfoTypeError
-	default:
-		return util.InfoTypeInfo
-	}
 }
 
 // nextStatusSeq stamps the status-line message about to be shown and

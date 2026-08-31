@@ -64,6 +64,8 @@ func init() {
 	)
 }
 
+var earlyLogs *sennitlog.EarlyHandler
+
 var rootCmd = &cobra.Command{
 	Use:   brand.Slug,
 	Short: "A terminal-first AI assistant for software development",
@@ -166,14 +168,11 @@ const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{
 `
 
 func Execute() {
-	// FIXME: config.Load uses slog internally during provider resolution,
-	// but the file-based logger isn't set up until after config is loaded
-	// (because the log path depends on the data directory from config).
-	// This creates a window where slog calls in config.Load leak to
-	// stderr. We discard early logs here as a workaround. The proper
-	// fix is to remove slog calls from config.Load and have it return
-	// warnings/diagnostics instead of logging them as a side effect.
-	slog.SetDefault(slog.New(slog.DiscardHandler))
+	// Config loading determines the log path, yet it may report useful warnings.
+	// Buffer them until setupLocalWorkspace installs the file logger so startup
+	// diagnostics neither leak to stderr nor get silently discarded.
+	earlyLogs = sennitlog.NewEarlyHandler()
+	slog.SetDefault(slog.New(earlyLogs))
 
 	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
 	// it forward to a bytes.Buffer, write the colored logo to it, and then
@@ -266,6 +265,9 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		},
 		PostConnect: func(cfg *config.ConfigStore) error {
 			sennitlog.Setup(config.GlobalLogFile(), debug)
+			if earlyLogs != nil {
+				earlyLogs.Replay(slog.Default())
+			}
 			return nil
 		},
 		OnAppInitFailure: func(err error) {

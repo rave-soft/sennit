@@ -15,10 +15,11 @@ import (
 // lets Sennit reap a server's descendant processes (e.g. signal-cli launched by
 // signal-mcp) when the session context is cancelled, instead of orphaning them.
 func TestCreateTransport_StdioProcessGroup(t *testing.T) {
+	r := NewRegistry()
 	t.Parallel()
 
 	m := config.MCPConfig{Type: config.MCPStdio, Command: "echo", Args: []string{"hi"}}
-	tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), shellResolverWithPath(t, nil))
+	tr, _, err := r.createTransportFor(t.Context(), nil, "test", m, r.currentGen("test"), r.authAttempt.Add(1), shellResolverWithPath(t, nil))
 	require.NoError(t, err)
 
 	ct, ok := tr.(*mcp.CommandTransport)

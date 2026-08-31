@@ -118,9 +118,8 @@ internal/
     `proto.PermissionRequest` and `proto.PermissionNotification` are never
     constructed anywhere in the tree, and no broker publishes them; their only
     references are `case` arms in `internal/herdr/translate.go` that can never
-    match. `proto.ServerNotice` is likewise never constructed, though
-    `ui/model` still switches on it. `proto.ConfigProviderKeyRequest` — the
-    `config.Scope` exception — has zero references outside `proto` itself.
+    match. `proto.ConfigProviderKeyRequest` — the `config.Scope` exception —
+    has zero references outside `proto` itself.
     `proto.LSPClientInfo` is an alias whose only mention outside `proto` is a
     swagger `@name` comment in `lsp/info.go`; `workspace.go` aliases
     `lsp.ClientInfo` directly instead.

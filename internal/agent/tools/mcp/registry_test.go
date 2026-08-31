@@ -9,37 +9,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestClose_SharedRegistryBrokerSurvivesOneOfTwoWorkspacesClosing is the
-// regression test for the shared-registry bug: before the
-// liveWorkspaces refcount, mcp.Close unconditionally called broker.Shutdown,
-// so a second workspace calling app.New (which arms the process-global MCP
-// registry and defers mcp.Close in its cleanup) would have its own MCP event
-// stream killed the instant the FIRST workspace shut down, since both shared
-// defaultRegistry.
-//
-// This drives the fix through the actual package-level API (ArmInit/Close),
-// the same one app.New uses, against a scratch registry swapped in for
-// defaultRegistry so the test can't leave the package's real shared registry
-// permanently shut down for tests that run after it.
+// TestClose_SharedRegistryBrokerSurvivesOneOfTwoWorkspacesClosing verifies
+// that a registry shared by two owners keeps its event broker alive until the
+// last owner closes it.
 func TestClose_SharedRegistryBrokerSurvivesOneOfTwoWorkspacesClosing(t *testing.T) {
-	orig := defaultRegistry
-	defaultRegistry = NewRegistry()
-	t.Cleanup(func() { defaultRegistry = orig })
+	r := NewRegistry()
 
 	ctx := context.Background()
 
 	// Two workspaces both arm against the same shared registry, exactly as
 	// two concurrent app.New calls would.
-	ArmInit()
-	ArmInit()
+	r.ArmInit()
+	r.ArmInit()
 
-	sub := SubscribeEvents(ctx)
+	sub := r.SubscribeEvents(ctx)
 
 	// The first workspace shuts down. The second is still alive, so the
 	// shared broker (and this subscriber's channel) must survive.
-	require.NoError(t, Close(ctx))
+	require.NoError(t, r.Close(ctx))
 
-	defaultRegistry.broker.Publish(pubsub.UpdatedEvent, Event{
+	r.broker.Publish(pubsub.UpdatedEvent, Event{
 		Type: EventStateChanged,
 		Name: "still-alive",
 	})
@@ -53,7 +42,7 @@ func TestClose_SharedRegistryBrokerSurvivesOneOfTwoWorkspacesClosing(t *testing.
 
 	// The second (last) workspace closes. Now the broker should shut down,
 	// and the subscriber's channel should be closed.
-	require.NoError(t, Close(ctx))
+	require.NoError(t, r.Close(ctx))
 
 	select {
 	case _, ok := <-sub:

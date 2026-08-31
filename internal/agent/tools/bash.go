@@ -242,6 +242,11 @@ func NewBashTool(permissions permission.Requester, workingDir string, attributio
 				return fantasy.NewTextErrorResponse(msg), nil
 			}
 
+			command, err := confinedBashCommand(permissions, execWorkingDir, params.Command)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+
 			isSafeReadOnly := isSafeReadOnlyCommand(params.Command)
 
 			sessionID := GetSessionFromContext(ctx)
@@ -275,7 +280,7 @@ func NewBashTool(permissions permission.Requester, workingDir string, attributio
 				startTime := time.Now()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -305,7 +310,7 @@ func NewBashTool(permissions permission.Requester, workingDir string, attributio
 
 			// Start with detached context so it can survive if moved to background
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

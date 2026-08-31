@@ -97,11 +97,10 @@ type appServices struct {
 	// see the lspEvents doc in lsp_events.go for why it isn't shared.
 	lsp *lspEvents
 
-	// MCP is this workspace's own MCP registry: sessions, per-server
-	// state, auth handlers, and the event broker all live here rather
-	// than on mcp's process-wide defaultRegistry, so two App instances in
-	// one process (the top-level workspace and a spawned thread's
-	// workspace) don't clobber each other's MCP servers.
+	// MCP is this workspace's own MCP registry: sessions, per-server state,
+	// auth handlers, and the event broker all live here, so two App instances
+	// in one process (the top-level workspace and a spawned thread's workspace)
+	// don't clobber each other's MCP servers.
 	MCP              *mcp.Registry
 	BackgroundShells *shell.BackgroundShellManager
 

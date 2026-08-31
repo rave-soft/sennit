@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -77,6 +79,29 @@ func TestContinuationBackoffIsZeroOnTheFirstAttempt(t *testing.T) {
 	require.Zero(t, continuationRetryBackoff(0))
 	require.Positive(t, continuationRetryBackoff(1))
 	require.Greater(t, continuationRetryBackoff(2), continuationRetryBackoff(1))
+}
+
+func TestContinuationBackoffStopsWhenCoordinatorLifecycleCloses(t *testing.T) {
+	lifecycle := &readinessLifecycle{}
+	a := &sessionAgent{dispatcher: newDispatcher(), continuationContext: lifecycle.context}
+	a.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})
+	a.noteContinuationOutcome("s1", errors.New("previous failure"))
+
+	started := make(chan struct{}, 1)
+	a.continuationRunner = func(context.Context, string) error {
+		started <- struct{}{}
+		return nil
+	}
+	a.startContinuation(context.Background(), "s1", "test")
+
+	deadline, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.NoError(t, lifecycle.close(deadline))
+	select {
+	case <-started:
+		t.Fatal("continuation runner started after coordinator close")
+	case <-time.After(continuationRetryBackoff(1) + 100*time.Millisecond):
+	}
 }
 
 // TestDropCompletionsClearsAnUndeliverableInbox covers the deleted-session

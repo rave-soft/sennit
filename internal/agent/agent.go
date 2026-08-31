@@ -110,6 +110,10 @@ type sessionAgent struct {
 	// Only the coordinator's own agent has one; anything else falls back
 	// to a plain Run. See startContinuation and coordinator.runContinuation.
 	continuationRunner func(ctx context.Context, sessionID string) error
+	// continuationContext is the coordinator lifecycle context. It keeps
+	// retry work independent from a short-lived triggering call while making
+	// it stop when the coordinator closes.
+	continuationContext func() context.Context
 
 	// subReady is the readiness group of a sub-agent build: the system
 	// prompt and tool list are assembled off the build's own goroutine,

@@ -18,15 +18,9 @@ import (
 // per-server status, the event broker, OAuth handlers in flight, and the
 // aggregated tool/prompt/resource catalogs served to the agent.
 //
-// Historically this state lived in package-level variables, which meant a
-// single process could only ever run one MCP registry: a second workspace's
-// app.New silently stomped the first's sessions, and closing either
-// workspace shut down the broker for both. Every app.App now constructs
-// and owns its own *Registry (app.App.MCP), so two workspaces in one
-// process no longer share sessions, states, auth handlers, or the event
-// broker. The package-level functions below still operate against a
-// single [defaultRegistry]; production has no callers left, and the only
-// ones remaining are this package's own tests.
+// Every app.App constructs and owns its own *Registry (app.App.MCP), so two
+// workspaces in one process do not share sessions, states, auth handlers, or
+// the event broker.
 type attemptID struct {
 	gen uint64
 	seq uint64
@@ -175,10 +169,7 @@ type Registry struct {
 	//
 	// Now that each app.App owns a dedicated *Registry, ArmInit/Close are
 	// called exactly once per Registry in production, so this refcount
-	// trivially goes 0->1->0 there. It stays in place because defaultRegistry
-	// is still a genuinely shared *Registry (see its doc), and any caller
-	// that arms it (e.g. a test exercising the package-level API directly)
-	// still needs the shutdown-gating this provides.
+	// trivially goes 0->1->0 there.
 	refMu          sync.Mutex
 	liveWorkspaces int
 	closeOnce      sync.Once
@@ -217,33 +208,6 @@ func NewRegistry() *Registry {
 	return r
 }
 
-// defaultRegistry is the shared, process-wide MCP registry every
-// package-level function below operates on.
-//
-// The "many pre-existing callers (agent, workspace, app, commands)" this
-// comment used to name are gone: every one of them now holds its own
-// registry through app.App.MCP, and a search for a package-level call
-// outside a _test.go file returns nothing. What is left is the tests, and
-// the reason they are worth unwinding is not tidiness — a process-global
-// registry is shared state between tests, which is what stops this
-// package's tests from running in parallel with each other.
-var defaultRegistry = NewRegistry()
-
-// ArmInit marks that MCP initialization is expected so WaitForInit blocks
-// until it completes. Call this synchronously before launching Initialize in a
-// goroutine; otherwise WaitForInit could observe the not-yet-started state and
-// return early, letting the tool list be read before MCP tools register.
-//
-// ArmInit also counts a live workspace against this registry: each call must
-// be matched by exactly one later Close call so the shared event broker is
-// only shut down once every armed workspace has gone away (see Close and the
-// liveWorkspaces doc on [Registry]). Initialize calls markInitStarted rather
-// than ArmInit for this reason — app.New arms each workspace exactly once
-// (through its own registry, app.MCP.ArmInit, not this package-level
-// wrapper) before launching Initialize in a goroutine, and Initialize
-// re-arming would double-count that single workspace against one Close.
-func ArmInit() { defaultRegistry.ArmInit() }
-
 func (r *Registry) ArmInit() {
 	r.markInitStarted()
 	r.refMu.Lock()
@@ -265,8 +229,6 @@ func (r *Registry) markInitStarted() {
 // armed (ArmInit was not called, e.g. a coordinator built outside app
 // startup), there is nothing to wait for and this returns nil immediately
 // rather than blocking until ctx is cancelled.
-func WaitForInit(ctx context.Context) error { return defaultRegistry.WaitForInit(ctx) }
-
 func (r *Registry) Version() uint64 {
 	return r.version.Load()
 }
@@ -310,10 +272,7 @@ func (r *Registry) WaitForInit(ctx context.Context) error {
 //
 // The shared event broker is only shut down once every workspace that armed
 // this registry has closed (see the refMu/liveWorkspaces doc on [Registry]):
-// a process running N workspaces against defaultRegistry must not have the
-// first one to exit silently kill MCP events for the rest.
-func Close(ctx context.Context) error { return defaultRegistry.Close(ctx) }
-
+// the first one to exit must not silently kill MCP events for the rest.
 func (r *Registry) Close(ctx context.Context) error {
 	r.refMu.Lock()
 	if r.liveWorkspaces > 0 {
@@ -414,31 +373,12 @@ func (r *Registry) close(ctx context.Context) {
 
 const lifecycleCleanupTimeout = 2 * time.Second
 
-// SubscribeEvents returns a channel for MCP events.
-//
-// Every App-backed workspace now owns its own *Registry with its own
-// broker (see NewRegistry / app.App.MCP), so a subscriber here only ever
-// sees this registry's own servers' events — there is no cross-workspace
-// fan-out to guard against anymore. Channel message events
-// (EventChannelMessage) used to be filtered out here specifically because
-// they carried no workspace/session identity and defaultRegistry was
-// shared; that filter is gone. What still isn't wired up is delivery:
-// downstream consumers (server/events.go's SSE bridge, the TUI's mcp.Event
-// switch) don't yet do anything with EventChannelMessage, so it currently
-// just passes through unconsumed rather than injecting into a session.
-func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	return defaultRegistry.SubscribeEvents(ctx)
-}
-
 func (r *Registry) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return r.broker.Subscribe(ctx)
 }
 
 // GetStates returns the current state of all MCP clients.
 func (r *Registry) GetStates() map[string]ClientInfo { return r.states.Copy() }
-
-// GetState returns the state of a specific MCP client.
-func GetState(name string) (ClientInfo, bool) { return defaultRegistry.GetState(name) }
 
 func (r *Registry) GetState(name string) (ClientInfo, bool) { return r.states.Get(name) }
 
