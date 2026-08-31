@@ -55,11 +55,6 @@ type agentReadyModel struct {
 // state (see the package doc comment above) plus its TTL-cache and
 // in-flight/generation bookkeeping.
 type workspaceCacheState struct {
-	// promptQueueCache mirrors the session's queued prompts. It is
-	// event-driven with a TTL backstop, fetched off-thread by
-	// dispatchPromptQueueRefresh; the queue count is always
-	// len(promptQueueCache.value).
-	promptQueueCache listcache.TTLCache[[]string]
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (treated as IO — see the package doc comment above). Reads
 	// never probe; refreshes happen off-thread.
@@ -155,15 +150,6 @@ func (c *workspaceCacheState) invalidateBusyCaches() {
 	c.busyFetchGen++
 }
 
-// invalidatePromptQueue marks the cached queue stale and bumps its
-// generation, so any in-flight queue fetch result is discarded when it
-// lands (and re-fetched) instead of overwriting newer optimistic or cleared
-// queue state. Callers that already know the authoritative new value
-// re-freshen it with a follow-up set, per ttlCache's invalidate doc.
-func (c *workspaceCacheState) invalidatePromptQueue() {
-	c.promptQueueCache.Invalidate()
-}
-
 // dispatchBusyRefresh returns a command that probes the workspace busy and
 // permission state off the Update goroutine, delivering a busyStateMsg. It
 // returns nil while a probe is already in flight. The closure captures only
@@ -239,17 +225,16 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 // nil while a fetch is already in flight. With no active session the queue
 // is simply cleared.
 func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
-	if m.wsCache.promptQueueCache.InFlight || m.com == nil || m.com.Workspace == nil {
+	if m.promptQueue.inFlight() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
 	if !m.hasSession() {
-		hadItems := len(m.wsCache.promptQueueCache.Value) != 0
+		hadItems := m.promptQueue.count() != 0
 		// Bump the generation so any in-flight fetch scoped to the
 		// now-departed session is discarded rather than repopulating the
 		// queue, then write the now-authoritative empty queue through as
 		// fresh.
-		m.wsCache.invalidatePromptQueue()
-		m.wsCache.promptQueueCache.Set(nil)
+		m.promptQueue.clear()
 		if hadItems {
 			m.updateLayoutAndSize()
 		}
@@ -257,7 +242,7 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	}
 	ws := m.com.Workspace
 	sessionID := m.sess.current.ID
-	gen, started := m.wsCache.promptQueueCache.Begin()
+	gen, started := m.promptQueue.begin()
 	if !started {
 		return nil
 	}
@@ -277,7 +262,7 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	// complete clears the in-flight marker unconditionally (even when the
 	// session-scope check below rejects the result), matching complete's
 	// contract of always being called once per dispatched fetch.
-	genOK := m.wsCache.promptQueueCache.Complete(msg.gen)
+	genOK := m.promptQueue.complete(msg.gen)
 	if msg.forSession != m.sess.currentSessionID() || !genOK {
 		// The fetch raced a session switch or a newer queue transition
 		// (submit, clear, invalidation). Discard the stale result and
@@ -288,8 +273,8 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		}
 		return nil
 	}
-	countChanged := len(msg.prompts) != len(m.wsCache.promptQueueCache.Value)
-	m.wsCache.promptQueueCache.Set(msg.prompts)
+	countChanged := len(msg.prompts) != m.promptQueue.count()
+	m.promptQueue.accept(msg.prompts)
 	if countChanged {
 		// A row-count change moves the panel/chat split; anything else
 		// (item text edited in place) is picked up on the next draw, since
@@ -313,7 +298,7 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if m.hasSession() && !m.wsCache.promptQueueCache.Fresh(promptQueueTTL) {
+	if m.hasSession() && !m.promptQueue.fresh(promptQueueTTL) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

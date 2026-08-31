@@ -43,7 +43,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// authoritative busy/queue state to confirm the optimistic values
 		// sendMessage wrote.
 		m.wsCache.invalidateBusyCaches()
-		m.wsCache.invalidatePromptQueue()
+		m.promptQueue.invalidate()
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -110,17 +110,15 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// off-thread so the queue pill and esc behavior track the new
 		// session instead of a stale one.
 		m.wsCache.invalidateBusyCaches()
-		m.wsCache.invalidatePromptQueue()
 		if msg.modelSwitched {
 			// Loading the session moved the instance onto the model it is
 			// pinned to. The rebuild has already landed by the time this
 			// message exists, so the memoized model only needs re-probing.
 			cmds = append(cmds, agentModelChangedCmd)
 		}
-		// invalidatePromptQueue above already zeroed the cache's timestamp
-		// (marking it stale) and bumped its generation; only the displayed
-		// items belong to the departed session and need clearing too.
-		m.wsCache.promptQueueCache.Value = nil
+		// The old queue belongs to the departed session, so remove it while
+		// keeping the replacement fetch stale.
+		m.promptQueue.discard()
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -282,7 +280,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// trigger this: during streaming that would put workspace
 			// probes on every token.
 			m.wsCache.invalidateBusyCaches()
-			m.wsCache.invalidatePromptQueue()
+			m.promptQueue.invalidate()
 			if cmd := m.dispatchBusyRefresh(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}

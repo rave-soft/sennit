@@ -548,7 +548,7 @@ func warmCmdDrivenCaches(m *UI) {
 	m.wsCache.agentBusyCache.Set(false)
 	m.wsCache.yoloCache.Set(false)
 	m.wsCache.agentCache.Set(agentReadyModel{ready: true})
-	m.wsCache.promptQueueCache.Set(m.wsCache.promptQueueCache.Value)
+	m.promptQueue.cache.Set(m.promptQueue.cache.Value)
 	m.lsp.checkedAt = time.Now()
 }
 
@@ -826,9 +826,9 @@ func TestCmdDriving_Routing_DistinctMsgTypes(t *testing.T) {
 	require.True(t, m.wsCache.agentCache.Value.ready, "busyStateMsg must route to applyBusyState")
 
 	// 2. promptQueueMsg → applyPromptQueue path.
-	_, cmd = m.Update(promptQueueMsg{forSession: "s1", gen: m.wsCache.promptQueueCache.Generation, prompts: []string{"p1"}})
+	_, cmd = m.Update(promptQueueMsg{forSession: "s1", gen: m.promptQueue.cache.Generation, prompts: []string{"p1"}})
 	_ = runCmdTree(m, cmd, nil)
-	require.Equal(t, 1, len(m.wsCache.promptQueueCache.Value), "promptQueueMsg must update queue")
+	require.Equal(t, 1, len(m.promptQueue.cache.Value), "promptQueueMsg must update queue")
 
 	// 3. agentRunSubmittedMsg → invalidation + re-dispatch path.
 	m.wsCache.agentBusyCache.Set(true)
@@ -857,7 +857,7 @@ func TestCmdDriving_StalePromptQueue_WrongSession(t *testing.T) {
 
 	// The current session is "s1". A stale fetch from "s2" arrives via
 	// runCmdTree so the full Update → applyPromptQueue chain runs.
-	staleGen := m.wsCache.promptQueueCache.Generation
+	staleGen := m.promptQueue.cache.Generation
 	staleCmd := func() tea.Msg {
 		return promptQueueMsg{
 			forSession: "s2",
@@ -867,10 +867,10 @@ func TestCmdDriving_StalePromptQueue_WrongSession(t *testing.T) {
 	}
 
 	_, freshCmd := driveCmdStep(m, staleCmd)
-	require.Zero(t, len(m.wsCache.promptQueueCache.Value),
+	require.Zero(t, len(m.promptQueue.cache.Value),
 		"result from different session must not populate queue before refresh runs")
 	require.NotNil(t, freshCmd, "session-mismatched result must schedule a refresh")
-	require.True(t, m.wsCache.promptQueueCache.InFlight,
+	require.True(t, m.promptQueue.cache.InFlight,
 		"session-mismatched result must leave the replacement fetch in flight")
 
 	// Execute the replacement separately and verify the command performs its

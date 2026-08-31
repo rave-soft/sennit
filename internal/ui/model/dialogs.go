@@ -157,7 +157,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.sess.current.ID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.sess.current.Todos)
-	hasQueue := len(m.wsCache.promptQueueCache.Value) > 0
+	hasQueue := m.promptQueue.count() > 0
 
 	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
@@ -179,7 +179,7 @@ func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
 		sessionID = m.sess.current.ID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.sess.current.Todos)
-	hasQueue := len(m.wsCache.promptQueueCache.Value) > 0
+	hasQueue := m.promptQueue.count() > 0
 
 	var dockerMCPAvailable *bool
 	if available, known := m.com.Workspace.DockerMCPAvailable(); known {

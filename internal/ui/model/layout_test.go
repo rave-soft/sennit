@@ -322,7 +322,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		u := newTestUI()
 		u.lay.height = 50
 		u.sess.current = &session.Session{ID: "s1", Todos: []session.Todo{}}
-		u.wsCache.promptQueueCache.Value = make([]string, 2)
+		u.promptQueue.cache.Value = make([]string, 2)
 
 		u.autoExpandTodosIfReasonable()
 

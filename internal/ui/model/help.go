@@ -28,7 +28,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.cancellation.isArmed() {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if len(m.wsCache.promptQueueCache.Value) > 0 {
+			} else if m.promptQueue.count() > 0 {
 				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, cancelBinding)
@@ -119,7 +119,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.cancellation.isArmed() {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if len(m.wsCache.promptQueueCache.Value) > 0 {
+			} else if m.promptQueue.count() > 0 {
 				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})

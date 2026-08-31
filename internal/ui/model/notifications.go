@@ -267,7 +267,7 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		// than duplicated: it exists precisely so an enqueue/drain/
 		// cancel/clear shows up immediately instead of waiting out the
 		// TTL backstop.
-		m.wsCache.invalidatePromptQueue()
+		m.promptQueue.invalidate()
 		return m.dispatchPromptQueueRefresh()
 	default:
 		return nil
@@ -277,7 +277,7 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 	// can re-probe. Drop the memoized busy state and re-fetch it and the
 	// prompt queue off-thread.
 	m.wsCache.invalidateBusyCaches()
-	m.wsCache.invalidatePromptQueue()
+	m.promptQueue.invalidate()
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}

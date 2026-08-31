@@ -186,9 +186,13 @@ type UI struct {
 	// todos + queue, between chat and the editor). See session_panel.go.
 	panel sessionPanelState
 
-	// wsCache holds the memoized workspace busy/yolo/ready/model/queue
-	// state and its TTL-cache bookkeeping. See workspace_cache.go.
+	// wsCache holds the memoized workspace busy/yolo/ready/model state and
+	// its TTL-cache bookkeeping. See workspace_cache.go.
 	wsCache workspaceCacheState
+
+	// promptQueue owns the memoized prompt queue lifecycle. UI orchestrates
+	// its workspace fetches, session scope, and layout effects.
+	promptQueue promptQueueState
 
 	// threadList holds the memoized thread list shared by the header
 	// badge, the session panel's dock, and (via a pointer handed to
@@ -1334,8 +1338,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.panel.autoExpanded = false
 	m.panel.todosScrollOffset = 0
 	m.wsCache.invalidateBusyCaches()
-	m.wsCache.invalidatePromptQueue()
-	m.wsCache.promptQueueCache.Set(nil)
+	m.promptQueue.clear()
 	m.editor.historyReset()
 	ws := m.com.Workspace
 	ctx := m.com.Context()

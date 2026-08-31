@@ -264,7 +264,7 @@ func warmCaches(m *UI, busy bool) {
 	m.wsCache.agentBusyCache.Set(busy)
 	m.wsCache.yoloCache.Set(false)
 	m.wsCache.agentCache.Value.ready = true
-	m.wsCache.promptQueueCache.Timestamp = time.Now()
+	m.promptQueue.cache.Timestamp = time.Now()
 	m.lsp.checkedAt = time.Now()
 }
 
@@ -350,7 +350,7 @@ func TestStreamingUpdatedEventsDoNotProbe(t *testing.T) {
 		"per-chunk UpdatedEvents must not probe the workspace")
 	require.False(t, m.wsCache.busyFetchInFlight,
 		"per-chunk UpdatedEvents must not schedule a busy refresh")
-	require.False(t, m.wsCache.promptQueueCache.InFlight,
+	require.False(t, m.promptQueue.cache.InFlight,
 		"per-chunk UpdatedEvents must not schedule a queue refresh")
 }
 
@@ -371,13 +371,13 @@ func TestMessageCreatedEventRefreshesBusyAndQueue(t *testing.T) {
 	})
 	require.Zero(t, ws.syncProbes(), "the event handler itself must not probe synchronously")
 	require.True(t, m.wsCache.busyFetchInFlight, "CreatedEvent must schedule a busy refresh")
-	require.True(t, m.wsCache.promptQueueCache.InFlight, "CreatedEvent must schedule a queue refresh")
+	require.True(t, m.promptQueue.cache.InFlight, "CreatedEvent must schedule a queue refresh")
 
 	runCmds(m, cmd)
 	require.True(t, m.isAgentBusy(), "refreshed busy state must land in the cache")
-	require.Equal(t, 1, len(m.wsCache.promptQueueCache.Value), "refreshed queue count must land in the cache")
+	require.Equal(t, 1, len(m.promptQueue.cache.Value), "refreshed queue count must land in the cache")
 	require.False(t, m.wsCache.busyFetchInFlight)
-	require.False(t, m.wsCache.promptQueueCache.InFlight)
+	require.False(t, m.promptQueue.cache.InFlight)
 }
 
 // TestAgentTerminalNotificationsRefreshBusy pins the busy→idle edge: the
@@ -400,7 +400,7 @@ func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 				Payload: workspace.AgentNotification{Type: typ, SessionID: "s1"},
 			})
 			require.True(t, m.wsCache.busyFetchInFlight, "terminal notification must schedule a busy refresh")
-			require.True(t, m.wsCache.promptQueueCache.InFlight, "terminal notification must schedule a queue refresh")
+			require.True(t, m.promptQueue.cache.InFlight, "terminal notification must schedule a queue refresh")
 
 			runCmds(m, cmd)
 			require.False(t, m.isAgentBusy(),
@@ -428,13 +428,13 @@ func TestQueueChangedNotificationRefreshesQueueOnly(t *testing.T) {
 		Type:    pubsub.CreatedEvent,
 		Payload: workspace.AgentNotification{Type: workspace.AgentNotificationQueueChanged, SessionID: "s1"},
 	})
-	require.True(t, m.wsCache.promptQueueCache.InFlight, "queue-changed notification must schedule a queue refresh")
+	require.True(t, m.promptQueue.cache.InFlight, "queue-changed notification must schedule a queue refresh")
 	require.False(t, m.wsCache.busyFetchInFlight,
 		"queue-changed notification must not schedule a busy refresh - it is not a busy<->idle edge")
 
 	runCmds(m, cmd)
-	require.Equal(t, 2, len(m.wsCache.promptQueueCache.Value), "refreshed queue count must land in the cache")
-	require.False(t, m.wsCache.promptQueueCache.InFlight)
+	require.Equal(t, 2, len(m.promptQueue.cache.Value), "refreshed queue count must land in the cache")
+	require.False(t, m.promptQueue.cache.InFlight)
 }
 
 // TestSessionSwitchRefreshesQueueAndBusy: switching sessions must drop the
@@ -447,17 +447,17 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	m := newBusyUI(ws)
 	warmCaches(m, true)
 	// stale queue pill from the previous session
-	m.wsCache.promptQueueCache.Value = []string{"x", "y", "z", "w", "v"}
+	m.promptQueue.cache.Value = []string{"x", "y", "z", "w", "v"}
 	ws.resetCounters()
 
 	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
-	require.Zero(t, len(m.wsCache.promptQueueCache.Value), "switching sessions must drop the old session's queue pill")
-	require.True(t, m.wsCache.promptQueueCache.InFlight, "session switch must schedule a queue refresh")
+	require.Zero(t, len(m.promptQueue.cache.Value), "switching sessions must drop the old session's queue pill")
+	require.True(t, m.promptQueue.cache.InFlight, "session switch must schedule a queue refresh")
 	require.True(t, m.wsCache.busyFetchInFlight, "session switch must schedule a busy refresh")
 
 	runCmds(m, cmd)
-	require.Equal(t, 2, len(m.wsCache.promptQueueCache.Value), "the new session's queue must be fetched")
-	require.Equal(t, []string{"a", "b"}, m.wsCache.promptQueueCache.Value)
+	require.Equal(t, 2, len(m.promptQueue.cache.Value), "the new session's queue must be fetched")
+	require.Equal(t, []string{"a", "b"}, m.promptQueue.cache.Value)
 }
 
 // TestToggleYoloWritesThroughCache: both yolo toggle paths share
@@ -533,7 +533,7 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 
 	// esc right after enter: isAgentBusy gates cancelAgent, first press
 	// arms the double-press cancel.
-	require.Zero(t, len(m.wsCache.promptQueueCache.Value))
+	require.Zero(t, len(m.promptQueue.cache.Value))
 	m.cancelAgent()
 	require.True(t, m.cancellation.isArmed(), "first esc press must arm cancellation")
 
@@ -551,7 +551,7 @@ func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 	ws := &countingWorkspace{ready: true, queued: []string{"a"}}
 	m := newBusyUI(ws)
 	warmCaches(m, true)
-	m.wsCache.promptQueueCache.Value = []string{"a"}
+	m.promptQueue.cache.Value = []string{"a"}
 	ws.resetCounters()
 
 	cmd := m.cancelAgent()
@@ -559,8 +559,8 @@ func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 	require.Equal(t, 1, ws.clearQueueCalls, "esc with a queue must clear it")
 	require.Zero(t, ws.queuedCalls, "the decision must use the cached count, not a probe")
 	require.Zero(t, ws.queueListCalls, "the decision must use the cached count, not a probe")
-	require.Zero(t, len(m.wsCache.promptQueueCache.Value), "the cached count must be zeroed immediately")
-	require.Empty(t, m.wsCache.promptQueueCache.Value)
+	require.Zero(t, len(m.promptQueue.cache.Value), "the cached count must be zeroed immediately")
+	require.Empty(t, m.promptQueue.cache.Value)
 	require.False(t, m.cancellation.isArmed(), "clearing the queue must not arm cancellation")
 }
 
@@ -717,14 +717,14 @@ func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
 	ws := &countingWorkspace{ready: true, queued: []string{"real"}}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
-	m.wsCache.promptQueueCache.Value = []string{"real"}
+	m.promptQueue.cache.Value = []string{"real"}
 
 	// A fetch is in flight; capture its generation, then a newer transition
 	// (esc clears the queue) supersedes it.
-	m.wsCache.promptQueueCache.InFlight = true
-	staleGen := m.wsCache.promptQueueCache.Generation
-	m.wsCache.invalidatePromptQueue()
-	m.wsCache.promptQueueCache.Value = nil
+	m.promptQueue.cache.InFlight = true
+	staleGen := m.promptQueue.cache.Generation
+	m.promptQueue.invalidate()
+	m.promptQueue.cache.Value = nil
 
 	// The stale fetch (still saw one prompt) lands for the same session.
 	cmds := m.applyPromptQueue(promptQueueMsg{
@@ -732,12 +732,12 @@ func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
 		gen:        staleGen,
 		prompts:    []string{"stale"},
 	})
-	require.Zero(t, len(m.wsCache.promptQueueCache.Value),
+	require.Zero(t, len(m.promptQueue.cache.Value),
 		"a stale queue result must not repopulate the cleared queue")
-	require.Empty(t, m.wsCache.promptQueueCache.Value)
+	require.Empty(t, m.promptQueue.cache.Value)
 	require.NotEmpty(t, cmds,
 		"a stale queue result must re-dispatch the authoritative fetch")
-	require.True(t, m.wsCache.promptQueueCache.InFlight, "the re-dispatched fetch must be in flight")
+	require.True(t, m.promptQueue.cache.InFlight, "the re-dispatched fetch must be in flight")
 }
 
 // TestStalePromptQueuePreservesSessionScoping pins that the generation guard
@@ -750,15 +750,15 @@ func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws) // active session "s1"
 	warmCaches(m, false)
-	m.wsCache.promptQueueCache.InFlight = true
-	gen := m.wsCache.promptQueueCache.Generation
+	m.promptQueue.cache.InFlight = true
+	gen := m.promptQueue.cache.Generation
 
 	cmds := m.applyPromptQueue(promptQueueMsg{
 		forSession: "other",
 		gen:        gen,
 		prompts:    []string{"from other session"},
 	})
-	require.Zero(t, len(m.wsCache.promptQueueCache.Value),
+	require.Zero(t, len(m.promptQueue.cache.Value),
 		"a result from a different session must never populate the queue")
 	require.NotEmpty(t, cmds, "a session-mismatched result must re-fetch for the current session")
 }

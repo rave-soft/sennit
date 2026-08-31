@@ -83,7 +83,7 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		sessionID = m.sess.current.ID
 		m.wsCache.agentBusyCache.Set(true)
 		m.wsCache.busyFetchGen++
-		m.wsCache.invalidatePromptQueue()
+		m.promptQueue.invalidate()
 	}
 
 	owner := m
@@ -145,14 +145,13 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
 	// count (event-driven) instead of a synchronous workspace probe.
-	if len(m.wsCache.promptQueueCache.Value) > 0 {
+	if m.promptQueue.count() > 0 {
 		m.com.Workspace.AgentClearQueue(m.sess.current.ID)
 		m.queued.clear(m.chat)
 		// Bump the queue generation so a fetch started before this clear
 		// cannot land and repopulate the pill we just emptied, then write
 		// the now-authoritative empty queue through as fresh.
-		m.wsCache.invalidatePromptQueue()
-		m.wsCache.promptQueueCache.Set(nil)
+		m.promptQueue.clear()
 		m.updateLayoutAndSize()
 		return nil
 	}

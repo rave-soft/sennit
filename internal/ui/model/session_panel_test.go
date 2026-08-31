@@ -294,7 +294,7 @@ func TestSessionPanelPlan_QueueAlwaysVisibleRegardlessOfTodosExpand(t *testing.T
 	t.Parallel()
 
 	u := sessionUI()
-	u.wsCache.promptQueueCache.Value = []string{"do this", "then that"}
+	u.promptQueue.cache.Value = []string{"do this", "then that"}
 
 	collapsed := u.sessionPanelPlan(100)
 	require.Equal(t, []string{"do this", "then that"}, collapsed.queue)
@@ -328,7 +328,7 @@ func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
 		{Status: session.TodoStatusCompleted, Content: "done 2"},
 		{Status: session.TodoStatusCompleted, Content: "done 3"},
 	}
-	u.wsCache.promptQueueCache.Value = []string{"q1", "q2", "q3", "q4"}
+	u.promptQueue.cache.Value = []string{"q1", "q2", "q3", "q4"}
 
 	// Natural size: 1 (threads header) + 4 (threads) + 1 (todos header) +
 	// 3 (active) + 3 (completed) + 1 (queue header) + 4 (queue) = 17. Each
@@ -407,7 +407,7 @@ func TestSessionPanelHeight_ZeroContentMatchesBaseline(t *testing.T) {
 	u := sessionUI()
 	u.sess.current.Todos = nil
 	u.threadList.Cache.Value = nil
-	u.wsCache.promptQueueCache.Value = nil
+	u.promptQueue.cache.Value = nil
 	u.updateLayoutAndSize()
 
 	require.Zero(t, u.sessionPanelHeight(100))
@@ -801,7 +801,7 @@ func allSectionsUI(t *testing.T) *UI {
 		{Status: session.TodoStatusInProgress, Content: "in flight"},
 		{Status: session.TodoStatusCompleted, Content: "already done"},
 	}
-	u.wsCache.promptQueueCache.Value = []string{"queued prompt"}
+	u.promptQueue.cache.Value = []string{"queued prompt"}
 
 	u.updateLayoutAndSize()
 	return u
@@ -894,7 +894,7 @@ func TestDrawSessionPanel_EmptySectionRendersNoHeader(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.wsCache.promptQueueCache.Value = []string{"only the queue"}
+	u.promptQueue.cache.Value = []string{"only the queue"}
 	u.updateLayoutAndSize()
 
 	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())

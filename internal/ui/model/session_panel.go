@@ -584,7 +584,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.todosViewportRows = min(plan.todosContentRows, maxPanelTodosRows)
 	}
 
-	plan.queue = m.wsCache.promptQueueCache.Value
+	plan.queue = m.promptQueue.prompts()
 
 	headerRows := func() int {
 		if !plan.todosVisible {
