@@ -80,6 +80,9 @@ func NewRenameTool(
 					SessionID:   sessionID,
 					ToolCallID:  call.ID,
 					ToolName:    RenameToolName,
+					Action:      "rename",
+					Path:        searchDir,
+					Params:      params,
 					Description: fmt.Sprintf("Rename '%s' to '%s'", params.Symbol, params.NewName),
 				})
 				if err != nil {

@@ -2,6 +2,8 @@ package permission
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -158,6 +160,10 @@ type PermissionKey struct {
 	ToolName  string
 	Action    string
 	Path      string
+	// Params scopes persistent grants to the exact operation parameters.
+	// File paths alone are intentionally insufficient for operations such as
+	// symbol rename, where a second target or replacement is a distinct write.
+	Params string
 }
 
 type permissionService struct {
@@ -354,6 +360,7 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
 			ToolName:  permission.ToolName,
 			Action:    permission.Action,
 			Path:      permission.Path,
+			Params:    permissionParamsKey(permission.Params),
 		}, true)
 	})
 }
@@ -447,6 +454,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		ToolName:  permission.ToolName,
 		Action:    permission.Action,
 		Path:      permission.Path,
+		Params:    permissionParamsKey(permission.Params),
 	}); ok {
 		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
@@ -472,12 +480,36 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		// the entry, resolve has already called dispatchNext and this
 		// is a safe no-op.
 		if _, ok := s.pendingRequests.Take(permission.ID); ok {
+			// Cancellation settles a request just like an explicit denial.
+			// Without this terminal notification, the UI keeps its dialog
+			// open after the requester has gone away.
+			s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: permission.ToolCallID,
+				Denied:     true,
+			})
 			s.dispatchNext(permission.ID)
 		}
 		return false, ctx.Err()
 	case granted := <-respCh:
 		return granted, nil
 	}
+}
+
+// permissionParamsKey converts request parameters into a stable, comparable
+// key for session grants. JSON's deterministic map-key ordering makes this
+// safe for both typed tool params and map-shaped requests. If a caller passes
+// an unsupported value, fail closed by giving it a unique empty key only when
+// it is nil; otherwise use its type so it cannot accidentally match a valid
+// serialized request.
+func permissionParamsKey(params any) string {
+	if params == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Sprintf("invalid:%T", params)
+	}
+	return string(encoded)
 }
 
 // ActiveRequest returns the request currently awaiting an answer, if

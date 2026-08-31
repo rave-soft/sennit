@@ -303,7 +303,15 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	if err := git.WorktreeAdd(ctx, m.repoRoot, worktreePath, branch, base); err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
-	rb.push(func() { m.removeWorktree(worktreePath) })
+	// WorktreeAdd creates the branch as well as its checkout. If a later
+	// creation step fails, remove both; leaving the branch behind makes a
+	// retry collide with stale state even though Create reported failure.
+	rb.push(func() {
+		m.removeWorktree(worktreePath)
+		if err := git.DeleteBranch(context.Background(), m.repoRoot, branch, true); err != nil {
+			slog.Warn("Failed to remove branch after thread creation failure", "branch", branch, "error", err)
+		}
+	})
 
 	handle, err := m.spawner.Spawn(m.ctx, worktreePath)
 	if err != nil {
@@ -881,6 +889,17 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 		return err
 	}
 
+	// An unforced branch deletion rejects unmerged work. Check that condition
+	// before tearing down its checkout; force deletion must still remove the
+	// worktree first because git cannot delete a branch currently checked out
+	// by one.
+	if deleteBranch && !force {
+		if merged, err := git.IsAncestor(ctx, m.repoRoot, st.Branch, st.BaseBranch); err != nil {
+			return abort(fmt.Errorf("thread: check branch merge state: %w", err))
+		} else if !merged {
+			return abort(fmt.Errorf("thread: delete branch: %q is not merged into %q; use force to remove", st.Branch, st.BaseBranch))
+		}
+	}
 	if err := git.WorktreeRemove(ctx, m.repoRoot, st.WorktreePath, force); err != nil {
 		return abort(fmt.Errorf("thread: remove worktree: %w", err))
 	}

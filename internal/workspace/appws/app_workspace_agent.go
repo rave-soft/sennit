@@ -307,6 +307,10 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	// event bridge (see herdr.BridgeLocal in app.New) does the rest.
 	w.app.ReportCurrentSession(sessionID)
 
+	// Keep the caller's context distinct from the internal context we cancel
+	// when the stream ends. A coordinator may return context.Canceled for its
+	// own reasons; only cancellation inherited from the caller is normal.
+	callerCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	out := make(chan workspace.AgentRunEvent)
 
@@ -454,8 +458,8 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			select {
 			case result := <-done:
 				if result.err != nil {
-					if errors.Is(result.err, context.Canceled) {
-						sendFinal(workspace.AgentRunEvent{Done: true})
+					if errors.Is(result.err, context.Canceled) && callerCtx.Err() != nil {
+						sendFinal(workspace.AgentRunEvent{Done: true, Err: callerCtx.Err()})
 						return
 					}
 					sendFinal(workspace.AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)})

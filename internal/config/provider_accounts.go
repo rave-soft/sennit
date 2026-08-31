@@ -405,28 +405,16 @@ func PurgeAccounts(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 	return nil
 }
 
-// nextAccountAfterRemoval picks the account RemoveAccount should activate
-// before deleting excludeID: the first non-disabled account other than
-// excludeID, or, if every other account is disabled, the first one
-// regardless. Preferring an enabled account keeps the provider usable
-// immediately; falling back to a disabled one still beats refusing the
-// removal, since the user is free to re-enable it afterward.
+// nextAccountAfterRemoval picks the first enabled account other than
+// excludeID. A disabled account must never become active: activation would
+// silently bypass the disabled state and keep serving requests.
 func nextAccountAfterRemoval(existing []accounts.Account, excludeID string) (accounts.Account, bool) {
-	var fallback accounts.Account
-	haveFallback := false
 	for _, a := range existing {
-		if a.ID == excludeID {
-			continue
-		}
-		if !a.Disabled {
+		if a.ID != excludeID && !a.Disabled {
 			return a, true
 		}
-		if !haveFallback {
-			fallback = a
-			haveFallback = true
-		}
 	}
-	return fallback, haveFallback
+	return accounts.Account{}, false
 }
 
 // EnsureAccountMigrated makes sure providerID's pre-multi-account

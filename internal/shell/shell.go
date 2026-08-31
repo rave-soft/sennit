@@ -229,11 +229,21 @@ func realCommandName(args []string) string {
 		args = args[1:]
 		switch wrapper {
 		case "env":
-			// `env FOO=1 BAR=2 -u BAZ curl …`: skip VAR=value
-			// assignments and flags — the next token is not
-			// reliably the command, unlike the other wrappers.
-			for len(args) > 0 && (strings.HasPrefix(args[0], "-") || isEnvAssignment(args[0])) {
+			// `env FOO=1 BAR=2 -u BAZ curl …`: skip assignments and
+			// options. -u and -C consume one separate argument.
+			for len(args) > 0 {
+				if isEnvAssignment(args[0]) {
+					args = args[1:]
+					continue
+				}
+				if !strings.HasPrefix(args[0], "-") {
+					break
+				}
+				option := args[0]
 				args = args[1:]
+				if (option == "-u" || option == "--unset" || option == "-C" || option == "--chdir") && len(args) > 0 {
+					args = args[1:]
+				}
 			}
 		case "timeout":
 			// `timeout --signal=KILL 5 curl …`: skip flags, then
@@ -245,11 +255,19 @@ func realCommandName(args []string) string {
 			if len(args) > 0 {
 				args = args[1:]
 			}
+		case "nice", "xargs":
+			// Both wrappers accept options with separate values (-n 10).
+			// Consume the documented value-taking forms before locating the
+			// command they will execute.
+			for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+				option := args[0]
+				args = args[1:]
+				if wrapperOptionTakesValue(wrapper, option) && len(args) > 0 {
+					args = args[1:]
+				}
+			}
 		default:
-			// nice, nohup, xargs, command, exec: skip any leading
-			// flags. This misses a flag that takes its value as a
-			// separate token (`nice -n 10 …`), but the deny list
-			// is best-effort already — see the doc comment above.
+			// nohup, command, exec only need their leading flags skipped.
 			for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 				args = args[1:]
 			}
@@ -265,6 +283,22 @@ func realCommandName(args []string) string {
 // an identifier (letters, digits, underscore, not starting with a digit)
 // followed by "=". env accepts any number of these before the command it
 // runs.
+// wrapperOptionTakesValue reports value-taking options that may appear before
+// the wrapped command. Options in their --name=value form carry their value
+// already, so only their separate-value spelling is listed.
+func wrapperOptionTakesValue(wrapper, option string) bool {
+	switch wrapper {
+	case "nice":
+		return option == "-n" || option == "--adjustment"
+	case "xargs":
+		switch option {
+		case "-n", "-s", "-P", "-E", "-e", "-I", "-i", "-L", "-l", "-a", "-d":
+			return true
+		}
+	}
+	return false
+}
+
 func isEnvAssignment(tok string) bool {
 	eq := strings.IndexByte(tok, '=')
 	if eq <= 0 {

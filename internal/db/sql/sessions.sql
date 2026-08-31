@@ -52,7 +52,7 @@ WHERE id = ? LIMIT 1;
 SELECT *
 FROM sessions
 WHERE project_path = ? AND parent_session_id IS NULL
-ORDER BY updated_at DESC
+ORDER BY updated_at DESC, id DESC
 LIMIT 1;
 
 -- name: ListSessions :many
@@ -93,7 +93,7 @@ SET
 WHERE id = ?
 RETURNING *;
 
--- name: UpdateSessionTitleAndUsage :exec
+-- name: UpdateSessionTitleAndUsage :execrows
 UPDATE sessions
 SET
     title = ?,
@@ -115,7 +115,7 @@ SET
     updated_at = strftime('%s', 'now')
 WHERE id = ?;
 
--- name: SetSessionTodos :exec
+-- name: SetSessionTodos :execrows
 -- Write only the todo list. The todo tool runs mid-turn, alongside the
 -- turn's own usage saves; a full-row write from either side carried a
 -- stale copy of what the other had just written.
@@ -125,13 +125,13 @@ SET
     updated_at = strftime('%s', 'now')
 WHERE id = ?;
 
--- name: RenameSession :exec
+-- name: RenameSession :execrows
 UPDATE sessions
 SET
     title = ?
 WHERE id = ?;
 
--- name: SetSessionModel :exec
+-- name: SetSessionModel :execrows
 -- Pin the model a session runs on, so restoring it later restores the
 -- model it was working with rather than the instance's current selection.
 -- Empty strings clear the pin, returning the session to that fallback.

@@ -206,21 +206,21 @@ type Querier interface {
 	// distribution (see internal/stats.ComputeLatency), and SQLite has no
 	// percentile aggregate to lean on anyway.
 	RecordLatencyEvent(ctx context.Context, arg RecordLatencyEventParams) error
-	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	RenameSession(ctx context.Context, arg RenameSessionParams) (int64, error)
 	// Pin the model a session runs on, so restoring it later restores the
 	// model it was working with rather than the instance's current selection.
 	// Empty strings clear the pin, returning the session to that fallback.
 	//
 	// Deliberately not RETURNING the row: this is written on every turn, from
 	// the dispatch path, and its result is never read back.
-	SetSessionModel(ctx context.Context, arg SetSessionModelParams) error
+	SetSessionModel(ctx context.Context, arg SetSessionModelParams) (int64, error)
 	// Write only the todo list. The todo tool runs mid-turn, alongside the
 	// turn's own usage saves; a full-row write from either side carried a
 	// stale copy of what the other had just written.
-	SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) error
+	SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) (int64, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
-	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
+	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) (int64, error)
 	// Same fields as UpdateSession, except cost: this accumulates a delta
 	// onto the existing value (cost = cost + ?) instead of overwriting it
 	// with the caller's whole running total. Used by a writer whose

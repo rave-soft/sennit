@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,10 +11,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,11 +75,22 @@ func runLSPToolHelper() {
 		result := "null"
 		switch request.Method {
 		case "initialize":
-			if scenario == "no-capabilities" {
+			switch scenario {
+			case "no-capabilities":
 				result = `{"capabilities":{}}`
-			} else {
+			case "rename":
+				result = `{"capabilities":{"definitionProvider":true,"renameProvider":true}}`
+			default:
 				result = `{"capabilities":{"hoverProvider":true,"workspaceSymbolProvider":true}}`
 			}
+		case "textDocument/definition":
+			root := filepath.ToSlash(os.Getenv("SENNIT_LSP_TOOL_ROOT"))
+			uri := "file://" + filepath.ToSlash(filepath.Join(root, "a.go"))
+			result = fmt.Sprintf(`[{"uri":%q,"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":5}}}]`, uri)
+		case "textDocument/rename":
+			// An empty edit is still a non-nil WorkspaceEdit, which drives
+			// RenameTool through its permission gate without changing fixtures.
+			result = `{"changes":{}}`
 		case "workspace/symbol":
 			root := filepath.ToSlash(os.Getenv("SENNIT_LSP_TOOL_ROOT"))
 			uri := "file://" + filepath.ToSlash(filepath.Join(root, "a.go"))
@@ -196,6 +211,44 @@ func TestLSPToolsThroughManagerAndProcess(t *testing.T) {
 	hover := runToolWith(t, NewHoverTool(manager, root), t.Context(), HoverToolName, HoverParams{Symbol: "Exact"})
 	require.False(t, hover.IsError)
 	require.Equal(t, "Exact() string", hover.Content)
+}
+
+func TestLSPRenameThroughManagerRequestsOperationScopedPermission(t *testing.T) {
+	root := newLSPToolWorktree(t)
+	manager := newLSPToolE2EManager(t, root, "rename")
+	perms := permission.NewPermissionService(root, false, nil)
+	events := perms.Subscribe(t.Context())
+	tool := NewRenameTool(manager, perms, nil, nil, root)
+	params := RenameParams{Symbol: "Exact", NewName: "Renamed", Path: "."}
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "rename-session")
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() { done <- runToolWith(t, tool, ctx, RenameToolName, params) }()
+	var req permission.PermissionRequest
+	select {
+	case request := <-events:
+		req = request.Payload
+	case response := <-done:
+		t.Fatalf("rename did not request permission: %s", response.Content)
+	case <-time.After(5 * time.Second):
+		t.Fatal("rename did not reach the permission request")
+	}
+	require.Equal(t, "rename", req.Action)
+	require.Equal(t, root, req.Path)
+	require.Equal(t, params, req.Params)
+	require.True(t, perms.GrantPersistent(req))
+	response := <-done
+	require.False(t, response.IsError, response.Content)
+
+	// The persisted grant is keyed by the actual operation parameters, not
+	// merely by tool/action/path. A different rename must reach the dialog.
+	other := RenameParams{Symbol: "Exact", NewName: "OtherName", Path: "."}
+	otherDone := make(chan fantasy.ToolResponse, 1)
+	go func() { otherDone <- runToolWith(t, tool, ctx, RenameToolName, other) }()
+	otherRequest := <-events
+	require.Equal(t, other, otherRequest.Payload.Params)
+	require.True(t, perms.Deny(otherRequest.Payload))
+	require.True(t, (<-otherDone).IsError)
 }
 
 func TestLSPHoverThroughManagerRejectsAmbiguousSymbol(t *testing.T) {

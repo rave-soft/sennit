@@ -124,7 +124,7 @@ const getLastSession = `-- name: GetLastSession :one
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id, model_provider, model_id
 FROM sessions
 WHERE project_path = ? AND parent_session_id IS NULL
-ORDER BY updated_at DESC
+ORDER BY updated_at DESC, id DESC
 LIMIT 1
 `
 
@@ -372,7 +372,7 @@ func (q *Queries) ListSubAgentSessions(ctx context.Context, arg ListSubAgentSess
 	return items, nil
 }
 
-const renameSession = `-- name: RenameSession :exec
+const renameSession = `-- name: RenameSession :execrows
 UPDATE sessions
 SET
     title = ?
@@ -384,12 +384,15 @@ type RenameSessionParams struct {
 	ID    string `json:"id"`
 }
 
-func (q *Queries) RenameSession(ctx context.Context, arg RenameSessionParams) error {
-	_, err := q.db.ExecContext(ctx, renameSession, arg.Title, arg.ID)
-	return err
+func (q *Queries) RenameSession(ctx context.Context, arg RenameSessionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renameSession, arg.Title, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const setSessionModel = `-- name: SetSessionModel :exec
+const setSessionModel = `-- name: SetSessionModel :execrows
 UPDATE sessions
 SET
     model_provider = ?,
@@ -409,12 +412,15 @@ type SetSessionModelParams struct {
 //
 // Deliberately not RETURNING the row: this is written on every turn, from
 // the dispatch path, and its result is never read back.
-func (q *Queries) SetSessionModel(ctx context.Context, arg SetSessionModelParams) error {
-	_, err := q.db.ExecContext(ctx, setSessionModel, arg.ModelProvider, arg.ModelID, arg.ID)
-	return err
+func (q *Queries) SetSessionModel(ctx context.Context, arg SetSessionModelParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionModel, arg.ModelProvider, arg.ModelID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const setSessionTodos = `-- name: SetSessionTodos :exec
+const setSessionTodos = `-- name: SetSessionTodos :execrows
 UPDATE sessions
 SET
     todos = ?,
@@ -430,9 +436,12 @@ type SetSessionTodosParams struct {
 // Write only the todo list. The todo tool runs mid-turn, alongside the
 // turn's own usage saves; a full-row write from either side carried a
 // stale copy of what the other had just written.
-func (q *Queries) SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) error {
-	_, err := q.db.ExecContext(ctx, setSessionTodos, arg.Todos, arg.ID)
-	return err
+func (q *Queries) SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionTodos, arg.Todos, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateSession = `-- name: UpdateSession :one
@@ -489,7 +498,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 	return i, err
 }
 
-const updateSessionTitleAndUsage = `-- name: UpdateSessionTitleAndUsage :exec
+const updateSessionTitleAndUsage = `-- name: UpdateSessionTitleAndUsage :execrows
 UPDATE sessions
 SET
     title = ?,
@@ -508,15 +517,18 @@ type UpdateSessionTitleAndUsageParams struct {
 	ID               string  `json:"id"`
 }
 
-func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error {
-	_, err := q.db.ExecContext(ctx, updateSessionTitleAndUsage,
+func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateSessionTitleAndUsage,
 		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,
 		arg.Cost,
 		arg.ID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateSessionUsage = `-- name: UpdateSessionUsage :one

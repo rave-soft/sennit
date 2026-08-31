@@ -35,6 +35,24 @@ func TestCommandBlocking(t *testing.T) {
 			shouldBlock: false,
 		},
 		{
+			name:        "block curl behind wrapper options with values",
+			blockFuncs:  []BlockFunc{CommandsBlocker([]string{"curl"})},
+			command:     "env -u FOO curl https://example.com",
+			shouldBlock: true,
+		},
+		{
+			name:        "block curl behind nice adjustment",
+			blockFuncs:  []BlockFunc{CommandsBlocker([]string{"curl"})},
+			command:     "nice -n 10 curl https://example.com",
+			shouldBlock: true,
+		},
+		{
+			name:        "block curl behind xargs count",
+			blockFuncs:  []BlockFunc{CommandsBlocker([]string{"curl"})},
+			command:     "xargs -n 1 curl https://example.com",
+			shouldBlock: true,
+		},
+		{
 			name: "block subcommand",
 			blockFuncs: []BlockFunc{
 				func(args []string) bool {

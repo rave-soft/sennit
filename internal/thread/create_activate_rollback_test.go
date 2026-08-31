@@ -211,6 +211,7 @@ func TestManager_CreateRollsBackOnlyWhatSucceeded(t *testing.T) {
 				tc.args(&args)
 			}
 			worktreePath := filepath.Join(mgr.WorktreeDirForTest(), args.Name)
+			branch := "sennit/" + args.Name
 
 			_, err := mgr.Create(context.Background(), args)
 			require.Error(t, err)
@@ -218,6 +219,11 @@ func TestManager_CreateRollsBackOnlyWhatSucceeded(t *testing.T) {
 			require.Equal(t, tc.wantWorktree, worktreeExists(t, worktreePath))
 			require.Equal(t, tc.wantSpawns, spawner.spawns())
 			require.Equal(t, tc.wantReleases, spawner.releases(worktreePath))
+			if tc.wantWorktree {
+				require.NotEmpty(t, runGit(t, repo, "branch", "--list", branch))
+			} else {
+				require.Empty(t, runGit(t, repo, "branch", "--list", branch), "failed Create must delete the branch created with its worktree")
+			}
 		})
 	}
 }

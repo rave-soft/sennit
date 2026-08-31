@@ -9,6 +9,19 @@ import (
 )
 
 func TestLoad_ProjectTrustGate(t *testing.T) {
+	// A prior trusted load in this same test binary may have applied this
+	// project-level variable to the process environment. Start from the
+	// untrusted contract explicitly so repeated -count runs are isolated.
+	previous, wasSet := os.LookupEnv("SENNIT_PROJECT_JSON")
+	require.NoError(t, os.Unsetenv("SENNIT_PROJECT_JSON"))
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv("SENNIT_PROJECT_JSON", previous)
+		} else {
+			_ = os.Unsetenv("SENNIT_PROJECT_JSON")
+		}
+	})
+
 	globalDir := t.TempDir()
 	globalDataDir := t.TempDir()
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)

@@ -192,6 +192,13 @@ func isReadOnlyInvocation(entry, cmdLower, command string) bool {
 // [argumentGatedSafeCommands]. digitsOK additionally admits digit runes
 // anywhere in a flag or cluster — see [digitCountFlagCommands].
 func flagsAllowed(allowed []string, rest string, digitsOK bool) bool {
+	// strings.Fields does not understand shell quoting. A quoted flag such
+	// as `"--output=../pwned"` would otherwise look like a non-flag token
+	// and bypass this gate. There is no need to parse quoted arguments here:
+	// the safe path is an optimization, so reject quoting and ask instead.
+	if strings.ContainsAny(rest, "'\"") {
+		return false
+	}
 	endOfFlags := false
 	for _, token := range strings.Fields(rest) {
 		if endOfFlags {

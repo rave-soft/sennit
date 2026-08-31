@@ -338,11 +338,15 @@ func (s *service) SetTodos(ctx context.Context, sessionID string, todos []sessio
 	if err != nil {
 		return err
 	}
-	if err := s.q.SetSessionTodos(ctx, db.SetSessionTodosParams{
+	rows, err := s.q.SetSessionTodos(ctx, db.SetSessionTodosParams{
 		Todos: sql.NullString{String: todosJSON, Valid: todosJSON != ""},
 		ID:    sessionID,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("session %q: %w", sessionID, session.ErrNotFound)
 	}
 	s.publishSessionUpdate(ctx, sessionID)
 	return nil
@@ -351,14 +355,18 @@ func (s *service) SetTodos(ctx context.Context, sessionID string, todos []sessio
 // UpdateTitleAndUsage updates only the title and usage fields atomically.
 // This is safer than fetching, modifying, and saving the entire session.
 func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error {
-	if err := s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
+	rows, err := s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
 		ID:               sessionID,
 		Title:            title,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		Cost:             cost,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("session %q: %w", sessionID, session.ErrNotFound)
 	}
 	s.publishSessionUpdate(ctx, sessionID)
 	return nil
@@ -367,22 +375,33 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 // Rename updates only the title of a session without touching updated_at or
 // usage fields.
 func (s *service) Rename(ctx context.Context, id string, title string) error {
-	if err := s.q.RenameSession(ctx, db.RenameSessionParams{
+	rows, err := s.q.RenameSession(ctx, db.RenameSessionParams{
 		ID:    id,
 		Title: title,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("session %q: %w", id, session.ErrNotFound)
 	}
 	s.publishSessionUpdate(ctx, id)
 	return nil
 }
 
 func (s *service) SetModel(ctx context.Context, sessionID string, model session.ModelRef) error {
-	return s.q.SetSessionModel(ctx, db.SetSessionModelParams{
+	rows, err := s.q.SetSessionModel(ctx, db.SetSessionModelParams{
 		ID:            sessionID,
 		ModelProvider: model.Provider,
 		ModelID:       model.Model,
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("session %q: %w", sessionID, session.ErrNotFound)
+	}
+	return nil
 }
 
 func (s *service) ValidateSessionIDsInTree(ctx context.Context, rootSessionID string, sessionIDs []string) ([]string, error) {

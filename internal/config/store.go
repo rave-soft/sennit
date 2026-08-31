@@ -533,9 +533,10 @@ func (s *ConfigStore) mutateInMemory(mutate func(*Config)) {
 }
 
 // update applies a copy-on-write change and persists the reported fields.
-// mutate edits the clone and returns the JSON-path fields to write to disk;
-// because the clone already reflects the change, no reload is needed.
-// Returning an empty map publishes the clone without a disk write.
+// mutate edits the clone and returns the JSON-path fields to write to disk.
+// The clone is published only after persistence succeeds, so a disk error
+// leaves the live config and its version unchanged. Returning an empty map
+// publishes the clone without a disk write.
 func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -558,8 +559,8 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	if len(nc.Agents) == 0 && nc.Options != nil && nc.IsConfigured() {
 		nc.SetupAgents()
 	}
-	s.setConfig(nc)
 	if len(fields) == 0 {
+		s.setConfig(nc)
 		return nil
 	}
 	if err := s.writeConfigFields(scope, fields); err != nil {
@@ -571,6 +572,7 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	if path, err := s.ConfigPath(scope); err == nil {
 		s.CaptureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
 	}
+	s.setConfig(nc)
 	return nil
 }
 

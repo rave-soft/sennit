@@ -117,6 +117,38 @@ func TestAppWorkspace_AgentRunStream_CtxCancelAlwaysDeliversTerminalEvent(t *tes
 	}
 }
 
+func TestAppWorkspace_AgentRunStream_InternalCancellationIsTerminalError(t *testing.T) {
+	sessions, messages := newRealSessionAgentEnv(t)
+	a := app.NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
+	a.MCP = mcp.NewRegistry()
+	a.SetSessionsForTest(sessions)
+	a.SetMessagesForTest(messages)
+	sess, err := sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
+
+	coord := &releaseGatedCoordinator{entered: make(chan struct{}), release: make(chan struct{})}
+	a.SetAgentCoordinatorForTest(coord)
+	out, err := aw.AgentRunStream(t.Context(), sess.ID, "hello")
+	require.NoError(t, err)
+	select {
+	case <-coord.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("coordinator.Run never entered")
+	}
+	close(coord.release) // coordinator returns context.Canceled, caller remains live.
+
+	var terminal error
+	for ev := range out {
+		if ev.Done {
+			terminal = ev.Err
+		}
+	}
+	require.ErrorIs(t, terminal, context.Canceled)
+	require.ErrorContains(t, terminal, "agent processing failed")
+}
+
 // SetLiveSession is inert: AgentRunStream reports the run's session
 // through App.ReportCurrentSession, and this double only has to answer it.
 func (c *releaseGatedCoordinator) SetLiveSession(string) {}

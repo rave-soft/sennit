@@ -828,6 +828,41 @@ func TestPermissionService_QueuedDispatch(t *testing.T) {
 		assert.False(t, granted1)
 		assert.True(t, granted2)
 	})
+
+	t.Run("canceling current request publishes terminal denial notification", func(t *testing.T) {
+		service := NewPermissionService(t.TempDir(), false, nil)
+		events := service.Subscribe(t.Context())
+		notifications := service.SubscribeNotifications(t.Context())
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() {
+			_, err := service.Request(ctx, CreatePermissionRequest{SessionID: "s", ToolCallID: "cancel-call", ToolName: "edit", Action: "edit", Path: "a.txt"})
+			done <- err
+		}()
+		select {
+		case <-events:
+		case <-time.After(2 * time.Second):
+			t.Fatal("request was never published")
+		}
+		// Initial notification opens the dialog; the terminal denial closes it.
+		select {
+		case ev := <-notifications:
+			require.False(t, ev.Payload.Denied)
+		case <-time.After(2 * time.Second):
+			t.Fatal("initial notification was never published")
+		}
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
+		select {
+		case ev := <-notifications:
+			require.Equal(t, "cancel-call", ev.Payload.ToolCallID)
+			require.True(t, ev.Payload.Denied)
+		case <-time.After(2 * time.Second):
+			t.Fatal("cancellation did not publish terminal denial")
+		}
+		_, active := service.ActiveRequest()
+		require.False(t, active, "terminal notification must not leave a stale active dialog")
+	})
 }
 
 // TestPermissionService_DelegationAttribution covers WithDelegation: a
@@ -1453,6 +1488,28 @@ func TestPermissionService_PersistentGrantKeyIsPathScoped(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.True(t, granted, "an uncleaned absolute path must canonicalize to the same key")
+	})
+
+	t.Run("grant for one rename parameters does not cover another rename", func(t *testing.T) {
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+		path := filepath.Join(dir, "source.go")
+		grantPersistentFor(t, service, events, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "rename-1", ToolName: "lsp_rename", Action: "rename", Path: path,
+			Params: map[string]string{"symbol": "old", "new_name": "new"},
+		})
+		var wg sync.WaitGroup
+		var granted bool
+		wg.Go(func() {
+			granted, _ = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID: "s1", ToolCallID: "rename-2", ToolName: "lsp_rename", Action: "rename", Path: path,
+				Params: map[string]string{"symbol": "other", "new_name": "replacement"},
+			})
+		})
+		denyNext(t, service, events)
+		wg.Wait()
+		assert.False(t, granted, "a session grant must remain scoped to one rename operation")
 	})
 
 	t.Run("a directory-shaped tool keeps its directory-scoped grant", func(t *testing.T) {
