@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/home"
 )
 
@@ -131,7 +130,7 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 	}
 
 	providers := Providers(cfg)
-	resolver := NewShellVariableResolver(env.New())
+	resolver := cfg.RuntimeResolver()
 	if opts.processor != nil {
 		result, err := opts.processor.Process(opts.ctx, RuntimeInput{
 			Config:          cfg,
@@ -148,7 +147,6 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 		providers = result.KnownProviders
 		resolver = result.Resolver
 	} else {
-		cfg.applyEnv(resolver)
 		providers = providersFromConfig(cfg)
 	}
 

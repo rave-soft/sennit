@@ -36,24 +36,18 @@ func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config
 			return modelcache.New(path).Save(providerID, models)
 		}, fsext.AtomicWriteFile)
 	}
-	environment := env.New()
+	environment := cfg.RuntimeEnvironment()
 	resolver := config.NewShellVariableResolver(environment)
-	cfg.ApplyRuntimeEnvironment(resolver)
 	if cfg.Options.DisableDefaultProviders {
 		knownProviders = nil
 	}
-	restore := config.PushPopEnvOverrides()
 	knownNames, err := l.mergeCatalogProviders(cfg, input.Store, environment, resolver, knownProviders, input.CredentialsHome, input.Stat)
 	if err != nil {
-		restore()
 		return config.RuntimeResult{}, err
 	}
 	resolveCustomProviderModels(cfg.Providers, knownNames, input.GlobalDataPath)
 	requests, results := resolveDiscoveryRequests(cfg.Providers, knownNames, resolver)
-	restore()
 	maps.Copy(results, runDiscoveryRequests(ctx, requests))
-	restore = config.PushPopEnvOverrides()
-	defer restore()
 	if err := l.validateCustomProviders(cfg, knownNames, resolver, results, input.GlobalDataPath); err != nil {
 		return config.RuntimeResult{}, err
 	}
@@ -67,7 +61,7 @@ func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config
 	if cfg.Providers.Len() == 0 && cfg.Options.DisableDefaultProviders {
 		return config.RuntimeResult{}, fmt.Errorf("default providers are disabled and no custom providers are configured")
 	}
-	return config.RuntimeResult{KnownProviders: knownProviders, Resolver: resolver}, nil
+	return config.RuntimeResult{KnownProviders: knownProviders, Resolver: cfg.RuntimeResolver()}, nil
 }
 
 func providers(cfg *config.Config) []catwalk.Provider {

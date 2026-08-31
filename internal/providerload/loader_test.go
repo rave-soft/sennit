@@ -2,6 +2,7 @@ package providerload
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,6 +23,53 @@ func (store *recordingStore) RemoveRuntimeConfigField(_ config.Scope, key string
 }
 
 func (*recordingStore) WriteRuntimeConfigFields(config.Scope, map[string]any) {}
+
+func TestLoadRuntimeResolverReadsCurrentEnvironment(t *testing.T) {
+	workingDir := t.TempDir()
+	globalDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
+	t.Setenv("PROVIDERLOAD_LATE_PROCESS", "before-load")
+	t.Setenv("SENNIT_PROVIDERLOAD_OVERRIDE", "override")
+
+	globalConfig, err := json.Marshal(map[string]any{
+		"options": map[string]any{
+			"data_directory":            workspaceDir,
+			"disable_default_providers": true,
+		},
+		"providers": map[string]any{
+			"local": map[string]any{
+				"base_url":             "http://127.0.0.1:1/v1",
+				"auto_discover_models": false,
+				"models":               []map[string]string{{"id": "local-model"}},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(globalDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "sennit.json"), globalConfig, 0o644))
+	require.NoError(t, config.Trust(workingDir))
+
+	workspaceConfig, err := json.Marshal(map[string]any{
+		"env": map[string]string{
+			"PROVIDERLOAD_CONFIG":         "config",
+			"PROVIDERLOAD_CONFIG_DERIVED": "$PROVIDERLOAD_CONFIG",
+			"PROVIDERLOAD_LATE_RESOLVED":  "$PROVIDERLOAD_LATE_PROCESS",
+			"PROVIDERLOAD_OVERRIDE":       "config",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(workspaceDir, "sennit.json"), workspaceConfig, 0o644))
+
+	store, err := config.LoadWithProcessor(workingDir, "", false, New())
+	require.NoError(t, err)
+	t.Setenv("PROVIDERLOAD_LATE_PROCESS", "after-load")
+
+	resolved, err := store.Resolve("$PROVIDERLOAD_CONFIG_DERIVED/$PROVIDERLOAD_LATE_RESOLVED/$PROVIDERLOAD_OVERRIDE")
+	require.NoError(t, err)
+	require.Equal(t, "config/after-load/override", resolved)
+}
 
 func TestLoaderProcessesCustomProvider(t *testing.T) {
 	cfg := customConfig(config.ProviderConfig{

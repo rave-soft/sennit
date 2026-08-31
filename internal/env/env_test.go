@@ -21,3 +21,14 @@ func TestOsEnv_Env(t *testing.T) {
 		require.Contains(t, envVar, "=")
 	}
 }
+
+func TestSnapshot_MergesAndCopiesValues(t *testing.T) {
+	overrides := map[string]string{"SHARED": "override", "ONLY_OVERRIDE": "value"}
+	environment := Snapshot([]string{"BASE=value", "SHARED=base"}, overrides)
+	overrides["SHARED"] = "changed"
+
+	require.Equal(t, "value", environment.Get("BASE"))
+	require.Equal(t, "override", environment.Get("SHARED"))
+	require.Equal(t, "value", environment.Get("ONLY_OVERRIDE"))
+	require.Equal(t, []string{"BASE=value", "ONLY_OVERRIDE=value", "SHARED=override"}, environment.Env())
+}

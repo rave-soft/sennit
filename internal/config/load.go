@@ -9,10 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/qjebbs/go-jsons"
-	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config/migrate"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/home"
@@ -184,90 +182,6 @@ func mustMarshalConfig(cfg *Config) []byte {
 		return []byte("{}")
 	}
 	return data
-}
-
-// processEnvMu guards every os.Setenv call in this package. os.Setenv
-// mutates state shared by the whole process (any concurrent os.Getenv
-// anywhere races it), and Sennit runs one config store per workspace, so
-// PushPopEnvOverrides' push/restore window and applyEnv's writes must never
-// interleave across workspaces loading or reloading concurrently. The real
-// fix is for config to stop mutating the process environment at all and
-// thread values through explicitly instead; this mutex is the documented
-// minimum until that happens.
-var processEnvMu sync.Mutex
-
-// PushPopEnvOverrides copies every SENNIT_-prefixed process environment
-// variable into its bare name (SENNIT_FOO=x sets FOO=x), mutating the
-// process-wide environment for every goroutine until the returned restore
-// function is called. It takes processEnvMu before its first os.Setenv and
-// the returned function releases it after putting the previous values back,
-// so the caller MUST always call the returned function — its only caller
-// uses defer restore() for exactly this reason — or every subsequent config
-// load/reload deadlocks waiting on the lock. The call is not reentrant:
-// calling PushPopEnvOverrides again, or calling applyEnv, before the first
-// restore() returns will also deadlock.
-func PushPopEnvOverrides() func() {
-	processEnvMu.Lock()
-
-	var found []string
-	for _, ev := range os.Environ() {
-		if strings.HasPrefix(ev, brand.EnvPrefix) {
-			pair := strings.SplitN(ev, "=", 2)
-			if len(pair) != 2 {
-				continue
-			}
-			found = append(found, strings.TrimPrefix(pair[0], brand.EnvPrefix))
-		}
-	}
-	backups := make(map[string]string)
-	for _, ev := range found {
-		backups[ev] = os.Getenv(ev)
-	}
-
-	for _, ev := range found {
-		if err := os.Setenv(ev, os.Getenv(brand.EnvPrefix+ev)); err != nil {
-			slog.Warn("Failed to set env var from SENNIT_ override", "key", ev, "error", err)
-		}
-	}
-
-	restore := func() {
-		defer processEnvMu.Unlock()
-		for k, v := range backups {
-			if err := os.Setenv(k, v); err != nil {
-				slog.Warn("Failed to restore env var", "key", k, "error", err)
-			}
-		}
-	}
-	return restore
-}
-
-// applyEnv sets top-level env vars from the config, mutating the
-// process-wide environment (every os.Setenv here races any concurrent
-// os.Getenv anywhere in the process). It takes processEnvMu around its
-// writes and releases it before returning, so it must not be called while
-// PushPopEnvOverrides' restore function is still outstanding — see
-// processEnvMu's doc comment. Keys are sorted for deterministic ordering so
-// that vars referencing other vars via the value resolver produce
-// consistent results.
-func (c *Config) applyEnv(resolver VariableResolver) {
-	processEnvMu.Lock()
-	defer processEnvMu.Unlock()
-
-	keys := make([]string, 0, len(c.Env))
-	for k := range c.Env {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		resolved, err := resolver.ResolveValue(c.Env[k])
-		if err != nil {
-			slog.Warn("Skipping env var due to resolution failure.", "key", k, "value", c.Env[k], "error", err)
-			continue
-		}
-		if err := os.Setenv(k, resolved); err != nil {
-			slog.Warn("Failed to set env var", "key", k, "error", err)
-		}
-	}
 }
 
 func loadFromConfigPaths(ctx context.Context, configPaths []string, projectTrusted bool) (*Config, []string, error) {

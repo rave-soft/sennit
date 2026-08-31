@@ -74,13 +74,6 @@ type discoveryRequest struct {
 // out) and resolves every value the HTTP round trip will need — base URL,
 // API key, and extra headers — via resolver.
 //
-// This must run while the caller still holds processEnvMu (see
-// PushPopEnvOverrides): resolver.ResolveValue reads process env on every
-// call, so the SENNIT_ overrides have to be in place here. The actual HTTP
-// call does not need them — see runDiscoveryRequests — which is the whole
-// point of splitting this out: it lets configureProviders drop the lock
-// before the slow part runs.
-//
 // A base_url/api_key resolution failure is reported as a discoveryResult
 // here, mirroring the error discover.DiscoverModels used to produce from
 // the same failure inside doRequest, so validateCustomProviders sees the

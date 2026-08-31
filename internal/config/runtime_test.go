@@ -8,7 +8,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config/migrate"
 	"github.com/rave-soft/sennit/internal/discover"
-	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/modelcache"
 )
@@ -16,8 +15,7 @@ import (
 type testRuntimeProcessor struct{}
 
 func (testRuntimeProcessor) Process(ctx context.Context, input RuntimeInput) (RuntimeResult, error) {
-	resolver := NewShellVariableResolver(env.New())
-	input.Config.ApplyRuntimeEnvironment(resolver)
+	resolver := NewShellVariableResolver(input.Config.RuntimeEnvironment())
 	knownProviders := Providers(input.Config)
 	if input.Initial {
 		migrateBloatedModelCache(input.GlobalDataPath, knownProviders)
@@ -43,7 +41,6 @@ func (testRuntimeProcessor) Process(ctx context.Context, input RuntimeInput) (Ru
 		input.Config.Providers.Set(id, configured)
 	}
 
-	restore := PushPopEnvOverrides()
 	type request struct {
 		id  string
 		cfg discover.Config
@@ -71,7 +68,6 @@ func (testRuntimeProcessor) Process(ctx context.Context, input RuntimeInput) (Ru
 		}
 		input.Config.Providers.Set(id, provider)
 	}
-	restore()
 
 	for _, request := range requests {
 		models, err := discover.DiscoverModels(ctx, request.cfg, IdentityResolver())
