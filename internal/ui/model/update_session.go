@@ -240,11 +240,12 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				m.updateLayoutAndSize()
 			}
 			// While the panel is showing this session's todos, the chat
-			// transcript's own todos tool call(s) render compact (header
-			// only) instead of duplicating the full list; once every todo
-			// is completed and the panel disappears, the transcript
-			// becomes the permanent record again.
-			m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.current.Todos))
+			// transcript's own todos tool call(s) draw nothing at all
+			// rather than duplicating the list or announcing it in a
+			// one-line stub; once every todo is completed and the panel
+			// disappears, the transcript becomes the permanent record
+			// again.
+			m.chat.SetTodosHidden(hasIncompleteTodos(m.sess.current.Todos))
 			// And the same handoff for delegations: while the panel's
 			// agents section has them, they have no row in the transcript.
 			m.chat.SetDelegationsHidden(m.panelledDelegations())

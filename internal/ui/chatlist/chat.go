@@ -1025,26 +1025,36 @@ func (m *Chat) LastToolCall() (message.ToolCall, bool) {
 	return message.ToolCall{}, false
 }
 
-// SetTodosCompact syncs every top-level todos tool call's compact state to
-// compact — reusing the same Compactable/SetCompact mechanism the
-// nested-tool-call redesign (commit b1efdc60) uses for one-line rows. The
-// session panel is the live, persistent view of the current todos list
-// while any todo is incomplete; while it's showing, the chat transcript's
-// own todos tool call(s) render as a compact one-liner (header only) rather
-// than duplicating the full list. Once the panel disappears (every todo
-// completed), compact is cleared so the transcript becomes the permanent
-// record of the finished checklist. Only top-level items are touched —
-// nested sub-agent tool calls (loadNestedToolCalls) are unconditionally
-// compact already and unrelated to this session's panel.
-func (m *Chat) SetTodosCompact(compact bool) {
+// SetTodosHidden hides every top-level todos tool call while hidden, and
+// shows it again when not. The session panel is the live, persistent view
+// of the current todos list while any todo is incomplete; while it is
+// showing, the transcript's own todos row has nothing left to say, so it
+// draws nothing at all. Once the panel disappears (every todo completed)
+// the row comes back with its full list, and is then the permanent record
+// of the finished checklist.
+//
+// It used to render a compact one-liner in the panel's place instead
+// ("To-Do created 4 todos, starting first", and a delta header on every
+// update after it). That is one line per todos call, several per session,
+// each saying less than the panel two inches away was already saying —
+// noise between the messages that carry the actual work. This is the same
+// bargain delegations already strike; see SetDelegationsHidden, whose
+// SetHiddenWhilePanelled this now shares.
+//
+// Only top-level items are touched — nested sub-agent tool calls
+// (loadNestedToolCalls) are compact already and belong to a child session
+// this panel is not reporting on.
+func (m *Chat) SetTodosHidden(hidden bool) {
 	for i := range m.list.Len() {
 		toolItem, ok := m.list.ItemAt(i).(chat.ToolMessageItem)
 		if !ok || toolItem.ToolCall().Name != tools.TodosToolName {
 			continue
 		}
-		if compactable, ok := toolItem.(chat.Compactable); ok {
-			compactable.SetCompact(compact)
+		hideable, ok := toolItem.(interface{ SetHiddenWhilePanelled(bool) })
+		if !ok {
+			continue
 		}
+		hideable.SetHiddenWhilePanelled(hidden)
 	}
 }
 
@@ -1052,7 +1062,7 @@ func (m *Chat) SetTodosCompact(compact bool) {
 // currently showing, named by the id of the tool call that started each —
 // panelled holds those ids, and every other delegation is shown.
 //
-// This is the todos handoff (see SetTodosCompact) with the harder half of
+// This is the todos handoff (see SetTodosHidden) with the harder half of
 // the bargain: a delegation goes into the panel when it starts and leaves
 // it when it finishes, so the transcript is where it lands afterwards, not
 // somewhere it also appears meanwhile.
@@ -1071,6 +1081,16 @@ func (m *Chat) SetDelegationsHidden(panelled map[string]bool) {
 	for i := range m.list.Len() {
 		toolItem, ok := m.list.ItemAt(i).(chat.ToolMessageItem)
 		if !ok {
+			continue
+		}
+		// Delegations only, identified by the nested-tool tree none of
+		// the other tools has. Every tool item can be hidden this way
+		// now that todos are hidden too (see SetTodosHidden), so the
+		// hide method itself no longer picks the delegations out: an
+		// unfiltered loop here immediately un-hides the todos row this
+		// panel is also showing, since no todos call is ever in
+		// panelled.
+		if _, ok := toolItem.(chat.NestedToolContainer); !ok {
 			continue
 		}
 		hideable, ok := toolItem.(interface{ SetHiddenWhilePanelled(bool) })

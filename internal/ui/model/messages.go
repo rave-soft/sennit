@@ -64,12 +64,12 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 	if cmd := m.chat.SetMessages(items...); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	// New items just replaced the whole list — sync their todos compact
-	// state to whether the panel is currently showing this session's
-	// todos, same as the pubsub session-update handler does for
+	// New items just replaced the whole list — sync whether their todos
+	// rows are hidden to whether the panel is currently showing this
+	// session's todos, same as the pubsub session-update handler does for
 	// already-loaded items.
 	if m.hasSession() {
-		m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.current.Todos))
+		m.chat.SetTodosHidden(hasIncompleteTodos(m.sess.current.Todos))
 		m.chat.SetDelegationsHidden(m.panelledDelegations())
 	}
 	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {

@@ -21,6 +21,21 @@ func (t *baseToolMessageItem) SetCompact(compact bool) {
 	t.Bump()
 }
 
+// Hidden implements [list.Hideable].
+func (t *baseToolMessageItem) Hidden() bool { return t.hiddenWhilePanelled }
+
+// SetHiddenWhilePanelled records whether the session panel is currently
+// showing what this row would say, and is the only thing that can make a
+// tool item draw nothing. See the hiddenWhilePanelled field.
+func (t *baseToolMessageItem) SetHiddenWhilePanelled(hidden bool) {
+	if t.hiddenWhilePanelled == hidden {
+		return
+	}
+	t.hiddenWhilePanelled = hidden
+	t.clearCache()
+	t.Bump()
+}
+
 // ID returns the unique identifier for this tool message item.
 func (t *baseToolMessageItem) ID() string {
 	return t.toolCall.ID
@@ -132,7 +147,12 @@ func (t *baseToolMessageItem) syncAnimLabel() {
 // Render renders the tool message item at the given width.
 func (t *baseToolMessageItem) Render(width int) string {
 	// A hidden item draws nothing — not an empty prefixed line, which is
-	// what prefixLines would make of an empty body. See [Hideable].
+	// what prefixLines would make of an empty body. See [Hideable]. Asked
+	// of the item first (the panel handoff sets its flag directly) and
+	// then of the renderer, for a renderer that decides on its own.
+	if t.Hidden() {
+		return ""
+	}
 	if hideable, ok := t.toolRenderer.(list.Hideable); ok && hideable.Hidden() {
 		return ""
 	}

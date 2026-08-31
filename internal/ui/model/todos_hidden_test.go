@@ -36,16 +36,16 @@ func newTestTodosToolItem(t *testing.T, u *UI) chat.ToolMessageItem {
 	return chat.NewToolMessageItem(u.com.Styles, "m-todos", toolCall, result, false, nil)
 }
 
-// TestChatSetTodosCompact_HidesAndRestoresTranscriptBody covers the new
+// TestChatSetTodosHidden_HidesAndRestoresTranscriptRow covers the
 // panel/chat handoff: while the session panel is showing a session's live
 // todos (any todo incomplete), the chat transcript's own todos tool call
-// must render compact (header only, via the existing Compactable/SetCompact
-// mechanism) so the list isn't duplicated on screen. Once every todo is
-// completed — the panel disappears, see
-// TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted — the transcript
+// must draw nothing at all, so the list is neither duplicated on screen
+// nor announced by a one-line stub between the messages that carry the
+// work. Once every todo is completed - the panel disappears, see
+// TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted - the transcript
 // must go back to showing the full list, since it's now the only place
 // left recording it.
-func TestChatSetTodosCompact_HidesAndRestoresTranscriptBody(t *testing.T) {
+func TestChatSetTodosHidden_HidesAndRestoresTranscriptRow(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
@@ -53,28 +53,24 @@ func TestChatSetTodosCompact_HidesAndRestoresTranscriptBody(t *testing.T) {
 	item := newTestTodosToolItem(t, u)
 	u.chat.SetMessages(item)
 
-	u.chat.SetTodosCompact(true)
-	compact := item.Render(80)
-	require.NotContains(t, compact, "Writing the plan", "compact render must not duplicate the panel's live list")
-	require.NotContains(t, compact, "ship it")
-	// The compact stub must be a real one-liner (ratio/delta header via
-	// toolHeader), not blank — confirming chat/todos.go's
-	// `if opts.Compact { return header }` path never degenerates to "".
-	require.NotEmpty(t, compact)
-	require.Contains(t, compact, "To-Do")
-	require.Contains(t, compact, "created 2 todos", "compact stub still carries the header's ratio/delta text")
+	u.chat.SetTodosHidden(true)
+	// Empty, not merely list-free: a hidden row must not leave the
+	// prefixed blank line prefixLines would make of an empty body, and
+	// must not leave the header stub the compact path used to render.
+	require.Empty(t, item.Render(80), "the panel is showing this list: the transcript row must draw nothing")
 
-	u.chat.SetTodosCompact(false)
+	u.chat.SetTodosHidden(false)
 	full := item.Render(80)
-	require.Contains(t, full, "Writing the plan", "once compact is cleared the transcript must show the full list again")
+	require.Contains(t, full, "To-Do")
+	require.Contains(t, full, "Writing the plan", "once the panel is gone the transcript must show the full list again")
 	require.Contains(t, full, "ship it")
 }
 
-// TestUpdate_SessionEvent_SyncsTodosCompactWithPanelVisibility is an
+// TestUpdate_SessionEvent_SyncsTodosHiddenWithPanelVisibility is an
 // end-to-end check that the pubsub session-update handler actually wires
-// SetTodosCompact to hasIncompleteTodos, not just that the method itself
+// SetTodosHidden to hasIncompleteTodos, not just that the method itself
 // works in isolation.
-func TestUpdate_SessionEvent_SyncsTodosCompactWithPanelVisibility(t *testing.T) {
+func TestUpdate_SessionEvent_SyncsTodosHiddenWithPanelVisibility(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
@@ -88,7 +84,7 @@ func TestUpdate_SessionEvent_SyncsTodosCompactWithPanelVisibility(t *testing.T) 
 	}
 
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
-	require.NotContains(t, item.Render(80), "Writing the plan", "panel is showing incomplete todos: transcript must be compact")
+	require.Empty(t, item.Render(80), "panel is showing incomplete todos: transcript row must draw nothing")
 
 	completed := *u.sess.current
 	completed.Todos = []session.Todo{

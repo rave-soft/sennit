@@ -77,19 +77,6 @@ type delegationToolMessageItem struct {
 	// never shows todos (see ToggleExpanded).
 	todos []session.Todo
 
-	// hiddenWhilePanelled records that the session panel is showing this
-	// delegation in its agents section. A delegation goes into the panel
-	// when it starts and leaves it when it finishes, and the transcript is
-	// where it lands afterwards — so while the panel has it, this block
-	// draws nothing at all rather than saying the same thing twice in two
-	// places.
-	//
-	// It only ever reaches a delegation that is still running: the model
-	// clears it the moment the panel has nothing live left (see
-	// Chat.SetDelegationsHidden), which is the same moment the finished
-	// block becomes the only record of what happened.
-	hiddenWhilePanelled bool
-
 	// duration is frozen the first time SetResult observes a non-nil
 	// result (see SetResult below) — i.e. only for a delegation that
 	// finishes while this item is live in the UI. An item reconstructed
@@ -127,21 +114,6 @@ func (a *delegationToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
 		return
 	}
 	a.todos = todos
-	a.clearCache()
-	a.Bump()
-}
-
-// Hidden implements [Hideable].
-func (a *delegationToolMessageItem) Hidden() bool { return a.hiddenWhilePanelled }
-
-// SetHiddenWhilePanelled records whether the session panel is currently
-// showing this delegation, and is the only thing that can make this item
-// draw nothing. See the hiddenWhilePanelled field.
-func (a *delegationToolMessageItem) SetHiddenWhilePanelled(hidden bool) {
-	if a.hiddenWhilePanelled == hidden {
-		return
-	}
-	a.hiddenWhilePanelled = hidden
 	a.clearCache()
 	a.Bump()
 }

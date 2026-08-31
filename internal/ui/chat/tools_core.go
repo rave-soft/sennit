@@ -143,6 +143,16 @@ type baseToolMessageItem struct {
 	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
+	// hiddenWhilePanelled records that the session panel is already
+	// showing what this row would say, so the row draws nothing at all
+	// rather than saying the same thing twice in two places. Two tools
+	// hand off to the panel this way — a running delegation (see
+	// Chat.SetDelegationsHidden) and the todo list (see
+	// Chat.SetTodosHidden) — and both hand back: the panel drops a
+	// delegation when it finishes and the whole list when every todo is
+	// done, which is the same moment the transcript becomes the only
+	// record of what happened.
+	hiddenWhilePanelled bool
 	// expanded is the click-to-expand state, consumed by renderers that
 	// show a collapsible body (see ToolRenderOpts.Expanded). Toggled via
 	// Expandable on the concrete item types that opt in (e.g. Bash).
