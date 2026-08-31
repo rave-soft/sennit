@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -313,29 +312,6 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
 	return http.DetectContentType(content[:mimeBufferSize])
-}
-
-var readyPlaceholders = [...]string{
-	"Ready!",
-	"Ready...",
-	"Ready?",
-	"Ready for instructions",
-}
-
-var workingPlaceholders = [...]string{
-	"Working!",
-	"Working...",
-	"Brrrrr...",
-	"Prrrrrrrr...",
-	"Processing...",
-	"Thinking...",
-}
-
-// randomizePlaceholders selects random placeholder text for the textarea's
-// ready and working states.
-func (e *editorState) randomizePlaceholders() {
-	e.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
-	e.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
 // checkBangModeAfterPaste engages bang mode when pasted text starts with

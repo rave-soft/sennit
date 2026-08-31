@@ -28,9 +28,8 @@ func newCmdDrivenGoldenUI(ws *cmdDrivingWorkspace) *UI {
 	m.lay.width = 140
 	m.lay.height = 45
 	m.sess.current = &session.Session{ID: "s1"}
-	m.editor.readyPlaceholder = "Ready!"
-	m.editor.workingPlaceholder = "Working!"
-	m.editor.textarea.Placeholder = m.editor.readyPlaceholder
+	m.editor.placeholder = newEditorPlaceholderStateWithValues("Ready!", "Working!")
+	m.editor.textarea.Placeholder = m.editor.placeholder.ready
 	warmCmdDrivenCaches(m)
 	return m
 }
@@ -95,7 +94,7 @@ func TestCmdDrivingGolden(t *testing.T) {
 		m.editor.textarea.SetValue("ship the golden tests")
 
 		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		m.editor.workingPlaceholder = "Working!"
+		m.editor.placeholder.working = "Working!"
 		var captured bool
 		runCmdTree(m, cmd, func(msg tea.Msg, next tea.Cmd) {
 			if _, ok := msg.(agentRunSubmittedMsg); !ok {

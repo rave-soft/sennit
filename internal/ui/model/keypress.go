@@ -310,7 +310,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 		if m.editor.bang.isActive() && value != "" {
 			m.editor.bang.exit()
 			m.setEditorPrompt(m.yoloModeCached())
-			m.editor.randomizePlaceholders()
+			m.editor.placeholder.randomize()
 			m.editor.historyReset()
 			return cmds, tea.Batch(m.runShellCommand(value)), true
 		}
@@ -321,7 +321,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 			return cmds, nil, true
 		}
 
-		m.editor.randomizePlaceholders()
+		m.editor.placeholder.randomize()
 		m.editor.historyReset()
 
 		return cmds, tea.Batch(m.sendMessage(value, attachments...), m.sess.loadPromptHistory(m.com)), true

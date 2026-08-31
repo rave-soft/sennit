@@ -20,12 +20,8 @@ type editorState struct {
 	// textarea is the prompt input widget.
 	textarea textarea.Model
 
-	// readyPlaceholder / workingPlaceholder are the randomized placeholder
-	// texts shown in the textarea when idle / when the agent is busy — see
-	// randomizePlaceholders (editor_input.go) and the placeholder switch at
-	// the end of UI.Update.
-	readyPlaceholder   string
-	workingPlaceholder string
+	// placeholder owns randomized text and context-based placeholder selection.
+	placeholder editorPlaceholderState
 
 	// attachments is the file/text attachment list shown above the editor.
 	attachments *attachments.Attachments

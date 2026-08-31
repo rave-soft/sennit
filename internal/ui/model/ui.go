@@ -310,6 +310,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		com: com,
 		editor: editorState{
 			textarea:    ta,
+			placeholder: newEditorPlaceholderState(),
 			completions: completionsLifecycleState{popup: comp},
 		},
 		widgets: widgets{
@@ -385,8 +386,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		ui.wsCache.agentCache.Set(agentReadyModel{ready: true, model: com.Workspace.AgentModel()})
 	}
 	ui.setEditorPrompt(yolo)
-	ui.editor.randomizePlaceholders()
-	ui.editor.textarea.Placeholder = ui.editor.readyPlaceholder
+	ui.editor.textarea.Placeholder = ui.editor.placeholder.ready
 	ui.status = status
 
 	// Initialize compact mode from config
@@ -744,23 +744,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// This logic gets triggered on any message type, but should it?
-	switch m.focus {
-	case uiFocusMain:
-	case uiFocusEditor:
-		// Textarea placeholder logic
-		if m.viewingChildSession() {
-			m.editor.textarea.Placeholder = "viewing subagent session · " + m.exitChildSessionShortcut() + " to return"
-		} else if m.editor.bang.isActive() {
-			m.editor.textarea.Placeholder = "Run a shell command"
-		} else if m.isAgentBusy() {
-			m.editor.textarea.Placeholder = m.editor.workingPlaceholder
-		} else {
-			m.editor.textarea.Placeholder = m.editor.readyPlaceholder
-		}
-		if !m.editor.bang.isActive() && m.yoloModeCached() {
-			m.editor.textarea.Placeholder = "Yolo mode!"
-		}
+	if m.focus == uiFocusEditor {
+		m.editor.textarea.Placeholder = m.editor.placeholder.selectPlaceholder(editorPlaceholderContext{
+			current:                  m.editor.textarea.Placeholder,
+			editorFocused:            true,
+			viewingChildSession:      m.viewingChildSession(),
+			exitChildSessionShortcut: m.exitChildSessionShortcut(),
+			bangActive:               m.editor.bang.isActive(),
+			busy:                     m.isAgentBusy(),
+			yolo:                     m.yoloModeCached(),
+		})
 	}
 
 	// TTL backstop: schedule an off-thread re-probe for any memoized
