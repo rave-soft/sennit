@@ -26,7 +26,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
-			if m.isCanceling {
+			if m.cancellation.isArmed() {
 				cancelBinding.SetHelp("esc", "press again to cancel")
 			} else if len(m.wsCache.promptQueueCache.Value) > 0 {
 				cancelBinding.SetHelp("esc", "clear queue")
@@ -117,7 +117,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
-			if m.isCanceling {
+			if m.cancellation.isArmed() {
 				cancelBinding.SetHelp("esc", "press again to cancel")
 			} else if len(m.wsCache.promptQueueCache.Value) > 0 {
 				cancelBinding.SetHelp("esc", "clear queue")

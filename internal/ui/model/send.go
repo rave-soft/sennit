@@ -125,9 +125,9 @@ func cancelTimerCmd(owner *UI) tea.Cmd {
 	})
 }
 
-// cancelAgent handles the cancel key press. The first press sets isCanceling to true
-// and starts a timer. The second press (before the timer expires) actually
-// cancels the proto.
+// cancelAgent handles the cancel key press. The first press arms the
+// confirmation and starts a timer. The second press (before the timer
+// expires) actually cancels the agent.
 func (m *UI) cancelAgent() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -139,24 +139,8 @@ func (m *UI) cancelAgent() tea.Cmd {
 		return nil
 	}
 
-	if m.isCanceling {
-		// Second escape press — actually cancel.
-		m.isCanceling = false
-
-		// Cancel a running bang command if one is in progress.
-		m.editor.bang.cancelRunning()
-
-		m.com.Workspace.AgentCancel(m.sess.current.ID)
-		// A cancel clears the agent's queue too, so nothing is left
-		// waiting for these placeholders to stand in for.
-		m.queued.clear(m.chat)
-		// Stop the spinning todo indicator and drop the memoized busy
-		// state the cancel just changed; the session panel reads
-		// m.panel.isSpinning fresh on every draw, and again once the
-		// off-thread refresh (and the agent's own events) land.
-		m.panel.isSpinning = false
-		m.wsCache.invalidateBusyCaches()
-		return m.dispatchBusyRefresh()
+	if m.cancellation.confirm() {
+		return m.confirmAgentCancellation()
 	}
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
@@ -173,7 +157,26 @@ func (m *UI) cancelAgent() tea.Cmd {
 		return nil
 	}
 
-	// First escape press - set canceling state and start timer.
-	m.isCanceling = true
+	// First escape press arms the confirmation and starts its timer.
+	m.cancellation.arm()
 	return cancelTimerCmd(m)
+}
+
+// confirmAgentCancellation performs the UI orchestration that follows a
+// confirmed cancellation request.
+func (m *UI) confirmAgentCancellation() tea.Cmd {
+	// Cancel a running bang command if one is in progress.
+	m.editor.bang.cancelRunning()
+
+	m.com.Workspace.AgentCancel(m.sess.current.ID)
+	// A cancel clears the agent's queue too, so nothing is left waiting for
+	// these placeholders to stand in for.
+	m.queued.clear(m.chat)
+	// Stop the spinning todo indicator and drop the memoized busy state the
+	// cancel just changed; the session panel reads m.panel.isSpinning fresh
+	// on every draw, and again once the off-thread refresh (and the agent's
+	// own events) land.
+	m.panel.isSpinning = false
+	m.wsCache.invalidateBusyCaches()
+	return m.dispatchBusyRefresh()
 }

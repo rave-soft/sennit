@@ -105,9 +105,9 @@ type copyChatHighlightMsg struct{}
 //     via Go's promotion rules; only struct literals that name these
 //     fields (New below, and a few tests) need to qualify them by group.
 //
-// com, embedded, focus, state, keyMap, and isCanceling stay directly on UI:
-// each is either the one shared dependency handle or reflects a piece of
-// state central to the whole model rather than owned by one grouping.
+// com, embedded, focus, state, and keyMap stay directly on UI: each is
+// either the one shared dependency handle or reflects a piece of state
+// central to the whole model rather than owned by one grouping.
 type UI struct {
 	com *common.Common
 
@@ -137,8 +137,8 @@ type UI struct {
 	// which is always true outside tests — see withGOOS.
 	goos string
 
-	// isCanceling tracks whether the user has pressed escape once to cancel.
-	isCanceling bool
+	// cancellation owns the two-step agent cancellation confirmation.
+	cancellation agentCancellationState
 
 	// editor holds the prompt textarea, attachments, completions popup
 	// state, bang (!) shell-mode flags, and prompt history. See editor.go.

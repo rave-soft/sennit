@@ -535,7 +535,7 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 	// arms the double-press cancel.
 	require.Zero(t, len(m.wsCache.promptQueueCache.Value))
 	m.cancelAgent()
-	require.True(t, m.isCanceling, "first esc press must arm cancellation")
+	require.True(t, m.cancellation.isArmed(), "first esc press must arm cancellation")
 
 	// Second press must actually cancel.
 	m.cancelAgent()
@@ -561,7 +561,31 @@ func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 	require.Zero(t, ws.queueListCalls, "the decision must use the cached count, not a probe")
 	require.Zero(t, len(m.wsCache.promptQueueCache.Value), "the cached count must be zeroed immediately")
 	require.Empty(t, m.wsCache.promptQueueCache.Value)
-	require.False(t, m.isCanceling, "clearing the queue must not arm cancellation")
+	require.False(t, m.cancellation.isArmed(), "clearing the queue must not arm cancellation")
+}
+
+func TestCancelAgentConfirmationOnlyChangesForEligibleRequests(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+
+	m.sess.current = nil
+	require.Nil(t, m.cancelAgent())
+	require.False(t, m.cancellation.isArmed(), "a missing session must not arm cancellation")
+
+	m.sess.current = &session.Session{ID: "s1"}
+	m.wsCache.agentCache.Value.ready = false
+	require.Nil(t, m.cancelAgent())
+	require.False(t, m.cancellation.isArmed(), "an unready agent must not arm cancellation")
+
+	m.wsCache.agentCache.Value.ready = true
+	require.NotNil(t, m.cancelAgent(), "an eligible first escape must start the timer")
+	require.True(t, m.cancellation.isArmed())
+
+	_, _ = m.Update(cancelTimerExpiredMsg{uiOwned: uiOwned{owner: m}})
+	require.False(t, m.cancellation.isArmed(), "timer expiry must reset cancellation confirmation")
 }
 
 // TestBackstopRefreshesStaleCaches: when the memoized state outlives its TTL

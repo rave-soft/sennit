@@ -14,9 +14,9 @@ import (
 // cancelTimerExpiredMsg is sent when the cancel timer expires.
 //
 // uiOwned: dispatched by cancelTimerCmd. Routed by active screen instead,
-// an expiry that lands while the dashboard is up never clears isCanceling,
-// so the esc-to-cancel affordance is stuck reading "press again to
-// confirm" for the rest of the session.
+// an expiry that lands while the dashboard is up never resets the
+// cancellation confirmation, so the esc-to-cancel affordance is stuck
+// reading "press again to confirm" for the rest of the session.
 type cancelTimerExpiredMsg struct{ uiOwned }
 
 // updateStatus handles the status-line branches of UI.Update: info/clear
@@ -39,7 +39,7 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, cmd)
 		}
 	case cancelTimerExpiredMsg:
-		m.isCanceling = false
+		m.cancellation.expire()
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
