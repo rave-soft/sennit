@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -44,4 +46,36 @@ func TestDropTrailingPartialRuneKeepsInvalidContentInvalid(t *testing.T) {
 
 	bad := []byte{'a', 0xff, 'b'}
 	require.False(t, utf8.Valid(dropTrailingPartialRune(bad)))
+}
+
+func TestFetchURLAndConvertRejectsResponseOverBodyLimit(t *testing.T) {
+	t.Parallel()
+
+	const maxSize = 5 * 1024 * 1024
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(strings.Repeat("a", maxSize+1)))
+	}))
+	t.Cleanup(server.Close)
+
+	content, err := FetchURLAndConvert(t.Context(), server.Client(), server.URL)
+	require.Error(t, err)
+	require.Empty(t, content)
+	require.Contains(t, err.Error(), "response body exceeds")
+}
+
+func TestFetchURLAndConvertAcceptsResponseAtBodyLimit(t *testing.T) {
+	t.Parallel()
+
+	const maxSize = 5 * 1024 * 1024
+	want := strings.Repeat("a", maxSize)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(want))
+	}))
+	t.Cleanup(server.Close)
+
+	content, err := FetchURLAndConvert(t.Context(), server.Client(), server.URL)
+	require.NoError(t, err)
+	require.Equal(t, want, content)
 }

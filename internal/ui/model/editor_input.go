@@ -93,8 +93,16 @@ func (e *editorState) openEditor(value string) tea.Cmd {
 			return util.NewErrorMsg(err)
 		}
 		tmpPath := tmpfile.Name()
-		defer tmpfile.Close()
+		cleanup := func() {
+			_ = tmpfile.Close()
+			_ = os.Remove(tmpPath)
+		}
 		if _, err := tmpfile.WriteString(value); err != nil {
+			cleanup()
+			return util.NewErrorMsg(err)
+		}
+		if err := tmpfile.Close(); err != nil {
+			_ = os.Remove(tmpPath)
 			return util.NewErrorMsg(err)
 		}
 		cmd, err := editor.Command(
@@ -103,6 +111,7 @@ func (e *editorState) openEditor(value string) tea.Cmd {
 			editor.AtPosition(line, col),
 		)
 		if err != nil {
+			_ = os.Remove(tmpPath)
 			return util.NewErrorMsg(err)
 		}
 		return openEditorReadyMsg{cmd: cmd, tmpPath: tmpPath}

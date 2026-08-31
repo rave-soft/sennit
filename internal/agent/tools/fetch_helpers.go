@@ -44,10 +44,13 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 		return "", fmt.Errorf("request failed with status code: %d", resp.StatusCode)
 	}
 
-	maxSize := int64(5 * 1024 * 1024) // 5MB
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
+	const maxSize = 5 * 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+	if len(body) > maxSize {
+		return "", fmt.Errorf("response body exceeds %d byte limit", maxSize)
 	}
 
 	content := string(dropTrailingPartialRune(body))
@@ -102,10 +105,12 @@ func FetchLargeContent(ctx context.Context, client *http.Client, dir, url string
 	tempFilePath := tempFile.Name()
 
 	if _, err := tempFile.WriteString(content); err != nil {
-		_ = tempFile.Close() // Best effort close
+		_ = tempFile.Close()
+		_ = os.Remove(tempFilePath)
 		return "", "", fmt.Errorf("failed to write content to file: %w", err)
 	}
 	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempFilePath)
 		return "", "", fmt.Errorf("failed to close temporary file: %w", err)
 	}
 
