@@ -207,6 +207,10 @@ func blockFuncs() []shell.BlockFunc {
 // this path is unreachable in production and callers no longer need a panic
 // guard here.
 func NewBashTool(permissions permission.Requester, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager, options ...toolAvailabilityOption) fantasy.AgentTool {
+	return newBashTool(permissions, workingDir, attribution, modelID, bgManager, confinedBashCommand, options...)
+}
+
+func newBashTool(permissions permission.Requester, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager, sandboxCommand func(permission.Requester, string, string) (string, error), options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		BashToolName,
@@ -242,7 +246,7 @@ func NewBashTool(permissions permission.Requester, workingDir string, attributio
 				return fantasy.NewTextErrorResponse(msg), nil
 			}
 
-			command, err := confinedBashCommand(permissions, execWorkingDir, params.Command)
+			command, err := sandboxCommand(permissions, execWorkingDir, params.Command)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

@@ -63,6 +63,12 @@ func confinedTestCtx(t *testing.T) context.Context {
 	return context.WithValue(t.Context(), SessionIDContextKey, "test-session")
 }
 
+func newConfinedTestBashTool(permissions permission.Requester, workdir string) fantasy.AgentTool {
+	return newBashTool(permissions, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager(), func(_ permission.Requester, _, command string) (string, error) {
+		return command, nil
+	})
+}
+
 // writeOutsideAttempt sets up a confined workspace and a file that lives
 // outside it, and returns the tool call payload aimed at that outside file.
 func writeOutsideAttempt(t *testing.T) (workdir, outside string, perms *confinedTestPermissions) {
@@ -285,7 +291,7 @@ func TestBashTool_ConfinedWorkspaceRefusesAWorkingDirOutside(t *testing.T) {
 	t.Parallel()
 
 	workdir, outside, perms := writeOutsideAttempt(t)
-	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(perms, workdir)
 
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
@@ -305,7 +311,7 @@ func TestBashTool_ConfinedWorkspaceRefusesAnAbsoluteArgumentOutside(t *testing.T
 	t.Parallel()
 
 	workdir, outside, perms := writeOutsideAttempt(t)
-	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(perms, workdir)
 
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
@@ -324,7 +330,7 @@ func TestBashTool_ConfinedWorkspaceRefusesAnAbsoluteRedirectOutside(t *testing.T
 	t.Parallel()
 
 	workdir, outside, perms := writeOutsideAttempt(t)
-	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(perms, workdir)
 
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
@@ -352,7 +358,7 @@ func TestBashTool_ConfinedWorkspaceAllowsLegitimateCommandInsideBoundary(t *test
 
 	workdir, _, perms := writeOutsideAttempt(t)
 	target := filepath.Join(workdir, "out.txt")
-	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(perms, workdir)
 
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
@@ -372,7 +378,7 @@ func TestBashTool_ConfinedWorkspaceDynamicPathsRequirePermission(t *testing.T) {
 
 	workdir, outside, basePermissions := writeOutsideAttempt(t)
 	permissions := &recordingConfinedPermissions{confinedTestPermissions: basePermissions}
-	tool := NewBashTool(permissions, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(permissions, workdir)
 
 	commands := []string{
 		"echo $OUT",
@@ -410,7 +416,7 @@ func TestBashTool_ConfinedWorkspaceLiteralGlobCharactersDoNotRequirePermission(t
 
 	workdir, _, basePermissions := writeOutsideAttempt(t)
 	permissions := &recordingConfinedPermissions{confinedTestPermissions: basePermissions}
-	tool := NewBashTool(permissions, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(permissions, workdir)
 
 	for index, command := range []string{"echo '*'", `echo "?"`, `echo \*`, `echo "["`, `echo "prefix"suffix`} {
 		resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
@@ -516,7 +522,7 @@ func TestBashTool_ConfinedWorkspaceAllowsReadOnlyCommandsToReadOutside(t *testin
 	workdir, outside, perms := writeOutsideAttempt(t)
 	inside := filepath.Join(workdir, "f.txt")
 	require.NoError(t, os.WriteFile(inside, []byte("inside\n"), 0o644))
-	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(perms, workdir)
 
 	for _, command := range []string{
 		"cat " + outside,
@@ -550,7 +556,7 @@ func TestBashTool_ConfinedWorkspaceReadOnlyAllowanceIsNarrow(t *testing.T) {
 	t.Parallel()
 
 	workdir, outside, perms := writeOutsideAttempt(t)
-	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	tool := newConfinedTestBashTool(perms, workdir)
 
 	for _, command := range []string{
 		"cat x > " + outside,
