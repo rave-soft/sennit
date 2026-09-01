@@ -601,17 +601,18 @@ type fakeSpawner struct {
 	// path was still on disk at the moment Release was called — see
 	// Release and releaseSawWorktreeAt.
 	releaseSawWorktree map[string]bool
-	// releaseCtxErr records, per id, ctx.Err() at the moment Release was
-	// called with it — for tests proving a deferred/detached Release is
-	// handed a context that survives the caller's own cancellation rather
-	// than the caller's dead ctx itself.
-	releaseCtxErr map[string]error
-	spawnCount    int
-	spawnErr      error
-	runErr        error
-	blockSpawn    bool
-	spawnEntered  chan struct{}
-	spawnRelease  chan struct{}
+	// releaseCtxErr records, per id, ctx.Err() when Release returns. The
+	// entry value is kept separately because a bounded cleanup context ends
+	// before a deliberately hung Release returns.
+	releaseCtxErr         map[string]error
+	releaseCtxLiveAtEntry map[string]bool
+	releaseCtxHasDeadline map[string]bool
+	spawnCount            int
+	spawnErr              error
+	runErr                error
+	blockSpawn            bool
+	spawnEntered          chan struct{}
+	spawnRelease          chan struct{}
 	// sessionsErr, when set, is handed to every fakeSessions this spawner
 	// builds, so its Create/CreateTaskSession calls fail — for tests
 	// driving Manager.Create's rollback on a session-creation failure.
@@ -694,6 +695,16 @@ func (s *fakeSpawner) Release(ctx context.Context, id string) error {
 	_, statErr := os.Stat(id)
 	sawWorktree := statErr == nil
 
+	s.mu.Lock()
+	if s.releaseCtxLiveAtEntry == nil {
+		s.releaseCtxLiveAtEntry = make(map[string]bool)
+	}
+	if s.releaseCtxHasDeadline == nil {
+		s.releaseCtxHasDeadline = make(map[string]bool)
+	}
+	s.releaseCtxLiveAtEntry[id] = ctx.Err() == nil
+	_, s.releaseCtxHasDeadline[id] = ctx.Deadline()
+	s.mu.Unlock()
 	if s.releaseEntered != nil {
 		close(s.releaseEntered)
 	}
@@ -731,8 +742,20 @@ func (s *fakeSpawner) releaseCtxErrAt(id string) error {
 	return s.releaseCtxErr[id]
 }
 
+func (s *fakeSpawner) releaseCtxWasLiveAtEntry(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.releaseCtxLiveAtEntry[id]
+}
+
 // releaseSawWorktreeAt reports whether the worktree at id was still present
 // on disk at the moment Release was called for it.
+func (s *fakeSpawner) releaseCtxHadDeadlineAtEntry(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.releaseCtxHasDeadline[id]
+}
+
 func (s *fakeSpawner) releaseSawWorktreeAt(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

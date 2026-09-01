@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
@@ -226,6 +227,38 @@ func TestManager_CreateRollsBackOnlyWhatSucceeded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestManager_CreateRollbackUsesBoundedDetachedContext proves that a Create
+// rollback releases a handle after the request context is cancelled, but does
+// not let a hung release block forever. The fake only returns when its Release
+// context ends, so a return here requires the rollback's own deadline.
+func TestManager_CreateRollbackUsesBoundedDetachedContext(t *testing.T) {
+	repo := initRepo(t)
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+
+	spawner := newFakeSpawner(t)
+	spawner.sessionsErr = errors.New("session boom")
+	spawner.blockReleaseUntilCtxDone = true
+	spawner.afterSpawn = func(string) { cancelRequest() }
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:           thread.NewStoreForTest(t),
+		Spawner:         spawner,
+		RepoRoot:        repo,
+		WorktreeDir:     t.TempDir(),
+		RollbackTimeout: 25 * time.Millisecond,
+	})
+	shutdownManagerOnCleanup(t, mgr)
+
+	args := thread.CreateArgs{Name: "bounded-cleanup", Goal: "go", MergePolicy: thread.MergeManual}
+	worktreePath := filepath.Join(mgr.WorktreeDirForTest(), args.Name)
+	_, err := mgr.Create(requestCtx, args)
+	require.ErrorIs(t, err, spawner.sessionsErr)
+	require.Equal(t, 1, spawner.releases(worktreePath))
+	require.True(t, spawner.releaseCtxWasLiveAtEntry(worktreePath), "rollback cleanup must outlive the cancelled request")
+	require.True(t, spawner.releaseCtxHadDeadlineAtEntry(worktreePath), "rollback cleanup must have a deadline")
+	require.ErrorIs(t, spawner.releaseCtxErrAt(worktreePath), context.DeadlineExceeded, "hung Release must be cancelled by the rollback deadline")
 }
 
 // TestManager_CreateRollbackOrder_ReleasesBeforeRemovingWorktree pins the

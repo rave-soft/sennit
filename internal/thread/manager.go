@@ -75,6 +75,11 @@ type ManagerOptions struct {
 	// runs, RunComplete watchers) are bound to. Defaults to
 	// context.Background().
 	Context context.Context
+	// RollbackTimeout bounds cleanup after a failed Create or Activate.
+	// The cleanup context preserves caller values but not cancellation, so
+	// resources can still be released after a request aborts. Zero defaults
+	// to terminalBookkeepingTimeout.
+	RollbackTimeout time.Duration
 	// ParentApp is the workspace this Manager is attached to (see
 	// Attach) — the one a thread's own CreateArgs.ParentSessionID refers
 	// to a session in. A thread spawns its own isolated workspace
@@ -95,12 +100,13 @@ type ManagerOptions struct {
 // plumbing it needs to do that live in the [lifecycle] it holds; Manager
 // itself is the git/merge-specific overlay on top.
 type Manager struct {
-	store       Store
-	spawner     Spawner
-	repoRoot    string
-	worktreeDir string
-	ctx         context.Context
-	cancel      context.CancelFunc
+	store           Store
+	spawner         Spawner
+	repoRoot        string
+	worktreeDir     string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	rollbackTimeout time.Duration
 	// parentApp is the workspace this Manager is attached to — see
 	// ManagerOptions.ParentApp and resolveDeliveryTarget.
 	parentApp Workspace
@@ -139,12 +145,17 @@ func NewManager(opts ManagerOptions) *Manager {
 		// under the repo instead of using it as-is.
 		worktreeDir = filepath.Join(filepath.Dir(opts.RepoRoot), worktreeDir)
 	}
+	rollbackTimeout := opts.RollbackTimeout
+	if rollbackTimeout <= 0 {
+		rollbackTimeout = terminalBookkeepingTimeout
+	}
 	m := &Manager{
 		store:           opts.Store,
 		spawner:         opts.Spawner,
 		repoRoot:        opts.RepoRoot,
 		worktreeDir:     worktreeDir,
 		ctx:             ctx,
+		rollbackTimeout: rollbackTimeout,
 		parentApp:       opts.ParentApp,
 		shutdownStarted: make(chan struct{}),
 		shutdownDone:    make(chan struct{}),
@@ -300,8 +311,10 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	// creation step fails, remove both; leaving the branch behind makes a
 	// retry collide with stale state even though Create reported failure.
 	rb.push(func() {
-		m.removeWorktree(worktreePath)
-		if err := git.DeleteBranch(context.Background(), m.repoRoot, branch, true); err != nil {
+		cleanupCtx, cancel := m.detachForRollback(ctx)
+		defer cancel()
+		m.removeWorktree(cleanupCtx, worktreePath)
+		if err := git.DeleteBranch(cleanupCtx, m.repoRoot, branch, true); err != nil {
 			slog.Warn("Failed to remove branch after thread creation failure", "branch", branch, "error", err)
 		}
 	})
@@ -310,7 +323,11 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	if err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
-	rb.push(func() { m.releaseHandle(handle) })
+	rb.push(func() {
+		cleanupCtx, cancel := m.detachForRollback(ctx)
+		defer cancel()
+		m.releaseHandle(cleanupCtx, handle)
+	})
 	if err := m.ctx.Err(); err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
@@ -372,19 +389,24 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 }
 
 // removeWorktree and releaseHandle are the two rollbacks Create/Activate
-// push onto an [unwinder]. Both always run against context.Background(),
-// not the failed operation's own context: cleanup must still complete when
-// that context is the very thing that's canceled (the ctx.Err() checks
-// below), and a half-finished removal would leave exactly the orphaned
-// worktree `sennit gc` exists to report.
-func (m *Manager) removeWorktree(worktreePath string) {
-	if err := git.WorktreeRemove(context.Background(), m.repoRoot, worktreePath, true); err != nil {
+// push onto an [unwinder]. Their callers pass a detached, deadline-bound
+// context so cleanup survives cancellation of the failed operation without
+// letting a wedged git or spawner operation hold the caller indefinitely.
+// detachForRollback preserves request values while allowing rollback to
+// outlive request cancellation, and bounds every cleanup operation with the
+// manager's configured timeout.
+func (m *Manager) detachForRollback(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), m.rollbackTimeout)
+}
+
+func (m *Manager) removeWorktree(ctx context.Context, worktreePath string) {
+	if err := git.WorktreeRemove(ctx, m.repoRoot, worktreePath, true); err != nil {
 		slog.Error("Failed to remove worktree during rollback", "component", "thread", "error", err)
 	}
 }
 
-func (m *Manager) releaseHandle(handle Handle) {
-	if err := m.spawner.Release(context.Background(), handle.ID()); err != nil {
+func (m *Manager) releaseHandle(ctx context.Context, handle Handle) {
+	if err := m.spawner.Release(ctx, handle.ID()); err != nil {
 		slog.Error("Failed to release spawner handle during rollback", "component", "thread", "error", err)
 	}
 }
@@ -596,7 +618,11 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	// Activate returns before the thread is resting live again.
 	var rb unwinder
 	defer rb.unwind()
-	rb.push(func() { m.releaseHandle(handle) })
+	rb.push(func() {
+		cleanupCtx, cancel := m.detachForRollback(ctx)
+		defer cancel()
+		m.releaseHandle(cleanupCtx, handle)
+	})
 	if err := m.ctx.Err(); err != nil {
 		return Thread{}, err
 	}
