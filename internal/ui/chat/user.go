@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -37,6 +38,41 @@ type UserMessageItem struct {
 	// is the only thing separating "said" from "about to say" — see
 	// NewQueuedUserMessageItem.
 	queued bool
+	// reportExpanded opens a delegation's report, which renders as a
+	// row until it is (see user_delegation_report.go).
+	reportExpanded bool
+	// reportRenderedLines is the height of the last expanded-report
+	// render, so the footer that closes it can be found by row index
+	// from a mouse event. Zero when the item is not an expanded report.
+	reportRenderedLines int
+}
+
+var _ Expandable = (*UserMessageItem)(nil)
+
+// ToggleExpanded implements [Expandable]. Only a delegation report has
+// anything to open: an ordinary user message is what the person typed,
+// and it is shown whole.
+func (m *UserMessageItem) ToggleExpanded() bool {
+	if !m.isDelegationReport() {
+		return false
+	}
+	return m.toggleReportExpanded()
+}
+
+// HandleMouseClick implements MouseClickable. It reports that the click
+// landed on the report's own control so the caller can run the generic
+// [Expandable] path; toggling here would double-toggle.
+func (m *UserMessageItem) HandleMouseClick(btn ansi.MouseButton, _, y int) bool {
+	if btn != ansi.MouseLeft || !m.isDelegationReport() {
+		return false
+	}
+	return m.reportHit(y)
+}
+
+// HoverableAt matches what HandleMouseClick treats as the click target,
+// so the row lights up exactly where clicking does something.
+func (m *UserMessageItem) HoverableAt(_, y, _ int) bool {
+	return m.isDelegationReport() && m.reportHit(y)
 }
 
 // NewUserMessageItem creates a new UserMessageItem.
@@ -150,6 +186,16 @@ func (m *UserMessageItem) RawRender(width int) string {
 
 	msgContent := strings.TrimSpace(m.message.Content().Text)
 
+	// A delegation's report is a row until someone opens it, and none of
+	// its text reaches the window before that — see
+	// user_delegation_report.go.
+	if m.isDelegationReport() {
+		content = m.renderReport(msgContent, cappedWidth)
+		height = lipgloss.Height(content)
+		m.setCachedRender(content, cappedWidth, height)
+		return m.renderHighlighted(content, cappedWidth, height)
+	}
+
 	// Check if this is a skill invocation (loaded_skill XML)
 	if strings.HasPrefix(msgContent, "<loaded_skill>") {
 		content = m.withTurnSeparator(m.renderSkillInvocation(msgContent, cappedWidth), cappedWidth)
@@ -158,18 +204,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
-	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
-	mu := common.LockMarkdownRenderer(renderer)
-
-	mu.Lock()
-	result, err := renderer.Render(msgContent)
-	mu.Unlock()
-
-	if err != nil {
-		content = msgContent
-	} else {
-		content = strings.TrimSuffix(result, "\n")
-	}
+	content = m.renderMarkdown(msgContent, cappedWidth)
 
 	if len(m.message.BinaryContent()) > 0 {
 		attachmentsStr := m.renderAttachments(cappedWidth)
@@ -186,7 +221,54 @@ func (m *UserMessageItem) RawRender(width int) string {
 	return m.renderHighlighted(content, cappedWidth, height)
 }
 
-// renderSkillInvocation renders a loaded_skill XML as a special UI element.
+// renderReport renders a delegation report: its header row, and — once
+// opened — the report itself under it, closed by the footer control.
+func (m *UserMessageItem) renderReport(text string, width int) string {
+	m.reportRenderedLines = 0
+	body := m.renderReportHeader(width)
+	if m.reportExpanded {
+		body += "\n\n" + m.renderReportBody(text, width) + "\n" + m.renderReportFooter(width)
+	}
+	content := m.withTurnSeparator(body, width)
+	if m.reportExpanded {
+		m.reportRenderedLines = lipgloss.Height(content)
+	}
+	return content
+}
+
+// renderReportBody renders an opened report: its header block as
+// written, then the answer through the markdown renderer.
+//
+// The split matters. The header is a column of "key: value" lines, and
+// markdown reflows single newlines into a paragraph — id, name, goal and
+// status ran together into one unreadable sentence. The answer below the
+// blank line is the delegate's own prose, which is markdown and reads
+// like it. Nothing is dropped: a report is the evidence for what a
+// delegation did, and deciding on the reader's behalf which half of it
+// they may see is not this function's business.
+func (m *UserMessageItem) renderReportBody(text string, width int) string {
+	header, answer, found := strings.Cut(strings.TrimSpace(text), "\n\n")
+	if !found {
+		return m.sty.Messages.Notice.Render(header)
+	}
+	return m.sty.Messages.Notice.Render(header) + "\n\n" + m.renderMarkdown(answer, width)
+}
+
+// renderMarkdown renders text through the shared markdown renderer,// renderMarkdown renders text through the shared markdown renderer,
+// falling back to the raw text when it cannot.
+func (m *UserMessageItem) renderMarkdown(text string, width int) string {
+	renderer := common.MarkdownRenderer(m.sty, width)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	result, err := renderer.Render(text)
+	mu.Unlock()
+	if err != nil {
+		return text
+	}
+	return strings.TrimSuffix(result, "\n")
+}
+
+// renderSkillInvocation renders a loaded_skill XML as a special UI element.// renderSkillInvocation renders a loaded_skill XML as a special UI element.
 func (m *UserMessageItem) renderSkillInvocation(content string, width int) string {
 	var skill skillInvocation
 	if err := xml.Unmarshal([]byte(content), &skill); err != nil {

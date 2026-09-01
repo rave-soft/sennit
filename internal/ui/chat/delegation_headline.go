@@ -2,6 +2,25 @@ package chat
 
 import "strings"
 
+// The disclosure triangles and hint wording every collapsible block in
+// the chat shares: the compaction row (assistant_summary.go), a
+// delegation report (user.go), and the session panel's own collapsible
+// sections, which is where the triangles come from (panelSectionHeaderText).
+// One affordance, spelled one way, so a reader who has opened one row
+// knows how to open the next.
+const (
+	collapsedGlyph = "▸"
+	expandedGlyph  = "▾"
+	// The hints sit on lines of their own rather than trailing the
+	// header: trailing, they read as a footnote to whatever is beside
+	// them and get truncated first on a narrow window. They name
+	// clicking alone - the `space` binding works only while the chat
+	// list itself holds focus, which is not where someone reading a
+	// reply is.
+	expandHint   = "Click to expand"
+	collapseHint = "Click to collapse"
+)
+
 // DelegationHeadline is [delegationHeadline] for the views outside this
 // package that show a delegation as a name plus one line of what it was
 // asked to do: the session panel's agents and threads sections, and the

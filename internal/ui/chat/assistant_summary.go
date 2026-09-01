@@ -28,13 +28,6 @@ import (
 // one while leaving the context uncompacted.
 
 const (
-	// summaryCollapsedGlyph and summaryExpandedGlyph are the disclosure
-	// triangles the session panel's collapsible sections already use
-	// (see panelSectionHeaderText), so a collapsed summary reads as the
-	// same affordance rather than a new one.
-	summaryCollapsedGlyph = "▸"
-	summaryExpandedGlyph  = "▾"
-
 	// summaryHeaderLabel is the label of a finished compaction;
 	// summaryRunningLabel is the same row while the pass is still
 	// running. A summarize streams its text like any other reply, so the
@@ -44,19 +37,6 @@ const (
 	// compaction that had not happened.
 	summaryHeaderLabel  = "Context compacted"
 	summaryRunningLabel = "Compacting context"
-	// summaryHeaderHint and summaryCollapseHint sit on lines of their own
-	// rather than in parentheses after the counts. Trailing on the header
-	// line the hint read as a footnote to the numbers and got truncated
-	// first on a narrow window - and it was the only thing on the row
-	// telling anyone the row opened at all.
-	//
-	// The wording is the one every other expandable block in the chat
-	// uses (see expandableBodyContent), and it names clicking alone: the
-	// `space` binding works only while the chat list itself holds focus,
-	// which is not where a person reading a reply usually is, so
-	// advertising it here promised a key that mostly does nothing.
-	summaryHeaderHint   = "Click to expand"
-	summaryCollapseHint = "Click to collapse"
 )
 
 // isSummary reports whether this item renders a summarize pass's output.
@@ -93,9 +73,9 @@ func (a *AssistantMessageItem) toggleSummaryExpanded() bool {
 // message predates them or the provider reported no usage; see
 // [message.Message.SummarySavings].
 func (a *AssistantMessageItem) renderSummaryHeader(width int) string {
-	glyph := summaryCollapsedGlyph
+	glyph := collapsedGlyph
 	if a.summaryExpanded {
-		glyph = summaryExpandedGlyph
+		glyph = expandedGlyph
 	}
 	label := summaryHeaderLabel
 	if !a.message.IsFinished() {
@@ -118,7 +98,7 @@ func (a *AssistantMessageItem) renderSummaryHeader(width int) string {
 	// The hint indents under the label rather than under the glyph, so
 	// the disclosure triangle stays the leftmost thing on the row and
 	// the two lines read as one control.
-	hint := "  " + summaryHeaderHint
+	hint := "  " + expandHint
 	if width > 0 {
 		hint = ansi.Truncate(hint, width, "…")
 	}
@@ -148,7 +128,7 @@ func (a *AssistantMessageItem) summaryClickHeight() int {
 // long compaction: the person has scrolled past the row they opened, and
 // every other expandable block in the chat ends with this same line.
 func (a *AssistantMessageItem) renderSummaryFooter(width int) string {
-	hint := " " + summaryCollapseHint
+	hint := " " + collapseHint
 	if width > 0 {
 		hint = ansi.Truncate(hint, width, "…")
 	}

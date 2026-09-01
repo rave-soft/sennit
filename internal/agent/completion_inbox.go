@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 // TaskCompletion is the structured event delivered into a session's
@@ -458,7 +459,7 @@ func formatTaskCompletion(c TaskCompletion) string {
 		return formatDelegationMessage(c)
 	}
 	var b strings.Builder
-	b.WriteString("[system-generated delegation report - not user input]\n")
+	b.WriteString(message.DelegationReportPrefix + "\n")
 	fmt.Fprintf(&b, "A background %s has finished.\n", c.Kind)
 	writeRepeatNotice(&b, c)
 	writeOrphanTrail(&b, c)
@@ -524,7 +525,7 @@ func writeOrphanTrail(b *strings.Builder, c TaskCompletion) {
 // apart at a glance to decide whether a reply is even expected.
 func formatDelegationMessage(c TaskCompletion) string {
 	var b strings.Builder
-	b.WriteString("[system-generated delegation report - not user input]\n")
+	b.WriteString(message.DelegationReportPrefix + "\n")
 	fmt.Fprintf(&b, "A running background %s is asking you something.\n", c.Kind)
 	writeOrphanTrail(&b, c)
 	fmt.Fprintf(&b, "id: %s\n", c.DelegationID)

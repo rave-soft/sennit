@@ -55,8 +55,8 @@ func TestSummaryRendersCollapsedByDefault(t *testing.T) {
 	require.NotContains(t, out, "deciding what to keep",
 		"a collapsed summary must not render its reasoning either")
 	require.Contains(t, out, summaryHeaderLabel)
-	require.Contains(t, out, summaryCollapsedGlyph)
-	require.Contains(t, out, summaryHeaderHint,
+	require.Contains(t, out, collapsedGlyph)
+	require.Contains(t, out, expandHint,
 		"the collapsed row must say how it opens")
 }
 
@@ -106,9 +106,9 @@ func TestSummaryExpandRevealsBody(t *testing.T) {
 	require.True(t, exp.ToggleExpanded(), "first toggle must report expanded")
 	out := item.Render(80)
 	require.Contains(t, out, "ZZQUUX", "an expanded summary must show its body")
-	require.Contains(t, out, summaryExpandedGlyph,
+	require.Contains(t, out, expandedGlyph,
 		"the header must flip to the open disclosure triangle")
-	require.NotContains(t, out, summaryHeaderHint,
+	require.NotContains(t, out, expandHint,
 		"an already-open row must not advertise the key that opens it")
 
 	require.False(t, exp.ToggleExpanded(), "second toggle must report collapsed")
@@ -236,9 +236,9 @@ func TestSummaryHintIsItsOwnLine(t *testing.T) {
 	lines := strings.Split(item.Render(80), "\n")
 	require.Len(t, lines, 2)
 	require.Contains(t, lines[0], summaryHeaderLabel)
-	require.NotContains(t, lines[0], summaryHeaderHint,
+	require.NotContains(t, lines[0], expandHint,
 		"the hint must not ride along on the line the counts are truncated from")
-	require.Contains(t, lines[1], summaryHeaderHint)
+	require.Contains(t, lines[1], expandHint)
 }
 
 // TestSummaryOpensOnAClick is the fix for the complaint that started
@@ -331,7 +331,7 @@ func TestExpandedSummaryEndsWithACollapseControl(t *testing.T) {
 
 	out := item.Render(80)
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	require.Contains(t, lines[len(lines)-1], summaryCollapseHint,
+	require.Contains(t, lines[len(lines)-1], collapseHint,
 		"the collapse control is the last line of an opened summary")
 
 	// And it is a real control, not a caption: the click target covers it.
@@ -354,6 +354,6 @@ func TestCollapsedSummaryHasNoFooter(t *testing.T) {
 	item := NewAssistantMessageItem(&sty, summaryMessage("s1", 47000, 8000)).(*AssistantMessageItem)
 
 	out := item.Render(80)
-	require.NotContains(t, out, summaryCollapseHint)
+	require.NotContains(t, out, collapseHint)
 	require.Equal(t, -1, item.summaryFooterLine())
 }
