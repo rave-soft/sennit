@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -48,19 +49,31 @@ func (s *ConfigStore) ReserveMCPTokenMutation(name string, expected MCPConfig) (
 // SetMCPToken conditionally persists and publishes a token if reservation is
 // still the exact owner of the same enabled MCP configuration.
 func (s *ConfigStore) SetMCPToken(reservation *MCPTokenMutation, token *oauth.Token) (bool, error) {
-	return s.mutateMCPToken(reservation, nil, token, false)
+	ctx, cancel := configWriteContext()
+	defer cancel()
+	return s.SetMCPTokenContext(ctx, reservation, token)
+}
+
+func (s *ConfigStore) SetMCPTokenContext(ctx context.Context, reservation *MCPTokenMutation, token *oauth.Token) (bool, error) {
+	return s.mutateMCPToken(ctx, reservation, nil, token, false)
 }
 
 // ClearMCPToken conditionally clears expectedToken. In addition to ownership,
 // the current token must still be exactly the token the failing attempt used.
 func (s *ConfigStore) ClearMCPToken(reservation *MCPTokenMutation, expectedToken *oauth.Token) (bool, error) {
-	return s.mutateMCPToken(reservation, expectedToken, nil, true)
+	ctx, cancel := configWriteContext()
+	defer cancel()
+	return s.mutateMCPToken(ctx, reservation, expectedToken, nil, true)
 }
 
-func (s *ConfigStore) mutateMCPToken(reservation *MCPTokenMutation, clearExpected, token *oauth.Token, clear bool) (bool, error) {
-	s.reloadMu.Lock()
+func (s *ConfigStore) mutateMCPToken(ctx context.Context, reservation *MCPTokenMutation, clearExpected, token *oauth.Token, clear bool) (bool, error) {
+	if err := lockMutexContext(ctx, &s.reloadMu); err != nil {
+		return false, err
+	}
 	defer s.reloadMu.Unlock()
-	s.writeMu.Lock()
+	if err := lockMutexContext(ctx, &s.writeMu); err != nil {
+		return false, err
+	}
 	defer s.writeMu.Unlock()
 
 	expectedToken := reservation.expectedToken
@@ -89,7 +102,7 @@ func (s *ConfigStore) mutateMCPToken(reservation *MCPTokenMutation, clearExpecte
 
 	mutated := false
 	skipReason := ""
-	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+	err := s.atomicWriteContext(ctx, scope, func(data []byte) ([]byte, error) {
 		if scope == ScopeGlobal {
 			// The full declaration is expected to live in this file, so the
 			// identity guard (command/url/etc. unchanged since reservation)

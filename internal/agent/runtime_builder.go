@@ -76,7 +76,7 @@ type runtimeConfigSnapshot struct {
 	loadedPaths             []string
 	staleness               config.StalenessResult
 	reserveMCPTokenMutation func(string, config.MCPConfig) (config.MCPTokenMutation, bool)
-	setMCPToken             func(*config.MCPTokenMutation, *oauth.Token) (bool, error)
+	setMCPToken             func(context.Context, *config.MCPTokenMutation, *oauth.Token) (bool, error)
 	clearMCPToken           func(*config.MCPTokenMutation, *oauth.Token) (bool, error)
 }
 
@@ -108,8 +108,8 @@ func (s runtimeConfigSnapshot) ReserveMCPTokenMutation(name string, expected con
 	return s.reserveMCPTokenMutation(name, expected)
 }
 
-func (s runtimeConfigSnapshot) SetMCPToken(reservation *config.MCPTokenMutation, token *oauth.Token) (bool, error) {
-	return s.setMCPToken(reservation, token)
+func (s runtimeConfigSnapshot) SetMCPTokenContext(ctx context.Context, reservation *config.MCPTokenMutation, token *oauth.Token) (bool, error) {
+	return s.setMCPToken(ctx, reservation, token)
 }
 
 func (s runtimeConfigSnapshot) ClearMCPToken(reservation *config.MCPTokenMutation, expectedToken *oauth.Token) (bool, error) {
@@ -548,7 +548,7 @@ func (b *runtimeBuilder) runtimeConfigSnapshot() runtimeConfigSnapshot {
 		loadedPaths:             published.LoadedPaths,
 		staleness:               published.Staleness,
 		reserveMCPTokenMutation: b.cfg.ReserveMCPTokenMutation,
-		setMCPToken:             b.cfg.SetMCPToken,
+		setMCPToken:             b.cfg.SetMCPTokenContext,
 		clearMCPToken:           b.cfg.ClearMCPToken,
 	}
 }

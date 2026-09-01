@@ -35,7 +35,7 @@ type ConfigProvider interface {
 	Resolver() config.VariableResolver
 	Overrides() config.RuntimeOverrides
 	ReserveMCPTokenMutation(name string, expected config.MCPConfig) (config.MCPTokenMutation, bool)
-	SetMCPToken(reservation *config.MCPTokenMutation, token *oauth.Token) (bool, error)
+	SetMCPTokenContext(context.Context, *config.MCPTokenMutation, *oauth.Token) (bool, error)
 	ClearMCPToken(reservation *config.MCPTokenMutation, expectedToken *oauth.Token) (bool, error)
 }
 
@@ -137,7 +137,7 @@ type Registry struct {
 
 	tokenWrites        map[tokenWriteOwner]map[*tokenWrite]struct{}
 	tokenReservations  map[tokenWriteOwner]*config.MCPTokenMutation
-	tokenCommit        func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error
+	tokenCommit        func(context.Context, ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error
 	beforeTokenPersist func()
 
 	allTools     *csync.Map[string, []*Tool]
@@ -201,8 +201,8 @@ func NewRegistry() *Registry {
 	r.runAuth = r.runAuthFlow
 	r.ping = r.pingSession
 	r.listResources = getResources
-	r.tokenCommit = func(cfg ConfigProvider, reservation *config.MCPTokenMutation, token *oauth.Token) error {
-		_, err := cfg.SetMCPToken(reservation, token)
+	r.tokenCommit = func(ctx context.Context, cfg ConfigProvider, reservation *config.MCPTokenMutation, token *oauth.Token) error {
+		_, err := cfg.SetMCPTokenContext(ctx, reservation, token)
 		return err
 	}
 	return r
@@ -297,7 +297,10 @@ func (r *Registry) Close(ctx context.Context) error {
 	}
 }
 
-func (r *Registry) close(ctx context.Context) {
+func (r *Registry) close(_ context.Context) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), lifecycleCleanupTimeout)
+	defer cancel()
+
 	// Invalidate and detach everything before any potentially blocking close.
 	r.publishMu.Lock()
 	if r.closing {
@@ -359,15 +362,15 @@ func (r *Registry) close(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	for name, session := range sessions {
-		wg.Go(func() { r.closeSessionContext(ctx, name, session) })
+		wg.Go(func() { r.closeSessionContext(cleanupCtx, name, session) })
 	}
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-ctx.Done():
+	case <-cleanupCtx.Done():
 	}
-	_ = waitTokenWrites(ctx, writeWaiters)
+	_ = waitTokenWrites(cleanupCtx, writeWaiters)
 	r.broker.Shutdown()
 }
 

@@ -111,7 +111,9 @@ func (r *Registry) persistOAuthToken(_ context.Context, cfg ConfigProvider, name
 	if !owns || !ok {
 		return
 	}
-	if err := r.tokenCommit(cfg, reservation, tok); err != nil {
+	commitCtx, cancel := context.WithTimeout(context.Background(), lifecycleCleanupTimeout)
+	defer cancel()
+	if err := r.tokenCommit(commitCtx, cfg, reservation, tok); err != nil {
 		slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
 	}
 }

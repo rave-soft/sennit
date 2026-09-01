@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -105,12 +106,14 @@ func (r *Registry) teardown(name string) {
 	r.publishMu.Unlock()
 	r.cancelAuthFlow(name)
 	r.detachCurrentAuth(name).Close()
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), lifecycleCleanupTimeout)
+	defer cancel()
 	if hasSession {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), lifecycleCleanupTimeout)
-		defer cancel()
 		r.closeSessionContext(cleanupCtx, name, session)
 	}
-	_ = waitTokenWrites(context.Background(), waiters)
+	if err := waitTokenWrites(cleanupCtx, waiters); err != nil {
+		slog.Warn("Timed out waiting for MCP OAuth token writes during teardown", "name", name, "error", err)
+	}
 }
 
 func maybeTimeoutErr(err error, timeout time.Duration) error {

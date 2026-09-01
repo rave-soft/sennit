@@ -345,11 +345,17 @@ func (s *ConfigStore) LoadedPaths() []string {
 // token exchange) must resolve the path via ConfigPath and lock it with
 // s.file.lock explicitly rather than going through atomicWrite.
 func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, error)) error {
+	ctx, cancel := configWriteContext()
+	defer cancel()
+	return s.atomicWriteContext(ctx, scope, fn)
+}
+
+func (s *ConfigStore) atomicWriteContext(ctx context.Context, scope Scope, fn func(current []byte) ([]byte, error)) error {
 	path, err := s.ConfigPath(scope)
 	if err != nil {
 		return err
 	}
-	return s.file.atomicWrite(path, fn)
+	return s.file.atomicWrite(ctx, path, fn)
 }
 
 // RemoveRuntimeConfigField deletes key from the runtime config files that
@@ -386,7 +392,8 @@ func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		if err := s.file.atomicWrite(path, func(data []byte) ([]byte, error) {
+		ctx, cancel := configWriteContext()
+		err := s.file.atomicWrite(ctx, path, func(data []byte) ([]byte, error) {
 			if !gjson.GetBytes(data, key).Exists() {
 				return nil, errAtomicWriteNoop
 			}
@@ -395,7 +402,9 @@ func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 				return nil, fmt.Errorf("failed to delete config field %s: %w", key, err)
 			}
 			return []byte(value), nil
-		}); err != nil {
+		})
+		cancel()
+		if err != nil {
 			slog.Warn("Failed to remove runtime config field", "key", key, "path", path, "error", err)
 		} else {
 			wrote = true
@@ -715,7 +724,8 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 		// the branch that actually hands back new bytes, and wrote is
 		// driven off that instead of off the call's error.
 		var changed bool
-		if err := s.file.atomicWrite(path, func(data []byte) ([]byte, error) {
+		ctx, cancel := configWriteContext()
+		err := s.file.atomicWrite(ctx, path, func(data []byte) ([]byte, error) {
 			if !gjson.GetBytes(data, key).Exists() {
 				return nil, errAtomicWriteNoop
 			}
@@ -725,7 +735,9 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 			}
 			changed = true
 			return []byte(v), nil
-		}); err != nil {
+		})
+		cancel()
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", path, err))
 		} else if changed {
 			wrote = true

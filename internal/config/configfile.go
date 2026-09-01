@@ -13,12 +13,13 @@ import (
 	"github.com/rave-soft/sennit/internal/lock"
 )
 
-// configLockDeadline bounds how long lockConfig waits for the
-// cross-process flock before giving up. A few seconds is plenty for
-// honest contention; longer suggests something is wedged.
 const configLockDeadline = 5 * time.Second
 
 var errAtomicWriteNoop = errors.New("config mutation is a no-op")
+
+func configWriteContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), configLockDeadline)
+}
 
 // configFile owns the in-process serialization of config file writes. Its
 // mu is the only state it holds: everything else a write needs (which path,
@@ -43,14 +44,31 @@ type configFile struct {
 // The returned release function drops both locks. Callers must call it as
 // soon as the file access is complete — no I/O should be performed while
 // the lock is held.
-func (f *configFile) lock(path string) (func(), error) {
-	f.mu.Lock()
+type tryLocker interface {
+	TryLock() bool
+	Lock()
+	Unlock()
+}
+
+func lockMutexContext(ctx context.Context, mu tryLocker) error {
+	for !mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
+	return nil
+}
+
+func (f *configFile) lock(ctx context.Context, path string) (func(), error) {
+	if err := lockMutexContext(ctx, &f.mu); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		f.mu.Unlock()
 		return nil, fmt.Errorf("create config directory: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), configLockDeadline)
-	defer cancel()
 	release, err := lock.File(ctx, path+".lock")
 	if err != nil {
 		f.mu.Unlock()
@@ -66,8 +84,8 @@ func (f *configFile) lock(path string) (func(), error) {
 // config file mutation at path. The fn callback receives the current file
 // contents (raw bytes, or {} if the file is missing) and must return the
 // new contents. fn must be pure — no I/O, no network calls.
-func (f *configFile) atomicWrite(path string, fn func(current []byte) ([]byte, error)) error {
-	unlock, err := f.lock(path)
+func (f *configFile) atomicWrite(ctx context.Context, path string, fn func(current []byte) ([]byte, error)) error {
+	unlock, err := f.lock(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -90,5 +108,8 @@ func (f *configFile) atomicWrite(path string, fn func(current []byte) ([]byte, e
 		return err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return fsext.AtomicWriteFile(path, newData, 0o600)
 }

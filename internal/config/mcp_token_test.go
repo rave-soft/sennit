@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -83,6 +85,53 @@ func readFileOrEmpty(t *testing.T, path string) []byte {
 	}
 	require.NoError(t, err)
 	return data
+}
+
+func TestSetMCPTokenContextHonorsCallerDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := `{"mcp":{"server":{"type":"http","oauth":true}}}`
+	require.NoError(t, os.WriteFile(path, []byte(seed), 0o600))
+	store := NewStore(StoreOptions{
+		Config:         &Config{MCP: MCPs{"server": {Type: MCPHttp, OAuth: true}}},
+		GlobalDataPath: path,
+	})
+	reservation, ok := store.ReserveMCPTokenMutation("server", store.Config().MCP["server"])
+	require.True(t, ok)
+	unlock, err := lock.File(t.Context(), path+".lock")
+	require.NoError(t, err)
+	defer unlock()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	_, err = store.SetMCPTokenContext(ctx, &reservation, &oauth.Token{AccessToken: "token"})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestSetMCPTokenLegacyWriteHasLockDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := `{"mcp":{"server":{"type":"http","oauth":true}}}`
+	require.NoError(t, os.WriteFile(path, []byte(seed), 0o600))
+	store := NewStore(StoreOptions{
+		Config:         &Config{MCP: MCPs{"server": {Type: MCPHttp, OAuth: true}}},
+		GlobalDataPath: path,
+	})
+	reservation, ok := store.ReserveMCPTokenMutation("server", store.Config().MCP["server"])
+	require.True(t, ok)
+	unlock, err := lock.File(t.Context(), path+".lock")
+	require.NoError(t, err)
+	defer unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := store.SetMCPToken(&reservation, &oauth.Token{AccessToken: "token"})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(configLockDeadline + time.Second):
+		t.Fatal("legacy MCP token write did not respect the config lock deadline")
+	}
 }
 
 // TestSetMCPToken_GloballyDeclaredServerStillWritesGlobal is a control for

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/configtest"
+	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
 	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 	"github.com/rave-soft/sennit/internal/testenv"
@@ -1155,7 +1157,7 @@ func TestOAuthTokenPersistenceCurrentOwnerPersistsOnce(t *testing.T) {
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
 	var writes atomic.Int32
-	r.tokenCommit = func(_ ConfigProvider, _ *config.MCPTokenMutation, token *oauth.Token) error {
+	r.tokenCommit = func(_ context.Context, _ ConfigProvider, _ *config.MCPTokenMutation, token *oauth.Token) error {
 		writes.Add(1)
 		require.Equal(t, "fresh", token.AccessToken)
 		return nil
@@ -1179,7 +1181,7 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 			release := make(chan struct{})
 			r.beforeTokenPersist = func() { close(blocked); <-release }
 			var writes atomic.Int32
-			r.tokenCommit = func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error {
+			r.tokenCommit = func(context.Context, ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error {
 				writes.Add(1)
 				return nil
 			}
@@ -1212,31 +1214,59 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 	}
 }
 
-func TestOAuthTokenPersistenceReservedWriteDelaysTeardown(t *testing.T) {
+func TestOAuthTokenPersistenceBoundedWriteLetsTeardownFinish(t *testing.T) {
 	const name = "token-owner"
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := `{"mcp":{"token-owner":{"type":"http","oauth":true}}}`
+	require.NoError(t, os.WriteFile(path, []byte(seed), 0o600))
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}}, configtest.WithGlobalDataPath(path))
+	unlock, err := lock.File(t.Context(), path+".lock")
+	require.NoError(t, err)
+	defer unlock()
+
 	r := NewRegistry()
-	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	r.tokenCommit = func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error {
-		close(started)
-		<-release
-		return nil
-	}
-	go r.persistOAuthToken(context.Background(), cfg, name, owner, &oauth.Token{AccessToken: "fresh"})
-	<-started
+	writeDone := make(chan struct{})
+	go func() {
+		r.persistOAuthToken(context.Background(), cfg, name, owner, &oauth.Token{AccessToken: "fresh"})
+		close(writeDone)
+	}()
+	require.Eventually(t, func() bool {
+		r.publishMu.Lock()
+		defer r.publishMu.Unlock()
+		return len(r.tokenWriteWaitersLocked(name)) == 1
+	}, time.Second, time.Millisecond)
+
 	teardownDone := make(chan struct{})
 	go func() { r.teardown(name); close(teardownDone) }()
 	select {
 	case <-teardownDone:
-		t.Fatal("teardown returned while a reserved token write was in flight")
-	default:
+	case <-time.After(3 * time.Second):
+		t.Fatal("teardown did not finish after token commit deadline")
 	}
-	close(release)
-	<-teardownDone
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("token commit remained blocked after its deadline")
+	}
+}
+
+func TestOAuthTokenPersistenceCancelledCallerStillCommits(t *testing.T) {
+	const name = "token-owner"
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := `{"mcp":{"token-owner":{"type":"http","oauth":true}}}`
+	require.NoError(t, os.WriteFile(path, []byte(seed), 0o600))
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}}, configtest.WithGlobalDataPath(path))
+	r := NewRegistry()
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.updateStateFor(name, owner, StateStarting, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	r.persistOAuthToken(ctx, cfg, name, owner, &oauth.Token{AccessToken: "fresh"})
+	require.Equal(t, "fresh", cfg.Config().MCP[name].OAuthToken.AccessToken)
 }
 
 func TestOwnedAuthHandlerSharedPublicationAndSessionClosesOnce(t *testing.T) {

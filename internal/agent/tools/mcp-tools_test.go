@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
@@ -22,7 +23,7 @@ func (s *stubMCPConfigProvider) ReserveMCPTokenMutation(string, config.MCPConfig
 	return config.MCPTokenMutation{}, false
 }
 
-func (s *stubMCPConfigProvider) SetMCPToken(*config.MCPTokenMutation, *oauth.Token) (bool, error) {
+func (s *stubMCPConfigProvider) SetMCPTokenContext(context.Context, *config.MCPTokenMutation, *oauth.Token) (bool, error) {
 	return false, nil
 }
 
