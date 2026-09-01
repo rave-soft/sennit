@@ -120,9 +120,11 @@ internal/
     references are `case` arms in `internal/herdr/translate.go` that can never
     match. `proto.ConfigProviderKeyRequest` — the `config.Scope` exception —
     has zero references outside `proto` itself.
-    `proto.LSPClientInfo` is an alias whose only mention outside `proto` is a
-    swagger `@name` comment in `lsp/info.go`; `workspace.go` aliases
-    `lsp.ClientInfo` directly instead.
+    `proto.LSPClientInfo` is a live frontend DTO. `workspace.LSPClientInfo`
+    aliases it, and `internal/workspace/appws` converts runtime LSP state into
+    this data-only shape before the UI receives it.
+  - `proto.Session` was unused and has been removed. `proto.Todo` remains an
+    alias of `session.Todo` in `proto/lsp.go` to preserve its type identity.
   - So: add a DTO to `proto` only for something that genuinely crosses the
     workspace/UI boundary as data, the way `proto.Thread` does. Do not add one
     because a type "might be sent somewhere" — nothing is sent anywhere.

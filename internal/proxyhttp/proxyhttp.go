@@ -40,6 +40,13 @@ func ValidateProxy(proxyURL string) error {
 	return err
 }
 
+func OptionalClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
+	if proxyURL == "" {
+		return &http.Client{Timeout: timeout}, nil
+	}
+	return NewClient(proxyURL, timeout)
+}
+
 func NewClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
 	if proxyURL == Direct {
 		transport := http.DefaultTransport.(*http.Transport).Clone()

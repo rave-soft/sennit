@@ -1,6 +1,12 @@
 package proto
 
-import "time"
+import (
+	"time"
+
+	"github.com/rave-soft/sennit/internal/session"
+)
+
+type Todo = session.Todo
 
 // LSPState is how far along an LSP server is, as the UI needs to know it.
 //

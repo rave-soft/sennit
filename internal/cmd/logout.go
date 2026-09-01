@@ -91,7 +91,12 @@ sennit logout codex
 // returns nil on the common success path, confirmed by a minimal cmp.Or
 // repro outside this codebase. Spelling it out avoids the false positive
 // without weakening the check.
-func logoutProvider(ws workspace.ConfigAccessor, providerID, displayName string, extraFields ...string) error {
+type logoutWorkspace interface {
+	workspace.ConfigFieldEditor
+	workspace.AccountsPurger
+}
+
+func logoutProvider(ws logoutWorkspace, providerID, displayName string, extraFields ...string) error {
 	fields := append([]string{
 		"providers." + providerID + ".api_key",
 		"providers." + providerID + ".oauth",
@@ -124,18 +129,18 @@ func logoutProvider(ws workspace.ConfigAccessor, providerID, displayName string,
 	return nil
 }
 
-func logoutCopilot(ws workspace.ConfigAccessor) error {
+func logoutCopilot(ws logoutWorkspace) error {
 	return logoutProvider(ws, "copilot", "GitHub Copilot")
 }
 
 // logoutCodex drops the Codex credentials. The discovered model list goes
 // with them: it is per-account, so leaving it behind would advertise models
 // the next account may not have.
-func logoutCodex(ws workspace.ConfigAccessor) error {
+func logoutCodex(ws logoutWorkspace) error {
 	return logoutProvider(ws, "codex", "OpenAI Codex", "providers.codex.models")
 }
 
-func pickLoggedInProvider(ws workspace.ConfigAccessor) string {
+func pickLoggedInProvider(ws workspace.ConfigReader) string {
 	cfg := ws.Config()
 	if cfg == nil {
 		fmt.Println(logoutPromptStyle.Render("You are not logged in to any platform."))

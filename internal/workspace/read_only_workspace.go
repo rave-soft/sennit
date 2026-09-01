@@ -231,6 +231,15 @@ func (w *readOnlyWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSe
 	if rootSessionID != w.sessionID {
 		return nil, w.scopeError(rootSessionID)
 	}
+	for _, sessionID := range sessionIDs {
+		allowed, err := w.allowsSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, w.scopeError(sessionID)
+		}
+	}
 	return w.ws.ListMessagesBySessionIDs(ctx, w.sessionID, generation, sessionIDs)
 }
 

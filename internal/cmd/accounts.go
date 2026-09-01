@@ -83,7 +83,11 @@ var accountsUseCmd = &cobra.Command{
 
 // runAuthUse is accountsUseCmd's RunE body, factored out so a test can drive it
 // directly without a *cobra.Command.
-func runAuthUse(ws workspace.ConfigAccessor, providerID, accountArg string) error {
+func runAuthUse(ws interface {
+	workspace.AccountLister
+	workspace.AccountActivator
+}, providerID, accountArg string,
+) error {
 	account, err := findAuthAccount(ws, providerID, accountArg)
 	if err != nil {
 		return err
@@ -144,7 +148,11 @@ var accountsRemoveCmd = &cobra.Command{
 // ws.RemoveAccount returns (e.g. its own "last account" refusal, which
 // already names `sennit logout`) is propagated as-is, not swallowed or
 // replaced with a competing message.
-func runAuthRemove(ws workspace.ConfigAccessor, providerID, accountArg string) error {
+func runAuthRemove(ws interface {
+	workspace.AccountLister
+	workspace.AccountRemover
+}, providerID, accountArg string,
+) error {
 	account, err := findAuthAccount(ws, providerID, accountArg)
 	if err != nil {
 		return err
@@ -186,7 +194,12 @@ inheriting anything.`,
 // runAuthProxy is accountsProxyCmd's RunE body, factored out so a test can
 // drive it directly without a *cobra.Command. accountArg is "" for the
 // 2-arg (provider-level) form.
-func runAuthProxy(ws workspace.ConfigAccessor, providerID, accountArg, rawURL string) error {
+func runAuthProxy(ws interface {
+	workspace.AccountLister
+	workspace.AccountUpdater
+	workspace.ProviderProxySetter
+}, providerID, accountArg, rawURL string,
+) error {
 	proxyURL := rawURL
 	if proxyURL == "-" {
 		proxyURL = ""
@@ -248,7 +261,7 @@ func normalizeAuthProvider(provider string) string {
 
 // findAuthAccount resolves account (matched against ID, or Label
 // case-insensitively) to one of providerID's stored accounts.
-func findAuthAccount(ws workspace.ConfigAccessor, providerID, account string) (accounts.Account, error) {
+func findAuthAccount(ws workspace.AccountLister, providerID, account string) (accounts.Account, error) {
 	accts, err := ws.ListAccounts(providerID)
 	if err != nil {
 		return accounts.Account{}, err
@@ -272,7 +285,7 @@ func findAuthAccount(ws workspace.ConfigAccessor, providerID, account string) (a
 // (see config.RecordAccount), not the force flag, so forcing here is what
 // makes "add" actually attempt a fresh sign-in instead of bailing out
 // early because one account already exists.
-func authAddOAuth(ws workspace.ConfigAccessor, providerID string) error {
+func authAddOAuth(ws loginAccountWorkspace, providerID string) error {
 	switch providerID {
 	case "codex":
 		return loginCodex(ws, true, "")
@@ -289,7 +302,7 @@ func authAddOAuth(ws workspace.ConfigAccessor, providerID string) error {
 // genuinely new account instead of RecordAccount folding this into the
 // provider's existing active one — see config.RecordAccount's doc comment,
 // step 4.
-func authAddAPIKey(ws workspace.ConfigAccessor, providerID, apiKey string) error {
+func authAddAPIKey(ws workspace.AccountRecorder, providerID, apiKey string) error {
 	if apiKey == "" {
 		fmt.Printf("API key for %s: ", providerID)
 		key, err := readSecretLine(os.Stdin)
@@ -335,7 +348,11 @@ func readSecretLine(in *os.File) (string, error) {
 }
 
 // authListAll lists every provider with at least one stored account.
-func authListAll(ws workspace.ConfigAccessor) error {
+func authListAll(ws interface {
+	workspace.ConfigReader
+	workspace.AccountLister
+},
+) error {
 	cfg := ws.Config()
 	if cfg == nil || cfg.Providers == nil {
 		fmt.Println("No accounts stored for any provider.")
@@ -375,7 +392,7 @@ var (
 // printAccountList renders providerID's accounts: label, active/disabled
 // markers, and — only for a provider that reports usage
 // (accounts.CapabilitiesOf) — its stored allowance figures.
-func printAccountList(ws workspace.ConfigAccessor, providerID string, accts []accounts.Account) {
+func printAccountList(ws workspace.ConfigReader, providerID string, accts []accounts.Account) {
 	activeID := ""
 	if cfg := ws.Config(); cfg != nil {
 		if pc, ok := cfg.Providers.Get(providerID); ok {

@@ -23,7 +23,13 @@ import (
 // proxyURL is optional, and routes both halves of the sign-in as well as the
 // model requests that follow: for a user who can only reach OpenAI through a
 // proxy, a token exchange that ignored it would fail on its own.
-func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error {
+type codexLoginWorkspace interface {
+	workspace.ConfigReader
+	workspace.ConfigFieldEditor
+	workspace.AccountRecorder
+}
+
+func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 	loginCtx, stop := getLoginContext()
 	defer stop()
 
@@ -162,7 +168,7 @@ func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error 
 // failed login does not leave the proxy setting changed with no new
 // account to show for it. Best effort: a failure here is logged rather
 // than returned, since the caller already has the real error to report.
-func restoreCodexProxyField(ws workspace.ConfigAccessor, hadProxyURL bool, previousProxyURL string) {
+func restoreCodexProxyField(ws workspace.ConfigFieldEditor, hadProxyURL bool, previousProxyURL string) {
 	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
 	var err error
 	if hadProxyURL {
@@ -188,7 +194,7 @@ func restoreCodexProxyField(ws workspace.ConfigAccessor, hadProxyURL bool, previ
 // route to every account's default on the next login, and would rewrite a
 // "$VAR" template to its resolved literal even though nothing asked for a
 // proxy change at all.
-func configuredCodexProxy(ws workspace.ConfigAccessor) string {
+func configuredCodexProxy(ws workspace.ConfigReader) string {
 	cfg := ws.Config()
 	if cfg == nil {
 		return ""

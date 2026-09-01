@@ -99,14 +99,20 @@ func init() {
 // authAddOAuth's own doc comment and this command's Long help, and leaving
 // `sennit accounts use copilot <old>` pointing at a stale credential the
 // store still remembered.
-func recordCopilotAccount(ws workspace.ConfigAccessor, token *oauth.Token, forceNewAccount bool) (accounts.Account, error) {
+type loginAccountWorkspace interface {
+	workspace.ConfigReader
+	workspace.ConfigFieldEditor
+	workspace.AccountRecorder
+}
+
+func recordCopilotAccount(ws workspace.AccountRecorder, token *oauth.Token, forceNewAccount bool) (accounts.Account, error) {
 	return ws.RecordAccount(config.ScopeGlobal, "copilot", accounts.LegacyCredential{
 		Token:           token,
 		ForceNewAccount: forceNewAccount,
 	})
 }
 
-func loginCopilot(ws workspace.ConfigAccessor, force, forceNewAccount bool) error {
+func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 	loginCtx, stop := getLoginContext()
 	defer stop()
 

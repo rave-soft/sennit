@@ -8,6 +8,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOptionalClientWithoutProxyUsesDefaultTransport(t *testing.T) {
+	t.Parallel()
+
+	client, err := OptionalClient("", time.Second)
+	require.NoError(t, err)
+	require.Nil(t, client.Transport)
+	require.Equal(t, time.Second, client.Timeout)
+}
+
 // TestNewClientDirectIgnoresTheEnvironment pins the sentinel: "none" means
 // connect straight out even when HTTP_PROXY names a proxy, which is the
 // whole reason it exists.

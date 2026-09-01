@@ -87,12 +87,12 @@ func MarkUncommittedSessionFiles(sessionFiles []SessionFile, files []git.FileCha
 	for _, file := range files {
 		paths[filepath.Clean(file.Path)] = struct{}{}
 	}
-	result := make([]SessionFile, 0, len(sessionFiles))
-	for _, file := range sessionFiles {
+	result := make([]SessionFile, len(sessionFiles))
+	for i, file := range sessionFiles {
 		if _, ok := paths[filepath.Clean(file.FirstVersion.Path)]; ok {
 			file.Uncommitted = true
-			result = append(result, file)
 		}
+		result[i] = file
 	}
 	return result
 }

@@ -6,7 +6,6 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 )
@@ -63,14 +62,6 @@ func TestTranslateDomainPermissionNotification(t *testing.T) {
 		Payload: permission.PermissionNotification{Granted: true},
 	}
 	assert.Equal(t, PermissionResolved{}, Translate(ev))
-}
-
-func TestTranslateProtoSessionIgnored(t *testing.T) {
-	t.Parallel()
-	ev := pubsub.Event[proto.Session]{
-		Payload: proto.Session{ID: "s1"},
-	}
-	assert.Nil(t, Translate(ev))
 }
 
 // Unknown types.

@@ -24,21 +24,7 @@ const MaxAttachmentSize = int64(5 * 1024 * 1024)
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 
-type Workspace interface {
-	workspace.SessionStore
-	workspace.AgentController
-	workspace.UsageReporter
-	workspace.PermissionResolver
-	workspace.QuestionResponder
-	workspace.FileServices
-	workspace.LSPController
-	workspace.ConfigAccessor
-	workspace.ProjectLifecycle
-	workspace.MCPController
-	workspace.ThreadController
-	workspace.TaskController
-	workspace.BackgroundJobs
-}
+type Workspace = workspace.FrontendWorkspace
 
 // Common defines common UI options and configurations.
 type Common struct {

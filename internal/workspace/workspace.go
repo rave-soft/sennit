@@ -295,10 +295,55 @@ type LSPController interface {
 	LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts
 }
 
+type ConfigReader interface {
+	Config() *config.Config
+}
+
+type ConfigFieldEditor interface {
+	SetConfigField(scope config.Scope, key string, value any) error
+	RemoveConfigField(scope config.Scope, key string) error
+}
+
+type AccountRecorder interface {
+	RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error)
+}
+
+type AccountLister interface {
+	ListAccounts(providerID string) ([]accounts.Account, error)
+}
+
+type AccountActivator interface {
+	ActivateAccount(scope config.Scope, providerID, accountID string) error
+}
+
+type AccountUpdater interface {
+	UpdateAccount(providerID string, account accounts.Account) error
+}
+
+type AccountRemover interface {
+	RemoveAccount(scope config.Scope, providerID, accountID string) error
+}
+
+type ProviderProxySetter interface {
+	SetProviderProxy(providerID, proxy string) error
+}
+
+type AccountsPurger interface {
+	PurgeAccounts(scope config.Scope, providerID string) error
+}
+
 // ConfigAccessor reads the resolved configuration and applies mutations to
 // it (proxied to the server in client mode).
 type ConfigAccessor interface {
-	Config() *config.Config
+	ConfigReader
+	ConfigFieldEditor
+	AccountRecorder
+	AccountLister
+	AccountActivator
+	AccountUpdater
+	AccountRemover
+	AccountsPurger
+
 	WorkingDir() string
 	Resolver() config.VariableResolver
 
@@ -578,7 +623,7 @@ type EventSubscriber interface {
 // Ninety-four is a lot, and the role interfaces are what keep that from
 // being the number every consumer depends on. A new method belongs on the
 // role it serves, not here.
-type Workspace interface {
+type FrontendWorkspace interface {
 	SessionStore
 	AgentController
 	UsageReporter
@@ -592,6 +637,10 @@ type Workspace interface {
 	ThreadController
 	TaskController
 	BackgroundJobs
+}
+
+type Workspace interface {
+	FrontendWorkspace
 	EventSubscriber
 }
 

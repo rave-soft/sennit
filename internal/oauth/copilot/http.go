@@ -30,8 +30,5 @@ func Headers() map[string]string {
 // token exchange that ignored it would fail while the provider itself
 // looked correctly configured.
 func httpClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
-	if proxyURL == "" {
-		return &http.Client{Timeout: timeout}, nil
-	}
-	return proxyhttp.NewClient(proxyURL, timeout)
+	return proxyhttp.OptionalClient(proxyURL, timeout)
 }

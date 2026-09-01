@@ -41,7 +41,10 @@ func TestMarkUncommittedSessionFilesNormalizesPaths(t *testing.T) {
 		{FirstVersion: history.File{Path: "committed.go"}},
 	}, []git.FileChange{{Path: "changed.go"}})
 
-	require.Equal(t, []SessionFile{{FirstVersion: history.File{Path: "dir/../changed.go"}, Uncommitted: true}}, files)
+	require.Equal(t, []SessionFile{
+		{FirstVersion: history.File{Path: "dir/../changed.go"}, Uncommitted: true},
+		{FirstVersion: history.File{Path: "committed.go"}},
+	}, files)
 }
 
 func TestPrepareSessionChangesDegradesWhenGitFails(t *testing.T) {
