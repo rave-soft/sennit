@@ -28,20 +28,11 @@ type settingsOps struct {
 	transparentLoading       bool
 	transparentGeneration    uint64
 	themeGeneration          uint64
-	// themeLive is the palette ID currently on screen. It can differ from
-	// the configured one while the theme picker previews a highlighted
-	// palette, which is exactly why the live value is tracked separately
-	// instead of being read back from config.
-	themeLive string
-	// themePreviewFrom is the palette to restore when a preview is
-	// abandoned (the picker closed without a choice). Empty means no
-	// preview is in progress.
-	themePreviewFrom     string
-	compactModeLoading   bool
-	yoloLoading          bool
-	permissionLoading    bool
-	permissionGeneration uint64
-	permissionID         string
+	compactModeLoading       bool
+	yoloLoading              bool
+	permissionLoading        bool
+	permissionGeneration     uint64
+	permissionID             string
 }
 
 // transparentToggledMsg carries the result of a transparency-toggle config mutation.

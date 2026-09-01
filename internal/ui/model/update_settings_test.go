@@ -371,20 +371,20 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
 		m.ops.themeGeneration = 2
-		m.ops.themeLive = "steel-teal"
+		m.themePreview.setLive("steel-teal")
 
 		cmds, done := m.updateSettings(themeSetMsg{generation: 1}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.Equal(t, "steel-teal", m.ops.themeLive)
+		require.Equal(t, "steel-teal", m.liveThemeID())
 	})
 
 	t.Run("error restores the previous palette and reports", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
 		m.ops.themeGeneration = 1
-		m.ops.themeLive = "graphite-amber"
+		m.themePreview.setLive("graphite-amber")
 
 		cmds, _ := m.updateSettings(themeSetMsg{
 			Err:        errors.New("write failed"),
@@ -392,7 +392,7 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 			generation: 1,
 		}, nil)
 
-		require.Equal(t, "steel-teal", m.ops.themeLive, "setTheme(Previous) must run")
+		require.Equal(t, "steel-teal", m.liveThemeID(), "setTheme(Previous) must run")
 		require.NotEmpty(t, cmds)
 		last := cmds[len(cmds)-1]
 		got, ok := firstMsg(last).(util.InfoMsg)

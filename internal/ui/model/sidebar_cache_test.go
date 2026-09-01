@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -34,8 +35,9 @@ type sidebarCacheWorkspace struct {
 	countsN int // number of BackgroundJobCounts calls, for tests that want to distinguish
 }
 
-func (w *sidebarCacheWorkspace) Config() *config.Config { return w.cfg }
-func (w *sidebarCacheWorkspace) WorkingDir() string     { return w.cwd }
+func (w *sidebarCacheWorkspace) Config() *config.Config         { return w.cfg }
+func (w *sidebarCacheWorkspace) WorkingDir() string             { return w.cwd }
+func (w *sidebarCacheWorkspace) BuiltinSkills() []*skills.Skill { return nil }
 func (w *sidebarCacheWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
 	w.countsN++
 	return w.counts
@@ -220,7 +222,7 @@ func TestSidebarCacheInvalidatesOnThemeChange(t *testing.T) {
 	require.NotEmpty(t, before)
 
 	*m.com.Styles = styles.Theme("graphite-amber")
-	m.ops.themeLive = "graphite-amber"
+	m.themePreview.setLive("graphite-amber")
 	m.updateSidebarScrollState()
 
 	require.NotEqual(t, before, m.sidebar.content,

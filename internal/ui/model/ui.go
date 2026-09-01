@@ -119,6 +119,10 @@ type UI struct {
 
 	ops settingsOps
 
+	// themePreview owns the applied theme and preview restore point. UI keeps
+	// validation, palette application, persistence, and command orchestration.
+	themePreview themePreviewState
+
 	lay layoutState
 
 	// embedded is true for a UI instance attached to a thread's own
@@ -1086,7 +1090,7 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 	// to on a failed write is the configured one, not whatever the cursor
 	// happened to be resting on.
 	previous := styles.PaletteByID(m.com.Config().ThemeID()).ID
-	m.ops.themePreviewFrom = ""
+	m.themePreview.confirm()
 	if id == previous && m.liveThemeID() == previous {
 		return nil
 	}
@@ -1108,10 +1112,8 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 // liveThemeID returns the palette currently drawn, which is the previewed
 // one while the theme picker is browsing and the configured one otherwise.
 func (m *UI) liveThemeID() string {
-	if m.ops.themeLive != "" {
-		return m.ops.themeLive
-	}
-	return styles.PaletteByID(m.com.Config().ThemeID()).ID
+	configured := styles.PaletteByID(m.com.Config().ThemeID()).ID
+	return m.themePreview.live(configured)
 }
 
 // previewTheme paints the whole UI in the palette the theme picker is
@@ -1122,10 +1124,8 @@ func (m *UI) previewTheme(id string) tea.Cmd {
 	if !styles.IsKnownPaletteID(id) {
 		return nil
 	}
-	if m.ops.themePreviewFrom == "" {
-		m.ops.themePreviewFrom = m.liveThemeID()
-	}
-	if id == m.liveThemeID() {
+	configured := styles.PaletteByID(m.com.Config().ThemeID()).ID
+	if !m.themePreview.preview(id, configured) {
 		return nil
 	}
 	return m.setTheme(id)
@@ -1134,9 +1134,11 @@ func (m *UI) previewTheme(id string) tea.Cmd {
 // cancelThemePreview restores the palette that was live before the theme
 // picker started previewing. It is a no-op when no preview is in progress.
 func (m *UI) cancelThemePreview() tea.Cmd {
-	from := m.ops.themePreviewFrom
-	m.ops.themePreviewFrom = ""
-	if from == "" || from == m.liveThemeID() {
+	if !m.themePreview.previewActive() {
+		return nil
+	}
+	from, needed := m.themePreview.cancel(m.liveThemeID())
+	if !needed {
 		return nil
 	}
 	return m.setTheme(from)
@@ -1157,7 +1159,7 @@ func (m *UI) setTheme(id string) tea.Cmd {
 	// without re-applying it here the first /theme switch of a session
 	// silently put every spinner back to the scramble.
 	*m.com.Styles = styles.Theme(id).WithSpinner(common.SpinnerMode(m.com.Workspace))
-	m.ops.themeLive = styles.PaletteByID(id).ID
+	m.themePreview.setLive(styles.PaletteByID(id).ID)
 	t := m.com.Styles
 
 	var cmd tea.Cmd

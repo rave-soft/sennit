@@ -89,6 +89,27 @@ func TestSetTheme_RepaintsOpenCompletions(t *testing.T) {
 // UI really does switch palette as the selection moves (so the preview is
 // the actual thing, not an approximation of it), and walking away from the
 // dialog leaves both the screen and the config exactly as they were.
+func TestPreviewTheme_ConfiguredThemeCancelDoesNotRestyle(t *testing.T) {
+	t.Parallel()
+
+	// Do not call setTheme: this exercises a newly created preview owner, whose
+	// live palette must fall back to the configured theme.
+	u := newTestUI()
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{
+		Options: &config.Options{TUI: &config.TUIOptions{Theme: styles.PaletteSteelTeal.ID}},
+	}}
+	before := u.com.Styles.Background
+
+	require.Nil(t, u.previewTheme(styles.PaletteSteelTeal.ID),
+		"previewing the configured theme must not apply or restyle it")
+	require.Nil(t, u.cancelThemePreview(),
+		"cancelling an unapplied configured-theme preview must not restore it")
+	require.Equal(t, before, u.com.Styles.Background)
+	require.Empty(t, u.themePreview.liveID,
+		"cancel must not apply or restyle the configured fallback palette")
+	require.Equal(t, styles.PaletteSteelTeal.ID, u.liveThemeID())
+}
+
 func TestPreviewTheme_RestoredOnCancel(t *testing.T) {
 	t.Parallel()
 
@@ -111,6 +132,19 @@ func TestPreviewTheme_RestoredOnCancel(t *testing.T) {
 // TestPreviewTheme_KeptOnSelect checks the other exit: confirming keeps the
 // previewed palette and persists it, rather than restoring the palette the
 // dialog opened in.
+func TestThemePreview_UnknownIDsPreserveOrCancelAsAppropriate(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIWithTheme(t, styles.PaletteSteelTeal.ID)
+	u.previewTheme("no-such-theme")
+	require.Equal(t, styles.PaletteSteelTeal.ID, u.liveThemeID(), "unknown preview must be ignored")
+
+	u.previewTheme(styles.PaletteInkSage.ID)
+	cmd := u.applyTheme("no-such-theme")
+	require.NotNil(t, cmd, "unknown apply must report an error")
+	require.Equal(t, styles.PaletteSteelTeal.ID, u.liveThemeID(), "unknown apply must cancel an active preview")
+}
+
 func TestPreviewTheme_KeptOnSelect(t *testing.T) {
 	t.Parallel()
 
@@ -121,8 +155,6 @@ func TestPreviewTheme_KeptOnSelect(t *testing.T) {
 
 	require.NotNil(t, cmd, "confirming a previewed theme must persist it")
 	require.Equal(t, styles.PaletteInkSage.Bg, u.com.Styles.Background)
-	require.Empty(t, u.ops.themePreviewFrom, "the preview must be committed, not left open")
-
 	// A later cancel (e.g. the commands dialog closing behind the picker)
 	// must not undo the confirmed choice.
 	u.cancelThemePreview()

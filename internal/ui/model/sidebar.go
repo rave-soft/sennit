@@ -128,7 +128,7 @@ func (m *UI) computeSidebarSig() sidebarSig {
 	sig := sidebarSig{
 		area:      m.lay.layout.sidebar,
 		sess:      m.sess.current,
-		theme:     m.ops.themeLive,
+		theme:     m.liveThemeID(),
 		cwd:       m.com.Workspace.WorkingDir(),
 		jobCounts: m.com.Workspace.BackgroundJobCounts(),
 
