@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 const (
@@ -96,8 +97,10 @@ type statsTabState struct {
 // reached a completed state.
 type Stats struct {
 	Base
-	com       *common.Common
-	sessionID string
+	com        *common.Common
+	usage      workspace.UsageReporter
+	workingDir workspace.WorkingDirectory
+	sessionID  string
 
 	active int
 	// tabs is keyed by tab index rather than scope so a tab is exactly one
@@ -119,12 +122,14 @@ var _ Dialog = (*Stats)(nil)
 // Session tab reports on; when it is empty that tab reports nothing to
 // show rather than silently falling back to another scope, since "this
 // session" with no session is a question with no answer.
-func NewStats(com *common.Common, sessionID string) *Stats {
+func NewStats(com *common.Common, usage workspace.UsageReporter, workingDir workspace.WorkingDirectory, sessionID string) *Stats {
 	d := &Stats{
-		Base:      NewBase(com, statsDialogMaxWidth),
-		com:       com,
-		sessionID: sessionID,
-		tabs:      make(map[int]statsTabState, len(statsTabs)),
+		Base:       NewBase(com, statsDialogMaxWidth),
+		com:        com,
+		usage:      usage,
+		workingDir: workingDir,
+		sessionID:  sessionID,
+		tabs:       make(map[int]statsTabState, len(statsTabs)),
 	}
 	// Open on Project: a session's own numbers are already on the
 	// sidebar, so the first thing this screen can say that nothing else
@@ -175,19 +180,22 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 	if scope == stats.ScopeSession && d.sessionID == "" {
 		return nil
 	}
-	if d.com == nil || d.com.Workspace == nil {
+	if d.com == nil || d.usage == nil {
+		return nil
+	}
+	if scope == stats.ScopeProject && d.workingDir == nil {
 		return nil
 	}
 
 	st.loading = true
 	d.tabs[i] = st
-	ws := d.com.Workspace
+	usage := d.usage
 	req := stats.Request{Scope: scope}
 	switch scope {
 	case stats.ScopeSession:
 		req.SessionID = d.sessionID
 	case stats.ScopeProject:
-		req.ProjectPath = d.com.Workspace.WorkingDir()
+		req.ProjectPath = d.workingDir.WorkingDir()
 	}
 	ctx := d.com.Context()
 	sessionID := d.sessionID
@@ -197,7 +205,7 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 		// from whatever the program-wide timeout (if any) would allow.
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		snap, err := ws.Stats(ctx, req)
+		snap, err := usage.Stats(ctx, req)
 		return StatsLoadedMsg{Scope: scope, Snapshot: snap, Err: err, SessionID: sessionID}
 	}
 }

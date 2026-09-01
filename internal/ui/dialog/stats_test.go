@@ -8,14 +8,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,20 +20,10 @@ import (
 // (which scope each tab requests, what it renders, what it caches) rather
 // than the aggregation, which internal/stats covers.
 type statsTestWorkspace struct {
-	workspace.Workspace
 	requested []stats.Request
 	snap      stats.Snapshot
 	err       error
 }
-
-// KnownProviders: no test here renders a provider list.
-func (w statsTestWorkspace) KnownProviders() []catwalk.Provider { return nil }
-
-// SkillStates, BuiltinSkills: the skills panel reads these; no test
-// here has a catalog beyond what the binary ships.
-func (w statsTestWorkspace) SkillStates() []*skills.SkillState { return nil }
-func (w statsTestWorkspace) ConfigProblems() []config.Problem  { return nil }
-func (w statsTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
 func (w *statsTestWorkspace) WorkingDir() string { return "/repo" }
 
@@ -49,7 +35,7 @@ func (w *statsTestWorkspace) Stats(_ context.Context, req stats.Request) (stats.
 func newStatsTestDialog(t *testing.T, ws *statsTestWorkspace, sessionID string) *Stats {
 	t.Helper()
 	s := styles.SennitDark()
-	return NewStats(&common.Common{Styles: &s, Workspace: ws}, sessionID)
+	return NewStats(&common.Common{Styles: &s}, ws, ws, sessionID)
 }
 
 // sampleSnapshot is a snapshot with one of everything the screen draws.

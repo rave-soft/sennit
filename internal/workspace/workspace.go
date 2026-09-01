@@ -310,6 +310,12 @@ type ConfigReader interface {
 	Config() *config.Config
 }
 
+// WorkingDirectory reports the workspace path used to scope operations to the
+// current project.
+type WorkingDirectory interface {
+	WorkingDir() string
+}
+
 type ConfigFieldEditor interface {
 	SetConfigField(scope config.Scope, key string, value any) error
 	RemoveConfigField(scope config.Scope, key string) error
@@ -347,6 +353,7 @@ type AccountsPurger interface {
 // it (proxied to the server in client mode).
 type ConfigAccessor interface {
 	ConfigReader
+	WorkingDirectory
 	ConfigFieldEditor
 	AccountRecorder
 	AccountLister

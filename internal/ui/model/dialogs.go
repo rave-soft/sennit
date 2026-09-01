@@ -386,7 +386,7 @@ func (m *UI) openStatsDialog() tea.Cmd {
 	if m.sess.current != nil {
 		sessionID = m.sess.current.ID
 	}
-	statsDialog := dialog.NewStats(m.com, sessionID)
+	statsDialog := dialog.NewStats(m.com, m.com.Workspace, m.com.Workspace, sessionID)
 	m.dialog.OpenDialog(statsDialog)
 	return statsDialog.LoadCmd()
 }
