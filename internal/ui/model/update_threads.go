@@ -36,6 +36,11 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		cmds = append(cmds, m.threadViewsRefreshCmds()...)
 		cmds = append(cmds, m.agentViewsRefreshCmds()...)
+		// The event just moved a task in or out of the list the
+		// transcript's delegation blocks are keyed off — most
+		// importantly the update that names a task with its child
+		// session, which is what makes that delegation openable.
+		m.refreshDelegationBlocks()
 		// A thread's edge transition into a terminal status (merged,
 		// failed, ...) gets a toast — see thread_completion.go for why a
 		// toast rather than a persisted chat entry. Skipped for a deleted
@@ -75,7 +80,7 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// A delegation just started or finished, which is exactly when it
 		// enters or leaves the panel — and so when the transcript has to
 		// stop or start showing it. See Chat.SetDelegationsHidden.
-		m.chat.SetDelegationsHidden(m.panelledDelegations())
+		m.refreshDelegationBlocks()
 	case threads.DockActivityLoadedMsg:
 		m.threadsDock.ApplyActivityLoaded(msg)
 	}

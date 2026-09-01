@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -129,4 +131,42 @@ func TestDelegationNotInTheLoadedChatOpensAsBefore(t *testing.T) {
 
 	require.NotNil(t, u.enterChildSession("msg1", "tc-absent"))
 	require.Len(t, u.sess.navStack, 1)
+}
+
+// TestAnUnstartedDelegationDoesNotLookClickable: the block stopped
+// opening anything, but it still lit up under the pointer and still
+// reported the click as handled, so it read as a control that does
+// nothing. refreshDelegationBlocks marks it, and the item refuses both.
+func TestAnUnstartedDelegationDoesNotLookClickable(t *testing.T) {
+	t.Parallel()
+
+	u := newTaskListingUI(t)
+	item := newAgentItem(u.com.Styles, "tc-new")
+	u.chat.AppendMessages(item)
+	setTaskList(u, proto.Thread{SessionID: "msg1$$tc-other"})
+
+	u.refreshDelegationBlocks()
+
+	require.False(t, item.HoverableAt(chat.MessageLeftPaddingTotal, 1, 80),
+		"a delegation with nothing to open must not highlight under the pointer")
+	require.False(t, item.HandleMouseClick(ansi.MouseLeft, chat.MessageLeftPaddingTotal, 1),
+		"and must not report the click as handled")
+}
+
+// TestAStartedDelegationStaysClickable is the other half: the moment its
+// task record names a child session, the block is a way in again.
+func TestAStartedDelegationStaysClickable(t *testing.T) {
+	t.Parallel()
+
+	u := newTaskListingUI(t)
+	item := newAgentItem(u.com.Styles, "tc-run")
+	u.chat.AppendMessages(item)
+	setTaskList(u, proto.Thread{SessionID: "msg1$$tc-other"})
+	u.refreshDelegationBlocks()
+
+	setTaskList(u, proto.Thread{SessionID: "msg1$$tc-run"})
+	u.refreshDelegationBlocks()
+
+	require.True(t, item.HoverableAt(chat.MessageLeftPaddingTotal, 1, 80))
+	require.True(t, item.HandleMouseClick(ansi.MouseLeft, chat.MessageLeftPaddingTotal, 1))
 }

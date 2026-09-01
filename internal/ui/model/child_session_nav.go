@@ -107,6 +107,35 @@ func captureDelegationRef(item chat.ToolMessageItem) childSessionRef {
 	return ref
 }
 
+// refreshDelegationBlocks re-syncs both handoffs the transcript's
+// delegation blocks depend on: which of them the panel is showing (so the
+// transcript does not show them too), and which have no child session to
+// open yet (so they do not offer a drill-in that would do nothing). Both
+// answers change on the same events — a delegation starting, running,
+// finishing — which is why they are pushed together.
+func (m *UI) refreshDelegationBlocks() {
+	m.chat.SetDelegationsHidden(m.panelledDelegations())
+	m.chat.SetDelegationsUnopenable(m.unstartedDelegations())
+}
+
+// unstartedDelegations names the loaded delegations that cannot be opened
+// yet, by the id of the tool call that started each. Nil when they all
+// can, which is the ordinary case.
+func (m *UI) unstartedDelegations() map[string]bool {
+	var ids map[string]bool
+	for _, item := range m.chat.NestedToolContainers() {
+		id := item.ToolCall().ID
+		if m.delegationStarted(id) {
+			continue
+		}
+		if ids == nil {
+			ids = make(map[string]bool)
+		}
+		ids[id] = true
+	}
+	return ids
+}
+
 // delegationStarted reports whether the delegation identified by
 // toolCallID has a child session behind it yet, i.e. whether opening it
 // would land on a transcript rather than on nothing.

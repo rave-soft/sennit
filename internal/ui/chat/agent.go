@@ -77,6 +77,14 @@ type delegationToolMessageItem struct {
 	// never shows todos (see ToggleExpanded).
 	todos []session.Todo
 
+	// unopenable marks a delegation whose child session does not exist
+	// yet — the model pushes it (see SetDelegationsUnopenable and
+	// delegationStarted in internal/ui/model). It only suppresses the
+	// block's click affordances: the block itself renders exactly as it
+	// did, spinner and all, because "this delegation is starting" is what
+	// it is honestly saying.
+	unopenable bool
+
 	// duration is frozen the first time SetResult observes a non-nil
 	// result (see SetResult below) — i.e. only for a delegation that
 	// finishes while this item is live in the UI. An item reconstructed
@@ -177,9 +185,39 @@ func (a *delegationToolMessageItem) ToggleExpanded() bool {
 	return false
 }
 
-// HoverableAt matches the delegation's whole-item click target.
+// SetUnopenable marks whether this delegation has a child session to open
+// yet. An unopenable one stops hovering and stops accepting clicks, so a
+// block that cannot be drilled into no longer lights up under the pointer
+// promising that it can.
+func (a *delegationToolMessageItem) SetUnopenable(unopenable bool) {
+	if a.unopenable == unopenable {
+		return
+	}
+	a.unopenable = unopenable
+	if unopenable {
+		// The pointer may be sitting on it right now, and the chat only
+		// re-evaluates hover on the next motion event.
+		a.SetHovered(false)
+	}
+}
+
+// HoverableAt matches the delegation's whole-item click target, which is
+// nothing at all while it has no child session to open.
 func (a *delegationToolMessageItem) HoverableAt(x, y, width int) bool {
+	if a.unopenable {
+		return false
+	}
 	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
+}
+
+// HandleMouseClick refuses the click on a delegation with nothing behind
+// it, so HandleDelayedClick never reports it as a container to open (see
+// internal/ui/chatlist).
+func (a *delegationToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
+	if a.unopenable {
+		return false
+	}
+	return a.baseToolMessageItem.HandleMouseClick(btn, x, y)
 }
 
 // Restyle implements [Restylable]. Nested tools are not list entries of

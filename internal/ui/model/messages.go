@@ -70,7 +70,7 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 	// already-loaded items.
 	if m.hasSession() {
 		m.chat.SetTodosHidden(hasIncompleteTodos(m.sess.current.Todos))
-		m.chat.SetDelegationsHidden(m.panelledDelegations())
+		m.refreshDelegationBlocks()
 	}
 	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {
 		cmds = append(cmds, cmd)

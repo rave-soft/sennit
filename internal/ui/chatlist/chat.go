@@ -1101,6 +1101,32 @@ func (m *Chat) SetDelegationsHidden(panelled map[string]bool) {
 	}
 }
 
+// SetDelegationsUnopenable marks which delegations have no child session
+// to drill into yet, named by the id of the tool call that started each.
+// Those blocks stop highlighting under the pointer and stop taking
+// clicks; every other delegation is (re)marked openable.
+//
+// A block whose click does nothing must not look like a block whose click
+// does something: a delegation the model has only just asked for is on
+// screen for seconds before its run is launched, and hover feedback there
+// promised a drill-in that could not happen.
+func (m *Chat) SetDelegationsUnopenable(unopenable map[string]bool) {
+	for i := range m.list.Len() {
+		toolItem, ok := m.list.ItemAt(i).(chat.ToolMessageItem)
+		if !ok {
+			continue
+		}
+		if _, ok := toolItem.(chat.NestedToolContainer); !ok {
+			continue
+		}
+		gated, ok := toolItem.(interface{ SetUnopenable(bool) })
+		if !ok {
+			continue
+		}
+		gated.SetUnopenable(unopenable[toolItem.ToolCall().ID])
+	}
+}
+
 // IsSelectedShellItem returns true if the currently selected item is a
 // ShellItem (bang-mode result).
 func (m *Chat) IsSelectedShellItem() bool {
