@@ -247,3 +247,67 @@ func TestTodosTool_InvalidStatusIsTextResponseNotError(t *testing.T) {
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, `invalid status "in-progress" for todo "write tests"`)
 }
+
+// TestTodosTool_NewCycleDropsResentCompletedItems is the regression test for
+// a finished todo list reopening: todos.md tells the model never to drop
+// completed items, so after finishing everything it resends the whole
+// completed list with the new task appended. The stored list must hold only
+// the new cycle's work — otherwise the session panel, which hides the
+// section once everything is completed, pops it back with the old tail
+// still attached.
+func TestTodosTool_NewCycleDropsResentCompletedItems(t *testing.T) {
+	t.Parallel()
+
+	sessions := &fakeTodoSessions{sess: session.Session{
+		ID: "session-1",
+		Todos: []session.Todo{
+			{Content: "write tests", Status: session.TodoStatusCompleted},
+			{Content: "ship it", Status: session.TodoStatusCompleted},
+		},
+	}}
+
+	todos, meta := runTodosTool(t, sessions, []TodoItem{
+		{Content: "write tests", Status: "completed"},
+		{Content: "  SHIP IT  ", Status: "completed"},
+		{Content: "monitor rollout", Status: "in_progress", ActiveForm: "Monitoring rollout"},
+	})
+
+	require.Equal(t, []session.Todo{{
+		Content:    "monitor rollout",
+		Status:     session.TodoStatusInProgress,
+		ActiveForm: "Monitoring rollout",
+	}}, todos, "only the new cycle's work survives, whitespace/case variants included")
+	require.True(t, meta.IsNew)
+	require.Equal(t, 0, meta.Completed)
+	require.Equal(t, 1, meta.Total)
+	require.Equal(t, "Monitoring rollout", meta.JustStarted)
+	require.Empty(t, meta.JustCompleted)
+}
+
+// TestTodosTool_NewCycleKeepsCompletedItemsTheOldListNeverHad covers the
+// other side of that filter: a task the model reports completed which the
+// finished list never contained is new-cycle work done in the same call, so
+// it must stay.
+func TestTodosTool_NewCycleKeepsCompletedItemsTheOldListNeverHad(t *testing.T) {
+	t.Parallel()
+
+	sessions := &fakeTodoSessions{sess: session.Session{
+		ID: "session-1",
+		Todos: []session.Todo{
+			{Content: "write tests", Status: session.TodoStatusCompleted},
+		},
+	}}
+
+	todos, meta := runTodosTool(t, sessions, []TodoItem{
+		{Content: "write tests", Status: "completed"},
+		{Content: "cut release", Status: "completed"},
+		{Content: "monitor rollout", Status: "in_progress", ActiveForm: "Monitoring rollout"},
+	})
+
+	require.Len(t, todos, 2)
+	require.Equal(t, "cut release", todos[0].Content)
+	require.Equal(t, "monitor rollout", todos[1].Content)
+	require.True(t, meta.IsNew)
+	require.Equal(t, 1, meta.Completed)
+	require.Equal(t, 2, meta.Total)
+}

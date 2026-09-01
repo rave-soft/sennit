@@ -86,6 +86,34 @@ func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
 				}
 			}
 
+			// A model that has just finished every task keeps resending the
+			// whole finished list and appends the new work to it — todos.md
+			// tells it never to drop completed items, and taken literally
+			// that is what it does. Left alone, a list the user already saw
+			// close reopens with its old tail attached: the session panel
+			// hides the section once everything is completed and pops it
+			// back the moment a new in_progress item arrives. So when this
+			// call starts a new cycle, drop the carried-over items — the
+			// ones the stored list already held, still completed — and keep
+			// only what belongs to the new cycle. Items the model reports
+			// completed that the old list never had are genuinely new-cycle
+			// work and stay.
+			if startsNewCycle {
+				carried := make(map[string]bool, len(currentSession.Todos))
+				for _, old := range currentSession.Todos {
+					carried[normalizeTodoContent(old.Content)] = true
+				}
+				fresh := make([]TodoItem, 0, len(params.Todos))
+				for _, item := range params.Todos {
+					if session.TodoStatus(item.Status) == session.TodoStatusCompleted &&
+						carried[normalizeTodoContent(item.Content)] {
+						continue
+					}
+					fresh = append(fresh, item)
+				}
+				params.Todos = fresh
+			}
+
 			todos := make([]session.Todo, len(params.Todos))
 			var justCompleted []string
 			var justStarted string
