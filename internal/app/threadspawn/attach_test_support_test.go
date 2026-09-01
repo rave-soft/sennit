@@ -125,7 +125,7 @@ func (f *attachFakeCoordinator) Run(ctx context.Context, sessionID, prompt strin
 	return nil, f.runErr
 }
 
-func (f *attachFakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
+func (f *attachFakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return &agent.AcceptedRun{} }
 
 func (f *attachFakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
 	f.mu.Lock()

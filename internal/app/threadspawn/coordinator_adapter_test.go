@@ -163,7 +163,7 @@ func TestCoordinatorAdapter_TranslateCtxCarriesDispatchTag(t *testing.T) {
 	adapter := NewCoordinatorAdapter(coord)
 
 	ctx := thread.WithAgentDispatch(thread.WithRunID(context.Background(), "run-123"))
-	require.NoError(t, adapter.RunAccepted(ctx, nil, "sess", "do it", nil))
+	require.NoError(t, adapter.RunAccepted(ctx, adapter.BeginAccepted("sess"), "sess", "do it", nil))
 
 	require.Equal(t, message.OriginAgent, seenOrigin.Load().(message.Origin),
 		"the agent-dispatch origin tag must be re-applied on the agent's own key")
@@ -175,9 +175,51 @@ func TestCoordinatorAdapter_TranslateCtxCarriesDispatchTag(t *testing.T) {
 // origin/run-id it observes in RunAccepted — the port's only dispatch —
 // for the translateCtx test. It embeds the interface (nil) so it only
 // implements the one method under test.
+// TestCoordinatorAdapter_RunAcceptedRejectsForeignHandle ensures a bad
+// reservation is reported instead of being silently converted to nil and
+// forwarded to the agent coordinator.
+func TestCoordinatorAdapter_RunAcceptedRejectsForeignHandle(t *testing.T) {
+	var calls atomic.Int32
+	coord := &tagRecodingCoordinator{run: func(context.Context) { calls.Add(1) }}
+	adapter := NewCoordinatorAdapter(coord)
+
+	err := adapter.RunAccepted(context.Background(), thread.NewAcceptedRun(noopAcceptedRun{}), "sess", "do it", nil)
+	require.ErrorIs(t, err, ErrInvalidAcceptedRun)
+	require.Zero(t, calls.Load(), "inner RunAccepted must not receive an incompatible handle")
+}
+
+// TestCoordinatorAdapter_RunAcceptedRejectsNilHandles ensures nil wrappers and
+// typed-nil agent reservations are rejected before reaching the inner
+// coordinator, rather than silently forwarding a nil reservation.
+func TestCoordinatorAdapter_RunAcceptedRejectsNilHandles(t *testing.T) {
+	var typedNil *agent.AcceptedRun
+	for name, accept := range map[string]*thread.AcceptedRun{
+		"nil wrapper":                   nil,
+		"wrapper with typed-nil handle": thread.NewAcceptedRun(typedNil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			coord := &tagRecodingCoordinator{run: func(context.Context) { calls.Add(1) }}
+			adapter := NewCoordinatorAdapter(coord)
+
+			err := adapter.RunAccepted(context.Background(), accept, "sess", "do it", nil)
+			require.ErrorIs(t, err, ErrInvalidAcceptedRun)
+			require.Zero(t, calls.Load(), "inner RunAccepted must not receive a nil handle")
+		})
+	}
+}
+
+type noopAcceptedRun struct{}
+
+func (noopAcceptedRun) Close() {}
+
 type tagRecodingCoordinator struct {
 	agent.Coordinator
 	run func(ctx context.Context)
+}
+
+func (c *tagRecodingCoordinator) BeginAccepted(string) *agent.AcceptedRun {
+	return &agent.AcceptedRun{}
 }
 
 func (c *tagRecodingCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {

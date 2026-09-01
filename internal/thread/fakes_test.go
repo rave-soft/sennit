@@ -164,8 +164,10 @@ func testTranslateCtx(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (a *testCoordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []thread.Attachment) error {
-	ar, _ := accept.(*agent.AcceptedRun)
+func (a *testCoordinatorAdapter) RunAccepted(ctx context.Context, accept *thread.AcceptedRun, sessionID, prompt string, attachments []thread.Attachment) error {
+	if accept == nil {
+		return fmt.Errorf("thread test adapter: missing accepted run")
+	}
 	msgAttachments := make([]message.Attachment, 0, len(attachments))
 	for _, at := range attachments {
 		msgAttachments = append(msgAttachments, message.Attachment{
@@ -175,12 +177,16 @@ func (a *testCoordinatorAdapter) RunAccepted(ctx context.Context, accept any, se
 			Content:  at.Content,
 		})
 	}
+	ar, ok := accept.Handle().(*agent.AcceptedRun)
+	if !ok || ar == nil {
+		return fmt.Errorf("thread test adapter: incompatible accepted run")
+	}
 	_, err := a.inner.RunAccepted(testTranslateCtx(ctx), ar, sessionID, prompt, msgAttachments...)
 	return err
 }
 
-func (a *testCoordinatorAdapter) BeginAccepted(sessionID string) any {
-	return a.inner.BeginAccepted(sessionID)
+func (a *testCoordinatorAdapter) BeginAccepted(sessionID string) *thread.AcceptedRun {
+	return thread.NewAcceptedRun(a.inner.BeginAccepted(sessionID))
 }
 
 func (a *testCoordinatorAdapter) Cancel(sessionID string) {
@@ -334,7 +340,15 @@ func (f *fakeSessions) Get(_ context.Context, id string) (session.Session, error
 type fakeCoordinator struct {
 	agent.Coordinator
 
-	mu                sync.Mutex
+	mu sync.Mutex
+
+	// acceptedAgent creates real agent.AcceptedRun reservations for the
+	// shared thread-test path. RunAccepted deliberately remains a recording
+	// fake, but the lifecycle may Close a reservation after a dispatch error,
+	// so a zero-value AcceptedRun would panic instead of preserving ownership.
+	acceptedOnce  sync.Once
+	acceptedAgent agent.SessionAgent
+
 	runs              []fakeRun
 	cancelAllCalled   bool
 	canceled          []string
@@ -500,9 +514,20 @@ func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ .
 	return nil, f.dispatch(ctx, sessionID, prompt)
 }
 
-func (f *fakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
+func (f *fakeCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
+	f.acceptedOnce.Do(func() {
+		f.acceptedAgent = agent.NewSessionAgent(agent.SessionAgentOptions{})
+	})
+	return f.acceptedAgent.BeginAccepted(sessionID)
+}
 
-func (f *fakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+func (f *fakeCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+	// A real coordinator consumes the reservation whether it admits the call
+	// or returns an error. Keep the shared fake's ownership contract aligned
+	// so normal test dispatches do not accumulate accepted reservations.
+	if accept != nil {
+		defer accept.Close()
+	}
 	return nil, f.dispatch(ctx, sessionID, prompt)
 }
 

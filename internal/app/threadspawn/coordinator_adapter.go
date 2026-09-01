@@ -2,6 +2,7 @@ package threadspawn
 
 import (
 	"context"
+	"errors"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent"
@@ -29,6 +30,12 @@ import (
 type coordinatorAdapter struct {
 	inner DelegationCoordinator
 }
+
+// ErrInvalidAcceptedRun reports that a reservation was not created by this
+// adapter for the concrete agent coordinator it wraps. Forwarding it as nil
+// would silently discard the acceptance reservation and break dispatch
+// ownership.
+var ErrInvalidAcceptedRun = errors.New("threadspawn: incompatible accepted run handle")
 
 // DelegationCoordinator is the subset of agent.Coordinator this seam
 // forwards to — the seven methods the six of [thread.Coordinator] map
@@ -101,8 +108,14 @@ func (a *coordinatorAdapter) translateCtx(ctx context.Context) context.Context {
 
 // RunAccepted translates the context and forwards directly, discarding
 // the agent result the domain never reads and surfacing only the error.
-func (a *coordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []thread.Attachment) error {
-	ar, _ := accept.(*agent.AcceptedRun)
+func (a *coordinatorAdapter) RunAccepted(ctx context.Context, accept *thread.AcceptedRun, sessionID, prompt string, attachments []thread.Attachment) error {
+	if accept == nil {
+		return ErrInvalidAcceptedRun
+	}
+	ar, ok := accept.Handle().(*agent.AcceptedRun)
+	if !ok || ar == nil {
+		return ErrInvalidAcceptedRun
+	}
 	_, err := a.inner.RunAccepted(a.translateCtx(ctx), ar, sessionID, prompt, toMessageAttachments(attachments)...)
 	return err
 }
@@ -126,8 +139,8 @@ func toMessageAttachments(in []thread.Attachment) []message.Attachment {
 	return out
 }
 
-func (a *coordinatorAdapter) BeginAccepted(sessionID string) any {
-	return a.inner.BeginAccepted(sessionID)
+func (a *coordinatorAdapter) BeginAccepted(sessionID string) *thread.AcceptedRun {
+	return thread.NewAcceptedRun(a.inner.BeginAccepted(sessionID))
 }
 
 func (a *coordinatorAdapter) Cancel(sessionID string) {

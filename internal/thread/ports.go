@@ -201,6 +201,36 @@ type Attachment struct {
 	Content  []byte
 }
 
+// AcceptedRun is an opaque reservation returned by [Coordinator.BeginAccepted].
+// A coordinator consumes it when it admits the dispatch; callers must close it
+// when RunAccepted returns an error before admission. Its handle is private so
+// the lifecycle cannot depend on a coordinator's concrete reservation type.
+type AcceptedRun struct {
+	handle interface{ Close() }
+}
+
+// NewAcceptedRun carries handle through the consumer-owned coordinator port.
+// It is used only by composition adapters that own a concrete coordinator.
+func NewAcceptedRun(handle interface{ Close() }) *AcceptedRun {
+	return &AcceptedRun{handle: handle}
+}
+
+// Close releases a reservation which was not consumed by a coordinator.
+func (r *AcceptedRun) Close() {
+	if r != nil && r.handle != nil {
+		r.handle.Close()
+	}
+}
+
+// Handle returns the opaque reservation for the composition adapter that
+// created it. The lifecycle must use [AcceptedRun.Close] instead.
+func (r *AcceptedRun) Handle() interface{ Close() } {
+	if r == nil {
+		return nil
+	}
+	return r.handle
+}
+
 // Coordinator is the slice of a workspace's agent coordinator the
 // delegation lifecycle drives: dispatching a run (Run/RunAccepted, with the
 // accept handle reserved by BeginAccepted), cancelling a session,
@@ -223,11 +253,11 @@ type Coordinator interface {
 	// [BeginAccepted] result, carried opaquely so the port never names the
 	// agent's AcceptedRun type. attachments is nil for every dispatch this
 	// package makes on an agent's behalf; see [Attachment].
-	RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []Attachment) error
+	RunAccepted(ctx context.Context, accept *AcceptedRun, sessionID, prompt string, attachments []Attachment) error
 	// BeginAccepted reserves acceptance for sessionID before a run is
 	// dispatched, so cancellation cannot leave a run unaccounted for
 	// between scheduling and coordinator admission.
-	BeginAccepted(sessionID string) any
+	BeginAccepted(sessionID string) *AcceptedRun
 	// Cancel stops the run in flight in sessionID (never the whole
 	// coordinator).
 	Cancel(sessionID string)

@@ -1363,8 +1363,8 @@ func (l *lifecycle) setPermissionsSkip(skip bool) {
 // and necessary on them: a dispatch that failed before admission left the
 // reservation counted forever, which pins the session's dispatch state in
 // memory and makes it look permanently mid-dispatch.
-func closeAccepted(accept any) {
-	if closer, ok := accept.(interface{ Close() }); ok {
-		closer.Close()
+func closeAccepted(accept *AcceptedRun) {
+	if accept != nil {
+		accept.Close()
 	}
 }
