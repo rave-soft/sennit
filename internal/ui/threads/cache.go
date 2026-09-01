@@ -47,7 +47,6 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/listcache"
-	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // threadsCacheTTL bounds how long the memoized thread list may go without a
@@ -56,6 +55,11 @@ var threadsCacheTTL = 5 * time.Second
 
 // ListCache holds the memoized thread list (see the package doc
 // comment above) plus its TTL-cache and in-flight/generation bookkeeping.
+type threadListWorkspace interface {
+	SupportsThreads() bool
+	ListThreads(context.Context) ([]proto.Thread, error)
+}
+
 type ListCache struct {
 	// Cache is the memoized list and its bookkeeping. It is exported
 	// because the screen that owns a ListCache arranges list state
@@ -88,14 +92,15 @@ type LoadedMsg struct {
 // tool's own delegation — it already renders inline in the chat that
 // started it, is never merged, and nothing ever removed a finished one, so
 // they only accumulated here, burying the threads this cache is about.
-func (c *ListCache) ops() listcache.Ops[LoadedMsg] {
-	return listcache.Ops[LoadedMsg]{
-		Label:    "threads",
-		TTL:      threadsCacheTTL,
-		Backoff:  listcache.RefreshBackoff,
-		Kind:     proto.ThreadKindThread,
-		Supports: func(ws workspace.Workspace) bool { return ws.SupportsThreads() },
-		Fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListThreads(ctx) },
+func (c *ListCache) ops() listcache.Ops[LoadedMsg, threadListWorkspace] {
+	return listcache.Ops[LoadedMsg, threadListWorkspace]{
+		Label:     "threads",
+		TTL:       threadsCacheTTL,
+		Backoff:   listcache.RefreshBackoff,
+		Kind:      proto.ThreadKindThread,
+		Available: func(ws threadListWorkspace) bool { return ws != nil },
+		Supports:  func(ws threadListWorkspace) bool { return ws.SupportsThreads() },
+		Fetch:     func(ctx context.Context, ws threadListWorkspace) ([]proto.Thread, error) { return ws.ListThreads(ctx) },
 		Wrap: func(gen uint64, items []proto.Thread, err error) LoadedMsg {
 			return LoadedMsg{Gen: gen, Threads: items, Err: err}
 		},
@@ -109,7 +114,10 @@ func (c *ListCache) ops() listcache.Ops[LoadedMsg] {
 // goroutine, delivering a LoadedMsg. It returns nil while a fetch is
 // already in flight, or if the workspace doesn't support threads.
 func (c *ListCache) DispatchRefresh(com *common.Common) tea.Cmd {
-	return listcache.DispatchRefresh(&c.Cache, com, c.ops())
+	if com == nil || com.Workspace == nil {
+		return nil
+	}
+	return listcache.DispatchRefresh(&c.Cache, threadListWorkspace(com.Workspace), com.Context(), c.ops())
 }
 
 // applyLoaded stores an off-thread fetch result. Runs on the Update
@@ -119,7 +127,10 @@ func (c *ListCache) DispatchRefresh(com *common.Common) tea.Cmd {
 // the dock's activityGen, say) check it instead of re-deriving the same
 // generation logic themselves.
 func (c *ListCache) ApplyLoaded(com *common.Common, msg LoadedMsg) (cmds []tea.Cmd, applied bool) {
-	return listcache.ApplyLoaded(&c.Cache, com, c.ops(), msg)
+	if com == nil || com.Workspace == nil {
+		return listcache.ApplyLoaded(&c.Cache, threadListWorkspace(nil), nil, c.ops(), msg)
+	}
+	return listcache.ApplyLoaded(&c.Cache, threadListWorkspace(com.Workspace), com.Context(), c.ops(), msg)
 }
 
 // invalidate marks the cached list stale and bumps the generation so any
@@ -143,7 +154,10 @@ func (c *ListCache) ApplyEvent(evt pubsub.Event[proto.Thread]) {
 // has outlived its TTL, it schedules an off-thread re-probe. It never does
 // IO itself.
 func (c *ListCache) StaleRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	return listcache.StaleRefreshCmd(&c.Cache, com, active, c.ops())
+	if com == nil || com.Workspace == nil {
+		return nil
+	}
+	return listcache.StaleRefreshCmd(&c.Cache, threadListWorkspace(com.Workspace), com.Context(), active, c.ops())
 }
 
 // ActiveCount reports how many of threads are pending, running, or

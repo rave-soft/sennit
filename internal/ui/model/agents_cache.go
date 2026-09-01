@@ -34,7 +34,6 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/listcache"
 	"github.com/rave-soft/sennit/internal/ui/threads"
-	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // agentsCacheTTL bounds how long the memoized task list may go without a
@@ -46,6 +45,11 @@ var agentsCacheTTL = 3 * time.Second
 
 // agentListCache holds the memoized delegation list plus its TTL-cache and
 // in-flight/generation bookkeeping.
+type taskListWorkspace interface {
+	SupportsTasks() bool
+	ListTasks(context.Context) ([]proto.Thread, error)
+}
+
 type agentListCache struct {
 	cache listcache.TTLCache[[]proto.Thread]
 }
@@ -76,14 +80,15 @@ type agentsLoadedMsg struct {
 // list_cache.go. owner is stamped onto the result so Root can hand it back
 // to the *UI that dispatched the fetch instead of routing it by whichever
 // screen is active when it lands — see agentsLoadedMsg's doc comment.
-func (c *agentListCache) ops(owner *UI) listcache.Ops[agentsLoadedMsg] {
-	return listcache.Ops[agentsLoadedMsg]{
-		Label:    "delegations",
-		TTL:      agentsCacheTTL,
-		Backoff:  listcache.RefreshBackoff,
-		Kind:     proto.ThreadKindTask,
-		Supports: func(ws workspace.Workspace) bool { return ws.SupportsTasks() },
-		Fetch:    func(ctx context.Context, ws workspace.Workspace) ([]proto.Thread, error) { return ws.ListTasks(ctx) },
+func (c *agentListCache) ops(owner *UI) listcache.Ops[agentsLoadedMsg, taskListWorkspace] {
+	return listcache.Ops[agentsLoadedMsg, taskListWorkspace]{
+		Label:     "delegations",
+		TTL:       agentsCacheTTL,
+		Backoff:   listcache.RefreshBackoff,
+		Kind:      proto.ThreadKindTask,
+		Available: func(ws taskListWorkspace) bool { return ws != nil },
+		Supports:  func(ws taskListWorkspace) bool { return ws.SupportsTasks() },
+		Fetch:     func(ctx context.Context, ws taskListWorkspace) ([]proto.Thread, error) { return ws.ListTasks(ctx) },
 		Wrap: func(gen uint64, items []proto.Thread, err error) agentsLoadedMsg {
 			return agentsLoadedMsg{uiOwned: uiOwned{owner: owner}, gen: gen, agents: items, err: err}
 		},
@@ -97,7 +102,10 @@ func (c *agentListCache) ops(owner *UI) listcache.Ops[agentsLoadedMsg] {
 // goroutine. applied reports whether msg was written through, as opposed to
 // discarded for a stale generation or a failure.
 func (c *agentListCache) applyLoaded(com *common.Common, owner *UI, msg agentsLoadedMsg) (cmds []tea.Cmd, applied bool) {
-	return listcache.ApplyLoaded(&c.cache, com, c.ops(owner), msg)
+	if com == nil || com.Workspace == nil {
+		return listcache.ApplyLoaded(&c.cache, taskListWorkspace(nil), nil, c.ops(owner), msg)
+	}
+	return listcache.ApplyLoaded(&c.cache, taskListWorkspace(com.Workspace), com.Context(), c.ops(owner), msg)
 }
 
 // applyEvent reacts to a delegation pubsub event: it upserts (Created,
@@ -120,7 +128,10 @@ func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 // does: a session that never delegates anything must not re-list forever,
 // and a delegation's own create event is what starts the section moving.
 func (c *agentListCache) staleRefreshCmd(com *common.Common, owner *UI, active bool) tea.Cmd {
-	return listcache.StaleRefreshCmd(&c.cache, com, active, c.ops(owner))
+	if com == nil || com.Workspace == nil {
+		return nil
+	}
+	return listcache.StaleRefreshCmd(&c.cache, taskListWorkspace(com.Workspace), com.Context(), active, c.ops(owner))
 }
 
 // sessionDelegations filters agents down to the live delegations of

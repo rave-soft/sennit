@@ -573,7 +573,7 @@ func (w *readOnlyWorkspace) refusesThreadAttach() {}
 // optimization rather than a guarantee — a caller that polls still needs to
 // handle a failing AttachThread without spinning. Callers that genuinely
 // want to attach should just call AttachThread and handle the error.
-func SupportsThreadAttach(ws Workspace) bool {
+func SupportsThreadAttach(ws ThreadController) bool {
 	_, refuses := ws.(threadAttachRefuser)
 	return !refuses
 }

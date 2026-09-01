@@ -94,6 +94,30 @@ func (w *threadsTestWorkspace) RemoveThread(context.Context, string, proto.Remov
 	return w.err
 }
 
+type narrowThreadListWorkspace struct {
+	threads []proto.Thread
+}
+
+func (w narrowThreadListWorkspace) SupportsThreads() bool { return true }
+
+func (w narrowThreadListWorkspace) ListThreads(context.Context) ([]proto.Thread, error) {
+	return w.threads, nil
+}
+
+func TestThreadListOpsAcceptsNarrowWorkspace(t *testing.T) {
+	t.Parallel()
+
+	cache := &ListCache{}
+	ops := cache.ops()
+	ws := narrowThreadListWorkspace{threads: []proto.Thread{{ID: "thread-1"}}}
+	var role threadListWorkspace = ws
+	msg := listcache.DispatchRefresh(&cache.Cache, role, context.Background(), ops)()
+
+	loaded := msg.(LoadedMsg)
+	require.Equal(t, ws.threads, loaded.Threads)
+	require.NoError(t, loaded.Err)
+}
+
 func TestDispatchThreadsRefreshNoopWhenInFlight(t *testing.T) {
 	t.Parallel()
 
@@ -255,6 +279,28 @@ func TestStaleThreadsRefreshCmdOnlyWhenActiveAndStale(t *testing.T) {
 	c.Cache.InFlight = false
 	c.Cache.Timestamp = time.Now()
 	require.Nil(t, c.StaleRefreshCmd(com, true), "fresh cache should not refresh")
+}
+
+func TestApplyThreadsLoadedStaleResultWithoutWorkspaceDoesNotRedispatch(t *testing.T) {
+	t.Parallel()
+
+	for name, msg := range map[string]LoadedMsg{
+		"success": {Gen: 0, Threads: []proto.Thread{{ID: "stale"}}},
+		"error":   {Gen: 0, Err: errors.New("boom")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := &ListCache{Cache: listcache.TTLCache[[]proto.Thread]{InFlight: true, Generation: 1}}
+
+			cmds, applied := c.ApplyLoaded(nil, msg)
+
+			require.Empty(t, cmds)
+			require.False(t, applied)
+			require.Nil(t, c.Cache.Value)
+			require.False(t, c.Cache.InFlight)
+		})
+	}
 }
 
 func TestApplyThreadsLoadedErrorPreservesCachedValue(t *testing.T) {

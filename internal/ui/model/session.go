@@ -173,9 +173,15 @@ func (msg loadSessionMsg) lspFilePaths() []string {
 	return paths
 }
 
+type sessionLoadWorkspace interface {
+	workspace.SessionStore
+	workspace.AgentController
+	workspace.FileServices
+}
+
 type sessionLoadResolver struct {
 	ctx            context.Context
-	workspace      workspace.Workspace
+	workspace      sessionLoadWorkspace
 	sessionChanges workspace.SessionChangePreparer
 	styles         *styles.Styles
 	config         *config.Config

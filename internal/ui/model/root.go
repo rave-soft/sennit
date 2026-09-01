@@ -32,7 +32,6 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/uimsg"
 	"github.com/rave-soft/sennit/internal/ui/util"
-	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // showThreadsDashboardMsg requests switching to the threads dashboard
@@ -68,7 +67,6 @@ type threadEventSubscriber interface {
 type threadAttachment struct {
 	threadID string
 	name     string
-	ws       workspace.Workspace
 	ui       *UI
 	stop     func() // stops the SubscribeWith event pump
 	detach   func() // releases the attached workspace (from AttachThread)
@@ -160,7 +158,7 @@ type threadAttachedMsg struct {
 	id        string
 	sessionID string
 	name      string
-	ws        workspace.Workspace
+	ws        common.Workspace
 	detach    func()
 	err       error
 }
@@ -624,7 +622,6 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	r.attachment.thread = &threadAttachment{
 		threadID: msg.id,
 		name:     msg.name,
-		ws:       msg.ws,
 		ui:       childUI,
 		stop:     stop,
 		detach:   msg.detach,

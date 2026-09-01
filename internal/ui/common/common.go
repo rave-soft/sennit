@@ -24,9 +24,25 @@ const MaxAttachmentSize = int64(5 * 1024 * 1024)
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 
+type Workspace interface {
+	workspace.SessionStore
+	workspace.AgentController
+	workspace.UsageReporter
+	workspace.PermissionResolver
+	workspace.QuestionResponder
+	workspace.FileServices
+	workspace.LSPController
+	workspace.ConfigAccessor
+	workspace.ProjectLifecycle
+	workspace.MCPController
+	workspace.ThreadController
+	workspace.TaskController
+	workspace.BackgroundJobs
+}
+
 // Common defines common UI options and configurations.
 type Common struct {
-	Workspace      workspace.Workspace
+	Workspace      Workspace
 	SessionChanges workspace.SessionChangePreparer
 	Styles         *styles.Styles
 	// Ctx is the process lifecycle context (typically the cobra command's
@@ -56,7 +72,7 @@ func (c *Common) Context() context.Context {
 // DefaultCommon returns the default common UI configurations, styled with
 // the theme the workspace's config selects (see the "/theme" command). An
 // unset or unknown theme resolves to Sennit's default palette.
-func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
+func DefaultCommon(ctx context.Context, ws Workspace) *Common {
 	s := styles.Theme(ThemeID(ws)).WithSpinner(SpinnerMode(ws))
 	sessionChanges, _ := ws.(workspace.SessionChangePreparer)
 	return &Common{

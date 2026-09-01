@@ -26,8 +26,6 @@ import (
 
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/ui/common"
-	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // Ops supplies what differs between the panel's two live thread-
@@ -52,7 +50,7 @@ import (
 // their own in seconds.
 var RefreshBackoff = 30 * time.Second
 
-type Ops[Msg any] struct {
+type Ops[Msg any, Workspace any] struct {
 	Label string        // for slog.Error's "Failed to list <label>"
 	TTL   time.Duration // StaleRefreshCmd's freshness window
 	// Backoff is how long to wait before re-probing after a failed fetch.
@@ -60,12 +58,13 @@ type Ops[Msg any] struct {
 	// StaleRefreshCmd, which meant every other list — the agents cache
 	// today, anything added tomorrow — silently inherited the threads
 	// backoff without saying so anywhere.
-	Backoff  time.Duration
-	Kind     proto.ThreadKind // which pubsub events this cache's ApplyEvent accepts
-	Supports func(workspace.Workspace) bool
-	Fetch    func(context.Context, workspace.Workspace) ([]proto.Thread, error)
-	Wrap     func(gen uint64, items []proto.Thread, err error) Msg
-	Unwrap   func(Msg) (gen uint64, items []proto.Thread, err error)
+	Backoff   time.Duration
+	Kind      proto.ThreadKind // which pubsub events this cache's ApplyEvent accepts
+	Available func(Workspace) bool
+	Supports  func(Workspace) bool
+	Fetch     func(context.Context, Workspace) ([]proto.Thread, error)
+	Wrap      func(gen uint64, items []proto.Thread, err error) Msg
+	Unwrap    func(Msg) (gen uint64, items []proto.Thread, err error)
 }
 
 // DispatchRefresh returns a command that lists ops' items off the
@@ -73,16 +72,14 @@ type Ops[Msg any] struct {
 // already in flight, or if the workspace doesn't support this list. The
 // closure captures only locals (never *common.Common) so it is safe
 // off-thread; state is applied by ApplyLoaded on the Update goroutine.
-func DispatchRefresh[Msg any](cache *TTLCache[[]proto.Thread], com *common.Common, ops Ops[Msg]) tea.Cmd {
-	if cache.InFlight || com == nil || com.Workspace == nil || !ops.Supports(com.Workspace) {
+func DispatchRefresh[Msg any, Workspace any](cache *TTLCache[[]proto.Thread], ws Workspace, ctx context.Context, ops Ops[Msg, Workspace]) tea.Cmd {
+	if cache.InFlight || !ops.Available(ws) || !ops.Supports(ws) {
 		return nil
 	}
 	gen, started := cache.Begin()
 	if !started {
 		return nil
 	}
-	ws := com.Workspace
-	ctx := com.Context()
 	return func() tea.Msg {
 		items, err := ops.Fetch(ctx, ws)
 		if err != nil {
@@ -96,13 +93,13 @@ func DispatchRefresh[Msg any](cache *TTLCache[[]proto.Thread], com *common.Commo
 // goroutine. applied reports whether msg was actually written through
 // (true) as opposed to discarded for a stale Generation or a failure
 // (false).
-func ApplyLoaded[Msg any](cache *TTLCache[[]proto.Thread], com *common.Common, ops Ops[Msg], msg Msg) (cmds []tea.Cmd, applied bool) {
+func ApplyLoaded[Msg any, Workspace any](cache *TTLCache[[]proto.Thread], ws Workspace, ctx context.Context, ops Ops[Msg, Workspace], msg Msg) (cmds []tea.Cmd, applied bool) {
 	gen, items, err := ops.Unwrap(msg)
 	if err != nil {
 		if !cache.Fail(gen) {
 			// Started before a newer state transition; discard and
 			// re-dispatch so the authoritative refresh isn't lost.
-			if cmd := DispatchRefresh(cache, com, ops); cmd != nil {
+			if cmd := DispatchRefresh(cache, ws, ctx, ops); cmd != nil {
 				return []tea.Cmd{cmd}, false
 			}
 		}
@@ -113,7 +110,7 @@ func ApplyLoaded[Msg any](cache *TTLCache[[]proto.Thread], com *common.Common, o
 		// event edge). Discard its result and re-dispatch so the
 		// authoritative refresh is not lost merely because this older
 		// request was in flight.
-		if cmd := DispatchRefresh(cache, com, ops); cmd != nil {
+		if cmd := DispatchRefresh(cache, ws, ctx, ops); cmd != nil {
 			return []tea.Cmd{cmd}, false
 		}
 		return nil, false
@@ -176,12 +173,12 @@ func threadEventMatchesKind(payloadKind, target proto.ThreadKind) bool {
 // A fetched-and-empty list stays empty until a matching event invalidates
 // it (the Timestamp is zeroed then) — don't re-poll forever for a workspace
 // with nothing in this particular list.
-func StaleRefreshCmd[Msg any](cache *TTLCache[[]proto.Thread], com *common.Common, active bool, ops Ops[Msg]) tea.Cmd {
+func StaleRefreshCmd[Msg any, Workspace any](cache *TTLCache[[]proto.Thread], ws Workspace, ctx context.Context, active bool, ops Ops[Msg, Workspace]) tea.Cmd {
 	if !active || cache.Fresh(ops.TTL) || cache.BackingOff(ops.Backoff) {
 		return nil
 	}
 	if len(cache.Value) == 0 && !cache.Timestamp.IsZero() {
 		return nil
 	}
-	return DispatchRefresh(cache, com, ops)
+	return DispatchRefresh(cache, ws, ctx, ops)
 }
