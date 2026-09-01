@@ -129,7 +129,9 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
-		if m.ops.transparentLoading {
+		// Preserve the in-flight warning even if the configuration changed while
+		// the write was running. Validation applies only to a new operation.
+		if m.transparency.isLoading() {
 			cmds = append(cmds, util.ReportWarn("Transparency is already being updated"))
 			break
 		}
@@ -138,10 +140,12 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
-		desired := cfg.Options == nil || cfg.Options.TUI.Transparent == nil || !*cfg.Options.TUI.Transparent
-		m.ops.transparentLoading = true
-		m.ops.transparentGeneration++
-		generation := m.ops.transparentGeneration
+		desired := cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.Transparent == nil || !*cfg.Options.TUI.Transparent
+		generation, started := m.transparency.begin()
+		if !started {
+			cmds = append(cmds, util.ReportWarn("Transparency is already being updated"))
+			break
+		}
 		workspace := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
 			return transparentToggledMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", desired), Enabled: desired, generation: generation}

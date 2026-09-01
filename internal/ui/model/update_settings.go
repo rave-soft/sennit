@@ -13,8 +13,8 @@ import (
 )
 
 // settingsOps holds the generation counters and in-flight flags for the
-// settings that apply asynchronously (yolo, model, transparency, theme,
-// permission responses). A generation is
+// settings that apply asynchronously (yolo, model, theme, permission
+// responses). A generation is
 // bumped each time an operation starts, and the result handler discards
 // any reply whose generation doesn't match the latest one, so a stale
 // response from a superseded operation can't clobber a newer one.
@@ -22,8 +22,6 @@ type settingsOps struct {
 	yoloGeneration           uint64
 	modelOperationGeneration uint64
 	modelOperationLoading    bool
-	transparentLoading       bool
-	transparentGeneration    uint64
 	themeGeneration          uint64
 	yoloLoading              bool
 	permissionLoading        bool
@@ -189,10 +187,9 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 
 	case transparentToggledMsg:
-		if msg.generation != m.ops.transparentGeneration {
+		if !m.transparency.complete(msg.generation) {
 			break
 		}
-		m.ops.transparentLoading = false
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break

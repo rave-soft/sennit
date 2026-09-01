@@ -122,6 +122,9 @@ type UI struct {
 	// compactMode owns the persistence lifecycle for compact-mode changes.
 	compactMode compactModeState
 
+	// transparency owns the persistence lifecycle for transparency changes.
+	transparency transparencyState
+
 	// notificationStyle owns the persistence lifecycle for notification-style changes.
 	notificationStyle notificationStyleState
 

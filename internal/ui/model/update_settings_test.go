@@ -326,26 +326,26 @@ func TestUpdateSettings_TransparentToggledMsg(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.transparentGeneration = 2
-		m.ops.transparentLoading = true
+		generation, started := m.transparency.begin()
+		require.True(t, started)
 
-		cmds, done := m.updateSettings(transparentToggledMsg{generation: 1}, nil)
+		cmds, done := m.updateSettings(transparentToggledMsg{generation: generation + 1}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.transparentLoading)
+		require.True(t, m.transparency.isLoading())
 	})
 
 	t.Run("error reports and leaves transparency unchanged", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.transparentGeneration = 1
-		m.ops.transparentLoading = true
+		generation, started := m.transparency.begin()
+		require.True(t, started)
 		m.lay.isTransparent = false
 
-		cmds, _ := m.updateSettings(transparentToggledMsg{Err: errors.New("nope"), Enabled: true, generation: 1}, nil)
+		cmds, _ := m.updateSettings(transparentToggledMsg{Err: errors.New("nope"), Enabled: true, generation: generation}, nil)
 
-		require.False(t, m.ops.transparentLoading)
+		require.False(t, m.transparency.isLoading())
 		require.False(t, m.lay.isTransparent)
 		require.Len(t, cmds, 1)
 	})
@@ -353,11 +353,13 @@ func TestUpdateSettings_TransparentToggledMsg(t *testing.T) {
 	t.Run("success flips transparency and closes the commands dialog", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.transparentGeneration = 1
+		generation, started := m.transparency.begin()
+		require.True(t, started)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.CommandsID})
 
-		cmds, _ := m.updateSettings(transparentToggledMsg{Enabled: true, generation: 1}, nil)
+		cmds, _ := m.updateSettings(transparentToggledMsg{Enabled: true, generation: generation}, nil)
 
+		require.False(t, m.transparency.isLoading())
 		require.True(t, m.lay.isTransparent)
 		require.False(t, m.dialog.ContainsDialog(dialog.CommandsID))
 		require.Empty(t, cmds)
