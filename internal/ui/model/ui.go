@@ -152,10 +152,9 @@ type UI struct {
 	// probe, keyboard enhancements, progress bar). See update_system.go.
 	term
 
-	// onboarding state
-	onboarding struct {
-		yesInitializeSelected bool
-	}
+	// onboarding holds the project initialization prompt selection. See
+	// initialize_selection_state.go.
+	onboarding initializeSelectionState
 
 	// lsp holds the memoized workspace LSP state and per-server diagnostic
 	// counts. See lsp.go.
@@ -395,9 +394,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 
 	// Initialize compact mode from config
 	ui.lay.forceCompactMode = com.Config().Options.TUI.CompactMode
-
-	// set onboarding state defaults
-	ui.onboarding.yesInitializeSelected = true
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor

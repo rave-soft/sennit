@@ -33,13 +33,13 @@ func markProjectInitializedCmd(com *common.Common) tea.Cmd {
 func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keyMap.Initialize.Enter):
-		if m.onboarding.yesInitializeSelected {
+		if m.onboarding.yesSelected() {
 			cmds = append(cmds, m.initializeProject())
 		} else {
 			cmds = append(cmds, m.skipInitializeProject())
 		}
 	case key.Matches(msg, m.keyMap.Initialize.Switch):
-		m.onboarding.yesInitializeSelected = !m.onboarding.yesInitializeSelected
+		m.onboarding.toggle()
 	case key.Matches(msg, m.keyMap.Initialize.Yes):
 		cmds = append(cmds, m.initializeProject())
 	case key.Matches(msg, m.keyMap.Initialize.No):
@@ -93,8 +93,8 @@ func (m *UI) initializeView() string {
 	prompt := s.Content.Render("Would you like to initialize now?")
 
 	buttons := common.ButtonGroup(m.com.Styles, []common.ButtonOpts{
-		{Text: "Yep!", Selected: m.onboarding.yesInitializeSelected},
-		{Text: "Nope", Selected: !m.onboarding.yesInitializeSelected},
+		{Text: "Yep!", Selected: m.onboarding.yesSelected()},
+		{Text: "Nope", Selected: !m.onboarding.yesSelected()},
 	}, " ")
 
 	// max width 60 so the text is compact
