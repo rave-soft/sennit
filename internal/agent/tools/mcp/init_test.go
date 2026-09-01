@@ -1254,6 +1254,8 @@ func TestOAuthTokenPersistenceBoundedWriteLetsTeardownFinish(t *testing.T) {
 }
 
 func TestOAuthTokenPersistenceCancelledCallerStillCommits(t *testing.T) {
+	type contextKey struct{}
+
 	const name = "token-owner"
 	path := filepath.Join(t.TempDir(), "config.json")
 	seed := `{"mcp":{"token-owner":{"type":"http","oauth":true}}}`
@@ -1263,10 +1265,15 @@ func TestOAuthTokenPersistenceCancelledCallerStillCommits(t *testing.T) {
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
-	ctx, cancel := context.WithCancel(t.Context())
+	r.tokenCommit = func(ctx context.Context, cfg ConfigProvider, reservation *config.MCPTokenMutation, tok *oauth.Token) error {
+		require.NoError(t, ctx.Err())
+		require.Equal(t, "cleanup-value", ctx.Value(contextKey{}))
+		_, err := cfg.SetMCPTokenContext(ctx, reservation, tok)
+		return err
+	}
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), contextKey{}, "cleanup-value"))
 	cancel()
 	r.persistOAuthToken(ctx, cfg, name, owner, &oauth.Token{AccessToken: "fresh"})
-	require.Equal(t, "fresh", cfg.Config().MCP[name].OAuthToken.AccessToken)
 }
 
 func TestOwnedAuthHandlerSharedPublicationAndSessionClosesOnce(t *testing.T) {

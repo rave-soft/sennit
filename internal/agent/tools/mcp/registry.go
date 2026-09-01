@@ -285,7 +285,7 @@ func (r *Registry) Close(ctx context.Context) error {
 	}
 	r.closeOnce.Do(func() {
 		go func() {
-			r.close(context.Background())
+			r.close(ctx)
 			close(r.closeDone)
 		}()
 	})
@@ -297,8 +297,8 @@ func (r *Registry) Close(ctx context.Context) error {
 	}
 }
 
-func (r *Registry) close(_ context.Context) {
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), lifecycleCleanupTimeout)
+func (r *Registry) close(ctx context.Context) {
+	cleanupCtx, cancel := lifecycleCleanupContext(ctx)
 	defer cancel()
 
 	// Invalidate and detach everything before any potentially blocking close.
@@ -375,6 +375,10 @@ func (r *Registry) close(_ context.Context) {
 }
 
 const lifecycleCleanupTimeout = 2 * time.Second
+
+func lifecycleCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), lifecycleCleanupTimeout)
+}
 
 func (r *Registry) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return r.broker.Subscribe(ctx)

@@ -96,6 +96,21 @@ func TestRegistry_CloseContinuesAfterCallerCancellation(t *testing.T) {
 	require.NoError(t, r.Close(context.Background()))
 }
 
+func TestLifecycleCleanupContextPreservesValuesAfterCancellation(t *testing.T) {
+	type contextKey struct{}
+
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), contextKey{}, "cleanup-value"))
+	cancel()
+	cleanupCtx, cleanupCancel := lifecycleCleanupContext(ctx)
+	defer cleanupCancel()
+
+	require.NoError(t, cleanupCtx.Err())
+	require.Equal(t, "cleanup-value", cleanupCtx.Value(contextKey{}))
+	deadline, ok := cleanupCtx.Deadline()
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(lifecycleCleanupTimeout), deadline, 100*time.Millisecond)
+}
+
 func TestRegistry_CloseReturnsEachCallersContextError(t *testing.T) {
 	r := NewRegistry()
 	r.ArmInit()

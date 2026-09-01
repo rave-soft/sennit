@@ -86,7 +86,7 @@ func (r *Registry) finishTokenWrite(name string, owner attemptID, write *tokenWr
 	r.publishMu.Unlock()
 }
 
-func (r *Registry) persistOAuthToken(_ context.Context, cfg ConfigProvider, name string, owner attemptID, tok *oauth.Token) {
+func (r *Registry) persistOAuthToken(ctx context.Context, cfg ConfigProvider, name string, owner attemptID, tok *oauth.Token) {
 	if m, ok := cfg.Config().MCP[name]; ok && !r.reserveTokenMutation(cfg, name, m, owner) {
 		return
 	}
@@ -111,7 +111,7 @@ func (r *Registry) persistOAuthToken(_ context.Context, cfg ConfigProvider, name
 	if !owns || !ok {
 		return
 	}
-	commitCtx, cancel := context.WithTimeout(context.Background(), lifecycleCleanupTimeout)
+	commitCtx, cancel := lifecycleCleanupContext(ctx)
 	defer cancel()
 	if err := r.tokenCommit(commitCtx, cfg, reservation, tok); err != nil {
 		slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
