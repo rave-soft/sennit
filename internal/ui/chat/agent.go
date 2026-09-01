@@ -310,7 +310,7 @@ func NewAgentToolMessageItem(
 ) *AgentToolMessageItem {
 	t := &AgentToolMessageItem{
 		delegationToolMessageItem: &delegationToolMessageItem{startTime: time.Now()},
-		displayName:               agentDisplayName(toolCall.Name),
+		displayName:               agentDisplayName(toolCall.Name, toolCall.Input),
 	}
 	if cfg != nil {
 		// The built-in "task"/"coder" roles never carry a model/effort
@@ -345,19 +345,28 @@ func NewAgentToolMessageItem(
 // internal/config for one constant.
 const builtinTaskAgentName = "task"
 
-// agentDisplayName resolves a delegation block's title from its tool name.
-// The built-in agent tool (tools.AgentToolName) always dispatches to the
-// fixed config.AgentTask sub-agent — AgentParams carries no field
-// identifying a specific target — so it always renders as "task". A
-// user-defined agent tool's own name already is its identity:
-// internal/agent/custom_agent_tool.go registers one tool per cfg.Agents
-// entry, named after the map key, so toolCall.Name is already the right
-// display name (e.g. "developer").
-func agentDisplayName(toolName string) string {
-	if toolName == tools.AgentToolName {
-		return builtinTaskAgentName
+// agentDisplayName resolves a delegation block's title from the tool call.
+//
+// The agent tool names its target in the call: subagent_type is the id of
+// a user-defined agent, and an absent one is the built-in config.AgentTask
+// sub-agent, which renders as "task".
+//
+// A tool name other than the agent tool's is a user-defined agent from
+// before the tools were unified, when internal/agent registered one tool
+// per cfg.Agents entry named after the map key. Those calls are still in
+// session history, where the tool name is the only identity they carry,
+// so it stays the display name for them.
+func agentDisplayName(toolName, input string) string {
+	if toolName != tools.AgentToolName {
+		return toolName
 	}
-	return toolName
+	var p struct {
+		SubagentType string `json:"subagent_type"`
+	}
+	if json.Unmarshal([]byte(input), &p) == nil && p.SubagentType != "" {
+		return p.SubagentType
+	}
+	return builtinTaskAgentName
 }
 
 // DelegationInfoProvider is implemented by tool items that represent a

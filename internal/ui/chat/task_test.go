@@ -41,7 +41,7 @@ func taskInfoJSON(t *testing.T, info taskInfo) string {
 func TestTaskResultRender(t *testing.T) {
 	t.Parallel()
 
-	out := renderTaskTool(t, tools.TaskResultToolName,
+	out := renderTaskTool(t, tools.AgentResultToolName,
 		`{"id":"a8355bfc-08c7-4024-8af1-b157a4f836ff"}`,
 		taskInfoJSON(t, taskInfo{Goal: pipelineGoal, Status: "running"}),
 		"Task a8355bfc-08c7-4024-8af1-b157a4f836ff is still running; no result yet.")
@@ -58,7 +58,7 @@ func TestTaskResultRender(t *testing.T) {
 func TestTaskResultRender_Failure(t *testing.T) {
 	t.Parallel()
 
-	out := renderTaskTool(t, tools.TaskResultToolName, `{"id":"t1"}`,
+	out := renderTaskTool(t, tools.AgentResultToolName, `{"id":"t1"}`,
 		taskInfoJSON(t, taskInfo{Goal: "look into the flaky test", Status: "failed", Error: "context deadline exceeded\nstack..."}),
 		"Task t1 did not complete (status=failed): context deadline exceeded")
 
@@ -75,27 +75,27 @@ func TestTaskToolRender_Subjects(t *testing.T) {
 
 	t.Run("task_output reports how much of the transcript came back", func(t *testing.T) {
 		t.Parallel()
-		out := renderTaskTool(t, tools.TaskOutputToolName, `{"id":"t1","limit":20}`,
+		out := renderTaskTool(t, tools.AgentOutputToolName, `{"id":"t1","limit":20}`,
 			`{"Messages":[{"Role":"assistant","Text":"looking"}],"Total":37}`, "[assistant] looking")
 		require.Contains(t, out, "last 1 of 37 messages")
 	})
 
 	t.Run("task_output with nothing yet says so", func(t *testing.T) {
 		t.Parallel()
-		out := renderTaskTool(t, tools.TaskOutputToolName, `{"id":"t1"}`, `{"Messages":null,"Total":0}`, "No output yet.")
+		out := renderTaskTool(t, tools.AgentOutputToolName, `{"id":"t1"}`, `{"Messages":null,"Total":0}`, "No output yet.")
 		require.Contains(t, out, "no output yet")
 	})
 
 	t.Run("task_list counts what is still moving", func(t *testing.T) {
 		t.Parallel()
 		meta := `{"Tasks":[{"Status":"running"},{"Status":"running"},{"Status":"completed"}]}`
-		out := renderTaskTool(t, tools.TaskListToolName, `{}`, meta, "…")
+		out := renderTaskTool(t, tools.AgentListToolName, `{}`, meta, "…")
 		require.Contains(t, out, "3 tasks, 2 running")
 	})
 
 	t.Run("task_cancel names the task it stopped", func(t *testing.T) {
 		t.Parallel()
-		out := renderTaskTool(t, tools.TaskCancelToolName, `{"id":"t1"}`,
+		out := renderTaskTool(t, tools.AgentCancelToolName, `{"id":"t1"}`,
 			taskInfoJSON(t, taskInfo{Goal: pipelineGoal, Status: "cancelled"}), "Task t1 status: cancelled")
 		require.Contains(t, out, "C5 providerload extraction")
 		require.Contains(t, out, "cancelled")
@@ -105,7 +105,7 @@ func TestTaskToolRender_Subjects(t *testing.T) {
 		t.Parallel()
 		// No metadata: what it did is in its text, so the subject has to
 		// come from the call.
-		out := renderTaskTool(t, tools.TaskSendToolName,
+		out := renderTaskTool(t, tools.AgentSendToolName,
 			`{"id":"t1","message":"drop the modelcache move\nand rerun the tests"}`, "", "Queued for task t1.")
 		require.Contains(t, out, "drop the modelcache move")
 		require.NotContains(t, out, "rerun the tests", "the header is one line")
@@ -118,8 +118,8 @@ func TestTaskToolRender_Subjects(t *testing.T) {
 func TestTaskToolRender_NoMetadata(t *testing.T) {
 	t.Parallel()
 
-	out := renderTaskTool(t, tools.TaskResultToolName, `{"id":"t1"}`, "", "no such task")
-	require.Contains(t, out, "Task Result")
+	out := renderTaskTool(t, tools.AgentResultToolName, `{"id":"t1"}`, "", "no such task")
+	require.Contains(t, out, "Agent Result")
 	require.NotContains(t, out, "t1")
 }
 

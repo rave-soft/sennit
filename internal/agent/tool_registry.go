@@ -73,6 +73,11 @@ func gateAllows(g toolmeta.Gate, name string, b *buildToolsCtx) bool {
 		return !b.isSubAgent && b.threads != nil
 	case toolmeta.GateTasks:
 		return !b.isSubAgent && b.backgroundAgentsOn && b.taskManager != nil
+	case toolmeta.GateDelegations:
+		// Either kind is enough: the agent_* tools answer for whichever
+		// exists, and a workspace can have threads with background tasks
+		// switched off, or tasks with no git worktree to thread from.
+		return !b.isSubAgent && ((b.backgroundAgentsOn && b.taskManager != nil) || b.threads != nil)
 	case toolmeta.GateLSP:
 		return b.cfg.HasLSP() || b.cfg.AutoLSPEnabled()
 	case toolmeta.GateMCP:
@@ -92,12 +97,14 @@ func one(fn func(b *buildToolsCtx) fantasy.AgentTool) func(context.Context, *run
 	}
 }
 
-// toolSpecs is the registry buildTools walks. Two tools are deliberately
-// left out of it — see buildTools' doc comment for why:
-//   - the user-defined agent tools (custom_agent_tool.go), whose count and
-//     names depend on config.Agents and so cannot be fixed rows;
-//   - the per-MCP-server tools (tools.GetMCPTools), gated by AllowedMCP
-//     rather than AllowedTools and likewise dynamic in name and count.
+// toolSpecs is the registry buildTools walks. One kind of tool is
+// deliberately left out of it — see buildTools' doc comment for why: the
+// per-MCP-server tools (tools.GetMCPTools), gated by AllowedMCP rather
+// than AllowedTools and dynamic in name and count.
+//
+// User-defined agents used to be the other exception, one row-less tool
+// per .sennit/agents entry. They are the "agent" row's subagent_type
+// parameter now, so the registry is the whole built-in tool list again.
 func coreToolNames() []string {
 	names := []string{"bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "agent_trace", "job_output", "job_kill", "download", "edit", "multiedit", "fetch", "web_fetch", "web_search", "glob"}
 	if tools.HasRipgrep() {
@@ -117,7 +124,14 @@ func toolSpecs() []toolSpec {
 		{
 			[]string{AgentToolName},
 			func(ctx context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
-				return []fantasy.AgentTool{b.inputs.delegationToolsBuilt[AgentToolName]}, nil
+				// Two builds of the one tool: a delegated caller gets the
+				// one that neither advertises nor accepts a
+				// subagent_type - see agentTool's allowNamedAgents.
+				key := AgentToolName
+				if b.isSubAgent {
+					key = subAgentAgentToolKey
+				}
+				return []fantasy.AgentTool{b.inputs.delegationToolsBuilt[key]}, nil
 			},
 		},
 		{
@@ -157,30 +171,32 @@ func toolSpecs() []toolSpec {
 			}, nil
 		}},
 
-		// Thread tools: top-level agent of the workspace owning the thread
-		// manager only — sub-agents nesting workspace ownership isn't
-		// supported, and non-git/thread-spawned workspaces have no manager.
-		{[]string{"thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		// Worktree lifecycle: top-level agent of the workspace owning the
+		// thread manager only — sub-agents nesting workspace ownership
+		// isn't supported, and non-git/thread-spawned workspaces have no
+		// manager. Creating, merging and removing a worktree have no task
+		// equivalent, so these three stayed thread-specific when the rest
+		// of the delegation surface merged into the agent_* tools.
+		{[]string{"thread_create", "thread_merge", "thread_remove"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
 				tools.NewThreadCreateTool(b.threads, b.inputs.permissions),
-				tools.NewThreadListTool(b.threads),
-				tools.NewThreadStatusTool(b.threads),
-				tools.NewThreadSendTool(b.threads),
 				tools.NewThreadMergeTool(b.threads, b.inputs.permissions),
 				tools.NewThreadRemoveTool(b.threads, b.inputs.permissions),
 			}, nil
 		}},
 
-		// Task tools observe/steer background task delegations (see the
-		// "agent" tool's background mode). Same restriction as thread
-		// tools, plus the explicit options.background_agents opt-out.
-		{[]string{"task_list", "task_result", "task_cancel", "task_send", "task_output"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		// The agent_* tools observe and steer delegations of both kinds:
+		// background tasks (see the "agent" tool) and threads. b.threads
+		// is nil in a workspace with no thread manager, and then they
+		// answer for tasks alone. Same restriction as the worktree tools,
+		// plus the explicit options.background_agents opt-out.
+		{[]string{"agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
-				tools.NewTaskListTool(b.taskManager),
-				tools.NewTaskResultTool(b.taskManager),
-				tools.NewTaskCancelTool(b.taskManager, b.inputs.permissions),
-				tools.NewTaskSendTool(b.taskManager),
-				tools.NewTaskOutputTool(b.taskManager),
+				tools.NewAgentListTool(b.taskManager, b.threads),
+				tools.NewAgentResultTool(b.taskManager, b.threads),
+				tools.NewAgentCancelTool(b.taskManager, b.threads, b.inputs.permissions),
+				tools.NewAgentSendTool(b.taskManager, b.threads),
+				tools.NewAgentOutputTool(b.taskManager, b.threads),
 			}, nil
 		}},
 

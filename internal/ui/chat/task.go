@@ -28,16 +28,22 @@ import (
 // task's own record (goal, status, result summary) as response metadata,
 // and none of it was being read.
 
-// registerTaskToolRenderers registers the renderer for every task_* tool.
-// They share one because they share a subject — one delegation, addressed
-// by id — and differ only in what they did to it.
+// registerTaskToolRenderers registers the renderer for every agent_*
+// delegation tool. They share one because they share a subject — one
+// delegation, addressed by id — and differ only in what they did to it.
 func registerTaskToolRenderers() {
 	for _, name := range []string{
-		tools.TaskResultToolName,
-		tools.TaskOutputToolName,
-		tools.TaskListToolName,
-		tools.TaskCancelToolName,
-		tools.TaskSendToolName,
+		tools.AgentResultToolName,
+		tools.AgentOutputToolName,
+		tools.AgentListToolName,
+		tools.AgentCancelToolName,
+		tools.AgentSendToolName,
+		// The per-kind names these replaced. Sessions recorded before the
+		// merge still hold calls under them and must keep rendering; the
+		// subject each one reads comes from the metadata, which the old
+		// tools attached in the same shape.
+		"task_result", "task_output", "task_list", "task_cancel", "task_send",
+		"thread_list", "thread_status", "thread_send",
 	} {
 		registerToolRenderer(name, &TaskToolRenderContext{})
 	}
@@ -54,7 +60,9 @@ type taskInfo struct {
 	Error         string
 }
 
-// taskListMetadata mirrors tools.TaskListResponseMetadata.
+// taskListMetadata mirrors tools.AgentListResponseMetadata. Only the task
+// half is read: a thread row renders from its own fields, and the count
+// line this feeds is about background tasks.
 type taskListMetadata struct {
 	Tasks []taskInfo
 }
@@ -102,14 +110,14 @@ func taskToolSubject(opts *ToolRenderOpts) (subject, summary string) {
 	}
 
 	switch opts.ToolCall.Name {
-	case tools.TaskListToolName:
+	case tools.AgentListToolName:
 		var meta taskListMetadata
 		if json.Unmarshal([]byte(metadata), &meta) != nil || len(meta.Tasks) == 0 {
 			return "", "no tasks"
 		}
 		return "", taskCountSummary(meta.Tasks)
 
-	case tools.TaskOutputToolName:
+	case tools.AgentOutputToolName:
 		var meta taskOutputMetadata
 		if json.Unmarshal([]byte(metadata), &meta) != nil || meta.Total == 0 {
 			return "", "no output yet"
@@ -119,8 +127,8 @@ func taskToolSubject(opts *ToolRenderOpts) (subject, summary string) {
 		}
 		return "", fmt.Sprintf("%d messages", meta.Total)
 
-	case tools.TaskSendToolName:
-		// task_send attaches no metadata — what it did is in its text —
+	case tools.AgentSendToolName:
+		// agent_send attaches no metadata — what it did is in its text —
 		// so the subject comes from the call itself: the instruction
 		// sent, which is the part a reader would recognize.
 		var params struct {

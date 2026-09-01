@@ -78,6 +78,10 @@ func (a *agentToolManager) Send(ctx context.Context, idOrName, message string) (
 	return toToolSendOutcome(disp), nil
 }
 
+func (a *agentToolManager) Cancel(ctx context.Context, idOrName, reason string) error {
+	return toolErr(a.m.Cancel(ctx, idOrName, reason))
+}
+
 func (a *agentToolManager) Wait(ctx context.Context, ids []string, timeout time.Duration) error {
 	return a.m.Wait(ctx, ids, timeout)
 }

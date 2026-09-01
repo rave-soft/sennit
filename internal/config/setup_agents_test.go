@@ -40,7 +40,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "agent_trace", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "read", "multi_read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "agent_trace", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "read", "multi_read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_merge", "thread_remove", "agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output", "ask_parent"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -91,7 +91,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_merge", "thread_remove", "agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output", "ask_parent"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)

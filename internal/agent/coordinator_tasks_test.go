@@ -39,11 +39,11 @@ func (noopTaskManager) Output(context.Context, string, int) (tools.TaskOutput, e
 }
 
 var taskToolNames = []string{
-	tools.TaskListToolName,
-	tools.TaskResultToolName,
-	tools.TaskCancelToolName,
-	tools.TaskSendToolName,
-	tools.TaskOutputToolName,
+	tools.AgentListToolName,
+	tools.AgentResultToolName,
+	tools.AgentCancelToolName,
+	tools.AgentSendToolName,
+	tools.AgentOutputToolName,
 }
 
 // newTasksTestCoordinator mirrors newThreadsTestCoordinator, wired
@@ -162,11 +162,11 @@ func TestCoordinator_SetDelegationToolsTaskTakesEffectImmediately(t *testing.T) 
 
 	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
-	require.NotContains(t, toolNames(t, built), tools.TaskListToolName)
+	require.NotContains(t, toolNames(t, built), tools.AgentListToolName)
 
 	coord.SetDelegationTools(nil, noopTaskManager{})
 
 	built, err = coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
-	require.Contains(t, toolNames(t, built), tools.TaskListToolName)
+	require.Contains(t, toolNames(t, built), tools.AgentListToolName)
 }

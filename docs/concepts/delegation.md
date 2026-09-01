@@ -65,8 +65,8 @@ capped at 3 levels deep.
 
 ## Every task tool answers from where you stand
 
-The tasks form a tree, and `task_list`, `task_result`, `task_output`,
-`task_send` and `task_cancel` all read it from one place: the session the
+The tasks form a tree, and `agent_list`, `agent_result`, `agent_output`,
+`agent_send` and `agent_cancel` all read it from one place: the session the
 call came from. Each reaches that session's own subtree — the tasks it
 started, and the tasks those started, at any depth — and nothing else. A
 delegation cannot cancel itself, cannot cancel the delegation it hangs
@@ -76,7 +76,7 @@ had last week.
 
 The rule reads like tidiness and is not. Before it existed, a delegated
 agent meaning to stop one of the two tasks it had started passed its own
-id to `task_cancel` — its own row was in the listing and nothing checked
+id to the cancel tool — its own row was in the listing and nothing checked
 whose it was. It killed its own turn mid-sentence. The report it owed the
 session waiting on it died with it, its own child went on editing the
 repository for nine more minutes with nobody left above it, and the work
@@ -126,8 +126,8 @@ outright once you're done with it.
 A named agent — anything defined as a markdown file in `.sennit/agents`,
 as opposed to the built-in `coder` and `task` — is a continuing counterpart,
 not a stranger on every call. Delegating to `developer` twice under the same
-session replays the first exchange into the second: you can send it review
-findings and it knows what it wrote.
+session (`agent` with `subagent_type: developer`) replays the first exchange
+into the second: you can send it review findings and it knows what it wrote.
 
 Continuity is scoped by *who* and *where*. Two named agents under one parent
 keep separate conversations, and the same agent keeps separate conversations
@@ -148,8 +148,8 @@ bounded: once the carried transcript grows past the budget
 (`maxCarriedSubAgentChars`), the oldest whole delegations are shed, newest
 kept.
 
-The anonymous delegations — the built-in `agent` and `agentic_fetch` tools —
-stay stateless on purpose. They are one-off, often run several at a time on
+The anonymous delegations — `agent` with no `subagent_type`, and
+`agentic_fetch` — stay stateless on purpose. They are one-off, often run several at a time on
 unrelated work, and stitching those calls into one growing conversation
 would cost context without buying continuity anyone asked for.
 

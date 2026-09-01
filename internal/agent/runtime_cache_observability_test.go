@@ -85,6 +85,8 @@ func (mapThreadManager) Get(context.Context, string) (tools.ThreadInfo, error) {
 	return tools.ThreadInfo{}, nil
 }
 
+func (mapThreadManager) Cancel(context.Context, string, string) error { return nil }
+
 func (mapThreadManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
 	return tools.SendOutcome{}, nil
 }
@@ -110,6 +112,8 @@ func (closureThreadManager) Get(context.Context, string) (tools.ThreadInfo, erro
 	return tools.ThreadInfo{}, nil
 }
 
+func (closureThreadManager) Cancel(context.Context, string, string) error { return nil }
+
 func (closureThreadManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
 	return tools.SendOutcome{}, nil
 }
@@ -128,6 +132,8 @@ func (sliceThreadManager) List(context.Context) ([]tools.ThreadInfo, error) { re
 func (sliceThreadManager) Get(context.Context, string) (tools.ThreadInfo, error) {
 	return tools.ThreadInfo{}, nil
 }
+
+func (sliceThreadManager) Cancel(context.Context, string, string) error { return nil }
 
 func (sliceThreadManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
 	return tools.SendOutcome{}, nil

@@ -5,7 +5,7 @@ Picking the wrong one is the most common source of "why doesn't it use this?"
 
 | Mechanism | It is | Use when |
 |:--|:--|:--|
-| [Agents](agents.md) | a markdown file that becomes a delegation tool | you want a *role* with its own prompt, model and tool set |
+| [Agents](agents.md) | a markdown file the `agent` tool can delegate to by name | you want a *role* with its own prompt, model and tool set |
 | [Skills](skills.md) | a `SKILL.md` loaded on demand | you have a *procedure* the agent should follow when a situation arises |
 | [Commands](commands.md) | a markdown prompt template you invoke with `/` | *you* want a shortcut for a prompt you retype |
 | [Hooks](hooks.md) | a shell command run on tool events | you need to *gate, rewrite or observe* what the agent does |

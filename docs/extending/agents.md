@@ -1,8 +1,10 @@
 # Agents
 
 An agent is a markdown file. Drop it into `.sennit/agents/` and the main agent
-gains a tool of that name it can delegate to; the body of the file becomes that
-agent's system prompt.
+can delegate to it by name — `agent` with `subagent_type: <name>` — and the
+body of the file becomes that agent's system prompt. The `agent` tool's own
+description carries the roster, so a newly added file is offered without a
+restart.
 
 ```markdown
 ---
@@ -44,8 +46,8 @@ sennit import claude --agents            # or: --global, --dry-run, --force
 
 | Field | Meaning |
 |:--|:--|
-| `name` | the tool name the main agent calls. Defaults to the filename |
-| `description` | what the main agent reads to decide whether to delegate. This is the single most important field |
+| `name` | the `subagent_type` the main agent calls. Defaults to the filename |
+| `description` | what the main agent reads to decide whether to delegate — it is what the `agent` tool lists this agent as. This is the single most important field |
 | `model` | `provider/model-id` to pin this agent to its own model. Omit to inherit the app's main model |
 | `reasoning_effort` | `low`, `medium` or `high`, overriding the model's effort for this agent alone |
 | `tools` | restricts the agent to these tools |
@@ -103,10 +105,10 @@ the transcript. The carried memory is bounded: once the replayed transcript
 grows past its budget, the oldest whole delegations are shed and the newest are
 kept.
 
-The anonymous delegations — the built-in `agent` and `agentic_fetch` tools —
-stay stateless on purpose. They are one-off, often several at a time on
-unrelated work, and stitching them into one growing conversation would cost
-context without buying continuity.
+The anonymous delegations — `agent` with no `subagent_type`, and
+`agentic_fetch` — stay stateless on purpose. They are one-off, often several at
+a time on unrelated work, and stitching them into one growing conversation
+would cost context without buying continuity.
 
 See [Steering, tasks and threads](../concepts/delegation.md)
 for how delegated work relates to background tasks and threads.

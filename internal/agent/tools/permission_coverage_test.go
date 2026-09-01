@@ -222,9 +222,9 @@ func toolClassifications() []toolClassification {
 				return resp
 			},
 		},
-		{name: ThreadListToolName, writes: false},
-		{name: ThreadStatusToolName, writes: false},
-		{name: ThreadSendToolName, writes: false},
+		{name: AgentListToolName, writes: false},
+		{name: AgentResultToolName, writes: false},
+		{name: AgentSendToolName, writes: false},
 		{
 			name: ThreadMergeToolName, writes: true,
 			run: func(t *testing.T, perms permission.Service, _, _ string) fantasy.ToolResponse {
@@ -249,11 +249,11 @@ func toolClassifications() []toolClassification {
 				return resp
 			},
 		},
-		{name: TaskListToolName, writes: false},
-		{name: TaskResultToolName, writes: false},
-		{name: TaskCancelToolName, writes: false},
-		{name: TaskSendToolName, writes: false},
-		{name: TaskOutputToolName, writes: false},
+		{name: AgentListToolName, writes: false},
+		{name: AgentResultToolName, writes: false},
+		{name: AgentCancelToolName, writes: false},
+		{name: AgentSendToolName, writes: false},
+		{name: AgentOutputToolName, writes: false},
 		{name: AskParentToolName, writes: false},
 	}
 }
@@ -277,6 +277,10 @@ func (panicThreadManager) Get(context.Context, string) (ThreadInfo, error) {
 }
 
 func (panicThreadManager) Send(context.Context, string, string) (SendOutcome, error) {
+	panic("permission_coverage_test: ThreadManager reached despite a denied request")
+}
+
+func (panicThreadManager) Cancel(context.Context, string, string) error {
 	panic("permission_coverage_test: ThreadManager reached despite a denied request")
 }
 
@@ -330,7 +334,7 @@ func TestToolClassificationsCoverAllRegisteredTools(t *testing.T) {
 			"tool %q is registered but has no entry in toolClassifications; classify it (writes/confined) before merging", name)
 	}
 	for _, name := range classified {
-		require.True(t, slices.Contains(registered, name) || name == ThreadSendToolName,
+		require.True(t, slices.Contains(registered, name) || name == AgentSendToolName,
 			"toolClassifications has an entry %q that config.AllToolNames() does not know; remove it or fix the name", name)
 	}
 	for _, d := range toolmeta.Builtins() {

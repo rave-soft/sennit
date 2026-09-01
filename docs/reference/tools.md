@@ -79,43 +79,45 @@ See [Steering, tasks and threads](../concepts/delegation.md).
 
 | Tool | Does |
 |:--|:--|
-| `agent` | Delegate to a subagent — anonymous, or a named one from `.sennit/agents/`. Its `background` parameter starts a background task |
-| `task_list` | Every background task in this workspace, with status and goal |
-| `task_result` | A task's status, and its final answer once finished |
-| `task_output` | A task's transcript so far, without waiting |
-| `task_send` | Send a follow-up into a task's session |
-| `task_cancel` | Stop a running task |
+| `agent` | Delegate to a subagent. `subagent_type` names one from `.sennit/agents/`; omit it for the general-purpose agent |
+| `agent_list` | Every delegation you can act on — your background tasks, and the workspace's threads |
+| `agent_result` | A delegation's status, and its final answer once finished |
+| `agent_output` | A background task's transcript so far, without waiting |
+| `agent_send` | Send a follow-up into a delegation's session |
+| `agent_cancel` | Stop a running delegation |
 | `ask_parent` | Message the session that created this delegation, waking it if idle |
 
-Each user-defined agent also registers under its own name.
+The `agent_*` tools take a task's id or a thread's id or name, so one set
+addresses both kinds. The older per-kind names (`task_list`, `thread_send`,
+and the rest) still resolve to them in `tools:` lists and permission
+configs.
 
-The `task_*` tools disappear when `options.background_agents` is `false`.
+They disappear when `options.background_agents` is `false`.
 
 ## Threads
 
 | Tool | Does |
 |:--|:--|
 | `thread_create` | Create a thread: its own git worktree, branch, data directory and session |
-| `thread_list` | Every thread, with status, branch and summary |
-| `thread_status` | One thread's result, error, and merge conflicts |
-| `thread_send` | Queue a follow-up prompt for a thread, reporting whether it runs next or waits behind the turn in flight |
 | `thread_merge` | Merge a thread's branch into its base |
 | `thread_remove` | Cancel it, remove the worktree, delete the record |
 
+Listing, inspecting, steering and stopping a thread are the `agent_*` tools
+above; only the worktree lifecycle is thread-specific. `agent_output` is the
+one that is not: a thread's transcript lives in its own worktree session and
+is not readable from the parent workspace.
+
 > [!NOTE]
-> `thread_send` is **not** in the default tool set. A thread that is mid-turn
-> does not read a follow-up until that turn ends — an agent inside a long
-> sub-agent call can be minutes away from it — so steering or time-boxing a
-> running thread, the tool's most tempting use, is the one thing it cannot do.
-> Enable it by naming it in an agent's `tools:` list when you do need it (for
-> resuming an `interrupted` thread, or driving conflict resolution inside a
-> thread's worktree). When enabled, its result says whether the message runs
-> next or is waiting behind the turn in flight. Sending to a thread from the
-> TUI's thread view is a separate path and is always available.
+> A thread that is mid-turn does not read a follow-up until that turn ends —
+> an agent inside a long sub-agent call can be minutes away from it — so
+> `agent_send` cannot steer or time-box work already in flight. Its result
+> says whether the message runs next or is waiting behind the turn in flight;
+> read it rather than assuming delivery. Sending to a thread from the TUI's
+> thread view is a separate path.
 
 > [!NOTE]
 > A thread's completion arrives on its own through the parent's completion
-> inbox. Use `thread_status` to inspect an individual result; there is no
+> inbox. Use `agent_result` to inspect an individual result; there is no
 > blocking wait tool. When several threads are involved, inspect their statuses
 > and continue when the corresponding completion messages arrive.
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -200,7 +201,16 @@ func (d *delegationFinalizer) runtimeInputs() runtimeToolInputs {
 	}
 	buildCtx := context.Background()
 	cfg := newAgentConfig(d.cfg.Config())
-	agentTool, err := d.agentTool(buildCtx, cfg)
+	agentTool, err := d.agentTool(buildCtx, cfg, true)
+	if err != nil {
+		inputs.toolBuildErr = err
+		return inputs
+	}
+	// A delegated agent gets the same tool without the named-agent roster
+	// - see agentTool's allowNamedAgents. Two instances rather than one
+	// runtime check because the roster is half the description, and a
+	// caller must not be shown agents it may not start.
+	subAgentAgentTool, err := d.agentTool(buildCtx, cfg, false)
 	if err != nil {
 		inputs.toolBuildErr = err
 		return inputs
@@ -210,16 +220,11 @@ func (d *delegationFinalizer) runtimeInputs() runtimeToolInputs {
 		inputs.toolBuildErr = err
 		return inputs
 	}
-	customAgentTools, err := d.customAgentTools(buildCtx, cfg)
-	if err != nil {
-		inputs.toolBuildErr = err
-		return inputs
-	}
 	inputs.delegationToolsBuilt = map[string]fantasy.AgentTool{
-		AgentToolName: agentTool, tools.AgenticFetchToolName: agenticFetchTool,
-		"ask_parent": tools.NewAskParentTool(d),
+		AgentToolName: agentTool, subAgentAgentToolKey: subAgentAgentTool,
+		tools.AgenticFetchToolName: agenticFetchTool,
+		"ask_parent":               tools.NewAskParentTool(d),
 	}
-	inputs.customAgentToolsBuilt = customAgentTools
 
 	// Only a successful build is worth remembering: a transient failure
 	// (e.g. the web_search backend construction erroring) should be
@@ -627,11 +632,14 @@ func (d *delegationFinalizer) launchDelegation(ctx context.Context, args tools.T
 	), nil
 }
 
-func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, childSessionID string, childDepth int) (fantasy.ToolResponse, error) {
+func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, title, childSessionID string, childDepth int) (fantasy.ToolResponse, error) {
+	if title == "" {
+		title = "New Agent Session"
+	}
 	return d.launchDelegation(ctx, tools.TaskCreateArgs{
 		Goal:            delegatedPrompt,
 		ParentSessionID: sessionID,
-		SessionTitle:    "New Agent Session",
+		SessionTitle:    title,
 		SessionID:       childSessionID,
 		Factory: func(ctx context.Context, childSessionID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 			agentCfg, ok := d.cfg.Config().Agents[config.AgentTask]
@@ -939,13 +947,29 @@ func (d *delegationFinalizer) carryOverMessages(ctx context.Context, in carryOve
 // a durable background task (see runBackgroundAgent), so the tool is only
 // available when the workspace owns a task manager and background
 // delegation is enabled.
-func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig) (fantasy.AgentTool, error) {
+// agentTool builds the one delegation tool. allowNamedAgents is false for
+// a sub-agent's own build: a delegation could never start a named agent
+// (their tools were registered for the top-level agent only), and folding
+// them into one tool must not quietly widen that.
+func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allowNamedAgents bool) (fantasy.AgentTool, error) {
 	if _, ok := cfg.Agents()[config.AgentTask]; !ok {
 		return nil, errors.New("task agent not configured")
 	}
+	var named []namedAgent
+	if allowNamedAgents {
+		named = namedAgents(cfg)
+	}
+	constraints := map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}
+	if len(named) > 0 {
+		ids := make([]string, len(named))
+		for i, a := range named {
+			ids[i] = a.ID
+		}
+		constraints["subagent_type"] = tools.ToolSchemaConstraint{Enum: ids}
+	}
 	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
 		AgentToolName,
-		agentToolDescription,
+		agentToolDescription(named),
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
@@ -954,9 +978,67 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig) (fan
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
-			return d.runBackgroundAgent(ctx, sessionID, params.Prompt, delegationSessionID(ctx, d.sessions, call.ID), delegationDepth(ctx))
+			if params.SubagentType == "" {
+				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, d.sessions, call.ID), delegationDepth(ctx))
+			}
+			if !allowNamedAgents {
+				return fantasy.NewTextErrorResponse(
+					"subagent_type is not available to a delegated agent: delegate without it to " +
+						"get the general-purpose agent, or do the work here."), nil
+			}
+			return d.runNamedAgent(ctx, sessionID, params, call)
 		},
-	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
+	), constraints), nil
+}
+
+// runNamedAgent starts params.SubagentType on params.Prompt. The config is
+// re-read here rather than closed over: the tool outlives a config reload
+// only until the next rebuild, and an agent deleted in between must be
+// refused by name instead of started from a stale definition.
+func (d *delegationFinalizer) runNamedAgent(ctx context.Context, parentID string, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	id := params.SubagentType
+	latest, ok := d.cfg.Config().Agents[id]
+	if !ok || !delegatableAgentID(id) {
+		available := namedAgents(newAgentConfig(d.cfg.Config()))
+		ids := make([]string, len(available))
+		for i, a := range available {
+			ids[i] = a.ID
+		}
+		if len(ids) == 0 {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf(
+				"No agent %q, and no agents are configured in this workspace. Omit subagent_type to use the general-purpose agent.", id)), nil
+		}
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"No agent %q. Available: %s. Omit subagent_type to use the general-purpose agent.",
+			id, strings.Join(ids, ", "))), nil
+	}
+	title := params.Description
+	if title == "" {
+		title = latest.Name
+	}
+	childDepth := delegationDepth(ctx)
+	return d.launchDelegation(ctx, tools.TaskCreateArgs{
+		Goal:            params.Prompt,
+		ParentSessionID: parentID,
+		SessionTitle:    title,
+		AgentID:         id,
+		SessionID:       delegationSessionID(ctx, d.sessions, call.ID),
+		Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
+			definition, ok := d.cfg.Config().Agents[id]
+			if !ok {
+				return nil, nil, fmt.Errorf("agent %q is no longer configured", id)
+			}
+			systemPrompt, err := prompt.NewPrompt(id, delegatedAgentPrompt(definition.Prompt), prompt.WithWorkingDir(d.cfg.WorkingDir()))
+			if err != nil {
+				return nil, nil, fmt.Errorf("parse prompt: %w", err)
+			}
+			agent, err := d.newSubAgent(ctx, systemPrompt, definition)
+			if err != nil {
+				return nil, nil, err
+			}
+			return d.subAgentTaskRun(parentID, childID, params.Prompt, agent, childDepth), nil, nil
+		},
+	})
 }
 
 // sharedFetchClient returns the delegationFinalizer's shared *http.Client
@@ -1077,68 +1159,29 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 	return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth), cleanup, nil
 }
 
-func (d *delegationFinalizer) customAgentTools(ctx context.Context, cfg agentConfig) ([]fantasy.AgentTool, error) {
+// delegatableAgentID reports whether id names an agent a caller may hand
+// work to. The two built-in roles are not: "coder" is the top-level agent
+// itself, and "task" is what a caller gets by omitting subagent_type.
+func delegatableAgentID(id string) bool {
+	return id != config.AgentCoder && id != config.AgentTask
+}
+
+// namedAgents is the roster the agent tool advertises and validates
+// against, sorted by id so the description is stable across rebuilds.
+func namedAgents(cfg agentConfig) []namedAgent {
 	agents := cfg.Agents()
 	ids := make([]string, 0, len(agents))
 	for id := range agents {
-		if id != config.AgentCoder && id != config.AgentTask {
+		if delegatableAgentID(id) {
 			ids = append(ids, id)
 		}
 	}
 	slices.Sort(ids)
-	result := make([]fantasy.AgentTool, 0, len(ids))
+	out := make([]namedAgent, 0, len(ids))
 	for _, id := range ids {
-		tool, err := d.buildCustomAgentTool(ctx, id, agents[id])
-		if err != nil {
-			return nil, fmt.Errorf("build agent tool %q: %w", id, err)
-		}
-		result = append(result, tool)
+		out = append(out, namedAgent{ID: id, Description: customAgentDescription(id, agents[id])})
 	}
-	return result, nil
-}
-
-//nolint:unparam // keeps the common tool-builder signature.
-func (d *delegationFinalizer) buildCustomAgentTool(_ context.Context, id string, agentCfg config.Agent) (fantasy.AgentTool, error) {
-	return fantasy.NewParallelAgentTool(
-		id,
-		customAgentDescription(id, agentCfg)+"\n\n"+delegationReportContract,
-		func(ctx context.Context, params CustomAgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Prompt == "" {
-				return fantasy.NewTextErrorResponse("prompt is required"), nil
-			}
-			parentID := tools.GetSessionFromContext(ctx)
-			if parentID == "" {
-				return fantasy.ToolResponse{}, errors.New("session id missing from context")
-			}
-			childDepth := delegationDepth(ctx)
-			latest, ok := d.cfg.Config().Agents[id]
-			if !ok {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Agent %q is no longer configured.", id)), nil
-			}
-			return d.launchDelegation(ctx, tools.TaskCreateArgs{
-				Goal:            params.Prompt,
-				ParentSessionID: parentID,
-				SessionTitle:    latest.Name,
-				AgentID:         id,
-				SessionID:       delegationSessionID(ctx, d.sessions, call.ID),
-				Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
-					definition, ok := d.cfg.Config().Agents[id]
-					if !ok {
-						return nil, nil, fmt.Errorf("agent %q is no longer configured", id)
-					}
-					systemPrompt, err := prompt.NewPrompt(id, delegatedAgentPrompt(definition.Prompt), prompt.WithWorkingDir(d.cfg.WorkingDir()))
-					if err != nil {
-						return nil, nil, fmt.Errorf("parse prompt: %w", err)
-					}
-					agent, err := d.newSubAgent(ctx, systemPrompt, definition)
-					if err != nil {
-						return nil, nil, err
-					}
-					return d.subAgentTaskRun(parentID, childID, params.Prompt, agent, childDepth), nil, nil
-				},
-			})
-		},
-	), nil
+	return out
 }
 
 func customAgentDescription(id string, agentCfg config.Agent) string {

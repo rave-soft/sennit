@@ -105,6 +105,11 @@ type ThreadManager interface {
 	// Send hands message to the thread's session and reports whether its
 	// agent picks it up now or only after the turn it is already running.
 	Send(ctx context.Context, idOrName, message string) (SendOutcome, error)
+	// Cancel stops the thread's in-flight run, recording reason as its
+	// terminal error, for agent_cancel. The worktree and branch survive:
+	// a cancelled thread's work can still be read or resumed, and
+	// clearing it away is thread_remove's job.
+	Cancel(ctx context.Context, idOrName, reason string) error
 	Wait(ctx context.Context, ids []string, timeout time.Duration) error
 	// Merge returns the thread as the attempt left it. A clean merge
 	// discards the thread, so there is nothing left to Get afterwards —

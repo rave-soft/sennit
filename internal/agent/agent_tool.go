@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	_ "embed"
+	"fmt"
+	"strings"
 
 	"github.com/rave-soft/sennit/internal/agent/tools"
 )
@@ -27,9 +29,38 @@ var agentToolPurpose string
 //go:embed templates/delegation_report.md
 var delegationReportContract string
 
-// agentToolDescription is what this tool is for, then how its answer
-// comes back.
-var agentToolDescription = agentToolPurpose + "\n" + delegationReportContract
+// namedAgent is one delegatable agent as the agent tool advertises it:
+// the id a caller passes as subagent_type, and the person's own sentence
+// about what it is for.
+type namedAgent struct {
+	ID          string
+	Description string
+}
+
+// agentToolDescription is what this tool is for, which agents it can run,
+// and how its answer comes back.
+//
+// The roster is part of the description rather than a separate listing
+// because the description is the only thing a model reads before choosing
+// a subagent_type, and it is rebuilt whenever the config version changes
+// (see delegationFinalizer.runtimeInputs), so a newly added .sennit/agents
+// file shows up without a restart. An empty roster - no user-defined
+// agents configured, or a delegated caller, which may not start named
+// agents - leaves the section out entirely rather than advertising a
+// parameter with nothing to put in it.
+func agentToolDescription(named []namedAgent) string {
+	var b strings.Builder
+	b.WriteString(agentToolPurpose)
+	if len(named) > 0 {
+		b.WriteString("\nAvailable `subagent_type` values:\n\n")
+		for _, a := range named {
+			fmt.Fprintf(&b, "- `%s`: %s\n", a.ID, a.Description)
+		}
+		b.WriteString("\nOmit `subagent_type` to run the built-in general-purpose agent.\n")
+	}
+	b.WriteString("\n" + delegationReportContract)
+	return b.String()
+}
 
 // delegatedAgentContract is the other half of that handoff, told to the
 // delegation rather than to its caller: your last message is the report,
@@ -53,13 +84,35 @@ func delegatedAgentPrompt(definition string) string {
 	return definition + "\n\n" + delegatedAgentContract
 }
 
-// AgentParams is deliberately limited to the work to delegate. Delegations are
-// always asynchronous; a tool call is only an acknowledgement of launch.
+// AgentParams is the work to delegate and which agent to hand it to.
+// Delegations are always asynchronous; a tool call is only an
+// acknowledgement of launch.
+//
+// SubagentType is what unified the delegation surface: user-defined
+// agents used to be registered as one tool each, named after the agent,
+// so the tool list grew with every file in .sennit/agents and a caller
+// had to be told separately which of those names were agents at all.
+// They are now this one field, and the tool's own description carries
+// the roster.
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+	// SubagentType names a user-defined agent (.sennit/agents, config
+	// Agents). Empty runs the built-in general-purpose agent, which is
+	// what every caller got before this field existed.
+	SubagentType string `json:"subagent_type,omitempty" description:"Which agent to run; omit for the general-purpose agent"`
+	// Description is a short label for the delegation, used as its child
+	// session's title. Optional: an empty one falls back to the agent's
+	// own name.
+	Description string `json:"description,omitempty" description:"Short (3-5 word) label for this delegation"`
 }
 
 const AgentToolName = "agent"
+
+// subAgentAgentToolKey names the delegated-caller build of the agent tool
+// in delegationToolsBuilt. It is a map key only - the tool it holds
+// registers under AgentToolName like any other - so it deliberately looks
+// nothing like a tool name a model could call.
+const subAgentAgentToolKey = "agent#sub"
 
 func intPointer(value int) *int { return &value }
 

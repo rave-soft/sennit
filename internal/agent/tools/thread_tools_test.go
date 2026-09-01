@@ -298,6 +298,27 @@ func callTool(t *testing.T, tool fantasy.AgentTool, params any) fantasy.ToolResp
 	return resp
 }
 
+// noTasks is an empty tools.TaskManager for the delegation tools, which
+// answer for both kinds: these tests are about the thread half, and a
+// workspace can genuinely have threads and no background tasks.
+type noTasks struct{}
+
+func (noTasks) Create(context.Context, tools.TaskCreateArgs) (tools.TaskInfo, error) {
+	return tools.TaskInfo{}, fmt.Errorf("thread_tools_test: no task manager")
+}
+func (noTasks) List(context.Context) ([]tools.TaskInfo, error) { return nil, nil }
+func (noTasks) Get(context.Context, string) (tools.TaskInfo, error) {
+	return tools.TaskInfo{}, fmt.Errorf("thread_tools_test: no task manager")
+}
+func (noTasks) Cancel(context.Context, string, string) error { return nil }
+func (noTasks) Send(context.Context, string, string) (tools.SendOutcome, error) {
+	return tools.SendOutcome{}, fmt.Errorf("thread_tools_test: no task manager")
+}
+
+func (noTasks) Output(context.Context, string, int) (tools.TaskOutput, error) {
+	return tools.TaskOutput{}, fmt.Errorf("thread_tools_test: no task manager")
+}
+
 func TestThreadCreateTool_CreatesThread(t *testing.T) {
 	repo := initRepo(t)
 	mgr := newTestThreadManager(t, repo)
@@ -332,8 +353,8 @@ func TestThreadListTool_ListsCreatedThreads(t *testing.T) {
 	_, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "beta", Goal: "x"})
 	require.NoError(t, err)
 
-	tool := tools.NewThreadListTool(mgr)
-	resp := callTool(t, tool, tools.ThreadListParams{})
+	tool := tools.NewAgentListTool(noTasks{}, mgr)
+	resp := callTool(t, tool, tools.AgentListParams{})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "beta")
 }
@@ -342,10 +363,10 @@ func TestThreadListTool_EmptyWhenNoThreads(t *testing.T) {
 	repo := initRepo(t)
 	mgr := newTestThreadManager(t, repo)
 
-	tool := tools.NewThreadListTool(mgr)
-	resp := callTool(t, tool, tools.ThreadListParams{})
+	tool := tools.NewAgentListTool(noTasks{}, mgr)
+	resp := callTool(t, tool, tools.AgentListParams{})
 	require.False(t, resp.IsError)
-	require.Contains(t, resp.Content, "No threads")
+	require.Contains(t, resp.Content, "No delegations")
 }
 
 func TestThreadStatusTool_ReturnsDetails(t *testing.T) {
@@ -355,8 +376,8 @@ func TestThreadStatusTool_ReturnsDetails(t *testing.T) {
 	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "gamma", Goal: "do it"})
 	require.NoError(t, err)
 
-	tool := tools.NewThreadStatusTool(mgr)
-	resp := callTool(t, tool, tools.ThreadStatusParams{ID: st.ID})
+	tool := tools.NewAgentResultTool(noTasks{}, mgr)
+	resp := callTool(t, tool, tools.AgentResultParams{ID: st.ID})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "gamma")
 	require.Contains(t, resp.Content, st.Status)
@@ -366,8 +387,8 @@ func TestThreadStatusTool_MissingID(t *testing.T) {
 	repo := initRepo(t)
 	mgr := newTestThreadManager(t, repo)
 
-	tool := tools.NewThreadStatusTool(mgr)
-	resp := callTool(t, tool, tools.ThreadStatusParams{})
+	tool := tools.NewAgentResultTool(noTasks{}, mgr)
+	resp := callTool(t, tool, tools.AgentResultParams{})
 	require.True(t, resp.IsError)
 }
 
@@ -375,8 +396,8 @@ func TestThreadStatusTool_UnknownID(t *testing.T) {
 	repo := initRepo(t)
 	mgr := newTestThreadManager(t, repo)
 
-	tool := tools.NewThreadStatusTool(mgr)
-	resp := callTool(t, tool, tools.ThreadStatusParams{ID: "nope"})
+	tool := tools.NewAgentResultTool(noTasks{}, mgr)
+	resp := callTool(t, tool, tools.AgentResultParams{ID: "nope"})
 	require.True(t, resp.IsError)
 }
 
@@ -387,8 +408,8 @@ func TestThreadSendTool_ReactivatesThread(t *testing.T) {
 	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "delta", Goal: "do it"})
 	require.NoError(t, err)
 
-	tool := tools.NewThreadSendTool(mgr)
-	resp := callTool(t, tool, tools.ThreadSendParams{ID: st.ID, Message: "keep going"})
+	tool := tools.NewAgentSendTool(noTasks{}, mgr)
+	resp := callTool(t, tool, tools.AgentSendParams{ID: st.ID, Message: "keep going"})
 	require.False(t, resp.IsError)
 
 	got, err := mgr.Get(t.Context(), st.ID)
@@ -452,9 +473,9 @@ func TestThreadMergeTool_RefusesAThreadWithATurnInFlight(t *testing.T) {
 func TestThreadStatusTool_MissingThreadExplainsItself(t *testing.T) {
 	repo := initRepo(t)
 	mgr := newTestThreadManager(t, repo)
-	tool := tools.NewThreadStatusTool(mgr)
+	tool := tools.NewAgentResultTool(noTasks{}, mgr)
 
-	resp := callTool(t, tool, tools.ThreadStatusParams{ID: "already-landed"})
+	resp := callTool(t, tool, tools.AgentResultParams{ID: "already-landed"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "already-landed", "name what was asked for")
 	require.Contains(t, resp.Content, "removed once it merges", "and say what the absence means")

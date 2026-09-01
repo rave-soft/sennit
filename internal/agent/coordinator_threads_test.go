@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"runtime"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -35,6 +34,8 @@ func (noopThreadManager) Get(context.Context, string) (tools.ThreadInfo, error) 
 	return tools.ThreadInfo{}, nil
 }
 
+func (noopThreadManager) Cancel(context.Context, string, string) error { return nil }
+
 func (noopThreadManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
 	return tools.SendOutcome{}, nil
 }
@@ -51,18 +52,15 @@ func (noopThreadManager) Remove(context.Context, string, bool, bool) error {
 	return nil
 }
 
-// threadToolNames lists the thread_* tools expected under the coder
-// agent's *default* AllowedTools. tools.ThreadSendToolName is
-// deliberately excluded: it is not in the default set (a running thread
-// does not read a follow-up until its current turn ends, so the steering
-// it looks like it offers is not real — see internal/config's
-// allToolNames), though it is still constructed and offered to any agent
-// config that explicitly allows it — see
-// TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed.
+// threadToolNames lists the tools a workspace with a thread manager
+// expects under the coder agent's *default* AllowedTools: the worktree
+// lifecycle, plus the agent_* tools that answer for threads as well as
+// background tasks.
 var threadToolNames = []string{
 	tools.ThreadCreateToolName,
-	tools.ThreadListToolName,
-	tools.ThreadStatusToolName,
+	tools.AgentListToolName,
+	tools.AgentResultToolName,
+	tools.AgentSendToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
 }
@@ -156,29 +154,39 @@ func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
 	}
 }
 
-// TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed
-// covers the removal side of the "allowed-tools list is where a tool
-// silently stops existing" trap: dropping thread_send from the default
-// set (internal/config's allToolNames) must not make it uninstallable -
-// buildTools still constructs it unconditionally and offers it to any
-// agent config whose own AllowedTools names it explicitly, exactly like
-// any other tool not in the default set. That path is what an agent
-// resuming an interrupted thread, or driving conflict resolution inside a
-// thread's worktree, is expected to be configured with.
-func TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed(t *testing.T) {
+// TestBuildTools_AgentSendReachesThreadsByDefault pins what merging the
+// two send tools decided. thread_send was deliberately outside the
+// default set — a running thread does not read a follow-up until its
+// current turn ends, so the steering it looks like it offers is not real
+// — while task_send, which has exactly the same property, was inside it.
+// One tool cannot be both, and the tool that exists now reports its own
+// disposition (delivered now, or queued behind the turn in flight), which
+// is the answer to the objection that kept thread_send out.
+func TestBuildTools_AgentSendReachesThreadsByDefault(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
 	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
-	require.NotContains(t, toolNames(t, built), tools.ThreadSendToolName,
-		"thread_send must not be offered under the default AllowedTools")
+	require.Contains(t, toolNames(t, built), tools.AgentSendToolName,
+		"one send tool for both kinds, and it is in the default set")
+}
 
-	allowed := agentCfg
-	allowed.AllowedTools = append(slices.Clone(agentCfg.AllowedTools), tools.ThreadSendToolName)
-	built, err = coord.delegation.buildTools(t.Context(), allowed, false)
+// TestBuildTools_DelegationToolsSurviveBackgroundAgentsOff covers the
+// gate the merge needed: the agent_* tools answer for threads too, so
+// turning background tasks off must not take a workspace's threads away
+// with them.
+func TestBuildTools_DelegationToolsSurviveBackgroundAgentsOff(t *testing.T) {
+	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
+	disabled := false
+	coord.cfg.Config().Options.BackgroundAgents = &disabled
+
+	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
-	require.Contains(t, toolNames(t, built), tools.ThreadSendToolName,
-		"thread_send must still be constructible/registerable when an agent config explicitly allows it")
+	names := toolNames(t, built)
+	for _, name := range threadToolNames {
+		require.Contains(t, names, name,
+			"a workspace with threads keeps its delegation tools when background tasks are off")
+	}
 }
 
 func TestCoordinator_SetDelegationToolsThreadTakesEffectOnNextBuild(t *testing.T) {
@@ -300,6 +308,8 @@ func (*fakeSnapshotThreadManager) List(context.Context) ([]tools.ThreadInfo, err
 func (*fakeSnapshotThreadManager) Get(context.Context, string) (tools.ThreadInfo, error) {
 	return tools.ThreadInfo{}, nil
 }
+
+func (*fakeSnapshotThreadManager) Cancel(context.Context, string, string) error { return nil }
 
 func (*fakeSnapshotThreadManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
 	return tools.SendOutcome{}, nil

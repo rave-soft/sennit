@@ -7,7 +7,7 @@ import (
 	"charm.land/fantasy"
 )
 
-// Background tasks form a tree, and every task_* tool answers from one
+// Background tasks form a tree, and every agent_* tool answers from one
 // vantage point in it: the session the tool call came from. A task's own
 // child session (TaskInfo.SessionID) is the TaskInfo.ParentSessionID of
 // every task that task goes on to start, so the flat list the manager
@@ -23,7 +23,7 @@ import (
 //
 // It exists because the unscoped version cost a night's work. A
 // delegated agent meant to cancel one of the two tasks it had started,
-// passed its own id to task_cancel instead — its own row was in the
+// passed its own id to the cancel tool instead — its own row was in the
 // listing, and nothing checked whose it was — and killed itself
 // mid-turn. Its report to the session that was waiting on it died with
 // it, its own child kept editing the repository for nine more minutes
@@ -101,19 +101,20 @@ func (s taskScope) self() (TaskInfo, bool) {
 	return t, ok
 }
 
-// refuse reports why the caller may not act on id, or ok=false when it
-// may. The wording is aimed at the model that made the call: it has to
-// say what to do instead, since the interesting refusals are all cases
+// The refusals below are aimed at the model that made the call: each has
+// to say what to do instead, since the interesting ones are all cases
 // where the model wanted something real and reached for the wrong id.
-func (s taskScope) refuse(id string, verb string) (fantasy.ToolResponse, bool) {
-	if _, ok := s.descendants[id]; ok {
-		return fantasy.ToolResponse{}, false
-	}
+// delegationView.lookup picks between them - it asks the thread manager
+// before concluding that an id is nobody's.
+
+// refuseOwnOrAncestor covers the two mistakes that are about the caller
+// itself: acting on its own delegation, or on one it hangs under.
+func (s taskScope) refuseOwnOrAncestor(id string, verb string) (fantasy.ToolResponse, bool) {
 	if self, ok := s.self(); ok && self.ID == id {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf(
 			"Task %s is the task you are running as; you cannot %s yourself. "+
 				"If you meant to stop one of the tasks you started, list them first — "+
-				"task_list shows only your own. If you meant to stop working, end "+
+				"agent_list shows only your own. If you meant to stop working, end "+
 				"your turn with your report instead.", id, verb)), true
 	}
 	// Up the parent pointers from the caller's own task. The seen set is
@@ -135,14 +136,31 @@ func (s taskScope) refuse(id string, verb string) (fantasy.ToolResponse, bool) {
 		}
 		session = task.ParentSessionID
 	}
-	return fantasy.NewTextErrorResponse(fmt.Sprintf(
-		"No task %s among the tasks you started, so there is nothing here to %s: "+
-			"task_list shows the ones that are yours, and a task someone else "+
-			"started is not one of them. If that is a thread's id and not a "+
-			"task's, the thread_* tools are the ones that take it.", id, verb)), true
+	return fantasy.ToolResponse{}, false
 }
 
-// scopeTasks is the preamble every task_* tool shares: resolve the
+// refuseUnknown is the answer when nothing the caller may act on has that
+// id. threadsChecked says a thread manager was asked too, which changes
+// what the absence most likely means: a thread is deleted once its branch
+// lands, so "not found" is the normal answer for one that finished, and
+// reporting only the miss invites the model to conclude the work was lost
+// and start it over.
+func (s taskScope) refuseUnknown(idOrName string, verb string, threadsChecked bool) fantasy.ToolResponse {
+	if threadsChecked {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"No delegation %q to %s: it is not among the tasks you started (agent_list "+
+				"shows those, and a task someone else started is not one of them), and no "+
+				"thread has that id or name. A thread is removed once it merges — if it "+
+				"existed, it most likely landed and was cleared away; its merge is "+
+				"recorded in the session history.", idOrName, verb))
+	}
+	return fantasy.NewTextErrorResponse(fmt.Sprintf(
+		"No task %s among the tasks you started, so there is nothing here to %s: "+
+			"agent_list shows the ones that are yours, and a task someone else "+
+			"started is not one of them.", idOrName, verb))
+}
+
+// scopeTasks is the preamble every agent_* tool shares: resolve the
 // calling session, list, and place the caller in the tree. The listing
 // is workspace-wide by necessity — the tree cannot be walked from a
 // pre-filtered slice — and is narrowed here, once, for all of them.
@@ -151,6 +169,13 @@ func scopeTasks(ctx context.Context, manager TaskManager, action string) (scope 
 	sessionID := GetSessionFromContext(ctx)
 	if sessionID == "" {
 		return taskScope{}, nil, missingSessionID(action)
+	}
+	// No task manager at all - a workspace with threads and background
+	// tasks switched off - is an empty forest, not a failure: the caller
+	// simply has no tasks, and the thread half of the answer stands on
+	// its own.
+	if manager == nil {
+		return newTaskScope(sessionID, nil), nil, nil
 	}
 	tasks, err := manager.List(ctx)
 	if err != nil {

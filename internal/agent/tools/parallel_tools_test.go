@@ -133,16 +133,14 @@ var sequentialDenyList = []struct {
 	{QuestionToolName, "interactive prompt on the session"},
 	{JobOutputToolName, "background-shell manager state; wait=true blocks"},
 	{JobKillToolName, "kills background shell processes"},
-	{ThreadListToolName, "thread manager state"},
-	{ThreadStatusToolName, "thread manager state"},
 	{ThreadCreateToolName, "starts a thread"},
 	{ThreadMergeToolName, "merges a thread, git worktree"},
 	{ThreadRemoveToolName, "removes a thread"},
-	{TaskListToolName, "task manager state"},
-	{TaskResultToolName, "task manager state"},
-	{TaskOutputToolName, "task manager state"},
-	{TaskSendToolName, "posts into a task queue"},
-	{TaskCancelToolName, "cancels a task"},
+	{AgentListToolName, "task and thread manager state"},
+	{AgentResultToolName, "task and thread manager state"},
+	{AgentOutputToolName, "task manager state"},
+	{AgentSendToolName, "posts into a delegation's queue"},
+	{AgentCancelToolName, "cancels a delegation"},
 	{AskParentToolName, "parent session state; built by the coordinator"},
 }
 
@@ -150,16 +148,14 @@ var sequentialDenyList = []struct {
 // not part of config.AllToolNames() (the default set). They must still be
 // classified, and TestParallelClassificationIsExhaustive checks them too:
 //
-//   - thread_send is deliberately absent from the default set (see the
-//     comment in config.allToolNames) but is still a real tool any agent
-//     config can enable, so it is pinned to sequential.
+// There are none today: agent_send, which used to be thread_send's
+// sequential twin outside the default set, is now one tool with the task
+// side and carries agent_send's own default-allowed descriptor.
 var optionalToolNames = []struct {
 	name     string
 	parallel bool
 	reason   string
-}{
-	{ThreadSendToolName, false, "posts into a thread queue; not in the default tool set, enabled per agent config"},
-}
+}{}
 
 // classificationFor returns the expected parallel flag for a built-in tool
 // name. It is a lookup, not a default: an unclassified name is a bug and
@@ -320,28 +316,22 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewRenameTool(nil, nil, &mockHistoryService{}, mockFileTrackerService{}, dir)
 	case ReplaceSymbolToolName:
 		return NewReplaceSymbolTool(nil, nil, &mockHistoryService{}, mockFileTrackerService{}, dir)
-	case ThreadListToolName:
-		return NewThreadListTool(panicThreadManager{})
-	case ThreadStatusToolName:
-		return NewThreadStatusTool(panicThreadManager{})
 	case ThreadCreateToolName:
 		return NewThreadCreateTool(panicThreadManager{}, nil)
-	case ThreadSendToolName:
-		return NewThreadSendTool(panicThreadManager{})
 	case ThreadMergeToolName:
 		return NewThreadMergeTool(panicThreadManager{}, nil)
 	case ThreadRemoveToolName:
 		return NewThreadRemoveTool(panicThreadManager{}, nil)
-	case TaskListToolName:
-		return NewTaskListTool(panicTaskManager{})
-	case TaskResultToolName:
-		return NewTaskResultTool(panicTaskManager{})
-	case TaskOutputToolName:
-		return NewTaskOutputTool(panicTaskManager{})
-	case TaskSendToolName:
-		return NewTaskSendTool(panicTaskManager{})
-	case TaskCancelToolName:
-		return NewTaskCancelTool(panicTaskManager{}, nil)
+	case AgentListToolName:
+		return NewAgentListTool(panicTaskManager{}, panicThreadManager{})
+	case AgentResultToolName:
+		return NewAgentResultTool(panicTaskManager{}, panicThreadManager{})
+	case AgentOutputToolName:
+		return NewAgentOutputTool(panicTaskManager{}, panicThreadManager{})
+	case AgentSendToolName:
+		return NewAgentSendTool(panicTaskManager{}, panicThreadManager{})
+	case AgentCancelToolName:
+		return NewAgentCancelTool(panicTaskManager{}, panicThreadManager{}, nil)
 	case AskParentToolName:
 		return NewAskParentTool(nil)
 	// Legacy parallel exceptions: built with test doubles. A nil

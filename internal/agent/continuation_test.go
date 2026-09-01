@@ -715,7 +715,7 @@ func TestRunBackgroundAgent_NestingLimit(t *testing.T) {
 
 	for depth := range maxTaskCascadeDepth {
 		ctx := context.WithValue(t.Context(), tools.DepthContextKey, depth)
-		resp, err := coord.delegation.runBackgroundAgent(ctx, "parent-sess", fmt.Sprintf("depth %d work", depth), "", depth+1)
+		resp, err := coord.delegation.runBackgroundAgent(ctx, "parent-sess", fmt.Sprintf("depth %d work", depth), "", "", depth+1)
 		require.NoError(t, err)
 		require.False(t, resp.IsError, "depth %d is below the limit and must be allowed", depth)
 	}
@@ -729,7 +729,7 @@ func TestRunBackgroundAgent_NestingLimit(t *testing.T) {
 	// simulates the tool invocation inside it), but delegating further is
 	// refused.
 	limitCtx := context.WithValue(t.Context(), tools.DepthContextKey, maxTaskCascadeDepth)
-	resp, err := coord.delegation.runBackgroundAgent(limitCtx, "parent-sess", "one too many", "", maxTaskCascadeDepth+1)
+	resp, err := coord.delegation.runBackgroundAgent(limitCtx, "parent-sess", "one too many", "", "", maxTaskCascadeDepth+1)
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "a turn at the nesting limit must refuse to delegate further")
 	require.Contains(t, resp.Content, "nesting limit")
@@ -738,7 +738,7 @@ func TestRunBackgroundAgent_NestingLimit(t *testing.T) {
 	// A session someone drives — no DepthContextKey set, so
 	// GetDepthFromContext defaults to 0 — is at the top level and is
 	// allowed again.
-	resp, err = coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "fresh user turn", "", 1)
+	resp, err = coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "fresh user turn", "", "", 1)
 	require.NoError(t, err)
 	require.False(t, resp.IsError, "a turn a person drives is at the top level")
 	require.Len(t, fake.created, maxTaskCascadeDepth+1)
@@ -757,7 +757,7 @@ func TestRunBackgroundAgent_RepeatedRoundsAtTopLevelAllowed(t *testing.T) {
 
 	const rounds = maxTaskCascadeDepth * 10
 	for round := range rounds {
-		resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "another round", "", 1)
+		resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "another round", "", "", 1)
 		require.NoError(t, err)
 		require.False(t, resp.IsError, "round %d must be allowed", round)
 	}

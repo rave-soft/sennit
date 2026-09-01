@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
@@ -103,7 +104,7 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 func TestCoordinatorBuiltToolParallelFlags(t *testing.T) {
 	coord := newAgentToolTestCoordinator(t, nil)
 
-	agentTool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	agentTool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
 	require.NoError(t, err)
 	require.True(t, agentTool.Info().Parallel, "agent must retain its runtime parallel flag")
 	require.Equal(t, 1, agentTool.Info().InputSchema["properties"].(map[string]any)["prompt"].(map[string]any)["minLength"])
@@ -118,7 +119,7 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -148,7 +149,7 @@ func TestAgentTool_AlwaysCreatesTask(t *testing.T) {
 	fake := &fakeTaskManager{}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -169,7 +170,7 @@ func TestAgentTool_AlwaysCreatesTask(t *testing.T) {
 func TestAgentTool_BackgroundUnavailableReturnsClearError(t *testing.T) {
 	coord := newAgentToolTestCoordinator(t, nil)
 
-	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -193,7 +194,7 @@ func TestRunBackgroundAgent_RefusedWhenDisabledByConfig(t *testing.T) {
 	disabled := false
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
-	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
+	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", "", 1)
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "a disabled switch must refuse, not silently run in the foreground")
 	require.Contains(t, resp.Content, "background_agents")
@@ -210,7 +211,7 @@ func TestRunBackgroundAgent_AllowedWhenExplicitlyEnabled(t *testing.T) {
 	enabled := true
 	coord.cfg.Config().Options.BackgroundAgents = &enabled
 
-	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
+	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", "", 1)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -232,7 +233,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 
 	// Dispatched while enabled - this is the "in-flight task" the reload
 	// below must leave alone.
-	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "do work", "", 1)
+	resp, err := coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "do work", "", "", 1)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -241,7 +242,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
 	// New dispatch is refused from here on...
-	resp, err = coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "more work", "", 1)
+	resp, err = coord.delegation.runBackgroundAgent(t.Context(), "parent-sess", "more work", "", "", 1)
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Len(t, fake.created, 1, "the refused call must never reach the task manager")
@@ -264,7 +265,7 @@ func TestAgentTool_ChildSessionKeepsToolCallIdentity(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -290,7 +291,7 @@ func TestAgentTool_ChildSessionIdentityOptional(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -319,4 +320,83 @@ func TestDelegatedAgentPrompt_KeepsTheDefinitionAndAddsTheContract(t *testing.T)
 	require.True(t, strings.HasSuffix(built, delegatedAgentContract), "the contract closes the prompt")
 	require.Contains(t, built, "your final message is the entire report")
 	require.NotContains(t, delegatedAgentContract, "{{", "the contract is appended to a template and must not be one")
+}
+
+// TestAgentTool_SubagentTypeRunsTheNamedAgent covers the unified
+// delegation surface: a user-defined agent used to be a tool of its own,
+// named after the agent, and is now this parameter.
+func TestAgentTool_SubagentTypeRunsTheNamedAgent(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	coord.cfg.Config().Agents["reviewer"] = config.Agent{
+		ID: "reviewer", Name: "Reviewer", Description: "Reviews a diff.", Prompt: "You review.",
+	}
+
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
+	require.NoError(t, err)
+
+	require.Contains(t, tool.Info().Description, "reviewer", "the roster is part of the description")
+	require.Contains(t, tool.Info().Description, "Reviews a diff.")
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "call-1",
+		Input: `{"prompt":"review the diff","subagent_type":"reviewer","description":"review attempt 26"}`,
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.Equal(t, "reviewer", lastCreate(t, fake).AgentID, "the named agent is what runs")
+	require.Equal(t, "review attempt 26", lastCreate(t, fake).SessionTitle, "description titles the child session")
+}
+
+// TestAgentTool_UnknownSubagentTypeIsRefusedWithTheRoster keeps the
+// refusal actionable: the model picked a name, and the answer has to say
+// which names exist.
+func TestAgentTool_UnknownSubagentTypeIsRefusedWithTheRoster(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	coord.cfg.Config().Agents["reviewer"] = config.Agent{ID: "reviewer", Name: "Reviewer", Prompt: "You review."}
+
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: `{"prompt":"x","subagent_type":"nobody"}`})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "reviewer")
+	require.Contains(t, resp.Content, "subagent_type")
+}
+
+// TestAgentTool_DelegatedCallerCannotPickAnAgent pins the boundary the
+// per-agent tools enforced by simply not existing for a sub-agent build:
+// a delegation may start the general-purpose agent, not a named one.
+func TestAgentTool_DelegatedCallerCannotPickAnAgent(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	coord.cfg.Config().Agents["reviewer"] = config.Agent{ID: "reviewer", Name: "Reviewer", Prompt: "You review."}
+
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), false)
+	require.NoError(t, err)
+	require.NotContains(t, tool.Info().Description, "reviewer",
+		"a caller must not be shown agents it may not start")
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: `{"prompt":"x","subagent_type":"reviewer"}`})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Empty(t, fake.created, "nothing was dispatched")
+
+	// Without subagent_type it is the ordinary general-purpose delegation.
+	resp, err = tool.Run(ctx, fantasy.ToolCall{ID: "call-2", Input: `{"prompt":"x"}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+}
+
+// lastCreate returns the args of the most recent Create, failing the test
+// if nothing was dispatched.
+func lastCreate(t *testing.T, fake *fakeTaskManager) tools.TaskCreateArgs {
+	t.Helper()
+	require.NotEmpty(t, fake.created, "expected a delegation to have been dispatched")
+	return fake.created[len(fake.created)-1]
 }

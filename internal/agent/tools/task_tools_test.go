@@ -116,26 +116,26 @@ func TestTaskListTool_ListsTasks(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Goal: "look into X", Status: "running"}
 
-	resp := callTaskTool(t, NewTaskListTool(manager), TaskListParams{})
+	resp := callTaskTool(t, NewAgentListTool(manager, nil), AgentListParams{})
 	require.False(t, resp.IsError)
 
-	var meta TaskListResponseMetadata
+	var meta AgentListResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Len(t, meta.Tasks, 1)
 	require.Equal(t, "t1", meta.Tasks[0].ID)
 }
 
 func TestTaskListTool_EmptyWhenNoTasks(t *testing.T) {
-	resp := callTaskTool(t, NewTaskListTool(newFakeTaskManager()), TaskListParams{})
+	resp := callTaskTool(t, NewAgentListTool(newFakeTaskManager(), nil), AgentListParams{})
 	require.False(t, resp.IsError)
-	require.Contains(t, resp.Content, "No background tasks")
+	require.Contains(t, resp.Content, "No delegations")
 }
 
 func TestTaskListTool_SurfacesManagerError(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.listErr = fmt.Errorf("boom")
 
-	resp := callTaskTool(t, NewTaskListTool(manager), TaskListParams{})
+	resp := callTaskTool(t, NewAgentListTool(manager, nil), AgentListParams{})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "boom")
 }
@@ -144,7 +144,7 @@ func TestTaskResultTool_ReturnsFinalAnswerWhenCompleted(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "completed", ResultSummary: "the answer is 42"}
 
-	resp := callTaskTool(t, NewTaskResultTool(manager), TaskResultParams{ID: "t1"})
+	resp := callTaskTool(t, NewAgentResultTool(manager, nil), AgentResultParams{ID: "t1"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "the answer is 42")
 }
@@ -153,37 +153,36 @@ func TestTaskResultTool_ReportsStatusWhenStillRunning(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 
-	resp := callTaskTool(t, NewTaskResultTool(manager), TaskResultParams{ID: "t1"})
+	resp := callTaskTool(t, NewAgentResultTool(manager, nil), AgentResultParams{ID: "t1"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "still running")
 	require.NotContains(t, resp.Content, "finished")
 }
 
 func TestTaskResultTool_MissingID(t *testing.T) {
-	resp := callTaskTool(t, NewTaskResultTool(newFakeTaskManager()), TaskResultParams{})
+	resp := callTaskTool(t, NewAgentResultTool(newFakeTaskManager(), nil), AgentResultParams{})
 	require.True(t, resp.IsError)
 }
 
-// TestTaskResultTool_WrongKindRejection proves a thread's id is
-// rejected with a clear tool error rather than a crash or a silent
-// result. The rejection now comes from the scope check ahead of the
-// manager (a thread is never among the tasks a session started, so it
-// can never be in scope) rather than from TaskManager.Get's own kind
-// guard behind it - which is why it names the thread_* tools instead of
-// saying "is not a task".
-func TestTaskResultTool_WrongKindRejection(t *testing.T) {
-	resp := callTaskTool(t, NewTaskResultTool(newFakeTaskManager()), TaskResultParams{ID: "a-thread-id"})
+// TestTaskResultTool_UnknownIDRejection proves an id that resolves to
+// nothing is rejected with a clear tool error rather than a crash or a
+// silent result. The rejection comes from the scope check ahead of the
+// manager: a delegation that is not among the tasks this session started
+// can never be in scope, and with no thread manager here there is
+// nowhere else it could have come from.
+func TestTaskResultTool_UnknownIDRejection(t *testing.T) {
+	resp := callTaskTool(t, NewAgentResultTool(newFakeTaskManager(), nil), AgentResultParams{ID: "a-thread-id"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
-	require.Contains(t, resp.Content, "thread_* tools")
+	require.Contains(t, resp.Content, "agent_list")
 }
 
 func TestTaskCancelTool_CancelsRunningTask(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
-	tool := NewTaskCancelTool(manager, skipPermissions(t))
+	tool := NewAgentCancelTool(manager, nil, skipPermissions(t))
 
-	resp := callTaskTool(t, tool, TaskCancelParams{ID: "t1", Reason: "no longer needed"})
+	resp := callTaskTool(t, tool, AgentCancelParams{ID: "t1", Reason: "no longer needed"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "cancelled")
 
@@ -193,18 +192,19 @@ func TestTaskCancelTool_CancelsRunningTask(t *testing.T) {
 }
 
 func TestTaskCancelTool_MissingID(t *testing.T) {
-	tool := NewTaskCancelTool(newFakeTaskManager(), skipPermissions(t))
-	resp := callTaskTool(t, tool, TaskCancelParams{})
+	tool := NewAgentCancelTool(newFakeTaskManager(), nil, skipPermissions(t))
+	resp := callTaskTool(t, tool, AgentCancelParams{})
 	require.True(t, resp.IsError)
 }
 
 // TestTaskCancelTool_WrongKindRejection mirrors
-// TestTaskResultTool_WrongKindRejection: cancelling a thread's id must
-// surface the same clear rejection, not silently do nothing or panic.
-func TestTaskCancelTool_WrongKindRejection(t *testing.T) {
+// TestTaskResultTool_UnknownIDRejection: cancelling an id that resolves
+// to nothing must surface the same clear rejection, not silently do
+// nothing or panic.
+func TestTaskCancelTool_UnknownIDRejection(t *testing.T) {
 	manager := newFakeTaskManager()
-	tool := NewTaskCancelTool(manager, skipPermissions(t))
-	resp := callTaskTool(t, tool, TaskCancelParams{ID: "a-thread-id"})
+	tool := NewAgentCancelTool(manager, nil, skipPermissions(t))
+	resp := callTaskTool(t, tool, AgentCancelParams{ID: "a-thread-id"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
 	require.Empty(t, manager.cancelCalls, "rejected id must never reach a resolved Cancel")
@@ -214,7 +214,7 @@ func TestTaskSendTool_SendsMessage(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 
-	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "keep going"})
+	resp := callTaskTool(t, NewAgentSendTool(manager, nil), AgentSendParams{ID: "t1", Message: "keep going"})
 	require.False(t, resp.IsError)
 
 	require.Len(t, manager.sendCalls, 1)
@@ -231,14 +231,14 @@ func TestTaskSendTool_ReportsQueuedDelivery(t *testing.T) {
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
 	manager.sendOutcome = SendOutcome{Queued: true, Ahead: 2}
 
-	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "wrap up"})
+	resp := callTaskTool(t, NewAgentSendTool(manager, nil), AgentSendParams{ID: "t1", Message: "wrap up"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "Queued")
 	require.Contains(t, resp.Content, "mid-turn")
 	require.Contains(t, resp.Content, "2 earlier message(s)")
 
 	manager.sendOutcome = SendOutcome{}
-	resp = callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "and this"})
+	resp = callTaskTool(t, NewAgentSendTool(manager, nil), AgentSendParams{ID: "t1", Message: "and this"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "starts a turn on it now")
 }
@@ -246,12 +246,12 @@ func TestTaskSendTool_ReportsQueuedDelivery(t *testing.T) {
 func TestTaskSendTool_MissingFields(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "running"}
-	tool := NewTaskSendTool(manager)
+	tool := NewAgentSendTool(manager, nil)
 
-	resp := callTaskTool(t, tool, TaskSendParams{Message: "hi"})
+	resp := callTaskTool(t, tool, AgentSendParams{Message: "hi"})
 	require.True(t, resp.IsError)
 
-	resp = callTaskTool(t, tool, TaskSendParams{ID: "t1"})
+	resp = callTaskTool(t, tool, AgentSendParams{ID: "t1"})
 	require.True(t, resp.IsError)
 }
 
@@ -259,7 +259,7 @@ func TestTaskSendTool_MissingFields(t *testing.T) {
 // tests.
 func TestTaskSendTool_WrongKindRejection(t *testing.T) {
 	manager := newFakeTaskManager()
-	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "a-thread-id", Message: "hi"})
+	resp := callTaskTool(t, NewAgentSendTool(manager, nil), AgentSendParams{ID: "a-thread-id", Message: "hi"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
 	require.Empty(t, manager.sendCalls, "rejected id must never reach a resolved Send")
@@ -276,7 +276,7 @@ func TestTaskOutputTool_ReturnsMessages(t *testing.T) {
 		Total: 2,
 	}
 
-	resp := callTaskTool(t, NewTaskOutputTool(manager), TaskOutputParams{ID: "t1"})
+	resp := callTaskTool(t, NewAgentOutputTool(manager, nil), AgentOutputParams{ID: "t1"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "investigate X")
 	require.Contains(t, resp.Content, "here is what I found")
@@ -297,7 +297,7 @@ func TestTaskOutputTool_ReportsTruncation(t *testing.T) {
 		Total: 5,
 	}
 
-	resp := callTaskTool(t, NewTaskOutputTool(manager), TaskOutputParams{ID: "t1", Limit: 2})
+	resp := callTaskTool(t, NewAgentOutputTool(manager, nil), AgentOutputParams{ID: "t1", Limit: 2})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "Showing last 2 of 5 messages")
 
@@ -311,18 +311,18 @@ func TestTaskOutputTool_EmptyWhenNoMessages(t *testing.T) {
 	manager := newFakeTaskManager()
 	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession}
 
-	resp := callTaskTool(t, NewTaskOutputTool(manager), TaskOutputParams{ID: "t1"})
+	resp := callTaskTool(t, NewAgentOutputTool(manager, nil), AgentOutputParams{ID: "t1"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "No output yet")
 }
 
 func TestTaskOutputTool_MissingID(t *testing.T) {
-	resp := callTaskTool(t, NewTaskOutputTool(newFakeTaskManager()), TaskOutputParams{})
+	resp := callTaskTool(t, NewAgentOutputTool(newFakeTaskManager(), nil), AgentOutputParams{})
 	require.True(t, resp.IsError)
 }
 
 func TestTaskOutputTool_WrongKindRejection(t *testing.T) {
-	resp := callTaskTool(t, NewTaskOutputTool(newFakeTaskManager()), TaskOutputParams{ID: "a-thread-id"})
+	resp := callTaskTool(t, NewAgentOutputTool(newFakeTaskManager(), nil), AgentOutputParams{ID: "a-thread-id"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "No task a-thread-id among the tasks you started")
 }
@@ -348,7 +348,7 @@ func TestTaskCancelTool_RefusesTheCallersOwnTask(t *testing.T) {
 	manager := newFakeTaskManager()
 	seedDelegationTree(manager)
 
-	resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: "self"})
+	resp := callTaskTool(t, NewAgentCancelTool(manager, nil, skipPermissions(t)), AgentCancelParams{ID: "self"})
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "the task you are running as")
@@ -362,7 +362,7 @@ func TestTaskCancelTool_RefusesAnAncestor(t *testing.T) {
 	manager := newFakeTaskManager()
 	seedDelegationTree(manager)
 
-	resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: "ancestor"})
+	resp := callTaskTool(t, NewAgentCancelTool(manager, nil, skipPermissions(t)), AgentCancelParams{ID: "ancestor"})
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "running under")
@@ -376,7 +376,7 @@ func TestTaskCancelTool_RefusesASibling(t *testing.T) {
 	manager := newFakeTaskManager()
 	seedDelegationTree(manager)
 
-	resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: "sibling"})
+	resp := callTaskTool(t, NewAgentCancelTool(manager, nil, skipPermissions(t)), AgentCancelParams{ID: "sibling"})
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "among the tasks you started")
@@ -392,7 +392,7 @@ func TestTaskCancelTool_AllowsTheWholeSubtree(t *testing.T) {
 			manager := newFakeTaskManager()
 			seedDelegationTree(manager)
 
-			resp := callTaskTool(t, NewTaskCancelTool(manager, skipPermissions(t)), TaskCancelParams{ID: id})
+			resp := callTaskTool(t, NewAgentCancelTool(manager, nil, skipPermissions(t)), AgentCancelParams{ID: id})
 
 			require.False(t, resp.IsError, resp.Content)
 			require.Len(t, manager.cancelCalls, 1)
@@ -408,7 +408,7 @@ func TestTaskSendTool_RefusesTheCallersOwnTask(t *testing.T) {
 	manager := newFakeTaskManager()
 	seedDelegationTree(manager)
 
-	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "self", Message: "keep going"})
+	resp := callTaskTool(t, NewAgentSendTool(manager, nil), AgentSendParams{ID: "self", Message: "keep going"})
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "the task you are running as")
@@ -422,10 +422,10 @@ func TestTaskListTool_ShowsOnlyTheCallersSubtree(t *testing.T) {
 	manager := newFakeTaskManager()
 	seedDelegationTree(manager)
 
-	resp := callTaskTool(t, NewTaskListTool(manager), TaskListParams{})
+	resp := callTaskTool(t, NewAgentListTool(manager, nil), AgentListParams{})
 	require.False(t, resp.IsError)
 
-	var meta TaskListResponseMetadata
+	var meta AgentListResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	listed := make([]string, 0, len(meta.Tasks))
 	for _, ti := range meta.Tasks {
@@ -447,10 +447,10 @@ func TestTaskListTool_PersonsSessionSeesEverythingItStarted(t *testing.T) {
 	// were.
 	manager.tasks["stale"] = TaskInfo{ID: "stale", SessionID: "stale-sess", ParentSessionID: "last-week-sess", Status: "running"}
 
-	resp := callTaskTool(t, NewTaskListTool(manager), TaskListParams{})
+	resp := callTaskTool(t, NewAgentListTool(manager, nil), AgentListParams{})
 	require.False(t, resp.IsError)
 
-	var meta TaskListResponseMetadata
+	var meta AgentListResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	listed := make([]string, 0, len(meta.Tasks))
 	for _, ti := range meta.Tasks {

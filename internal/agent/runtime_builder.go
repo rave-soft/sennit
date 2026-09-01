@@ -123,7 +123,6 @@ type runtimeToolInputs struct {
 	backgroundAgentsOn      bool
 	permissions             permission.Requester
 	delegationToolsBuilt    map[string]fantasy.AgentTool
-	customAgentToolsBuilt   []fantasy.AgentTool
 	toolBuildErr            error
 	questions               question.Service
 	lspManager              *lsp.Manager
@@ -262,7 +261,7 @@ func (b *runtimeBuilder) buildToolsForConfig(ctx context.Context, agent config.A
 		return nil, err
 	}
 
-	allTools, err := b.assembleAllTools(ctx, bctx, isSubAgent, inputs)
+	allTools, err := b.assembleAllTools(ctx, bctx)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +324,7 @@ func (b *runtimeBuilder) newBuildToolsCtx(cfg agentConfig, snapshot runtimeConfi
 // appends the pre-built user-defined agent tools for the top-level agent
 // only (user-defined agents are offered to the top-level agent only - see
 // buildTools' doc comment).
-func (b *runtimeBuilder) assembleAllTools(ctx context.Context, bctx *buildToolsCtx, isSubAgent bool, inputs runtimeToolInputs) ([]fantasy.AgentTool, error) {
+func (b *runtimeBuilder) assembleAllTools(ctx context.Context, bctx *buildToolsCtx) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	for _, spec := range toolSpecs() {
 		gate, ok := specGate(spec)
@@ -337,9 +336,6 @@ func (b *runtimeBuilder) assembleAllTools(ctx context.Context, bctx *buildToolsC
 			return nil, err
 		}
 		allTools = append(allTools, built...)
-	}
-	if !isSubAgent {
-		allTools = append(allTools, inputs.customAgentToolsBuilt...)
 	}
 	return allTools, nil
 }

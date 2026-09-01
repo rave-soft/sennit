@@ -31,6 +31,13 @@ const (
 	GateNotSubAgent
 	GateThreads
 	GateTasks
+	// GateDelegations is the agent_* tools' gate: they answer for
+	// delegations of both kinds, so either one being available is enough.
+	// Neither GateTasks (which would hide them in a workspace with
+	// threads and background_agents off) nor GateThreads (which would
+	// hide them wherever there is no git worktree to thread from) can
+	// say that on its own.
+	GateDelegations
 	GateLSP
 	GateMCP
 	GateInteractive
@@ -113,16 +120,17 @@ var descriptors = []Descriptor{
 	{Name: "list_mcp_resources", Access: AccessRead, ParallelSafe: true, DefaultAllowed: true, Gate: GateMCP, Docs: DocsMCP},
 	{Name: "read_mcp_resource", Access: AccessRead, ParallelSafe: true, DefaultAllowed: true, Gate: GateMCP, Docs: DocsMCP},
 	{Name: "thread_create", Access: AccessWrite, Writes: true, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
-	{Name: "thread_list", Access: AccessRead, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
-	{Name: "thread_status", Access: AccessRead, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
-	{Name: "thread_send", Access: AccessWrite, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_merge", Access: AccessWrite, Writes: true, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_remove", Access: AccessWrite, Writes: true, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
-	{Name: "task_list", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
-	{Name: "task_result", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
-	{Name: "task_cancel", Access: AccessWrite, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
-	{Name: "task_send", Access: AccessWrite, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
-	{Name: "task_output", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
+	// The agent_* tools answer for delegations of both kinds. Their
+	// aliases are the per-kind tools they replaced, so a config or an
+	// agent file that still lists task_list or thread_send resolves to
+	// the tool that does that job now instead of silently naming nothing.
+	{Name: "agent_list", Aliases: []string{"task_list", "thread_list"}, Access: AccessRead, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "agent_result", Aliases: []string{"task_result", "thread_status"}, Access: AccessRead, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "agent_cancel", Aliases: []string{"task_cancel"}, Access: AccessWrite, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "agent_send", Aliases: []string{"task_send", "thread_send"}, Access: AccessWrite, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "agent_output", Aliases: []string{"task_output"}, Access: AccessRead, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
 	{Name: "ask_parent", Access: AccessWrite, DefaultAllowed: true, Gate: GateNotSubAgent, Docs: DocsDelegation},
 }
 
