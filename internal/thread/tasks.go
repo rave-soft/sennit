@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -176,7 +177,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	// step, not two.
 	t.createMu.Lock()
 	defer t.createMu.Unlock()
-	if err := t.checkActiveCaps(ctx, args.ParentSessionID); err != nil {
+	if err := t.checkActiveCaps(ctx, args.ParentSessionID, args.Goal); err != nil {
 		return Thread{}, err
 	}
 
@@ -307,9 +308,23 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 
 // checkActiveCaps refuses Create with a clear, model-visible error once
 // either concurrency cap (maxActiveTasksPerWorkspace,
-// maxActiveTasksPerParentTurn) is already at its limit. Callers must hold
+// maxActiveTasksPerParentTurn) is already at its limit, or when the same
+// parent already has this very task running. Callers must hold
 // t.createMu across this call and whatever create it gates - see that
 // field's doc comment for why the check alone is not enough.
+//
+// The duplicate check is deliberately narrow: same parent, same goal
+// (whitespace- and case-folded), and the twin still active. Two
+// delegates working the same prompt against the same working directory
+// at the same time is never what a caller means - they contend for the
+// same files and each reports on work the other is changing under it.
+// A goal that merely resembles a live one is left alone: prompts differ
+// by an attempt number or a findings list far more often than they
+// duplicate, and refusing real work is worse than the duplicate. So is
+// a goal repeated after its twin already finished, which is an ordinary
+// retry - what makes a parent re-dispatch finished work is losing the
+// report, and that is fixed where the report is delivered (see
+// runTurn.foldCompletions), not here.
 //
 // "Active" is Status.Active(): pending or running. A task blocked on a
 // permission prompt mid-run is still StatusRunning - it does not stop
@@ -322,12 +337,13 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 // since it is already in memory and this runs under createMu on every
 // dispatch - a DB round trip per active task on every Create would be a
 // needless cost for something already sitting in the controls map.
-func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID string) error {
+func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID, goal string) error {
 	tasks, err := t.List(ctx)
 	if err != nil {
 		return fmt.Errorf("thread: check active task count: %w", err)
 	}
 
+	wanted := normalizeGoal(goal)
 	var total, forParent int
 	for _, tk := range tasks {
 		if !tk.Status.Active() {
@@ -349,6 +365,12 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID strin
 		}
 		if parent == parentSessionID {
 			forParent++
+			if normalizeGoal(tk.Goal) == wanted {
+				return fmt.Errorf(
+					"thread: this turn already has %s running the same task (%s); wait for it to finish, or read its answer with task_result once it does",
+					tk.ID, tk.Status,
+				)
+			}
 		}
 	}
 
@@ -365,6 +387,14 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID strin
 		)
 	}
 	return nil
+}
+
+// normalizeGoal folds whitespace and case so checkActiveCaps's duplicate
+// check treats a goal re-sent with different indentation or casing as the
+// same goal. It is exact-match after folding by design - see that
+// function's note on why near-misses are left alone.
+func normalizeGoal(goal string) string {
+	return strings.ToLower(strings.Join(strings.Fields(goal), " "))
 }
 
 // failCreate records cause as the task's terminal failure and returns it

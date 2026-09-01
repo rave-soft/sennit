@@ -449,6 +449,68 @@ func TestTaskManager_PerParentCapIndependentOfWorkspaceCap(t *testing.T) {
 	require.NoError(t, err, "the per-parent cap must not leak across different parent sessions")
 }
 
+// TestTaskManager_CreateRefusesADuplicateOfALiveTask covers the guard on
+// two delegates working the same prompt at once: same parent, same goal
+// (whitespace- and case-folded), twin still active. Both would run
+// against the same working directory, contending for the same files and
+// each reporting on work the other is changing under it.
+func TestTaskManager_CreateRefusesADuplicateOfALiveTask(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	first, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
+		Goal:            "Review attempt 26",
+		ParentSessionID: "parent",
+	})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{
+		Goal:            "  review   ATTEMPT 26 ",
+		ParentSessionID: "parent",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), first.ID, "the refusal names the twin so the caller can wait on it or read its result")
+	require.Contains(t, err.Error(), "task_result")
+
+	// A different goal from the same parent, and the same goal from a
+	// different parent, are both ordinary work.
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "Review attempt 27", ParentSessionID: "parent"})
+	require.NoError(t, err)
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "Review attempt 26", ParentSessionID: "other-parent"})
+	require.NoError(t, err, "the duplicate guard must not leak across parent sessions")
+}
+
+// TestTaskManager_CreateAllowsRepeatingAFinishedTask is the deliberate
+// other half of that guard: repeating a goal whose twin already finished
+// is an ordinary retry - the same attempt re-run after a cancel, a
+// resumed piece of work - and must not be refused. What made a parent
+// re-dispatch work that was already reported on is the report going
+// missing from its context, which is fixed where reports are delivered
+// (internal/agent's runTurn.foldCompletions), not by refusing retries.
+func TestTaskManager_CreateAllowsRepeatingAFinishedTask(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+
+	first, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
+		Goal:            "Attempt 27",
+		ParentSessionID: "parent",
+	})
+	require.NoError(t, err)
+	publishSuccessForSession(t, parentApp, first.SessionID)
+	require.Eventually(t, func() bool {
+		got, err := store.Get(t.Context(), first.ID)
+		return err == nil && got.Status == thread.StatusCompleted
+	}, eventuallyTimeout, eventuallyTick)
+
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{
+		Goal:            "Attempt 27",
+		ParentSessionID: "parent",
+	})
+	require.NoError(t, err, "a finished twin is a retry, not a duplicate")
+}
+
 // TestTaskManager_InFlightTaskStillHoldsSlot proves the state the plan
 // deliberately preserves: a task waiting on something mid-run - most
 // notably a permission prompt the user has not yet answered - is still

@@ -136,10 +136,17 @@ func TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce(t *testing.T) {
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
+	var reports int
 	for _, m := range msgs {
-		require.NotEqual(t, message.User, m.Role,
-			"the wake path must never persist a fabricated user message, exactly like the mid-turn fold case: got %q", m.Content().String())
+		if m.Role != message.User {
+			continue
+		}
+		require.Equal(t, message.OriginAgent, m.Origin,
+			"the wake path must never persist a report as something the person typed: got %q", m.Content().String())
+		reports++
 	}
+	require.Equal(t, 1, reports,
+		"the report is persisted exactly once, as agent-authored history, exactly like the mid-turn fold case")
 
 	prompts := model.snapshotPrompts()
 	require.Len(t, prompts, 1, "exactly one turn must have reached the model")
@@ -770,21 +777,24 @@ func TestTaskCompletionDelivery_SameContentBothPaths(t *testing.T) {
 	t.Parallel()
 	completion := testCompletion("parity-marker-text")
 
-	foldedText, foldedUserCount := deliverThroughFold(t, completion)
-	wokenText, wokenUserCount := deliverThroughWake(t, completion)
+	foldedText, foldedPersonCount, foldedReports := deliverThroughFold(t, completion)
+	wokenText, wokenPersonCount, wokenReports := deliverThroughWake(t, completion)
 
 	require.Equal(t, foldedText, wokenText,
 		"the same completion must produce identical model-visible content whether it folds into a busy turn or wakes an idle one")
-	require.Zero(t, foldedUserCount, "the folded path must not persist a fabricated user message")
-	require.Zero(t, wokenUserCount, "the wake path must not persist a fabricated user message")
+	require.Zero(t, foldedPersonCount, "the folded path must not persist the report as something the person typed")
+	require.Zero(t, wokenPersonCount, "the wake path must not persist the report as something the person typed")
+	require.Equal(t, 1, foldedReports, "the folded path persists the report exactly once, as agent-authored history")
+	require.Equal(t, 1, wokenReports, "the wake path persists the report exactly once, as agent-authored history")
 }
 
 // deliverThroughFold drives completion through the mid-turn fold path -
 // an already-active, gated two-step turn, mirroring
 // TestPrepareStep_CompletionDeliveredBeforeSteering's setup - and returns
 // the exact text of the message the model received for it, plus how many
-// persisted user messages mention it (want: 0).
-func deliverThroughFold(t *testing.T, completion TaskCompletion) (string, int) {
+// persisted messages mention it, split into person-authored (want: 0)
+// and agent-authored reports (want: 1).
+func deliverThroughFold(t *testing.T, completion TaskCompletion) (string, int, int) {
 	t.Helper()
 	env := testEnv(t)
 
@@ -834,20 +844,15 @@ func deliverThroughFold(t *testing.T, completion TaskCompletion) (string, int) {
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
-	var userCount int
-	for _, m := range msgs {
-		if m.Role == message.User && strings.Contains(m.Content().String(), completion.ResultText) {
-			userCount++
-		}
-	}
-	return text, userCount
+	personCount, reports := countCompletionMessages(msgs, completion.ResultText)
+	return text, personCount, reports
 }
 
 // deliverThroughWake drives completion through the wake path - an idle
 // session - and returns the exact text of the message the model
-// received for it, plus how many persisted user messages mention it
-// (want: 0).
-func deliverThroughWake(t *testing.T, completion TaskCompletion) (string, int) {
+// received for it, plus how many persisted messages mention it, split
+// into person-authored (want: 0) and agent-authored reports (want: 1).
+func deliverThroughWake(t *testing.T, completion TaskCompletion) (string, int, int) {
 	t.Helper()
 	env := testEnv(t)
 	model := &promptRecordingModel{text: "done"}
@@ -872,13 +877,26 @@ func deliverThroughWake(t *testing.T, completion TaskCompletion) (string, int) {
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
-	var userCount int
+	personCount, reports := countCompletionMessages(msgs, completion.ResultText)
+	return text, personCount, reports
+}
+
+// countCompletionMessages splits the persisted user-role messages
+// mentioning marker into those attributed to the person (which a
+// delegation report must never be) and the agent-authored reports
+// themselves.
+func countCompletionMessages(msgs []message.Message, marker string) (person, reports int) {
 	for _, m := range msgs {
-		if m.Role == message.User && strings.Contains(m.Content().String(), completion.ResultText) {
-			userCount++
+		if m.Role != message.User || !strings.Contains(m.Content().String(), marker) {
+			continue
 		}
+		if m.Origin == message.OriginAgent {
+			reports++
+			continue
+		}
+		person++
 	}
-	return text, userCount
+	return person, reports
 }
 
 // completionMessageText finds the single message part within prompt
@@ -923,7 +941,13 @@ func TestFoldCompletions_ContinuationStaysAtItsOwnLevel(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			sa := testSessionAgent(env, &toolCallThenFinishModel{}, "system").(*sessionAgent)
-			sessionID := "session-" + tc.name
+			// A real session row: the fold persists the report as
+			// session history now, so a made-up id fails the
+			// messages table's foreign key instead of exercising
+			// the depth rule under test.
+			sess, err := env.sessions.Create(t.Context(), tc.name)
+			require.NoError(t, err)
+			sessionID := sess.ID
 
 			sa.enqueueCompletion(sessionID, TaskCompletion{
 				DelegationID: "d1",
@@ -933,7 +957,8 @@ func TestFoldCompletions_ContinuationStaysAtItsOwnLevel(t *testing.T) {
 			})
 
 			turn := &runTurn{agent: sa, call: SessionAgentCall{SessionID: sessionID, Continuation: true}}
-			messages, folded := turn.foldCompletions(nil, 0)
+			messages, folded, err := turn.foldCompletions(t.Context(), nil, 0)
+			require.NoError(t, err)
 			require.Len(t, folded, 1)
 			require.Len(t, messages, 1, "the completion is reported to the model as one message")
 			require.Equal(t, tc.want, turn.call.Depth)
@@ -1143,4 +1168,88 @@ func TestSetLiveSession_WakesWhatCouldNotBeWokenBefore(t *testing.T) {
 	require.Len(t, prompts, 1, "exactly one turn must have reached the model")
 	require.True(t, promptContains(prompts[0], "stall-marker-text"),
 		"the failure the delegation reported must be what that turn carries")
+}
+
+// TestFoldCompletions_ReportStaysVisibleForLaterSteps is the regression
+// test for a parent dispatching the same delegate twice for work already
+// reported on. A completion used to be handed to exactly one provider
+// request: the fantasy loop rebuilds every step's prompt from the turn's
+// initial prompt plus its own response messages, so a message an earlier
+// PrepareStep appended was gone by the next step, and persisted history
+// kept only the dispatch tool's "started ... its result will follow
+// separately". A parent that did not act on the report in that one step
+// had no record the delegate had ever reported.
+func TestFoldCompletions_ReportStaysVisibleForLaterSteps(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	sa := testSessionAgent(env, &toolCallThenFinishModel{}, "system").(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	sa.enqueueCompletion(sess.ID, TaskCompletion{
+		DelegationID: "d1",
+		Kind:         "task",
+		Status:       "completed",
+		ResultText:   "report-marker-text",
+	})
+
+	turn := &runTurn{agent: sa, call: SessionAgentCall{SessionID: sess.ID}}
+
+	step0, folded, err := turn.foldCompletions(t.Context(), nil, 0)
+	require.NoError(t, err)
+	require.Len(t, folded, 1)
+	require.Len(t, step0, 1)
+	require.Contains(t, completionMessageText(t, fantasy.Prompt(step0), "report-marker-text"), "report-marker-text")
+
+	// The next step starts from the same rebuilt prompt this one did -
+	// nil here, exactly as fantasy hands it over with nothing of the
+	// previous step's PrepareStep in it.
+	step1, foldedAgain, err := turn.foldCompletions(t.Context(), nil, 1)
+	require.NoError(t, err)
+	require.Empty(t, foldedAgain, "nothing new was waiting in the inbox")
+	require.Len(t, step1, 1, "the report the previous step folded is handed to this step too")
+	require.Contains(t, completionMessageText(t, fantasy.Prompt(step1), "report-marker-text"), "report-marker-text")
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	person, reports := countCompletionMessages(msgs, "report-marker-text")
+	require.Zero(t, person, "a report is never attributed to the person")
+	require.Equal(t, 1, reports, "the report is durable session history, written exactly once")
+}
+
+// TestRequeuePendingCompletions_TakesItsMessagesBack covers the other
+// half of that stickiness: a batch the step failed on goes back to the
+// inbox, so its message must leave the turn's folded set with it -
+// otherwise the model sees the same report twice, once from the folded
+// set and once from the requeued batch being folded again.
+func TestRequeuePendingCompletions_TakesItsMessagesBack(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	sa := testSessionAgent(env, &toolCallThenFinishModel{}, "system").(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	sa.enqueueCompletion(sess.ID, TaskCompletion{
+		DelegationID: "d1",
+		Kind:         "task",
+		Status:       "completed",
+		ResultText:   "requeue-marker-text",
+	})
+
+	turn := &runTurn{agent: sa, call: SessionAgentCall{SessionID: sess.ID}}
+	messages, folded, err := turn.foldCompletions(t.Context(), nil, 0)
+	require.NoError(t, err)
+	require.Len(t, folded, 1)
+	require.Len(t, messages, 1)
+
+	turn.pendingCompletions = folded
+	turn.requeuePendingCompletions()
+	require.Empty(t, turn.foldedCompletions, "the requeued batch takes its message with it")
+
+	next, refolded, err := turn.foldCompletions(t.Context(), nil, 1)
+	require.NoError(t, err)
+	require.Len(t, refolded, 1, "the batch went back to the inbox and is folded again")
+	require.Len(t, next, 1, "and it reaches the model exactly once, not twice")
 }

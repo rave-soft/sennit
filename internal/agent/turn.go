@@ -109,6 +109,22 @@ type runTurn struct {
 	// It remains owned by the turn until OnStepFinish proves that the provider
 	// step completed and all local persistence for it succeeded.
 	pendingCompletions []TaskCompletion
+	// foldedCompletions is every completion report already folded into
+	// this turn, as the messages the model saw, kept so later steps can
+	// see them too. The fantasy loop rebuilds each step's prompt from
+	// initialPrompt + the loop's own response messages (see
+	// third_party/fantasy/agent.go's Generate/Stream), so a message a
+	// previous step's PrepareStep appended is gone by the next step:
+	// without this, a delegation's report reached exactly one provider
+	// request and the parent's context then said only "started, its
+	// result will follow separately" — which is how a parent came to
+	// dispatch the same delegate a second time for work already
+	// reported on.
+	foldedCompletions []fantasy.Message
+	// pendingFoldedCount is how many of foldedCompletions belong to
+	// pendingCompletions, so a requeued batch takes its messages back
+	// out with it instead of being shown twice when it is folded again.
+	pendingFoldedCount int
 }
 
 // newRunTurn returns a runTurn ready to be wired into a
@@ -168,8 +184,8 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	// from an ordinary assistant reply. Strip the user message fantasy
 	// synthesized from it before the model ever sees it. What replaces it
 	// is exactly the completion-inbox drain in foldCompletions - the same
-	// mechanism, the same non-persisted delivery, as the mid-turn fold
-	// case, so the two paths cannot record the same event differently.
+	// mechanism, the same persistence, as the mid-turn fold case, so the
+	// two paths cannot record the same event differently.
 	//
 	// stripContinuationPlaceholder verifies the entry it removes actually
 	// is the placeholder rather than trusting its position (always last -
@@ -188,13 +204,18 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	// A batch folded here is only accepted after the provider step and its
 	// local persistence complete in onStepFinish. Preparation failures put it
 	// back immediately; provider/stream failures are handled by Run's outer
-	// cleanup through requeuePendingCompletions.
-	prepared.Messages, t.pendingCompletions = t.foldCompletions(prepared.Messages, options.StepNumber)
+	// cleanup through requeuePendingCompletions. The defer is registered
+	// before the fold so a fold that fails half-way — its report persisted,
+	// the batch not yet accepted — unwinds through the same path.
 	defer func() {
 		if err != nil {
 			t.requeuePendingCompletions()
 		}
 	}()
+	prepared.Messages, t.pendingCompletions, err = t.foldCompletions(callContext, prepared.Messages, options.StepNumber)
+	if err != nil {
+		return callContext, prepared, err
+	}
 
 	// foldSteering owns its own rollback: a follow-up it successfully
 	// persists via createUserMessage is durable session history the
@@ -218,20 +239,23 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 // taskCompletionsMessage) and stamps a continuation's cascade depth from the
 // deepest delegation in the batch.
 //
-// finish is non-nil exactly when something was drained; the caller must
-// invoke it exactly once with the step's final error after every later
-// stage has run: nothing here persists a completion anywhere durable (unlike
-// a folded steering prompt, which is written via createUserMessage before
-// it's appended) — a completion lives only in the inbox and, once appended
-// here, in this step's in-memory messages. So "delivered" can only be
-// declared once the whole step reaches the model; any error from here on
-// means it never did, and finish(err) puts the drained batch back rather
-// than losing it. On success, finish logs delivery latency (ids, statuses,
-// and durations only, never Goal/ResultText/Error).
-func (t *runTurn) foldCompletions(messages []fantasy.Message, stepNumber int) ([]fantasy.Message, []TaskCompletion) {
+// The report is written to the session's own history first, the same way
+// a folded steering prompt is (createUserMessage), and only then appended:
+// a report that lives solely in this step's in-memory messages survives
+// exactly one provider request. Every report folded earlier in this turn
+// is re-appended too, since the step the model sees is rebuilt from the
+// turn's initial prompt each time — see runTurn.foldedCompletions.
+//
+// The drained batch still stays owned by the turn (returned as its second
+// value, held in pendingCompletions) until the step reaches the model:
+// the durable outbox bit is cleared by acknowledgePendingCompletions, and
+// any error from here on requeues the batch instead of losing it. On
+// success, acknowledgePendingCompletions logs delivery latency (ids,
+// statuses, and durations only, never Goal/ResultText/Error).
+func (t *runTurn) foldCompletions(ctx context.Context, messages []fantasy.Message, stepNumber int) ([]fantasy.Message, []TaskCompletion, error) {
 	completions := t.agent.drainCompletionsForStep(t.call.SessionID)
 	if len(completions) == 0 {
-		return messages, nil
+		return t.appendFoldedCompletions(messages), nil, nil
 	}
 	if t.call.Continuation && stepNumber == 0 {
 		// Only knowable now that we see what actually woke this turn.
@@ -256,12 +280,63 @@ func (t *runTurn) foldCompletions(messages []fantasy.Message, stepNumber int) ([
 		}
 		t.call.Depth = max(0, depth-1)
 	}
-	return append(messages, taskCompletionsMessage(completions)), completions
+	// Persisted, not just handed to this one request. A report that lives
+	// only in prepared.Messages is visible for a single provider call and
+	// then gone — from the next step of this very turn (the fantasy loop
+	// rebuilds the prompt from initialPrompt + its own response messages),
+	// from every later turn, from a summary, and from the transcript the
+	// user reads. What history kept instead was only the dispatch tool's
+	// "started ... its result will follow separately", so a parent that
+	// did not act on the report in that one step had no record the
+	// delegate had ever reported, and re-dispatched it.
+	//
+	// User role with Origin agent: the same shape a delegation's own goal
+	// is persisted under (see internal/thread's lifecycle and
+	// message.OriginAgent), so the UI tags it as agent-authored rather
+	// than something the person typed, and the leading label in
+	// joinTaskCompletions keeps the model from reading it as user speech.
+	//
+	// Delivery stays at-least-once: a batch persisted here but rejected
+	// by a later failure goes back to the inbox and can be reported
+	// again. formatTaskCompletion's repeat notice already covers a
+	// delegation reporting more than once, and a duplicated report is a
+	// far smaller problem than a lost one.
+	reportMsg, err := t.agent.messages.Create(ctx, t.call.SessionID, message.CreateMessageParams{
+		Role:   message.User,
+		Parts:  []message.ContentPart{message.TextContent{Text: joinTaskCompletions(completions)}},
+		Origin: message.OriginAgent,
+	})
+	if err != nil {
+		return messages, completions, fmt.Errorf("failed to persist delegation report: %w", err)
+	}
+	folded := toAIMessage(&reportMsg)
+	t.foldedCompletions = append(t.foldedCompletions, folded...)
+	t.pendingFoldedCount = len(folded)
+	return append(messages, t.foldedCompletions...), completions, nil
+}
+
+// appendFoldedCompletions re-appends every report this turn has already
+// folded. Persisting them (foldCompletions) is what makes them durable
+// history, but the turn already in flight built its prompt before they
+// existed, so the steps that follow still need them handed back
+// explicitly - see runTurn.foldedCompletions.
+func (t *runTurn) appendFoldedCompletions(messages []fantasy.Message) []fantasy.Message {
+	if len(t.foldedCompletions) == 0 {
+		return messages
+	}
+	return append(messages, t.foldedCompletions...)
 }
 
 func (t *runTurn) requeuePendingCompletions() {
 	if len(t.pendingCompletions) == 0 {
 		return
+	}
+	// The batch goes back to the inbox, so its messages come back out of
+	// the turn's folded set: leaving them would show the model the same
+	// report twice once the requeued batch is folded again.
+	if t.pendingFoldedCount > 0 {
+		t.foldedCompletions = t.foldedCompletions[:len(t.foldedCompletions)-t.pendingFoldedCount]
+		t.pendingFoldedCount = 0
 	}
 	t.agent.requeueCompletions(t.call.SessionID, t.pendingCompletions)
 	t.pendingCompletions = nil
