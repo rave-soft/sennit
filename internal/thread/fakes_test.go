@@ -817,14 +817,41 @@ func (s *fakeSpawner) wasReleased(id string) bool {
 	return s.released[id]
 }
 
-// settleTimeout bounds a Manager.Wait in these tests.
+// settleTimeout bounds a Manager.Wait in these tests, and
+// eventuallyTimeout (below) bounds every require.Eventually. Both are
+// waits for something that happens in microseconds when the code works:
+// the number only decides how long a genuinely stuck test hangs before
+// failing.
 //
-// Generous on purpose: Wait returns the moment the threads settle, so the
-// number only decides how long a genuinely stuck test hangs before failing —
-// while too small a number fails tests that were merely slow. It was two
-// seconds, and CI duly failed with "context deadline exceeded" on a runner
-// executing the whole suite at once.
-const settleTimeout = 60 * time.Second
+// Which is why they are two numbers, not one. A loaded CI runner needs
+// the generous end — two seconds of settle and one second of eventually
+// were both tried and both failed there, the latter on a commit that
+// changed no code at all — while a developer's machine never comes near
+// it, and pays the whole deadline for every broken test. That bill is
+// real: a refactor in progress left 55 tests here failing, and at ten
+// seconds each they turned `go test -race ./...` from 46 seconds into
+// ten minutes. CI does not have that problem, because it runs with
+// -failfast (.github/workflows/build.yml) and stops at the first one.
+//
+// The local values are measured, not guessed: this package passes with
+// 200ms of eventually and 2s of settle, so what is set below is a
+// tenfold margin over numbers that already work.
+var (
+	settleTimeout     = waitBudget(60*time.Second, 10*time.Second)
+	eventuallyTimeout = waitBudget(10*time.Second, 2*time.Second)
+)
+
+// waitBudget returns onCI when the tests are running on a CI runner and
+// local otherwise. Any CI worth the name sets CI=true; GitHub Actions,
+// which is what this repository runs, sets both that and GITHUB_ACTIONS.
+// An unrecognized environment gets the generous number: being slow there
+// is a nuisance, while being flaky is a lie about the code.
+func waitBudget(onCI, local time.Duration) time.Duration {
+	if os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return onCI
+	}
+	return local
+}
 
 // newTestManager wires a Manager over a real store, a real git repo (repo),
 // and the fakeSpawner defined above.
@@ -865,20 +892,12 @@ func shutdownManagerOnCleanup(t *testing.T, mgr *thread.Manager) {
 	})
 }
 
-// publishSuccess simulates a thread's agent run finishing successfully.
-// eventuallyTimeout and eventuallyTick bound every require.Eventually in
-// these tests: a run reaching the fake coordinator, a RunComplete event
-// travelling through the lifecycle's subscriber, a status landing in the
-// store. Same reasoning as settleTimeout above — the deadline only decides
-// how long a genuinely broken test takes to fail, while too small a number
-// fails tests that were merely slow. One second was too small: a loaded CI
-// runner under -race failed TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle
-// on a commit that changed no code at all. The tick stays at a millisecond,
-// so a healthy machine still finishes in microseconds.
-const (
-	eventuallyTimeout = 10 * time.Second
-	eventuallyTick    = time.Millisecond
-)
+// eventuallyTick is how often the waits above re-check: a run reaching
+// the fake coordinator, a RunComplete event travelling through the
+// lifecycle's subscriber, a status landing in the store. A millisecond,
+// so a healthy machine finishes in microseconds and the deadline never
+// enters into it. See settleTimeout for the deadlines themselves.
+const eventuallyTick = time.Millisecond
 
 func publishSuccess(t *testing.T, a *app.App, sessionID string) {
 	t.Helper()
