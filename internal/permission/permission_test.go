@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -869,6 +870,93 @@ func TestPermissionService_QueuedDispatch(t *testing.T) {
 // request made under a delegation ctx is published carrying that ref, one
 // made without carries the zero ref (today's only value), and neither
 // case's grant/deny behavior changes.
+func TestPermissionRequestJSONDelegation(t *testing.T) {
+	foreground := PermissionRequest{
+		ID:          "permission-1",
+		SessionID:   "session-1",
+		ToolCallID:  "call-1",
+		ToolName:    "bash",
+		Description: "list files",
+		Action:      "execute",
+		Params:      map[string]string{"command": "ls"},
+		Path:        "/workspace",
+	}
+	background := foreground
+	background.Delegation = DelegationRef{ID: "task-1", Name: "index", Kind: "task"}
+
+	foregroundJSON, err := json.Marshal(foreground)
+	require.NoError(t, err)
+	assert.Equal(t, `{"id":"permission-1","session_id":"session-1","tool_call_id":"call-1","tool_name":"bash","description":"list files","action":"execute","params":{"command":"ls"},"path":"/workspace"}`, string(foregroundJSON))
+
+	backgroundJSON, err := json.Marshal(background)
+	require.NoError(t, err)
+	assert.Equal(t, `{"id":"permission-1","session_id":"session-1","tool_call_id":"call-1","tool_name":"bash","description":"list files","action":"execute","params":{"command":"ls"},"path":"/workspace","delegation":{"id":"task-1","name":"index","kind":"task"}}`, string(backgroundJSON))
+
+	var decoded PermissionRequest
+	require.NoError(t, json.Unmarshal(backgroundJSON, &decoded))
+	assert.Equal(t, background.Delegation, decoded.Delegation)
+	assert.Equal(t, background.ID, decoded.ID)
+	assert.Equal(t, background.SessionID, decoded.SessionID)
+	assert.Equal(t, background.ToolCallID, decoded.ToolCallID)
+	assert.Equal(t, background.ToolName, decoded.ToolName)
+	assert.Equal(t, background.Description, decoded.Description)
+	assert.Equal(t, background.Action, decoded.Action)
+	assert.Equal(t, map[string]any{"command": "ls"}, decoded.Params)
+	assert.Equal(t, background.Path, decoded.Path)
+}
+
+func TestPermissionRequestJSONUnmarshalSemantics(t *testing.T) {
+	type ordinaryRequest struct {
+		ID         string        `json:"id"`
+		ToolName   string        `json:"tool_name"`
+		Delegation DelegationRef `json:"delegation"`
+	}
+
+	initial := PermissionRequest{
+		ID:         "permission-1",
+		ToolName:   "bash",
+		Params:     map[string]string{"command": "ls"},
+		Delegation: DelegationRef{ID: "task-1", Name: "index", Kind: "task"},
+	}
+	ordinaryInitial := ordinaryRequest{
+		ID:         initial.ID,
+		ToolName:   initial.ToolName,
+		Delegation: initial.Delegation,
+	}
+
+	t.Run("partial object preserves absent fields", func(t *testing.T) {
+		got := initial
+		want := ordinaryInitial
+		require.NoError(t, json.Unmarshal([]byte(`{"tool_name":"view","unknown":true}`), &got))
+		require.NoError(t, json.Unmarshal([]byte(`{"tool_name":"view","unknown":true}`), &want))
+		assert.Equal(t, want.ID, got.ID)
+		assert.Equal(t, want.ToolName, got.ToolName)
+		assert.Equal(t, want.Delegation, got.Delegation)
+		assert.Equal(t, initial.Params, got.Params)
+	})
+
+	t.Run("top-level null preserves receiver", func(t *testing.T) {
+		got := initial
+		want := ordinaryInitial
+		require.NoError(t, json.Unmarshal([]byte(`null`), &got))
+		require.NoError(t, json.Unmarshal([]byte(`null`), &want))
+		assert.Equal(t, want.ID, got.ID)
+		assert.Equal(t, want.ToolName, got.ToolName)
+		assert.Equal(t, want.Delegation, got.Delegation)
+		assert.Equal(t, initial.Params, got.Params)
+	})
+
+	t.Run("missing delegation preserves and null clears it", func(t *testing.T) {
+		preserved := initial
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"permission-2"}`), &preserved))
+		assert.Equal(t, initial.Delegation, preserved.Delegation)
+
+		cleared := initial
+		require.NoError(t, json.Unmarshal([]byte(`{"delegation":null}`), &cleared))
+		assert.Equal(t, DelegationRef{}, cleared.Delegation)
+	})
+}
+
 func TestPermissionService_DelegationAttribution(t *testing.T) {
 	t.Parallel()
 

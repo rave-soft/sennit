@@ -11,9 +11,9 @@ import "context"
 // over a domain object. The zero value means "the visible turn asked",
 // which is the only value every request had before this existed.
 type DelegationRef struct {
-	ID   string
-	Name string
-	Kind string
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
 }
 
 // delegationContextKey is the unexported context key WithDelegation uses.

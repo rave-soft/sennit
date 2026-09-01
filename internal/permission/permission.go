@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -64,7 +65,72 @@ type PermissionRequest struct {
 	// Delegation identifies the background delegation whose run raised
 	// this request (see [WithDelegation]), or the zero value if the
 	// visible turn asked.
-	Delegation DelegationRef `json:"delegation,omitempty"`
+	Delegation DelegationRef `json:"-"`
+}
+
+type permissionRequestJSON struct {
+	ID          string         `json:"id"`
+	SessionID   string         `json:"session_id"`
+	ToolCallID  string         `json:"tool_call_id"`
+	ToolName    string         `json:"tool_name"`
+	Description string         `json:"description"`
+	Action      string         `json:"action"`
+	Params      any            `json:"params"`
+	Path        string         `json:"path"`
+	Delegation  *DelegationRef `json:"delegation,omitempty"`
+}
+
+func (p PermissionRequest) MarshalJSON() ([]byte, error) {
+	request := permissionRequestJSON{
+		ID:          p.ID,
+		SessionID:   p.SessionID,
+		ToolCallID:  p.ToolCallID,
+		ToolName:    p.ToolName,
+		Description: p.Description,
+		Action:      p.Action,
+		Params:      p.Params,
+		Path:        p.Path,
+	}
+	if p.Delegation != (DelegationRef{}) {
+		request.Delegation = &p.Delegation
+	}
+	return json.Marshal(request)
+}
+
+func (p *PermissionRequest) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return nil
+	}
+
+	delegation := p.Delegation
+	request := permissionRequestJSON{
+		ID:          p.ID,
+		SessionID:   p.SessionID,
+		ToolCallID:  p.ToolCallID,
+		ToolName:    p.ToolName,
+		Description: p.Description,
+		Action:      p.Action,
+		Params:      p.Params,
+		Path:        p.Path,
+		Delegation:  &delegation,
+	}
+	if err := json.Unmarshal(data, &request); err != nil {
+		return err
+	}
+
+	p.ID = request.ID
+	p.SessionID = request.SessionID
+	p.ToolCallID = request.ToolCallID
+	p.ToolName = request.ToolName
+	p.Description = request.Description
+	p.Action = request.Action
+	p.Params = request.Params
+	p.Path = request.Path
+	p.Delegation = DelegationRef{}
+	if request.Delegation != nil {
+		p.Delegation = *request.Delegation
+	}
+	return nil
 }
 
 // Requester is the asking side of the permission service: tools and the
