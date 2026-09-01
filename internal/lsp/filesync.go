@@ -2,7 +2,9 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -177,9 +179,18 @@ func (f *filesync) prepareSyncOn(ctx context.Context, gen *clientGeneration, use
 		openedSet[uri] = struct{}{}
 		return nil
 	}
+	// vanished collects the files that no longer exist on disk. They are
+	// dropped from the bookkeeping at commit time, not before: until the
+	// candidate is published the current generation still has them open,
+	// and a sync that fails must leave the snapshot exactly as it found
+	// it.
+	var vanished []string
 	restore := func() {
 		for uri, info := range userFiles {
 			f.files.Set(uri, info)
+		}
+		for _, uri := range vanished {
+			f.files.Del(uri)
 		}
 	}
 	for _, marker := range f.rootMarkers {
@@ -215,6 +226,19 @@ func (f *filesync) prepareSyncOn(ctx context.Context, gen *clientGeneration, use
 			return nil, fmt.Errorf("convert reopened URI %s: %w", uri, err)
 		}
 		if err := openCandidate(path); err != nil {
+			// A file open at the last restart can be gone by this one —
+			// a branch switch, a rename, or another session deleting it
+			// mid-refactor. It is not the server's fault and there is
+			// nothing to reopen, but failing here failed the whole
+			// restart: the candidate was rolled back and the client left
+			// down, so one deleted file took gopls out for the rest of
+			// the session ("Failed to restart 1 LSP client(s): gopls").
+			// Drop it from the set instead and carry on with the rest.
+			if errors.Is(err, fs.ErrNotExist) {
+				slog.Debug("Dropping a file that no longer exists from the LSP reopen set", "name", f.name, "path", path)
+				vanished = append(vanished, uri)
+				continue
+			}
 			return nil, fmt.Errorf("reopen file %s: %w", path, err)
 		}
 	}

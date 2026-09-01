@@ -162,6 +162,56 @@ func TestClient_Restart_ReopensPreviouslyOpenFiles(t *testing.T) {
 	require.Empty(t, client.GetDiagnostics())
 }
 
+// TestClient_Restart_SkipsAFileDeletedSinceItWasOpened is the regression
+// case for one deleted file taking the whole server down. Restart reopens
+// everything that was open, reading each file off disk; a file removed in
+// the meantime — a branch switch, a rename, another session mid-refactor —
+// failed that read, and the failure was returned all the way out, so the
+// candidate generation was rolled back and the client left down for the
+// rest of the session ("Failed to restart 1 LSP client(s): gopls"). The
+// missing file is now dropped from the reopen set, and the restart carries
+// on with the files that are still there.
+func TestClient_Restart_SkipsAFileDeletedSinceItWasOpened(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	kept := filepath.Join(dir, "main.go")
+	deleted := filepath.Join(dir, "gone_test.go")
+	require.NoError(t, os.WriteFile(kept, []byte("package main\n"), 0o644))
+	require.NoError(t, os.WriteFile(deleted, []byte("package main\n"), 0o644))
+
+	cfg := config.LSPConfig{
+		Command:   exe,
+		FileTypes: []string{"go"},
+		Env:       map[string]string{fakeLSPServerEnv: "1"},
+	}
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
+
+	client, err := New("test-restart-deleted", cfg, resolver, dir, false)
+	require.NoError(t, err)
+	t.Cleanup(client.Kill)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(ctx))
+
+	require.NoError(t, client.OpenFile(ctx, kept))
+	require.NoError(t, client.OpenFile(ctx, deleted))
+	require.True(t, client.IsFileOpen(deleted))
+
+	require.NoError(t, os.Remove(deleted))
+
+	require.NoError(t, client.Restart(), "a file deleted since it was opened must not fail the restart")
+	require.True(t, client.IsFileOpen(kept), "the surviving file should be reopened")
+	require.False(t, client.IsFileOpen(deleted), "the deleted file should be dropped, not reported open")
+}
+
 // TestClient_ConcurrentVersionBumpsDoNotRace exercises NotifyChange and
 // RefreshOpenFiles bumping the same open file's version concurrently (e.g.
 // a debounced edit notification racing a workspace-wide refresh). Both read
@@ -1442,10 +1492,18 @@ func TestClient_FailedRestartRollsBackCandidateFilesAndRetries(t *testing.T) {
 
 	before, err := os.ReadFile(logPath)
 	require.NoError(t, err)
+	// Make the tracked file unreadable to fail the candidate. A directory
+	// in its place does that on every platform, and — unlike deleting it —
+	// is not the one read failure the sync forgives: a file that no longer
+	// exists is dropped from the reopen set rather than failing the
+	// restart (see TestClient_Restart_SkipsAFileDeletedSinceItWasOpened),
+	// which would leave nothing here to roll back.
 	require.NoError(t, os.Remove(userFile))
+	require.NoError(t, os.Mkdir(userFile, 0o755))
 	require.Error(t, client.Restart(), "candidate must fail when a tracked file cannot reopen")
 	require.True(t, client.IsFileOpen(userFile), "failed candidate must not alter the user-file snapshot")
 
+	require.NoError(t, os.Remove(userFile))
 	require.NoError(t, os.WriteFile(userFile, []byte("package main\n"), 0o644))
 	require.NoError(t, client.Restart(), "retry must reopen the preserved user-file snapshot")
 	require.True(t, client.IsFileOpen(userFile))
