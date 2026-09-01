@@ -72,7 +72,12 @@ func (b *bangModeState) enterFromLeadingPrefix(textarea *textarea.Model, previou
 		return false
 	}
 
-	stripped := trimmedCurrent[1:] // ASCII bang prefix.
+	// TrimPrefix, not a [1:] slice: the prefix is one ASCII byte and the
+	// slice was correct, but the display-text check (internal/devtools/
+	// uicheck) reads every constant-bound slice of a string as a byte
+	// index into text that may not be ASCII, and this needs no index at
+	// all to say what it means.
+	stripped := strings.TrimPrefix(trimmedCurrent, "!")
 	textarea.SetValue(stripped)
 	column := textarea.Column()
 	if previous != "" {
