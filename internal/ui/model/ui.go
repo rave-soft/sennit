@@ -122,6 +122,9 @@ type UI struct {
 	// compactMode owns the persistence lifecycle for compact-mode changes.
 	compactMode compactModeState
 
+	// notificationStyle owns the persistence lifecycle for notification-style changes.
+	notificationStyle notificationStyleState
+
 	// themePreview owns the applied theme and preview restore point. UI keeps
 	// validation, palette application, persistence, and command orchestration.
 	themePreview themePreviewState

@@ -469,36 +469,41 @@ func TestUpdateSettings_NotificationStyleSetMsg(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.notificationGeneration = 2
-		m.ops.notificationLoading = true
+		generation, started := m.notificationStyle.begin()
+		require.True(t, started)
+		require.True(t, m.notificationStyle.complete(generation))
+		generation, started = m.notificationStyle.begin()
+		require.True(t, started)
 
-		cmds, done := m.updateSettings(notificationStyleSetMsg{generation: 1}, nil)
+		cmds, done := m.updateSettings(notificationStyleSetMsg{generation: generation - 1}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.notificationLoading)
+		require.True(t, m.notificationStyle.isLoading())
 	})
 
 	t.Run("error reports", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.notificationGeneration = 1
-		m.ops.notificationLoading = true
+		generation, started := m.notificationStyle.begin()
+		require.True(t, started)
 
-		cmds, _ := m.updateSettings(notificationStyleSetMsg{Err: errors.New("bad"), generation: 1}, nil)
+		cmds, _ := m.updateSettings(notificationStyleSetMsg{Err: errors.New("bad"), generation: generation}, nil)
 
-		require.False(t, m.ops.notificationLoading)
+		require.False(t, m.notificationStyle.isLoading())
 		require.Len(t, cmds, 1)
 	})
 
 	t.Run("success closes the dialog and reports the new style", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.notificationGeneration = 1
+		generation, started := m.notificationStyle.begin()
+		require.True(t, started)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.NotificationsID})
 
-		cmds, _ := m.updateSettings(notificationStyleSetMsg{Style: "desktop", generation: 1}, nil)
+		cmds, _ := m.updateSettings(notificationStyleSetMsg{Style: "desktop", generation: generation}, nil)
 
+		require.False(t, m.notificationStyle.isLoading())
 		require.False(t, m.dialog.ContainsDialog(dialog.NotificationsID))
 		require.Len(t, cmds, 1)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)

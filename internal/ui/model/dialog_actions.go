@@ -70,15 +70,19 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		cmds = append(cmds, m.toggleYoloMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
-		if m.ops.notificationLoading {
+		// Preserve the in-flight warning even if the configuration changed while
+		// the write was running. Validation applies only to a new operation.
+		if m.notificationStyle.isLoading() {
 			cmds = append(cmds, util.ReportWarn("Notification settings are already being updated"))
 			break
 		}
-		style := msg.Style
 		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
-			m.ops.notificationLoading = true
-			m.ops.notificationGeneration++
-			generation := m.ops.notificationGeneration
+			generation, started := m.notificationStyle.begin()
+			if !started {
+				cmds = append(cmds, util.ReportWarn("Notification settings are already being updated"))
+				break
+			}
+			style := msg.Style
 			workspace := m.com.Workspace
 			cmds = append(cmds, func() tea.Msg {
 				return notificationStyleSetMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.notifications", style), Style: style, generation: generation}
