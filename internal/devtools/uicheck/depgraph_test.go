@@ -1,8 +1,11 @@
 package uicheck_test
 
 import (
+	"sort"
+	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -43,6 +46,10 @@ type forbiddenImportRule struct {
 	Why       string
 }
 
+// moduleRoot is this repository's own import prefix: the walk in
+// findPath steps through these packages and stops at anyone else's.
+const moduleRoot = "github.com/rave-soft/sennit"
+
 var forbiddenImports = []forbiddenImportRule{
 	{
 		Pattern:   "github.com/rave-soft/sennit/internal/session",
@@ -64,6 +71,68 @@ var forbiddenImports = []forbiddenImportRule{
 		Forbidden: "github.com/rave-soft/sennit/internal/ui",
 		Why:       "the animated spinner primitive moved to internal/spin precisely so format (and cmd) stay presentation-neutral; the spinner is driven through plain tea messages, no TUI import is needed",
 	},
+	// The architectural boundaries. Each of these is a seam the tree
+	// paid for once and would lose silently: nothing in the build
+	// notices a dependency arriving through three hops, and the reason
+	// it must not arrive lives in a comment the next edit need not read.
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/ui",
+		Forbidden: "github.com/rave-soft/sennit/internal/db",
+		Why:       "the TUI reads its data through the Workspace seam and internal/proto DTOs; the last link from ui to the database was cut by turning the tools.*PermissionsParams aliases around (AGENTS.md, 2026-08-28), and it arrived transitively the first time",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/ui",
+		Forbidden: "github.com/rave-soft/sennit/internal/thread",
+		Why:       "the delegation runtime reaches the TUI as proto.Thread data, never as its own types; internal/ui/threads is the view, internal/thread is the machine",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/ui",
+		Forbidden: "github.com/rave-soft/sennit/internal/app",
+		Why:       "the app composes the workspace and hands the TUI a Workspace; a UI package reaching back into the composition root inverts that",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/thread",
+		Forbidden: "github.com/rave-soft/sennit/internal/app",
+		Why:       "thread declares what it needs as ports (internal/thread/ports.go) and the app satisfies them; importing the app back is the cycle those ports exist to avoid",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/thread",
+		Forbidden: "github.com/rave-soft/sennit/internal/agent",
+		Why:       "same seam from the other side: a delegation runs an agent through a spawner port, and thread must not know what an agent is",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/thread",
+		Forbidden: "github.com/rave-soft/sennit/internal/db",
+		Why:       "thread persists through its Store interface; the SQL layer belongs to whoever implements it",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/agent/tools",
+		Forbidden: "github.com/rave-soft/sennit/internal/thread",
+		Why:       "tools mirror thread's types (ThreadCreateArgs, TaskInfo, SendOutcome) rather than importing them, and internal/app/threadspawn converts at the seam; the mirrors are pointless the moment this edge exists",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/agent",
+		Forbidden: "github.com/rave-soft/sennit/internal/ui",
+		Why:       "the agent renders nothing; what a tool call looks like is decided in internal/ui from the call and its result",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/toolmeta",
+		Forbidden: "github.com/rave-soft/sennit/internal",
+		Allow: []string{
+			"github.com/rave-soft/sennit/internal/toolmeta",
+		},
+		Why: "toolmeta is the one table both the agent and the UI read, and it stays a leaf on purpose: a dependency here would be imported by everything that classifies a tool",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/proto",
+		Forbidden: "github.com/rave-soft/sennit/internal/db",
+		Why:       "proto is the workspace/UI data boundary and must stay light enough for the TUI to import; internal/proto -> internal/agent/tools -> internal/db is exactly how the TUI used to reach the database",
+	},
+	{
+		Pattern:   "github.com/rave-soft/sennit/internal/proto",
+		Forbidden: "github.com/rave-soft/sennit/internal/agent",
+		Why:       "the alias direction is proto -> tools, not tools -> proto (AGENTS.md); reversing it puts the agent's dependency graph behind every proto import",
+	},
 	{
 		Pattern:   "github.com/rave-soft/sennit/internal",
 		Forbidden: "testing",
@@ -80,7 +149,12 @@ func TestForbiddenProductionImports(t *testing.T) {
 	t.Parallel()
 
 	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedImports,
+		// NeedDeps as well as NeedImports: without it the Imports map
+		// holds stubs whose own Imports are empty, and the walk below
+		// would silently see the graph one level deep - which is how a
+		// forbidden dependency arriving through three hops passed
+		// unnoticed in the first place.
+		Mode:  packages.NeedName | packages.NeedImports | packages.NeedDeps,
 		Dir:   "../../..",
 		Tests: false,
 	}
@@ -99,14 +173,13 @@ func TestForbiddenProductionImports(t *testing.T) {
 
 			violations := 0
 			for _, pkg := range pkgs {
-				if !pkgInPattern(pkg.PkgPath, r.Pattern) {
+				if !pkgInPattern(pkg.PkgPath, r.Pattern) || r.allowed(pkg.PkgPath) {
 					continue
 				}
-				for _, imp := range pkg.Imports {
-					if pkgInPattern(imp.PkgPath, r.Forbidden) && !r.allowed(pkg.PkgPath) {
-						violations++
-						t.Errorf("%s imports %s: %s", pkg.PkgPath, imp.PkgPath, r.Why)
-					}
+				if path := r.findPath(pkg); path != nil {
+					violations++
+					t.Errorf("%s depends on %s: %s\n  %s",
+						pkg.PkgPath, path[len(path)-1], r.Why, strings.Join(path, "\n    -> "))
 				}
 			}
 			if violations == 0 && pkgCount(pkgs, r.Pattern) == 0 {
@@ -114,6 +187,74 @@ func TestForbiddenProductionImports(t *testing.T) {
 			}
 		})
 	}
+}
+
+// findPath returns the shortest import path from pkg to a package the
+// rule forbids, starting at pkg itself, or nil when there is none.
+//
+// It walks the whole graph rather than pkg's direct imports because that
+// is how the edges this guards actually arrive. The one the tree
+// removed by hand - the TUI reaching the database - was
+// internal/ui -> internal/proto -> internal/agent/tools -> internal/db:
+// four packages, no single import anyone would have questioned. A
+// direct-import check reports nothing about that, and reporting only the
+// endpoints would leave the reader to rediscover the path, so the whole
+// chain goes into the failure.
+//
+// Breadth-first, so the reported chain is the shortest one and stays
+// stable as unrelated edges come and go. Allowed packages are not
+// traversed at all: a sanctioned exception (a test-support package that
+// may import testing) must not make every package that reaches it a
+// violation.
+//
+// The walk only steps through this repository's own packages, though it
+// tests every import it sees. These rules are about this tree's
+// architecture, and a dependency that arrives through somebody else's
+// module is not one this tree can move: a provider SDK in charm.land/
+// fantasy imports google.golang.org/genai, which imports testing, so
+// walking third-party edges made "no production package imports testing"
+// fail for internal/cmd with a four-hop chain it has no say in. A
+// forbidden package reached *directly* from one of our packages is still
+// caught, whoever owns it.
+func (r forbiddenImportRule) findPath(pkg *packages.Package) []string {
+	type node struct {
+		pkg  *packages.Package
+		path []string
+	}
+	seen := map[string]bool{pkg.PkgPath: true}
+	queue := []node{{pkg: pkg, path: []string{pkg.PkgPath}}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		// Imports is a map, so iterate it in a fixed order or the
+		// reported path among several equally short ones changes from
+		// run to run.
+		for _, name := range sortedImports(cur.pkg) {
+			imp := cur.pkg.Imports[name]
+			if seen[imp.PkgPath] || r.allowed(imp.PkgPath) {
+				continue
+			}
+			seen[imp.PkgPath] = true
+			path := append(append([]string(nil), cur.path...), imp.PkgPath)
+			if pkgInPattern(imp.PkgPath, r.Forbidden) {
+				return path
+			}
+			if pkgInPattern(imp.PkgPath, moduleRoot) {
+				queue = append(queue, node{pkg: imp, path: path})
+			}
+		}
+	}
+	return nil
+}
+
+// sortedImports returns pkg's import paths in a stable order.
+func sortedImports(pkg *packages.Package) []string {
+	names := make([]string, 0, len(pkg.Imports))
+	for name := range pkg.Imports {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // pkgInPattern reports whether import path p is the package prefix or a
@@ -231,4 +372,61 @@ func TestForbiddenMatchersAreExactAndEffective(t *testing.T) {
 			t.Errorf("rule.allowed matched %q; exemptions must be exact import paths", p)
 		}
 	}
+}
+
+// TestFindPathWalksTheWholeGraph is the unit-level proof that the guard
+// cannot regress into the direct-import check it used to be.
+//
+// The edge this exists for is not one anybody writes on purpose: the TUI
+// reached the database through internal/proto and internal/agent/tools,
+// three hops of imports each of which looked reasonable on its own. A
+// direct-import guard reports nothing at all about that, and it passes
+// just as loudly as a real one - which is the failure mode a synthetic
+// graph here catches without waiting for a real edge to reappear.
+func TestFindPathWalksTheWholeGraph(t *testing.T) {
+	t.Parallel()
+
+	pkg := func(path string, imports ...*packages.Package) *packages.Package {
+		p := &packages.Package{PkgPath: path, Imports: map[string]*packages.Package{}}
+		for _, imp := range imports {
+			p.Imports[imp.PkgPath] = imp
+		}
+		return p
+	}
+	const (
+		ui    = moduleRoot + "/internal/ui"
+		proto = moduleRoot + "/internal/proto"
+		tools = moduleRoot + "/internal/agent/tools"
+		db    = moduleRoot + "/internal/db"
+	)
+
+	dbPkg := pkg(db)
+	uiPkg := pkg(ui, pkg(proto, pkg(tools, dbPkg)))
+	rule := forbiddenImportRule{Pattern: ui, Forbidden: db}
+
+	path := rule.findPath(uiPkg)
+	require.Equal(t, []string{ui, proto, tools, db}, path,
+		"the whole chain is the finding: reporting only the endpoints leaves the reader to rediscover it")
+
+	// A graph with no route to the forbidden package is clean, not
+	// merely unreported.
+	require.Nil(t, rule.findPath(pkg(ui, pkg(proto))))
+
+	// An allowed package is not traversed: a sanctioned exception must
+	// not make every package that reaches it a violation.
+	allowRule := forbiddenImportRule{Pattern: ui, Forbidden: db, Allow: []string{proto}}
+	require.Nil(t, allowRule.findPath(uiPkg))
+
+	// Somebody else's module is tested but not walked through: a
+	// dependency that arrives inside a third-party package is not one
+	// this tree can move (see findPath).
+	thirdParty := pkg(ui, pkg("example.com/sdk", dbPkg))
+	require.Nil(t, rule.findPath(thirdParty))
+	require.Equal(t, []string{ui, db}, rule.findPath(pkg(ui, dbPkg)),
+		"a forbidden package imported directly is still caught, whoever owns it")
+
+	// The shortest chain wins, so the report stays stable as unrelated
+	// edges come and go.
+	long := pkg(proto, pkg(tools, dbPkg))
+	require.Equal(t, []string{ui, db}, rule.findPath(pkg(ui, dbPkg, long)))
 }
