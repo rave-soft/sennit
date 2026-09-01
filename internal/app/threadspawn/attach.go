@@ -126,7 +126,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 		ParentApp:   parentWorkspace,
 	})
 	if err := deps.addShutdownHook(a, func(context.Context) error {
-		return deps.shutdown(mgr, context.Background())
+		return deps.shutdown(mgr, context.Background()) // ok: detached - the thread manager's own shutdown must run to completion while the app's context is being torn down
 	}); err != nil {
 		slog.Warn("Failed to register thread manager shutdown", "error", err)
 		_ = deps.release(dbDir)
@@ -136,7 +136,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 		return deps.release(dbDir)
 	}); err != nil {
 		slog.Warn("Failed to register thread database cleanup", "error", err)
-		_ = deps.shutdown(mgr, context.Background())
+		_ = deps.shutdown(mgr, context.Background()) // ok: detached - as above
 		_ = deps.release(dbDir)
 		return
 	}

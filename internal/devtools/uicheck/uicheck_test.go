@@ -84,7 +84,7 @@ func TestNoByteSlicingOfDisplayText(t *testing.T) {
 					return true
 				}
 				pos := pkg.Fset.Position(slice.Pos())
-				if hasOptOut(pkg, pos) {
+				if hasOptOut(pkg, pos, optOut) {
 					return true
 				}
 				findings = append(findings, pos.String())
@@ -127,15 +127,18 @@ func isConstBound(e ast.Expr) bool {
 	return err == nil
 }
 
-// hasOptOut reports whether the source line carries the opt-out marker.
-func hasOptOut(pkg *packages.Package, pos token.Position) bool {
+// hasOptOut reports whether the source line at pos carries marker. The
+// marker is a property of the line a reader sees, which is why this
+// reads the file rather than the AST's comment map: a comment map would
+// attach the comment to whichever node the parser decided owns it.
+func hasOptOut(pkg *packages.Package, pos token.Position, marker string) bool {
 	for _, file := range pkg.CompiledGoFiles {
 		if file != pos.Filename {
 			continue
 		}
 		lines := readLines(file)
 		if pos.Line-1 < len(lines) {
-			return strings.Contains(lines[pos.Line-1], optOut)
+			return strings.Contains(lines[pos.Line-1], marker)
 		}
 	}
 	return false

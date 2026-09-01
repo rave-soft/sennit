@@ -773,7 +773,7 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		return SendDisposition{}, fmt.Errorf("thread: respawn workspace: %w", err)
 	}
 	if err := bgCtx.Err(); err != nil {
-		_ = spawner.Release(context.Background(), handle.ID())
+		_ = spawner.Release(context.Background(), handle.ID()) // ok: detached - bgCtx is already done; this is the cleanup for that
 		return SendDisposition{}, err
 	}
 	// This call owns the freshly spawned handle until startRun installs it

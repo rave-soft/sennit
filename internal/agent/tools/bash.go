@@ -284,7 +284,7 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 				startTime := time.Now()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description) // ok: detached - a background shell outlives the tool call that started it
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -314,7 +314,7 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 
 			// Start with detached context so it can survive if moved to background
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description) // ok: detached - the shell may yet be moved to the background and must survive that
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

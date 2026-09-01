@@ -389,7 +389,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// prompt entirely. We still publish a granted notification so the UI
 	// and audit subscribers see the outcome.
 	if hookApproved(ctx, opts.ToolCallID) {
-		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - the outcome must reach the UI even if the caller's context dies mid-publish
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -397,7 +397,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 
 	// tell the UI that a permission was requested
-	s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
+	s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - as above
 		ToolCallID: opts.ToolCallID,
 	})
 
@@ -406,7 +406,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	s.autoApproveSessionsMu.RUnlock()
 
 	if autoApprove {
-		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - as above
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -456,7 +456,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Path:      permission.Path,
 		Params:    permissionParamsKey(permission.Params),
 	}); ok {
-		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - as above
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -483,7 +483,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 			// Cancellation settles a request just like an explicit denial.
 			// Without this terminal notification, the UI keeps its dialog
 			// open after the requester has gone away.
-			s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
+			s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - this is the cancellation path: the context that would carry it is the one that just died, and without this the dialog stays open
 				ToolCallID: permission.ToolCallID,
 				Denied:     true,
 			})
