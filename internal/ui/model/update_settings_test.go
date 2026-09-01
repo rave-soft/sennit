@@ -381,10 +381,11 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.themeGeneration = 2
+		stale := m.themePersistence.begin()
+		m.themePersistence.begin()
 		m.themePreview.setLive("steel-teal")
 
-		cmds, done := m.updateSettings(themeSetMsg{generation: 1}, nil)
+		cmds, done := m.updateSettings(themeSetMsg{generation: stale}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
@@ -394,13 +395,13 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 	t.Run("error restores the previous palette and reports", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.themeGeneration = 1
+		generation := m.themePersistence.begin()
 		m.themePreview.setLive("graphite-amber")
 
 		cmds, _ := m.updateSettings(themeSetMsg{
 			Err:        errors.New("write failed"),
 			Previous:   "steel-teal",
-			generation: 1,
+			generation: generation,
 		}, nil)
 
 		require.Equal(t, "steel-teal", m.liveThemeID(), "setTheme(Previous) must run")
@@ -414,9 +415,9 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 	t.Run("success reports the new palette name", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.themeGeneration = 1
+		generation := m.themePersistence.begin()
 
-		cmds, _ := m.updateSettings(themeSetMsg{ID: "steel-teal", generation: 1}, nil)
+		cmds, _ := m.updateSettings(themeSetMsg{ID: "steel-teal", generation: generation}, nil)
 
 		require.Len(t, cmds, 1)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)

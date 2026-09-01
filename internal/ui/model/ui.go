@@ -117,8 +117,6 @@ type UI struct {
 	// busy session — see queuedPromptState.
 	queued queuedPromptState
 
-	ops settingsOps
-
 	// modelOperation owns correlation and in-flight state for model changes.
 	modelOperation modelOperationState
 
@@ -140,6 +138,9 @@ type UI struct {
 	// themePreview owns the applied theme and preview restore point. UI keeps
 	// validation, palette application, persistence, and command orchestration.
 	themePreview themePreviewState
+
+	// themePersistence owns correlation for theme-persistence results.
+	themePersistence themePersistenceState
 
 	lay layoutState
 
@@ -1114,8 +1115,7 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 	}
 
 	cmd := m.setTheme(id)
-	m.ops.themeGeneration++
-	generation := m.ops.themeGeneration
+	generation := m.themePersistence.begin()
 	ws := m.com.Workspace
 	return tea.Batch(cmd, func() tea.Msg {
 		return themeSetMsg{

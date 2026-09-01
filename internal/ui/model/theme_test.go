@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -108,6 +109,38 @@ func TestPreviewTheme_ConfiguredThemeCancelDoesNotRestyle(t *testing.T) {
 	require.Empty(t, u.themePreview.liveID,
 		"cancel must not apply or restyle the configured fallback palette")
 	require.Equal(t, styles.PaletteSteelTeal.ID, u.liveThemeID())
+}
+
+func TestApplyTheme_NoOpDoesNotStartPersistence(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIWithTheme(t, styles.PaletteSteelTeal.ID)
+
+	require.Nil(t, u.applyTheme(styles.PaletteSteelTeal.ID))
+	require.Zero(t, u.themePersistence.generation)
+	require.False(t, u.themePersistence.pending)
+}
+
+func TestApplyTheme_StalePersistenceFailureCannotRestoreNewerSelection(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIWithTheme(t, styles.PaletteSteelTeal.ID)
+	require.NotNil(t, u.applyTheme(styles.PaletteInkSage.ID))
+	first := u.themePersistence.generation
+	require.NotNil(t, u.applyTheme(styles.PaletteGraphiteAmber.ID))
+	second := u.themePersistence.generation
+
+	cmds, _ := u.updateSettings(themeSetMsg{
+		Err:        errors.New("first write failed"),
+		Previous:   styles.PaletteSteelTeal.ID,
+		generation: first,
+	}, nil)
+	require.Empty(t, cmds)
+	require.Equal(t, styles.PaletteGraphiteAmber.ID, u.liveThemeID())
+
+	cmds, _ = u.updateSettings(themeSetMsg{ID: styles.PaletteGraphiteAmber.ID, generation: second}, nil)
+	require.Len(t, cmds, 1)
+	require.Equal(t, styles.PaletteGraphiteAmber.ID, u.liveThemeID())
 }
 
 func TestPreviewTheme_RestoredOnCancel(t *testing.T) {

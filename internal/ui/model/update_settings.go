@@ -12,12 +12,6 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
-// settingsOps holds generation counters for settings that do not yet have a
-// dedicated lifecycle owner.
-type settingsOps struct {
-	themeGeneration uint64
-}
-
 // transparentToggledMsg carries the result of a transparency-toggle config mutation.
 type transparentToggledMsg struct {
 	Err        error
@@ -191,7 +185,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case themeSetMsg:
-		if msg.generation != m.ops.themeGeneration {
+		if !m.themePersistence.complete(msg.generation) {
 			break
 		}
 		if msg.Err != nil {
