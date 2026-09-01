@@ -15,17 +15,6 @@ Next step: run a real `user → assistant(tool_calls) → tool → user(steering
 request against Gemini. If Gemini rejects it, fix Fantasy's Google adapter by
 merging adjacent contents that map to the same Gemini role.
 
-## Screen model decomposition
-
-`internal/ui/model` still contains about 14,700 non-test lines. Extracting chat,
-threads, the dock, and shared caches exhausted the clean package boundaries: most
-remaining code consists of methods on `*UI` and `*Root`.
-
-The attached-thread request/lifecycle state is now isolated from `Root`; its
-release boundary is covered by tests. Next step: continue the state-object refactor
-in `UI`, splitting cohesive screen state and behavior with tests around each
-boundary before extraction.
-
 ## Multiple-agent configuration
 
 The coordinator and runtime builder still assume a single primary agent/model in
