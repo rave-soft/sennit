@@ -252,19 +252,25 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 // was ever replaced — the failed load returned before it could — so the
 // parent is already what is on screen, and re-fetching it would throw
 // away the person's scroll position to redraw what is already there.
-func (m *UI) abandonChildSessionEntry(sessionID string) bool {
+// The returned cmd re-focuses the editor when the stack empties, exactly
+// as exitChildSession does on the same transition. Setting m.focus alone
+// is not enough: entering blurred the textarea, and nothing in Update's
+// tail focuses it back, so a rolled-back entry left the editor greyed out
+// and refusing input on a chat that was otherwise perfectly usable.
+func (m *UI) abandonChildSessionEntry(sessionID string) (bool, tea.Cmd) {
 	if len(m.sess.navStack) == 0 {
-		return false
+		return false, nil
 	}
 	if m.sess.navStack[len(m.sess.navStack)-1].childSessionID != sessionID {
-		return false
+		return false, nil
 	}
 	m.sess.navStack = m.sess.navStack[:len(m.sess.navStack)-1]
-	if len(m.sess.navStack) == 0 {
-		m.focus = uiFocusEditor
-		m.chat.Blur()
+	if len(m.sess.navStack) > 0 {
+		return true, nil
 	}
-	return true
+	m.focus = uiFocusEditor
+	m.chat.Blur()
+	return true, m.editor.textarea.Focus()
 }
 
 // exitChildSession pops the top navigation frame and returns a tea.Cmd

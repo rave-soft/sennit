@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/session"
@@ -23,8 +25,10 @@ func newChildNavUI() *UI {
 // opening a delegation that has not started yet: the nav frame is pushed
 // and focus moves off the editor, then the asynchronous load comes back
 // not-found.
-func enterMissingChild(t *testing.T, u *UI, childID string) []util.InfoMsg {
+func enterMissingChild(t *testing.T, u *UI) []util.InfoMsg {
 	t.Helper()
+
+	const childID = "parent$$call_notyet"
 
 	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{
 		parentSessionID: "parent",
@@ -57,7 +61,7 @@ func TestOpeningAnUnstartedDelegationDoesNotStrandTheUI(t *testing.T) {
 	t.Parallel()
 
 	u := newChildNavUI()
-	enterMissingChild(t, u, "parent$$call_notyet")
+	enterMissingChild(t, u)
 
 	require.False(t, u.viewingChildSession(),
 		"a child session that could not be loaded must not be left on the nav stack")
@@ -73,7 +77,7 @@ func TestOpeningAnUnstartedDelegationExplainsItself(t *testing.T) {
 	t.Parallel()
 
 	u := newChildNavUI()
-	infos := enterMissingChild(t, u, "parent$$call_notyet")
+	infos := enterMissingChild(t, u)
 
 	require.Len(t, infos, 1, "exactly one status message")
 	require.Equal(t, util.InfoTypeWarn, infos[0].Type,
@@ -128,8 +132,7 @@ func TestFailedChildLoadClearsLoadExpectedID(t *testing.T) {
 
 	u := newChildNavUI()
 	u.sess.current = &session.Session{ID: "parent"}
-	childID := "parent$$call_notyet"
-	enterMissingChild(t, u, childID)
+	enterMissingChild(t, u)
 
 	require.Empty(t, u.sess.loadExpectedID,
 		"a failed load must not leave loadExpectedID pointed at a session that no longer exists")
@@ -149,6 +152,27 @@ func TestAbandonOnlyPopsTheFrameItWasAskedAbout(t *testing.T) {
 	u := newChildNavUI()
 	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{childSessionID: "parent$$call_current"})
 
-	require.False(t, u.abandonChildSessionEntry("parent$$call_other"))
+	abandoned, refocus := u.abandonChildSessionEntry("parent$$call_other")
+	require.False(t, abandoned)
+	require.Nil(t, refocus, "nothing was abandoned, so nothing is refocused")
 	require.True(t, u.viewingChildSession(), "the current frame must survive")
+}
+
+// TestAbandonedEntryHandsFocusBackToTheEditor is the regression for the
+// chat going grey and inert after "This delegation has not started yet":
+// entering blurred the textarea, and rolling the entry back restored
+// m.focus without ever focusing it again, so the editor stayed dead
+// until some other message happened to wake it.
+func TestAbandonedEntryHandsFocusBackToTheEditor(t *testing.T) {
+	t.Parallel()
+
+	u := newChildNavUI()
+	u.editor.textarea = textarea.New()
+	u.editor.textarea.Blur()
+
+	enterMissingChild(t, u)
+
+	require.Equal(t, uiFocusEditor, u.focus)
+	require.True(t, u.editor.textarea.Focused(),
+		"the editor must accept typing again once the failed entry is rolled back")
 }

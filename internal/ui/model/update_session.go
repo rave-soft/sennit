@@ -85,7 +85,10 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// Every failed entry rolls back, whatever went wrong; only
 			// the not-found case gets the gentler wording, since that is
 			// the one that is not really an error at all.
-			abandoned := m.abandonChildSessionEntry(msg.sessionID)
+			abandoned, refocus := m.abandonChildSessionEntry(msg.sessionID)
+			if refocus != nil {
+				cmds = append(cmds, refocus)
+			}
 			if abandoned && errors.Is(msg.err, session.ErrNotFound) {
 				cmds = append(cmds, util.ReportWarn("This delegation has not started yet"))
 				break
