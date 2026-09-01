@@ -23,9 +23,9 @@ var importCmd = &cobra.Command{
 	Use:   "import claude|opencode",
 	Short: "Import skills and/or agents from Claude Code or opencode",
 	Long: `Sennit only auto-discovers its own skills (.sennit/skills) and agents
-(.sennit/agents) — see TECHDEBT.md. This command is the supported way to bring
-in a role or skill written for another tool: it copies from that tool's
-directories into Sennit's own, validating and translating fields as it goes
+(.sennit/agents). This command is the supported way to bring in a role or skill
+written for another tool: it copies from that tool's directories into Sennit's
+own, validating and translating fields as it goes
 (model, reasoning_effort/effort, tools) rather than trusting the foreign
 directory implicitly.
 

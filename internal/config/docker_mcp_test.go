@@ -28,8 +28,7 @@ func setDockerMCPVersionRunner(t *testing.T, runner func(context.Context) error)
 // swapDockerMCPCacheForTest installs a fresh dockerMCPCache as
 // defaultDockerMCPCache for the duration of the test, so this test cannot
 // observe (or leave behind for a sibling test to observe) whatever another
-// test warmed the shared cache to. This is the fix for the "process-global
-// cache" half of the TECHDEBT.md entry: previously every test reading
+// test warmed the shared cache to. Previously every test reading
 // DockerMCPAvailabilityCached shared one package-level cache with no reset
 // seam.
 func swapDockerMCPCacheForTest(t *testing.T) *dockerMCPCache {
@@ -242,10 +241,9 @@ func TestDisableDockerMCP(t *testing.T) {
 	})
 }
 
-// TestDockerMCPCache_TTLUsesInjectedClockNotWallTime pins the fix for
-// "Docker MCP availability is a process-global cache with a wall-clock TTL"
-// (TECHDEBT.md): the cache's freshness check now goes through an injected
-// clock instead of time.Since, so a test can drive it past its TTL
+// TestDockerMCPCache_TTLUsesInjectedClockNotWallTime pins that the cache's
+// freshness check goes through an injected clock instead of time.Since, so
+// a test can drive it past its TTL
 // deterministically instead of sleeping (or risking a slow run crossing the
 // boundary by accident).
 func TestDockerMCPCache_TTLUsesInjectedClockNotWallTime(t *testing.T) {

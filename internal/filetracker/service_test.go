@@ -118,6 +118,27 @@ func TestService_RecordRead(t *testing.T) {
 	require.WithinDuration(t, time.Now(), lastRead, 2*time.Second)
 }
 
+func TestService_PathAliasesShareCoverage(t *testing.T) {
+	workingDir := t.TempDir()
+	realDir := filepath.Join(workingDir, "real")
+	require.NoError(t, os.Mkdir(realDir, 0o755))
+	aliasDir := filepath.Join(workingDir, "alias")
+	require.NoError(t, os.Symlink(realDir, aliasDir))
+
+	env := setupTestWithWorkingDir(t, workingDir)
+	env.createSession(t, "aliases")
+	realPath := filepath.Join(realDir, "file.go")
+	require.NoError(t, os.WriteFile(realPath, []byte("one\ntwo\n"), 0o644))
+	aliasPath := filepath.Join(aliasDir, "file.go")
+
+	env.svc.RecordRead(env.ctx, "aliases", aliasPath)
+	require.Equal(t, FullCoverage, env.svc.ReadCoverage(env.ctx, "aliases", realPath))
+
+	files, err := env.svc.ListReadFiles(env.ctx, "aliases")
+	require.NoError(t, err)
+	require.Equal(t, []string{realPath}, files)
+}
+
 func TestService_LastReadTime_NotFound(t *testing.T) {
 	env := setupTest(t)
 

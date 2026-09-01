@@ -515,9 +515,8 @@ You are a Go code reviewer. Report real defects, not style opinions.
 sennit import claude|opencode [--skills] [--agents] [--dry-run] [--global] [--force]
 ```
 
-Sennit does not auto-discover another tool's config directories (see
-[Limitations of imported agent definitions](../../../../TECHDEBT.md) in
-TECHDEBT.md for why). `sennit import` is the supported way to bring files in:
+Sennit does not auto-discover another tool's config directories.
+`sennit import` is the supported way to bring files in:
 
 - `--skills` copies `<tool>/skills/<name>/SKILL.md` (and any other files in
   that skill's directory) into `.sennit/skills/<name>/`, after parsing and

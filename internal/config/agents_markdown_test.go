@@ -94,8 +94,8 @@ You review databases.`)
 }
 
 // Only .sennit/agents is auto-discovered. Agent files written for other
-// tools are not picked up on their own — they need `sennit import` to bring
-// them in (see TECHDEBT.md and cmd/import.go).
+// tools are not picked up on their own; they need `sennit import` to bring
+// them in.
 func TestDiscoverIgnoresForeignDirs(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".opencode/agent", "reviewer.md", "---\ndescription: from opencode\n---\nopencode body")

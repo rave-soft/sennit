@@ -967,33 +967,6 @@ func renderAgentSubtitle(sty *styles.Styles, width int, model, effort string) st
 	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(line, width, "…"))
 }
 
-// capTodosForDelegation keeps every in-progress item, then fills the
-// remaining line budget with pending and completed items in that order. This
-// intentionally lets in-progress rows exceed maxLines: hiding active work is
-// less useful than preserving the nominal compact-pane cap.
-//
-// Currently exercised only by TestCapTodosForDelegation: its production
-// caller (a running delegation's inline todo pane) was removed as dead code
-// — a running delegation's todos are no longer shown in the chat transcript
-// at all (see PanelStatusLine's caller in internal/ui/model, and
-// TestAgentToolRender_RunningHidesTodosFromTranscript, which pins that).
-// Left in place rather than deleted alongside its caller, since the
-// prioritization logic itself is still correct and may be wired back up.
-func capTodosForDelegation(todos []session.Todo, maxLines int) []session.Todo {
-	buckets := presentation.BucketTodos(todos)
-	out := make([]session.Todo, 0, len(todos))
-	out = append(out, buckets.InProgress...)
-	for _, bucket := range [][]session.Todo{buckets.Pending, buckets.Completed} {
-		for _, todo := range bucket {
-			if len(out) >= maxLines {
-				return out
-			}
-			out = append(out, todo)
-		}
-	}
-	return out
-}
-
 // LastToolSummary describes a single child tool call as "name key-arg" for
 // a status line, e.g. `grep "Provider" internal/config`. Falls back to
 // just the tool name when there's no argument worth summarizing. Exported

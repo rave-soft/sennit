@@ -86,9 +86,8 @@ type ConfigStore struct {
 	// that buildConfig can reapply it on every reload. Options.Debug is
 	// otherwise sourced only from the "debug" key in a config file, which a
 	// reload's fresh disk read would otherwise silently drop back to false.
-	// See buildConfig's reapplication of it; formerly the "--debug is lost
-	// on the first config reload" entry in TECHDEBT.md. Read and written
-	// only from Load/reloadFromDisk, both of which already run
+	// See buildConfig's reapplication of it. Read and written only from
+	// Load/reloadFromDisk, both of which already run
 	// single-threaded with respect to this field (Load before the store is
 	// published; reloadFromDisk under reloadMu), so no separate mutex.
 	debugOverride      bool
@@ -491,9 +490,9 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	// steps: write, then run the whole (possibly slow, network-touching)
 	// autoReload pipeline, which only refreshed the snapshot at the very
 	// end — so a poll landing anywhere in that much wider window misread
-	// this process's own write as an external change (see the now-closed
-	// TECHDEBT.md entry, and TestWatchForExternalChanges_IgnoresOwnWrites
-	// / *_TightPoll). refreshStalenessSnapshotLocked (not
+	// this process's own write as an external change (see
+	// TestWatchForExternalChanges_IgnoresOwnWrites and *_TightPoll).
+	// refreshStalenessSnapshotLocked (not
 	// CaptureStalenessSnapshot) is safe to call without writeMu here: it
 	// only restats s.trackedConfigPaths, which the write's own path is
 	// always already a member of — CaptureStalenessSnapshot always adds

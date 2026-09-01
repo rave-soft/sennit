@@ -42,10 +42,8 @@ func (c *recordingCoordinator) Close(context.Context) error {
 
 func (c *recordingCoordinator) IsBusy() bool { return false }
 
-// appWithCoderAgentConfigured returns a NewForTest App whose config has a
-// non-empty AgentCoder entry, which is all initCoderAgent's own
-// "coder agent configuration is missing" guard requires before it reaches
-// the (faked) coordinator constructor.
+// appWithCoderAgentConfigured returns a NewForTest App with the built-in
+// coder entry that production config setup normally creates.
 func appWithCoderAgentConfigured(t *testing.T) *App {
 	t.Helper()
 	a := NewForTest(t.Context())
@@ -79,6 +77,23 @@ type fakeTaskManagerAdapter struct{ tools.TaskManager }
 // Without the fix (initCoderAgent building CoordinatorOptions with no
 // Threads/Tasks fields), this test fails: gotThreads/gotTasks come back
 // nil even though SetDelegationManagers published non-nil adapters.
+func TestInitCoderAgent_DoesNotGateOnLegacyCoderConfig(t *testing.T) {
+	a := NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
+
+	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
+	a.SetConfigForTest(configtest.NewStore(t, cfg, configtest.WithWorkingDir(t.TempDir())))
+
+	called := false
+	withFakeNewCoordinator(t, func(context.Context, agent.CoordinatorOptions) (agent.Coordinator, error) {
+		called = true
+		return &recordingCoordinator{}, nil
+	})
+
+	require.NoError(t, a.InitCoderAgentNonInteractive(t.Context()))
+	require.True(t, called, "initialization must defer role validation to the coordinator")
+}
+
 func TestInitCoderAgent_RebuildReappliesPublishedDelegationTools(t *testing.T) {
 	a := appWithCoderAgentConfigured(t)
 

@@ -15,16 +15,6 @@ Next step: run a real `user → assistant(tool_calls) → tool → user(steering
 request against Gemini. If Gemini rejects it, fix Fantasy's Google adapter by
 merging adjacent contents that map to the same Gemini role.
 
-## Multiple-agent configuration
-
-The coordinator and runtime builder still assume a single primary agent/model in
-several paths (`internal/agent/coordinator.go`, `internal/agent/runtime_builder.go`,
-`internal/app/app.go`). This blocks making agent selection and model configuration
-fully dynamic.
-
-Next step: define the runtime configuration per agent, route model selection through
-that value, then remove the legacy top-level agent-config concept.
-
 ## GitHub Copilot identity
 
 The Copilot provider uses the inherited VS Code/Copilot OAuth client ID and presents
@@ -33,12 +23,3 @@ Sennit. Keeping the provider is intentional, but the identity mismatch remains.
 
 Next step: either register a Sennit-owned GitHub OAuth application and use an honest
 user agent, if GitHub permits Copilot API access for it, or remove the provider.
-
-## File tracker path identity
-
-`internal/filetracker` computes relative paths from raw path spellings. On Windows,
-short and long forms of the same path can differ, unlike the canonicalized checks
-used elsewhere.
-
-Next step: canonicalize the workspace and tracked path before `filepath.Rel`, then
-add a regression test covering equivalent path aliases.

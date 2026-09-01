@@ -58,7 +58,7 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 		client = newHTTPClient(0)
 	}
 
-	return withToolParameterSchema(fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		FetchToolName,
 		fetchDescription(availability),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

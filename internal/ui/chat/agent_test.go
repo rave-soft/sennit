@@ -818,37 +818,6 @@ func TestAgentToolRender_FinishedHidesTodos(t *testing.T) {
 	require.NotContains(t, out, "Fixing the bug", "a finished delegation must not render its child-session todos")
 }
 
-// TestCapTodosForDelegation covers the compact pane's selection priority:
-// every in-progress item is kept, then pending items fill the remaining
-// budget, then completed items — dropping completed first since they're
-// already done and least useful to a user checking in on progress.
-func TestCapTodosForDelegation(t *testing.T) {
-	t.Parallel()
-
-	todos := []session.Todo{
-		{Content: "done 1", Status: session.TodoStatusCompleted},
-		{Content: "active 1", Status: session.TodoStatusInProgress},
-		{Content: "unknown", Status: "future"},
-		{Content: "pending", Status: session.TodoStatusPending},
-		{Content: "active 2", Status: session.TodoStatusInProgress},
-		{Content: "done 2", Status: session.TodoStatusCompleted},
-	}
-	names := func(todos []session.Todo) []string {
-		out := make([]string, len(todos))
-		for i, todo := range todos {
-			out[i] = todo.Content
-		}
-		return out
-	}
-
-	require.Equal(t, []string{"active 1", "active 2", "unknown"}, names(capTodosForDelegation(todos, 3)))
-	require.Equal(t, []string{"active 1", "active 2", "unknown", "pending", "done 1", "done 2"}, names(capTodosForDelegation(todos, len(todos))))
-
-	// In-progress rows are never sacrificed to the cap, even when their count
-	// exceeds it.
-	require.Equal(t, []string{"active 1", "active 2"}, names(capTodosForDelegation(todos, 1)))
-}
-
 // TestDelegationItemsKeepTheirRestylableAndAnimatableContracts pins the
 // two delegation blocks against the shared embedding they were collapsed
 // into. Both satisfy these through promoted methods now, and a promotion

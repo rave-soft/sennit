@@ -64,7 +64,7 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 		// keeps an unspecified timeout from hanging forever.
 		client = newHTTPClient(0)
 	}
-	return withToolParameterSchema(fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		DownloadToolName,
 		downloadDescription(),
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

@@ -75,9 +75,9 @@ func TestBuildAgentCustomModel(t *testing.T) {
 		coord, p := buildCustomModelCoordinator(t)
 		agentCfg := coord.cfg.Config().Agents[config.AgentCoder]
 		// "small" carries no special meaning for Agent.Model anymore; with no
-		// provider named "small", buildAgent hands it straight to
-		// buildCustomAgentModel like any other unresolvable string, which
-		// fails. Falling back to the default happens earlier, in
+		// provider named "small", buildAgent resolves it like any other
+		// unresolvable string and fails. Falling back to the default happens
+		// earlier, in
 		// Config.validUserAgents, not here.
 		agentCfg.Model = "small"
 

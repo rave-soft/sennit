@@ -46,33 +46,22 @@ import (
 // no thread/task manager, no background-shell manager, no permission
 // prompts, no session state, no outbound requests.
 //
-// The classification splits in three, and the split is what this file must
-// not blur:
+// The classification has two exhaustive buckets:
 //
-//   - t0ParallelAllowList: the tools THIS task promoted to parallel. Their
-//     flags are new, and they carry the behavioral proof:
-//     TestParallelAllowListIsStateless runs them concurrently and asserts
-//     deterministic, state-free results.
-//   - legacyParallelExceptions: tools that were already
-//     NewParallelAgentTool before this task and are NOT re-audited here.
-//     Each is an explicit exception with its reason and its tech-debt
-//     status; their flags are pinned only by
-//     TestParallelFlagsMatchClassification.
-//   - sequentialDenyList: everything else, each with the concrete shared
-//     state its handler touches, which is why it must stay on the
-//     dispatcher's sequential path.
+//   - parallelAllowList: tools with behavioral proof in
+//     TestParallelAllowListIsStateless.
+//   - sequentialDenyList: every other built-in tool, with the concrete
+//     shared state or side effect that keeps it on the dispatcher's
+//     sequential path.
 //
-// The flag check (TestParallelFlagsMatchClassification) is exhaustive: it
-// constructs every possible built-in tool this package can build — the
-// T0 allow-list, the legacy exceptions, and the sequential tools alike —
-// and asserts the dispatcher-visible Info().Parallel agrees with the
-// classification. The only tools that cannot be built from this package at
-// all are the coordinator-built agent tools ("agent", "ask_parent",
-// "agentic_fetch"); their flags are pinned by source inspection of the
-// constructors in internal/agent, which are verified by runtime tests in that package.
+// TestParallelFlagsMatchClassification constructs every possible built-in
+// tool this package can build and asserts the dispatcher-visible
+// Info().Parallel matches this classification. Coordinator-built tools
+// ("agent" and "agentic_fetch") are verified by runtime tests in
+// internal/agent.
 
-// t0ParallelAllowList is this task's parallel set.
-var t0ParallelAllowList = []string{
+// parallelAllowList contains only tools whose concurrent behavior is proven below.
+var parallelAllowList = []string{
 	GrepToolName,       // searchFiles: exec rg or in-memory walk; read-only
 	RipgrepToolName,    // same searchFiles backend as grep; read-only
 	GlobToolName,       // rg --files or gitignore-aware walk; read-only
@@ -83,24 +72,6 @@ var t0ParallelAllowList = []string{
 	GitStatusToolName,  // validated read-only git status; no shared Go state
 	GitDiffToolName,    // validated read-only git diff; no shared Go state
 	GitLogToolName,     // validated read-only git log; no shared Go state
-}
-
-// legacyParallelExceptions are the tools that already carried
-// NewParallelAgentTool before this task. They are classified explicitly —
-// as legacy exceptions, not as T0 decisions — and each entry names the
-// state its handler touches and the debt that leaves it un-audited here.
-var legacyParallelExceptions = []struct {
-	name   string
-	reason string
-}{
-	{"agent", "runs a sub-agent; built by the coordinator (internal/agent/agent_tool.go). Pre-existing parallel flag; no T0 re-audit — tech debt"},
-	{FetchToolName, "outbound HTTP via an injected *http.Client; read-only w.r.t. local state. Pre-existing parallel flag; no T0 re-audit — tech debt"},
-	{WebFetchToolName, "outbound HTTP via an injected *http.Client; read-only w.r.t. local state. Pre-existing parallel flag; no T0 re-audit — tech debt"},
-	{WebSearchToolName, "outbound HTTP through a SearchBackend; read-only w.r.t. local state. Pre-existing parallel flag; no T0 re-audit — tech debt"},
-	{AgenticFetchToolName, "runs a sub-agent over an outbound fetch; built by the coordinator. Pre-existing parallel flag; no T0 re-audit — tech debt"},
-	{DownloadToolName, "MUTATING: writes the downloaded file into the workspace while marked parallel. Pre-existing flag, kept untouched by T0; re-audit before relying on it — tech debt"},
-	{ListMCPResourcesToolName, "shared *mcp.Registry client lifecycle + permission gate. Pre-existing parallel flag; no T0 re-audit — tech debt"},
-	{ReadMCPResourceToolName, "reads an MCP resource through shared registry state and permission gate; pre-existing parallel flag, retained as legacy behavior"},
 }
 
 // sequentialDenyList is the complement: every other built-in tool, each
@@ -142,6 +113,15 @@ var sequentialDenyList = []struct {
 	{AgentSendToolName, "posts into a delegation's queue"},
 	{AgentCancelToolName, "cancels a delegation"},
 	{AskParentToolName, "parent session state; built by the coordinator"},
+	// Legacy parallel tools re-audited here.
+	{"agent", "starts a background delegation through the shared task manager; built by the coordinator"},
+	{FetchToolName, "permission gate and outbound HTTP client"},
+	{WebFetchToolName, "permission gate, outbound HTTP, and FetchLargeContent may write a large page"},
+	{WebSearchToolName, "permission gate and outbound SearchBackend request"},
+	{AgenticFetchToolName, "starts a background delegation, requests permission, and creates temporary directories; built by the coordinator"},
+	{DownloadToolName, "permission gate and writes downloaded files into the workspace"},
+	{ListMCPResourcesToolName, "permission gate and shared MCP registry lazily renews clients and publishes its resource catalog"},
+	{ReadMCPResourceToolName, "permission gate and shared MCP registry lazily renews clients"},
 }
 
 // optionalToolNames are built-in tools that exist in this package but are
@@ -162,13 +142,8 @@ var optionalToolNames = []struct {
 // fails the calling test.
 func classificationFor(t *testing.T, name string) bool {
 	t.Helper()
-	if slices.Contains(t0ParallelAllowList, name) {
+	if slices.Contains(parallelAllowList, name) {
 		return true
-	}
-	for _, entry := range legacyParallelExceptions {
-		if entry.name == name {
-			return true
-		}
 	}
 	for _, entry := range sequentialDenyList {
 		if entry.name == name {
@@ -184,14 +159,9 @@ func classificationFor(t *testing.T, name string) bool {
 	return false
 }
 
-// classifiedToolNames is the union of every name the classification knows:
-// the T0 allow-list, the legacy exceptions, the deny list and the optional
-// tools.
+// classifiedToolNames is the union of every name the classification knows.
 func classifiedToolNames() []string {
-	out := append([]string{}, t0ParallelAllowList...)
-	for _, entry := range legacyParallelExceptions {
-		out = append(out, entry.name)
-	}
+	out := append([]string{}, parallelAllowList...)
 	for _, entry := range sequentialDenyList {
 		out = append(out, entry.name)
 	}
@@ -204,11 +174,8 @@ func classifiedToolNames() []string {
 // TestParallelClassificationIsExhaustive pins the invariant the rest of the
 // file relies on: the classification names are unique;
 // config.AllToolNames() (the default set) plus the optional tools are
-// covered with no gaps; and the three buckets (T0 allow-list, legacy
-// exceptions, sequential) do not overlap. This is the gate that makes a
-// future built-in tool fail here until it is classified — and the gate
-// that makes a tool silently move between the T0 set and the legacy
-// exceptions fail here until the move is a conscious edit.
+// covered with no gaps; and the two buckets do not overlap. This is the
+// gate that makes a future built-in tool fail here until it is classified.
 func TestParallelClassificationIsExhaustive(t *testing.T) {
 	t.Parallel()
 
@@ -220,13 +187,9 @@ func TestParallelClassificationIsExhaustive(t *testing.T) {
 		}
 		seen[name] = bucket
 	}
-	for _, name := range t0ParallelAllowList {
-		require.Contains(t, registered, name, "T0 allow-list tool %q is not a registered built-in tool", name)
-		add(name, "t0ParallelAllowList")
-	}
-	for _, entry := range legacyParallelExceptions {
-		require.Contains(t, registered, entry.name, "legacy exception %q is not a registered built-in tool", entry.name)
-		add(entry.name, "legacyParallelExceptions")
+	for _, name := range parallelAllowList {
+		require.Contains(t, registered, name, "parallel allow-list tool %q is not a registered built-in tool", name)
+		add(name, "parallelAllowList")
 	}
 	for _, entry := range sequentialDenyList {
 		require.Contains(t, registered, entry.name, "deny-list tool %q is not a registered built-in tool", entry.name)
@@ -245,9 +208,8 @@ func TestParallelClassificationIsExhaustive(t *testing.T) {
 }
 
 // buildForInfo returns a constructed instance of every possible built-in
-// tool this package can build — the T0 allow-list, the legacy exceptions
-// (with test doubles for their dependencies: a nil *http.Client, a stub
-// SearchBackend, an empty mcp.Registry), and the sequential tools. The
+// tool this package can build — the parallel allow-list and sequential
+// tools (with test doubles for their dependencies). The
 // only tools it cannot build are the coordinator-built agent tools, which
 // are named in coordinatorBuiltToolNames.
 func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
@@ -334,10 +296,8 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewAgentCancelTool(panicTaskManager{}, panicThreadManager{}, nil)
 	case AskParentToolName:
 		return NewAskParentTool(nil)
-	// Legacy parallel exceptions: built with test doubles. A nil
-	// *http.Client is enough — Info() never performs a request, and the
-	// tools' behavior under concurrency is out of scope for T0 (see
-	// legacyParallelExceptions).
+	// Re-audited sequential network and MCP tools use test doubles because
+	// Info() never performs a request.
 	case FetchToolName:
 		return NewFetchTool(perms, dir, nil)
 	case WebFetchToolName:
@@ -369,8 +329,8 @@ func testConfigStore(t *testing.T, dir string) *config.ConfigStore {
 }
 
 // TestParallelFlagsMatchClassification is the unexpected-flag guard: for
-// every possible built-in tool this package can construct — T0 allow-list,
-// legacy exceptions, and sequential tools alike — the ToolInfo the
+// every possible built-in tool this package can construct — parallel and
+// sequential alike — the ToolInfo the
 // dispatcher actually sees must agree with the classification. It fails if
 // a constructor silently starts (or stops) marking a tool parallel: the
 // only way to change the parallel set is to change the classification in

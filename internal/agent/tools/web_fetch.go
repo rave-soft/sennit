@@ -32,7 +32,7 @@ func NewWebFetchTool(permissions permission.Requester, workingDir string, client
 		client = newHTTPClient(30 * time.Second)
 	}
 
-	return withToolParameterSchema(fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		WebFetchToolName,
 		renderToolDescriptionWithAvailability(webFetchDescriptionTpl, availability),
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

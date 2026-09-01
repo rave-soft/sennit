@@ -47,11 +47,9 @@ const (
 // returns [ActionSubmitProviderSettings] and the caller performs the save
 // in a tea.Cmd, mirroring AccountForm.
 //
-// This step stores and validates rotation settings only; the rotator that
-// acts on them is a later change (see PROVIDER_ACCOUNTS_PLAN.md §5.5). The
-// account order field from the plan (§6.2) is deliberately not offered
-// here yet — the list order accounts were added in is fine for now, and
-// the plan itself lists it last.
+// The runtime rotator consumes the stored settings. The account order field
+// is deliberately not offered here yet; the list order accounts were added
+// in is fine for now.
 type ProviderSettings struct {
 	Base
 	com *common.Common

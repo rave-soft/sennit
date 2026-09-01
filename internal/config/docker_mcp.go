@@ -19,9 +19,8 @@ const dockerMCPAvailabilityTTL = 10 * time.Second
 
 // dockerMCPCache holds Docker MCP availability behind an injectable clock,
 // rather than the bare package-level struct measured against time.Since it
-// used to be. See "Docker MCP availability is a process-global cache with a
-// wall-clock TTL" in TECHDEBT.md: a single package-global cache makes every
-// reader order-dependent across tests in the same process (whichever test
+// used to be. A single package-global cache makes every reader
+// order-dependent across tests in the same process (whichever test
 // warms the cache first decides what later tests observe), and a TTL
 // measured against wall time lets a slow test run cross the 10s boundary
 // mid-suite. now is swapped out in tests instead of sleeping past the TTL,

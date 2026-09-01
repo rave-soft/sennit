@@ -80,7 +80,7 @@ func NewWebSearchTool(permissions permission.Requester, workingDir string, clien
 		backend = &duckDuckGoBackend{client: client}
 	}
 
-	return withToolParameterSchema(fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		WebSearchToolName,
 		renderWebSearchDescription(backend, availability),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

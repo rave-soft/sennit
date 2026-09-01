@@ -30,7 +30,7 @@ const ReadMCPResourceToolName = "read_mcp_resource"
 var readMCPResourceDescription string
 
 func NewReadMCPResourceTool(cfg mcpResourceConfig, reg *mcp.Registry, permissions permission.Requester) fantasy.AgentTool {
-	return withToolParameterSchema(fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		ReadMCPResourceToolName,
 		readMCPResourceDescription,
 		func(ctx context.Context, params ReadMCPResourceParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

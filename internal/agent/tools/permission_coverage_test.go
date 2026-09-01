@@ -16,10 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file is the table-driven regression test named in TECHDEBT.md's
-// "профилактика" entry, item 4: several tools were found to bypass the
-// permission model one way or another, and a one-off fix per tool leaves
-// the next one free to make the same mistake. toolClassifications below is
+// Several tools were found to bypass the permission model one way or
+// another, and a one-off fix per tool leaves the next one free to make the
+// same mistake. toolClassifications below is
 // the register every tool must appear in; toolClassificationsCoverAllTools
 // makes an unclassified tool — one added to config.AllToolNames() but never
 // given an entry here — a red test rather than a silent gap.

@@ -381,10 +381,6 @@ var newCoordinator = agent.NewCoordinator
 // existing coordinator in place and working, not overwrite the field with
 // the error's nil.
 func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
-	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
-	if coderAgentCfg.ID == "" {
-		return fmt.Errorf("coder agent configuration is missing")
-	}
 	threadTools, taskTools := app.delegationToolAdapters()
 	newCoord, err := newCoordinator(ctx, agent.CoordinatorOptions{
 		Config:           app.config,

@@ -79,7 +79,7 @@ func (d *turnDispatcher) Close(ctx context.Context) error {
 }
 
 // buildAgent assembles a session agent for agent: its model (inherited or
-// its own, see buildAgentModel/buildCustomAgentModel) and, on this
+// its own, see buildAgentModel) and, on this
 // dispatcher's own readiness goroutines, its system prompt and tool list.
 // The returned agent is not ready to run until those goroutines finish:
 // the coordinator's own agent is waited on by run()'s preamble through

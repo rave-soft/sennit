@@ -117,9 +117,8 @@ func TestRunSubAgent_RetryUsesRefreshedCredential(t *testing.T) {
 }
 
 // subAgentDifferentModelID names a second catalog model, distinct from
-// authModelID, that only a custom agent's own agent.Model routes to (see
-// buildCustomAgentModel) - the coordinator's own selected model never
-// resolves to it.
+// authModelID, that only an agent's own agent.Model routes to - the
+// coordinator's selected model never resolves to it.
 const subAgentDifferentModelID = "sub-model-different"
 
 // TestRunSubAgent_RetryUsesRefreshedCredential_DifferentModel pins the fix
@@ -195,8 +194,8 @@ func TestRunSubAgent_RetryUsesRefreshedCredential_DifferentModel(t *testing.T) {
 	require.NoError(t, err)
 
 	// A custom agent naming its own model, distinct from the coordinator's
-	// selected one - buildAgent routes this through buildCustomAgentModel
-	// instead of inheriting the app's main model (see TestBuildAgentCustomModel).
+	// selected one - buildAgent resolves its configured model instead of
+	// inheriting the app's main model (see TestBuildAgentCustomModel).
 	taskCfg, ok := co.cfg.Config().Agents[config.AgentTask]
 	require.True(t, ok, "authTestCoordinator's SetupAgents must configure the task agent")
 	agentCfg := taskCfg

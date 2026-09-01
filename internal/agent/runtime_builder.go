@@ -407,70 +407,48 @@ func webSearchBackend(snapshot runtimeConfigSnapshot) (tools.SearchBackend, erro
 	return tools.NewSearchBackend(opts, snapshot.resolver, nil)
 }
 
-// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
-func (b *runtimeBuilder) buildAgentModel(ctx context.Context, isSubAgent bool) (Model, error) {
-	return b.buildAgentModelForConfig(ctx, b.cfg.Config(), isSubAgent)
+// buildAgentModel resolves one agent's model from a single runtime snapshot.
+// An empty Agent.Model inherits the application's selected model; otherwise the
+// agent's existing provider/model-id setting is resolved against that snapshot.
+func (b *runtimeBuilder) buildAgentModel(ctx context.Context, agent config.Agent, isSubAgent bool) (Model, error) {
+	return b.buildAgentModelForSnapshot(ctx, b.runtimeConfigSnapshot(), agent, isSubAgent)
 }
 
-func (b *runtimeBuilder) buildAgentModelForConfig(ctx context.Context, runtimeCfg *config.Config, isSubAgent bool) (Model, error) {
-	return b.buildAgentModelForSnapshot(ctx, runtimeConfigSnapshot{config: runtimeCfg, resolver: runtimeCfg.RuntimeResolver(), workingDir: b.cfg.WorkingDir()}, isSubAgent)
-}
-
-func (b *runtimeBuilder) buildAgentModelForSnapshot(ctx context.Context, snapshot runtimeConfigSnapshot, isSubAgent bool) (Model, error) {
+func (b *runtimeBuilder) buildAgentModelForSnapshot(ctx context.Context, snapshot runtimeConfigSnapshot, agent config.Agent, isSubAgent bool) (Model, error) {
 	runtimeCfg := snapshot.config
-	modelCfg := runtimeCfg.Model
-	if modelCfg.Model == "" {
+	selected := runtimeCfg.Model
+	if agent.Model != "" {
+		match, err := config.ResolveModelString(runtimeCfg.Providers.Copy(), agent.Model)
+		if err != nil {
+			return Model{}, fmt.Errorf("agent %q model %q: %w", agent.Name, agent.Model, err)
+		}
+		selected = config.SelectedModel{Provider: match.Provider, Model: match.ModelID}
+	}
+	if selected.Model == "" {
 		return Model{}, errModelNotSelected
 	}
 
-	providerCfg, ok := runtimeCfg.Providers.Get(modelCfg.Provider)
+	providerCfg, ok := runtimeCfg.Providers.Get(selected.Provider)
 	if !ok {
+		if agent.Model != "" {
+			return Model{}, fmt.Errorf("agent %q model %q: provider %q not configured", agent.Name, agent.Model, selected.Provider)
+		}
 		return Model{}, errModelProviderNotConfigured
 	}
 
-	return b.buildModelForSnapshot(ctx, providerCfg, modelCfg, isSubAgent, snapshot)
-}
-
-// buildCustomAgentModel builds the Model for an agent whose Model field
-// names a specific model, e.g. "provider/model-id", rather than inheriting
-// the app's main model. Config-load validation already guarantees that any
-// such string reaching here resolves against the configured providers, but
-// the config can be reloaded or edited after an agent is set up, so this
-// still fails safe instead of trusting that blindly. ResolveModelString is
-// reused rather than re-deriving its ambiguity resolution (matching a bare
-// model ID against every provider, disambiguating a "provider/model" prefix
-// from a model ID that itself contains a slash, etc.).
-func (b *runtimeBuilder) buildCustomAgentModel(ctx context.Context, agent config.Agent, isSubAgent bool) (Model, error) {
-	match, err := config.ResolveModelString(b.cfg.Config().Providers.Copy(), agent.Model)
-	if err != nil {
-		return Model{}, fmt.Errorf("agent %q model %q: %w", agent.Name, agent.Model, err)
-	}
-
-	providerCfg, ok := b.cfg.Config().Providers.Get(match.Provider)
-	if !ok {
-		return Model{}, fmt.Errorf("agent %q model %q: provider %q not configured", agent.Name, agent.Model, match.Provider)
-	}
-
-	selected := config.SelectedModel{Provider: match.Provider, Model: match.ModelID}
-
-	model, err := b.buildModel(ctx, providerCfg, selected, isSubAgent)
-	if errors.Is(err, errModelNotFound) {
+	model, err := b.buildModelForSnapshot(ctx, providerCfg, selected, isSubAgent, snapshot)
+	if agent.Model != "" && errors.Is(err, errModelNotFound) {
 		return Model{}, fmt.Errorf("agent %q model %q: model not found in provider config", agent.Name, agent.Model)
 	}
-	if err != nil {
-		return Model{}, err
-	}
-	return model, nil
+	return model, err
 }
 
 // buildModel resolves selected's provider, catalog entry, and language
 // model, and assembles the result. Shared by buildAgentModel (the app's
-// main model) and buildCustomAgentModel (an agent's own
-// "provider/model-id"): both need the same provider-build ->
-// catalog-lookup -> openrouter ":exacto" suffix -> language-model steps,
-// and only differ in how they arrive at providerCfg/selected and in how
-// they word a not-found error, which is why each keeps that part to
-// itself and reports a bare errModelNotFound here for the caller to wrap.
+// selected model, whether inherited or named by an agent: both need the
+// same provider-build -> catalog-lookup -> openrouter ":exacto" suffix ->
+// language-model steps. It reports a bare errModelNotFound so agent-specific
+// resolution can add the configured agent and model to the error.
 func (b *runtimeBuilder) buildModel(ctx context.Context, providerCfg config.ProviderConfig, selected config.SelectedModel, isSubAgent bool) (Model, error) {
 	return b.buildModelForSnapshot(ctx, providerCfg, selected, isSubAgent, b.runtimeConfigSnapshot())
 }
@@ -578,13 +556,13 @@ func (b *runtimeBuilder) runtimeConfigSnapshot() runtimeConfigSnapshot {
 func (b *runtimeBuilder) runtimeFor(ctx context.Context, inputs runtimeToolInputs) (*compiledRuntime, error) {
 	return b.runtime.getOrBuild(ctx, b.runtimeKey, func(ctx context.Context, key runtimeKey) (*compiledRuntime, error) {
 		runtimeCfg := b.runtimeConfigSnapshot()
-		model, err := b.buildAgentModelForSnapshot(ctx, runtimeCfg, false)
-		if err != nil {
-			return nil, err
-		}
 		agentCfg, ok := runtimeCfg.config.Agents[config.AgentCoder]
 		if !ok {
 			return nil, errCoderAgentNotConfigured
+		}
+		model, err := b.buildAgentModelForSnapshot(ctx, runtimeCfg, agentCfg, false)
+		if err != nil {
+			return nil, err
 		}
 		builtTools, err := b.buildToolsForConfig(ctx, agentCfg, false, inputs, runtimeCfg)
 		if err != nil {
@@ -769,7 +747,7 @@ func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConf
 // refreshes once per pass, so the delegation died on an expiry the
 // top-level agent recovers from cleanly. This variant rebuilds a runtime
 // scoped to model (the sub-agent's own, already resolved by buildAgentModel
-// or buildCustomAgentModel in buildAgent) instead, so what lands in active
+// in buildAgent) instead, so what lands in active
 // actually matches what modelProvider is comparing against.
 func (b *runtimeBuilder) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, model Model, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
 	if providerCfg.OAuthToken == nil &&
@@ -794,7 +772,7 @@ func (b *runtimeBuilder) makeSubAgentAuthRefreshCallback(providerCfg config.Prov
 
 // buildSubAgentRuntime rebuilds model's provider/language-model pair against
 // the current config (i.e. after a credential refresh has landed a new
-// token or key), the same way buildAgentModel/buildCustomAgentModel do for
+// token or key), the same way buildAgentModel does for
 // a fresh delegation build. It re-reads providerCfg from the live config
 // store rather than trusting a value captured before the refresh, since
 // that value's credential is exactly what the refresh just replaced.

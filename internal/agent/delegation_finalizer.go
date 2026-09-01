@@ -260,8 +260,8 @@ func (d *delegationFinalizer) invalidate(ctx context.Context, reason string, mut
 	d.builder.invalidateRuntime(ctx, reason, mutate)
 }
 
-func (d *delegationFinalizer) resolveAgentModel(ctx context.Context, isSubAgent bool) (Model, error) {
-	return d.builder.buildAgentModel(ctx, isSubAgent)
+func (d *delegationFinalizer) resolveAgentModel(ctx context.Context, agent config.Agent, isSubAgent bool) (Model, error) {
+	return d.builder.buildAgentModel(ctx, agent, isSubAgent)
 }
 
 func (d *delegationFinalizer) resolveWebSearchBackend() (tools.SearchBackend, error) {
@@ -273,22 +273,9 @@ func (d *delegationFinalizer) newSubAgent(ctx context.Context, p *prompt.Prompt,
 }
 
 func (d *delegationFinalizer) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
-	model, err := d.builder.buildAgentModel(ctx, isSubAgent)
+	primary, err := d.builder.buildAgentModel(ctx, agent, isSubAgent)
 	if err != nil {
 		return nil, err
-	}
-
-	// An empty agent.Model means "inherit the app's main model", which is
-	// the model built above. A non-empty value is a "provider/model-id"
-	// string naming a specific model of its own.
-	var primary Model
-	if agent.Model == "" {
-		primary = model
-	} else {
-		primary, err = d.builder.buildCustomAgentModel(ctx, agent, isSubAgent)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	// Model is a value and ModelCfg a plain struct, so this override stays
@@ -967,7 +954,7 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allo
 		}
 		constraints["subagent_type"] = tools.ToolSchemaConstraint{Enum: ids}
 	}
-	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
+	return tools.WithToolSchemaConstraints(fantasy.NewAgentTool(
 		AgentToolName,
 		agentToolDescription(named),
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -1061,7 +1048,7 @@ func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.C
 	if client == nil {
 		client = d.sharedFetchClient()
 	}
-	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
+	return tools.WithToolSchemaConstraints(fantasy.NewAgentTool(
 		tools.AgenticFetchToolName,
 		agenticFetchToolDescription,
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -1128,7 +1115,7 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 	if err != nil {
 		return nil, cleanup, err
 	}
-	model, err := d.resolveAgentModel(ctx, true)
+	model, err := d.resolveAgentModel(ctx, config.Agent{}, true)
 	if err != nil {
 		return nil, cleanup, err
 	}

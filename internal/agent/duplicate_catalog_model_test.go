@@ -12,11 +12,9 @@ import (
 
 // TestFindCatalogModelFirstMatchWins pins findCatalogModel's resolution rule
 // for a provider config whose Models slice contains two entries sharing an
-// ID: the first entry wins. buildAgentModel and buildCustomAgentModel both
-// resolve their catalog entry through this one function (buildModel), so
-// they cannot diverge on this again the way they did before — one used to
-// scan without a break (last match wins) and the other with one (first
-// match wins).
+// ID: the first entry wins. Every agent model resolves its catalog entry
+// through this one function (buildModel), so inheritance and explicit model
+// selection cannot diverge on this rule.
 func TestFindCatalogModelFirstMatchWins(t *testing.T) {
 	providerCfg := config.ProviderConfig{
 		ID: "mock",
@@ -32,11 +30,9 @@ func TestFindCatalogModelFirstMatchWins(t *testing.T) {
 }
 
 // TestBuildAgentModelDuplicateCatalogEntryFirstMatchWins exercises the same
-// rule through the app's main-model path (buildAgentModel), which reaches
-// providerCfg.Models directly and has no equivalent of
-// config.ResolveModelString's ambiguity check to reject a duplicate ID
-// beforehand — see this package's report on buildCustomAgentModel for why
-// that path cannot reach the divergent case the same way.
+// rule through an inheriting agent, which reaches providerCfg.Models directly
+// and has no equivalent of config.ResolveModelString's ambiguity check to
+// reject a duplicate ID beforehand.
 func TestBuildAgentModelDuplicateCatalogEntryFirstMatchWins(t *testing.T) {
 	env := testEnv(t)
 
@@ -67,7 +63,7 @@ func TestBuildAgentModelDuplicateCatalogEntryFirstMatchWins(t *testing.T) {
 	}
 	coord.newCoordinatorComponents()
 
-	model, err := coord.builder.buildAgentModel(t.Context(), false)
+	model, err := coord.builder.buildAgentModel(t.Context(), config.Agent{}, false)
 	require.NoError(t, err)
 	require.Equal(t, "First", model.CatalogCfg.Name)
 }

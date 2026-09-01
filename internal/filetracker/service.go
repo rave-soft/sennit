@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 // Service defines the interface for tracking file reads in sessions.
@@ -124,8 +125,9 @@ func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time
 }
 
 func (s *service) relpath(path string) string {
-	path = filepath.Clean(path)
-	relpath, err := filepath.Rel(s.workingDir, path)
+	workingDir := fsext.Canonical(s.workingDir)
+	path = fsext.Canonical(path)
+	relpath, err := filepath.Rel(workingDir, path)
 	if err != nil {
 		slog.Warn("Error getting relpath", "error", err)
 		return path

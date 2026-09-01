@@ -310,7 +310,9 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	// TODO: make this dynamic when we support multiple agents
+	// The product has one interactive primary role. User-defined agents are
+	// dynamically constructed by delegationFinalizer; the primary uses the
+	// built-in coder prompt and its own config entry.
 	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err

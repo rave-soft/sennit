@@ -444,9 +444,8 @@ func convertAgentFile(path, filename, dstDir string, opts Options) (Entry, error
 		comments = append(comments, fmt.Sprintf("# original top_p: %v (not supported by sennit agents)", *meta.TopP))
 	}
 
-	// See TECHDEBT.md, "Limitations of imported agent definitions":
-	// permission blocks were never enforced even when the source directory
-	// was auto-discovered, and that hasn't changed for import.
+	// Permission blocks from foreign agent definitions are not enforceable
+	// by Sennit; tool restrictions are translated through the tools list.
 	if !meta.Permission.IsZero() {
 		warnings = append(warnings, "permission block is not supported; restrict tools via the tools list instead")
 		comments = append(comments, "# original permission block dropped: not supported, use tools list")

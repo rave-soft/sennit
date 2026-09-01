@@ -65,7 +65,7 @@ func TestCoordinatorAgentModelSelection(t *testing.T) {
 
 		// The resolution itself, independent of how buildAgent wires the
 		// result into the session agent.
-		model, err := coord.builder.buildCustomAgentModel(t.Context(), agentCfg, false)
+		model, err := coord.builder.buildAgentModel(t.Context(), agentCfg, false)
 		require.NoError(t, err)
 		require.Equal(t, config.SelectedModel{Provider: "mock", Model: "agent-model"}, model.ModelCfg)
 		require.Equal(t, "agent-model", model.CatalogCfg.ID)
@@ -77,6 +77,17 @@ func TestCoordinatorAgentModelSelection(t *testing.T) {
 		require.Equal(t, "mock", result.Model().ModelCfg.Provider)
 		require.Equal(t, "agent-model", result.Model().ModelCfg.Model)
 		require.NotEqual(t, coord.cfg.Config().Model.Model, result.Model().ModelCfg.Model)
+	})
+
+	t.Run("primary runtime uses the coder's configured model", func(t *testing.T) {
+		coord, _ := agentModelCoordinator(t)
+		coder := coord.cfg.Config().Agents[config.AgentCoder]
+		coder.Model = "mock/agent-model"
+		coord.cfg.Config().Agents[config.AgentCoder] = coder
+
+		runtime, err := coord.delegation.runtimeFor(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "agent-model", runtime.model.ModelCfg.Model)
 	})
 
 	t.Run("empty agent model inherits the app's main model", func(t *testing.T) {

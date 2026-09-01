@@ -51,8 +51,8 @@ import (
 //     only sent the model looking for a way around. Redirects on those
 //     commands are still checked. /dev/null is never outside.
 //
-// None of that is a gap in this function so much as the reason it exists
-// instead of a sandbox — see the bash entry in TECHDEBT.md.
+// None of that is a gap in this function so much as the reason this is a
+// confinement boundary rather than a sandbox.
 func bashConfinementRefusal(permissions permission.Requester, command string) (message string, refused, permissionRequired bool) {
 	if permissions == nil {
 		return "", false, false

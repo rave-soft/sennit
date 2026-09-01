@@ -157,9 +157,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// request.
 	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() AcceptedRunner { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
 
-	// TODO: remove the concept of agent config, most likely.
+	// Keep the application available until a provider is configured:
+	// configuration and skill watchers can still observe a later setup, while
+	// dispatch reports that no coordinator has been initialized.
 	if !cfg.IsConfigured() {
-		slog.Warn("No agent configuration found")
+		slog.Warn("No runtime provider configured")
 		return app, nil
 	}
 	if err := app.InitCoderAgent(ctx); err != nil {
