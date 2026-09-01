@@ -481,12 +481,9 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	//
 	// Keyed on the request id, so a genuinely new request still replaces
 	// whatever is open.
-	if m.ops.permissionID == perm.ID && m.dialog.Dialog(dialog.PermissionsID) != nil {
+	if _, opened := m.permissionResponse.open(perm.ID, m.dialog.Dialog(dialog.PermissionsID) != nil); !opened {
 		return nil
 	}
-	m.ops.permissionGeneration++
-	m.ops.permissionLoading = false
-	m.ops.permissionID = perm.ID
 	// Close any existing permissions dialog first.
 	m.dialog.CloseDialog(dialog.PermissionsID)
 

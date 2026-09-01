@@ -132,17 +132,19 @@ func TestOpenPermissionsDialog_DuplicateRequestIsIgnored(t *testing.T) {
 
 	require.Nil(t, u.openPermissionsDialog(perm))
 	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
-	gen := u.ops.permissionGeneration
+	_, gen := u.permissionResponse.current()
 
 	// The user answers: the response path claims the current generation.
-	u.ops.permissionLoading = true
+	_, started := u.permissionResponse.begin(perm.ID)
+	require.True(t, started)
 
 	// The second copy of the same request arrives now.
 	require.Nil(t, u.openPermissionsDialog(perm))
 
-	require.Equal(t, gen, u.ops.permissionGeneration,
+	_, currentGeneration := u.permissionResponse.current()
+	require.Equal(t, gen, currentGeneration,
 		"a duplicate must not bump the generation an in-flight answer is matched against")
-	require.True(t, u.ops.permissionLoading,
+	require.True(t, u.permissionResponse.isLoading(),
 		"a duplicate must not clear the in-flight answer's loading state")
 	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
 }
@@ -157,12 +159,13 @@ func TestOpenPermissionsDialog_DifferentRequestReopens(t *testing.T) {
 	second := permission.PermissionRequest{ID: "perm-2", ToolCallID: "tc-2", ToolName: "edit"}
 
 	require.Nil(t, u.openPermissionsDialog(first))
-	gen := u.ops.permissionGeneration
+	_, gen := u.permissionResponse.current()
 
 	require.Nil(t, u.openPermissionsDialog(second))
-	require.Greater(t, u.ops.permissionGeneration, gen,
+	permissionID, currentGeneration := u.permissionResponse.current()
+	require.Greater(t, currentGeneration, gen,
 		"a new request must claim a new generation")
-	require.Equal(t, "perm-2", u.ops.permissionID)
+	require.Equal(t, "perm-2", permissionID)
 	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
 }
 
@@ -175,13 +178,14 @@ func TestOpenPermissionsDialog_SameIDReopensAfterClose(t *testing.T) {
 	perm := permission.PermissionRequest{ID: "perm-1", ToolCallID: "tc-1", ToolName: "bash"}
 
 	require.Nil(t, u.openPermissionsDialog(perm))
-	gen := u.ops.permissionGeneration
+	_, gen := u.permissionResponse.current()
 
 	u.dialog.CloseDialog(dialog.PermissionsID)
 	require.False(t, u.dialog.ContainsDialog(dialog.PermissionsID))
 
 	require.Nil(t, u.openPermissionsDialog(perm))
-	require.Greater(t, u.ops.permissionGeneration, gen)
+	_, currentGeneration := u.permissionResponse.current()
+	require.Greater(t, currentGeneration, gen)
 	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
 }
 
@@ -197,16 +201,18 @@ func TestPermissionResponse_RefusedAnswerClosesTheDialog(t *testing.T) {
 	perm := permission.PermissionRequest{ID: "perm-1", ToolName: "bash", Action: "execute"}
 	u.openPermissionsDialog(perm)
 	require.NotNil(t, u.dialog.Dialog(dialog.PermissionsID), "precondition: the prompt is on screen")
+	generation, started := u.permissionResponse.begin(perm.ID)
+	require.True(t, started)
 
 	_, _ = u.updateSettings(permissionResponseMsg{
 		Accepted:   false,
 		Permission: perm.ID,
-		generation: u.ops.permissionGeneration,
+		generation: generation,
 	}, nil)
 
 	require.Nil(t, u.dialog.Dialog(dialog.PermissionsID),
 		"a prompt nothing is waiting on must not stay on screen")
-	require.False(t, u.ops.permissionLoading)
+	require.False(t, u.permissionResponse.isLoading())
 }
 
 // An accepted answer still closes it, and does not report an error.
@@ -216,11 +222,13 @@ func TestPermissionResponse_AcceptedAnswerClosesTheDialog(t *testing.T) {
 	u := newTestUIForOpeningPermissions(t)
 	perm := permission.PermissionRequest{ID: "perm-1", ToolName: "bash", Action: "execute"}
 	u.openPermissionsDialog(perm)
+	generation, started := u.permissionResponse.begin(perm.ID)
+	require.True(t, started)
 
 	_, _ = u.updateSettings(permissionResponseMsg{
 		Accepted:   true,
 		Permission: perm.ID,
-		generation: u.ops.permissionGeneration,
+		generation: generation,
 	}, nil)
 
 	require.Nil(t, u.dialog.Dialog(dialog.PermissionsID))
@@ -234,11 +242,13 @@ func TestPermissionResponse_StaleAnswerLeavesTheDialogAlone(t *testing.T) {
 	u := newTestUIForOpeningPermissions(t)
 	perm := permission.PermissionRequest{ID: "perm-1", ToolName: "bash", Action: "execute"}
 	u.openPermissionsDialog(perm)
+	generation, started := u.permissionResponse.begin(perm.ID)
+	require.True(t, started)
 
 	_, _ = u.updateSettings(permissionResponseMsg{
 		Accepted:   false,
 		Permission: perm.ID,
-		generation: u.ops.permissionGeneration - 1,
+		generation: generation - 1,
 	}, nil)
 
 	require.NotNil(t, u.dialog.Dialog(dialog.PermissionsID))

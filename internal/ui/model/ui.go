@@ -122,6 +122,9 @@ type UI struct {
 	// modelOperation owns correlation and in-flight state for model changes.
 	modelOperation modelOperationState
 
+	// permissionResponse owns the current permission request and response lifecycle.
+	permissionResponse permissionResponseState
+
 	// compactMode owns the persistence lifecycle for compact-mode changes.
 	compactMode compactModeState
 

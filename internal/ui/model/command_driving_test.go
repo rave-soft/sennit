@@ -774,6 +774,7 @@ func TestCmdDriving_PermissionRoundTrip_Allow(t *testing.T) {
 	// Open the permissions dialog (use OpenDialog to skip the grace period
 	// that would absorb the key press in tests).
 	permsDialog := dialog.NewPermissions(m.com, perm)
+	m.permissionResponse.open(perm.ID, false)
 	m.dialog.OpenDialog(permsDialog)
 
 	require.True(t, m.dialog.ContainsDialog(dialog.PermissionsID),
@@ -784,8 +785,24 @@ func TestCmdDriving_PermissionRoundTrip_Allow(t *testing.T) {
 	// handleDialogMsg → permsDialog.HandleMsg → ActionPermissionResponse →
 	// applyDialogAction (side effects: PermissionGrant + CloseDialog).
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// A second answer before the first command returns is rejected. It must not
+	// make another workspace call or advance the response lifecycle.
+	_, duplicateCmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	duplicateMessages := runCmdTree(m, duplicateCmd, nil)
+	var warning util.InfoMsg
+	for _, msg := range duplicateMessages {
+		if info, ok := msg.(util.InfoMsg); ok && info.Type == util.InfoTypeWarn {
+			warning = info
+			break
+		}
+	}
+	require.Equal(t, util.InfoTypeWarn, warning.Type)
+	require.Equal(t, "Permission response is already being submitted", warning.Msg)
+	require.Zero(t, ws.permGrantCalls)
+
 	// The permission action dispatches a tea.Cmd (PermissionGrant) so the
-	// I/O is not done on the Update goroutine. Drive it to verify the call.
+	// I/O is not done on the Update goroutine. Drive the original command to
+	// verify the one workspace call it is allowed to make.
 	require.NotNil(t, cmd, "allow action dispatches a cmd for the I/O")
 	messages := runCmdTree(m, cmd, nil)
 	// Verify the cmd produced no error.
@@ -953,6 +970,7 @@ func TestCmdDriving_PermissionRoundTrip_Deny(t *testing.T) {
 	// Open the permissions dialog (use OpenDialog to skip the grace period
 	// that would absorb the key press in tests).
 	permsDialog := dialog.NewPermissions(m.com, perm)
+	m.permissionResponse.open(perm.ID, false)
 	m.dialog.OpenDialog(permsDialog)
 
 	// Simulate pressing 'd' (Deny) through the real Update path:
@@ -988,6 +1006,7 @@ func TestCmdDriving_PermissionRoundTrip_AllowForSession(t *testing.T) {
 	}
 
 	permsDialog := dialog.NewPermissions(m.com, perm)
+	m.permissionResponse.open(perm.ID, false)
 	// Open the permissions dialog (use OpenDialog to skip the grace period).
 	m.dialog.OpenDialog(permsDialog)
 

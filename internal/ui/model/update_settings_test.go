@@ -526,45 +526,48 @@ func TestUpdateSettings_NotificationStyleSetMsg(t *testing.T) {
 func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 	t.Parallel()
 
+	start := func(t *testing.T, m *UI) uint64 {
+		t.Helper()
+		_, opened := m.permissionResponse.open("perm-1", false)
+		require.True(t, opened)
+		generation, started := m.permissionResponse.begin("perm-1")
+		require.True(t, started)
+		return generation
+	}
+
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.permissionGeneration = 2
-		m.ops.permissionID = "perm-1"
-		m.ops.permissionLoading = true
+		generation := start(t, m)
 
-		cmds, done := m.updateSettings(permissionResponseMsg{Permission: "perm-1", generation: 1}, nil)
+		cmds, done := m.updateSettings(permissionResponseMsg{Permission: "perm-1", generation: generation - 1}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.permissionLoading)
+		require.True(t, m.permissionResponse.isLoading())
 	})
 
 	t.Run("mismatched permission id is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.permissionGeneration = 1
-		m.ops.permissionID = "perm-1"
-		m.ops.permissionLoading = true
+		generation := start(t, m)
 
-		cmds, done := m.updateSettings(permissionResponseMsg{Permission: "perm-2", generation: 1}, nil)
+		cmds, done := m.updateSettings(permissionResponseMsg{Permission: "perm-2", generation: generation}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.permissionLoading)
+		require.True(t, m.permissionResponse.isLoading())
 	})
 
 	t.Run("refused closes the dialog and reports an error", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.permissionGeneration = 1
-		m.ops.permissionID = "perm-1"
-		m.ops.permissionLoading = true
+		generation := start(t, m)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.PermissionsID})
 
-		cmds, _ := m.updateSettings(permissionResponseMsg{Permission: "perm-1", Accepted: false, generation: 1}, nil)
+		cmds, _ := m.updateSettings(permissionResponseMsg{Permission: "perm-1", Accepted: false, generation: generation}, nil)
 
-		require.False(t, m.ops.permissionLoading)
+		require.False(t, m.permissionResponse.isLoading())
 		require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID))
 		require.Len(t, cmds, 1)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
@@ -575,14 +578,12 @@ func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 	t.Run("accepted closes the dialog without reporting anything", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.permissionGeneration = 1
-		m.ops.permissionID = "perm-1"
-		m.ops.permissionLoading = true
+		generation := start(t, m)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.PermissionsID})
 
-		cmds, _ := m.updateSettings(permissionResponseMsg{Permission: "perm-1", Accepted: true, generation: 1}, nil)
+		cmds, _ := m.updateSettings(permissionResponseMsg{Permission: "perm-1", Accepted: true, generation: generation}, nil)
 
-		require.False(t, m.ops.permissionLoading)
+		require.False(t, m.permissionResponse.isLoading())
 		require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID))
 		require.Empty(t, cmds)
 	})

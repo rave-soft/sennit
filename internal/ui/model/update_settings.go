@@ -12,14 +12,10 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
-// settingsOps holds the generation counters and in-flight flags for settings
-// other than model operations. Each operation's owner rejects stale results
-// so an older response cannot clobber newer UI state.
+// settingsOps holds generation counters for settings that do not yet have a
+// dedicated lifecycle owner.
 type settingsOps struct {
-	themeGeneration      uint64
-	permissionLoading    bool
-	permissionGeneration uint64
-	permissionID         string
+	themeGeneration uint64
 }
 
 // transparentToggledMsg carries the result of a transparency-toggle config mutation.
@@ -235,10 +231,9 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, util.ReportInfo("Notifications set to: "+msg.Style))
 
 	case permissionResponseMsg:
-		if msg.generation != m.ops.permissionGeneration || msg.Permission != m.ops.permissionID {
+		if !m.permissionResponse.complete(msg.Permission, msg.generation) {
 			break
 		}
-		m.ops.permissionLoading = false
 		if !msg.Accepted {
 			// Nothing is holding this request any more: an answer is
 			// refused only when no permission service still has the id

@@ -254,17 +254,14 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionPermissionResponse:
-		if m.ops.permissionLoading {
+		action := msg.Action
+		perm := msg.Permission
+		generation, started := m.permissionResponse.begin(perm.ID)
+		if !started {
 			cmds = append(cmds, util.ReportWarn("Permission response is already being submitted"))
 			break
 		}
-		m.ops.permissionLoading = true
-		m.ops.permissionGeneration++
-		generation := m.ops.permissionGeneration
-		action := msg.Action
-		perm := msg.Permission
-		m.ops.permissionID = perm.ID
-		permissionID := perm.ID
+		permissionID, _ := m.permissionResponse.current()
 		workspace := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
 			accepted := false
