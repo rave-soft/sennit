@@ -119,6 +119,9 @@ type UI struct {
 
 	ops settingsOps
 
+	// modelOperation owns correlation and in-flight state for model changes.
+	modelOperation modelOperationState
+
 	// compactMode owns the persistence lifecycle for compact-mode changes.
 	compactMode compactModeState
 
@@ -922,7 +925,7 @@ func (m *UI) freezeFinishedChildDelegation() {
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
-	if m.ops.modelOperationLoading {
+	if m.modelOperation.isLoading() {
 		return util.ReportWarn("Model settings are already being updated")
 	}
 
@@ -948,9 +951,10 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	// re-check whether the provider is configured and decide auth vs model
 	// flow — never batch the import with the subsequent steps.
 	if isCopilot && !msg.ReAuthenticate {
-		m.ops.modelOperationLoading = true
-		m.ops.modelOperationGeneration++
-		generation := m.ops.modelOperationGeneration
+		generation, started := m.modelOperation.begin()
+		if !started {
+			return util.ReportWarn("Model settings are already being updated")
+		}
 		ws := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
 			ws.ImportCopilot()
@@ -974,9 +978,10 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	// Move UpdatePreferredModel into the cmd; the result is handled by a
 	// modelSelectResult case that only calls initAgentAndReportModel on success.
-	m.ops.modelOperationLoading = true
-	m.ops.modelOperationGeneration++
-	generation := m.ops.modelOperationGeneration
+	generation, started := m.modelOperation.begin()
+	if !started {
+		return util.ReportWarn("Model settings are already being updated")
+	}
 	capturedModel := msg.Model
 	ws := m.com.Workspace
 	cmds = append(cmds, func() tea.Msg {

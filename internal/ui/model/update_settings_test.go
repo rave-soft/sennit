@@ -94,27 +94,27 @@ func TestUpdateSettings_ProviderConfiguredResult(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 5
-		m.ops.modelOperationLoading = true
+		m.modelOperation.generation = 5
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(providerConfiguredResult{generation: 4}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.modelOperationLoading, "stale reply must not touch loading state")
+		require.True(t, m.modelOperation.loading, "stale reply must not touch loading state")
 	})
 
 	t.Run("error reports and clears loading", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
-		m.ops.modelOperationLoading = true
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 		wantErr := errors.New("boom")
 
 		cmds, done := m.updateSettings(providerConfiguredResult{Err: wantErr, generation: 1}, nil)
 
 		require.False(t, done)
-		require.False(t, m.ops.modelOperationLoading)
+		require.False(t, m.modelOperation.loading)
 		require.Len(t, cmds, 1)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
 		require.True(t, ok)
@@ -125,7 +125,8 @@ func TestUpdateSettings_ProviderConfiguredResult(t *testing.T) {
 	t.Run("success dispatches init command", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(providerConfiguredResult{
 			Model:      config.SelectedModel{Provider: "p", Model: "m"},
@@ -133,6 +134,7 @@ func TestUpdateSettings_ProviderConfiguredResult(t *testing.T) {
 		}, nil)
 
 		require.False(t, done)
+		require.True(t, m.modelOperation.isLoading(), "provider success must retain ownership for agent initialization")
 		// One command drives model/agent init; the other refreshes the
 		// sidebar's cached account label for the now-configured provider
 		// (see account_label.go) — harmless for the common "just signed
@@ -150,7 +152,8 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 2
+		m.modelOperation.generation = 2
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(modelSelectResult{generation: 1}, nil)
 
@@ -161,14 +164,14 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 	t.Run("error reports and clears loading", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
-		m.ops.modelOperationLoading = true
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 		wantErr := errors.New("select failed")
 
 		cmds, done := m.updateSettings(modelSelectResult{Err: wantErr, generation: 1}, nil)
 
 		require.False(t, done)
-		require.False(t, m.ops.modelOperationLoading)
+		require.False(t, m.modelOperation.loading)
 		require.Len(t, cmds, 1)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
 		require.True(t, ok)
@@ -178,7 +181,8 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 	t.Run("success dispatches init command", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 3
+		m.modelOperation.generation = 3
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(modelSelectResult{
 			Onboarding: true,
@@ -187,6 +191,7 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 		}, nil)
 
 		require.False(t, done)
+		require.True(t, m.modelOperation.isLoading(), "model selection success must retain ownership for agent initialization")
 		// As with providerConfiguredResult above: one command drives
 		// model/agent init, the other refreshes the sidebar's account
 		// label, since selecting a model can move to a provider whose
@@ -203,27 +208,27 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 2
-		m.ops.modelOperationLoading = true
+		m.modelOperation.generation = 2
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(agentModelInitializedMsg{generation: 1}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.modelOperationLoading)
+		require.True(t, m.modelOperation.loading)
 	})
 
 	t.Run("error reports and clears loading", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
-		m.ops.modelOperationLoading = true
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 		wantErr := errors.New("init failed")
 
 		cmds, done := m.updateSettings(agentModelInitializedMsg{Err: wantErr, generation: 1}, nil)
 
 		require.False(t, done)
-		require.False(t, m.ops.modelOperationLoading)
+		require.False(t, m.modelOperation.loading)
 		require.Len(t, cmds, 1)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
 		require.True(t, ok)
@@ -238,8 +243,8 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 			Models: []catwalk.Model{{ID: "m", Name: "Pretty Model"}},
 		})
 		m, _ := newSettingsUI(cfg)
-		m.ops.modelOperationGeneration = 1
-		m.ops.modelOperationLoading = true
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 		m.state = uiChat
 
 		cmds, done := m.updateSettings(agentModelInitializedMsg{
@@ -249,7 +254,7 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 		}, nil)
 
 		require.False(t, done)
-		require.False(t, m.ops.modelOperationLoading)
+		require.False(t, m.modelOperation.loading)
 		require.Equal(t, uiLanding, m.state)
 		require.Len(t, cmds, 2)
 		info, ok := firstMsg(cmds[0]).(util.InfoMsg)
@@ -261,7 +266,8 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 	t.Run("non-onboarding success without a catalog match reports the raw model id", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 		m.state = uiChat
 
 		cmds, done := m.updateSettings(agentModelInitializedMsg{
@@ -283,7 +289,8 @@ func TestUpdateSettings_ModelSettingUpdatedMsg(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 2
+		m.modelOperation.generation = 2
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(modelSettingUpdatedMsg{generation: 1}, nil)
 
@@ -294,7 +301,8 @@ func TestUpdateSettings_ModelSettingUpdatedMsg(t *testing.T) {
 	t.Run("error reports", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 		wantErr := errors.New("setting failed")
 
 		cmds, _ := m.updateSettings(modelSettingUpdatedMsg{Err: wantErr, generation: 1}, nil)
@@ -308,7 +316,8 @@ func TestUpdateSettings_ModelSettingUpdatedMsg(t *testing.T) {
 	t.Run("success reports info", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 
 		cmds, _ := m.updateSettings(modelSettingUpdatedMsg{Info: "effort set", generation: 1}, nil)
 
@@ -661,7 +670,8 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 2
+		m.modelOperation.generation = 2
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(importCopilotResult{generation: 1}, nil)
 
@@ -672,8 +682,8 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 	t.Run("provider not configured opens the auth dialog", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.modelOperationGeneration = 1
-		m.ops.modelOperationLoading = true
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.ModelsID})
 
 		cmds, done := m.updateSettings(importCopilotResult{
@@ -682,7 +692,7 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 		}, nil)
 
 		require.True(t, done)
-		require.False(t, m.ops.modelOperationLoading)
+		require.False(t, m.modelOperation.loading)
 		require.False(t, m.dialog.ContainsDialog(dialog.ModelsID))
 		// openAuthenticationDialog's API-key path opens the dialog
 		// synchronously and returns a nil cmd (no verification spinner to
@@ -696,7 +706,8 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 		cfg := newSettingsConfig()
 		cfg.Providers.Set("github-copilot", config.ProviderConfig{ID: "github-copilot"})
 		m, ws := newSettingsUI(cfg)
-		m.ops.modelOperationGeneration = 1
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(importCopilotResult{
 			providerID: "github-copilot",
@@ -705,6 +716,7 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 		}, nil)
 
 		require.True(t, done)
+		require.True(t, m.modelOperation.isLoading(), "configured Copilot import must retain ownership for model selection")
 		require.Len(t, cmds, 1)
 		msg := firstMsg(cmds[0])
 		result, ok := msg.(modelSelectResult)
@@ -721,7 +733,8 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 		cfg.Providers.Set("github-copilot", config.ProviderConfig{ID: "github-copilot"})
 		m, ws := newSettingsUI(cfg)
 		ws.updatePreferredModelErr = errors.New("disk full")
-		m.ops.modelOperationGeneration = 1
+		m.modelOperation.generation = 1
+		m.modelOperation.loading = true
 
 		cmds, done := m.updateSettings(importCopilotResult{
 			providerID: "github-copilot",

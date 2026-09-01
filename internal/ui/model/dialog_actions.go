@@ -97,7 +97,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		if m.ops.modelOperationLoading {
+		if m.modelOperation.isLoading() {
 			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
 			break
 		}
@@ -116,9 +116,11 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		if currentModel.Think {
 			status = "enabled"
 		}
-		m.ops.modelOperationLoading = true
-		m.ops.modelOperationGeneration++
-		generation := m.ops.modelOperationGeneration
+		generation, started := m.modelOperation.begin()
+		if !started {
+			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
+			break
+		}
 		ws := m.com.Workspace
 		ctx := m.com.Context()
 		cmds = append(cmds, updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
@@ -166,7 +168,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.ThemeID)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectReasoningEffort:
-		if m.ops.modelOperationLoading {
+		if m.modelOperation.isLoading() {
 			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
 			break
 		}
@@ -193,9 +195,11 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		currentModel.ReasoningEffort = msg.Effort
 		effort := msg.Effort
 
-		m.ops.modelOperationLoading = true
-		m.ops.modelOperationGeneration++
-		generation := m.ops.modelOperationGeneration
+		generation, started := m.modelOperation.begin()
+		if !started {
+			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
+			break
+		}
 		ws := m.com.Workspace
 		ctx := m.com.Context()
 		cmds = append(cmds, updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
@@ -385,7 +389,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			return dialog.ActionCustomProviderResult{ProviderID: msg.ID, Err: err}
 		})
 	case dialog.ActionProviderConfigured:
-		if m.ops.modelOperationLoading {
+		if m.modelOperation.isLoading() {
 			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
 			break
 		}
@@ -419,9 +423,11 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// Move UpdatePreferredModel into a tea.Cmd so it does not block
 		// Update.  The result (providerConfiguredResult) is handled in
 		// Update and only calls initAgentAndReportModel on success.
-		m.ops.modelOperationLoading = true
-		m.ops.modelOperationGeneration++
-		generation := m.ops.modelOperationGeneration
+		generation, started := m.modelOperation.begin()
+		if !started {
+			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
+			break
+		}
 		capturedModel := model
 		cmds = append(cmds, updatePreferredModelCmd(ws, capturedModel, func(err error) tea.Msg {
 			if err != nil {

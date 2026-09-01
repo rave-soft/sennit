@@ -12,19 +12,14 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
-// settingsOps holds the generation counters and in-flight flags for the
-// settings that apply asynchronously (model, theme, permission
-// responses). A generation is
-// bumped each time an operation starts, and the result handler discards
-// any reply whose generation doesn't match the latest one, so a stale
-// response from a superseded operation can't clobber a newer one.
+// settingsOps holds the generation counters and in-flight flags for settings
+// other than model operations. Each operation's owner rejects stale results
+// so an older response cannot clobber newer UI state.
 type settingsOps struct {
-	modelOperationGeneration uint64
-	modelOperationLoading    bool
-	themeGeneration          uint64
-	permissionLoading        bool
-	permissionGeneration     uint64
-	permissionID             string
+	themeGeneration      uint64
+	permissionLoading    bool
+	permissionGeneration uint64
+	permissionID         string
 }
 
 // transparentToggledMsg carries the result of a transparency-toggle config mutation.
@@ -119,11 +114,11 @@ type permissionResponseMsg struct {
 func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case providerConfiguredResult:
-		if msg.generation != m.ops.modelOperationGeneration {
+		if !m.modelOperation.owns(msg.generation) {
 			break
 		}
 		if msg.Err != nil {
-			m.ops.modelOperationLoading = false
+			m.modelOperation.complete(msg.generation)
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}
@@ -137,11 +132,11 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.Model.Provider))
 
 	case modelSelectResult:
-		if msg.generation != m.ops.modelOperationGeneration {
+		if !m.modelOperation.owns(msg.generation) {
 			break
 		}
 		if msg.Err != nil {
-			m.ops.modelOperationLoading = false
+			m.modelOperation.complete(msg.generation)
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}
@@ -154,10 +149,12 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.Model.Provider))
 
 	case agentModelInitializedMsg:
-		if msg.generation != m.ops.modelOperationGeneration {
+		if !m.modelOperation.owns(msg.generation) {
 			break
 		}
-		m.ops.modelOperationLoading = false
+		if !m.modelOperation.complete(msg.generation) {
+			break
+		}
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
@@ -174,10 +171,12 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Model changed to %s", modelName)), func() tea.Msg { return agentModelChangedMsg{} })
 
 	case modelSettingUpdatedMsg:
-		if msg.generation != m.ops.modelOperationGeneration {
+		if !m.modelOperation.owns(msg.generation) {
 			break
 		}
-		m.ops.modelOperationLoading = false
+		if !m.modelOperation.complete(msg.generation) {
+			break
+		}
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 		} else {
@@ -276,7 +275,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.updateNotificationBackend()
 
 	case importCopilotResult:
-		if msg.generation != m.ops.modelOperationGeneration {
+		if !m.modelOperation.owns(msg.generation) {
 			break
 		}
 		// ImportCopilot completed (successfully or not). Now check
@@ -288,7 +287,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			return ok
 		}
 		if !isConfigured() {
-			m.ops.modelOperationLoading = false
+			m.modelOperation.complete(msg.generation)
 			m.dialog.CloseDialog(dialog.ModelsID)
 			provider := catwalk.Provider{ID: catwalk.InferenceProvider(msg.providerID)}
 			if cmd := m.openAuthenticationDialog(provider, msg.model); cmd != nil {
