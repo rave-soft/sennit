@@ -55,10 +55,9 @@ type Notification struct {
 	SessionTitle string
 	Type         Type
 	ProviderID   string
-	// RunID, when non-empty, is the caller-supplied correlator
-	// (proto.AgentMessage.RunID) for the run that produced this
-	// notification. It lets observers attribute a TypeAgentError to a
-	// specific request rather than to any in-flight run on the
+	// RunID, when non-empty, is the caller-supplied correlator for the run
+	// that produced this notification. It lets observers attribute an agent
+	// error to a specific request rather than to any in-flight run on the
 	// session. Empty when no caller set one.
 	RunID string
 	// Message carries the error text for TypeAgentError. Other
@@ -83,10 +82,9 @@ type Notification struct {
 // are mutually exclusive in the success case but may overlap when a
 // cancel triggers a downstream error.
 //
-// RunID identifies the specific request that produced this event.
-// It is the value the caller set on `proto.AgentMessage.RunID` (or
-// equivalently propagated via agent.WithRunID on the context that
-// reaches the coordinator); empty when no caller set one. Filtering
+// RunID identifies the specific request that produced this event. It is the
+// value propagated via agent.WithRunID on the context that reaches the
+// coordinator; empty when no caller set one. Filtering
 // by RunID lets a client correlate a SendMessage call with its
 // terminal event even when the session is busy and other turns are
 // finishing on the same session.

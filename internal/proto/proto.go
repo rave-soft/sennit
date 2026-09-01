@@ -17,14 +17,6 @@ type QuestionChoice struct {
 	Description string `json:"description,omitempty"`
 }
 
-// AgentMessage represents a message sent to the agent.
-type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
-}
-
 // ShellCommandResponse represents the result of a direct shell command.
 type ShellCommandResponse struct {
 	Output   string `json:"output"`
