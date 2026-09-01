@@ -87,6 +87,9 @@ func (s *store) Create(ctx context.Context, params thread.CreateParams) (thread.
 
 func (s *store) Get(ctx context.Context, id string) (thread.Thread, error) {
 	dbThread, err := s.q.GetThread(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return thread.Thread{}, fmt.Errorf("%w: %q", thread.ErrNotFound, id)
+	}
 	if err != nil {
 		return thread.Thread{}, err
 	}
@@ -98,6 +101,9 @@ func (s *store) GetByName(ctx context.Context, name string) (thread.Thread, erro
 		Name:        name,
 		ProjectPath: s.projectPath,
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return thread.Thread{}, fmt.Errorf("%w: %q", thread.ErrNotFound, name)
+	}
 	if err != nil {
 		return thread.Thread{}, err
 	}

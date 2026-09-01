@@ -806,7 +806,7 @@ func TestBusyRefreshCarriesReadyAndModel(t *testing.T) {
 
 	ws := &countingWorkspace{
 		ready: true,
-		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "test-model", Provider: "prov"}},
+		model: workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "test-model", Provider: "prov"}},
 	}
 	m := newBusyUI(ws)
 	require.Nil(t, m.selectedModel(), "before any probe the model is unknown")
@@ -829,11 +829,11 @@ func TestAgentModelChangedRefreshesModel(t *testing.T) {
 
 	ws := &countingWorkspace{
 		ready: true,
-		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "new-model"}},
+		model: workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "new-model"}},
 	}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
-	m.wsCache.agentCache.Value.model = workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "old-model"}}
+	m.wsCache.agentCache.Value.model = workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "old-model"}}
 	ws.resetCounters()
 
 	_, cmd := m.Update(agentModelChangedMsg{})
@@ -855,11 +855,11 @@ func TestMCPStateChangedRefreshesModel(t *testing.T) {
 
 	ws := &countingWorkspace{
 		ready: true,
-		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "post-mcp-model"}},
+		model: workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "post-mcp-model"}},
 	}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
-	m.wsCache.agentCache.Value.model = workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "pre-mcp-model"}}
+	m.wsCache.agentCache.Value.model = workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "pre-mcp-model"}}
 	ws.resetCounters()
 
 	// handleStateChanged sequences the rebuild with agentModelChangedCmd;

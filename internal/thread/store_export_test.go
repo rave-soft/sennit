@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -112,6 +113,9 @@ func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, 
 func (s *testStoreDB) Get(ctx context.Context, id string) (Thread, error) {
 	dbThread, err := s.q.GetThread(ctx, id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Thread{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+		}
 		return Thread{}, err
 	}
 	return testFromDBItem(dbThread), nil
@@ -123,6 +127,9 @@ func (s *testStoreDB) GetByName(ctx context.Context, name string) (Thread, error
 		ProjectPath: s.projectPath,
 	})
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Thread{}, fmt.Errorf("%w: %s", ErrNotFound, name)
+		}
 		return Thread{}, err
 	}
 	return testFromDBItem(dbThread), nil

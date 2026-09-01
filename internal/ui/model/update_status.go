@@ -1,9 +1,7 @@
 package model
 
 import (
-	"fmt"
 	"log/slog"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -45,16 +43,6 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			slog.Error("Error reported", "error", msg.Msg)
 		}
 		cmds = append(cmds, m.status.ShowInfo(msg))
-	case workspace.UpdateAvailableMsg:
-		text := fmt.Sprintf("Sennit update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
-		if msg.IsDevelopment {
-			text = fmt.Sprintf("This is a development version of Sennit. The latest version is v%s.", msg.LatestVersion)
-		}
-		cmds = append(cmds, m.status.ShowInfo(util.InfoMsg{
-			Type: util.InfoTypeUpdate,
-			Msg:  text,
-			TTL:  10 * time.Second,
-		}))
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg(msg.Seq)
 	}

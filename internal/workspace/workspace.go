@@ -116,12 +116,6 @@ type AgentNotification struct {
 	AWSSOURL     string
 }
 
-type UpdateAvailableMsg struct {
-	CurrentVersion string
-	LatestVersion  string
-	IsDevelopment  bool
-}
-
 // LSPClientInfo is the frontend-facing LSP client state.
 //
 // It used to alias internal/lsp.ClientInfo, which carries a live *Client:
@@ -146,10 +140,27 @@ type LSPEvent struct {
 	DiagnosticCount int
 }
 
+// AgentCatalog contains the catalog properties the UI renders.
+type AgentCatalog struct {
+	ID              string
+	Name            string
+	CanReason       bool
+	ReasoningLevels []string
+	ContextWindow   int64
+}
+
+// AgentSelection contains the configured properties the UI renders.
+type AgentSelection struct {
+	Provider        string
+	Model           string
+	Think           bool
+	ReasoningEffort string
+}
+
 // AgentModel holds the model information exposed to the UI.
 type AgentModel struct {
-	CatalogCfg catwalk.Model
-	ModelCfg   config.SelectedModel
+	CatalogCfg AgentCatalog
+	ModelCfg   AgentSelection
 }
 
 // SessionStore covers session CRUD and message reads: everything the

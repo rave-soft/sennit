@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -29,8 +27,8 @@ func setPlanUsage(t *testing.T, u *UI, usage accounts.Usage) {
 
 func codexModel() *workspace.AgentModel {
 	return &workspace.AgentModel{
-		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
-		ModelCfg:   config.SelectedModel{Provider: planProvider, Model: "gpt-5.6-sol"},
+		CatalogCfg: workspace.AgentCatalog{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
+		ModelCfg:   workspace.AgentSelection{Provider: planProvider, Model: "gpt-5.6-sol"},
 	}
 }
 

@@ -19,6 +19,52 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type oauthPlatform struct {
+	ID          string
+	DisplayName string
+	Aliases     []string
+	Login       func(workspace.Workspace, bool, string) error
+	Logout      func(workspace.Workspace) error
+}
+
+var oauthPlatforms = []oauthPlatform{
+	{
+		ID: "copilot", DisplayName: "GitHub Copilot", Aliases: []string{"github", "github-copilot"},
+		Login:  func(ws workspace.Workspace, force bool, _ string) error { return loginCopilot(ws, force, false) },
+		Logout: func(ws workspace.Workspace) error { return logoutCopilot(ws) },
+	},
+	{
+		ID: "codex", DisplayName: "OpenAI Codex", Aliases: []string{"chatgpt", "openai-codex"},
+		Login: func(ws workspace.Workspace, force bool, proxyURL string) error {
+			return loginCodex(ws, force, proxyURL)
+		},
+		Logout: func(ws workspace.Workspace) error { return logoutCodex(ws) },
+	},
+}
+
+func resolveOAuthPlatform(value string) (oauthPlatform, bool) {
+	for _, platform := range oauthPlatforms {
+		if value == platform.ID {
+			return platform, true
+		}
+		for _, alias := range platform.Aliases {
+			if value == alias {
+				return platform, true
+			}
+		}
+	}
+	return oauthPlatform{}, false
+}
+
+func oauthPlatformCompletions() []cobra.Completion {
+	values := make([]cobra.Completion, 0, len(oauthPlatforms)*2)
+	for _, platform := range oauthPlatforms {
+		values = append(values, platform.ID)
+		values = append(values, platform.Aliases...)
+	}
+	return values
+}
+
 var loginCmd = &cobra.Command{
 	Aliases: []string{"auth"},
 	Use:     "login [platform]",
@@ -39,15 +85,8 @@ sennit login codex --proxy socks5://127.0.0.1:1080
 # Force re-authentication even if already logged in
 sennit login -f copilot
   `,
-	ValidArgs: []cobra.Completion{
-		"copilot",
-		"github",
-		"github-copilot",
-		"codex",
-		"chatgpt",
-		"openai-codex",
-	},
-	Args: cobra.MaximumNArgs(1),
+	ValidArgs: oauthPlatformCompletions(),
+	Args:      cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
@@ -60,19 +99,12 @@ sennit login -f copilot
 			provider = args[0]
 		}
 		force, _ := cmd.Flags().GetBool("force")
-		switch provider {
-		case "copilot", "github", "github-copilot":
-			// Plain `sennit login copilot` re-authenticates the existing
-			// account rather than deliberately adding a second one — see
-			// authAddOAuth, which is what `sennit accounts add copilot`
-			// goes through instead.
-			return loginCopilot(ws, force, false)
-		case "codex", "chatgpt", "openai-codex":
-			proxyURL, _ := cmd.Flags().GetString("proxy")
-			return loginCodex(ws, force, proxyURL)
-		default:
-			return fmt.Errorf("unknown platform: %s", args[0])
+		platform, ok := resolveOAuthPlatform(provider)
+		if !ok {
+			return fmt.Errorf("unknown platform: %s", provider)
 		}
+		proxyURL, _ := cmd.Flags().GetString("proxy")
+		return platform.Login(ws, force, proxyURL)
 	},
 }
 
@@ -103,6 +135,7 @@ type loginAccountWorkspace interface {
 	workspace.ConfigReader
 	workspace.ConfigFieldEditor
 	workspace.AccountRecorder
+	workspace.AccountLister
 }
 
 func recordCopilotAccount(ws workspace.AccountRecorder, token *oauth.Token, forceNewAccount bool) (accounts.Account, error) {

@@ -3,10 +3,8 @@ package model
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -38,8 +36,8 @@ func TestViewedModelPrefersTheChildSessionsOwnModel(t *testing.T) {
 	u := newCursorTestUI(t)
 	u.wsCache.agentCache.Value.ready = true
 	u.wsCache.agentCache.Value.model = workspace.AgentModel{
-		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
-		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
+		CatalogCfg: workspace.AgentCatalog{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
+		ModelCfg:   workspace.AgentSelection{Provider: "codex", Model: "gpt-5.6-sol"},
 	}
 	u.sess.modelUsed = sessionModelRef{sessionID: "child-1", provider: "anthropic", model: "claude-haiku-4-5"}
 
@@ -61,8 +59,8 @@ func TestSidebarShowsTheChildSessionsModel(t *testing.T) {
 	u := newCursorTestUI(t)
 	u.wsCache.agentCache.Value.ready = true
 	u.wsCache.agentCache.Value.model = workspace.AgentModel{
-		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
-		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
+		CatalogCfg: workspace.AgentCatalog{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
+		ModelCfg:   workspace.AgentSelection{Provider: "codex", Model: "gpt-5.6-sol"},
 	}
 	u.sess.navStack = []sessionNavFrame{{parentSessionID: "main", childSessionID: "child-1"}}
 	u.sess.modelUsed = sessionModelRef{sessionID: "child-1", provider: "anthropic", model: "claude-haiku-4-5"}
@@ -120,8 +118,8 @@ func TestViewedModelIgnoresAnotherSessionsReading(t *testing.T) {
 	u := newCursorTestUI(t)
 	u.wsCache.agentCache.Value.ready = true
 	u.wsCache.agentCache.Value.model = workspace.AgentModel{
-		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
-		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
+		CatalogCfg: workspace.AgentCatalog{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
+		ModelCfg:   workspace.AgentSelection{Provider: "codex", Model: "gpt-5.6-sol"},
 	}
 	u.sess.navStack = []sessionNavFrame{{
 		parentSessionID: "main",
@@ -156,8 +154,8 @@ func TestViewedModelFallsBackToTheSelectionWithoutAPin(t *testing.T) {
 	u := newCursorTestUI(t)
 	u.wsCache.agentCache.Value.ready = true
 	u.wsCache.agentCache.Value.model = workspace.AgentModel{
-		CatalogCfg: catwalk.Model{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
-		ModelCfg:   config.SelectedModel{Provider: "codex", Model: "gpt-5.6-sol"},
+		CatalogCfg: workspace.AgentCatalog{ID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"},
+		ModelCfg:   workspace.AgentSelection{Provider: "codex", Model: "gpt-5.6-sol"},
 	}
 	u.sess.navStack = []sessionNavFrame{{parentSessionID: "main", childSessionID: "child-1"}}
 	u.sess.modelUsed = sessionModelRef{sessionID: "main", provider: "anthropic", model: "claude-haiku-4-5"}

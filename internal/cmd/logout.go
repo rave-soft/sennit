@@ -30,15 +30,8 @@ sennit logout copilot
 # Sign out from OpenAI Codex
 sennit logout codex
   `,
-	ValidArgs: []cobra.Completion{
-		"copilot",
-		"github",
-		"github-copilot",
-		"codex",
-		"chatgpt",
-		"openai-codex",
-	},
-	Args: cobra.MaximumNArgs(1),
+	ValidArgs: oauthPlatformCompletions(),
+	Args:      cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
@@ -67,14 +60,11 @@ sennit logout codex
 			}
 		}
 
-		switch provider {
-		case "copilot", "github", "github-copilot":
-			return logoutCopilot(ws)
-		case "codex", "chatgpt", "openai-codex":
-			return logoutCodex(ws)
-		default:
+		platform, ok := resolveOAuthPlatform(provider)
+		if !ok {
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
+		return platform.Logout(ws)
 	},
 }
 
@@ -152,17 +142,10 @@ func pickLoggedInProvider(ws workspace.ConfigReader) string {
 		name string
 	}
 
-	// Only OAuth-based providers support login/logout. Keep this list in sync
-	// with the switch in RunE and the login command.
-	oauthProviders := map[string]string{
-		"copilot": "GitHub Copilot",
-		"codex":   "OpenAI Codex",
-	}
-
 	var loggedIn []loggedInProvider
-	for id, name := range oauthProviders {
-		if p, ok := cfg.Providers.Get(id); ok && p.OAuthToken != nil {
-			loggedIn = append(loggedIn, loggedInProvider{id: id, name: name})
+	for _, platform := range oauthPlatforms {
+		if p, ok := cfg.Providers.Get(platform.ID); ok && p.OAuthToken != nil {
+			loggedIn = append(loggedIn, loggedInProvider{id: platform.ID, name: platform.DisplayName})
 		}
 	}
 

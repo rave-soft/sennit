@@ -153,7 +153,7 @@ func (w *AppWorkspace) AgentModel() workspace.AgentModel {
 	cfg := w.store.Config()
 	if cfg == nil || cfg.Model.Model == "" {
 		m := coord.Model()
-		return workspace.AgentModel{CatalogCfg: m.CatalogCfg, ModelCfg: m.ModelCfg}
+		return agentModelForUI(m.CatalogCfg, m.ModelCfg)
 	}
 	selected := cfg.Model
 	// A model the catalog cannot resolve is still named by its id rather
@@ -167,7 +167,20 @@ func (w *AppWorkspace) AgentModel() workspace.AgentModel {
 			catalog = *known
 		}
 	}
-	return workspace.AgentModel{CatalogCfg: catalog, ModelCfg: selected}
+	return agentModelForUI(catalog, selected)
+}
+
+func agentModelForUI(catalog catwalk.Model, selected config.SelectedModel) workspace.AgentModel {
+	return workspace.AgentModel{
+		CatalogCfg: workspace.AgentCatalog{
+			ID: catalog.ID, Name: catalog.Name, CanReason: catalog.CanReason,
+			ReasoningLevels: catalog.ReasoningLevels, ContextWindow: catalog.ContextWindow,
+		},
+		ModelCfg: workspace.AgentSelection{
+			Provider: selected.Provider, Model: selected.Model, Think: selected.Think,
+			ReasoningEffort: selected.ReasoningEffort,
+		},
+	}
 }
 
 func (w *AppWorkspace) AgentIsReady() bool {

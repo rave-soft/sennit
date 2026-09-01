@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -118,4 +122,98 @@ func TestRestoreCodexProxyField_RollbackFailureDoesNotPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		restoreCodexProxyField(ws, true, "socks5://old-proxy:1080")
 	})
+}
+
+// codexLoginWorkspaceFake observes the account boundary used by loginCodex.
+// It intentionally has no file-store behavior: login must use only the
+// workspace's AccountLister and AccountRecorder capabilities.
+type codexLoginWorkspaceFake struct {
+	stubConfigAccessor
+	listResults   []codexLoginListResult
+	calls         []string
+	recorded      []accounts.LegacyCredential
+	setCalls      []setConfigFieldCall
+	recordAccount accounts.Account
+}
+
+type codexLoginListResult struct {
+	accounts []accounts.Account
+	err      error
+}
+
+func (w *codexLoginWorkspaceFake) ListAccounts(providerID string) ([]accounts.Account, error) {
+	w.calls = append(w.calls, "ListAccounts:"+providerID)
+	result := w.listResults[0]
+	w.listResults = w.listResults[1:]
+	return result.accounts, result.err
+}
+
+func (w *codexLoginWorkspaceFake) RecordAccount(_ config.Scope, providerID string, credential accounts.LegacyCredential) (accounts.Account, error) {
+	w.calls = append(w.calls, "RecordAccount:"+providerID)
+	w.recorded = append(w.recorded, credential)
+	return w.recordAccount, nil
+}
+
+func (w *codexLoginWorkspaceFake) SetConfigField(_ config.Scope, key string, value any) error {
+	w.setCalls = append(w.setCalls, setConfigFieldCall{key: key, value: value})
+	return nil
+}
+
+func stubCodexLoginNetwork(t *testing.T) {
+	t.Helper()
+	originalToken, originalModels := codexTokenForLogin, fetchCodexModels
+	codexTokenForLogin = func(context.Context, string) (*oauth.Token, error) {
+		return &oauth.Token{AccessToken: "access-token"}, nil
+	}
+	fetchCodexModels = func(context.Context, string, string, string) ([]catwalk.Model, error) {
+		return []catwalk.Model{{ID: "gpt-test", Name: "GPT Test"}}, nil
+	}
+	t.Cleanup(func() {
+		codexTokenForLogin, fetchCodexModels = originalToken, originalModels
+	})
+}
+
+func TestLoginCodex_ListsRecordsThenListsAccounts(t *testing.T) {
+	stubCodexLoginNetwork(t)
+	ws := &codexLoginWorkspaceFake{
+		listResults: []codexLoginListResult{
+			{accounts: []accounts.Account{{ID: "existing"}}},
+			{accounts: []accounts.Account{{ID: "existing"}, {ID: "new"}}},
+		},
+		recordAccount: accounts.Account{ID: "new", Label: "New account"},
+	}
+
+	require.NoError(t, loginCodex(ws, true, ""))
+	require.Equal(t, []string{
+		"ListAccounts:codex", "RecordAccount:codex", "ListAccounts:codex",
+	}, ws.calls)
+	require.Len(t, ws.recorded, 1)
+	require.Equal(t, "providers.codex.models", ws.setCalls[0].key)
+}
+
+func TestLoginCodex_FirstAccountListingFailureDoesNotRecord(t *testing.T) {
+	stubCodexLoginNetwork(t)
+	listErr := errors.New("account store unavailable")
+	ws := &codexLoginWorkspaceFake{listResults: []codexLoginListResult{{err: listErr}}}
+
+	err := loginCodex(ws, true, "")
+	require.ErrorIs(t, err, listErr)
+	require.Equal(t, []string{"ListAccounts:codex"}, ws.calls)
+	require.Empty(t, ws.recorded)
+}
+
+func TestLoginCodex_SecondAccountListingFailureKeepsSuccessfulLogin(t *testing.T) {
+	stubCodexLoginNetwork(t)
+	listErr := errors.New("account store unavailable")
+	ws := &codexLoginWorkspaceFake{
+		listResults:   []codexLoginListResult{{}, {err: listErr}},
+		recordAccount: accounts.Account{ID: "new", Label: "New account"},
+	}
+
+	require.NoError(t, loginCodex(ws, true, ""))
+	require.Equal(t, []string{
+		"ListAccounts:codex", "RecordAccount:codex", "ListAccounts:codex",
+	}, ws.calls)
+	require.Len(t, ws.recorded, 1, "the account is persisted before the summary re-list")
+	require.Len(t, ws.setCalls, 1, "the model list is persisted before the summary re-list")
 }

@@ -195,14 +195,25 @@ func (m *Manager) Get(ctx context.Context, idOrName string) (Thread, error) {
 // (see discardMerged), asking about one by name is now an ordinary thing
 // to do — the answer has to be a sentence, not a database message.
 func (m *Manager) resolve(ctx context.Context, idOrName string) (Thread, error) {
-	if st, err := m.store.Get(ctx, idOrName); err == nil {
+	st, err := m.store.Get(ctx, idOrName)
+	if err == nil {
 		return st, nil
 	}
-	st, err := m.store.GetByName(ctx, idOrName)
-	if err != nil {
+	if !isNotFound(err) {
+		return Thread{}, err
+	}
+	st, err = m.store.GetByName(ctx, idOrName)
+	if isNotFound(err) {
 		return Thread{}, fmt.Errorf("%w: %q", ErrNotFound, idOrName)
 	}
+	if err != nil {
+		return Thread{}, err
+	}
 	return st, nil
+}
+
+func isNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound)
 }
 
 // Create validates and dispatches a new thread: it records the thread,

@@ -14,10 +14,9 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/typeclass"
 
 	"charm.land/fantasy/providers/anthropic"
-	"charm.land/fantasy/providers/azure"
-	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
@@ -118,8 +117,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		reasoningEffort != "" &&
 		slices.Contains(model.CatalogCfg.ReasoningLevels, reasoningEffort)
 
-	switch providerCfg.Type {
-	case openai.Name, azure.Name:
+	switch typeclass.Of(providerCfg.Type) {
+	case typeclass.OpenAI, typeclass.Azure:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
@@ -146,7 +145,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		}
 
-	case anthropic.Name, bedrock.Name:
+	case typeclass.Anthropic, typeclass.Bedrock:
 		var (
 			_, hasEffort = mergedOptions["effort"]
 			_, hasThink  = mergedOptions["thinking"]
@@ -181,7 +180,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[anthropic.Name] = parsed
 		}
 
-	case openrouter.Name:
+	case typeclass.OpenRouter:
 		_, hasReasoning := mergedOptions["reasoning"]
 		if !hasReasoning && shouldSetEffort {
 			mergedOptions["reasoning"] = map[string]any{
@@ -194,7 +193,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[openrouter.Name] = parsed
 		}
 
-	case vercel.Name:
+	case typeclass.Vercel:
 		_, hasReasoning := mergedOptions["reasoning"]
 		if !hasReasoning && shouldSetEffort {
 			mergedOptions["reasoning"] = map[string]any{
@@ -207,7 +206,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[vercel.Name] = parsed
 		}
 
-	case google.Name:
+	case typeclass.Google:
 		_, hasReasoning := mergedOptions["thinking_config"]
 		if !hasReasoning && model.CatalogCfg.CanReason {
 			if strings.HasPrefix(model.CatalogCfg.ID, "gemini-2") {
@@ -227,7 +226,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[google.Name] = parsed
 		}
 
-	case openaicompat.Name:
+	case typeclass.OpenAICompat:
 		extraBody := make(map[string]any)
 
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]

@@ -106,9 +106,13 @@ func (w workspaceSessionLookup) List(ctx context.Context) ([]session.Session, er
 // multiple sessions), listing the candidates like Git does for an
 // ambiguous abbreviated commit hash.
 func resolveSessionID(ctx context.Context, lookup sessionByIDLister, id string) (session.Session, error) {
-	// Try direct UUID lookup first.
+	// Try direct UUID lookup first. Only a documented miss can fall back to
+	// hash-prefix resolution; a cancelled request or storage failure must reach
+	// the caller unchanged.
 	if s, err := lookup.Get(ctx, id); err == nil {
 		return s, nil
+	} else if !errors.Is(err, session.ErrNotFound) {
+		return session.Session{}, err
 	}
 
 	// List all sessions and check for hash matches.

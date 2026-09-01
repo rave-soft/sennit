@@ -56,7 +56,8 @@ type FinalizeTaskParams struct {
 	TerminalAt      int64
 }
 
-// Store persists threads. It is a thin persistence contract with no
+// Store persists threads. Get and GetByName return an error wrapping
+// ErrNotFound when no matching row exists. It is a thin persistence contract with no
 // pub/sub of its own — the thread manager owns lifecycle events built on
 // top of these operations. The sqlc-backed implementation lives in
 // internal/app/threadspawn (NewStore): this domain package declares the

@@ -1,8 +1,6 @@
 package thread
 
 import (
-	"database/sql"
-	"errors"
 	"testing"
 	"testing/synctest"
 
@@ -95,7 +93,7 @@ func TestStore_GetByName(t *testing.T) {
 	require.Equal(t, created, fetched)
 
 	_, err = store.GetByName(t.Context(), "does-not-exist")
-	require.ErrorIs(t, err, sql.ErrNoRows)
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestStore_DuplicateNameRejected(t *testing.T) {
@@ -185,12 +183,12 @@ func TestStore_Delete(t *testing.T) {
 	require.NoError(t, store.Delete(t.Context(), created.ID))
 
 	_, err = store.Get(t.Context(), created.ID)
-	require.True(t, errors.Is(err, sql.ErrNoRows))
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestStore_GetNotFound(t *testing.T) {
 	store := newTestStore(t)
 
 	_, err := store.Get(t.Context(), "does-not-exist")
-	require.ErrorIs(t, err, sql.ErrNoRows)
+	require.ErrorIs(t, err, ErrNotFound)
 }

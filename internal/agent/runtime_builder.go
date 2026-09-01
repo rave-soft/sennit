@@ -49,6 +49,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/providers/typeclass"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
@@ -1633,7 +1634,7 @@ func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderCon
 	}
 
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && b.isAnthropicThinking(model) {
+	if typeclass.Of(providerCfg.Type) == typeclass.Anthropic && b.isAnthropicThinking(model) {
 		if v, ok := headers["anthropic-beta"]; ok {
 			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
 		} else {
@@ -1664,24 +1665,24 @@ func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderCon
 		}
 	}
 
-	switch providerCfg.Type {
-	case openai.Name:
+	switch typeclass.Of(providerCfg.Type) {
+	case typeclass.OpenAI:
 		return b.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case anthropic.Name:
+	case typeclass.Anthropic:
 		return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case openrouter.Name:
+	case typeclass.OpenRouter:
 		return b.buildOpenrouterProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case vercel.Name:
+	case typeclass.Vercel:
 		return b.buildVercelProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case azure.Name:
+	case typeclass.Azure:
 		return b.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case bedrock.Name:
+	case typeclass.Bedrock:
 		return b.buildBedrockProvider(apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case google.Name:
+	case typeclass.Google:
 		return b.buildGoogleProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case "google-vertex":
+	case typeclass.GoogleVertex:
 		return b.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.ProxyURL, snapshot.config.Options.Debug)
-	case openaicompat.Name:
+	case typeclass.OpenAICompat:
 		switch providerCfg.ID {
 		case string(catwalk.InferenceProviderZAI):
 			// Clone before writing: providerCfg.ExtraBody is shared with

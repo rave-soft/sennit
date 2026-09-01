@@ -23,13 +23,6 @@ import (
 	"github.com/rave-soft/sennit/internal/stats/gather"
 )
 
-// UpdateAvailableMsg is sent when a new version is available.
-type UpdateAvailableMsg struct {
-	CurrentVersion string
-	LatestVersion  string
-	IsDevelopment  bool
-}
-
 // App is the top-level wiring for one workspace: the composition root New
 // assembles. It is a thin facade over three groupings, each embedded
 // anonymously so their fields/methods promote onto *App unchanged: the
@@ -108,10 +101,6 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	if err := clipboard.Init(); err != nil {
 		slog.Warn("Clipboard initialization failed", "error", err)
 	}
-
-	// Check for updates in the background.
-	// Upstream started a background update check against GitHub here. Sennit
-	// makes no outbound calls of its own.
 
 	// Arm initialization synchronously before launching it so WaitForInit
 	// blocks for the in-flight init instead of racing the goroutine and

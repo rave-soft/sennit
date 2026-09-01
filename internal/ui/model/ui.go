@@ -671,7 +671,6 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 
 	register((*UI).updateStatus,
 		reflect.TypeFor[util.InfoMsg](), reflect.TypeFor[util.ClearStatusMsg](),
-		reflect.TypeFor[workspace.UpdateAvailableMsg](),
 		reflect.TypeFor[pubsub.Event[workspace.AgentNotification]](), reflect.TypeFor[cancelTimerExpiredMsg]())
 
 	register((*UI).updateThreads,

@@ -22,6 +22,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/providers/typeclass"
 	"github.com/rave-soft/sennit/internal/proxyhttp"
 )
 
@@ -373,8 +374,8 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		return nil
 	}
 
-	switch c.Type {
-	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
+	switch typeclass.Of(c.Type) {
+	case typeclass.OpenAI, typeclass.OpenAICompat, typeclass.OpenRouter:
 		baseURL, err := resolver.ResolveValue(c.BaseURL)
 		if err != nil {
 			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
@@ -391,7 +392,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		}
 
 		headers["Authorization"] = "Bearer " + apiKey
-	case catwalk.TypeAnthropic:
+	case typeclass.Anthropic:
 		baseURL, err := resolver.ResolveValue(c.BaseURL)
 		if err != nil {
 			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
@@ -407,7 +408,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
-	case catwalk.TypeGoogle:
+	case typeclass.Google:
 		baseURL, err := resolver.ResolveValue(c.BaseURL)
 		if err != nil {
 			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
@@ -418,7 +419,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		// in the UI and logs.
 		testURL = baseURL + "/v1beta/models"
 		headers["x-goog-api-key"] = apiKey
-	case catwalk.TypeBedrock:
+	case typeclass.Bedrock:
 		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
 		// theory use, but apparently the authorization is region-specific,
 		// so it's not so trivial.
@@ -426,7 +427,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return nil
 		}
 		return errors.New("not a valid bedrock api key")
-	case catwalk.TypeVercel:
+	case typeclass.Vercel:
 		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
 		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
 			return nil

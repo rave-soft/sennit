@@ -3,8 +3,6 @@ package model
 import (
 	"strings"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -127,16 +125,16 @@ func (s *sessionState) recordedModel(com *common.Common, frame sessionNavFrame) 
 		return nil
 	}
 
-	catalog := catwalk.Model{ID: model, Name: model}
+	catalog := workspace.AgentCatalog{ID: model, Name: model}
 	// A config without providers is a config that can resolve nothing, and
 	// that is the shape a UI built without a workspace has.
 	if cfg := com.Config(); cfg != nil && cfg.Providers != nil {
 		if known := cfg.GetModel(provider, model); known != nil {
-			catalog = *known
+			catalog = workspace.AgentCatalog{ID: known.ID, Name: known.Name, CanReason: known.CanReason, ReasoningLevels: known.ReasoningLevels, ContextWindow: known.ContextWindow}
 		}
 	}
 	// The messages record no effort, but the delegation that started this
 	// session does, and it is the effort those messages were produced at.
-	selected := config.SelectedModel{Provider: provider, Model: model, ReasoningEffort: frame.effort}
+	selected := workspace.AgentSelection{Provider: provider, Model: model, ReasoningEffort: frame.effort}
 	return &workspace.AgentModel{CatalogCfg: catalog, ModelCfg: selected}
 }

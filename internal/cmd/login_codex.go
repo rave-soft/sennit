@@ -27,7 +27,15 @@ type codexLoginWorkspace interface {
 	workspace.ConfigReader
 	workspace.ConfigFieldEditor
 	workspace.AccountRecorder
+	workspace.AccountLister
 }
+
+// Package variables keep the workspace contract testable without sending
+// sign-in tests through the browser flow or the live Codex endpoint.
+var (
+	codexTokenForLogin = codexToken
+	fetchCodexModels   = codex.FetchModels
+)
 
 func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 	loginCtx, stop := getLoginContext()
@@ -60,7 +68,7 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 		}
 	}
 
-	token, err := codexToken(loginCtx, proxyURL)
+	token, err := codexTokenForLogin(loginCtx, proxyURL)
 	if err != nil {
 		return err
 	}
@@ -107,14 +115,13 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 	}
 
 	accountID := codex.AccountID(token.AccessToken)
-	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
 	// Counted before RecordAccount so the summary below can tell "a new
 	// account appeared" (this login, or the one-time migration of a
 	// pre-existing single credential, added an entry) from "the same
 	// count as before" (this login only refreshed an account already on
 	// file) — RecordAccount itself reports neither, only the resulting
 	// Account.
-	before, err := accStore.List(codex.ProviderID)
+	before, err := ws.ListAccounts(codex.ProviderID)
 	if err != nil {
 		restoreCodexProxyField(ws, hadProxyURL, previousProxyURL)
 		return fmt.Errorf("listing existing Codex accounts: %w", err)
@@ -133,7 +140,7 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 	// ships without any and the list is fetched here. A failure is not fatal
 	// to the sign-in itself: the credentials are already saved, and the list
 	// can be refreshed later.
-	models, err := codex.FetchModels(loginCtx, proxyURL, token.AccessToken, accountID)
+	models, err := fetchCodexModels(loginCtx, proxyURL, token.AccessToken, accountID)
 	if err != nil {
 		fmt.Println()
 		fmt.Println("Signed in, but the model list could not be fetched:", err)
@@ -144,7 +151,7 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 		return err
 	}
 
-	after, err := accStore.List(codex.ProviderID)
+	after, err := ws.ListAccounts(codex.ProviderID)
 	if err != nil {
 		// The sign-in itself already succeeded; a failure to re-list
 		// afterward only costs the account count in the summary line.

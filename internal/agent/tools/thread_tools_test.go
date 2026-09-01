@@ -194,7 +194,7 @@ func (s *fakeStore) Get(_ context.Context, id string) (thread.Thread, error) {
 	defer s.mu.Unlock()
 	st, ok := s.byID[id]
 	if !ok {
-		return thread.Thread{}, fmt.Errorf("thread: not found: %s", id)
+		return thread.Thread{}, fmt.Errorf("%w: %s", thread.ErrNotFound, id)
 	}
 	return st, nil
 }
@@ -204,7 +204,7 @@ func (s *fakeStore) GetByName(ctx context.Context, name string) (thread.Thread, 
 	id, ok := s.names[name]
 	s.mu.Unlock()
 	if !ok {
-		return thread.Thread{}, fmt.Errorf("thread: not found: %s", name)
+		return thread.Thread{}, fmt.Errorf("%w: %s", thread.ErrNotFound, name)
 	}
 	return s.Get(ctx, id)
 }
@@ -230,7 +230,7 @@ func (s *fakeStore) SetStatus(_ context.Context, id string, p thread.SetStatusPa
 	defer s.mu.Unlock()
 	st, ok := s.byID[id]
 	if !ok {
-		return thread.Thread{}, fmt.Errorf("thread: not found: %s", id)
+		return thread.Thread{}, fmt.Errorf("%w: %s", thread.ErrNotFound, id)
 	}
 	st.Status = p.Status
 	st.Error = p.Error
@@ -245,7 +245,7 @@ func (s *fakeStore) SetSession(_ context.Context, id, sessionID string) (thread.
 	defer s.mu.Unlock()
 	st, ok := s.byID[id]
 	if !ok {
-		return thread.Thread{}, fmt.Errorf("thread: not found: %s", id)
+		return thread.Thread{}, fmt.Errorf("%w: %s", thread.ErrNotFound, id)
 	}
 	st.SessionID = sessionID
 	s.byID[id] = st
