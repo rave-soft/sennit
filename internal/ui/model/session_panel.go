@@ -342,21 +342,51 @@ func delegationBlockStatusText(t proto.Thread) string {
 // started before this session was reloaded far enough back to hold it, or
 // by a delegation of its own rather than by this transcript.
 func (w *widgets) delegationBlockName(com *common.Common, t proto.Thread) string {
-	if com == nil || com.Workspace == nil {
-		return defaultDelegationBlockName
-	}
-	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(t.SessionID)
-	if !ok {
-		return defaultDelegationBlockName
-	}
-	item, ok := w.chat.MessageItem(toolCallID).(chat.ToolMessageItem)
-	if !ok {
+	item := w.delegationChatItem(com, t)
+	if item == nil {
 		return defaultDelegationBlockName
 	}
 	if name, _, _, _, _ := delegationInfo(item); name != "" {
 		return name
 	}
 	return defaultDelegationBlockName
+}
+
+// delegationBlockTask is the one line a delegation's row says about the
+// work. The chat block for the same delegation resolved it once as the
+// call streamed in (see chat.DelegationLabeler), so the row shows exactly
+// what the transcript shows - the caller's own `description` when the
+// call carried one - without re-reading the tool call on every frame.
+//
+// The goal is the fallback, for a delegation whose chat item is not
+// resolvable from here: a thread, a task recovered after a restart, or a
+// row drawn before its message reached the list.
+func (w *widgets) delegationBlockTask(com *common.Common, t proto.Thread) string {
+	if item := w.delegationChatItem(com, t); item != nil {
+		if labeler, ok := item.(chat.DelegationLabeler); ok {
+			if label := labeler.DelegationLabel(); label != "" {
+				return label
+			}
+		}
+	}
+	return threads.DockGoalHeadline(w.delegationBlockName(com, t), t.Goal)
+}
+
+// delegationChatItem resolves the chat transcript item a delegation was
+// started from, or nil when it cannot be found.
+func (w *widgets) delegationChatItem(com *common.Common, t proto.Thread) chat.ToolMessageItem {
+	if com == nil || com.Workspace == nil {
+		return nil
+	}
+	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(t.SessionID)
+	if !ok {
+		return nil
+	}
+	item, ok := w.chat.MessageItem(toolCallID).(chat.ToolMessageItem)
+	if !ok {
+		return nil
+	}
+	return item
 }
 
 // defaultDelegationBlockName is what a delegation block is called when its
@@ -1000,9 +1030,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		m.panel.hoveredAgent, panelBlockDrawSpec{
 			count: len(plan.agents), more: plan.agentsMore, footer: "…and %d more agents",
 			name: func(i int) string { return m.delegationBlockName(m.com, plan.agents[i]) },
-			task: func(i int) string {
-				return threads.DockGoalHeadline(m.delegationBlockName(m.com, plan.agents[i]), plan.agents[i].Goal)
-			},
+			task: func(i int) string { return m.delegationBlockTask(m.com, plan.agents[i]) },
 			line2: func(i int) string {
 				item := plan.agents[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")

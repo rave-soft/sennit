@@ -1060,3 +1060,38 @@ func TestAgentToolMessageItem_LegacyPerAgentToolNameStillRenders(t *testing.T) {
 	require.Equal(t, "reviewer", name)
 	require.Equal(t, "small-model", model)
 }
+
+// TestAgentToolMessageItem_LabelPrefersTheCallersDescription covers the
+// line every view shows about a delegation. The `description` parameter
+// is the caller's own three-to-five word name for the work, written for
+// exactly this; reading a line out of a structured prompt is what to do
+// when there isn't one.
+func TestAgentToolMessageItem_LabelPrefersTheCallersDescription(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	const prompt = `ROLE: middle-developer\nTASK: keep LSP restarts isolated\nORIGINAL USER REQUEST:\n...`
+
+	withDescription := NewAgentToolMessageItem(&sty, message.ToolCall{
+		ID: "a1", Name: "agent", Finished: true,
+		Input: `{"prompt":"` + prompt + `","subagent_type":"middle-developer","description":"Fix the workspace boundary"}`,
+	}, nil, false, nil)
+	require.Equal(t, "Fix the workspace boundary", withDescription.DelegationLabel())
+
+	// No description: the prompt's own line, with the scaffolding that
+	// only repeats the agent's name skipped.
+	withoutDescription := NewAgentToolMessageItem(&sty, message.ToolCall{
+		ID: "a2", Name: "agent", Finished: true,
+		Input: `{"prompt":"` + prompt + `","subagent_type":"middle-developer"}`,
+	}, nil, false, nil)
+	require.Equal(t, "keep LSP restarts isolated", withoutDescription.DelegationLabel())
+
+	// And it follows the streamed input, like the name does.
+	partial := NewAgentToolMessageItem(&sty, message.ToolCall{ID: "a3", Name: "agent", Input: `{"pro`}, nil, false, nil)
+	require.Empty(t, partial.DelegationLabel())
+	partial.SetToolCall(message.ToolCall{
+		ID: "a3", Name: "agent", Finished: true,
+		Input: `{"prompt":"do it","description":"Do the thing"}`,
+	})
+	require.Equal(t, "Do the thing", partial.DelegationLabel())
+}

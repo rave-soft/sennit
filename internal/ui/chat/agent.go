@@ -292,6 +292,11 @@ type AgentToolMessageItem struct {
 	// item is built from the first streamed delta of the tool call, whose
 	// input is usually still partial JSON — see SetToolCall.
 	cfg CustomAgentConfig
+	// headline is the one line saying what this delegation was asked to
+	// do, resolved alongside the name (see resolveIdentity) rather than
+	// per render: every view that shows a delegation wants it, and the
+	// session panel redraws on every animation tick.
+	headline string
 }
 
 var (
@@ -347,12 +352,15 @@ func (t *AgentToolMessageItem) SetToolCall(tc message.ToolCall) {
 	t.baseToolMessageItem.SetToolCall(tc)
 }
 
-// resolveIdentity sets the display name and any per-agent model/effort
-// override from tc. The built-in "task"/"coder" roles never carry an
-// override (see setupAgents in internal/config/agents.go), so looking
-// them up misses harmlessly.
+// resolveIdentity sets the display name, the headline, and any per-agent
+// model/effort override from tc. The built-in "task"/"coder" roles never
+// carry an override (see setupAgents in internal/config/agents.go), so
+// looking them up misses harmlessly.
 func (t *AgentToolMessageItem) resolveIdentity(tc message.ToolCall) {
 	t.displayName = agentDisplayName(tc.Name, tc.Input)
+	var params tools.AgentParams
+	_ = json.Unmarshal([]byte(tc.Input), &params)
+	t.headline = delegationLabel(t.displayName, params.Description, params.Prompt)
 	t.model, t.effort = "", ""
 	if t.cfg == nil {
 		return
@@ -508,11 +516,6 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
-	var params tools.AgentParams
-	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
-
-	prompt := params.Prompt
-
 	// Every delegation tool returns synchronously
 	// with an acknowledgment, not the delegation's actual answer — HasResult
 	// is already true the moment this block first renders, well before the
@@ -524,7 +527,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if opts.Result != nil {
 		var bgMeta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &bgMeta); err == nil && bgMeta.TaskID != "" {
-			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, prompt,
+			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, r.agent.headline,
 				r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
 			return clickableItemHover(sty, content, width, opts.Hovered)
 		}
@@ -542,7 +545,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// it), so this is really just "!opts.Compact": a nested (compact)
 	// delegation falls through to the bare header below instead.
 	if !opts.Compact {
-		content := renderCollapsedDelegation(sty, width, r.agent.displayName, opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
+		content := renderCollapsedDelegation(sty, width, r.agent.displayName, opts, r.agent.headline, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
@@ -703,8 +706,9 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 // AgentToolMessageItem.ToggleExpanded.
 
 // renderCollapsedDelegation renders a finished (or canceled) delegation as
-// a compact block: a header line (status icon, tool name, first line of
-// the prompt/URL), an optional model/effort subtitle, an outcome line
+// a compact block: a header line (status icon, tool name, the one line
+// saying what it was asked to do — see delegationLabel), an optional
+// model/effort subtitle, an outcome line
 // (step count, duration when known, token usage), and — only when the
 // delegation produced output — one line previewing the start of the
 // result. model/effort are "" for agentic_fetch, which has no per-agent
@@ -714,13 +718,13 @@ func renderCollapsedDelegation(
 	width int,
 	name string,
 	opts *ToolRenderOpts,
-	headerParam string,
+	headline string,
 	nestedTools []ToolMessageItem,
 	duration time.Duration,
 	promptTokens, completionTokens int64,
 	model, effort string,
 ) string {
-	lines := []string{toolHeader(sty, opts.Status, name, width, opts, delegationHeadline(name, headerParam))}
+	lines := []string{toolHeader(sty, opts.Status, name, width, opts, headline)}
 
 	if subtitle := renderAgentSubtitle(sty, width, model, effort); subtitle != "" {
 		lines = append(lines, subtitle)
@@ -761,12 +765,12 @@ func renderBackgroundDispatch(
 	width int,
 	name string,
 	opts *ToolRenderOpts,
-	prompt string,
+	headline string,
 	startTime time.Time,
 	nestedTools []ToolMessageItem,
 	promptTokens, completionTokens int64,
 ) string {
-	header := toolHeader(sty, opts.Status, name, width, opts, delegationHeadline(name, prompt))
+	header := toolHeader(sty, opts.Status, name, width, opts, headline)
 	if opts.Compact {
 		return header
 	}

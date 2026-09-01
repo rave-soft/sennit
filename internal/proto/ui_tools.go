@@ -42,8 +42,13 @@ const (
 	BashNoOutput             = "no output"
 )
 
+// AgentParams mirrors internal/agent's own AgentParams for the UI: the
+// work, which agent was asked to do it, and the caller's own short label
+// for the delegation.
 type AgentParams struct {
-	Prompt string `json:"prompt"`
+	Prompt       string `json:"prompt"`
+	SubagentType string `json:"subagent_type,omitempty"`
+	Description  string `json:"description,omitempty"`
 }
 
 type AgentBackgroundResponseMetadata struct {
