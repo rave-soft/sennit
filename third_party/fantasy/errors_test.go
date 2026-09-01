@@ -27,6 +27,14 @@ func TestIsTransportError(t *testing.T) {
 		{"x/net StreamError", http2.StreamError{StreamID: 1, Code: http2.ErrCodeInternal}, true},
 		{"x/net ConnectionError", http2.ConnectionError(http2.ErrCodeInternal), true},
 		{"x/net GoAwayError", http2.GoAwayError{LastStreamID: 1, ErrCode: http2.ErrCodeInternal}, true},
+		// net/http's own bundled http2 keeps its GoAwayError unexported,
+		// so this is the only shape a GOAWAY actually arrives in from a
+		// provider call - matched by message, not by type. NO_ERROR is
+		// the common case: the server is recycling the connection, which
+		// is precisely when retrying is right.
+		{"stdlib GoAwayError message", newTestError(`http2: server sent GOAWAY and closed the connection; LastStreamID=3, ErrCode=NO_ERROR, debug=""`), true},
+		{"wrapped stdlib GoAwayError", fmt.Errorf("stream: %w", newTestError(`http2: server sent GOAWAY and closed the connection; LastStreamID=1, ErrCode=ENHANCE_YOUR_CALM, debug=""`)), true},
+		{"prose mentioning goaway", newTestError("the model explained what GOAWAY means"), false},
 	}
 
 	for _, tt := range tests {

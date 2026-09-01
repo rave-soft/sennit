@@ -140,6 +140,15 @@ func NewIncompleteStreamError() *ProviderError {
 var http2TransportErrorFragments = []string{
 	"stream error:",     // RST_STREAM: INTERNAL_ERROR, REFUSED_STREAM, CANCEL, etc.
 	"connection error:", // connection-level protocol error
+	// GOAWAY. The type match below covers x/net/http2's GoAwayError, but
+	// net/http speaks HTTP/2 through its own bundled copy, whose
+	// http2GoAwayError is unexported - so the error that actually reaches
+	// a provider call is only this string. Without the fragment, the one
+	// frame a server sends to say "finish up on a new connection" -
+	// routinely with ErrCode=NO_ERROR, an idle or max-age recycle - was
+	// classified as an application failure and killed the turn instead of
+	// being retried. Both copies format it identically.
+	"http2: server sent GOAWAY",
 }
 
 // IsTransportError reports whether err or any error in its chain is a
