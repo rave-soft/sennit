@@ -33,9 +33,14 @@ type DownloadPermissionsParams = proto.DownloadPermissionsParams
 
 const DownloadToolName = "download"
 
-// defaultDownloadTimeout bounds a download call that didn't specify a
-// timeout, now that the http.Client itself carries none - see NewDownloadTool.
-const defaultDownloadTimeout = 5 * time.Minute
+const (
+	// MaxDownloadSize limits downloads so an untrusted response cannot fill the disk.
+	MaxDownloadSize = 100 * 1024 * 1024 // 100MB
+
+	// defaultDownloadTimeout bounds a download call that didn't specify a
+	// timeout, now that the http.Client itself carries none - see NewDownloadTool.
+	defaultDownloadTimeout = 5 * time.Minute
+)
 
 //go:embed download.md.tpl
 var downloadDescriptionTmpl []byte
@@ -46,11 +51,13 @@ var downloadDescriptionTpl = template.Must(
 )
 
 type downloadDescriptionData struct {
+	MaxDownloadSizeMB  int
 	MaxDownloadTimeout int
 }
 
 func downloadDescription() string {
 	return renderTemplate(downloadDescriptionTpl, downloadDescriptionData{
+		MaxDownloadSizeMB:  MaxDownloadSize / (1024 * 1024),
 		MaxDownloadTimeout: 600,
 	})
 }
@@ -148,6 +155,9 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 			if resp.StatusCode != http.StatusOK {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
 			}
+			if resp.ContentLength > MaxDownloadSize {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Download exceeds the maximum size of %d bytes", MaxDownloadSize)), nil
+			}
 
 			// Create parent directories if they don't exist
 			destDir := filepath.Dir(filePath)
@@ -180,12 +190,16 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 				}
 			}()
 
-			// Copy data without an explicit size limit.
-			// The overall download is still constrained by the per-call
-			// context timeout above and any upstream server limits.
-			bytesWritten, err := io.Copy(outFile, resp.Body)
+			// Read one byte past the cap to distinguish a body exactly at the
+			// limit from one that exceeds it. The temporary file is removed by
+			// the deferred cleanup on every failure, leaving an existing target
+			// untouched.
+			bytesWritten, err := io.Copy(outFile, io.LimitReader(resp.Body, MaxDownloadSize+1))
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+			}
+			if bytesWritten > MaxDownloadSize {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Download exceeds the maximum size of %d bytes", MaxDownloadSize)), nil
 			}
 			if err := outFile.Close(); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)

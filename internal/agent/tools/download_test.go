@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -73,6 +74,74 @@ func TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace(t *testing.T) {
 // low-Timeout client stands in for that old capped default and must still
 // get cut short; a tool built with client: nil - the actual production
 // default-construction path - must not.
+func TestDownloadTool_RejectsOversizedContentLengthBeforeCreatingFile(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.FormatInt(int64(MaxDownloadSize+1), 10))
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	workdir := t.TempDir()
+	destination := filepath.Join(workdir, "existing.txt")
+	require.NoError(t, os.WriteFile(destination, []byte("keep this content"), 0o644))
+
+	tool := NewDownloadTool(&mockPermissionService{}, workdir, nil)
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  DownloadToolName,
+		Input: mustJSONInput(t, DownloadParams{URL: server.URL, FilePath: "existing.txt"}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "maximum size")
+
+	content, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.Equal(t, "keep this content", string(content))
+	entries, err := os.ReadDir(workdir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "an oversized Content-Length must not create a temporary file")
+}
+
+func TestDownloadTool_RejectsOversizedChunkedResponseAndCleansUp(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// No Content-Length makes net/http use chunked transfer encoding.
+		chunk := make([]byte, 32*1024)
+		for remaining := MaxDownloadSize + 1; remaining > 0; remaining -= len(chunk) {
+			if remaining < len(chunk) {
+				chunk = chunk[:remaining]
+			}
+			_, _ = w.Write(chunk)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	workdir := t.TempDir()
+	destination := filepath.Join(workdir, "existing.txt")
+	require.NoError(t, os.WriteFile(destination, []byte("keep this content"), 0o644))
+
+	tool := NewDownloadTool(&mockPermissionService{}, workdir, nil)
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  DownloadToolName,
+		Input: mustJSONInput(t, DownloadParams{URL: server.URL, FilePath: "existing.txt"}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "maximum size")
+
+	content, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.Equal(t, "keep this content", string(content))
+	entries, err := os.ReadDir(workdir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "temporary file must be removed after an oversized chunked response")
+}
+
 func TestDownloadTool_DefaultClientDoesNotCapBelowCallerTimeout(t *testing.T) {
 	t.Parallel()
 
