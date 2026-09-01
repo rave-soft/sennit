@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 const GlobToolName = "glob"
@@ -36,12 +37,8 @@ func globDescription() string {
 	})
 }
 
-type GlobParams struct {
-	Pattern    string `json:"pattern" description:"The glob pattern to match files against"`
-	Path       string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
-	MaxResults int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
-	Cursor     string `json:"cursor,omitempty" description:"Stable continuation token returned by a previous response"`
-}
+// GlobParams is the canonical proto data shape used by both the runtime and UI.
+type GlobParams = proto.GlobParams
 
 type GlobResponseMetadata struct {
 	NumberOfFiles int    `json:"number_of_files"`

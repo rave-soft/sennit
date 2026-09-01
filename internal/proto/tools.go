@@ -120,9 +120,14 @@ type AgenticFetchPermissionsParams struct {
 const GlobToolName = "glob"
 
 // GlobParams represents the parameters for the glob tool.
+//
+// It is the canonical data-only definition and is aliased by
+// internal/agent/tools so the UI and runtime cannot drift.
 type GlobParams struct {
-	Pattern string `json:"pattern"`
-	Path    string `json:"path"`
+	Pattern    string `json:"pattern" description:"The glob pattern to match files against"`
+	Path       string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+	MaxResults int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
+	Cursor     string `json:"cursor,omitempty" description:"Stable continuation token returned by a previous response"`
 }
 
 // GlobResponseMetadata represents the metadata for a glob tool response.
@@ -142,12 +147,20 @@ type GrepResponseMetadata struct {
 const RipgrepToolName = "ripgrep"
 
 // RipgrepParams represents the parameters for the ripgrep tool.
+//
+// It is the canonical data-only definition and is aliased by
+// internal/agent/tools so the UI and runtime cannot drift.
 type RipgrepParams struct {
-	Pattern         string `json:"pattern"`
-	Path            string `json:"path"`
-	Include         string `json:"include"`
-	LiteralText     bool   `json:"literal_text"`
-	CaseInsensitive bool   `json:"case_insensitive"`
+	Pattern         string `json:"pattern" description:"The regex pattern (Rust regex syntax) to search for in file contents"`
+	Path            string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+	Include         string `json:"include,omitempty" description:"Glob pattern for files to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")"`
+	LiteralText     bool   `json:"literal_text,omitempty" description:"If true, the pattern will be treated as literal text with special regex characters escaped. Default is false."`
+	CaseInsensitive bool   `json:"case_insensitive,omitempty" description:"If true, the search is case-insensitive. Default is false."`
+	MaxResults      int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
+	BeforeContext   int    `json:"before_context,omitempty" description:"Lines before each match (0-30)"`
+	AfterContext    int    `json:"after_context,omitempty" description:"Lines after each match (0-30)"`
+	Cursor          string `json:"cursor,omitempty" description:"Stable continuation token"`
+	Sort            string `json:"sort,omitempty" description:"Sort by path or mtime" enum:"path,mtime"`
 }
 
 const LSToolName = "ls"

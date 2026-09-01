@@ -18,20 +18,11 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
-type RipgrepParams struct {
-	Pattern         string `json:"pattern" description:"The regex pattern (Rust regex syntax) to search for in file contents"`
-	Path            string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
-	Include         string `json:"include,omitempty" description:"Glob pattern for files to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")"`
-	LiteralText     bool   `json:"literal_text,omitempty" description:"If true, the pattern will be treated as literal text with special regex characters escaped. Default is false."`
-	CaseInsensitive bool   `json:"case_insensitive,omitempty" description:"If true, the search is case-insensitive. Default is false."`
-	MaxResults      int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
-	BeforeContext   int    `json:"before_context,omitempty" description:"Lines before each match (0-30)"`
-	AfterContext    int    `json:"after_context,omitempty" description:"Lines after each match (0-30)"`
-	Cursor          string `json:"cursor,omitempty" description:"Stable continuation token"`
-	Sort            string `json:"sort,omitempty" description:"Sort by path or mtime" enum:"path,mtime"`
-}
+// RipgrepParams is the canonical proto data shape used by both the runtime and UI.
+type RipgrepParams = proto.RipgrepParams
 
 const RipgrepToolName = "ripgrep"
 
