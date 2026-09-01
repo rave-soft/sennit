@@ -366,13 +366,11 @@ func (m *UI) agentViewsRefreshCmds() []tea.Cmd {
 }
 
 func (m *UI) toggleYoloMode() tea.Cmd {
-	if m.ops.yoloLoading {
+	generation, started := m.yolo.begin()
+	if !started {
 		return util.ReportWarn("Yolo mode is already being updated")
 	}
 	desired := !m.yoloModeCached()
-	m.ops.yoloLoading = true
-	m.ops.yoloGeneration++
-	generation := m.ops.yoloGeneration
 	workspace := m.com.Workspace
 	return func() tea.Msg {
 		workspace.PermissionSetSkipRequests(desired)

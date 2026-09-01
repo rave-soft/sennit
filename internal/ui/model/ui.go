@@ -125,6 +125,9 @@ type UI struct {
 	// transparency owns the persistence lifecycle for transparency changes.
 	transparency transparencyState
 
+	// yolo owns the persistence lifecycle for yolo-mode changes.
+	yolo yoloState
+
 	// notificationStyle owns the persistence lifecycle for notification-style changes.
 	notificationStyle notificationStyleState
 

@@ -13,17 +13,15 @@ import (
 )
 
 // settingsOps holds the generation counters and in-flight flags for the
-// settings that apply asynchronously (yolo, model, theme, permission
+// settings that apply asynchronously (model, theme, permission
 // responses). A generation is
 // bumped each time an operation starts, and the result handler discards
 // any reply whose generation doesn't match the latest one, so a stale
 // response from a superseded operation can't clobber a newer one.
 type settingsOps struct {
-	yoloGeneration           uint64
 	modelOperationGeneration uint64
 	modelOperationLoading    bool
 	themeGeneration          uint64
-	yoloLoading              bool
 	permissionLoading        bool
 	permissionGeneration     uint64
 	permissionID             string
@@ -258,10 +256,9 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.PermissionsID)
 
 	case yoloToggledMsg:
-		if msg.generation != m.ops.yoloGeneration {
+		if !m.yolo.complete(msg.generation) {
 			break
 		}
-		m.ops.yoloLoading = false
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break

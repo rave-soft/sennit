@@ -585,34 +585,43 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.yoloGeneration = 2
-		m.ops.yoloLoading = true
+		m.wsCache.yoloCache.Set(false)
+		busyGeneration := m.wsCache.busyFetchGen
+		generation, started := m.yolo.begin()
+		require.True(t, started)
 
-		cmds, done := m.updateSettings(yoloToggledMsg{generation: 1}, nil)
+		cmds, done := m.updateSettings(yoloToggledMsg{Enabled: true, generation: generation + 1}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.yoloLoading)
+		require.True(t, m.yolo.isLoading())
+		require.False(t, m.yoloModeCached(), "stale result must not change the cached mode")
+		require.Equal(t, busyGeneration, m.wsCache.busyFetchGen, "stale result must not supersede workspace probes")
 	})
 
 	t.Run("error reports", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.yoloGeneration = 1
-		m.ops.yoloLoading = true
+		m.wsCache.yoloCache.Set(false)
+		busyGeneration := m.wsCache.busyFetchGen
+		generation, started := m.yolo.begin()
+		require.True(t, started)
 
-		cmds, _ := m.updateSettings(yoloToggledMsg{Err: errors.New("nope"), generation: 1}, nil)
+		cmds, _ := m.updateSettings(yoloToggledMsg{Err: errors.New("nope"), Enabled: true, generation: generation}, nil)
 
-		require.False(t, m.ops.yoloLoading)
+		require.False(t, m.yolo.isLoading())
+		require.False(t, m.yoloModeCached(), "errors must not change the cached mode")
+		require.Equal(t, busyGeneration, m.wsCache.busyFetchGen, "errors must not supersede workspace probes")
 		require.Len(t, cmds, 1)
 	})
 
 	t.Run("enabling reports enabled", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.yoloGeneration = 1
+		generation, started := m.yolo.begin()
+		require.True(t, started)
 
-		cmds, _ := m.updateSettings(yoloToggledMsg{Enabled: true, generation: 1}, nil)
+		cmds, _ := m.updateSettings(yoloToggledMsg{Enabled: true, generation: generation}, nil)
 
 		require.True(t, m.wsCache.yoloCache.Value)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
@@ -623,9 +632,10 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 	t.Run("disabling reports disabled", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.yoloGeneration = 1
+		generation, started := m.yolo.begin()
+		require.True(t, started)
 
-		cmds, _ := m.updateSettings(yoloToggledMsg{Enabled: false, generation: 1}, nil)
+		cmds, _ := m.updateSettings(yoloToggledMsg{Enabled: false, generation: generation}, nil)
 
 		require.False(t, m.wsCache.yoloCache.Value)
 		got, ok := firstMsg(cmds[0]).(util.InfoMsg)
