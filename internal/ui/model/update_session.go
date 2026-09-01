@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"slices"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/history"
@@ -186,6 +187,15 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if m.sess.current == nil || msg.sessionID != m.sess.current.ID {
 			break
 		}
+		// A reload that found nothing new is not an update. File events
+		// arrive for every session in the instance (handleFileEvent leans
+		// on the tree-scoped reload rather than filtering them itself),
+		// so most reloads land here unchanged — bumping the version would
+		// invalidate the sidebar cache and re-walk the LSP paths each
+		// time, for the same list.
+		if slices.EqualFunc(m.sess.files, msg.sessionFiles, sameSessionFile) {
+			break
+		}
 		m.sess.files = msg.sessionFiles
 		m.sess.filesVersion++
 		var paths []string
@@ -301,7 +311,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[history.File]:
-		cmds = append(cmds, m.sess.handleFileEvent(m.com, msg.Payload))
+		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com))
 
 	case sendMessageErrorMsg:
 		if !msg.creating && m.sess.loadExpectedID != "" && (msg.sessionID != m.sess.loadExpectedID || msg.loadGeneration != m.sess.loadGen) {

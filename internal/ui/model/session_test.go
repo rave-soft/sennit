@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -172,7 +173,7 @@ func TestHandleFileEvent_SessionClearedBeforeCmdRuns(t *testing.T) {
 	m := &UI{com: com}
 	m.sess.current = &session.Session{ID: "s1"}
 
-	cmd := m.sess.handleFileEvent(m.com, history.File{SessionID: "s1", Path: "main.go"})
+	cmd := m.sess.refreshModifiedFiles(m.com)
 	require.NotNil(t, cmd)
 
 	// Simulate ctrl+n clearing the session between Update returning the cmd
@@ -184,6 +185,60 @@ func TestHandleFileEvent_SessionClearedBeforeCmdRuns(t *testing.T) {
 		_, ok := msg.(sessionFilesUpdatesMsg)
 		require.True(t, ok, "expected a sessionFilesUpdatesMsg, got %T", msg)
 	})
+}
+
+// TestFileEventFromAChildSessionRefreshes is the regression case for a
+// subagent's work never reaching the sidebar: a delegated agent records its
+// file versions under its own child session, so an event whose SessionID
+// was compared for equality with the viewed session was dropped and the
+// panel kept showing the parent's files alone until the parent's next tool
+// call. The reload is scoped to the session tree, so the event only has to
+// reach it.
+func TestFileEventFromAChildSessionRefreshes(t *testing.T) {
+	t.Parallel()
+
+	com := common.DefaultCommon(context.Background(), fileHistoryWorkspace{})
+	m := &UI{com: com}
+	m.sess.current = &session.Session{ID: "s1"}
+
+	cmds, _ := m.updateSession(pubsub.Event[history.File]{
+		Payload: history.File{SessionID: "msg123$$call456", Path: "main.go"},
+	}, nil)
+	require.Len(t, cmds, 1, "a child session's file event must still refresh the list")
+
+	msg, ok := cmds[0]().(sessionFilesUpdatesMsg)
+	require.True(t, ok)
+	require.Equal(t, "s1", msg.sessionID, "the reload is scoped to the viewed session, not the event's")
+}
+
+// TestSameSessionFile pins what counts as "the same row" for the update
+// this comparison gates: a reload that changed nothing must not bump the
+// sidebar's version, and anything the panel or the diff view would render
+// differently must.
+func TestSameSessionFile(t *testing.T) {
+	t.Parallel()
+
+	base := SessionFile{
+		FirstVersion:  history.File{ID: "v1", Path: "main.go"},
+		LatestVersion: history.File{ID: "v2", Path: "main.go"},
+		Additions:     3,
+		Deletions:     1,
+		Uncommitted:   true,
+		GitKnown:      true,
+	}
+	require.True(t, sameSessionFile(base, base))
+
+	newVersion := base
+	newVersion.LatestVersion.ID = "v3"
+	require.False(t, sameSessionFile(base, newVersion))
+
+	committed := base
+	committed.Uncommitted = false
+	require.False(t, sameSessionFile(base, committed))
+
+	restated := base
+	restated.Additions = 4
+	require.False(t, sameSessionFile(base, restated))
 }
 
 func stripANSI(s string) string {

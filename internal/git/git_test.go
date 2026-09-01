@@ -233,7 +233,7 @@ func TestUncommittedFiles_UnbornHEAD(t *testing.T) {
 
 func TestUncommittedFilesOutsideRepo(t *testing.T) {
 	files, err := UncommittedFiles(t.Context(), t.TempDir())
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrNotARepo)
 	require.Nil(t, files)
 }
 

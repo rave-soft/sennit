@@ -42,9 +42,45 @@ func TestMarkUncommittedSessionFilesNormalizesPaths(t *testing.T) {
 	}, []git.FileChange{{Path: "changed.go"}})
 
 	require.Equal(t, []SessionFile{
-		{FirstVersion: history.File{Path: "dir/../changed.go"}, Uncommitted: true},
-		{FirstVersion: history.File{Path: "committed.go"}},
+		{FirstVersion: history.File{Path: "dir/../changed.go"}, Uncommitted: true, GitKnown: true},
+		{FirstVersion: history.File{Path: "committed.go"}, GitKnown: true},
 	}, files)
+}
+
+// TestMarkUncommittedSessionFilesClearsAStaleUncommittedFlag pins that the
+// answer comes from the git status just read, not from whatever the entry
+// carried in: the same file is re-marked after every refresh, and once it
+// is committed the flag has to go back down — that flag is what keeps it
+// on the sidebar's "Modified Files" list.
+func TestMarkUncommittedSessionFilesClearsAStaleUncommittedFlag(t *testing.T) {
+	t.Parallel()
+
+	files := MarkUncommittedSessionFiles([]SessionFile{
+		{FirstVersion: history.File{Path: "committed.go"}, Uncommitted: true, GitKnown: true},
+	}, nil)
+
+	require.False(t, files[0].Uncommitted)
+	require.True(t, files[0].GitKnown)
+}
+
+// TestPrepareSessionChangesOutsideARepoLeavesGitUnknown pins that a working
+// directory with no repository is not read as "everything is committed":
+// git has no opinion there, so the files stay unmarked and their readers
+// fall back to the history diff.
+func TestPrepareSessionChangesOutsideARepoLeavesGitUnknown(t *testing.T) {
+	t.Parallel()
+
+	historyFiles := []history.File{{Path: "main.go", Version: 1, Content: "before\n"}, {Path: "main.go", Version: 2, Content: "after\n"}}
+	files, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
+		return historyFiles, nil
+	}, func(context.Context) ([]git.FileChange, error) {
+		return nil, git.ErrNotARepo
+	})
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.False(t, files[0].GitKnown)
+	require.False(t, files[0].Uncommitted)
 }
 
 func TestPrepareSessionChangesDegradesWhenGitFails(t *testing.T) {
@@ -59,6 +95,7 @@ func TestPrepareSessionChangesDegradesWhenGitFails(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
+	require.False(t, files[0].GitKnown)
 	require.False(t, files[0].Uncommitted)
 	require.Equal(t, 1, files[0].Additions)
 	require.Equal(t, 1, files[0].Deletions)

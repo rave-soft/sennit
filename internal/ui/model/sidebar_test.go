@@ -51,9 +51,10 @@ func TestFileChangeCountAgreesWithFilesInfoFilter(t *testing.T) {
 	t.Parallel()
 
 	files := []SessionFile{
-		{Additions: 1, Deletions: 0},                    // has a diff
-		{Additions: 0, Deletions: 0},                    // no diff, committed: not a change
-		{Additions: 0, Deletions: 0, Uncommitted: true}, // uncommitted, no diff yet: still a change
+		{Additions: 1, Deletions: 0},                                     // no git answer: the diff is the evidence
+		{Additions: 0, Deletions: 0},                                     // no git answer, no diff: not a change
+		{Additions: 0, Deletions: 0, Uncommitted: true, GitKnown: true},  // uncommitted, no diff yet: still a change
+		{Additions: 3, Deletions: 2, Uncommitted: false, GitKnown: true}, // committed since: done
 	}
 
 	// filesInfo's own inclusion test (session.go), reproduced verbatim so
@@ -61,11 +62,35 @@ func TestFileChangeCountAgreesWithFilesInfoFilter(t *testing.T) {
 	// implementation, only on agreeing which files count.
 	var filesInfoCount int
 	for _, f := range files {
-		if f.Uncommitted || f.Additions != 0 || f.Deletions != 0 {
+		if f.GitKnown {
+			if f.Uncommitted {
+				filesInfoCount++
+			}
+			continue
+		}
+		if f.Additions != 0 || f.Deletions != 0 {
 			filesInfoCount++
 		}
 	}
 
+	require.Equal(t, 2, filesInfoCount)
 	require.Equal(t, filesInfoCount, fileChangeCount(files),
 		"fileChangeCount (sidebar summary) must count the same files as the Modified Files list")
+}
+
+// TestHasFileChangesDropsAFileOnceGitSaysItIsCommitted is the regression
+// case for a sidebar that only ever grew: the session's history keeps the
+// diff a file received, so a file committed mid-session went on being
+// counted and listed as modified for the rest of the session — exactly
+// when the list is read to see what is still outstanding.
+func TestHasFileChangesDropsAFileOnceGitSaysItIsCommitted(t *testing.T) {
+	t.Parallel()
+
+	committed := SessionFile{Additions: 12, Deletions: 4, GitKnown: true}
+	require.False(t, hasFileChanges(committed))
+
+	// The same file before the commit, and the same file in a directory
+	// git knows nothing about, both still count.
+	require.True(t, hasFileChanges(SessionFile{Additions: 12, Deletions: 4, Uncommitted: true, GitKnown: true}))
+	require.True(t, hasFileChanges(SessionFile{Additions: 12, Deletions: 4}))
 }

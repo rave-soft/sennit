@@ -426,12 +426,24 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 }
 
 // hasFileChanges reports whether a session file counts as "changed" for the
-// sidebar count and the "Modified Files" list: it has a non-zero diff, or
-// it's uncommitted (a new/staged file can be uncommitted with no diff yet
-// computed). Shared so the two surfaces never disagree on which files
-// count.
+// sidebar count and the "Modified Files" list. Shared so the two surfaces
+// never disagree on which files count.
+//
+// Where git can answer, git decides: a file the session rewrote and then
+// committed is done, and leaving it on the list means the panel only ever
+// grows — after a commit the whole session's work is still sitting there,
+// which is precisely the state in which someone looks at the list to see
+// what is still outstanding. The session's history keeps the diff either
+// way; this is about what the panel is for.
+//
+// Without git — no repository, or a status that could not be read — the
+// history diff is the only evidence there is, and a new file can be
+// uncommitted before any diff has been computed for it.
 func hasFileChanges(f SessionFile) bool {
-	return f.Uncommitted || f.Additions != 0 || f.Deletions != 0
+	if f.GitKnown {
+		return f.Uncommitted
+	}
+	return f.Additions != 0 || f.Deletions != 0
 }
 
 // fileChangeCount returns the number of session files that count as changed

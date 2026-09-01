@@ -151,11 +151,21 @@ type FileChange struct {
 	Deletions int    `json:"deletions"`
 }
 
+// ErrNotARepo reports that the directory asked about is not inside a Git
+// working tree.
+//
+// It matters that this is an error rather than an empty result: "git says
+// nothing about these files" and "git says every one of them is committed"
+// are the same empty list, and callers that decide whether a file still
+// has pending changes need to tell the two apart. See
+// workspace.PrepareSessionChangesUsing.
+var ErrNotARepo = errors.New("git: not a repository")
+
 // UncommittedFiles returns staged, unstaged, and untracked files in dir's
-// repository. A directory outside a Git repository returns an empty list.
+// repository. A directory outside a Git repository returns ErrNotARepo.
 func UncommittedFiles(ctx context.Context, dir string) ([]FileChange, error) {
 	if !IsRepo(ctx, dir) {
-		return nil, nil
+		return nil, ErrNotARepo
 	}
 
 	repo, err := TopLevel(ctx, dir)

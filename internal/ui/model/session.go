@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/fsext"
-	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
@@ -280,28 +279,34 @@ func loadModifiedFiles(ctx context.Context, preparer workspace.SessionChangePrep
 	return preparer.PrepareSessionChanges(ctx, sessionID)
 }
 
-// handleFileEvent processes file change events and updates the session file
-// list with new or updated file information.
-func (s *sessionState) handleFileEvent(com *common.Common, file history.File) tea.Cmd {
-	if s.current == nil || file.SessionID != s.current.ID {
-		return nil
-	}
-
-	sessionID := s.current.ID
-	ctx, preparer := com.Context(), com.SessionChanges
-	return func() tea.Msg {
-		sessionFiles, err := loadModifiedFiles(ctx, preparer, sessionID)
-		// could not load session files
-		if err != nil {
-			return util.NewErrorMsg(err)
-		}
-		return sessionFilesUpdatesMsg{
-			sessionID:    sessionID,
-			sessionFiles: sessionFiles,
-		}
-	}
+// sameSessionFile reports whether two entries describe the same file in the
+// same state — the fields the panel renders, plus the versions the diff
+// view opens. Content is compared by version id rather than by text: a new
+// version is a new row's worth of information whether or not the bytes
+// changed.
+func sameSessionFile(a, b SessionFile) bool {
+	return a.FirstVersion.ID == b.FirstVersion.ID &&
+		a.LatestVersion.ID == b.LatestVersion.ID &&
+		a.FirstVersion.Path == b.FirstVersion.Path &&
+		a.LatestVersion.Path == b.LatestVersion.Path &&
+		a.Additions == b.Additions &&
+		a.Deletions == b.Deletions &&
+		a.Uncommitted == b.Uncommitted &&
+		a.GitKnown == b.GitKnown
 }
 
+// refreshModifiedFiles reloads the viewed session's changed files.
+//
+// It is what a file-history event runs too, and deliberately ignores which
+// session that event came from. A delegated agent writes its file versions
+// under its own child session, so comparing the event's session against the
+// viewed one for equality meant a subagent could rewrite half the repo
+// without a single row appearing in the panel of the session that started
+// it — the list only caught up on the parent's next tool call. The reload
+// is scoped to the session tree in SQL (History.ListBySessionTree), which
+// is the authority on what belongs to this session; an event from an
+// unrelated session reloads the same list, and the update is then dropped
+// as a no-op (see sessionFilesUpdatesMsg).
 func (s *sessionState) refreshModifiedFiles(com *common.Common) tea.Cmd {
 	if s.current == nil {
 		return nil

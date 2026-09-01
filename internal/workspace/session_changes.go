@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -17,7 +18,18 @@ type SessionFile struct {
 	LatestVersion history.File
 	Additions     int
 	Deletions     int
-	Uncommitted   bool
+	// Uncommitted reports that git still sees pending changes for this
+	// path. Only meaningful when GitKnown is set.
+	Uncommitted bool
+	// GitKnown reports that git was actually asked about this path, so
+	// Uncommitted false means "committed" rather than "no idea". A
+	// session outside a repository — or one whose git status could not be
+	// read — leaves both false, and readers fall back to the history
+	// diff. See sidebar.hasFileChanges in internal/ui/model, which drops
+	// a file from "Modified Files" once git reports it committed: the
+	// session's own history still holds the diff it made, so without this
+	// distinction a committed file stays on the list forever.
+	GitKnown bool
 }
 
 // SessionChangePreparer prepares the files changed by a session.
@@ -76,7 +88,13 @@ func PrepareSessionChangesUsing(
 	files := AggregateSessionFiles(historyFiles)
 	uncommitted, err := uncommittedFiles(ctx)
 	if err != nil {
-		slog.Warn("Failed to load uncommitted files for session", "session_id", sessionID, "error", err)
+		// Outside a repository there is nothing to have committed to, so
+		// this is the ordinary case rather than a fault; anything else is
+		// worth a line in the log. Either way the files come back
+		// unmarked, and the reader falls back to their history diff.
+		if !errors.Is(err, git.ErrNotARepo) {
+			slog.Warn("Failed to load uncommitted files for session", "session_id", sessionID, "error", err)
+		}
 		return files, nil
 	}
 	return MarkUncommittedSessionFiles(files, uncommitted), nil
@@ -89,9 +107,9 @@ func MarkUncommittedSessionFiles(sessionFiles []SessionFile, files []git.FileCha
 	}
 	result := make([]SessionFile, len(sessionFiles))
 	for i, file := range sessionFiles {
-		if _, ok := paths[filepath.Clean(file.FirstVersion.Path)]; ok {
-			file.Uncommitted = true
-		}
+		_, ok := paths[filepath.Clean(file.FirstVersion.Path)]
+		file.Uncommitted = ok
+		file.GitKnown = true
 		result[i] = file
 	}
 	return result
