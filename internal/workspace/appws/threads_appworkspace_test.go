@@ -148,17 +148,27 @@ func (f *fakeThreadSessions) CreateTaskSession(_ context.Context, id, parentSess
 type fakeThreadCoordinator struct {
 	agent.Coordinator
 
-	mu        sync.Mutex
-	delivered []deliveredCompletion
+	mu            sync.Mutex
+	acceptedOnce  sync.Once
+	acceptedAgent agent.SessionAgent
+	delivered     []deliveredCompletion
 }
 
 func (f *fakeThreadCoordinator) Run(_ context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }
 
-func (f *fakeThreadCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
+func (f *fakeThreadCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
+	f.acceptedOnce.Do(func() {
+		f.acceptedAgent = agent.NewSessionAgent(agent.SessionAgentOptions{})
+	})
+	return f.acceptedAgent.BeginAccepted(sessionID)
+}
 
-func (f *fakeThreadCoordinator) RunAccepted(_ context.Context, _ *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+func (f *fakeThreadCoordinator) RunAccepted(_ context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	if accept != nil {
+		defer accept.Close()
+	}
 	return f.Run(context.Background(), sessionID, prompt, attachments...)
 }
 
