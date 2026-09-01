@@ -62,10 +62,25 @@ func toolErr(err error) error {
 	return err
 }
 
+// Get resolves idOrName to a thread, and refuses anything that is not
+// one - the same guard thread.TaskManager.Get applies in the other
+// direction, for the same reason: threads and tasks are rows in one
+// table, so Manager.Get reaches either kind by id and each caller has to
+// say which it meant.
+//
+// It matters most to the agent_* tools, which take an id of either kind
+// and ask this only after the id turned out not to be a task the caller
+// may act on. Without the guard, a task belonging to somebody else came
+// back from here as a thread: the tools would report its goal, status
+// and result to a caller that has no business seeing them, and the
+// scope refusals below it would never run.
 func (a *agentToolManager) Get(ctx context.Context, idOrName string) (tools.ThreadInfo, error) {
 	st, err := a.m.Get(ctx, idOrName)
 	if err != nil {
 		return tools.ThreadInfo{}, toolErr(err)
+	}
+	if st.Kind != thread.KindThread {
+		return tools.ThreadInfo{}, fmt.Errorf("%w: %q", tools.ErrThreadNotFound, idOrName)
 	}
 	return toToolInfo(st), nil
 }

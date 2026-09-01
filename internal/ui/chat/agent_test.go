@@ -1030,3 +1030,64 @@ func TestAgentToolRender_HiddenBumpsVersion(t *testing.T) {
 	item.SetHiddenWhilePanelled(true)
 	require.Equal(t, steady, item.Version(), "setting it to what it already is must not churn the list cache")
 }
+
+// stubAgentConfig is a CustomAgentConfig with one named agent carrying a
+// model/effort override, for the identity tests below.
+type stubAgentConfig struct{ id, model, effort string }
+
+func (c stubAgentConfig) AgentOverride(name string) (string, string, bool) {
+	if name != c.id {
+		return "", "", false
+	}
+	return c.model, c.effort, true
+}
+
+// TestAgentToolMessageItem_IdentityFollowsStreamedInput is the regression
+// test for a delegation block stuck on the wrong name. The identity moved
+// from the tool name into the call's subagent_type, and internal/ui/model
+// builds the item from the first streamed delta — where the input is
+// still partial JSON — so resolving it only at construction left every
+// live delegation rendering as the built-in "task", without its agent's
+// model/effort subtitle, until the session was reloaded from history.
+func TestAgentToolMessageItem_IdentityFollowsStreamedInput(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	cfg := stubAgentConfig{id: "developer", model: "big-model", effort: "high"}
+
+	// The first delta: the tool name is known, the input is not yet.
+	item := NewAgentToolMessageItem(&sty, message.ToolCall{
+		ID: "a1", Name: "agent", Input: `{"prom`,
+	}, nil, false, cfg)
+	name, model, effort, _, _ := item.DelegationInfo()
+	require.Equal(t, builtinTaskAgentName, name, "an unparseable input names no agent yet")
+	require.Empty(t, model)
+	require.Empty(t, effort)
+
+	// The completed input names the agent.
+	item.SetToolCall(message.ToolCall{
+		ID: "a1", Name: "agent", Input: `{"prompt":"review","subagent_type":"developer"}`, Finished: true,
+	})
+	name, model, effort, _, _ = item.DelegationInfo()
+	require.Equal(t, "developer", name)
+	require.Equal(t, "big-model", model)
+	require.Equal(t, "high", effort)
+}
+
+// TestAgentToolMessageItem_LegacyPerAgentToolNameStillRenders covers the
+// calls already in session history: before the delegation tools were
+// merged, a named agent was a tool of its own, and the tool name is the
+// only identity those calls carry.
+func TestAgentToolMessageItem_LegacyPerAgentToolNameStillRenders(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	cfg := stubAgentConfig{id: "reviewer", model: "small-model", effort: "low"}
+
+	item := NewAgentToolMessageItem(&sty, message.ToolCall{
+		ID: "a1", Name: "reviewer", Input: `{"prompt":"review"}`, Finished: true,
+	}, nil, false, cfg)
+	name, model, _, _, _ := item.DelegationInfo()
+	require.Equal(t, "reviewer", name)
+	require.Equal(t, "small-model", model)
+}

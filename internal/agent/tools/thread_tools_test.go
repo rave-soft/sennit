@@ -259,8 +259,18 @@ func (s *fakeStore) Delete(_ context.Context, id string) error {
 // tools.ThreadManager for direct use by the thread_* tool constructors.
 func newTestThreadManager(t *testing.T, repo string) tools.ThreadManager {
 	t.Helper()
+	mgr, _ := newTestThreadManagerWithStore(t, repo)
+	return mgr
+}
+
+// newTestThreadManagerWithStore is newTestThreadManager plus the store
+// behind it, for the one test that needs to seed a row the manager's own
+// API cannot create - a task, which shares the table with threads.
+func newTestThreadManagerWithStore(t *testing.T, repo string) (tools.ThreadManager, *fakeStore) {
+	t.Helper()
+	store := newFakeStore()
 	mgr := thread.NewManager(thread.ManagerOptions{
-		Store:       newFakeStore(),
+		Store:       store,
 		Spawner:     &fakeSpawner{t: t},
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
@@ -275,7 +285,7 @@ func newTestThreadManager(t *testing.T, repo string) tools.ThreadManager {
 		defer cancel()
 		require.NoError(t, mgr.Shutdown(ctx))
 	})
-	return threadspawn.AsAgentToolManager(mgr)
+	return threadspawn.AsAgentToolManager(mgr), store
 }
 
 // grantingPermissions always grants, skipping the interactive prompt path
@@ -480,4 +490,30 @@ func TestThreadStatusTool_MissingThreadExplainsItself(t *testing.T) {
 	require.Contains(t, resp.Content, "already-landed", "name what was asked for")
 	require.Contains(t, resp.Content, "removed once it merges", "and say what the absence means")
 	require.NotContains(t, resp.Content, "sql:", "never the store's wording")
+}
+
+// TestAgentResultTool_TaskIDIsNotReadableAsAThread is the regression test
+// for a scope escape. Threads and tasks are rows in one table, and
+// thread.Manager.Get resolves either kind by id, so the delegation tools'
+// "not a task of yours, try the thread manager" fallback happily returned
+// somebody else's task and reported its goal, status and result - the
+// scoping taskScope exists for, bypassed by a lookup order.
+func TestAgentResultTool_TaskIDIsNotReadableAsAThread(t *testing.T) {
+	repo := initRepo(t)
+	mgr, store := newTestThreadManagerWithStore(t, repo)
+
+	// A task belonging to a session that is not the caller's.
+	task, err := store.Create(t.Context(), thread.CreateParams{
+		Name:            "task-somebody-elses",
+		Goal:            "secret goal",
+		Kind:            thread.KindTask,
+		ParentSessionID: "another-session",
+	})
+	require.NoError(t, err)
+
+	tool := tools.NewAgentResultTool(noTasks{}, mgr)
+	resp := callTool(t, tool, tools.AgentResultParams{ID: task.ID})
+	require.True(t, resp.IsError, "a task the caller did not start is not readable")
+	require.NotContains(t, resp.Content, "secret goal")
+	require.Contains(t, resp.Content, "not among the tasks you started")
 }

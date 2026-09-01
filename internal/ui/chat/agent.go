@@ -278,16 +278,20 @@ func (a *delegationToolMessageItem) PanelStatusLine(sty *styles.Styles, width in
 type AgentToolMessageItem struct {
 	*delegationToolMessageItem
 
-	// displayName is the block's title: the built-in agent tool always
-	// dispatches to config.AgentTask, so it renders as "task"; a
-	// user-defined agent tool's name is already the delegation's identity
-	// (toolCall.Name == its cfg.Agents key), so it renders as-is (e.g.
-	// "developer"). See agentDisplayName.
+	// displayName is the block's title: the agent the call names in its
+	// subagent_type, or "task" when it names none. See agentDisplayName,
+	// and SetToolCall for why it is re-derived rather than fixed at
+	// construction.
 	displayName string
 	// model and effort are this delegation's configured overrides (empty
 	// when the agent inherits the app's defaults — see config.Agent.Model
 	// / ReasoningEffort), rendered as a subtitle by renderAgentSubtitle.
 	model, effort string
+	// cfg resolves the model/effort override for whichever agent the call
+	// names. Kept because the identity can change after construction: the
+	// item is built from the first streamed delta of the tool call, whose
+	// input is usually still partial JSON — see SetToolCall.
+	cfg CustomAgentConfig
 }
 
 var (
@@ -310,18 +314,9 @@ func NewAgentToolMessageItem(
 ) *AgentToolMessageItem {
 	t := &AgentToolMessageItem{
 		delegationToolMessageItem: &delegationToolMessageItem{startTime: time.Now()},
-		displayName:               agentDisplayName(toolCall.Name, toolCall.Input),
+		cfg:                       cfg,
 	}
-	if cfg != nil {
-		// The built-in "task"/"coder" roles never carry a model/effort
-		// override (see setupAgents in internal/config/agents.go), so
-		// looking them up here would always miss anyway — AgentOverride
-		// excluding them changes nothing observable.
-		if model, effort, ok := cfg.AgentOverride(t.displayName); ok {
-			t.model = model
-			t.effort = effort
-		}
-	}
+	t.resolveIdentity(toolCall)
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	// For the agent tool we keep spinning until the tool call is finished.
 	// A background-dispatch ack (see backgroundDispatchTaskID) does not
@@ -337,6 +332,35 @@ func NewAgentToolMessageItem(
 		return !state.HasResult() || backgroundDispatchTaskID(state.Result) != ""
 	}
 	return t
+}
+
+// SetToolCall re-derives the delegation's identity from the updated call.
+//
+// The identity now lives in the call's input (subagent_type), not in the
+// tool name, and internal/ui/model builds this item from the *first*
+// streamed delta — where the input is typically empty or half a JSON
+// object. Resolving once at construction therefore pinned every live
+// delegation to the fallback "task" name, with no per-agent model/effort
+// subtitle, until the session was reloaded from history.
+func (t *AgentToolMessageItem) SetToolCall(tc message.ToolCall) {
+	t.resolveIdentity(tc)
+	t.baseToolMessageItem.SetToolCall(tc)
+}
+
+// resolveIdentity sets the display name and any per-agent model/effort
+// override from tc. The built-in "task"/"coder" roles never carry an
+// override (see setupAgents in internal/config/agents.go), so looking
+// them up misses harmlessly.
+func (t *AgentToolMessageItem) resolveIdentity(tc message.ToolCall) {
+	t.displayName = agentDisplayName(tc.Name, tc.Input)
+	t.model, t.effort = "", ""
+	if t.cfg == nil {
+		return
+	}
+	if model, effort, ok := t.cfg.AgentOverride(t.displayName); ok {
+		t.model = model
+		t.effort = effort
+	}
 }
 
 // builtinTaskAgentName is the display name for the built-in agent tool's

@@ -30,9 +30,11 @@ type AgentListResponseMetadata struct {
 	Threads []ThreadInfo `json:"threads"`
 }
 
-// NewAgentListTool creates the agent_list tool. tasks is never nil (the
-// registry omits every agent_* tool when it is); threads is nil in a
-// workspace with no thread manager, and then only tasks are listed.
+// NewAgentListTool creates the agent_list tool. Either manager may be
+// nil and at least one is not: GateDelegations offers these tools when
+// there are threads, or tasks, or both (see internal/agent's
+// tool_registry). A nil tasks is an empty task forest, not a failure -
+// see scopeTasks.
 func NewAgentListTool(tasks TaskManager, threads ThreadManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		AgentListToolName,
@@ -60,9 +62,13 @@ func NewAgentListTool(tasks TaskManager, threads ThreadManager) fantasy.AgentToo
 				), nil
 			}
 
+			// One row shape for both kinds - id, kind, status, name,
+			// summary - so a reader splitting on tabs finds the same
+			// thing in the same column whichever kind the row is. A
+			// task has no name of its own, and its goal is the summary.
 			var sb strings.Builder
 			for _, ti := range taskRows {
-				fmt.Fprintf(&sb, "%s\t%s\t%s\t%s\n", ti.ID, KindTask, ti.Status, firstLine(ti.Goal))
+				fmt.Fprintf(&sb, "%s\t%s\t%s\t\t%s\n", ti.ID, KindTask, ti.Status, firstLine(ti.Goal))
 			}
 			for _, st := range threadRows {
 				summary := st.ResultSummary

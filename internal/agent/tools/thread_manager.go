@@ -101,6 +101,12 @@ func (o SendOutcome) Describe(kind, idOrName string) string {
 type ThreadManager interface {
 	Create(ctx context.Context, args ThreadCreateArgs) (ThreadInfo, error)
 	List(ctx context.Context) ([]ThreadInfo, error)
+	// Get resolves a thread by id or name. It must report
+	// [ErrThreadNotFound] for an id that resolves to something which is
+	// not a thread: internal/thread keeps both kinds in one table, and
+	// delegationView.lookup treats a hit here as proof the id is a
+	// thread's - a task returned from here would be reported to a caller
+	// the task scoping means to keep it from.
 	Get(ctx context.Context, idOrName string) (ThreadInfo, error)
 	// Send hands message to the thread's session and reports whether its
 	// agent picks it up now or only after the turn it is already running.
