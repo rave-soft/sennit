@@ -70,8 +70,8 @@ type GrepParams struct {
 	Include       string `json:"include,omitempty" description:"File pattern to include in the search"`
 	LiteralText   bool   `json:"literal_text,omitempty" description:"Treat pattern as literal text"`
 	MaxResults    int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
-	BeforeContext int    `json:"before_context,omitempty" description:"Lines before each match (0-10)"`
-	AfterContext  int    `json:"after_context,omitempty" description:"Lines after each match (0-10)"`
+	BeforeContext int    `json:"before_context,omitempty" description:"Lines before each match (0-30)"`
+	AfterContext  int    `json:"after_context,omitempty" description:"Lines after each match (0-30)"`
 	Cursor        string `json:"cursor,omitempty" description:"Stable continuation token"`
 	Sort          string `json:"sort,omitempty" description:"Sort by path or mtime" enum:"path,mtime"`
 }
@@ -94,6 +94,10 @@ type GrepResponseMetadata struct {
 const (
 	GrepToolName        = "grep"
 	maxGrepContentWidth = 500
+	// maxGrepContextLines caps before/after context per match. Every extra
+	// line is re-read from disk and rendered into the response, so the cap
+	// bounds the token cost of a single search.
+	maxGrepContextLines = 30
 )
 
 //go:embed grep.md.tpl
@@ -134,8 +138,8 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 			if params.Pattern == "" {
 				return invalidParam("pattern"), nil
 			}
-			if params.BeforeContext < 0 || params.BeforeContext > 10 || params.AfterContext < 0 || params.AfterContext > 10 {
-				return fantasy.NewTextErrorResponse("context must be between 0 and 10 lines"), nil
+			if params.BeforeContext < 0 || params.BeforeContext > maxGrepContextLines || params.AfterContext < 0 || params.AfterContext > maxGrepContextLines {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("context must be between 0 and %d lines", maxGrepContextLines)), nil
 			}
 			limit := params.MaxResults
 			if limit == 0 {
@@ -187,8 +191,8 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{
 		"pattern":        {minLength: intPtr(1)},
 		"max_results":    intSchemaBounds(maxPageResults),
-		"before_context": intSchemaBounds(10),
-		"after_context":  intSchemaBounds(10),
+		"before_context": intSchemaBounds(maxGrepContextLines),
+		"after_context":  intSchemaBounds(maxGrepContextLines),
 	})
 }
 

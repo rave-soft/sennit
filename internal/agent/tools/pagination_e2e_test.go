@@ -251,8 +251,8 @@ func TestPaginationToolInfoSchemaContract(t *testing.T) {
 		sort   bool
 	}{
 		{name: "read", tool: newReadToolForTest(dir), bounds: map[string][2]int{"offset": {0, 0}, "limit": {0, DefaultReadLimit}}},
-		{name: "grep", tool: NewGrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, 10}, "after_context": {0, 10}}, sort: true},
-		{name: "ripgrep", tool: NewRipgrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, 10}, "after_context": {0, 10}}, sort: true},
+		{name: "grep", tool: NewGrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, maxGrepContextLines}, "after_context": {0, maxGrepContextLines}}, sort: true},
+		{name: "ripgrep", tool: NewRipgrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, maxGrepContextLines}, "after_context": {0, maxGrepContextLines}}, sort: true},
 		{name: "glob", tool: NewGlobTool(dir, config.ToolGlob{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}}},
 	}
 	for _, test := range tools {
@@ -337,7 +337,7 @@ func TestPaginationHandlerValidationBounds(t *testing.T) {
 		params   any
 	}{
 		{name: "grep limit", tool: NewGrepTool(dir, config.ToolGrep{}), toolName: GrepToolName, params: GrepParams{Pattern: "x", MaxResults: 1001}},
-		{name: "grep context", tool: NewGrepTool(dir, config.ToolGrep{}), toolName: GrepToolName, params: GrepParams{Pattern: "x", BeforeContext: 11}},
+		{name: "grep context", tool: NewGrepTool(dir, config.ToolGrep{}), toolName: GrepToolName, params: GrepParams{Pattern: "x", BeforeContext: maxGrepContextLines + 1}},
 		{name: "glob limit", tool: NewGlobTool(dir, config.ToolGlob{}), toolName: GlobToolName, params: GlobParams{Pattern: "*", MaxResults: 1001}},
 	}
 	for _, test := range cases {
