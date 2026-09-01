@@ -1000,7 +1000,9 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		m.panel.hoveredAgent, panelBlockDrawSpec{
 			count: len(plan.agents), more: plan.agentsMore, footer: "…and %d more agents",
 			name: func(i int) string { return m.delegationBlockName(m.com, plan.agents[i]) },
-			task: func(i int) string { return threads.DockGoalFirstLine(plan.agents[i].Goal) },
+			task: func(i int) string {
+				return threads.DockGoalHeadline(m.delegationBlockName(m.com, plan.agents[i]), plan.agents[i].Goal)
+			},
 			line2: func(i int) string {
 				item := plan.agents[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
@@ -1034,7 +1036,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				}
 				return name
 			},
-			task: func(i int) string { return threads.DockGoalFirstLine(plan.threads[i].Goal) },
+			task: func(i int) string { return threads.DockGoalHeadline(plan.threads[i].Name, plan.threads[i].Goal) },
 			line2: func(i int) string {
 				item := plan.threads[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")

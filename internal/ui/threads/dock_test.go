@@ -62,12 +62,26 @@ func TestThreadDockStatusWordIdleIsExplicit(t *testing.T) {
 	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusFailed), word, "must not fall through to an unhandled-status default indistinguishable from idle")
 }
 
-func TestThreadDockGoalFirstLine(t *testing.T) {
+// TestThreadDockGoalHeadline covers the one line a delegation shows
+// beside its name. A plain goal keeps its first line; a structured
+// prompt - the shape a pipeline skill hands its agents - is read the way
+// the chat's own delegation block reads it, so the row says what the job
+// is instead of repeating the agent's name back at it.
+func TestThreadDockGoalHeadline(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "", DockGoalFirstLine(""))
-	require.Equal(t, "fix the bug", DockGoalFirstLine("  fix the bug  "))
-	require.Equal(t, "first line", DockGoalFirstLine("first line\nsecond line\nthird line"))
+	require.Equal(t, "", DockGoalHeadline("dev", ""))
+	require.Equal(t, "fix the bug", DockGoalHeadline("dev", "  fix the bug  "))
+	require.Equal(t, "first line", DockGoalHeadline("dev", "first line\nsecond line\nthird line"))
+
+	// The case this exists for: the leading label repeats the name, and
+	// the line that carries the work is labeled too.
+	require.Equal(t, "keep LSP restarts isolated",
+		DockGoalHeadline("middle-developer", "ROLE: middle-developer\nTASK: keep LSP restarts isolated\nORIGINAL USER REQUEST:\n..."))
+
+	// Prose with a colon is not scaffolding and stays as written.
+	require.Equal(t, "Fix this: the parser drops newlines",
+		DockGoalHeadline("dev", "Fix this: the parser drops newlines"))
 }
 
 func TestThreadDockStatusLine(t *testing.T) {

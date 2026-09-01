@@ -285,12 +285,18 @@ func lastToolSummary(msgs []message.Message) string {
 	return ""
 }
 
-// DockGoalFirstLine returns the first line of a thread's goal/prompt
-// text, trimmed of surrounding whitespace — the dock shows one line per
-// thread and leaves wrapping/truncation for the drawing step.
-func DockGoalFirstLine(goal string) string {
-	line, _, _ := strings.Cut(goal, "\n")
-	return strings.TrimSpace(line)
+// DockGoalHeadline returns the one line of a delegation's goal/prompt
+// worth showing beside its name, trimmed of surrounding whitespace — the
+// dock and the session panel show one line per delegation and leave
+// wrapping/truncation for the drawing step.
+//
+// name is the delegation's own name, and it is what makes this more than
+// the goal's first line: a structured prompt opens with scaffolding
+// ("ROLE: middle-developer"), so taking that line verbatim named the
+// agent twice and the job not at all. See [chat.DelegationHeadline],
+// which the chat's own delegation block has always used for this.
+func DockGoalHeadline(name, goal string) string {
+	return strings.TrimSpace(chat.DelegationHeadline(name, goal))
 }
 
 // DockStatusLine builds the dock's per-thread status text: the step
