@@ -119,6 +119,9 @@ type UI struct {
 
 	ops settingsOps
 
+	// compactMode owns the persistence lifecycle for compact-mode changes.
+	compactMode compactModeState
+
 	// themePreview owns the applied theme and preview restore point. UI keeps
 	// validation, palette application, persistence, and command orchestration.
 	themePreview themePreviewState
@@ -1033,13 +1036,11 @@ func currentModelSupportsImages(com *common.Common) bool {
 // The actual SetCompactMode I/O runs inside the returned cmd; the UI state
 // is updated only when the result lands via compactModeToggledMsg.
 func (m *UI) toggleCompactMode() tea.Cmd {
-	if m.ops.compactModeLoading {
+	generation, started := m.compactMode.begin()
+	if !started {
 		return util.ReportWarn("Compact mode is already being updated")
 	}
 	desired := !m.lay.forceCompactMode
-	m.ops.compactModeLoading = true
-	m.ops.compactModeGeneration++
-	generation := m.ops.compactModeGeneration
 	workspace := m.com.Workspace
 	return func() tea.Msg {
 		return compactModeToggledMsg{Err: workspace.SetCompactMode(config.ScopeGlobal, desired), Enabled: desired, generation: generation}

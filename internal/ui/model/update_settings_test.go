@@ -420,26 +420,29 @@ func TestUpdateSettings_CompactModeToggledMsg(t *testing.T) {
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.compactModeGeneration = 2
-		m.ops.compactModeLoading = true
+		generation, started := m.compactMode.begin()
+		require.True(t, started)
+		require.True(t, m.compactMode.complete(generation))
+		generation, started = m.compactMode.begin()
+		require.True(t, started)
 
-		cmds, done := m.updateSettings(compactModeToggledMsg{generation: 1}, nil)
+		cmds, done := m.updateSettings(compactModeToggledMsg{generation: generation - 1}, nil)
 
 		require.False(t, done)
 		require.Empty(t, cmds)
-		require.True(t, m.ops.compactModeLoading)
+		require.True(t, m.compactMode.isLoading())
 	})
 
 	t.Run("error reports and leaves compact mode unchanged", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.compactModeGeneration = 1
-		m.ops.compactModeLoading = true
+		generation, started := m.compactMode.begin()
+		require.True(t, started)
 		m.lay.forceCompactMode = false
 
-		cmds, _ := m.updateSettings(compactModeToggledMsg{Err: errors.New("nope"), Enabled: true, generation: 1}, nil)
+		cmds, _ := m.updateSettings(compactModeToggledMsg{Err: errors.New("nope"), Enabled: true, generation: generation}, nil)
 
-		require.False(t, m.ops.compactModeLoading)
+		require.False(t, m.compactMode.isLoading())
 		require.False(t, m.lay.forceCompactMode)
 		require.Len(t, cmds, 1)
 	})
@@ -447,10 +450,11 @@ func TestUpdateSettings_CompactModeToggledMsg(t *testing.T) {
 	t.Run("success flips compact mode and closes the commands dialog", func(t *testing.T) {
 		t.Parallel()
 		m, _ := newSettingsUI(newSettingsConfig())
-		m.ops.compactModeGeneration = 1
+		generation, started := m.compactMode.begin()
+		require.True(t, started)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.CommandsID})
 
-		cmds, _ := m.updateSettings(compactModeToggledMsg{Enabled: true, generation: 1}, nil)
+		cmds, _ := m.updateSettings(compactModeToggledMsg{Enabled: true, generation: generation}, nil)
 
 		require.True(t, m.lay.forceCompactMode)
 		require.True(t, m.lay.isCompact)

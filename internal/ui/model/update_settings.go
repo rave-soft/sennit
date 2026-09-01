@@ -13,13 +13,12 @@ import (
 )
 
 // settingsOps holds the generation counters and in-flight flags for the
-// settings that apply asynchronously (compact mode, notifications, yolo,
-// model, transparency, theme, permission responses). A generation is
+// settings that apply asynchronously (notifications, yolo, model,
+// transparency, theme, permission responses). A generation is
 // bumped each time an operation starts, and the result handler discards
 // any reply whose generation doesn't match the latest one, so a stale
 // response from a superseded operation can't clobber a newer one.
 type settingsOps struct {
-	compactModeGeneration    uint64
 	notificationGeneration   uint64
 	yoloGeneration           uint64
 	modelOperationGeneration uint64
@@ -28,7 +27,6 @@ type settingsOps struct {
 	transparentLoading       bool
 	transparentGeneration    uint64
 	themeGeneration          uint64
-	compactModeLoading       bool
 	yoloLoading              bool
 	permissionLoading        bool
 	permissionGeneration     uint64
@@ -220,10 +218,9 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, util.ReportInfo("Theme set to: "+styles.PaletteByID(msg.ID).Name))
 
 	case compactModeToggledMsg:
-		if msg.generation != m.ops.compactModeGeneration {
+		if !m.compactMode.complete(msg.generation) {
 			break
 		}
-		m.ops.compactModeLoading = false
 		if msg.Err == nil {
 			m.lay.forceCompactMode = msg.Enabled
 			m.lay.isCompact = msg.Enabled
