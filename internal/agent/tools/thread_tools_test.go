@@ -82,8 +82,18 @@ func (f *fakeSessions) CreateTaskSession(_ context.Context, id, parentSessionID,
 }
 
 // fakeCoordinator implements agent.Coordinator with no-op behavior beyond
-// Run, which just records the call — thread's own dispatch/RunComplete
-// wiring is exercised by internal/thread's tests, not here.
+// Run — thread's own dispatch/RunComplete wiring is exercised by
+// internal/thread's tests, not here.
+//
+// Dispatch cannot actually succeed against it, and that is worth knowing
+// before writing a test here: a thread's run is admitted through an
+// acceptance reservation, BeginAccepted below has no way to mint one the
+// threadspawn adapter will take (its fields are unexported, and the
+// adapter checks it came from the coordinator it wraps), so every
+// dispatched goal fails at once with ErrInvalidAcceptedRun and the
+// thread lands in "failed". A test that needs a thread in some live
+// status must put it there itself (SetStatusForTest) rather than create
+// one with a goal and hope to look while it is still on its way there.
 type fakeCoordinator struct {
 	agent.Coordinator
 }
@@ -267,6 +277,14 @@ func newTestThreadManager(t *testing.T, repo string) tools.ThreadManager {
 // behind it, for the one test that needs to seed a row the manager's own
 // API cannot create - a task, which shares the table with threads.
 func newTestThreadManagerWithStore(t *testing.T, repo string) (tools.ThreadManager, *fakeStore) {
+	mgr, store, _ := newTestThreadManagerRaw(t, repo)
+	return mgr, store
+}
+
+// newTestThreadManagerRaw also returns the thread.Manager behind the
+// adapter, for the test that has to put a thread into a status these
+// fakes never reach on their own.
+func newTestThreadManagerRaw(t *testing.T, repo string) (tools.ThreadManager, *fakeStore, *thread.Manager) {
 	t.Helper()
 	store := newFakeStore()
 	mgr := thread.NewManager(thread.ManagerOptions{
@@ -285,7 +303,7 @@ func newTestThreadManagerWithStore(t *testing.T, repo string) (tools.ThreadManag
 		defer cancel()
 		require.NoError(t, mgr.Shutdown(ctx))
 	})
-	return threadspawn.AsAgentToolManager(mgr), store
+	return threadspawn.AsAgentToolManager(mgr), store, mgr
 }
 
 // grantingPermissions always grants, skipping the interactive prompt path
@@ -381,16 +399,20 @@ func TestThreadListTool_EmptyWhenNoThreads(t *testing.T) {
 
 func TestThreadStatusTool_ReturnsDetails(t *testing.T) {
 	repo := initRepo(t)
-	mgr := newTestThreadManager(t, repo)
+	mgr, _, raw := newTestThreadManagerRaw(t, repo)
 
-	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "gamma", Goal: "do it"})
+	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "gamma"})
+	require.NoError(t, err)
+	// A status the thread is actually in, and stays in - see
+	// fakeCoordinator on why a dispatched one does not.
+	_, err = raw.SetStatusForTest(t.Context(), st.ID, thread.StatusRunning, "", "", 0)
 	require.NoError(t, err)
 
 	tool := tools.NewAgentResultTool(noTasks{}, mgr)
 	resp := callTool(t, tool, tools.AgentResultParams{ID: st.ID})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "gamma")
-	require.Contains(t, resp.Content, st.Status)
+	require.Contains(t, resp.Content, "running")
 }
 
 func TestThreadStatusTool_MissingID(t *testing.T) {
@@ -422,21 +444,49 @@ func TestThreadSendTool_ReactivatesThread(t *testing.T) {
 	resp := callTool(t, tool, tools.AgentSendParams{ID: st.ID, Message: "keep going"})
 	require.False(t, resp.IsError)
 
-	got, err := mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, "running", got.Status)
+	// The outcome the send itself reports, not the status a moment
+	// later: the send decides then and there whether the thread took the
+	// message as its next turn or queued it behind one in flight, and
+	// that decision is what "reactivates" means. Reading the status
+	// afterwards asked a different question - whether the turn it just
+	// started was still going - and in these fakes a dispatch fails
+	// immediately (see fakeCoordinator), so the answer was a coin flip.
+	//
+	// Either immediate wording counts, and which one comes back is not
+	// this test's business: an idle thread whose workspace is still live
+	// takes the message directly, one whose workspace has been released
+	// is respawned first and reports a resume. Only "Queued" would mean
+	// it did not reactivate.
+	require.Regexp(t, "(?i)deliver", resp.Content)
+	require.NotContains(t, resp.Content, "Queued",
+		"reactivation means the message runs as the next turn, not behind one in flight")
 }
 
 func TestThreadRemoveTool_RefusesActiveWithoutForce(t *testing.T) {
 	repo := initRepo(t)
-	mgr := newTestThreadManager(t, repo)
+	mgr, _, raw := newTestThreadManagerRaw(t, repo)
 
-	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "epsilon", Goal: "do it"})
+	// No goal, so nothing is dispatched: Manager.Create sets the thread
+	// up and leaves it idle. That matters twice over - the fakes here
+	// never reach a coordinator, so a dispatched thread settles into a
+	// terminal status on its own, and it does so asynchronously, which
+	// would overwrite the status set below as readily as it used to
+	// overwrite the running one the old test was hoping to catch.
+	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "epsilon"})
+	require.NoError(t, err)
+
+	// The refusal is keyed on the thread being Running (Manager.Remove),
+	// so the test puts it there rather than racing a dispatch to catch
+	// it there. Whether the old test's tool call landed while the thread
+	// was still running was a coin flip, and it came up wrong about one
+	// run in twenty.
+	_, err = raw.SetStatusForTest(t.Context(), st.ID, thread.StatusRunning, "", "", 0)
 	require.NoError(t, err)
 
 	tool := tools.NewThreadRemoveTool(mgr, grantingPermissions(t))
 	resp := callTool(t, tool, tools.ThreadRemoveParams{ID: st.ID})
-	require.True(t, resp.IsError)
+	require.True(t, resp.IsError, "a running thread is not removable without force")
+	require.Contains(t, resp.Content, "use force to remove")
 }
 
 func TestThreadRemoveTool_ForceRemoves(t *testing.T) {
@@ -456,19 +506,25 @@ func TestThreadRemoveTool_ForceRemoves(t *testing.T) {
 
 func TestThreadMergeTool_RefusesAThreadWithATurnInFlight(t *testing.T) {
 	repo := initRepo(t)
-	mgr := newTestThreadManager(t, repo)
+	mgr, _, raw := newTestThreadManagerRaw(t, repo)
 
-	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "eta", Goal: "do it", MergePolicy: "manual"})
+	st, err := mgr.Create(t.Context(), tools.ThreadCreateArgs{Name: "eta", MergePolicy: "manual"})
 	require.NoError(t, err)
 
 	require.NoError(t, os.WriteFile(filepath.Join(st.WorktreePath, "output.txt"), []byte("content\n"), 0o644))
 
-	// No completion is ever published in this fake-spawner setup, so the
-	// thread is still running — and merging under a live turn commits
-	// whatever half-written state the agent is holding. The manager
-	// refuses; this pins that the tool surfaces that refusal rather than
+	// Merging under a live turn commits whatever half-written state the
+	// agent is holding — that file above — so the manager refuses, and
+	// this pins that the tool surfaces the refusal rather than
 	// swallowing it. The merge state machine itself is covered by
 	// internal/thread's own tests.
+	//
+	// The running status is set, not dispatched: this used to create the
+	// thread with a goal and trust that it would still be running by the
+	// time the tool call landed, which it was about three runs in five.
+	// See fakeCoordinator for why a dispatch here never gets that far.
+	_, err = raw.SetStatusForTest(t.Context(), st.ID, thread.StatusRunning, "", "", 0)
+	require.NoError(t, err)
 	tool := tools.NewThreadMergeTool(mgr, grantingPermissions(t))
 	resp := callTool(t, tool, tools.ThreadMergeParams{ID: st.ID})
 	require.True(t, resp.IsError)
