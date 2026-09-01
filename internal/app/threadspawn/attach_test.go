@@ -538,3 +538,45 @@ func TestAttachGitRootHandsCoordinatorAdaptersFromPublishedPair(t *testing.T) {
 // SetLiveSession is inert: this fake embeds a nil coordinator, and
 // the wake rule the foreground feeds is the agent's, not Attach's.
 func (a *attachFakeCoordinator) SetLiveSession(string) {}
+
+// TestAttachShutdownHookForwardsItsContext is the regression test for a
+// hook that took a context and threw it away.
+//
+// The context a shutdown hook is handed is bounded (app.runShutdownCallback
+// gives it the shutdown timeout), and thread.Manager.Shutdown counts the
+// callers waiting on it: when the last one gives up, it cancels the
+// teardown's own context, which is what stops the manager writing terminal
+// statuses to a store the process is about to leave behind. Passing
+// context.Background() instead made that wait endless — so the manager was
+// never told to stop, and the goroutine running the callback was left
+// behind still working while the app tore down around it.
+func TestAttachShutdownHookForwardsItsContext(t *testing.T) {
+	repo := initRepo(t)
+	a := newAttachTestApp(t, repo)
+	deps := testAttachDeps()
+
+	var shutdownHook func(context.Context) error
+	deps.addShutdownHook = func(_ *app.App, fn func(context.Context) error) error {
+		shutdownHook = fn
+		return nil
+	}
+	var got context.Context
+	deps.shutdown = func(mgr *thread.Manager, ctx context.Context) error {
+		got = ctx
+		return mgr.Shutdown(ctx)
+	}
+
+	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
+	require.NotNil(t, shutdownHook)
+
+	// A cancelled context is the giving-up signal in its most visible
+	// form: the hook must hand it straight through rather than wait on
+	// one of its own.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_ = shutdownHook(ctx)
+
+	require.NotNil(t, got)
+	require.ErrorIs(t, got.Err(), context.Canceled,
+		"the hook must pass the context it was given, not a fresh root that never ends")
+}

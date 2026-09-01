@@ -125,8 +125,19 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 		Context:     ctx,
 		ParentApp:   parentWorkspace,
 	})
-	if err := deps.addShutdownHook(a, func(context.Context) error {
-		return deps.shutdown(mgr, context.Background()) // ok: detached - the thread manager's own shutdown must run to completion while the app's context is being torn down
+	// The hook's own context, not a fresh root: it is how long this
+	// caller waits, and thread.Manager.Shutdown counts its waiters -
+	// when the last one gives up it cancels the teardown's own context,
+	// which is what stops the manager writing terminal statuses to a
+	// store the process is about to leave behind. Handed
+	// context.Background() the wait never ends, so the manager was never
+	// told to stop and the goroutine that runs shutdown callbacks was
+	// left behind still working while the app tore down around it.
+	// (app.runShutdownCallback stops waiting on its own deadline either
+	// way, so this was never able to hang shutdown - it just made the
+	// abandonment path unreachable from the only caller that has one.)
+	if err := deps.addShutdownHook(a, func(ctx context.Context) error {
+		return deps.shutdown(mgr, ctx)
 	}); err != nil {
 		slog.Warn("Failed to register thread manager shutdown", "error", err)
 		_ = deps.release(dbDir)
@@ -136,7 +147,11 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 		return deps.release(dbDir)
 	}); err != nil {
 		slog.Warn("Failed to register thread database cleanup", "error", err)
-		_ = deps.shutdown(mgr, context.Background()) // ok: detached - as above
+		// attach's own context bounds this unwind. A fresh root here had
+		// nothing to stop it: this call blocks until the manager's
+		// teardown finishes, and attach is on the caller's goroutine
+		// with no deadline of its own to fall back on.
+		_ = deps.shutdown(mgr, ctx)
 		_ = deps.release(dbDir)
 		return
 	}
