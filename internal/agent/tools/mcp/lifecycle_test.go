@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -172,6 +174,116 @@ func TestUpdateState_ErrorDetachesBeforeClosingOutsidePublishLock(t *testing.T) 
 
 	close(releaseClose)
 	<-updated
+}
+
+func TestCloseSessionContext_InterruptsAndJoinsTimedOutClose(t *testing.T) {
+	r := NewRegistry()
+	closeStarted := make(chan struct{})
+	interrupted := make(chan struct{})
+	closeFinished := make(chan struct{})
+	session := &ClientSession{
+		closeFunc: func() error {
+			close(closeStarted)
+			<-interrupted
+			close(closeFinished)
+			return nil
+		},
+		interrupt: func() error {
+			close(interrupted)
+			return nil
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	result := make(chan struct{})
+	go func() {
+		r.closeSessionContext(ctx, "blocked-close", session)
+		close(result)
+	}()
+
+	select {
+	case <-closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("session close did not start")
+	}
+	select {
+	case <-result:
+	case <-time.After(time.Second):
+		t.Fatal("timed out close did not interrupt and join the session close")
+	}
+	select {
+	case <-closeFinished:
+	default:
+		t.Fatal("closeSessionContext returned before the close goroutine finished")
+	}
+}
+
+// TestStreamableClose_BoundsBlockedDelete verifies the workaround for SDK
+// v1.7.0's Close ordering: it sends DELETE before cancelling the connection.
+// A server that accepts but never answers DELETE must not keep Close (and the
+// JSON-RPC shutdown it unblocks) alive indefinitely.
+func TestStreamableClose_BoundsBlockedDelete(t *testing.T) {
+	deleteStarted := make(chan struct{})
+	deleteCanceled := make(chan struct{})
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "srv"}, nil)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpServer }, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		close(deleteStarted)
+		<-r.Context().Done()
+		close(deleteCanceled)
+	}))
+	t.Cleanup(server.Close)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint:             server.URL,
+		HTTPClient:           &http.Client{Transport: &headerRoundTripper{base: http.DefaultTransport}},
+		DisableStandaloneSSE: true,
+	}, nil)
+	require.NoError(t, err)
+
+	closed := make(chan error, 1)
+	go func() { closed <- session.Close() }()
+	select {
+	case <-deleteStarted:
+	case <-time.After(time.Second):
+		t.Fatal("streamable session close did not issue DELETE")
+	}
+	select {
+	case err := <-closed:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(2 * streamableCloseTimeout):
+		t.Fatal("blocked DELETE kept streamable session close alive")
+	}
+	select {
+	case <-deleteCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("DELETE request was not cancelled after its deadline")
+	}
+}
+
+func TestCloseSessionContext_DoesNotInterruptNormalClose(t *testing.T) {
+	r := NewRegistry()
+	interrupted := make(chan struct{})
+	session := &ClientSession{
+		closeFunc: func() error { return nil },
+		interrupt: func() error {
+			close(interrupted)
+			return nil
+		},
+	}
+
+	r.closeSessionContext(context.Background(), "normal-close", session)
+	select {
+	case <-interrupted:
+		t.Fatal("normal close unexpectedly interrupted its transport")
+	default:
+	}
 }
 
 func TestUpdateState_ConfigBookkeeping(t *testing.T) {

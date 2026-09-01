@@ -55,18 +55,31 @@ func (cm *connectionManager) pingSession(ctx context.Context, s *ClientSession, 
 	return s.Ping(pingCtx, nil)
 }
 
-// closeSession closes an MCP session, logging only unexpected errors. EOF,
-// context cancellation, and a killed child are the ordinary result of tearing
-// a session down and are not worth surfacing.
+// closeSessionContext gracefully closes an MCP session. The SDK waits for
+// in-flight JSON-RPC handlers before it closes the transport; if that grace
+// period expires, interrupt closes the transport directly, which cancels those
+// handlers and lets the Close call join instead of leaking its goroutine.
+// EOF, context cancellation, and a killed child are ordinary teardown results.
 func (cm *connectionManager) closeSessionContext(ctx context.Context, name string, s *ClientSession) {
 	done := make(chan error, 1)
 	go func() { done <- s.Close() }()
+
 	select {
 	case err := <-done:
-		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !processKilledBySignal(err) {
-			slog.Warn("Error closing MCP session", "name", name, "error", err)
-		}
+		cm.logCloseError(name, err)
 	case <-ctx.Done():
+		if s.interrupt != nil {
+			if err := s.interrupt(); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !processKilledBySignal(err) {
+				slog.Warn("Error interrupting MCP session close", "name", name, "error", err)
+			}
+		}
+		cm.logCloseError(name, <-done)
+	}
+}
+
+func (cm *connectionManager) logCloseError(name string, err error) {
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !processKilledBySignal(err) {
+		slog.Warn("Error closing MCP session", "name", name, "error", err)
 	}
 }
 
@@ -113,7 +126,16 @@ func (cm *connectionManager) createSession(ctx context.Context, cfg ConfigProvid
 	// capability AND was opted in via --channels; otherwise it is closed
 	// (buffer discarded). This prevents early notifications from being lost.
 	channelGate := newChannelGate()
-	transport = &channelTransport{inner: transport, name: name, gate: channelGate, reg: cm.reg}
+	var transportConn mcp.Connection
+	transport = &channelTransport{
+		inner: transport,
+		onConnect: func(conn mcp.Connection) {
+			transportConn = conn
+		},
+		name: name,
+		gate: channelGate,
+		reg:  cm.reg,
+	}
 
 	client := mcp.NewClient(
 		&mcp.Implementation{
@@ -206,6 +228,7 @@ func (cm *connectionManager) createSession(ctx context.Context, cfg ConfigProvid
 		cancel:        cancel,
 		auth:          auth,
 		closeIdle:     closeIdleTransport(transport),
+		interrupt:     transportConn.Close,
 	}, nil
 }
 

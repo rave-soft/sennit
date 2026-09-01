@@ -286,9 +286,10 @@ func (g *channelGate) accept(raw json.RawMessage) json.RawMessage {
 // methods before any client-side handler or middleware runs, so the only place
 // to observe a custom notification is the transport's own connection.
 type channelTransport struct {
-	inner mcp.Transport
-	name  string
-	gate  *channelGate
+	inner     mcp.Transport
+	onConnect func(mcp.Connection)
+	name      string
+	gate      *channelGate
 	// reg is the registry a message accepted by the gate is published
 	// through. Carrying it here (rather than reaching for a package-level
 	// broker) is what lets each session publish to its own registry's event
@@ -308,7 +309,11 @@ func (t *channelTransport) Connect(ctx context.Context) (mcp.Connection, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &channelConn{Connection: conn, name: t.name, gate: t.gate, reg: t.reg}, nil
+	wrapped := &channelConn{Connection: conn, name: t.name, gate: t.gate, reg: t.reg}
+	if t.onConnect != nil {
+		t.onConnect(wrapped)
+	}
+	return wrapped, nil
 }
 
 // channelConn wraps an mcp.Connection and filters channel notifications out of

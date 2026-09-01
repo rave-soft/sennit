@@ -31,6 +31,9 @@ func (r *Registry) buildHTTPTransport(ctx context.Context, cfg ConfigProvider, n
 	if err != nil {
 		return "", nil, nil, err
 	}
+	// The SDK's streamable connection performs its session DELETE before it
+	// cancels its own connection context. Bound only DELETE requests here: a
+	// client-wide timeout would also terminate the long-lived SSE GET stream.
 	transport := http.RoundTripper(&headerRoundTripper{headers: headers, base: newOwnedHTTPTransport()})
 	var oauthHandler *mcpoauth.Handler
 	if m.OAuth {
@@ -89,6 +92,12 @@ func (r *Registry) createTransportFor(ctx context.Context, cfg ConfigProvider, n
 	}
 }
 
+// streamableCloseTimeout bounds the SDK's best-effort session DELETE. The
+// streamable SDK cancels its connection context only after that request returns;
+// without this separate request deadline an unresponsive server can prevent
+// Close from ever releasing its SSE reader and JSON-RPC workers.
+const streamableCloseTimeout = time.Second
+
 type headerRoundTripper struct {
 	headers map[string]string
 	base    http.RoundTripper
@@ -134,7 +143,16 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 			clone.Header.Set(k, v)
 		}
 	}
-	return rt.base.RoundTrip(clone)
+	return roundTripWithCloseDeadline(rt.base, clone)
+}
+
+func roundTripWithCloseDeadline(base http.RoundTripper, req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodDelete {
+		return base.RoundTrip(req)
+	}
+	ctx, cancel := context.WithTimeout(req.Context(), streamableCloseTimeout)
+	defer cancel()
+	return base.RoundTrip(req.Clone(ctx))
 }
 
 // oauthRoundTripper wraps an HTTP transport with OAuth bearer token
@@ -151,6 +169,11 @@ func newOAuthRoundTripper(handler auth.OAuthHandler, base http.RoundTripper) *oa
 }
 
 func (rt *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodDelete {
+		ctx, cancel := context.WithTimeout(req.Context(), streamableCloseTimeout)
+		defer cancel()
+		req = req.Clone(ctx)
+	}
 	request := cloneRequest(req)
 	resp, err := rt.doRequestWithToken(request)
 	if err != nil || (resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden) {

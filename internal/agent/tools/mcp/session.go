@@ -19,16 +19,31 @@ type ClientSession struct {
 	cancel    context.CancelFunc
 	auth      *ownedAuthHandler
 	closeIdle func()
+
+	// interrupt closes the transport connection directly. ClientSession.Close
+	// normally waits for in-flight JSON-RPC handlers before it reaches the
+	// transport, so shutdown uses this only after its grace period expires to
+	// make that wait cancellable.
+	interrupt func() error
+
+	// closeFunc is a test seam for a close that waits for an interrupt. Production
+	// sessions leave it nil and close the SDK session directly.
+	closeFunc func() error
 }
 
 // Close cancels the session context and then closes the underlying session.
 func (s *ClientSession) Close() error {
-	s.cancel()
+	if s.cancel != nil {
+		s.cancel()
+	}
 	if s.auth != nil {
 		s.auth.Close()
 	}
 	if s.closeIdle != nil {
 		s.closeIdle()
+	}
+	if s.closeFunc != nil {
+		return s.closeFunc()
 	}
 	return s.ClientSession.Close()
 }
