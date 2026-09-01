@@ -11,14 +11,19 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // NewAppWorkspaceAdapter presents a as a thread workspace. Adapters are
 // deliberately owned by their parent spawner or handle, rather than a
 // process-wide cache: retaining an adapter globally would retain its App and
 // all of its services after that workspace is released.
-func NewAppWorkspaceAdapter(a *app.App) *AppWorkspaceAdapter {
-	return &AppWorkspaceAdapter{App: a}
+func NewAppWorkspaceAdapter(a *app.App, frontend ...workspace.Workspace) *AppWorkspaceAdapter {
+	adapter := &AppWorkspaceAdapter{App: a}
+	if len(frontend) != 0 {
+		adapter.frontend = frontend[0]
+	}
+	return adapter
 }
 
 // AppWorkspaceAdapter presents an *app.App as the thread domain's narrow
@@ -32,7 +37,8 @@ func NewAppWorkspaceAdapter(a *app.App) *AppWorkspaceAdapter {
 // RunCompletions, SendEvent) is the identical underlying service, so
 // lifecycle behavior is unchanged.
 type AppWorkspaceAdapter struct {
-	App *app.App
+	App      *app.App
+	frontend workspace.Workspace
 
 	mu sync.Mutex
 	rc thread.RunCompletionBroker
@@ -80,6 +86,12 @@ func (a *AppWorkspaceAdapter) RunCompletions() thread.RunCompletionBroker {
 
 func (a *AppWorkspaceAdapter) SendEvent(msg any) {
 	a.App.SendEvent(msg)
+}
+
+// FrontendWorkspace returns the frontend-facing workspace supplied at the
+// composition root, if this handle is attachable by a frontend.
+func (a *AppWorkspaceAdapter) FrontendWorkspace() workspace.Workspace {
+	return a.frontend
 }
 
 // sessionAdapter wraps a workspace's real session service so it satisfies
@@ -165,23 +177,4 @@ func (a *MessageAdapter) LastActivity(ctx context.Context, sessionID string) (ti
 // narrow [thread.MessageService].
 func NewMessageService(full messagestore.Service) thread.MessageService {
 	return &MessageAdapter{full: full}
-}
-
-// AppOf resolves the *app.App behind a delegation's workspace handle, or
-// nil when the handle carries something else (a fake, in tests).
-//
-// The assertion lives here rather than at the call sites: this package is
-// what put the adapter behind the handle in the first place, so it is the
-// one place that may reasonably know what to assert. internal/workspace
-// used to reach through the handle itself and name the adapter type by
-// hand, twice.
-func AppOf(h thread.Handle) *app.App {
-	if h == nil {
-		return nil
-	}
-	adapter, ok := h.Workspace().(*AppWorkspaceAdapter)
-	if !ok {
-		return nil
-	}
-	return adapter.App
 }

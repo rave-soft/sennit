@@ -58,7 +58,8 @@ func agentToolDescription(named []namedAgent) string {
 		}
 		b.WriteString("\nOmit `subagent_type` to run the built-in general-purpose agent.\n")
 	}
-	b.WriteString("\n" + delegationReportContract)
+	b.WriteByte('\n')
+	b.WriteString(delegationReportContract)
 	return b.String()
 }
 

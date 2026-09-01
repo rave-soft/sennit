@@ -6,12 +6,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestModelOperationState(t *testing.T) {
+func TestAsyncOperationState(t *testing.T) {
 	t.Parallel()
+
+	t.Run("zero value has no operation to complete", func(t *testing.T) {
+		t.Parallel()
+		var state asyncOperationState
+
+		require.False(t, state.isLoading())
+		require.False(t, state.owns(0))
+		require.False(t, state.complete(0))
+	})
 
 	t.Run("zero value starts at generation one", func(t *testing.T) {
 		t.Parallel()
-		var state modelOperationState
+		var state asyncOperationState
 
 		generation, started := state.begin()
 
@@ -22,7 +31,7 @@ func TestModelOperationState(t *testing.T) {
 
 	t.Run("duplicate start preserves current ownership", func(t *testing.T) {
 		t.Parallel()
-		var state modelOperationState
+		var state asyncOperationState
 		generation, started := state.begin()
 		require.True(t, started)
 
@@ -36,7 +45,7 @@ func TestModelOperationState(t *testing.T) {
 
 	t.Run("nonterminal stage retains ownership", func(t *testing.T) {
 		t.Parallel()
-		var state modelOperationState
+		var state asyncOperationState
 		generation, _ := state.begin()
 
 		require.True(t, state.owns(generation))
@@ -47,7 +56,7 @@ func TestModelOperationState(t *testing.T) {
 
 	t.Run("stale and unsolicited completions do not mutate state", func(t *testing.T) {
 		t.Parallel()
-		var state modelOperationState
+		var state asyncOperationState
 		generation, _ := state.begin()
 
 		require.False(t, state.complete(generation+1))
@@ -59,7 +68,7 @@ func TestModelOperationState(t *testing.T) {
 
 	t.Run("next operation advances after terminal result", func(t *testing.T) {
 		t.Parallel()
-		var state modelOperationState
+		var state asyncOperationState
 		first, _ := state.begin()
 		require.True(t, state.complete(first))
 

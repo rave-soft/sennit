@@ -152,12 +152,12 @@ func (m *UI) setEditorPrompt(yolo bool) {
 		m.editor.textarea.SetPromptFunc(4, func(info textarea.PromptInfo) string { return yoloPromptFunc(m.com, info) })
 		return
 	}
-	m.editor.textarea.SetPromptFunc(2, func(info textarea.PromptInfo) string { return normalPromptFunc(m.com, info) })
+	m.editor.textarea.SetPromptFunc(2, normalPromptFunc)
 }
 
 // normalPromptFunc keeps the prompt width as whitespace so multiline text
 // stays aligned without visible prompt markers.
-func normalPromptFunc(com *common.Common, info textarea.PromptInfo) string {
+func normalPromptFunc(textarea.PromptInfo) string {
 	return "  "
 }
 

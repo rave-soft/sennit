@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // localHandle is the [thread.Handle] returned by [LocalSpawner].
@@ -33,6 +34,7 @@ type LocalSpawner struct {
 	parentSkills func() []*skills.Skill
 	parentYOLO   func() bool
 	parentModel  func() config.SelectedModel
+	frontend     func(*app.App) workspace.Workspace
 }
 
 // NewLocalSpawner returns a ready-to-use LocalSpawner. parentSkills, when
@@ -46,13 +48,19 @@ func NewLocalSpawner(
 	parentSkills func() []*skills.Skill,
 	parentYOLO func() bool,
 	parentModel func() config.SelectedModel,
+	frontend ...func(*app.App) workspace.Workspace,
 ) *LocalSpawner {
+	var frontendFactory func(*app.App) workspace.Workspace
+	if len(frontend) != 0 {
+		frontendFactory = frontend[0]
+	}
 	return &LocalSpawner{
 		apps:         csync.NewMap[string, *app.App](),
 		parentAgents: parentAgents,
 		parentSkills: parentSkills,
 		parentYOLO:   parentYOLO,
 		parentModel:  parentModel,
+		frontend:     frontendFactory,
 	}
 }
 
@@ -102,11 +110,15 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, e
 	if err != nil {
 		return nil, err
 	}
+	var frontendWorkspace workspace.Workspace
+	if s.frontend != nil {
+		frontendWorkspace = s.frontend(boot.App)
+	}
 	id := uuid.New().String()
 	h := &localHandle{
 		id:        id,
 		app:       boot.App,
-		workspace: NewAppWorkspaceAdapter(boot.App),
+		workspace: NewAppWorkspaceAdapter(boot.App, frontendWorkspace),
 	}
 	s.apps.Set(id, boot.App)
 	return h, nil

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -173,15 +172,10 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (workspace.W
 		// Manager, not by whoever is viewing it, so there is nothing to
 		// release here — teardown happens via Manager.Remove or process
 		// shutdown, not via this detach.
-		// The handle's Workspace is the domain-facing thread.Workspace
-		// seam; threadspawn is what put its own adapter behind it, so
-		// threadspawn is what unwraps it — this façade only needs the
-		// *app.App that comes back (NewAppWorkspace takes one).
-		threadApp := threadspawn.AppOf(h)
-		if threadApp == nil {
-			return nil, nil, fmt.Errorf("thread: workspace handle does not wrap an *app.App")
+		ws, err := frontendWorkspace(h)
+		if err != nil {
+			return nil, nil, err
 		}
-		ws := NewAppWorkspace(threadApp, threadApp.Store())
 		// Wrapped so a turn the person starts in the thread's own session
 		// goes through the Manager rather than past it — see
 		// attachedThreadWorkspace. Reading the row for its session id is
@@ -220,7 +214,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (workspace.W
 	// taken silently minutes earlier. The log line is WARN for the same
 	// reason: this is a thread the user asked to work in and cannot, not a
 	// detail worth having to turn debug logging on to see.
-	a, err := reactivate(ctx, mgr, id)
+	ws, err := reactivate(ctx, mgr, id)
 	if err != nil {
 		slog.Warn("Thread could not be reactivated; opening it read-only",
 			"component", "thread", "thread", id, "error", err)
@@ -229,19 +223,14 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (workspace.W
 	// Same wrapping as the live branch — and this is the branch that most
 	// needs it: a thread revived here is idle by definition, and everything
 	// that happens in it next is the person's own doing.
-	ws := NewAppWorkspace(a, a.Store())
 	return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, parent: w, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
 }
 
-// reactivate brings a thread's own workspace back up and returns the
-// in-process app behind it, or an error saying why it could not. Every
-// outcome that leaves the caller without a writable workspace is an error
-// here, including the two that are not Activate's own: reactivation that
-// reports success but leaves no handle installed, and a handle wrapping
-// something other than an in-process app. Both are unreachable in local
-// mode today, and both used to fall through to the read-only fallback
-// with nothing said at all.
-func reactivate(ctx context.Context, mgr *thread.Manager, id string) (*app.App, error) {
+// reactivate brings a thread's own frontend workspace back up, or reports
+// why it could not. Every outcome that leaves the caller without a writable
+// workspace is an error here, including reactivation that reports success
+// but leaves no handle installed.
+func reactivate(ctx context.Context, mgr *thread.Manager, id string) (workspace.Workspace, error) {
 	if _, err := mgr.Activate(ctx, id); err != nil {
 		return nil, err
 	}
@@ -249,12 +238,24 @@ func reactivate(ctx context.Context, mgr *thread.Manager, id string) (*app.App, 
 	if h == nil {
 		return nil, fmt.Errorf("thread: reactivated workspace was released before it could be attached")
 	}
-	// Unwrapped by threadspawn, which is what wrapped it — see AppOf.
-	threadApp := threadspawn.AppOf(h)
-	if threadApp == nil {
-		return nil, fmt.Errorf("thread: reactivated workspace is not an in-process app")
+	return frontendWorkspace(h)
+}
+
+// frontendWorkspace obtains the frontend-facing view supplied by a handle's
+// workspace. The domain Workspace remains independent of the frontend; only
+// implementations that can be attached expose this optional capability.
+func frontendWorkspace(h thread.Handle) (workspace.Workspace, error) {
+	provider, ok := h.Workspace().(interface {
+		FrontendWorkspace() workspace.Workspace
+	})
+	if !ok {
+		return nil, fmt.Errorf("thread: workspace handle does not expose a frontend workspace")
 	}
-	return threadApp, nil
+	ws := provider.FrontendWorkspace()
+	if ws == nil {
+		return nil, fmt.Errorf("thread: workspace handle exposed a nil frontend workspace")
+	}
+	return ws, nil
 }
 
 // SubscribeWith runs a second, independently stoppable event subscription

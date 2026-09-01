@@ -283,6 +283,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		func() []*skills.Skill { return skills.Inheritable(boot.App.Skills.AllSkills()) },
 		boot.App.PermissionsSkipFunc(),
 		func() config.SelectedModel { return boot.App.Config().Model },
+		func(a *app.App) workspace.Workspace { return appws.NewAppWorkspace(a, a.Store()) },
 	))
 
 	ws := appws.NewAppWorkspace(boot.App, boot.Config)

@@ -200,7 +200,22 @@ type fakeThreadHandle struct {
 func (h *fakeThreadHandle) ID() string    { return h.id }
 func (h *fakeThreadHandle) App() *app.App { return h.app }
 func (h *fakeThreadHandle) Workspace() thread.Workspace {
-	return &threadspawn.AppWorkspaceAdapter{App: h.app}
+	return &frontendThreadWorkspace{
+		Workspace: &threadspawn.AppWorkspaceAdapter{App: h.app},
+		frontend:  NewAppWorkspace(h.app, h.app.Store()),
+	}
+}
+
+// frontendThreadWorkspace is deliberately not threadspawn's app adapter.
+// It proves AttachThread only relies on the optional frontend seam and can
+// attach a valid proxy over any thread.Workspace implementation.
+type frontendThreadWorkspace struct {
+	thread.Workspace
+	frontend workspace.Workspace
+}
+
+func (w *frontendThreadWorkspace) FrontendWorkspace() workspace.Workspace {
+	return w.frontend
 }
 
 // fakeThreadSpawner spawns a real (but network/db-free) app.App per call
