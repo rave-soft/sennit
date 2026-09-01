@@ -57,7 +57,7 @@ func TestSummaryRendersCollapsedByDefault(t *testing.T) {
 	require.Contains(t, out, summaryHeaderLabel)
 	require.Contains(t, out, summaryCollapsedGlyph)
 	require.Contains(t, out, summaryHeaderHint,
-		"the collapsed row must name the key that opens it")
+		"the collapsed row must say how it opens")
 }
 
 // TestSummaryTokenCountsRendered checks the numbers reach the row, and
@@ -268,4 +268,92 @@ func TestSummaryOpensOnAClick(t *testing.T) {
 	// in the text below must not close what the person is reading.
 	require.True(t, item.HandleMouseClick(ansi.MouseLeft, 0, 0))
 	require.False(t, item.HandleMouseClick(ansi.MouseLeft, 0, 1))
+}
+
+// runningSummaryMessage builds a summarize pass caught mid-flight: it has
+// already streamed some of its body, but carries no Finish part.
+func runningSummaryMessage(id string) *message.Message {
+	return &message.Message{
+		ID:   id,
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: summaryText},
+		},
+		IsSummaryMessage: true,
+	}
+}
+
+// TestRunningSummaryRendersAsWorkingNotFinished is the regression test for
+// a compaction that reported itself done while it was still running. A
+// summarize streams its text like any other reply, and isSpinning goes
+// false the moment a message has content — so the row dropped its spinner
+// mid-pass and rendered the finished header, savings counts and all.
+func TestRunningSummaryRendersAsWorkingNotFinished(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAssistantMessageItem(&sty, runningSummaryMessage("s1")).(*AssistantMessageItem)
+
+	require.True(t, item.spinnerActive(),
+		"the row is nothing but the spinner while the pass runs, so it must keep ticking")
+
+	out := item.Render(80)
+	require.NotContains(t, out, summaryHeaderLabel,
+		"a running compaction must not claim to be a finished one")
+	require.NotContains(t, out, "ZZQUUX", "and must not spill the body it is still writing")
+}
+
+// TestRunningSummaryHeaderSaysItIsStillWorking covers the same state with
+// the row opened: the header is what labels the block there, so it has to
+// carry the distinction the collapsed row makes with its spinner.
+func TestRunningSummaryHeaderSaysItIsStillWorking(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAssistantMessageItem(&sty, runningSummaryMessage("s1")).(*AssistantMessageItem)
+	item.ToggleExpanded()
+
+	out := item.Render(80)
+	require.Contains(t, out, summaryRunningLabel)
+	require.NotContains(t, out, summaryHeaderLabel)
+}
+
+// TestExpandedSummaryEndsWithACollapseControl covers the way back out. A
+// compaction is long by construction, so by the time someone has read it
+// the header they opened is far above the fold — every other expandable
+// block in the chat ends with this line, and this one did not.
+func TestExpandedSummaryEndsWithACollapseControl(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAssistantMessageItem(&sty, summaryMessage("s1", 47000, 8000)).(*AssistantMessageItem)
+	item.ToggleExpanded()
+
+	out := item.Render(80)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	require.Contains(t, lines[len(lines)-1], summaryCollapseHint,
+		"the collapse control is the last line of an opened summary")
+
+	// And it is a real control, not a caption: the click target covers it.
+	footer := item.summaryFooterLine()
+	require.Equal(t, len(lines)-1, footer)
+	require.True(t, item.HandleMouseClick(ansi.MouseLeft, MessageLeftPaddingTotal, footer))
+	require.True(t, item.HoverableAt(MessageLeftPaddingTotal, footer, 80))
+
+	// The text between the two controls stays inert, so a click while
+	// reading cannot close what is being read.
+	require.False(t, item.HandleMouseClick(ansi.MouseLeft, MessageLeftPaddingTotal, footer-1))
+}
+
+// TestCollapsedSummaryHasNoFooter keeps the footer tied to the opened
+// shape: a collapsed row is two lines and neither of them closes anything.
+func TestCollapsedSummaryHasNoFooter(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAssistantMessageItem(&sty, summaryMessage("s1", 47000, 8000)).(*AssistantMessageItem)
+
+	out := item.Render(80)
+	require.NotContains(t, out, summaryCollapseHint)
+	require.Equal(t, -1, item.summaryFooterLine())
 }

@@ -227,6 +227,11 @@ type AssistantMessageItem struct {
 	// during long reasoning traces.
 	streamingThinking streamingMarkdown
 
+	// summaryRenderedLines is the height of the last expanded-summary
+	// render, so the footer that closes it can be found by row index
+	// from a mouse event - see summaryFooterLine. Zero when the item is
+	// not an expanded summary.
+	summaryRenderedLines int
 	// summaryExpanded opens a summarize pass's output, which renders as
 	// a single collapsed row otherwise. Meaningful only when the
 	// message carries IsSummaryMessage; see assistant_summary.go.
@@ -284,7 +289,7 @@ func (a *AssistantMessageItem) Restyle() tea.Cmd {
 
 // StartAnimation starts the assistant message animation if it should be spinning.
 func (a *AssistantMessageItem) StartAnimation() tea.Cmd {
-	if !a.isSpinning() {
+	if !a.spinnerActive() {
 		return nil
 	}
 	return a.anim.Start()
@@ -292,7 +297,7 @@ func (a *AssistantMessageItem) StartAnimation() tea.Cmd {
 
 // Animate progresses the assistant message animation if it should be spinning.
 func (a *AssistantMessageItem) Animate(msg spin.StepMsg) tea.Cmd {
-	if !a.isSpinning() {
+	if !a.spinnerActive() {
 		return nil
 	}
 	// Bump the F6 list-cache version so the next draw re-renders
@@ -355,7 +360,17 @@ func (a *AssistantMessageItem) renderRaw(width int, keys assistantSectionKeys) s
 		if highlightedContent != "" {
 			highlightedContent += "\n\n"
 		}
-		return highlightedContent + spinner
+		highlightedContent += spinner
+	}
+	// The footer goes last, below the spinner included: it is the
+	// control that closes the block, and a control belongs at the edge
+	// of what it acts on. Recording the height here is what lets a
+	// click find it - see summaryFooterLine.
+	if a.isSummary() && a.summaryExpanded {
+		highlightedContent += "\n" + a.renderSummaryFooter(cappedWidth)
+		a.summaryRenderedLines = lipgloss.Height(highlightedContent)
+	} else {
+		a.summaryRenderedLines = 0
 	}
 
 	return highlightedContent
@@ -786,6 +801,24 @@ func (a *AssistantMessageItem) renderError(width int) string {
 }
 
 // isSpinning returns true if the assistant message is still generating.
+// spinnerActive reports whether this item is rendering the working
+// spinner, and therefore needs animation ticks.
+//
+// It is isSpinning plus the one case that test cannot see: a collapsed
+// summary is *only* the spinner for the whole pass (renderCollapsedSummary),
+// while isSpinning goes false as soon as the summary streams its first
+// delta, since a message with content is normally past its spinner. Gating
+// the ticks on isSpinning alone therefore froze that row on whatever frame
+// the first delta happened to catch.
+//
+// A summary collapsed by hand mid-pass starts ticking again on the next
+// delta, through SetMessage's transition check below; during a summarize
+// those arrive constantly, and toggling expansion cannot return a command
+// of its own (see Expandable).
+func (a *AssistantMessageItem) spinnerActive() bool {
+	return a.isSpinning() || (a.summaryIsCollapsed() && !a.message.IsFinished())
+}
+
 func (a *AssistantMessageItem) isSpinning() bool {
 	isThinking := a.message.IsThinking()
 	isFinished := a.message.IsFinished()
@@ -799,7 +832,7 @@ func (a *AssistantMessageItem) isSpinning() bool {
 // invalidated; the others survive and serve cache hits on the next
 // RawRender.
 func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
-	wasSpinning := a.isSpinning()
+	wasSpinning := a.spinnerActive()
 	a.message = msg
 	// Bump the F6 version even if the underlying *message.Message
 	// pointer is identical: callers may have mutated the message in
@@ -812,7 +845,7 @@ func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
 	// cache valid while a changed section forces a miss naturally.
 	// Section caches themselves are content-keyed, so they do not
 	// need an explicit drop here either.
-	if !wasSpinning && a.isSpinning() {
+	if !wasSpinning && a.spinnerActive() {
 		return a.StartAnimation()
 	}
 	return nil
@@ -936,7 +969,7 @@ func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 	// hint beside it. Its own rows only: a click in the opened text
 	// below must not close the thing the person is reading.
 	if a.isSummary() {
-		return y >= 0 && y < a.summaryClickHeight()
+		return a.summaryHit(y)
 	}
 	// Otherwise only the thinking box is clickable; other regions of the
 	// assistant message should not trigger expansion.
@@ -947,7 +980,7 @@ func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 // target, so the row highlights exactly where clicking does something.
 func (a *AssistantMessageItem) HoverableAt(_ int, y, _ int) bool {
 	if a.isSummary() {
-		return y >= 0 && y < a.summaryClickHeight()
+		return a.summaryHit(y)
 	}
 	return a.thinkingBoxHeight > 0 && y >= 0 && y < a.thinkingBoxHeight
 }

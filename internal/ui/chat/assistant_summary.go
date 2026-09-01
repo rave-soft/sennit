@@ -35,15 +35,28 @@ const (
 	summaryCollapsedGlyph = "▸"
 	summaryExpandedGlyph  = "▾"
 
-	summaryHeaderLabel = "Context compacted"
-	// summaryHeaderHint names both ways in, on a line of its own rather
-	// than in parentheses after the counts. Trailing on the header line
-	// it read as a footnote to the numbers and got truncated first on a
-	// narrow window - and it was the only thing on the row telling anyone
-	// the row opened at all. Clicking is the half people reach for
-	// without being told, so it is the half that had to actually work;
-	// see [AssistantMessageItem.HandleMouseClick].
-	summaryHeaderHint = "space or click to expand"
+	// summaryHeaderLabel is the label of a finished compaction;
+	// summaryRunningLabel is the same row while the pass is still
+	// running. A summarize streams its text like any other reply, so the
+	// generic spinner test (isSpinning, which requires no content yet)
+	// goes false the moment the first delta lands - and the row then
+	// showed the finished wording, and its savings counts, for a
+	// compaction that had not happened.
+	summaryHeaderLabel  = "Context compacted"
+	summaryRunningLabel = "Compacting context"
+	// summaryHeaderHint and summaryCollapseHint sit on lines of their own
+	// rather than in parentheses after the counts. Trailing on the header
+	// line the hint read as a footnote to the numbers and got truncated
+	// first on a narrow window - and it was the only thing on the row
+	// telling anyone the row opened at all.
+	//
+	// The wording is the one every other expandable block in the chat
+	// uses (see expandableBodyContent), and it names clicking alone: the
+	// `space` binding works only while the chat list itself holds focus,
+	// which is not where a person reading a reply usually is, so
+	// advertising it here promised a key that mostly does nothing.
+	summaryHeaderHint   = "Click to expand"
+	summaryCollapseHint = "Click to collapse"
 )
 
 // isSummary reports whether this item renders a summarize pass's output.
@@ -84,7 +97,11 @@ func (a *AssistantMessageItem) renderSummaryHeader(width int) string {
 	if a.summaryExpanded {
 		glyph = summaryExpandedGlyph
 	}
-	text := fmt.Sprintf("%s %s", glyph, summaryHeaderLabel)
+	label := summaryHeaderLabel
+	if !a.message.IsFinished() {
+		label = summaryRunningLabel
+	}
+	text := fmt.Sprintf("%s %s", glyph, label)
 	if before, after, ok := a.message.SummarySavings(); ok {
 		text += fmt.Sprintf(" · %s → %s",
 			presentation.FormatTokenCount(before),
@@ -108,9 +125,12 @@ func (a *AssistantMessageItem) renderSummaryHeader(width int) string {
 	return rendered + "\n" + a.sty.Messages.Notice.Render(hint)
 }
 
-// summaryClickHeight is how many rows of a summary item are the header,
-// and therefore the click target. Two while collapsed (the label and its
-// hint), one once open - the row that closes it again.
+// summaryClickHeight is how many rows at the *top* of a summary item are
+// the header, and therefore a click target. Two while collapsed (the
+// label and its hint), one once open - the row that closes it again. The
+// opened text below is not a target: a click in the middle of what
+// someone is reading must not close it. The other target is the footer,
+// which renderSummaryFooter puts on the last line; see summaryFooterLine.
 //
 // A constant rather than a measurement: renderSummaryHeader is the only
 // thing that decides this shape, it is right here, and a click target
@@ -123,6 +143,39 @@ func (a *AssistantMessageItem) summaryClickHeight() int {
 	return 2
 }
 
+// renderSummaryFooter renders the line that closes an opened summary. It
+// exists because the header alone leaves no way back at the bottom of a
+// long compaction: the person has scrolled past the row they opened, and
+// every other expandable block in the chat ends with this same line.
+func (a *AssistantMessageItem) renderSummaryFooter(width int) string {
+	hint := " " + summaryCollapseHint
+	if width > 0 {
+		hint = ansi.Truncate(hint, width, "…")
+	}
+	return a.sty.Messages.Notice.Render(hint)
+}
+
+// summaryFooterLine is the row index of that footer within the item's
+// last render, or -1 when there is none (a collapsed summary, or an item
+// that is not one). renderRaw records the height as it renders, the same
+// way thinkingBoxHeight is recorded, since the footer's position depends
+// on how much text the summary itself came to.
+func (a *AssistantMessageItem) summaryFooterLine() int {
+	if !a.isSummary() || !a.summaryExpanded || a.summaryRenderedLines <= 0 {
+		return -1
+	}
+	return a.summaryRenderedLines - 1
+}
+
+// summaryHit reports whether y lands on one of an expanded summary's two
+// controls: the header at the top, or the footer on the last line.
+func (a *AssistantMessageItem) summaryHit(y int) bool {
+	if y >= 0 && y < a.summaryClickHeight() {
+		return true
+	}
+	return y == a.summaryFooterLine()
+}
+
 // renderCollapsedSummary renders the whole item while the summary is
 // collapsed. It deliberately bypasses renderMessageContent: none of the
 // summary's own text, reasoning included, reaches the window.
@@ -130,7 +183,12 @@ func (a *AssistantMessageItem) renderCollapsedSummary(width int) string {
 	// Still running: the working spinner is the entire row. Its label
 	// comes from the message's own phase, so it reads "Summarizing"
 	// without this needing to know that.
-	if a.isSpinning() {
+	//
+	// IsFinished, not the generic isSpinning: a summarize streams its
+	// text like any other reply, and isSpinning goes false as soon as
+	// there is content - which left a running compaction rendering the
+	// finished header, savings counts and all.
+	if a.spinnerActive() {
 		return a.renderSpinning()
 	}
 	// A failed summarize stays loud. The header still leads so the row
