@@ -47,8 +47,13 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// and toolCallID come from the clicked item directly, not
 		// m.chat.SelectedNestedToolContainer — a mouse click doesn't move
 		// the keyboard-driven selection that reads (see HandleMouseDown).
+		// enterChildSession returns nil for a delegation that has not
+		// started yet (see delegationStarted): the click is simply not
+		// one, so nothing is queued for it.
 		if _, openContainer, messageID, toolCallID := m.chat.HandleDelayedClick(msg); openContainer {
-			cmds = append(cmds, m.enterChildSession(messageID, toolCallID))
+			if cmd := m.enterChildSession(messageID, toolCallID); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open. Route through

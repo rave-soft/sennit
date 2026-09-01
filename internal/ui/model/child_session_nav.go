@@ -107,6 +107,67 @@ func captureDelegationRef(item chat.ToolMessageItem) childSessionRef {
 	return ref
 }
 
+// delegationStarted reports whether the delegation identified by
+// toolCallID has a child session behind it yet, i.e. whether opening it
+// would land on a transcript rather than on nothing.
+//
+// The sub-session row is written when the delegation's run is launched,
+// which can be seconds after the model emitted the tool call: the call
+// waits its turn behind its siblings, and the delegate's prompt and tools
+// still have to be built. In that window the block is already on screen,
+// spinner and all, with no session under it. Opening it there pushed a
+// nav frame, blurred the editor and then rolled all of it back when the
+// load came back not-found — a click that could only ever produce a
+// status-bar message.
+//
+// A delegation whose tool call has come back — or was canceled — is past
+// that window: a result exists, so the run that produced it did too. One
+// with no result yet is either running or not started, and the only thing
+// that tells those apart is whether the task record naming its session
+// exists — the same record the panel's agents section reads, which is why
+// "has it shown up in the panel yet" is what this comes down to.
+func (m *UI) delegationStarted(toolCallID string) bool {
+	item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem)
+	if !ok {
+		// Not in the loaded window (a sibling cycled to, a panel block):
+		// nothing to judge it by here, so let the load answer.
+		return true
+	}
+	if item.Status() == chat.ToolStatusCanceled {
+		return true
+	}
+	if reporter, ok := item.(chat.ToolResultReporter); ok && reporter.HasResult() {
+		return true
+	}
+	return m.delegationHasTaskRecord(toolCallID)
+}
+
+// delegationHasTaskRecord reports whether a task record carrying this
+// delegation's child session id is known. The record is created before
+// the session and only *named* with the session id once that session
+// exists (see TaskManager.Create's SetSession), so a parseable id here
+// means the session it points at has already been written.
+//
+// Every uncertain case answers yes: a workspace that lists no tasks at
+// all, and a list that has never been fetched, say nothing about this
+// delegation, and refusing to open one on that silence would break the
+// ordinary case to fix the rare one. The not-found path in updateSession
+// stays as the backstop for what slips through.
+func (m *UI) delegationHasTaskRecord(toolCallID string) bool {
+	if m.com == nil || m.com.Workspace == nil || !m.com.Workspace.SupportsTasks() {
+		return true
+	}
+	if m.agentList.cache.Timestamp.IsZero() {
+		return true
+	}
+	for _, task := range m.agentList.cache.Value {
+		if _, id, ok := m.com.Workspace.ParseAgentToolSessionID(task.SessionID); ok && id == toolCallID {
+			return true
+		}
+	}
+	return false
+}
+
 // enterChildSession pushes a navigation frame for the currently loaded
 // session and returns a tea.Cmd that loads the child (sub-agent) session
 // identified by messageID/toolCallID. The sibling list is built from the
@@ -119,6 +180,12 @@ func captureDelegationRef(item chat.ToolMessageItem) childSessionRef {
 // and reconstructing the old viewport would be fragile and not worth the
 // complexity for this step.
 func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
+	// A delegation that has not started has nothing to open: no frame, no
+	// load, no message. See delegationStarted.
+	if !m.delegationStarted(toolCallID) {
+		return nil
+	}
+
 	childID := m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID)
 
 	// m.sess.current still refers to the parent here — loadSession is async and

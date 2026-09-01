@@ -51,6 +51,14 @@ type ToolMessageItem interface {
 	Status() ToolStatus
 }
 
+// ToolResultReporter is implemented by tool items that can say whether
+// their call has produced a result. Every item built on
+// baseToolMessageItem does; it is a separate interface rather than part of
+// [ToolMessageItem] so a caller that only needs this one answer says so.
+type ToolResultReporter interface {
+	HasResult() bool
+}
+
 // Compactable is an interface for tool items that can render in a compacted mode.
 // When compact mode is enabled, tools render as a compact single-line header.
 type Compactable interface {

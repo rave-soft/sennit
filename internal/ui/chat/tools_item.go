@@ -228,6 +228,16 @@ func (t *baseToolMessageItem) Status() ToolStatus {
 	return t.status
 }
 
+// HasResult reports whether the tool call has come back yet. It reads the
+// same field computeStatus does, exposed because Status() alone cannot
+// answer it: status stays ToolStatusRunning once a result lands, and only
+// computeStatus (unexported, render-time) folds the result in. See
+// delegationStarted in internal/ui/model, which needs to tell a delegation
+// still in flight from one that has finished.
+func (t *baseToolMessageItem) HasResult() bool {
+	return t.result != nil
+}
+
 // computeStatus computes the effective status considering the result.
 func (t *baseToolMessageItem) computeStatus() ToolStatus {
 	if t.result != nil {
