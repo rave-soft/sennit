@@ -88,20 +88,3 @@ type RemoveThreadOptions struct {
 	Force        bool `json:"force,omitempty"`
 	DeleteBranch bool `json:"delete_branch,omitempty"`
 }
-
-// ThreadEventType identifies the kind of lifecycle change carried by a
-// ThreadEvent, mirroring internal/thread.EventType.
-type ThreadEventType string
-
-const (
-	ThreadEventCreated       ThreadEventType = "created"
-	ThreadEventStatusChanged ThreadEventType = "status_changed"
-	ThreadEventMerged        ThreadEventType = "merged"
-	ThreadEventRemoved       ThreadEventType = "removed"
-)
-
-// ThreadEvent is published over SSE on every thread lifecycle change.
-type ThreadEvent struct {
-	Type   ThreadEventType `json:"type"`
-	Thread Thread          `json:"thread"`
-}

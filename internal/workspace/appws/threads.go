@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -14,16 +13,16 @@ import (
 )
 
 // threadEventPubsubType maps a thread lifecycle event's semantic type
-// (created/status_changed/merged/removed, see proto.ThreadEventType) onto
+// (created/status_changed/merged/removed, see thread.EventType) onto
 // the coarser pubsub.EventType the TUI's thread state machines
 // (threads_cache.go, threads_dock.go, thread_indicator.go) key their
 // upsert/remove logic off. AppWorkspace.translateEvent funnels through
 // this so its mapping stays centralized.
-func threadEventPubsubType(t proto.ThreadEventType) pubsub.EventType {
+func threadEventPubsubType(t thread.EventType) pubsub.EventType {
 	switch t {
-	case proto.ThreadEventCreated:
+	case thread.EventCreated:
 		return pubsub.CreatedEvent
-	case proto.ThreadEventRemoved:
+	case thread.EventRemoved:
 		return pubsub.DeletedEvent
 	default: // status_changed, merged
 		return pubsub.UpdatedEvent
@@ -55,7 +54,7 @@ func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) 
 	}
 	result := make([]proto.Thread, len(sts))
 	for i, st := range sts {
-		result[i] = threadspawn.ThreadToProto(mgr, st)
+		result[i] = threadToProto(mgr, st)
 	}
 	return result, nil
 }
@@ -69,7 +68,7 @@ func (w *AppWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, 
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return threadspawn.ThreadToProto(mgr, st), nil
+	return threadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
@@ -87,7 +86,7 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return threadspawn.ThreadToProto(mgr, st), nil
+	return threadToProto(mgr, st), nil
 }
 
 // SendThread is the person's own path into a thread's session (the TUI's
@@ -117,7 +116,7 @@ func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thr
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return threadspawn.ThreadToProto(mgr, st), nil
+	return threadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
@@ -131,7 +130,7 @@ func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return threadspawn.ThreadToProto(mgr, st), nil
+	return threadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) CancelThread(ctx context.Context, id, reason string) error {

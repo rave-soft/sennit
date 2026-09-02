@@ -1,15 +1,15 @@
-package threadspawn
+package appws
 
 import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
-// ToProto converts st to its wire representation. workspaceID is the
+// toProto converts st to its wire representation. workspaceID is the
 // thread's currently-spawned runtime workspace ID (see
 // thread.Manager.WorkspaceID), threaded through explicitly because it is
 // manager-runtime state, not a column on the Thread row itself.
-func ToProto(st thread.Thread, workspaceID string) proto.Thread {
+func toProto(st thread.Thread, workspaceID string) proto.Thread {
 	return proto.Thread{
 		ID:              st.ID,
 		Name:            st.Name,
@@ -31,17 +31,9 @@ func ToProto(st thread.Thread, workspaceID string) proto.Thread {
 	}
 }
 
-// EventToProto converts a thread lifecycle event to its wire form.
-func EventToProto(e thread.Event, workspaceID string) proto.ThreadEvent {
-	return proto.ThreadEvent{
-		Type:   proto.ThreadEventType(e.Type),
-		Thread: ToProto(e.Thread, workspaceID),
-	}
-}
-
-// ThreadToProto is a convenience wrapper for handlers/event bridges that
+// threadToProto is a convenience wrapper for handlers/event bridges that
 // only have a Manager and a Thread and want the correct WorkspaceID filled
 // in without a separate m.WorkspaceID(id) call.
-func ThreadToProto(m *thread.Manager, st thread.Thread) proto.Thread {
-	return ToProto(st, m.WorkspaceID(st.ID))
+func threadToProto(m *thread.Manager, st thread.Thread) proto.Thread {
+	return toProto(st, m.WorkspaceID(st.ID))
 }

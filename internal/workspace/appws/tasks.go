@@ -3,7 +3,6 @@ package appws
 import (
 	"context"
 
-	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -36,7 +35,7 @@ func (w *AppWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
 	for i, st := range sts {
 		// A task has no workspace of its own (see TaskController's doc
 		// comment), so workspaceID is always "".
-		result[i] = threadspawn.ToProto(st, "")
+		result[i] = toProto(st, "")
 	}
 	return result, nil
 }

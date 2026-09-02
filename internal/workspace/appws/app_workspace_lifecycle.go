@@ -4,18 +4,17 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	mcptools "github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/app"
-	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- BackgroundJobs --
 
-func (w *AppWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
-	return w.app.BackgroundShells.Counts()
+func (w *AppWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {
+	c := w.app.BackgroundShells.Counts()
+	return workspace.BackgroundJobCounts{Active: c.Active, Completed: c.Completed}
 }
 
 // -- Lifecycle --
@@ -68,10 +67,9 @@ func (w *AppWorkspace) translateEvent(msg any) any {
 	if mgr, ok := w.threadManager(); ok {
 		workspaceID = mgr.WorkspaceID(e.Payload.Thread.ID)
 	}
-	pe := threadspawn.EventToProto(e.Payload, workspaceID)
 	return pubsub.Event[proto.Thread]{
-		Type:    threadEventPubsubType(pe.Type),
-		Payload: pe.Thread,
+		Type:    threadEventPubsubType(e.Payload.Type),
+		Payload: toProto(e.Payload.Thread, workspaceID),
 	}
 }
 
