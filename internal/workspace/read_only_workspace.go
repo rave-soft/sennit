@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
@@ -701,7 +700,7 @@ func (w *readOnlyWorkspace) ListAccounts(providerID string) ([]accounts.Account,
 	return w.ws.ListAccounts(providerID)
 }
 
-func (w *readOnlyWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
+func (w *readOnlyWorkspace) ListMCPPrompts(ctx context.Context) ([]MCPPrompt, error) {
 	return w.ws.ListMCPPrompts(ctx)
 }
 
@@ -725,7 +724,7 @@ func (w *readOnlyWorkspace) DoctorProblems() []config.Problem {
 	return w.ws.DoctorProblems()
 }
 
-func (w *readOnlyWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {
+func (w *readOnlyWorkspace) ListCustomCommands(ctx context.Context) ([]CustomCommand, error) {
 	return w.ws.ListCustomCommands(ctx)
 }
 

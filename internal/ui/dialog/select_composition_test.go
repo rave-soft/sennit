@@ -5,7 +5,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -67,7 +66,7 @@ func TestSelectDialogComposition_FilterNavigationAndNarrowLayout(t *testing.T) {
 
 func TestCommandsComposition_CategoryAndAsyncRebuildPreserveSelection(t *testing.T) {
 	com := newCommandsNamesTestCommon(t)
-	custom := []commands.CustomCommand{{ID: "custom", Name: "custom", Content: "run"}}
+	custom := []workspace.CustomCommand{{ID: "custom", Name: "custom", Content: "run"}}
 	c, err := NewCommands(com, "", false, false, false, custom, nil)
 	require.NoError(t, err)
 

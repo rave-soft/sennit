@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
@@ -649,7 +648,7 @@ func (s *stubWorkspace) CustomProviderTypes() []string {
 	return nil
 }
 
-func (s *stubWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {
+func (s *stubWorkspace) ListCustomCommands(ctx context.Context) ([]CustomCommand, error) {
 	s.track("ListCustomCommands")
 	return nil, nil
 }
@@ -711,7 +710,7 @@ func (s *stubWorkspace) ReadMCPResource(ctx context.Context, name, uri string) (
 	return nil, nil
 }
 
-func (s *stubWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
+func (s *stubWorkspace) ListMCPPrompts(ctx context.Context) ([]MCPPrompt, error) {
 	return nil, nil
 }
 

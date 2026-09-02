@@ -17,7 +17,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
@@ -484,7 +483,7 @@ type ProjectLifecycle interface {
 	// discovery — walking the config directories, then the skill catalog —
 	// and the palette's job is to render a list, not to know that a
 	// command can come from two places or how either is found.
-	ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error)
+	ListCustomCommands(ctx context.Context) ([]CustomCommand, error)
 }
 
 // MCPController manages MCP server connections and their tools, prompts,
@@ -546,7 +545,7 @@ type MCPController interface {
 	MCPRefreshResources(ctx context.Context, name string)
 	RefreshMCPTools(ctx context.Context, name string)
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
-	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
+	ListMCPPrompts(ctx context.Context) ([]MCPPrompt, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error

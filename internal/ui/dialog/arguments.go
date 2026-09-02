@@ -15,9 +15,9 @@ import (
 	"golang.org/x/text/language"
 
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // ArgumentsID is the identifier for the arguments dialog.
@@ -35,7 +35,7 @@ const (
 type Arguments struct {
 	com       *common.Common
 	title     string
-	arguments []commands.Argument
+	arguments []workspace.Argument
 	inputs    []textinput.Model
 	focused   int
 	spinner   spinner.Model
@@ -60,7 +60,7 @@ type Arguments struct {
 var _ Dialog = (*Arguments)(nil)
 
 // NewArguments creates a new arguments dialog.
-func NewArguments(com *common.Common, title, description string, arguments []commands.Argument, resultAction Action) *Arguments {
+func NewArguments(com *common.Common, title, description string, arguments []workspace.Argument, resultAction Action) *Arguments {
 	a := &Arguments{
 		com:          com,
 		title:        title,

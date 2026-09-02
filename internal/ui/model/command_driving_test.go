@@ -11,7 +11,6 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/git"
@@ -435,7 +434,7 @@ func (w *cmdDrivingWorkspace) ReadMCPResource(ctx context.Context, name, uri str
 	return nil, nil
 }
 
-func (w *cmdDrivingWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
+func (w *cmdDrivingWorkspace) ListMCPPrompts(ctx context.Context) ([]workspace.MCPPrompt, error) {
 	return nil, nil
 }
 

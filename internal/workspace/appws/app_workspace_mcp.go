@@ -69,8 +69,9 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 	return result, nil
 }
 
-func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
-	return commands.LoadMCPPrompts(w.app.MCP)
+func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]workspace.MCPPrompt, error) {
+	prompts, err := commands.LoadMCPPrompts(w.app.MCP)
+	return toWorkspaceMCPPrompts(prompts), err
 }
 
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
@@ -130,4 +131,52 @@ func (w *AppWorkspace) DockerMCPAvailable() (available, known bool) {
 // RefreshDockerMCPAvailability implements Workspace.
 func (w *AppWorkspace) RefreshDockerMCPAvailability() bool {
 	return config.RefreshDockerMCPAvailability()
+}
+
+// toWorkspaceArguments converts internal/commands' argument shape into the
+// contract's own. The conversion lives here, at the boundary, so
+// internal/workspace never imports internal/commands — that package pulls
+// in internal/agent/tools/mcp, and internal/workspace is what internal/ui
+// links against (see TestDomainPackageDoesNotDependOnAgentTransitively).
+func toWorkspaceArguments(in []commands.Argument) []workspace.Argument {
+	if in == nil {
+		return nil
+	}
+	out := make([]workspace.Argument, 0, len(in))
+	for _, a := range in {
+		out = append(out, workspace.Argument{ID: a.ID, Title: a.Title, Description: a.Description, Required: a.Required})
+	}
+	return out
+}
+
+// toWorkspaceMCPPrompts converts a listing of MCP prompts at the boundary.
+func toWorkspaceMCPPrompts(in []commands.MCPPrompt) []workspace.MCPPrompt {
+	if in == nil {
+		return nil
+	}
+	out := make([]workspace.MCPPrompt, 0, len(in))
+	for _, p := range in {
+		out = append(out, workspace.MCPPrompt{
+			ID: p.ID, Title: p.Title, Description: p.Description,
+			PromptID: p.PromptID, ClientID: p.ClientID,
+			Arguments: toWorkspaceArguments(p.Arguments),
+		})
+	}
+	return out
+}
+
+// toWorkspaceCustomCommands converts a listing of custom commands at the
+// boundary.
+func toWorkspaceCustomCommands(in []commands.CustomCommand) []workspace.CustomCommand {
+	if in == nil {
+		return nil
+	}
+	out := make([]workspace.CustomCommand, 0, len(in))
+	for _, c := range in {
+		out = append(out, workspace.CustomCommand{
+			ID: c.ID, Name: c.Name, Content: c.Content,
+			Arguments: toWorkspaceArguments(c.Arguments), Skill: c.Skill,
+		})
+	}
+	return out
 }

@@ -42,7 +42,7 @@ func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, err
 // commands directory is a worse reason to show an empty list than to show
 // the skills that did load — which is also why the error is returned
 // rather than swallowed: the caller decides whether to say anything.
-func (w *AppWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {
+func (w *AppWorkspace) ListCustomCommands(ctx context.Context) ([]workspace.CustomCommand, error) {
 	custom, cmdErr := commands.LoadCustomCommands(w.store.Config())
 
 	entries, skillErr := w.ListSkills(ctx)
@@ -50,7 +50,7 @@ func (w *AppWorkspace) ListCustomCommands(ctx context.Context) ([]commands.Custo
 		custom = append(custom, commands.FromSkillCatalog(entries)...)
 	}
 
-	return custom, errors.Join(cmdErr, skillErr)
+	return toWorkspaceCustomCommands(custom), errors.Join(cmdErr, skillErr)
 }
 
 func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {

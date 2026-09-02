@@ -10,7 +10,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -22,7 +21,7 @@ import (
 // newTestCommands builds a Commands dialog with the given custom commands
 // and MCP prompts, ready to drive nextCommandType/previousCommandType and
 // the tab-related plumbing.
-func newTestCommands(t *testing.T, custom []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) *Commands {
+func newTestCommands(t *testing.T, custom []workspace.CustomCommand, mcpPrompts []workspace.MCPPrompt) *Commands {
 	t.Helper()
 	com := newCommandsNamesTestCommon(t)
 	c, err := NewCommands(com, "sess-1", true, false, false, custom, mcpPrompts)
@@ -180,7 +179,7 @@ func TestCommandsRadioView(t *testing.T) {
 func TestCommands_Draw(t *testing.T) {
 	t.Parallel()
 
-	c := newTestCommands(t, []commands.CustomCommand{{ID: "c1", Name: "custom"}}, nil)
+	c := newTestCommands(t, []workspace.CustomCommand{{ID: "c1", Name: "custom"}}, nil)
 	area := image.Rect(0, 0, 60, 20)
 	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
 
@@ -244,7 +243,7 @@ func TestCommands_DockerAvailabilityMsgPreservesFilterText(t *testing.T) {
 func TestCommands_TabSwitchClearsFilterText(t *testing.T) {
 	t.Parallel()
 
-	c := newTestCommands(t, []commands.CustomCommand{{ID: "c1", Name: "custom"}}, nil)
+	c := newTestCommands(t, []workspace.CustomCommand{{ID: "c1", Name: "custom"}}, nil)
 	c.input.SetValue("bash")
 	c.list.SetFilter("bash")
 
@@ -284,8 +283,8 @@ func TestCommandType_CycleBothCategoriesPresent(t *testing.T) {
 	t.Parallel()
 
 	c := newTestCommands(t,
-		[]commands.CustomCommand{{ID: "c1", Name: "custom"}},
-		[]commands.MCPPrompt{{ID: "m1", PromptID: "prompt"}},
+		[]workspace.CustomCommand{{ID: "c1", Name: "custom"}},
+		[]workspace.MCPPrompt{{ID: "m1", PromptID: "prompt"}},
 	)
 
 	c.selected = SystemCommands
@@ -309,7 +308,7 @@ func TestCommandType_CycleBothCategoriesPresent(t *testing.T) {
 func TestCommandType_CycleOnlyUserCommands(t *testing.T) {
 	t.Parallel()
 
-	c := newTestCommands(t, []commands.CustomCommand{{ID: "c1", Name: "custom"}}, nil)
+	c := newTestCommands(t, []workspace.CustomCommand{{ID: "c1", Name: "custom"}}, nil)
 
 	c.selected = SystemCommands
 	require.Equal(t, UserCommands, c.nextCommandType())
@@ -328,7 +327,7 @@ func TestCommandType_CycleOnlyUserCommands(t *testing.T) {
 func TestCommandType_CycleOnlyMCPPrompts(t *testing.T) {
 	t.Parallel()
 
-	c := newTestCommands(t, nil, []commands.MCPPrompt{{ID: "m1", PromptID: "prompt"}})
+	c := newTestCommands(t, nil, []workspace.MCPPrompt{{ID: "m1", PromptID: "prompt"}})
 
 	c.selected = SystemCommands
 	require.Equal(t, MCPPrompts, c.nextCommandType(), "no user commands: next from System skips straight to MCP")
@@ -372,7 +371,7 @@ func TestCommandType_CycleEmptyCategories(t *testing.T) {
 func TestCommands_SetCommandItems(t *testing.T) {
 	t.Parallel()
 
-	c := newTestCommands(t, []commands.CustomCommand{{ID: "c1", Name: "custom-one"}}, nil)
+	c := newTestCommands(t, []workspace.CustomCommand{{ID: "c1", Name: "custom-one"}}, nil)
 	require.Equal(t, SystemCommands, c.selected)
 
 	c.setCommandItems(UserCommands)
@@ -393,7 +392,7 @@ func TestMcpPromptItem(t *testing.T) {
 
 	s := styles.SennitDark()
 
-	withDesc := mcpPromptItem(&s, commands.MCPPrompt{
+	withDesc := mcpPromptItem(&s, workspace.MCPPrompt{
 		ID: "p1", PromptID: "greet", ClientID: "client-1",
 		Title: "Greet", Description: "says hello",
 	})
@@ -406,7 +405,7 @@ func TestMcpPromptItem(t *testing.T) {
 	require.Equal(t, "greet", action.PromptID)
 	require.Equal(t, "client-1", action.ClientID)
 
-	noDesc := mcpPromptItem(&s, commands.MCPPrompt{ID: "p2", PromptID: "bye"})
+	noDesc := mcpPromptItem(&s, workspace.MCPPrompt{ID: "p2", PromptID: "bye"})
 	require.Empty(t, noDesc.Description())
 }
 
@@ -421,12 +420,12 @@ func TestCommands_SetCustomCommands(t *testing.T) {
 
 	// Not on the User tab: the list must not be touched yet, but the
 	// stored slice updates so a later tab switch picks it up.
-	c.SetCustomCommands([]commands.CustomCommand{{ID: "c1", Name: "one"}})
+	c.SetCustomCommands([]workspace.CustomCommand{{ID: "c1", Name: "one"}})
 	require.Len(t, c.customCommands, 1)
 	require.Equal(t, SystemCommands, c.selected, "must not switch tabs on its own")
 
 	c.selected = UserCommands
-	c.SetCustomCommands([]commands.CustomCommand{{ID: "c1", Name: "one"}, {ID: "c2", Name: "two"}})
+	c.SetCustomCommands([]workspace.CustomCommand{{ID: "c1", Name: "one"}, {ID: "c2", Name: "two"}})
 
 	require.Len(t, c.list.FilteredItems(), 2)
 	item, ok := c.list.FilteredItems()[1].(*CommandItem)
@@ -441,12 +440,12 @@ func TestCommands_SetMCPPrompts(t *testing.T) {
 
 	c := newTestCommands(t, nil, nil)
 
-	c.SetMCPPrompts([]commands.MCPPrompt{{ID: "m1", PromptID: "one"}})
+	c.SetMCPPrompts([]workspace.MCPPrompt{{ID: "m1", PromptID: "one"}})
 	require.Len(t, c.mcpPrompts, 1)
 	require.Equal(t, SystemCommands, c.selected)
 
 	c.selected = MCPPrompts
-	c.SetMCPPrompts([]commands.MCPPrompt{{ID: "m1", PromptID: "one"}, {ID: "m2", PromptID: "two"}})
+	c.SetMCPPrompts([]workspace.MCPPrompt{{ID: "m1", PromptID: "one"}, {ID: "m2", PromptID: "two"}})
 
 	require.Len(t, c.list.FilteredItems(), 2)
 	item, ok := c.list.FilteredItems()[1].(*CommandItem)

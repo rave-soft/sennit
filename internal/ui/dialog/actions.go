@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -15,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -112,7 +112,7 @@ type (
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {
 		Content   string
-		Arguments []commands.Argument
+		Arguments []workspace.Argument
 		Args      map[string]string // Actual argument values
 		Skill     *skills.Skill     // Set when this is a skill command
 	}
@@ -128,7 +128,7 @@ type (
 		Description string
 		PromptID    string
 		ClientID    string
-		Arguments   []commands.Argument
+		Arguments   []workspace.Argument
 		Args        map[string]string // Actual argument values
 	}
 	// ActionEnableDockerMCP is a message to enable Docker MCP.

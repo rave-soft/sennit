@@ -4,7 +4,6 @@ import (
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -31,18 +30,18 @@ type integrationsState struct {
 	mcpVersion    int
 	skillsVersion int
 
-	customCommands []commands.CustomCommand
-	mcpPrompts     []commands.MCPPrompt
+	customCommands []workspace.CustomCommand
+	mcpPrompts     []workspace.MCPPrompt
 }
 
 // userCommandsLoadedMsg is sent when user commands are loaded.
 type userCommandsLoadedMsg struct {
-	Commands []commands.CustomCommand
+	Commands []workspace.CustomCommand
 }
 
 // mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
 type mcpPromptsLoadedMsg struct {
-	Prompts []commands.MCPPrompt
+	Prompts []workspace.MCPPrompt
 }
 
 // mcpStateChangedMsg is sent when there is a change in MCP client states.
@@ -160,7 +159,7 @@ func loadMCPromptsCmd(com *common.Common) tea.Cmd {
 		}
 		if prompts == nil {
 			// flag them as loaded even if there is none or an error
-			prompts = []commands.MCPPrompt{}
+			prompts = []workspace.MCPPrompt{}
 		}
 		return mcpPromptsLoadedMsg{Prompts: prompts}
 	}

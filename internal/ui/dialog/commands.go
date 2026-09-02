@@ -8,11 +8,11 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // CommandsID is the identifier for the commands dialog.
@@ -45,8 +45,8 @@ type Commands struct {
 	spinner                        spinner.Model
 	loading                        bool
 	windowWidth                    int
-	customCommands                 []commands.CustomCommand
-	mcpPrompts                     []commands.MCPPrompt
+	customCommands                 []workspace.CustomCommand
+	mcpPrompts                     []workspace.MCPPrompt
 	dockerMCPAvailable             *bool
 	dockerMCPCheckInFlight         bool
 	tab, shiftTab                  key.Binding
@@ -54,7 +54,7 @@ type Commands struct {
 
 var _ Dialog = (*Commands)(nil)
 
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []workspace.CustomCommand, mcpPrompts []workspace.MCPPrompt) (*Commands, error) {
 	c := &Commands{com: com, sessionID: sessionID, hasSession: hasSession, hasTodos: hasTodos, hasQueue: hasQueue, customCommands: customCommands, mcpPrompts: mcpPrompts}
 	if available, known := com.Workspace.DockerMCPAvailable(); known {
 		c.dockerMCPAvailable = &available
@@ -277,7 +277,7 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 
 // customCommandItem builds a CommandItem for a user-defined (file-backed)
 // custom command or skill.
-func customCommandItem(sty *styles.Styles, cmd commands.CustomCommand) *CommandItem {
+func customCommandItem(sty *styles.Styles, cmd workspace.CustomCommand) *CommandItem {
 	var action Action
 	if cmd.Skill != nil {
 		action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
@@ -296,7 +296,7 @@ func customCommandItem(sty *styles.Styles, cmd commands.CustomCommand) *CommandI
 }
 
 // mcpPromptItem builds a CommandItem for a prompt exposed by an MCP server.
-func mcpPromptItem(sty *styles.Styles, cmd commands.MCPPrompt) *CommandItem {
+func mcpPromptItem(sty *styles.Styles, cmd workspace.MCPPrompt) *CommandItem {
 	action := ActionRunMCPPrompt{
 		Title:       cmd.Title,
 		Description: cmd.Description,
@@ -322,8 +322,8 @@ func BuildCommandItems(
 	hasSession, hasTodos, hasQueue bool,
 	windowWidth int,
 	dockerMCPAvailable *bool,
-	customCommands []commands.CustomCommand,
-	mcpPrompts []commands.MCPPrompt,
+	customCommands []workspace.CustomCommand,
+	mcpPrompts []workspace.MCPPrompt,
 ) []*CommandItem {
 	items := systemCommandItems(com, sessionID, hasSession, hasTodos, hasQueue, windowWidth, dockerMCPAvailable)
 	for _, cmd := range customCommands {
@@ -482,7 +482,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 }
 
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.
-func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
+func (c *Commands) SetCustomCommands(customCommands []workspace.CustomCommand) {
 	c.customCommands = customCommands
 	if c.selected == UserCommands {
 		c.setCommandItems(c.selected)
@@ -490,7 +490,7 @@ func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 }
 
 // SetMCPPrompts sets the MCP prompts and refreshes the view if MCP prompts are currently displayed.
-func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
+func (c *Commands) SetMCPPrompts(mcpPrompts []workspace.MCPPrompt) {
 	c.mcpPrompts = mcpPrompts
 	if c.selected == MCPPrompts {
 		c.setCommandItems(c.selected)

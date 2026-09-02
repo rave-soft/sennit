@@ -10,13 +10,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	mcptools "github.com/rave-soft/sennit/internal/workspace"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,9 +28,9 @@ func newUncoveredDialogCommon(t *testing.T) *common.Common {
 func TestArguments_KeyboardNavigationValidationAndViewport(t *testing.T) {
 	t.Parallel()
 
-	args := make([]commands.Argument, 5)
+	args := make([]workspace.Argument, 5)
 	for i := range args {
-		args[i] = commands.Argument{ID: string(rune('a' + i)), Title: "argument", Required: i == 4}
+		args[i] = workspace.Argument{ID: string(rune('a' + i)), Title: "argument", Required: i == 4}
 	}
 	dialog := NewArguments(newUncoveredDialogCommon(t), "Run", "", args, ActionRunCustomCommand{})
 	for range 4 {
@@ -49,9 +48,9 @@ func TestArguments_KeyboardNavigationValidationAndViewport(t *testing.T) {
 	require.True(t, ok, "valid final field must submit, got %T", action)
 	require.Equal(t, "x", run.Args["e"])
 
-	scrollArgs := make([]commands.Argument, 25)
+	scrollArgs := make([]workspace.Argument, 25)
 	for i := range scrollArgs {
-		scrollArgs[i] = commands.Argument{ID: string(rune('a' + i%26)), Title: fmt.Sprintf("argument %02d", i)}
+		scrollArgs[i] = workspace.Argument{ID: string(rune('a' + i%26)), Title: fmt.Sprintf("argument %02d", i)}
 	}
 	scrollDialog := NewArguments(newUncoveredDialogCommon(t), "Run", "", scrollArgs, ActionRunCustomCommand{})
 	for range 24 {
@@ -106,7 +105,7 @@ func TestAWSSSO_StateTransitionsAndNarrowDraw(t *testing.T) {
 func TestMCPAuth_MultiServerStateTransitions(t *testing.T) {
 	t.Parallel()
 
-	dialog, _ := NewMCPAuth(newUncoveredDialogCommon(t), []mcptools.MCPPendingAuthServer{
+	dialog, _ := NewMCPAuth(newUncoveredDialogCommon(t), []workspace.MCPPendingAuthServer{
 		{Name: "first", URL: "https://first.example.test"},
 		{Name: "second", URL: "https://second.example.test"},
 	}, func(name string) string { return "https://auth.example.test/" + name })

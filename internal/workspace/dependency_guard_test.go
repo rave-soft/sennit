@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/packages"
 )
 
 // TestDomainPackageDoesNotImportInfrastructure guards the contract/impl
@@ -48,6 +49,54 @@ func TestDomainPackageDoesNotImportInfrastructure(t *testing.T) {
 			}, path, "%s imports infrastructure package %s", name, path)
 		}
 	}
+}
+
+// agentDepAllowList names packages under internal/agent/ that this package
+// may legitimately keep in its transitive closure. It exists so a genuine
+// future exception is a one-line, reviewable addition rather than a silent
+// weakening of TestDomainPackageDoesNotDependOnAgentTransitively — as of
+// this writing it is empty because nothing under internal/agent belongs on
+// the wire between the UI and the Workspace contract.
+var agentDepAllowList = map[string]string{}
+
+// TestDomainPackageDoesNotDependOnAgentTransitively closes the gap in
+// TestDomainPackageDoesNotImportInfrastructure above: that test only checks
+// this package's own import lines, so a direct import of, say,
+// internal/commands — which does not itself look like infrastructure —
+// can still drag in internal/agent/tools/mcp (and, through it,
+// internal/hooks and internal/shellconfig) several hops away. Since
+// internal/ui imports this package for the Workspace interface and DTOs,
+// any such transitive dependency is one internal/ui links too. Walk the
+// full transitive closure with golang.org/x/tools/go/packages (equivalent
+// to `go list -deps`) and fail on anything under internal/agent/ that
+// isn't explicitly allow-listed above.
+func TestDomainPackageDoesNotDependOnAgentTransitively(t *testing.T) {
+	cfg := &packages.Config{Mode: packages.NeedImports | packages.NeedDeps | packages.NeedName}
+	pkgs, err := packages.Load(cfg, "github.com/rave-soft/sennit/internal/workspace")
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.Empty(t, pkgs[0].Errors)
+
+	const agentPrefix = "github.com/rave-soft/sennit/internal/agent"
+	seen := map[string]bool{}
+	var walk func(pkg *packages.Package)
+	walk = func(pkg *packages.Package) {
+		if seen[pkg.PkgPath] {
+			return
+		}
+		seen[pkg.PkgPath] = true
+		if pkg.PkgPath == agentPrefix || strings.HasPrefix(pkg.PkgPath, agentPrefix+"/") {
+			if reason, ok := agentDepAllowList[pkg.PkgPath]; ok {
+				t.Logf("allowing %s: %s", pkg.PkgPath, reason)
+			} else {
+				t.Errorf("internal/workspace transitively depends on %s; internal/ui links this via the Workspace contract", pkg.PkgPath)
+			}
+		}
+		for _, imp := range pkg.Imports {
+			walk(imp)
+		}
+	}
+	walk(pkgs[0])
 }
 
 func TestProductionFilesDoNotImportBubbleTea(t *testing.T) {
