@@ -1,101 +1,15 @@
 package config
 
 import (
-	"context"
 	"fmt"
-	"os/exec"
-	"sync"
-	"time"
 
+	"github.com/rave-soft/sennit/internal/dockermcp"
 	"github.com/rave-soft/sennit/internal/mcpid"
 )
-
-var dockerMCPVersionRunner = func(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "mcp", "version")
-	return cmd.Run()
-}
-
-const dockerMCPAvailabilityTTL = 10 * time.Second
-
-// dockerMCPCache holds Docker MCP availability behind an injectable clock,
-// rather than the bare package-level struct measured against time.Since it
-// used to be. A single package-global cache makes every reader
-// order-dependent across tests in the same process (whichever test
-// warms the cache first decides what later tests observe), and a TTL
-// measured against wall time lets a slow test run cross the 10s boundary
-// mid-suite. now is swapped out in tests instead of sleeping past the TTL,
-// and a test that needs isolation from others constructs its own instance
-// rather than reaching for the package-level default.
-type dockerMCPCache struct {
-	mu        sync.Mutex
-	available bool
-	checkedAt time.Time
-	known     bool
-
-	ttl time.Duration
-	now func() time.Time
-}
-
-func newDockerMCPCache() *dockerMCPCache {
-	return &dockerMCPCache{ttl: dockerMCPAvailabilityTTL, now: time.Now}
-}
-
-// cached returns the cached availability and whether it is still fresh.
-func (c *dockerMCPCache) cached() (available, known bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if !c.known {
-		return false, false
-	}
-	if c.now().Sub(c.checkedAt) > c.ttl {
-		return c.available, false
-	}
-	return c.available, true
-}
-
-// set records a freshly checked availability, timestamped with c.now().
-func (c *dockerMCPCache) set(available bool) {
-	c.mu.Lock()
-	c.available = available
-	c.checkedAt = c.now()
-	c.known = true
-	c.mu.Unlock()
-}
-
-// defaultDockerMCPCache is the process-wide cache DockerMCPAvailabilityCached
-// and RefreshDockerMCPAvailability go through. Tests that need isolation
-// from other tests' cache state swap this out for a fresh instance rather
-// than relying on the TTL to expire it; see swapDockerMCPCacheForTest in
-// docker_mcp_test.go.
-var defaultDockerMCPCache = newDockerMCPCache()
 
 // DockerMCPName is the name of the Docker MCP configuration. It is defined
 // in internal/mcpid so the UI can reference it without importing config.
 const DockerMCPName = mcpid.DockerMCPName
-
-// IsDockerMCPAvailable checks if Docker MCP is available by running
-// 'docker mcp version'.
-func IsDockerMCPAvailable() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := dockerMCPVersionRunner(ctx)
-	return err == nil
-}
-
-// DockerMCPAvailabilityCached returns the cached Docker MCP availability and
-// whether the cached value is still fresh.
-func DockerMCPAvailabilityCached() (available bool, known bool) {
-	return defaultDockerMCPCache.cached()
-}
-
-// RefreshDockerMCPAvailability refreshes and caches Docker MCP availability.
-func RefreshDockerMCPAvailability() bool {
-	available := IsDockerMCPAvailable()
-	defaultDockerMCPCache.set(available)
-	return available
-}
 
 // IsDockerMCPEnabled checks if Docker MCP is already configured.
 func (c *Config) IsDockerMCPEnabled() bool {
@@ -106,7 +20,11 @@ func (c *Config) IsDockerMCPEnabled() bool {
 	return exists
 }
 
-// DockerMCPConfig returns the default Docker MCP stdio configuration.
+// DockerMCPConfig returns the default Docker MCP stdio configuration. It
+// stays here, rather than in internal/dockermcp, because it is config-
+// shaped data (an MCPConfig) rather than availability detection; keeping it
+// here also keeps the dependency arrow pointing from config to dockermcp,
+// never back.
 func DockerMCPConfig() MCPConfig {
 	return MCPConfig{
 		Type:     MCPStdio,
@@ -119,7 +37,7 @@ func DockerMCPConfig() MCPConfig {
 // PrepareDockerMCPConfig validates Docker MCP availability and stages the
 // Docker MCP configuration in memory.
 func (s *ConfigStore) PrepareDockerMCPConfig() (MCPConfig, error) {
-	if !IsDockerMCPAvailable() {
+	if !dockermcp.IsAvailable() {
 		return MCPConfig{}, fmt.Errorf("docker mcp is not available, please ensure docker is installed and 'docker mcp version' succeeds")
 	}
 

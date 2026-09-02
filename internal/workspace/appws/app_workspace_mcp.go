@@ -7,6 +7,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/dockermcp"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -125,12 +126,12 @@ func (w *AppWorkspace) MCPAuthURL(name string) string {
 
 // DockerMCPAvailable implements Workspace.
 func (w *AppWorkspace) DockerMCPAvailable() (available, known bool) {
-	return config.DockerMCPAvailabilityCached()
+	return dockermcp.AvailabilityCached()
 }
 
 // RefreshDockerMCPAvailability implements Workspace.
 func (w *AppWorkspace) RefreshDockerMCPAvailability() bool {
-	return config.RefreshDockerMCPAvailability()
+	return dockermcp.RefreshAvailability()
 }
 
 // toWorkspaceArguments converts internal/commands' argument shape into the
