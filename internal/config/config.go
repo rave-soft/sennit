@@ -12,6 +12,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/oauth"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
@@ -580,6 +581,16 @@ type Config struct {
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
+	// runtimeEnv is the fully resolved runtime environment (process env,
+	// overlaid with each Env entry resolved in sorted key order, overlaid
+	// with SENNIT_-prefixed process vars) computed once when the Config is
+	// assembled. See RuntimeEnvironment: resolving it on every call ran
+	// every $(...) command in Env once per resolved value instead of once
+	// per config build. env.Env is an immutable value (Snapshot/Overlay
+	// never mutate in place), so sharing it across a clone or a published
+	// pointer needs no locking beyond the pointer read itself.
+	runtimeEnv env.Env
+
 	// Agents holds both the built-in agents and any the user defines.
 	// SetupAgents populates this from .sennit/agents/*.md files (via
 	// discoverMarkdownAgents) plus the two built-ins; nothing decodes user
@@ -622,7 +633,9 @@ type Config struct {
 // copied too, so a mutator can rewrite one provider's credentials without
 // racing a reader iterating the old map; the remaining fields are
 // immutable after load from the mutators' standpoint and are likewise
-// shared.
+// shared. That includes runtimeEnv: credential and option writes never
+// touch Env, so the struct copy above sharing the already-resolved
+// environment with the clone is correct, not a shortcut.
 func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.RecentModels = slices.Clone(c.RecentModels)

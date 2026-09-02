@@ -61,7 +61,29 @@ func (c *Config) RuntimeResolver() VariableResolver {
 	return runtimeEnvironmentResolver{config: c}
 }
 
+// RuntimeEnvironment returns the resolved runtime environment computed at
+// build time (see Config.runtimeEnv and populateRuntimeEnvironment). A
+// Config assembled outside the normal buildConfig pipeline (a bare &Config{}
+// in a test, or one handed to NewStore) never had it populated; rather than
+// silently returning an empty environment, fall back to computing it here.
+// That fallback recomputes on every call, same as before this method was
+// cached, but only for Configs that opted out of the build pipeline.
 func (c *Config) RuntimeEnvironment() env.Env {
+	if c.runtimeEnv != nil {
+		return c.runtimeEnv
+	}
+	return c.computeRuntimeEnvironment()
+}
+
+// populateRuntimeEnvironment computes and stores the runtime environment on
+// c. Callers must run this once, after c.Env is finalized and before c is
+// published or handed to anything that might call RuntimeEnvironment
+// (notably RuntimeResolver/ResolveValue) — see buildConfig.
+func (c *Config) populateRuntimeEnvironment() {
+	c.runtimeEnv = c.computeRuntimeEnvironment()
+}
+
+func (c *Config) computeRuntimeEnvironment() env.Env {
 	base := os.Environ()
 	environment := env.Snapshot(base, nil)
 	keys := make([]string, 0, len(c.Env))

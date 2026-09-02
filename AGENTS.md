@@ -88,12 +88,12 @@ internal/
     client/server split that no longer exists: every `Workspace`
     implementation is in-process, and events reach the TUI through
     `internal/pubsub` channels, not over a wire. Read any "wire contract"
-    language below as historical. Audited 2026-08-21.
-  - `proto.Thread` is the one live DTO. It is a real struct, built in
-    `workspace/app_workspace.go` and named throughout `Workspace`'s thread
-    methods, and `internal/app/threadspawn/protoconv.go` converts
-    `thread.Thread` into it. Keep it.
-  - `tools.*PermissionsParams` **stays aliased, but the direction is now
+    language in `proto`'s own comments as historical. Audited 2026-09-02.
+  - `proto.Thread` is the one live DTO. It is a real struct, named
+    throughout `Workspace`'s thread methods, and
+    `internal/app/threadspawn/protoconv.go` converts `thread.Thread` into
+    it for `internal/workspace/appws`. Keep it.
+  - `tools.*PermissionsParams` **stays aliased, but the direction is
     `proto` → `tools`, not the other way round.** These structs are defined
     in `proto` (a leaf package with a light dependency graph) and
     `internal/agent/tools` aliases them back, e.g.
@@ -104,25 +104,22 @@ internal/
     `permission.PermissionRequest` built in-process and asserts on
     `proto.*PermissionsParams`, which succeeds only because the alias makes
     it the same Go type as the `tools.*` value the agent constructed. The
-    alias is load-bearing for **type identity**, and breaking it (e.g. by
-    replacing it with a look-alike struct copy) would break the dialog's
-    per-tool rendering (see `ui/dialog/permissions.go`'s registry and
-    `TestDiffContentRenderer_GuardStopsBeforeToDiff`) — this is enforced by
-    compile-time identity assertions in
-    `internal/agent/tools/proto_identity_test.go`. The JSON path that the
-    old rationale referred to — `proto.PermissionRequest.UnmarshalJSON` and
-    `unmarshalToolParams` in `proto/permission.go` — is real code but
-    unreachable: nothing constructs a `proto.PermissionRequest`.
-  - The following are **dead** and should be deleted rather than defended.
-    `proto.Message`, `proto.RunComplete`, `proto.AgentEvent`,
-    `proto.PermissionRequest` and `proto.PermissionNotification` are never
-    constructed anywhere in the tree, and no broker publishes them; their only
-    references are `case` arms in `internal/herdr/translate.go` that can never
-    match. `proto.ConfigProviderKeyRequest` — the `config.Scope` exception —
-    has zero references outside `proto` itself.
-    `proto.LSPClientInfo` is a live frontend DTO. `workspace.LSPClientInfo`
-    aliases it, and `internal/workspace/appws` converts runtime LSP state into
-    this data-only shape before the UI receives it.
+    alias is load-bearing for **type identity**: replacing it with a
+    look-alike struct copy would break the dialog's per-tool rendering (see
+    `ui/dialog/permissions.go`'s registry and
+    `TestDiffContentRenderer_GuardStopsBeforeToDiff`). Compile-time identity
+    assertions in `internal/agent/tools/proto_identity_test.go` enforce it.
+  - The dead types this section used to list — `proto.Message`,
+    `proto.RunComplete`, `proto.AgentEvent`, `proto.PermissionRequest`,
+    `proto.PermissionNotification`, `proto.ConfigProviderKeyRequest` — and
+    `proto/permission.go` along with them, **have been deleted**. The
+    `case` arms in `internal/herdr/translate.go` now match on the domain
+    types (`message.Message`, `notify.RunComplete`,
+    `permission.PermissionRequest`, `permission.PermissionNotification`),
+    and none of them is unreachable.
+  - `proto.LSPClientInfo` is a live frontend DTO. `workspace.LSPClientInfo`
+    aliases it, and `internal/workspace/appws` converts runtime LSP state
+    into this data-only shape before the UI receives it.
   - `proto.Session` was unused and has been removed. `proto.Todo` remains an
     alias of `session.Todo` in `proto/lsp.go` to preserve its type identity.
   - So: add a DTO to `proto` only for something that genuinely crosses the

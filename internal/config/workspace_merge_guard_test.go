@@ -25,6 +25,7 @@ import (
 var carriedAcrossWorkspaceMerge = map[string]string{
 	"workingDir":              "restored by the setDefaults call after the merge",
 	"jsonAgentsBlockDetected": "OR-ed onto the merged config explicitly",
+	"runtimeEnv":              "not set until buildConfig calls populateRuntimeEnvironment, after applyWorkspaceConfig's merge and after cfg.Env is final, so the round trip never carries a value across it in the first place",
 }
 
 func TestConfigUnexportedFieldsSurviveTheWorkspaceMerge(t *testing.T) {

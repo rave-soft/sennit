@@ -168,6 +168,15 @@ APIKeyTemplate`. Тест из аудита добавить в пакет.
   (`loader.go:231`), `configruntime.LoadWithProcessor`,
   `RuntimeResult.Resolver` после 3.4.
 
+- Свести `Resolver()` и `RuntimeSnapshot().Resolver` к одному значению.
+  После кеширования окружения (3.4) `cfg.RuntimeResolver()` дёшев, поэтому
+  `Resolver()` может возвращать `s.Config().RuntimeResolver()` вместо
+  отдельного поля `s.resolver`. Сейчас они расходятся только в одном окне:
+  store, созданный через `NewStore` с `StoreOptions.Resolver`, до первого
+  reload отдаёт инжектированный резолвер из `Resolver()`, но не из
+  `RuntimeSnapshot()`; первый же reload его затирает
+  (`reload.go:207`). Решить заодно судьбу `StoreOptions.Resolver`.
+
 ### 3.6 [L] Развязать `config` ↔ `providers/runtime`
 
 `providers/runtime/provider.go:173` импортирует `config` ради
@@ -419,14 +428,7 @@ isEmpty`, `editor_placeholder_state.go:44`, `diffview/diffview.go:131-189`
 - Вызов `attach` из `appws` вынести в `cmd/root.go:282`, где он и
   используется.
 
-### 6.4 [S] Обновить AGENTS.md
 
-Секция «Proto boundary» описывает состояние до 82b152578: перечисляет как
-живые уже удалённые `proto.Message`, `RunComplete`, `AgentEvent`,
-`PermissionRequest`, `PermissionNotification`, `ConfigProviderKeyRequest`
-и `proto/permission.go`; утверждает, что `proto.Thread` строится в
-`workspace/app_workspace.go` (на деле `appws/threads.go` через
-`threadspawn`). Переписать абзац по факту, после 6.3 ещё раз.
 
 ---
 

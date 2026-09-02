@@ -125,6 +125,14 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 
 	applyEnvironmentDefaults(cfg)
 
+	// cfg.Env is fixed by this point (loadFromConfigPaths/applyWorkspaceConfig
+	// already ran, and nothing below writes to it), so compute the runtime
+	// environment once here rather than letting every RuntimeEnvironment()
+	// call rebuild it — see runtime.go. This must run before the first use
+	// below (cfg.RuntimeResolver(), and opts.processor.Process which resolves
+	// values through it).
+	cfg.populateRuntimeEnvironment()
+
 	if opts.presetModel != nil {
 		cfg.Model = *opts.presetModel
 	}
