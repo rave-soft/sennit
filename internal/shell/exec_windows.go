@@ -9,8 +9,10 @@ import (
 	"mvdan.cc/sh/v3/interp"
 )
 
-// defaultKillTimeout matches mvdan's DefaultExecHandler default.
-const defaultKillTimeout = 2 * time.Second
+// KillTimeout matches mvdan's DefaultExecHandler default. Exported so
+// callers outside this package can derive their own timing from it — see
+// the comment on the Unix definition in exec_unix.go.
+const KillTimeout = 2 * time.Second
 
 // isolateProcess is a no-op on Windows. Session isolation via Setsid is a
 // Unix-only concept; Windows uses CREATE_NEW_PROCESS_GROUP which mvdan's

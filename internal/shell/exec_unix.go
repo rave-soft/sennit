@@ -14,9 +14,14 @@ import (
 	"mvdan.cc/sh/v3/interp"
 )
 
-// defaultKillTimeout matches mvdan's DefaultExecHandler default. Extracted
-// so the coupling to upstream is explicit rather than a buried literal.
-const defaultKillTimeout = 2 * time.Second
+// KillTimeout matches mvdan's DefaultExecHandler default: how long a
+// cancelled child gets after SIGINT before escalating to SIGKILL. Extracted
+// so the coupling to upstream is explicit rather than a buried literal, and
+// exported so callers that must wait out the full SIGINT-then-SIGKILL
+// window before giving up on a goroutine (see hooks.abandonGrace) can
+// derive their own timing from it instead of guessing a value that has to
+// stay in sync by luck.
+const KillTimeout = 2 * time.Second
 
 // isolateProcess sets SysProcAttr so the child runs in its own session,
 // fully detached from Sennit's controlling terminal. This prevents shells

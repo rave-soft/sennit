@@ -14,11 +14,26 @@ import (
 	"github.com/rave-soft/sennit/internal/shell"
 )
 
+// abandonMargin is the slack given to abandonGrace on top of
+// shell.KillTimeout, covering the time between SIGKILL landing and the
+// killed process actually exiting and runOne's goroutine returning from
+// Wait. It is not a timing guess: it exists only to absorb scheduling
+// noise around a boundary that is otherwise exact.
+const abandonMargin = 500 * time.Millisecond
+
 // abandonGrace is how long runOne waits after ctx cancellation for the
 // shell goroutine to yield before returning control to the caller and
-// letting the goroutine finish on its own. Mirrors the historical
-// cmd.WaitDelay = time.Second behavior of the previous os/exec path.
-const abandonGrace = time.Second
+// letting the goroutine finish on its own.
+//
+// It must be strictly greater than shell.KillTimeout: on cancellation the
+// shell sends SIGINT and only escalates to SIGKILL after KillTimeout, so a
+// hook that ignores SIGINT (an empty trap on INT, or a Python/Node process
+// with its own handler) will not die until SIGKILL lands. Deriving abandonGrace
+// from shell.KillTimeout instead of an independent literal means the two
+// can't drift apart again — if KillTimeout changes, this changes with it.
+// If this file no longer imports shell.KillTimeout, that's a sign someone
+// has broken the coupling this comment describes.
+const abandonGrace = shell.KillTimeout + abandonMargin
 
 // compiledHook pairs a HookConfig with its compiled matcher regex. A nil
 // matcher means "match every tool".

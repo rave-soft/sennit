@@ -208,7 +208,7 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 // when sourcing framework files can send SIGINT/SIGTERM to Sennit's process
 // group and crash the parent.
 func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
-	base := processGroupExecHandler(defaultKillTimeout)
+	base := processGroupExecHandler(KillTimeout)
 	handler := base
 	for _, mw := range slices.Backward(standardHandlers(blockFuncs)) {
 		handler = mw(handler)
