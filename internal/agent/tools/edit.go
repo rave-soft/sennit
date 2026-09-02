@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/filepathext"
@@ -83,24 +82,9 @@ func NewEditTool(
 				response, err = replaceContent(editCtx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, call)
 			}
 
-			if err != nil && !mutationCommitted(err) {
-				return response, err
-			}
-			if response.IsError {
-				// Return early if there was an error during content replacement
-				// This prevents unnecessary LSP diagnostics processing
-				return response, nil
-			}
-
-			notifyLSPs(ctx, lspManager, params.FilePath)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-
-			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += getDiagnostics(params.FilePath, lspManager)
-			response.Content = text
-			return response, nil
+			return finishMutation(ctx, lspManager, params.FilePath, response, err, func(content string) string {
+				return fmt.Sprintf("<result>\n%s\n</result>\n", content)
+			})
 		},
 	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}})
 }
@@ -313,16 +297,13 @@ func loadExistingFile(edit editContext, filePath, sessionAction string) (existin
 			filePath, filePath,
 		)))
 	case fileStale:
-		return existingFileResult{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf(
-			"cannot edit %s: it changed on disk after you read it "+
-				"(modified %s, last read %s).\n\n"+
-				"Something outside this edit — the user, a formatter, a build step, another "+
+		return existingFileResult{}, stopWith(fantasy.NewTextErrorResponse(staleFileRefusal(
+			filePath, "edit", "after you read it",
+			"Something outside this edit — the user, a formatter, a build step, another "+
 				"agent — has written to the file, so old_string may no longer match what is "+
-				"there, and editing now would overwrite that change.\n\n"+
-				"Read %s again to see the current content, then redo the edit against it.",
-			filePath,
-			fileInfo.ModTime().Truncate(time.Second).Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			filePath,
+				"there, and editing now would overwrite that change.",
+			fmt.Sprintf("Read %s again to see the current content, then redo the edit against it.", filePath),
+			fileInfo.ModTime(), lastRead,
 		)))
 	}
 

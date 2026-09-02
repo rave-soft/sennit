@@ -7,9 +7,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/skills"
 )
 
 const (
@@ -49,8 +47,8 @@ type MultiReadResponse struct {
 	Truncated         bool             `json:"truncated"`
 }
 
-func NewMultiReadTool(lspManager *lsp.Manager, permissions permission.Requester, tracker FileTracking, skillTracker *skills.Tracker, workingDir string, skillsPaths ...string) fantasy.AgentTool {
-	core := newReadCore(lspManager, permissions, tracker, skillTracker, workingDir, skillsPaths...)
+func NewMultiReadTool(permissions permission.Requester, tracker FileTracking, workingDir string, skillsPaths ...string) fantasy.AgentTool {
+	core := newReadCore(permissions, tracker, workingDir, skillsPaths...)
 	tool := fantasy.NewAgentTool(MultiReadToolName, "Read multiple file ranges sequentially with one shared rendered-response budget.", func(ctx context.Context, p MultiReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		if len(p.Files) == 0 {
 			return invalidParam("files"), nil

@@ -146,28 +146,23 @@ func NewReplaceSymbolTool(
 					}, nil
 				},
 			})
-			if err != nil && !mutationCommitted(err) || resp.IsError {
-				return resp, err
-			}
-			notifyLSPs(ctx, lspManager, filePath)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-
-			var summary string
-			switch action {
-			case "replace":
-				summary = fmt.Sprintf("Replaced symbol '%s' in %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
-			case "add_before":
-				summary = fmt.Sprintf("Inserted before symbol '%s' in %s (before line %d)", params.Symbol, params.FilePath, startLine+1)
-			case "add_after":
-				summary = fmt.Sprintf("Inserted after symbol '%s' in %s (after line %d)", params.Symbol, params.FilePath, endLine+1)
-			case "delete":
-				summary = fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
-			}
-
-			resp.Content = summary + "\n" + getDiagnostics(filePath, lspManager)
-			return resp, nil
+			return finishMutation(ctx, lspManager, filePath, resp, err, func(_ string) string {
+				// Unlike edit/multiedit/write, the response body here isn't
+				// framed from resp.Content — it's a summary computed from
+				// the symbol range, so wrap ignores the content it is given.
+				var summary string
+				switch action {
+				case "replace":
+					summary = fmt.Sprintf("Replaced symbol '%s' in %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
+				case "add_before":
+					summary = fmt.Sprintf("Inserted before symbol '%s' in %s (before line %d)", params.Symbol, params.FilePath, startLine+1)
+				case "add_after":
+					summary = fmt.Sprintf("Inserted after symbol '%s' in %s (after line %d)", params.Symbol, params.FilePath, endLine+1)
+				case "delete":
+					summary = fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
+				}
+				return summary + "\n"
+			})
 		},
 	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}, "file_path": {minLength: intPtr(1)}, "action": {enum: []string{"replace", "add_before", "add_after", "delete"}}})
 	return withToolRootSchema(tool, map[string]any{"anyOf": []any{

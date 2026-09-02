@@ -9,7 +9,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/filepathext"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/skills"
 )
@@ -26,7 +25,7 @@ type readCoreResult struct {
 }
 type readCore func(context.Context, ReadParams, fantasy.ToolCall, string, int, bool) (readCoreResult, error)
 
-func newReadCore(_ *lsp.Manager, permissions permission.Requester, tracker FileTracking, _ *skills.Tracker, workingDir string, skillsPaths ...string) readCore {
+func newReadCore(permissions permission.Requester, tracker FileTracking, workingDir string, skillsPaths ...string) readCore {
 	return func(ctx context.Context, p ReadParams, call fantasy.ToolCall, toolName string, outputBudget int, rejectSkills bool) (readCoreResult, error) {
 		if p.FilePath == "" {
 			return readCoreResult{errText: "file_path is required"}, nil

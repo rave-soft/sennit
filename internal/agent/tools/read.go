@@ -92,7 +92,7 @@ const (
 )
 
 func NewReadTool(lspManager *lsp.Manager, permissions permission.Requester, tracker FileTracking, skillTracker *skills.Tracker, workingDir string, skillsPaths ...string) fantasy.AgentTool {
-	core := newReadCore(lspManager, permissions, tracker, skillTracker, workingDir, skillsPaths...)
+	core := newReadCore(permissions, tracker, workingDir, skillsPaths...)
 	tool := fantasy.NewAgentTool(ReadToolName, readDescription(), func(ctx context.Context, params ReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		// Scheme-backed skills retain their public-read behaviour; batches reject
 		// them because their in-memory source has no filesystem cursor identity.

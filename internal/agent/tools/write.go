@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/filepathext"
@@ -81,17 +80,14 @@ func NewWriteTool(
 						filePath, filePath,
 					)), nil
 				case fileStale:
-					return fantasy.NewTextErrorResponse(fmt.Sprintf(
-						"cannot write %s: it changed on disk after you last read it "+
-							"(modified %s, last read %s).\n\n"+
-							"Write replaces the whole file, so doing it now would discard "+
+					return fantasy.NewTextErrorResponse(staleFileRefusal(
+						filePath, "write", "after you last read it",
+						"Write replaces the whole file, so doing it now would discard "+
 							"whatever was just written there by the user, a formatter, or "+
-							"another agent.\n\n"+
-							"Read %s to see the current content, then write the version that "+
-							"keeps those changes.",
-						filePath,
-						fileInfo.ModTime().Truncate(time.Second).Format(time.RFC3339), lastRead.Format(time.RFC3339),
-						filePath,
+							"another agent.",
+						fmt.Sprintf("Read %s to see the current content, then write the version that "+
+							"keeps those changes.", filePath),
+						fileInfo.ModTime(), lastRead,
 					)), nil
 				}
 
@@ -135,24 +131,13 @@ func NewWriteTool(
 					}, nil
 				},
 			})
-			if err != nil && !mutationCommitted(err) {
-				return fantasy.ToolResponse{}, err
-			}
-			if resp.IsError {
-				return resp, nil
-			}
-
-			// The resolved path, not the raw parameter: a relative one
-			// never matched any client's cwd, so the LSP was told nothing
-			// about a file this tool had just written and went on serving
-			// diagnostics for the old content. getDiagnostics on the next
-			// line already used the resolved form.
-			notifyLSPs(ctx, lspManager, filePath)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			resp.Content = fmt.Sprintf("<result>\n%s\n</result>", resp.Content) + getDiagnostics(filePath, lspManager)
-			return resp, nil
+			// filePath, not params.FilePath: a relative one never matched
+			// any client's cwd, so the LSP was told nothing about a file
+			// this tool had just written and went on serving diagnostics
+			// for the old content.
+			return finishMutation(ctx, lspManager, filePath, resp, err, func(content string) string {
+				return fmt.Sprintf("<result>\n%s\n</result>", content)
+			})
 		},
 	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}})
 }

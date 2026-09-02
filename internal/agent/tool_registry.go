@@ -167,7 +167,7 @@ func toolSpecs() []toolSpec {
 				tools.NewLsTool(f.permissions, b.runtimeCfg.workingDir, b.cfg.Ls()),
 				tools.NewTodosTool(newTodoSessions(f.sessions)),
 				tools.NewReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
-				tools.NewMultiReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
+				tools.NewMultiReadTool(f.permissions, f.filetracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
 				tools.NewWriteTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
 			}, nil
 		}},

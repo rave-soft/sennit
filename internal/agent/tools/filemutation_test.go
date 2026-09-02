@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -119,3 +120,57 @@ func TestWriteTool_StaleFileRejectsOverwrite(t *testing.T) {
 // TestWriteTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside in
 // confinement_test.go; see the mutation-testing notes in this task's report
 // for how that test fails when confinementRefusal is defeated.
+
+// TestFinishMutation pins the shared tail edit, multiedit, write and
+// lsp_replace_symbol all delegate to: an uncommitted failure and a
+// model-visible error response both skip wrap and the LSP notification, a
+// committed-but-later-failed mutation still notifies but returns the zero
+// response with the error, and only an outright success wraps the body
+// and appends diagnostics.
+func TestFinishMutation(t *testing.T) {
+	t.Parallel()
+
+	noWrap := func(t *testing.T) func(string) string {
+		return func(string) string {
+			t.Helper()
+			t.Fatal("wrap must not run on this path")
+			return ""
+		}
+	}
+
+	t.Run("uncommitted failure returns the response and error untouched", func(t *testing.T) {
+		t.Parallel()
+		wantErr := errors.New("boom")
+		wantResp := fantasy.ToolResponse{}
+		resp, err := finishMutation(t.Context(), nil, "f.txt", wantResp, wantErr, noWrap(t))
+		require.Equal(t, wantErr, err)
+		require.Equal(t, wantResp, resp)
+	})
+
+	t.Run("a model-visible error response passes through untouched", func(t *testing.T) {
+		t.Parallel()
+		errResp := fantasy.NewTextErrorResponse("bad old_string")
+		resp, err := finishMutation(t.Context(), nil, "f.txt", errResp, nil, noWrap(t))
+		require.NoError(t, err)
+		require.Equal(t, errResp, resp)
+	})
+
+	t.Run("a committed mutation followed by a later failure still notifies and returns the error", func(t *testing.T) {
+		t.Parallel()
+		wantErr := &committedMutationError{err: errors.New("history update failed")}
+		resp, err := finishMutation(t.Context(), nil, "f.txt", fantasy.ToolResponse{Content: "done"}, wantErr, noWrap(t))
+		require.Equal(t, wantErr, err)
+		require.Equal(t, fantasy.ToolResponse{}, resp)
+	})
+
+	t.Run("success wraps the body and appends diagnostics", func(t *testing.T) {
+		t.Parallel()
+		resp, err := finishMutation(t.Context(), nil, "f.txt", fantasy.ToolResponse{Content: "ok"}, nil, func(content string) string {
+			return "<result>\n" + content + "\n</result>\n"
+		})
+		require.NoError(t, err)
+		// getDiagnostics returns "" for a nil manager, so nothing follows
+		// the wrapped body here.
+		require.Equal(t, "<result>\nok\n</result>\n", resp.Content)
+	})
+}

@@ -91,25 +91,9 @@ func NewMultiEditTool(
 				response, err = processMultiEditExistingFile(editCtx, params, call)
 			}
 
-			if err != nil && !mutationCommitted(err) {
-				return response, err
-			}
-
-			if response.IsError {
-				return response, nil
-			}
-
-			// Notify LSP clients about the change
-			notifyLSPs(ctx, lspManager, params.FilePath)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-
-			// Wait for LSP diagnostics and add them to the response
-			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += getDiagnostics(params.FilePath, lspManager)
-			response.Content = text
-			return response, nil
+			return finishMutation(ctx, lspManager, params.FilePath, response, err, func(content string) string {
+				return fmt.Sprintf("<result>\n%s\n</result>\n", content)
+			})
 		},
 	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}, "edits": {minItems: intPtr(1)}})
 }

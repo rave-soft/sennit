@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/diff"
 	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
 )
 
@@ -36,6 +37,24 @@ func checkFileFreshness(ctx context.Context, ft FileTracking, sessionID, filePat
 	default:
 		return fileFresh, lastRead
 	}
+}
+
+// staleFileRefusal builds the refusal returned when a mutation targets a
+// file that changed on disk after this session last read it. edit.go and
+// write.go each hit this case with their own wording for why the
+// staleness matters to that operation, so the differing halves — the verb,
+// the "since when" clause, the rationale, and the closing instruction —
+// are supplied by the caller and only the shared skeleton lives here.
+func staleFileRefusal(filePath, verb, afterClause, rationale, instruction string, modTime, lastRead time.Time) string {
+	return fmt.Sprintf(
+		"cannot %s %s: it changed on disk %s "+
+			"(modified %s, last read %s).\n\n"+
+			"%s\n\n"+
+			"%s",
+		verb, filePath, afterClause,
+		modTime.Truncate(time.Second).Format(time.RFC3339), lastRead.Format(time.RFC3339),
+		rationale, instruction,
+	)
 }
 
 type mutationStop struct {
@@ -166,4 +185,39 @@ func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
 		return fantasy.ToolResponse{}, &committedMutationError{err: fmt.Errorf("file committed but history update failed: %w", historyErr)}
 	}
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(prepared.successMessage), prepared.metadata(prepared.writeContent, diffText, additions, removals)), nil
+}
+
+// finishMutation runs the tail every mutating tool performs once
+// applyFileMutation has returned: an outright failure (mutationCommitted
+// is false) propagates as a Go error without touching the LSPs; a
+// model-visible error response passes through untouched; otherwise the
+// LSPs are notified of the write and the response comes back with wrap
+// applied to its body plus diagnostics appended.
+//
+// The four callers agreed on everything but one detail: three returned a
+// nil Go error alongside a model-visible error response, while
+// lsp_replace_symbol returned err there. That difference is unreachable —
+// applyFileMutation only ever pairs a committed-mutation error with a
+// successful response — so this settles on the majority form, which is
+// also the one the error-classification rule wants: an error the model can
+// read is not also a batch-aborting Go error.
+//
+// wrap covers the one place the four callers differ — how the successful
+// body gets framed ("<result>...</result>\n" for edit/multiedit,
+// "<result>...</result>" for write, a computed summary for
+// lsp_replace_symbol, which ignores the passed-in content and returns its
+// own) — everything else here is identical across them.
+func finishMutation(ctx context.Context, lspManager *lsp.Manager, filePath string, resp fantasy.ToolResponse, err error, wrap func(content string) string) (fantasy.ToolResponse, error) {
+	if err != nil && !mutationCommitted(err) {
+		return resp, err
+	}
+	if resp.IsError {
+		return resp, nil
+	}
+	notifyLSPs(ctx, lspManager, filePath)
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	resp.Content = wrap(resp.Content) + getDiagnostics(filePath, lspManager)
+	return resp, nil
 }

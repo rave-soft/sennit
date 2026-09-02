@@ -18,7 +18,7 @@ import (
 )
 
 func newMultiReadToolForTest(dir string) fantasy.AgentTool {
-	return NewMultiReadTool(nil, &mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}, mockFileTracker{}, nil, dir)
+	return NewMultiReadTool(&mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}, mockFileTracker{}, dir)
 }
 
 func runMultiRead(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params MultiReadParams) (fantasy.ToolResponse, MultiReadResponse) {
@@ -125,7 +125,7 @@ func TestMultiReadPermissionDenialStopsBeforeNextRead(t *testing.T) {
 	require.NoError(t, os.WriteFile(second, []byte("must-not-read"), 0o644))
 	permissions := &denyingMultiReadPermissions{mockReadPermissionService: &mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}}
 	tracker := &recordingReadTracker{}
-	tool := NewMultiReadTool(nil, permissions, tracker, nil, workingDir)
+	tool := NewMultiReadTool(permissions, tracker, workingDir)
 
 	response, _ := runMultiRead(t, tool, multiReadContext(), MultiReadParams{Files: []MultiReadItem{{FilePath: outside}, {FilePath: second}}})
 	require.True(t, response.IsError)
@@ -176,7 +176,7 @@ func TestMultiReadFileTrackerRecordsExactRangesAcrossPages(t *testing.T) {
 	path := filepath.Join(dir, "paged.txt")
 	require.NoError(t, os.WriteFile(path, []byte("1111111111\n2222222222\n3333333333\n4444444444"), 0o644))
 	tracker := &recordingReadTracker{}
-	tool := NewMultiReadTool(nil, &mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}, tracker, nil, dir)
+	tool := NewMultiReadTool(&mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}, tracker, dir)
 	params := MultiReadParams{Files: []MultiReadItem{{FilePath: "paged.txt"}}, MaxBytes: 75}
 	for {
 		_, metadata := runMultiRead(t, tool, multiReadContext(), params)
@@ -265,7 +265,7 @@ func TestMultiReadRejectsUnsupportedResources(t *testing.T) {
 	require.NoError(t, os.Mkdir(skillDir, 0o755))
 	skillPath := filepath.Join(skillDir, skills.SkillFileName)
 	require.NoError(t, os.WriteFile(skillPath, []byte("skill"), 0o644))
-	tool := NewMultiReadTool(nil, &mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}, mockFileTracker{}, nil, dir, skillDir)
+	tool := NewMultiReadTool(&mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}, mockFileTracker{}, dir, skillDir)
 	ctx := context.WithValue(multiReadContext(), SupportsImagesContextKey, true)
 	response, metadata := runMultiRead(t, tool, ctx, MultiReadParams{Files: []MultiReadItem{{FilePath: image}, {FilePath: skills.BuiltinPrefix + "sennit-config/" + skills.SkillFileName}, {FilePath: skillPath}}})
 	require.False(t, response.IsError)

@@ -110,6 +110,40 @@ func TestDeleteContentRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 	require.Equal(t, "alpha\nbeta\nalpha\n", string(content))
 }
 
+// TestReplaceContentRejectsStaleFile is the edit-tool counterpart of
+// TestWriteTool_StaleFileRejectsOverwrite (filemutation_test.go): the
+// on-disk mtime is after the session's last read, so the edit must be
+// refused with the shared staleFileRefusal wording rather than applied
+// against content that may no longer match.
+func TestReplaceContentRejectsStaleFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("alpha\nbeta\n"), 0o644))
+
+	// mtime is "now" (just written above); lastRead is an hour earlier.
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(-time.Hour)}
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+
+	resp, err := replaceContent(edit, filePath, "beta", "BETA", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "an edit to a file modified since it was read must be refused")
+	require.Contains(t, resp.Content, "cannot edit "+filePath+": it changed on disk after you read it")
+	require.Contains(t, resp.Content, "old_string may no longer match")
+	require.Contains(t, resp.Content, "Read "+filePath+" again to see the current content, then redo the edit against it.")
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Equal(t, "alpha\nbeta\n", string(content), "the stale edit must not land")
+}
+
 // TestChangedLineSpan pins the span an edit is checked against. It is
 // derived from before/after content rather than from old_string, so it
 // holds for every path that produces an edit.

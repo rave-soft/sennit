@@ -221,7 +221,7 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 	case ReadToolName:
 		return NewReadTool(nil, nil, nil, nil, dir)
 	case MultiReadToolName:
-		return NewMultiReadTool(nil, nil, nil, nil, dir)
+		return NewMultiReadTool(nil, nil, dir)
 	case GlobToolName:
 		return NewGlobTool(dir, config.ToolGlob{})
 	case GrepToolName:
