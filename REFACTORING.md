@@ -13,145 +13,43 @@
 
 ---
 
-## Фаза 1. Баги, ломающие пользователя
+## Фаза 1. Баги, ломающие пользователя — закрыта
 
-### 1.1 [M] Root теряет события главного workspace на дашборде тредов
+Все девять пунктов исправлены и закоммичены (`cec59b06d`..`e3973d2f4`), каждый
+с регрессионным тестом. Один пункт закрыт наполовину, остаток ниже.
 
-`internal/ui/model/root.go:393-405`, `:476-505`.
+### 1.1-bis [L] Экран треда всё ещё маршрутизирует по активному экрану
 
-`Root.Update` в `default`-ветке маршрутизирует всё, что не помечено
-`uimsg.MainScreenMsg` / `uiOwnedMsg`, по активному экрану. На
-`screenDashboard` `handleDashboardMsg` дропает всё, кроме мыши и paste.
-Ни один `pubsub.Event[T]` не помечен, поэтому теряются сообщения
-ассистента, `PermissionRequest`, `question.Request`, LSP/MCP-события и
-результаты async-операций (`modelSettingUpdatedMsg`, `themeSetMsg`,
-`permissionResponseMsg`, `modelSelectResult` и другие).
+Осталось от пункта 1.1. Дашборд починен (`221307322`):
+`handleDashboardMsg` классифицирует сообщение один раз и отдаёт всё,
+что не ввод, в `r.main`, опираясь на инвариант «при активном дашборде
+тред всегда отвязан», который закреплён тестом.
 
-Сценарии: permission-запрос при открытом дашборде никогда не показывается,
-агент висит; `/thinking` и сразу ctrl+e оставляет `modelOperation.loading`
-навсегда. На `screenThread` та же ветка отдаёт события во встроенный UI
-треда с чужим workspace. Симптом уже латали не там:
-`workspace/appws/attached_thread.go:47-58`.
+Для `screenThread` тот же приём не работает. Встроенный UI треда строится
+тем же конструктором `New(...)`, что и главный экран (`WithEmbedded`
+отключает только онбординг, прогресс-бар и панель тредов), поэтому оба
+`*UI` живы одновременно и рассылают одни и те же нетегированные типы:
+`pubsub.Event[message.Message]`, `[session.Session]`,
+`[permission.PermissionRequest]`, `[question.Request]`,
+`modelSettingUpdatedMsg`, `mcpStateChangedMsg`, `providerConfiguredResult`,
+`themeSetMsg`, `permissionResponseMsg` и другие. Любое правило «по
+активному экрану» или «всё в main» ошибается в одну из сторон.
 
-Действия:
-- Инвертировать умолчание: всё неизвестное идёт в `r.main`, по активному
-  экрану роутить только ввод (`tea.KeyPressMsg`, mouse, paste,
-  `WindowSizeMsg`). События треда уже помечены `threadEventMsg`.
-- После этого удалить маркеры `uiOwned`/`MainScreenOwned` и их ручную
-  регистрацию (`var _ uiOwnedMsg = ...`).
-- Убрать fallback на родителя в `attached_thread.go:47-58`, если он был
-  нужен только из-за маршрутизации.
-- Тест: открыть дашборд, опубликовать `PermissionRequest`, вернуться на
-  main, убедиться, что диалог показан.
+Тегировано сейчас: 12 типов через `uiOwnedMsg` (список закреплён
+compile-time проверками в `root.go:780-796`) и один через
+`uimsg.MainScreenMsg`.
 
-### 1.2 [S] Двойное закрытие общего `*herdr.Client`
+Форма настоящего фикса: расширить существующий механизм `uiOwned` на весь
+нетегированный набор, чтобы `Root` диспетчеризовал по владельцу, а не по
+активному экрану. Тегировать по месту отправки, а не оборачивать команды
+в `Root`: обёртка команды сломает `tea.BatchMsg`/`tea.SequenceMsg` и
+служебные сообщения вроде `QuitMsg`, которые обязаны дойти до рантайма.
+После этого fallback `default:` можно инвертировать целиком, а
+`handleDashboardMsg` вернуть к обработке одного лишь ввода.
 
-`internal/app/bootstrap.go:197-200`, `internal/app/shutdown.go:388`,
-`internal/herdr/client.go:382-386`, `internal/app/threadspawn/spawner.go:101-109`.
-
-`Bootstrap` подставляет process-wide singleton `herdr.Init`, `LocalSpawner`
-его не переопределяет, каждый thread-App при Shutdown зовёт `Close()`.
-`unixSender.close()` делает `close(s.ch)` без проверки `closed`.
-Release треда, затем выход из приложения даёт
-`panic: close of closed channel`; до этого треды перебивают статус пейна
-родителя (`pane.release_agent`).
-
-Действия:
-- `unixSender.close()`: `if s.closed { unlock; return }` под мьютексом.
-- `LocalSpawner.Spawn`: передавать `HerdrClient` = nil-клиент, thread-App
-  не репортит в чужой пейн.
-- Тест на идемпотентность `close()`.
-
-### 1.3 [S] LSP-колбэк не устанавливается при старте без провайдера
-
-`internal/app/app.go:152-155` возвращает `app` раньше блока `178-189`
-(`LSPManager.SetCallback`, `go LSPManager.TrackConfigured`). Путь
-онбординга `initCoderAgent` (`services.go:383`) LSP не трогает. Сайдбар не
-показывает LSP и счётчики диагностик до перезапуска.
-
-Действие: перенести блок LSP выше `if !cfg.IsConfigured()`, он не зависит
-от координатора.
-
-### 1.4 [M] `lsp_replace_symbol` / `lsp_rename` обходят гейт «прочитай перед правкой»
-
-`internal/agent/tools/lsp_replace_symbol.go:134`,
-`internal/agent/tools/lsp_rename.go:77,99,118,124`,
-`internal/agent/tools/filemutation.go:159-160`.
-
-`replace_symbol` ставит `wholeFileRead: true` без `checkFileFreshness` и
-`requireReadCoverage`; `rename` после `ApplyWorkspaceEdit` вызывает
-`filetracker.RecordRead` на каждый затронутый файл, а permission
-запрашивает раньше confinement. Противоречит `tools.go:285-290`
-(«edit is not a read»).
-
-Действия:
-- `replace_symbol`: `wholeFileRead: false`, пусть пишется
-  `recordEditedSpan`.
-- `rename`: `RecordEdit` только по изменённым диапазонам; цикл confinement
-  выше запроса разрешения.
-- Тест: после `rename` `edit` в нечитанном файле должен отказывать по
-  coverage.
-
-### 1.5 [S] `web_fetch` пишет `page-*.md` в рабочий каталог проекта
-
-`internal/agent/tool_registry.go:162` передаёт `workingDir`,
-`tools/fetch_helpers.go:101` делает там `os.CreateTemp` и удаляет только
-при ошибке записи. Путь субагента (`delegation_finalizer.go:1141`) уже
-использует tmpDir.
-
-Действие: главный путь тоже в per-session temp/data-dir; в workspace
-никогда.
-
-### 1.6 [S] Отмена субагента финализируется как «failed»
-
-`internal/agent/delegation_finalizer.go:863-864`, `:873-876`.
-
-`finishSubAgent` заворачивает любой Go-error, включая `context.Canceled`, в
-`NewTextErrorResponse`; `subAgentTaskRun` превращает текст обратно в
-`errors.New`. `thread/lifecycle.go` не видит `errors.Is(err,
-context.Canceled)` и ставит `StatusFailed`.
-
-Действие: `subAgentTaskRun` возвращает сырой `err` через `%w`; текстовая
-конверсия остаётся только для синхронного tool-response пути.
-
-### 1.7 [S] Hook `halt` не останавливает соседние tool-call'ы того же шага
-
-`internal/agent/hooked_tool.go:63-73`,
-`third_party/fantasy/agent.go:773-781`.
-
-`executeTools` выполняет вызовы последовательно и смотрит `StopTurn` только
-после всего батча. Заблокированный `bash` не мешает следующему `write` в
-том же шаге; то же для permission-denied в `tools.go:112`.
-
-Действие: в `executeTools` после результата с `StopTurn` прекращать
-выполнение, оставшиеся вызовы заполнять ошибкой «skipped: turn halted».
-Правка в `third_party/fantasy`, нужен отдельный тест там.
-
-### 1.8 [S] MCP SSE с OAuth строит сессию на отменяемом контексте
-
-`internal/agent/tools/mcp/connection.go:103`, `:501`,
-`authcoordinator.go:190-191`, `ui/dialog/mcp_auth.go:193`.
-
-Диалог и `completeAuthFlow` отменяют ctx после успеха; go-sdk привязывает
-SSE GET-стрим к ctx Connect. Даёт ложный цикл connected → error →
-reconnect. Путь renewal уже делает `context.WithoutCancel`, первичный нет.
-
-Действие: в `createSession` брать `context.WithoutCancel(ctx)`, таймер на
-connect оставить; `:501` становится лишним.
-
-### 1.9 [S] Общий lock-каталог в `/tmp` с правами 0700
-
-`internal/fsext/conditionalreplace.go:70,76,96,100-105`.
-
-`MkdirAll(/tmp/sennit-fsext-locks, 0o700)` молча проходит, если каталог
-создал другой пользователь, и каждый edit падает с `permission denied`.
-Ключ блокировки от `filepath.Clean`, а не `fsext.Canonical`, поэтому
-symlink и реальный путь не сериализуются.
-
-Действия: per-user каталог (`os.UserCacheDir()/sennit/locks` или суффикс
-uid); ключ по `Canonical(path)`.
-
----
+Симптом уже обходили не в том месте: `workspace/appws/attached_thread.go:47-58`
+добавляет fallback на родителя в `PermissionGrant` именно из-за этой
+маршрутизации. После фикса обход убрать.
 
 ## Фаза 2. Баги в фоне и ресурсы
 
