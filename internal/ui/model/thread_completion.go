@@ -52,6 +52,21 @@ func isTerminalThreadStatus(status string) bool {
 //     finished before this UI ever attached to it. Only real transitions
 //     observed live are worth interrupting the user for.
 func (n *notifyState) notifyThreadCompletion(t proto.Thread) tea.Cmd {
+	// Tasks ride the same event stream as threads (see updateThreads), and
+	// they are not what this toast is for. A task is a subagent the
+	// current turn started and is waiting on: its result comes back into
+	// the transcript as the delegation's report, so a toast on top of that
+	// says nothing new — it just interrupts, once per subagent, in a turn
+	// that may have started several. A thread is the opposite case: it
+	// outlives the turn that started it, and the dock is the only place it
+	// is otherwise visible, so a thread finishing (or hitting a merge
+	// conflict) is worth the interruption.
+	//
+	// An empty Kind is a thread: older servers sent no discriminator at
+	// all, matching listcache.threadEventMatchesKind.
+	if proto.ThreadKind(t.Kind) == proto.ThreadKindTask {
+		return nil
+	}
 	if n.threadLastStatus == nil {
 		n.threadLastStatus = make(map[string]string)
 	}

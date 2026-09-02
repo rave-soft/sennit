@@ -44,6 +44,37 @@ func TestNotifyThreadCompletion_TerminalTransitionToasts(t *testing.T) {
 // TestNotifyThreadCompletion_NonTerminalTransitionDoesNotToast is the
 // direct regression guard for "must not re-fire for a non-terminal status
 // change (e.g. pending -> running)".
+// TestNotifyThreadCompletion_TaskDoesNotToast pins that a subagent task
+// finishing raises nothing. Tasks share the thread event stream, so every
+// delegated subagent used to toast on completion — on top of the report it
+// already writes back into the transcript, and once per subagent in a turn
+// that may have started several.
+func TestNotifyThreadCompletion_TaskDoesNotToast(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+
+	require.Nil(t, u.notifyThreadCompletion(proto.Thread{
+		ID: "task1", Name: "review", Kind: string(proto.ThreadKindTask), Status: "running",
+	}))
+	require.Nil(t, u.notifyThreadCompletion(proto.Thread{
+		ID: "task1", Name: "review", Kind: string(proto.ThreadKindTask), Status: "completed",
+	}), "a task completing must not toast")
+	require.NotContains(t, u.threadLastStatus, "task1", "a task should not occupy the transition map either")
+
+	// A thread on the same stream still toasts, including one whose Kind
+	// an older server left empty.
+	require.Nil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "running"}))
+	require.NotNil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "completed"}))
+
+	require.Nil(t, u.notifyThreadCompletion(proto.Thread{
+		ID: "t2", Name: "fix-db", Kind: string(proto.ThreadKindThread), Status: "running",
+	}))
+	require.NotNil(t, u.notifyThreadCompletion(proto.Thread{
+		ID: "t2", Name: "fix-db", Kind: string(proto.ThreadKindThread), Status: "merged",
+	}))
+}
+
 func TestNotifyThreadCompletion_NonTerminalTransitionDoesNotToast(t *testing.T) {
 	t.Parallel()
 
