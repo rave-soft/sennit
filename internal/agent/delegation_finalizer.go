@@ -297,6 +297,7 @@ func (d *delegationFinalizer) buildAgent(ctx context.Context, prompt *prompt.Pro
 		Sessions:             d.sessions,
 		Messages:             d.messages,
 		Tools:                nil,
+		Lifecycle:            d.lifecycle,
 		Notify:               d.notify,
 		RunComplete:          d.runComplete,
 		MCP:                  d.mcp,
@@ -1149,6 +1150,7 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 		DisableAutoSummarize: d.cfg.Config().Options.DisableAutoSummarize,
 		AutoSummarizeAt:      d.cfg.Config().Options.AutoSummarizeAt,
 		Sessions:             d.sessions, Messages: d.messages,
+		Lifecycle: d.lifecycle,
 		Tools: []fantasy.AgentTool{
 			tools.NewWebFetchTool(nil, tmpDir, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
 			tools.NewGlobTool(tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, d.cfg.Config().Tools.Grep),

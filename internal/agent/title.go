@@ -11,10 +11,23 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/rave-soft/sennit/internal/message"
 )
 
 const DefaultSessionName = "Untitled Session"
+
+// titleGenerationTimeout bounds one title-generation call. A session title
+// is a single line derived from the opening prompt — not worth holding a
+// stalled provider's HTTP request (and this goroutine) open indefinitely
+// for; a generous but finite window keeps a slow-but-healthy provider
+// working while still bounding the leak a stalled one would otherwise
+// cause. See internal/agent/provider_stall.go for the watchdog that
+// protects calls that matter more than this one. Overridable per agent
+// (sessionAgent.titleTimeout) so a test can prove the bound is applied
+// without paying the production value in wall-clock time.
+const titleGenerationTimeout = 45 * time.Second
 
 //go:embed templates/title.md
 var titlePrompt []byte
@@ -49,6 +62,40 @@ func hasUserTextMessage(msgs []message.Message) bool {
 // GenerateTitle generates a session title based on the initial prompt.
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	a.generateTitle(ctx, sessionID, userPrompt, a.model.Get(), a.systemPromptPrefix.Get())
+}
+
+// startGenerateTitle launches generateTitle asynchronously. The call
+// context is detached (context.WithoutCancel) so the goroutine survives
+// the turn that triggered it, then bounded by titleGenerationTimeout so it
+// does not survive forever — a stalled provider must not leak the
+// goroutine or its in-flight request past the turn.
+//
+// When a carries a readiness lifecycle (the coordinator's own agent, and
+// agents built through delegationFinalizer), the work is launched through
+// lifecycle.launch so Coordinator.Close observes and waits for it instead
+// of being unaware of a bare goroutine. A sessionAgent built without one
+// (most tests, and one-off agents that never go through buildAgent) falls
+// back to a plain goroutine — nothing to register with in that case.
+func (a *sessionAgent) startGenerateTitle(ctx context.Context, sessionID, userPrompt string, model Model, systemPromptPrefix string) {
+	timeout := a.titleTimeout
+	if timeout <= 0 {
+		timeout = titleGenerationTimeout
+	}
+	titleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	work := func(context.Context) error {
+		defer cancel()
+		a.generateTitle(titleCtx, sessionID, userPrompt, model, systemPromptPrefix)
+		return nil
+	}
+	// A fresh group per call: nothing needs to wait on this specific
+	// title generation, only Close needs to know it exists — and
+	// readinessLifecycle.launch tracks that on its own internal
+	// WaitGroup regardless of which *errgroup.Group is passed in (see
+	// delegationFinalizer.buildAgent's identical use for a sub-agent's
+	// readiness group).
+	if a.lifecycle == nil || !a.lifecycle.launch(&errgroup.Group{}, work) {
+		go func() { _ = work(context.Background()) }()
+	}
 }
 
 // generateTitle titles the session with a single call on model. There is no

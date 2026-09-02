@@ -123,6 +123,21 @@ type sessionAgent struct {
 	// each sub-agent build gets a group of its own.
 	subReady *errgroup.Group
 
+	// lifecycle, when set, is the coordinator's readiness lifecycle —
+	// the same one buildAgent's own readiness goroutines register
+	// through. startGenerateTitle uses it so a title-generation
+	// goroutine is observed and waited on by Coordinator.Close instead
+	// of leaking past it. nil-safe: a sessionAgent built without one
+	// (most tests, and one-off agents built outside buildAgent) falls
+	// back to a plain goroutine for its title generation.
+	lifecycle *readinessLifecycle
+
+	// titleTimeout overrides titleGenerationTimeout when non-zero. Tests
+	// use this to prove startGenerateTitle actually bounds the provider
+	// call without paying the production timeout in wall-clock time; production
+	// callers leave it zero and get the package default.
+	titleTimeout time.Duration
+
 	// dispatcher owns the accept/queue/cancel protocol state shared by Run
 	// and Summarize's dispatch handoffs. Embedded so dispatcher's pure
 	// pass-through methods are promoted onto SessionAgent's method set
@@ -145,6 +160,10 @@ type SessionAgentOptions struct {
 	MCP                  *mcp.Registry
 	// Latency is optional; see sessionAgent.latency.
 	Latency latency.Recorder
+	// Lifecycle is optional; see sessionAgent.lifecycle.
+	Lifecycle *readinessLifecycle
+	// TitleTimeout is optional; see sessionAgent.titleTimeout.
+	TitleTimeout time.Duration
 }
 
 func NewSessionAgent(
@@ -169,6 +188,8 @@ func NewSessionAgent(
 		runComplete:          opts.RunComplete,
 		mcp:                  opts.MCP,
 		latency:              opts.Latency,
+		lifecycle:            opts.Lifecycle,
+		titleTimeout:         opts.TitleTimeout,
 		dispatcher:           newDispatcher(),
 	}
 	// Wired after construction since the hook closes over a: dispatch

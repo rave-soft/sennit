@@ -705,9 +705,15 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		return SteerRan, nil, nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
-	if !call.Continuation && !hasUserTextMessage(msgs) {
-		titleCtx := context.WithoutCancel(ctx)
-		go a.generateTitle(titleCtx, call.SessionID, call.Prompt, model, promptPrefix)
+	// A sub-agent session already got a deliberate title from
+	// CreateSubAgentSession (the delegation description, or a fallback
+	// like "New Agent Session") — never a blank one, so an empty title
+	// here means an unusual construction path that skipped that step,
+	// and generateTitle is the only thing left that will ever set one.
+	// Only skip when both hold: sub-agent *and* already titled.
+	skipTitle := a.isSubAgent && currentSession.Title != ""
+	if !call.Continuation && !hasUserTextMessage(msgs) && !skipTitle {
+		a.startGenerateTitle(ctx, call.SessionID, call.Prompt, model, promptPrefix)
 	}
 
 	var userMsgCreated bool
