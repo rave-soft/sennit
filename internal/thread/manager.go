@@ -27,8 +27,7 @@ import (
 
 // defaultDataDirName is the project-local data directory a workspace uses
 // when nothing else is configured; thread worktrees live in "threads"
-// inside it. The fallback only applies when a caller supplies no DataDir
-// at all.
+// inside it.
 const defaultDataDirName = brand.DataDir
 
 // nameRe restricts thread names to values safe to embed in a branch name
@@ -192,8 +191,8 @@ func (m *Manager) Get(ctx context.Context, idOrName string) (Thread, error) {
 // A miss is reported as [ErrNotFound] rather than whatever the store said.
 // The store's own "sql: no rows in result set" is an implementation detail
 // that means nothing to the caller, and since a merged thread is removed
-// (see discardMerged), asking about one by name is now an ordinary thing
-// to do — the answer has to be a sentence, not a database message.
+// (see discardMerged), asking about one by name is an ordinary thing to
+// do — the answer has to be a sentence, not a database message.
 func (m *Manager) resolve(ctx context.Context, idOrName string) (Thread, error) {
 	st, err := m.store.Get(ctx, idOrName)
 	if err == nil {
@@ -352,14 +351,9 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	// Parent pointing at m.parentApp's coordinator, mirroring
 	// resolveDeliveryTarget's KindThread branch: a thread's own App is
 	// wholly isolated, so its coordinator is not where a completion (or
-	// an ask) is ever delivered to. A thread's parent is optional
-	// (unlike a task's), and guarded on m.parentApp the same way
-	// resolveDeliveryTarget is, since a Manager built without one (see
-	// ManagerOptions.ParentApp) must not panic. Placed here so both the
-	// idle (empty-Goal) and dispatched-Goal paths below register it - an
-	// idle thread activated by hand later must still be able to ask.
-	// deliverStoredCompletion is always called with depth 0 for a thread; see its
-	// onAutoMerge call above.
+	// an ask) is ever delivered to. Placed here so both the idle
+	// (empty-Goal) and dispatched-Goal paths below register it - an idle
+	// thread activated by hand later must still be able to ask.
 	m.registerThreadParent(handle, st)
 
 	if args.Goal == "" {
@@ -412,25 +406,17 @@ func (m *Manager) releaseHandle(ctx context.Context, handle Handle) {
 
 // failCreate records cause as the thread's terminal failure and returns it
 // to Create's caller. st must be the row Create's own store.Create call
-// produced (or a later, successfully re-fetched copy of it) — never the
-// zero-value return of a failed store call — or the write below targets an
-// empty ID and marks nothing.
+// produced — never the zero-value return of a failed store call — or the
+// write below targets an empty ID and marks nothing.
 //
 // Every early return in Create from the point its row exists calls this,
-// deliberately without exception: once store.Create has succeeded the row
-// is a real, resolvable thread, and by the time any of these paths return
-// its worktree and spawned handle have already been unwound by rb. Leaving
-// such a row at whatever transient status it last held (mid-create, or the
-// short-lived StatusIdle/StatusRunning setStatus itself failed to write)
-// would let it sit there — on disk unaffected by the sweep in
-// lifecycle.recover, which only reconciles the terminal/active statuses of
-// a running process's restart, not a still-live one — misrepresenting a
-// thread as pending or running when nothing is actually working on it. A
-// setStatus failure calling back into this method sends one further
-// best-effort write against the same store, which is a redundant attempt
-// at worst and a correctly-recorded failure at best; either way it can
-// never turn a successful write into a failure, since failCreate's own
-// error is only logged.
+// without exception: leaving the row at its last transient status would
+// misrepresent an abandoned thread as pending or running, since
+// lifecycle.recover's sweep only reconciles active statuses on a restart,
+// not a still-live process. A setStatus failure recursing into this
+// method is a redundant write at worst — never a way to turn a
+// successful write into a failure, since failCreate's own error is only
+// logged.
 func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error {
 	// detachForTerminalWork, not ctx directly: cause is very often ctx
 	// having been cancelled, and a status write built on that same dead
@@ -645,8 +631,8 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	m.lc.installRuntime(m.ctx, handle, m.spawner, st.ID)
 	// The dispatcher's DelegationParent registry lives per coordinator
 	// instance and is empty on a freshly-started process (see
-	// resolveDeliveryTarget's doc comment on the persisted column this now
-	// reads from). Re-register here, on the freshly-installed handle, so a
+	// resolveDeliveryTarget's doc comment on the persisted column it reads
+	// from). Re-register here, on the freshly-installed handle, so a
 	// thread resumed after a restart can still ask its parent mid-run — not
 	// just report its eventual completion.
 	// Depth is not persisted (a pre-existing gap - see threadControl.depth,
@@ -735,18 +721,17 @@ func (m *Manager) SendFromPerson(ctx context.Context, idOrName, message string) 
 // RunFromPerson dispatches a turn the person is driving by hand in the
 // thread's own session — the TUI drilled into a thread and typed. It is
 // [Manager.SendFromPerson] plus attachments, and it exists as its own
-// entry point because of what it is for: the drilled-in view used to talk
-// to the thread's coordinator directly, which meant the manager never
-// learned a turn had started. The thread stayed idle while it worked, its
-// completion was dropped (an untracked run has no RunID to match), and a
-// thread revived by hand could therefore never settle, merge, or report
-// again.
+// entry point because of what it is for: routing this typing through the
+// manager, rather than straight to the thread's coordinator, makes it the
+// one owner of every turn in a thread's session — without that, the
+// manager never learns a turn started, an untracked run has no RunID to
+// match on completion, and a thread revived by hand could never settle,
+// merge, or report again.
 //
-// Routing that typing through here instead makes the manager the one
-// owner of every turn in a thread's session. What it does not do is treat
-// such a turn as the thread's work being finished: it rests at idle with
-// its workspace live, and merging stays the person's own call — see
-// lifecycle.handleRunComplete's person branch.
+// What it does not do is treat such a turn as the thread's work being
+// finished: it rests at idle with its workspace live, and merging stays
+// the person's own call — see lifecycle.handleRunComplete's person
+// branch.
 func (m *Manager) RunFromPerson(ctx context.Context, idOrName, message string, attachments []Attachment) (SendDisposition, error) {
 	return m.send(ctx, idOrName, message, SenderPerson, attachments)
 }

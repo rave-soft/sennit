@@ -188,7 +188,6 @@ func (t *TaskManager) endIdleTask(ctx context.Context, st Thread, idleFor time.D
 		return
 	}
 
-	// Rounded, and no goal or error text: the package logging note.
 	slog.Warn("Task produced nothing within the idle budget; ending it",
 		"component", "thread", "task", st.ID, "session_id", st.SessionID,
 		"idle", idleFor.Round(time.Second).String(),

@@ -93,7 +93,6 @@ func (TextContent) isContentPart() {}
 // the fields [TaskManager.Output] reads, deliberately not the full
 // persistence row.
 type Message struct {
-	// Role is who the message is attributed to.
 	Role MessageRole
 	// Text is the message's plain-text content (its first text part).
 	Text string

@@ -12,35 +12,20 @@ import (
 )
 
 // maxActiveTasksPerWorkspace and maxActiveTasksPerParentTurn bound
-// concurrent task delegations. Both are hard constants, not configuration:
-// unlike options.background_agents (an explicit, permanent product
-// choice), these are a defensive width limit, and a value someone could
-// misconfigure upward would defeat the reason they exist.
+// concurrent task delegations. They are hard constants, not configuration:
+// every task shares its parent App's working directory and
+// permission.Service, so beyond a small number extra concurrency just
+// queues behind the same gate and contends for the same files rather than
+// getting more done. The cascade depth limit (maxTaskCascadeDepth,
+// internal/agent) bounds how deep a chain of delegations runs; these bound
+// how wide it gets at any one level.
 //
-// Every task runs inside the *same* parent App as the turn that created it
-// (see threadspawn's ParentAppSpawner) — the same working directory, and the same
-// permission.Service the visible turn itself uses. Permission prompts are
-// answered one at a time, so beyond a small number, extra concurrent tasks
-// do not get more done in parallel; they just queue behind the same
-// permission gate and contend for the same files, while making the
-// workspace harder to reason about. The cascade depth limit
-// (maxTaskCascadeDepth, internal/agent) already bounds how *deep* a chain
-// of delegations may run; these bound how *wide* it may get at any one
-// level, which depth does nothing to prevent.
-//
-// maxActiveTasksPerWorkspace is the total across every parent turn in the
-// workspace. maxActiveTasksPerParentTurn is deliberately smaller than that
-// total — half — so one turn's fan-out can never claim the entire budget
-// and starve a second turn (the user's own foreground turn, or another
-// session) of the ability to delegate anything at all.
-//
-// Threads do not count toward either limit: a thread spawns its own
-// isolated App with its own worktree (threadspawn's LocalSpawner), so it
-// never touches
-// the parent App's working directory or its permission.Service - neither
-// of the two resources these limits protect. This is enforced simply by
-// scope: the counts below are computed from List, which is already
-// Kind-scoped to tasks.
+// maxActiveTasksPerParentTurn is half of maxActiveTasksPerWorkspace so one
+// turn's fan-out can never claim the whole budget. Threads don't count
+// toward either: they spawn their own isolated App (threadspawn's
+// LocalSpawner) and never touch the resources these limits protect. This
+// is enforced simply by scope: the counts below are computed from List,
+// which is already Kind-scoped to tasks.
 const (
 	maxActiveTasksPerWorkspace  = 4
 	maxActiveTasksPerParentTurn = 2
@@ -48,31 +33,27 @@ const (
 
 // TaskCreateArgs holds the inputs to [TaskManager.Create].
 type TaskCreateArgs struct {
-	// Goal is the task's prompt, dispatched immediately: unlike a thread,
-	// a task has no worktree to rest idle in, so there is no goal-less
-	// path the way [CreateArgs.Goal] has for [Manager.Create].
+	// Goal is the task's prompt, dispatched immediately — unlike a thread, a
+	// task has no idle worktree to wait in, so there is no goal-less path
+	// the way [CreateArgs.Goal] has for [Manager.Create].
 	Goal string
 	// ParentSessionID is the session the task's own child session nests
 	// under, the same relationship [Manager.Create] establishes for a
-	// thread's child session via Sessions.CreateTaskSession. Required: a
-	// task with no parent is not a task, just an orphaned session.
+	// thread via Sessions.CreateTaskSession. Required: a task with no
+	// parent is not a task, just an orphaned session.
 	ParentSessionID string
 	// Depth is the background-delegation cascade depth of the turn that
-	// created this task (0 for a real user turn). It is carried
-	// in-memory only (see threadControl.depth) — not persisted — since it
-	// is only ever needed transiently, between this Create and the one
-	// completion event this task ever produces, to compute the depth of
-	// an auto-woken continuation (see agent.TaskCompletion.Depth).
+	// created this task (0 for a real user turn), carried in-memory only
+	// (threadControl.depth) to compute the depth of an auto-woken
+	// continuation (agent.TaskCompletion.Depth).
 	Depth int
 	// SessionTitle and AgentID preserve specialized delegation history.
 	SessionTitle string
 	AgentID      string
 	// SessionID, when set, is used verbatim as the child session's id
-	// instead of a generated one. A delegation launched from a tool call
-	// passes the "<messageID>$$<toolCallID>" identity the transcript
-	// derives for that call, which is what makes the delegation openable
-	// from the parent's chat; callers with no such identity leave it
-	// empty and get a generated id.
+	// instead of a generated one, so a delegation from a tool call can
+	// reuse the "<messageID>$$<toolCallID>" identity that makes it openable
+	// from the parent's chat.
 	SessionID string
 	// Factory, when set, owns preparation and execution instead of the coder
 	// dispatcher. It is invoked asynchronously only after Create returns.
@@ -92,18 +73,14 @@ type TaskRunFactory func(context.Context, string) (run func(context.Context) (Ta
 // per-entity serialization, run dispatch, status transitions, recovery,
 // and shutdown as [Manager]'s threads, minus the git worktree/merge
 // overlay. A task runs inside its parent workspace's own App instead of
-// an isolated one it spawns — see threadspawn's ParentAppSpawner — which
-// is the
-// entire reason this kind exists: it starts cheaply where a thread
-// cannot.
+// spawning an isolated one (threadspawn's ParentAppSpawner), which is why
+// it starts cheaply where a thread cannot.
 //
-// TaskManager is deliberately a sibling of [Manager], not a method on it:
-// Manager's public surface (List, Wait, Merge, and its CreateArgs'
-// git-specific fields) is stated in terms of threads, and bolting a
-// worktree-less kind onto it would either strain that surface or require
-// every thread-only method to guard against a task ID. What TaskManager
-// shares with Manager is the [lifecycle] underneath both — see
-// [NewTaskManager].
+// TaskManager is a sibling of [Manager], not a method on it: Manager's
+// public surface is stated in terms of threads, and bolting a
+// worktree-less kind onto it would strain that surface or force every
+// thread-only method to guard against a task ID. What they share is the
+// [lifecycle] underneath both — see [NewTaskManager].
 type TaskManager struct {
 	store    Store
 	spawner  Spawner
@@ -111,44 +88,33 @@ type TaskManager struct {
 	ctx      context.Context
 	lc       *lifecycle
 
-	// createMu serializes Create end to end (see Create's own comment on
-	// it): the concurrency caps must check the active count and act on it
-	// as one atomic step, or two Create calls racing each other could both
-	// pass the check before either is counted and together exceed it.
-	// Task creation is not a hot path, so serializing all of it - not just
-	// the check - trades away nothing that matters for a correctness
-	// guarantee that does.
+	// createMu serializes Create end to end, so the concurrency-cap check
+	// and the create it gates run as one atomic step. Task creation isn't a
+	// hot path, so serializing all of it trades away nothing that matters
+	// for a correctness guarantee that does.
 	createMu sync.Mutex
 }
 
 // NewTaskManager constructs a TaskManager. lc and ctx must be an existing
-// [Manager]'s own m.lc and m.ctx (both unexported, so this can only be
-// called from within package thread), not freshly constructed ones: a
-// separate lifecycle would give tasks their own controls map, worker
-// group, and recovery sweep, splitting exactly the machinery this package
-// exists to share, and a separate ctx would mean Manager.Shutdown's
-// cancellation never reaches a task's in-flight run. spawner should be a
-// threadspawn ParentAppSpawner wrapping the workspace's own App, and
-// messages that
-// same App's own message store — a task's child session lives in the
-// parent's own message store, not a separate one, so [TaskManager.Output]
-// reads it directly rather than through any task-specific plumbing.
+// [Manager]'s own m.lc and m.ctx, not freshly constructed ones: a separate
+// lifecycle would split the controls map, worker group, and recovery sweep
+// this package exists to share, and a separate ctx would leave
+// Manager.Shutdown unable to reach a task's in-flight run. spawner should
+// be a threadspawn ParentAppSpawner over the workspace's own App, and
+// messages that same App's message store.
 func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *lifecycle, ctx context.Context) *TaskManager {
 	t := &TaskManager{store: store, spawner: spawner, messages: messages, ctx: ctx, lc: lc}
-	// Started here rather than left to the caller: a task manager without
-	// its idle sweep silently loses the slot every wedged run costs, and
-	// nothing about the construction site makes that omission visible.
-	// See watchdog.go for what it watches and why.
+	// Started here, not left to the caller, so no construction site can
+	// silently omit the idle sweep. See watchdog.go.
 	t.startIdleWatchdog()
 	return t
 }
 
 // Create records a task, gives it a child session under
-// args.ParentSessionID, and dispatches args.Goal immediately in the
-// task's bound runtime (the parent App). It returns once the task is
-// running; it does not wait for the run to finish — subscribe to the
-// shared lifecycle's events (via a [Manager] sharing it, [Manager.Wait])
-// for that.
+// args.ParentSessionID, and dispatches args.Goal immediately in the task's
+// bound runtime. It returns once the task is running, not once it
+// finishes — subscribe via a [Manager] sharing this lifecycle
+// ([Manager.Wait]) for that.
 //
 // The task's Name is generated (task-<uuid>), not caller-supplied: unlike
 // a thread, a task has no user-chosen name, and several nameless tasks
@@ -156,9 +122,8 @@ func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *l
 //
 // Create refuses over maxActiveTasksPerWorkspace or
 // maxActiveTasksPerParentTurn active tasks (see checkActiveCaps) rather
-// than queuing the request: a caller told "started" when the work was
-// actually deferred would go on to reason about a delegation that does
-// not exist yet.
+// than queuing: a caller told "started" when the work was actually
+// deferred would go on to reason about a delegation that doesn't exist yet.
 func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, error) {
 	done, err := t.lc.beginOp()
 	if err != nil {
@@ -172,9 +137,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, fmt.Errorf("thread: task requires a parent session")
 	}
 
-	// Held for the rest of this call - see createMu's own doc comment for
-	// why the check and the create that acts on it must be one atomic
-	// step, not two.
+	// Held for the rest of this call — see createMu's doc comment.
 	t.createMu.Lock()
 	defer t.createMu.Unlock()
 	if err := t.checkActiveCaps(ctx, args.ParentSessionID, args.Goal); err != nil {
@@ -240,37 +203,27 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	st = newSt
 
 	// Into runningSt, not st: setStatus returns the zero Thread on error,
-	// and failCreate below needs st's real ID (see SetSession's identical
-	// newSt pattern above - the same clobber-on-error class of bug).
+	// and failCreate below needs st's real ID.
 	runningSt, err := t.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
 	st = runningSt
-	// Register the parent only once nothing left in this function can
-	// fail: a task shares its parent's own App/Coordinator (see
-	// DelegationParent's doc comment), so this is the same coordinator
-	// instance startRun will dispatch the task's turns through.
-	// Registering any earlier — e.g. right after SetSession, before
-	// setStatus — would leave a stale registration pointing at a session
-	// that never actually runs whenever the step in between fails and
-	// this function returns via failCreate instead of reaching startRun.
+	// Registered only once nothing left in this function can fail: a task
+	// shares its parent's App/Coordinator (see DelegationParent's doc
+	// comment), and registering earlier would leave a stale registration
+	// pointing at a session that never runs if a later step fails.
 	coord := handle.Workspace().Coordinator()
 	registerParent(coord, coord, st, args.Depth)
-	// A task's tool calls hit the parent App's permission.Service — the
-	// same one the visible turn uses — so without a delegation tag, a
-	// prompt raised by the task's run would be indistinguishable from one
-	// raised by the user's own turn.
-	//
-	// startRun stamps the tag too, from the store (lifecycle.withDelegation),
-	// and in the ordinary case that stamp simply replaces this one with the
-	// same values. This one is not therefore redundant: withDelegation is
-	// best-effort and returns the context untagged when its store lookup
-	// fails, and the values are already in hand here, where nothing can
-	// fail. Stamping a context derived from t.ctx rather than t.ctx itself
-	// keeps it scoped to this run — t.ctx is shared with every other task
-	// and, transitively, with Manager's threads, and must not pick up one
-	// run's identity permanently.
+	// A task's tool calls hit the parent App's permission.Service, the same
+	// one the visible turn uses, so without a delegation tag a task's
+	// prompt would be indistinguishable from the user's own turn.
+	// startRun stamps the same tag from the store (lifecycle.withDelegation)
+	// and ordinarily just replaces this one; it's not redundant because
+	// that stamp is best-effort and returns the context untagged if its
+	// store lookup fails. The derived context, not t.ctx itself, is
+	// stamped so the identity stays scoped to this run — t.ctx is shared
+	// with every other task and thread.
 	runCtx := permission.WithDelegation(t.ctx, permission.DelegationRef{
 		ID:   st.ID,
 		Name: st.Name,
@@ -284,8 +237,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	rb.commit()
 
 	// ids and depth only — args.Goal is the user's prompt and never
-	// belongs in a log line (see the package-level logging note in
-	// lifecycle.go).
+	// belongs in a log line.
 	slog.Info("Task dispatched", "task", st.ID, "session", st.SessionID, "parent_session", args.ParentSessionID, "depth", args.Depth)
 
 	return st, nil
@@ -294,34 +246,25 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 // checkActiveCaps refuses Create with a clear, model-visible error once
 // either concurrency cap (maxActiveTasksPerWorkspace,
 // maxActiveTasksPerParentTurn) is already at its limit, or when the same
-// parent already has this very task running. Callers must hold
-// t.createMu across this call and whatever create it gates - see that
-// field's doc comment for why the check alone is not enough.
+// parent already has this very task running. Callers must hold t.createMu
+// across this call and whatever create it gates — see that field's doc
+// comment.
 //
-// The duplicate check is deliberately narrow: same parent, same goal
-// (whitespace- and case-folded), and the twin still active. Two
-// delegates working the same prompt against the same working directory
-// at the same time is never what a caller means - they contend for the
-// same files and each reports on work the other is changing under it.
-// A goal that merely resembles a live one is left alone: prompts differ
-// by an attempt number or a findings list far more often than they
-// duplicate, and refusing real work is worse than the duplicate. So is
-// a goal repeated after its twin already finished, which is an ordinary
-// retry - what makes a parent re-dispatch finished work is losing the
-// report, and that is fixed where the report is delivered (see
-// runTurn.foldCompletions), not here.
+// The duplicate check is narrow by design: same parent, same goal
+// (whitespace- and case-folded), and the twin still active. A goal that
+// merely resembles a live one is left alone — refusing real work is worse
+// than the rare duplicate — and a goal repeated after its twin finished is
+// an ordinary retry, handled where the report is delivered
+// (runTurn.foldCompletions), not here.
 //
-// "Active" is Status.Active(): pending or running. A task blocked on a
-// permission prompt mid-run is still StatusRunning - it does not stop
-// holding its slot while it waits, by design, the same way it does not
-// stop counting as "in flight" anywhere else in this package. A completed,
-// failed, or interrupted task holds no slot at all.
+// "Active" is Status.Active(): pending or running, including a task
+// blocked on a permission prompt mid-run — it still holds its slot.
 //
-// parentSessionID is read back from each active task's own control (see
-// Create's parentSessionID stash) rather than resolved through Sessions,
-// since it is already in memory and this runs under createMu on every
-// dispatch - a DB round trip per active task on every Create would be a
-// needless cost for something already sitting in the controls map.
+// parentSessionID is read back from each active task's own in-memory
+// control rather than resolved through Sessions, since this runs under
+// createMu on every dispatch and a DB round trip per active task would be
+// a needless cost. The persisted column is the fallback for a task resumed
+// after a restart, which has no in-memory control to read from.
 func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID, goal string) error {
 	tasks, err := t.List(ctx)
 	if err != nil {
@@ -335,11 +278,6 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID, goal
 			continue
 		}
 		total++
-		// The persisted column is the fallback, and it is what makes the
-		// count right after a restart: a task resumed then has no
-		// in-memory control to read a parent from, so every one of them
-		// was invisible to the per-parent limit and a parent could
-		// exceed it without ever being told.
 		parent := tk.ParentSessionID
 		if c := t.lc.existingControl(tk.ID); c != nil {
 			c.mu.Lock()
@@ -376,8 +314,7 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID, goal
 
 // normalizeGoal folds whitespace and case so checkActiveCaps's duplicate
 // check treats a goal re-sent with different indentation or casing as the
-// same goal. It is exact-match after folding by design - see that
-// function's note on why near-misses are left alone.
+// same goal. Matching is exact after folding — near-misses are left alone.
 func normalizeGoal(goal string) string {
 	return strings.ToLower(strings.Join(strings.Fields(goal), " "))
 }
@@ -385,11 +322,9 @@ func normalizeGoal(goal string) string {
 // failCreate records cause as the task's terminal failure and returns it
 // to Create's caller.
 func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) error {
-	// detachForTerminalWork, not ctx directly: cause is very often ctx
-	// having been cancelled, and a status write built on that same dead
-	// ctx would fail too, leaving the row stuck at its transient status
-	// until a restart's Recover reconciles it. See [Manager.failCreate],
-	// which solves this identical problem the same way.
+	// detachForTerminalWork, not ctx directly: cause is often ctx having
+	// been cancelled, and a status write on that same dead ctx would fail
+	// too. See [Manager.failCreate], which has the same problem.
 	writeCtx, cancel := detachForTerminalWork(ctx)
 	defer cancel()
 	if _, err := t.lc.setStatus(writeCtx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
@@ -399,9 +334,8 @@ func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) er
 }
 
 // List returns every known task (kind = KindTask), across the whole
-// workspace — the same scope [Manager.List] uses for threads. Store.List
-// is kind = 'thread'-scoped, so this goes through ListAll and filters in
-// Go instead, rather than adding a second SQL query for one caller.
+// workspace. Store.List is kind = 'thread'-scoped, so this goes through
+// ListAll and filters in Go instead of adding a second SQL query.
 func (t *TaskManager) List(ctx context.Context) ([]Thread, error) {
 	all, err := t.store.ListAll(ctx)
 	if err != nil {
@@ -417,14 +351,10 @@ func (t *TaskManager) List(ctx context.Context) ([]Thread, error) {
 }
 
 // Get resolves id to a task. Unlike [Manager.Get], there is no
-// resolve-by-name fallback: a task's Name is generated, not user-chosen
-// (see Create), so nothing ever addresses one by name.
+// resolve-by-name fallback: a task's Name is generated, not user-chosen.
 //
-// Rejects a thread's id with a clear error rather than returning it: one
-// table means every id is reachable through Store.Get regardless of kind,
-// and a task-facing caller asking for a task must never be handed a
-// thread — the same guard [Manager.Merge]/[Manager.Remove] apply in the
-// other direction.
+// Rejects a thread's id with a clear error rather than returning it — the
+// same guard [Manager.Merge]/[Manager.Remove] apply in the other direction.
 func (t *TaskManager) Get(ctx context.Context, id string) (Thread, error) {
 	st, err := t.store.Get(ctx, id)
 	if err != nil {
@@ -437,35 +367,25 @@ func (t *TaskManager) Get(ctx context.Context, id string) (Thread, error) {
 }
 
 // Cancel stops id's in-flight run and leaves it at the terminal
-// [StatusCancelled] with reason recorded as its Error. A task has no
-// merge flow or other kind-specific state to refuse this for — every
-// task is cancellable in any non-terminal status — see [lifecycle.cancel]
+// [StatusCancelled] with reason recorded as its Error. See [lifecycle.cancel]
 // for the mechanics shared with [Manager.Cancel].
 //
-// The cancel reaches id's whole subtree, not id alone. A task's own
-// delegations exist to answer it, and a cancelled task is never going to
-// read their answers: left running they go on holding concurrency slots,
-// go on prompting for permissions, and — the reason this is not merely
-// untidy — go on editing the workspace with nothing above them that will
-// ever look at the result. That is not a hypothetical: a delegation once
-// cancelled itself by accident and its child kept rewriting files for
-// nine more minutes afterwards, reporting at the end into a session that
-// had been dead the whole time.
+// The cancel reaches id's whole subtree, not id alone: a cancelled task
+// will never read its delegations' answers, so left running they'd go on
+// holding concurrency slots, prompting for permissions, and editing the
+// workspace with nothing above them to look at the result.
 //
 // Only id's failure is returned. A descendant that will not cancel is
-// logged and the sweep continues: the caller asked for id to stop, and
-// abandoning the rest of the subtree partway through would leave exactly
-// the unsupervised runs this exists to prevent.
+// logged and the sweep continues, rather than abandoning the rest of the
+// subtree.
 func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
-	// Detached before the read below, not just around the write: a
-	// cancel arriving on a dead context could not even load the task to
-	// cancel it. See detachForTerminalWork.
+	// Detached before the read below too: a cancel on a dead context
+	// couldn't even load the task to cancel it.
 	ctx, done := detachForTerminalWork(ctx)
 	defer done()
-	// Admitted like every other mutation: without this a cancel could
-	// start after Shutdown had closed admission and begun joining
-	// workers, and then tear down state those workers were still using.
-	// Held across the descendants below too, as one operation.
+	// Held across the descendants below too, as one operation, so a cancel
+	// can't start after Shutdown has closed admission and begun tearing
+	// down state those workers still use.
 	admitted, err := t.lc.beginOp()
 	if err != nil {
 		return err
@@ -475,12 +395,9 @@ func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 	if err != nil {
 		return err
 	}
-	// The subtree is read before st is cancelled, but cancelling st is
-	// what stops it dispatching anything new, so the two orders differ
-	// only by a task created in the microseconds between them. Reading
-	// first is the safer of the two: a listing taken after the cancel
-	// would miss nothing, while cancelling first and then failing to
-	// list would leave the whole subtree running.
+	// Read before st is cancelled: a listing taken after would miss
+	// nothing, while cancelling first and then failing to list would leave
+	// the whole subtree running.
 	descendants := t.descendantsOf(ctx, st)
 	cancelErr := t.lc.cancel(ctx, st, reason)
 	for _, child := range descendants {
@@ -496,14 +413,12 @@ func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 	return cancelErr
 }
 
-// descendantsOf returns every task below st, nearest first. A task's own
-// child session (Thread.SessionID) is the ParentSessionID of everything
-// it delegates, so the flat listing is a parent-pointer forest and this
-// is a breadth-first walk down it.
+// descendantsOf returns every task below st, nearest first, by walking the
+// parent-pointer forest breadth-first: a task's child session
+// (Thread.SessionID) is the ParentSessionID of everything it delegates.
 //
 // A listing that cannot be read yields nothing rather than an error: the
-// cancel the caller actually asked for must still happen, and a sweep
-// that cannot see the subtree has nothing to say about it.
+// cancel the caller asked for must still happen.
 func (t *TaskManager) descendantsOf(ctx context.Context, st Thread) []Thread {
 	if st.SessionID == "" {
 		return nil
@@ -519,8 +434,8 @@ func (t *TaskManager) descendantsOf(ctx context.Context, st Thread) []Thread {
 		byParent[child.ParentSessionID] = append(byParent[child.ParentSessionID], child)
 	}
 	var out []Thread
-	// seen guards the walk rather than a depth limit: a store that
-	// somehow described a cycle would otherwise hang the cancel.
+	// seen guards the walk rather than a depth limit, so a store
+	// describing a cycle can't hang the cancel.
 	seen := map[string]struct{}{st.ID: {}}
 	for frontier := []string{st.SessionID}; len(frontier) > 0; {
 		session := frontier[0]
@@ -540,20 +455,16 @@ func (t *TaskManager) descendantsOf(ctx context.Context, st Thread) []Thread {
 }
 
 // Send dispatches message into id's session, reactivating it first if its
-// runtime is not currently live — the same "queue if live, otherwise
+// runtime isn't currently live — the same "queue if live, otherwise
 // respawn and dispatch" behavior [Manager.Send] gives a thread, shared via
-// lifecycle.send. For a task, "respawn" only means rebinding to the
-// parent App through threadspawn's ParentAppSpawner; nothing is actually
-// rebuilt.
+// lifecycle.send. For a task, "respawn" only means rebinding to the parent
+// App; nothing is actually rebuilt.
 //
 // A task [TaskManager.Cancel] stopped is the one exception: cancelling was
-// a decision, not a pause, so Send refuses to resume it rather than
-// silently treating it the same as a task that was merely interrupted
-// (e.g. by a process restart). Anything else not live — completed,
-// failed, or incidentally interrupted — is reactivated exactly like a
-// thread would be, since a task has no merge-flow-equivalent state that
-// would make reactivating it meaningless the way [Manager.Activate]
-// refuses a thread mid-merge.
+// a decision, not a pause, so Send refuses to resume it. Anything else not
+// live — completed, failed, or incidentally interrupted — is reactivated
+// like a thread would be, since a task has no merge-flow-equivalent state
+// that would make reactivating it meaningless.
 func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposition, error) {
 	done, err := t.lc.beginOp()
 	if err != nil {
@@ -571,12 +482,9 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 	if err != nil {
 		return SendDisposition{}, err
 	}
-	// The dispatcher's DelegationParent registry lives per coordinator
-	// instance and is empty on a freshly-started process — see
-	// Manager.Send's identical re-registration. A task's Parent is its own
-	// coordinator (it shares its parent's App via threadspawn's
-	// ParentAppSpawner, unlike a thread's wholly isolated one), so no
-	// ParentApp guard is needed here, only a persisted parent to re-register.
+	// The dispatcher's DelegationParent registry is per coordinator
+	// instance and empty on a fresh process, so it's re-registered here —
+	// see Manager.Send's identical re-registration.
 	if c := t.lc.existingControl(st.ID); c != nil {
 		c.mu.Lock()
 		rt := c.runtime
@@ -592,31 +500,22 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 
 // wasCancelled reports whether st was explicitly stopped via
 // [TaskManager.Cancel] or [Manager.Cancel], as opposed to reaching a
-// terminal status some other way (completing normally, failing, or an
-// incidental interruption — see [StatusCancelled]'s own doc comment for
-// the distinction). A plain status check now; it used to infer this from
-// StatusInterrupted plus a non-empty Error, which held only because every
-// other writer of that status happened to leave Error empty — nothing
-// enforced that, so a status of its own replaces the inference rather
-// than sitting alongside it.
+// terminal status some other way — see [StatusCancelled]'s doc comment.
 func wasCancelled(st Thread) bool {
 	return st.Status == StatusCancelled
 }
 
 // defaultOutputLimit and maxOutputLimit bound how many of a task's child
-// session messages [TaskManager.Output] returns: a background task's
-// transcript goes straight into the parent's own context when read, so
-// the default stays small and even an explicit request cannot ask for
-// the whole history in one call.
+// session messages [TaskManager.Output] returns: the transcript goes
+// straight into the parent's own context when read, so even an explicit
+// request cannot ask for the whole history in one call.
 const (
 	defaultOutputLimit = 20
 	maxOutputLimit     = 100
 )
 
-// TaskOutputMessage is one message from a task's child session, reduced
-// to what [TaskManager.Output] surfaces: the role and its text content.
-// Tool calls, tool results, and reasoning are omitted — see Output's doc
-// comment for why.
+// TaskOutputMessage is one message from a task's child session, reduced to
+// what [TaskManager.Output] surfaces: the role and its text content.
 type TaskOutputMessage struct {
 	Role string
 	Text string
@@ -626,23 +525,19 @@ type TaskOutputMessage struct {
 // child session transcript.
 type TaskOutput struct {
 	Messages []TaskOutputMessage
-	// Total is how many user/assistant text messages exist in the
-	// session, so a caller can tell a truncated tail from the whole
-	// transcript instead of the omission passing silently.
+	// Total is how many user/assistant text messages exist in the session,
+	// so a caller can tell a truncated tail from the whole transcript.
 	Total int
 }
 
-// Output returns a tail of id's child session transcript: the same data
-// the UI would render for that session, reduced to user and assistant
-// text only. Tool calls, tool results, and reasoning are deliberately
-// left out — the point of this method is letting the caller check on a
-// task without the check itself flooding its own context, and raw tool
-// traffic is exactly what would defeat that.
+// Output returns a tail of id's child session transcript, reduced to user
+// and assistant text only: tool calls, tool results, and reasoning are
+// left out so a caller checking on a task doesn't flood its own context
+// with raw tool traffic.
 //
 // limit caps how many of the most recent such messages come back; <= 0
 // uses defaultOutputLimit, and any larger value is clamped to
-// maxOutputLimit — the default is a starting point, not a ceiling the
-// caller can lift by asking.
+// maxOutputLimit.
 func (t *TaskManager) Output(ctx context.Context, id string, limit int) (TaskOutput, error) {
 	st, err := t.Get(ctx, id)
 	if err != nil {

@@ -104,12 +104,10 @@ type Delegation struct {
 	UpdatedAt     int64
 	CompletedAt   int64
 	// ParentSessionID is the session this delegation's own session nests
-	// under, persisted so the link survives a process restart — the
-	// durable counterpart of the old in-memory-only
-	// threadControl.parentSessionID, which now only feeds
-	// TaskManager.checkActiveCaps's admission cache. Empty means no
-	// parent, exactly as before: resolveDeliveryTarget and SendToParent
-	// both treat "" as nobody to deliver/ask.
+	// under, persisted so the link survives a process restart; it also
+	// feeds TaskManager.checkActiveCaps's admission cache. Empty means no
+	// parent: resolveDeliveryTarget and SendToParent both treat "" as
+	// nobody to deliver/ask.
 	ParentSessionID string
 	// CompletionPending is the durable outbox bit for a task terminal event.
 	CompletionPending bool
