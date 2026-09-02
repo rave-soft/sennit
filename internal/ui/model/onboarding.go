@@ -64,7 +64,7 @@ func (m *UI) initializeProject() tea.Cmd {
 				Msg:  fmt.Sprintf("Failed to initialize project: %v", err),
 			}
 		}
-		return sendMessageMsg{Content: initPrompt}
+		return sendMessageMsg{uiOwned: uiOwned{owner: m}, Content: initPrompt}
 	}
 	// Mark the project as initialized
 	cmds = append(cmds, initialize, markProjectInitializedCmd(m.com))

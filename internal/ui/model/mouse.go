@@ -294,7 +294,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				clickTime := m.lastClickTime
 				cmds = append(cmds, tea.Tick(chatlist.DoubleClickThreshold, func(t time.Time) tea.Msg {
 					if time.Since(clickTime) >= chatlist.DoubleClickThreshold {
-						return copyChatHighlightMsg{}
+						return copyChatHighlightMsg{uiOwned{owner: m}}
 					}
 					return nil
 				}))

@@ -80,7 +80,7 @@ func (w *widgets) openMCPAuthDialog(com *common.Common) tea.Cmd {
 // checkPendingMCPAuth waits for MCP initialization to finish and then
 // checks whether any OAuth MCPs need authentication. This runs as a
 // Bubble Tea command so it doesn't block the UI.
-func checkPendingMCPAuth(com *common.Common) tea.Cmd {
+func checkPendingMCPAuth(com *common.Common, owner *UI) tea.Cmd {
 	parentCtx := com.Context()
 	ws := com.Workspace
 	return func() tea.Msg {
@@ -90,7 +90,8 @@ func checkPendingMCPAuth(com *common.Common) tea.Cmd {
 			return nil
 		}
 		return mcpStateChangedMsg{
-			states: ws.MCPGetStates(),
+			uiOwned: uiOwned{owner: owner},
+			states:  ws.MCPGetStates(),
 		}
 	}
 }

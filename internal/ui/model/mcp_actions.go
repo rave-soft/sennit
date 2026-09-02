@@ -9,7 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
-func (w *widgets) runMCPPrompt(com *common.Common, clientID, promptID string, arguments map[string]string) tea.Cmd {
+func (w *widgets) runMCPPrompt(com *common.Common, owner *UI, clientID, promptID string, arguments map[string]string) tea.Cmd {
 	ws := com.Workspace
 	load := func() tea.Msg {
 		prompt, err := ws.GetMCPPrompt(clientID, promptID, arguments)
@@ -22,6 +22,7 @@ func (w *widgets) runMCPPrompt(com *common.Common, clientID, promptID string, ar
 			return nil
 		}
 		return sendMessageMsg{
+			uiOwned: uiOwned{owner: owner},
 			Content: prompt,
 		}
 	}
@@ -41,7 +42,7 @@ func (w *widgets) runMCPPrompt(com *common.Common, clientID, promptID string, ar
 		cmds = append(cmds, cmd)
 	}
 	cmds = append(cmds, load, func() tea.Msg {
-		return closeDialogMsg{id: frontID}
+		return closeDialogMsg{uiOwned: uiOwned{owner: owner}, id: frontID}
 	})
 
 	return tea.Sequence(cmds...)
@@ -50,12 +51,13 @@ func (w *widgets) runMCPPrompt(com *common.Common, clientID, promptID string, ar
 func (m *UI) handleStateChanged() tea.Cmd {
 	ws := m.com.Workspace
 	ctx := m.com.Context()
-	return updateAgentModelCmd(func() tea.Msg {
+	return updateAgentModelCmd(m, func() tea.Msg {
 		if err := ws.UpdateAgentModel(ctx); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return mcpStateChangedMsg{
-			states: ws.MCPGetStates(),
+			uiOwned: uiOwned{owner: m},
+			states:  ws.MCPGetStates(),
 		}
 	})
 }

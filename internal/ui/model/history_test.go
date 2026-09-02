@@ -82,7 +82,7 @@ func TestLoadPromptHistorySnapshotsSessionAtCallTime(t *testing.T) {
 	u.com.Workspace = ws
 	u.sess.current = &session.Session{ID: "sess-a"}
 
-	cmd := u.sess.loadPromptHistory(u.com)
+	cmd := u.sess.loadPromptHistory(u.com, u)
 	require.NotNil(t, cmd)
 
 	// Simulate the session changing (e.g. the user switches sessions)

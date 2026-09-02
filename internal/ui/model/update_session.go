@@ -53,7 +53,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		m.editor.pendingSend.finishActive()
 		if m.editor.pendingSend.hasQueued() {
-			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{uiOwned: uiOwned{owner: m}} })
 		}
 	case loadSessionMsg:
 		if msg.gen != m.sess.loadGen || msg.sessionID != m.sess.loadExpectedID {
@@ -118,7 +118,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// Loading the session moved the instance onto the model it is
 			// pinned to. The rebuild has already landed by the time this
 			// message exists, so the memoized model only needs re-probing.
-			cmds = append(cmds, agentModelChangedCmd)
+			cmds = append(cmds, func() tea.Msg { return agentModelChangedCmd(m) })
 		}
 		// The old queue belongs to the departed session, so remove it while
 		// keeping the replacement fetch stale.
@@ -145,12 +145,12 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		// Reload prompt history for the new session.
 		m.editor.historyReset()
-		cmds = append(cmds, m.sess.loadPromptHistory(m.com))
+		cmds = append(cmds, m.sess.loadPromptHistory(m.com, m))
 
 		m.editor.pendingSend.finishLoading()
 		m.editor.pendingSend.finishActive()
 		if m.editor.pendingSend.hasQueued() {
-			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{uiOwned: uiOwned{owner: m}} })
 		}
 		m.updateLayoutAndSize()
 
@@ -311,7 +311,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[history.File]:
-		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com))
+		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com, m))
 
 	case sendMessageErrorMsg:
 		if !msg.creating && m.sess.loadExpectedID != "" && (msg.sessionID != m.sess.loadExpectedID || msg.loadGeneration != m.sess.loadGen) {
@@ -324,7 +324,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, util.ReportError(msg.Err))
 		m.wsCache.agentBusyCache.Set(false)
 		if !msg.creating && m.editor.pendingSend.hasQueued() {
-			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{uiOwned: uiOwned{owner: m}} })
 		}
 
 	case sendPendingQueueMsg:
@@ -337,7 +337,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		if item.sessionID != m.sess.current.ID || item.loadGeneration != m.sess.loadGen {
 			if m.editor.pendingSend.hasQueued() {
-				cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+				cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{uiOwned: uiOwned{owner: m}} })
 			}
 			break
 		}

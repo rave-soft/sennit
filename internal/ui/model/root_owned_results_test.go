@@ -3,10 +3,12 @@ package model
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // taskSupportingWorkspace overrides countingWorkspace's hardcoded
@@ -128,4 +130,92 @@ func TestRootRoutesAnOwnedResultAwayFromTheOtherUI(t *testing.T) {
 	require.False(t, threadUI.wsCache.busyFetchInFlight, "the thread's own result must reach it")
 	require.True(t, r.main.wsCache.busyFetchInFlight,
 		"the thread's result must not clear the main screen's unrelated probe")
+}
+
+// TestRootDeliversEnvelopedResultToTheUIThatDispatchedIt is the ownedMsg
+// counterpart of TestRootDeliversOwnedResultsToTheUIThatAskedForThem:
+// util.ClearStatusMsg is defined outside model (in internal/ui/util), so it
+// cannot embed uiOwned directly — it is tagged via ownCmd's envelope
+// instead (see root.go). Proves that path also survives a screen switch
+// between dispatch and arrival, not just the twelve types that embed
+// uiOwned themselves.
+func TestRootDeliversEnvelopedResultToTheUIThatDispatchedIt(t *testing.T) {
+	ws := &countingWorkspace{ready: true}
+	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
+
+	cmd := ownCmd(r.main, r.main.status.ShowInfo(util.InfoMsg{Msg: "saved", TTL: time.Millisecond}))
+	require.NotNil(t, cmd)
+	require.False(t, r.main.status.InfoMsg().IsEmpty())
+
+	// The user opens the threads dashboard before the clear timer fires.
+	r.active = screenDashboard
+
+	msg := cmd()
+	require.IsType(t, ownedMsg{}, msg, "a cross-package type must arrive wrapped in the envelope")
+	r.Update(msg)
+
+	require.True(t, r.main.status.InfoMsg().IsEmpty(),
+		"the enveloped result must reach the UI that dispatched it, whatever screen is on top")
+}
+
+// TestRootRoutesEnvelopedResultAwayFromTheOtherUI is the ownedMsg
+// counterpart of TestRootRoutesAnOwnedResultAwayFromTheOtherUI: both UIs
+// dispatch the exact same wrapped message type (util.ClearStatusMsg inside
+// ownedMsg), so only the owner pointer captured at dispatch time — not the
+// type, and not a thread-ID comparison the way threadEventMsg needs — can
+// be what keeps them apart.
+func TestRootRoutesEnvelopedResultAwayFromTheOtherUI(t *testing.T) {
+	ws := &countingWorkspace{ready: true}
+	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenThread}
+	threadUI := newBusyUI(ws)
+	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
+
+	mainCmd := ownCmd(r.main, r.main.status.ShowInfo(util.InfoMsg{Msg: "main", TTL: time.Millisecond}))
+	threadCmd := ownCmd(threadUI, threadUI.status.ShowInfo(util.InfoMsg{Msg: "thread", TTL: time.Millisecond}))
+	require.NotNil(t, mainCmd)
+	require.NotNil(t, threadCmd)
+
+	// The thread's own timer fires first; the main screen's is still
+	// pending.
+	r.Update(threadCmd())
+
+	require.True(t, threadUI.status.InfoMsg().IsEmpty(), "the thread's own result must reach it")
+	require.False(t, r.main.status.InfoMsg().IsEmpty(),
+		"the thread's result must not clear the main screen's unrelated status message")
+
+	// The main screen's own timer, delivered afterward, still finds it.
+	r.Update(mainCmd())
+	require.True(t, r.main.status.InfoMsg().IsEmpty(), "the main screen's own result must reach it too")
+}
+
+// TestRootDeliversYoloToggleResultAwayFromTheOtherUI is a second-pass
+// (directly embedded, not enveloped) type from the same routing fix as
+// TestRootRoutesEnvelopedResultAwayFromTheOtherUI: yoloToggledMsg is
+// defined in model, so it embeds uiOwned itself rather than going through
+// ownCmd's envelope. Proves the plain-embedding path also keeps two UIs'
+// in-flight operations apart when both dispatch the same message type at
+// once.
+func TestRootDeliversYoloToggleResultAwayFromTheOtherUI(t *testing.T) {
+	ws := &countingWorkspace{ready: true}
+	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenThread}
+	threadUI := newBusyUI(ws)
+	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
+
+	mainCmd := r.main.toggleYoloMode()
+	threadCmd := threadUI.toggleYoloMode()
+	require.NotNil(t, mainCmd)
+	require.NotNil(t, threadCmd)
+	require.True(t, r.main.yolo.loading)
+	require.True(t, threadUI.yolo.loading)
+
+	// The thread's own toggle completes first; the main screen's is still
+	// in flight.
+	r.Update(threadCmd())
+
+	require.False(t, threadUI.yolo.loading, "the thread's own result must reach it")
+	require.True(t, r.main.yolo.loading,
+		"the thread's result must not clear the main screen's unrelated in-flight toggle")
+
+	r.Update(mainCmd())
+	require.False(t, r.main.yolo.loading, "the main screen's own result must reach it too")
 }

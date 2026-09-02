@@ -124,13 +124,20 @@ type agentRunSubmittedMsg struct {
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
 // ready/model state should be re-fetched without waiting for the TTL.
-type agentModelChangedMsg struct{}
+//
+// uiOwned: dispatched by agentModelChangedCmd. Routed by active screen
+// instead, this re-probed whichever UI happened to be on top instead of
+// the one whose model actually changed, leaving that UI's memoized
+// ready/model state stale.
+type agentModelChangedMsg struct{ uiOwned }
 
 // agentModelChangedCmd is sequenced after cmds that call UpdateAgentModel so
 // the refresh probes the coordinator only once the update has completed.
 // Callers should reach for updateAgentModelCmd rather than sequencing this
 // by hand.
-func agentModelChangedCmd() tea.Msg { return agentModelChangedMsg{} }
+func agentModelChangedCmd(owner *UI) tea.Msg {
+	return agentModelChangedMsg{uiOwned{owner: owner}}
+}
 
 // currentSessionID returns the active session's ID, or "" when none.
 func (s *sessionState) currentSessionID() string {
@@ -183,8 +190,8 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 // be re-probed after the rebuild lands (treated as IO — see the package doc
 // comment above), so the message drives the refresh instead of each call
 // site remembering to.
-func updateAgentModelCmd(pre tea.Cmd) tea.Cmd {
-	return tea.Sequence(pre, agentModelChangedCmd)
+func updateAgentModelCmd(owner *UI, pre tea.Cmd) tea.Cmd {
+	return tea.Sequence(pre, func() tea.Msg { return agentModelChangedCmd(owner) })
 }
 
 // applyBusyState stores an off-thread probe result and reacts to busy
@@ -374,7 +381,7 @@ func (m *UI) toggleYoloMode() tea.Cmd {
 	workspace := m.com.Workspace
 	return func() tea.Msg {
 		workspace.PermissionSetSkipRequests(desired)
-		return yoloToggledMsg{Enabled: desired, generation: generation}
+		return yoloToggledMsg{uiOwned: uiOwned{owner: m}, Enabled: desired, generation: generation}
 	}
 }
 

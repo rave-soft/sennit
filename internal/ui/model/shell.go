@@ -10,7 +10,12 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
+// uiOwned: dispatched by execEditorCmd once the external $EDITOR exits.
+// Routed by active screen instead, a thread's own external-edit draft
+// could be applied to the main screen's textarea, or vice versa.
 type openEditorMsg struct {
+	uiOwned
+
 	Text string
 }
 
@@ -36,7 +41,15 @@ type shellResultMsg struct {
 }
 
 // shellStreamMsg carries incremental output from a streaming shell command.
+//
+// uiOwned: dispatched by runShellCommandInternal's stream-draining cmd and
+// re-armed by updateShell itself. Routed by active screen instead, output
+// for a bang command running in a thread could stream into the main
+// screen's chat, or the drain loop could stop feeding the wrong screen
+// entirely once misrouted once.
 type shellStreamMsg struct {
+	uiOwned
+
 	PendingID string
 	Chunk     string
 	streamCh  <-chan string // unexported; used to continue draining
@@ -81,7 +94,7 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				if !ok {
 					return nil
 				}
-				return shellStreamMsg{PendingID: pid, Chunk: chunk, streamCh: ch}
+				return shellStreamMsg{uiOwned: uiOwned{owner: m}, PendingID: pid, Chunk: chunk, streamCh: ch}
 			})
 		}
 	case shellResultMsg:
@@ -121,9 +134,9 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		cmds = append(cmds, m.sess.loadPromptHistory(m.com))
+		cmds = append(cmds, m.sess.loadPromptHistory(m.com, m))
 		if m.editor.pendingSend.hasQueued() {
-			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{uiOwned: uiOwned{owner: m}} })
 		}
 	}
 	return cmds, false
@@ -142,7 +155,7 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 			loadGeneration: m.sess.loadGen,
 			bang:           true,
 		})
-		return func() tea.Msg { return sendPendingQueueMsg{} }
+		return func() tea.Msg { return sendPendingQueueMsg{uiOwned: uiOwned{owner: m}} }
 	}
 	return m.runShellCommandInternal(command, true)
 }
@@ -204,7 +217,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		if !ok {
 			return nil
 		}
-		return shellStreamMsg{PendingID: pendingID, Chunk: chunk, streamCh: streamCh}
+		return shellStreamMsg{uiOwned: uiOwned{owner: m}, PendingID: pendingID, Chunk: chunk, streamCh: streamCh}
 	})
 
 	ctx, cancel := context.WithCancel(m.com.Context())

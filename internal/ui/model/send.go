@@ -15,15 +15,29 @@ import (
 
 // sendMessageMsg is sent to send a message.
 // currently only used for mcp prompts.
+//
+// uiOwned: dispatched by runMCPPrompt and initializeProject. Routed by
+// active screen instead, an MCP prompt run from a thread's own commands
+// dialog (or the onboarding init prompt) could be sent into whichever
+// screen's editor happened to be active when the round trip finished.
 type sendMessageMsg struct {
+	uiOwned
+
 	Content     string
 	Attachments []message.Attachment
 }
 
-// sendPendingQueueMsg advances one pending send after a session load completes.
-type sendPendingQueueMsg struct{}
+// sendPendingQueueMsg advances one pending send after a session load
+// completes.
+//
+// uiOwned: dispatched from several places across shell.go and
+// update_session.go, all pendingSend-queue-draining steps for one UI's own
+// editor. Routed by active screen instead, a queued send drained while a
+// different screen was on top applied to the wrong UI's pendingSend state
+// (or was dropped by the dashboard), leaving the queue stuck.
+type sendPendingQueueMsg struct{ uiOwned }
 
-type notificationSentMsg struct{}
+type notificationSentMsg struct{ uiOwned }
 
 // sendQueueItem holds one pending-send entry with generation tracking.
 // sendMessage sends a message with the given content and attachments.

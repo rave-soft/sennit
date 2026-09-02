@@ -92,7 +92,7 @@ func TestOpenEditor_DoesNotTouchDiskUntilCmdRuns(t *testing.T) {
 	before, err := filepath.Glob(filepath.Join(os.TempDir(), "msg_*.md"))
 	require.NoError(t, err)
 
-	cmd := u.editor.openEditor("hello from the editor")
+	cmd := u.editor.openEditor("hello from the editor", u)
 	require.NotNil(t, cmd)
 
 	after, err := filepath.Glob(filepath.Join(os.TempDir(), "msg_*.md"))

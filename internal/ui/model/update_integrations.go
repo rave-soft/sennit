@@ -35,17 +35,35 @@ type integrationsState struct {
 }
 
 // userCommandsLoadedMsg is sent when user commands are loaded.
+//
+// uiOwned: dispatched by loadCustomCommands, called once from Init.
+// Routed by active screen instead, a thread's own custom-commands load
+// (its embedded UI runs Init too) could apply to the main screen's
+// commands palette instead, or vice versa.
 type userCommandsLoadedMsg struct {
+	uiOwned
+
 	Commands []workspace.CustomCommand
 }
 
 // mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
+// uiOwned: dispatched by loadMCPromptsCmd, from an MCP state-change event.
+// Routed by active screen instead, this could populate the wrong UI's
+// commands-palette prompt list, or land nowhere.
 type mcpPromptsLoadedMsg struct {
+	uiOwned
+
 	Prompts []workspace.MCPPrompt
 }
 
 // mcpStateChangedMsg is sent when there is a change in MCP client states.
+// uiOwned: dispatched by checkPendingMCPAuth (from Init) and
+// handleStateChanged (an MCP client state-change event). Routed by active
+// screen instead, a thread's own MCP state refresh could apply to the main
+// screen's mcpStates instead, or vice versa.
 type mcpStateChangedMsg struct {
+	uiOwned
+
 	states map[string]workspace.MCPClientInfo
 }
 
@@ -117,7 +135,13 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.skillStates = msg.Payload.States
 		m.skillsVersion++
 	case dialog.ActionMCPAuthStarted:
-		cmds = append(cmds, authenticateMCP(m.com, msg.Ctx, msg.Name))
+		// dialog.ActionMCPAuthComplete/Errored are defined outside model
+		// and cannot embed uiOwned themselves — wrapped via ownCmd instead.
+		// Routed by active screen instead, the result of authenticating an
+		// MCP server from a thread's own MCP dialog could land on the main
+		// screen (or vice versa) if the active screen changed before the
+		// OAuth flow finished.
+		cmds = append(cmds, ownCmd(m, authenticateMCP(m.com, msg.Ctx, msg.Name)))
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
@@ -129,7 +153,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		case workspace.MCPEventStateChanged:
 			cmds = append(cmds, tea.Batch(
 				m.handleStateChanged(),
-				loadMCPromptsCmd(m.com),
+				loadMCPromptsCmd(m.com, m),
 			))
 			return cmds, true
 		case workspace.MCPEventPromptsListChanged:
@@ -149,7 +173,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 // loadMCPromptsCmd loads the MCP prompts asynchronously. It snapshots the
 // workspace and context before returning the closure: callers pass the
 // result directly as a tea.Cmd, which runs off the Update goroutine.
-func loadMCPromptsCmd(com *common.Common) tea.Cmd {
+func loadMCPromptsCmd(com *common.Common, owner *UI) tea.Cmd {
 	ws := com.Workspace
 	ctx := com.Context()
 	return func() tea.Msg {
@@ -161,6 +185,6 @@ func loadMCPromptsCmd(com *common.Common) tea.Cmd {
 			// flag them as loaded even if there is none or an error
 			prompts = []workspace.MCPPrompt{}
 		}
-		return mcpPromptsLoadedMsg{Prompts: prompts}
+		return mcpPromptsLoadedMsg{uiOwned: uiOwned{owner: owner}, Prompts: prompts}
 	}
 }

@@ -77,7 +77,7 @@ func TestLoadMCPromptsCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	ws := &cmdDrivingWorkspace{agentReady: true}
 	u := newCmdDrivenUI(ws)
 
-	cmd := loadMCPromptsCmd(u.com)
+	cmd := loadMCPromptsCmd(u.com, u)
 	require.NotNil(t, cmd)
 
 	done := make(chan struct{})

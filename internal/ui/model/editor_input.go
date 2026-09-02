@@ -72,7 +72,13 @@ func (m *UI) updateTextareaWithPrevHeight(msg tea.Msg, prevHeight int) tea.Cmd {
 // openEditorReadyMsg carries the prepared $EDITOR invocation once
 // openEditor's off-loop closure has written the scratch file. Update
 // launches the process (see execEditorCmd) when this arrives.
+// uiOwned: dispatched by openEditor. Routed by active screen instead, the
+// scratch-file prep for one UI's editor could hand its exec launch to
+// execEditorCmd on the wrong screen (or the dashboard, which drops it),
+// leaving the user's $EDITOR session unstarted.
 type openEditorReadyMsg struct {
+	uiOwned
+
 	cmd     *exec.Cmd
 	tmpPath string
 }
@@ -81,7 +87,7 @@ type openEditorReadyMsg struct {
 // scratch-file IO in the returned tea.Cmd's closure: os.CreateTemp and the
 // write both touch disk and must not run on the Update goroutine that a key
 // handler calls this from.
-func (e *editorState) openEditor(value string) tea.Cmd {
+func (e *editorState) openEditor(value string, owner *UI) tea.Cmd {
 	line := e.textarea.Line() + 1
 	col := e.textarea.Column() + 1
 	return func() tea.Msg {
@@ -111,7 +117,7 @@ func (e *editorState) openEditor(value string) tea.Cmd {
 			_ = os.Remove(tmpPath)
 			return util.NewErrorMsg(err)
 		}
-		return openEditorReadyMsg{cmd: cmd, tmpPath: tmpPath}
+		return openEditorReadyMsg{uiOwned: uiOwned{owner: owner}, cmd: cmd, tmpPath: tmpPath}
 	}
 }
 
@@ -119,7 +125,7 @@ func (e *editorState) openEditor(value string) tea.Cmd {
 // openEditor's closure so the tea.ExecProcess call — which takes over the
 // terminal — happens from Update once the scratch file is ready, not from
 // the cmd goroutine that prepared it.
-func execEditorCmd(msg openEditorReadyMsg) tea.Cmd {
+func execEditorCmd(msg openEditorReadyMsg, owner *UI) tea.Cmd {
 	return tea.ExecProcess(msg.cmd, func(err error) tea.Msg {
 		defer func() {
 			_ = os.Remove(msg.tmpPath)
@@ -136,7 +142,8 @@ func execEditorCmd(msg openEditorReadyMsg) tea.Cmd {
 			return util.NewWarnMsg("Message is empty")
 		}
 		return openEditorMsg{
-			Text: strings.TrimSpace(string(content)),
+			uiOwned: uiOwned{owner: owner},
+			Text:    strings.TrimSpace(string(content)),
 		}
 	})
 }
@@ -192,7 +199,13 @@ func bangPromptFunc(com *common.Common, info textarea.PromptInfo) string {
 // file read. fileCmd's closure runs on a different goroutine than Update, so
 // it cannot append to m.sess.fileReads directly; Update does that when it
 // handles this message.
+//
+// uiOwned: dispatched by insertFileCompletion. Routed by active screen
+// instead, an @-completion picked in a thread's own editor could append
+// its attachment to the main screen's editor instead, or vice versa.
 type fileCompletionMsg struct {
+	uiOwned
+
 	absPath    string
 	attachment message.Attachment
 }
@@ -240,6 +253,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 		}
 
 		return fileCompletionMsg{
+			uiOwned: uiOwned{owner: m},
 			absPath: absPath,
 			attachment: message.Attachment{
 				FilePath: path,
@@ -368,6 +382,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	}
 	return func() tea.Msg {
 		return pasteFilesCheckedMsg{
+			uiOwned:    uiOwned{owner: m},
 			msg:        msg,
 			paths:      paths,
 			valid:      pastedFilesExistAndValid(paths),
@@ -406,7 +421,13 @@ func pastedFilesExistAndValid(paths []string) bool {
 // pasteFilesCheckedMsg carries the result of handlePasteMsg's off-loop
 // filesystem check for a pasted-file-paths paste. Update applies it via
 // applyPasteFilesChecked.
+//
+// uiOwned: dispatched by handlePasteMsg. Routed by active screen instead,
+// a paste into a thread's own editor could apply its file-attachment
+// result to the main screen's textarea, or vice versa.
 type pasteFilesCheckedMsg struct {
+	uiOwned
+
 	msg        tea.PasteMsg
 	paths      []string
 	valid      bool
@@ -476,7 +497,13 @@ const richPasteTimeout = 15 * time.Second
 // richPasteMsg carries a clipboard payload that mixed markup with images:
 // the images become attachments, the text goes through the normal paste
 // path.
+//
+// uiOwned: dispatched by pasteRichFromClipboard, off pasteImageFromClipboardCmd.
+// Routed by active screen instead, a rich paste into a thread's own editor
+// could attach its images to the main screen instead, or vice versa.
 type richPasteMsg struct {
+	uiOwned
+
 	text        string
 	attachments []message.Attachment
 	skipped     int
@@ -488,8 +515,9 @@ type richPasteMsg struct {
 func (m *UI) pasteImageFromClipboardCmd() tea.Cmd {
 	ctx := m.com.Context()
 	pasteIdx := m.pasteIdx()
+	owner := m
 	return func() tea.Msg {
-		return pasteImageFromClipboard(ctx, pasteIdx)
+		return pasteImageFromClipboard(ctx, pasteIdx, owner)
 	}
 }
 
@@ -497,8 +525,8 @@ func (m *UI) pasteImageFromClipboardCmd() tea.Cmd {
 // creates an attachment. A rich payload — markup carrying several images,
 // as a browser selection does — is handled first. Failing that, a lone
 // clipboard image, then clipboard text read as a file path.
-func pasteImageFromClipboard(ctx context.Context, pasteIdx int) tea.Msg {
-	if msg := pasteRichFromClipboard(ctx, pasteIdx); msg != nil {
+func pasteImageFromClipboard(ctx context.Context, pasteIdx int, owner *UI) tea.Msg {
+	if msg := pasteRichFromClipboard(ctx, pasteIdx, owner); msg != nil {
 		return msg
 	}
 
@@ -578,7 +606,7 @@ func pasteImageFromClipboard(ctx context.Context, pasteIdx int) tea.Msg {
 // the images it references into attachments, pairing them with the plain
 // text of the same selection. It returns nil when the clipboard holds no
 // rich payload, leaving the plain image and file-path paths to run.
-func pasteRichFromClipboard(parentCtx context.Context, pasteIdx int) tea.Msg {
+func pasteRichFromClipboard(parentCtx context.Context, pasteIdx int, owner *UI) tea.Msg {
 	markup, err := clipboard.Read(clipboard.FormatHTML)
 	if err != nil || len(markup) == 0 {
 		return nil
@@ -620,7 +648,7 @@ func pasteRichFromClipboard(parentCtx context.Context, pasteIdx int) tea.Msg {
 		})
 	}
 
-	return richPasteMsg{text: text, attachments: attachments, skipped: skipped}
+	return richPasteMsg{uiOwned: uiOwned{owner: owner}, text: text, attachments: attachments, skipped: skipped}
 }
 
 // handleRichPaste attaches the images of a rich paste and hands the text to

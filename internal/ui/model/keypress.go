@@ -22,7 +22,7 @@ func (m *UI) openExternalEditorGuarded(cmds []tea.Cmd) (out []tea.Cmd, started b
 		return append(cmds, util.ReportWarn("Agent is working, please wait...")), false
 	}
 	editorValue := m.editor.bang.draftValue(m.editor.textarea.Value())
-	return append(cmds, m.editor.openEditor(editorValue)), true
+	return append(cmds, m.editor.openEditor(editorValue, m)), true
 }
 
 // openThreadsDashboardGuarded appends the command that opens the threads
@@ -324,7 +324,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 		m.editor.placeholder.randomize()
 		m.editor.historyReset()
 
-		return cmds, tea.Batch(m.sendMessage(value, attachments...), m.sess.loadPromptHistory(m.com)), true
+		return cmds, tea.Batch(m.sendMessage(value, attachments...), m.sess.loadPromptHistory(m.com, m)), true
 	case key.Matches(msg, m.keyMap.Chat.NewSession):
 		if !m.hasSession() {
 			break
@@ -433,10 +433,16 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 		// Only show if beginning of prompt or after whitespace.
 		if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 			depth, limit := m.com.Config().CompletionsLimits()
-			cmds = append(cmds, m.editor.completions.openFiles(
+			// completions.CompletionItemsLoadedMsg is defined outside
+			// model, so it cannot embed uiOwned itself — wrapped here via
+			// ownCmd instead. Routed by active screen instead, files
+			// loaded for a thread's @-completion popup could land on the
+			// main screen's editor (or vice versa) if the active screen
+			// changed before the load finished.
+			cmds = append(cmds, ownCmd(m, m.editor.completions.openFiles(
 				curIdx, m.completionsPosition(), m.completionsMaxWidth(), depth, limit,
 				func() []completions.ResourceCompletionValue { return loadMCPResourceCompletions(m.com) },
-			))
+			)))
 		}
 	}
 

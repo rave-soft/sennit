@@ -254,7 +254,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 				}
 			}
 		}
-		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com))
+		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com, m))
 	}
 	m.queued.refloat(m.chat, m.com.Styles)
 	return tea.Sequence(cmds...)

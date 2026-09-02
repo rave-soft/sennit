@@ -68,7 +68,14 @@ type sessionState struct {
 // updated. sessionID identifies which session the load was for, so a stale
 // reply arriving after the user switched sessions can be dropped instead of
 // clobbering m.sess.files with another session's file list.
+//
+// uiOwned: dispatched by sessionState.refreshModifiedFiles. Routed by
+// active screen instead, a refresh started while viewing one screen and
+// landing on another was silently applied to the wrong sessionState (see
+// the sessionID no-op guard's doc above) or dropped entirely.
 type sessionFilesUpdatesMsg struct {
+	uiOwned
+
 	sessionID    string
 	sessionFiles []SessionFile
 }
@@ -145,7 +152,13 @@ type loadSessionMsg struct {
 	err           error
 }
 
+// uiOwned: constructed only by loadInitialSession's continue-last-session
+// path (ui.go), tagged there. Routed by active screen instead, the
+// initial-session lookup that fires once at startup could land on a
+// screen the user has already switched away from before it resolves.
 type requestSessionLoad struct {
+	uiOwned
+
 	sessionID string
 }
 
@@ -307,7 +320,7 @@ func sameSessionFile(a, b SessionFile) bool {
 // is the authority on what belongs to this session; an event from an
 // unrelated session reloads the same list, and the update is then dropped
 // as a no-op (see sessionFilesUpdatesMsg).
-func (s *sessionState) refreshModifiedFiles(com *common.Common) tea.Cmd {
+func (s *sessionState) refreshModifiedFiles(com *common.Common, owner *UI) tea.Cmd {
 	if s.current == nil {
 		return nil
 	}
@@ -318,7 +331,7 @@ func (s *sessionState) refreshModifiedFiles(com *common.Common) tea.Cmd {
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
-		return sessionFilesUpdatesMsg{sessionID: sessionID, sessionFiles: files}
+		return sessionFilesUpdatesMsg{uiOwned: uiOwned{owner: owner}, sessionID: sessionID, sessionFiles: files}
 	}
 }
 

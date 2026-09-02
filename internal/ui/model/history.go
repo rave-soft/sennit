@@ -11,12 +11,19 @@ import (
 )
 
 // promptHistoryLoadedMsg is sent when prompt history is loaded.
+//
+// uiOwned: dispatched by sessionState.loadPromptHistory, from several
+// places across the package. Routed by active screen instead, a thread's
+// own history load could replace the main screen's prompt history (or
+// vice versa) instead of applying to the sessionState that asked for it.
 type promptHistoryLoadedMsg struct {
+	uiOwned
+
 	messages []string
 }
 
 // loadPromptHistory loads user messages for history navigation.
-func (s *sessionState) loadPromptHistory(com *common.Common) tea.Cmd {
+func (s *sessionState) loadPromptHistory(com *common.Common, owner *UI) tea.Cmd {
 	ctx := com.Context()
 	ws := com.Workspace
 
@@ -39,7 +46,7 @@ func (s *sessionState) loadPromptHistory(com *common.Common) tea.Cmd {
 		}
 		if err != nil {
 			slog.Error("Failed to load prompt history", "error", err)
-			return promptHistoryLoadedMsg{messages: nil}
+			return promptHistoryLoadedMsg{uiOwned: uiOwned{owner: owner}, messages: nil}
 		}
 
 		// The SQL layer already excludes child-session (sub-agent) prompts;
@@ -62,7 +69,7 @@ func (s *sessionState) loadPromptHistory(com *common.Common) tea.Cmd {
 				texts = append(texts, "!"+sc.Command)
 			}
 		}
-		return promptHistoryLoadedMsg{messages: texts}
+		return promptHistoryLoadedMsg{uiOwned: uiOwned{owner: owner}, messages: texts}
 	}
 }
 

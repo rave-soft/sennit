@@ -82,8 +82,14 @@ const (
 	uiChat
 )
 
-// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
-type copyChatHighlightMsg struct{}
+// copyChatHighlightMsg is sent to copy the current chat highlight to
+// clipboard.
+//
+// uiOwned: dispatched from HandleMouseUp's double-click timer. Routed by
+// active screen instead, releasing a drag-selection on one screen and
+// switching screens before the timer fires copied the wrong UI's
+// highlighted text (or none, if the other screen has no selection).
+type copyChatHighlightMsg struct{ uiOwned }
 
 // UI represents the main user interface model. Its fields fall into two
 // kinds:
@@ -462,9 +468,9 @@ func (m *UI) Init() tea.Cmd {
 		}
 	}
 	// load the user commands async
-	cmds = append(cmds, loadCustomCommands(m.com))
+	cmds = append(cmds, loadCustomCommands(m.com, m))
 	// load prompt history async
-	cmds = append(cmds, m.sess.loadPromptHistory(m.com))
+	cmds = append(cmds, m.sess.loadPromptHistory(m.com, m))
 	// Prime the memoized LSP state off-thread.
 	if cmd := m.requestLSPRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -477,13 +483,13 @@ func (m *UI) Init() tea.Cmd {
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	cmds = append(cmds, checkPendingMCPAuth(m.com))
+	cmds = append(cmds, checkPendingMCPAuth(m.com, m))
 	// Prime the sidebar's account-label cache for whatever model/provider
 	// this UI already knows about at construction time (see
 	// account_label.go). refreshAccountLabelCmd is nil for a nil model,
 	// so this is a no-op during onboarding.
 	if model := m.viewedModel(); model != nil {
-		if cmd := refreshAccountLabelCmd(m.com, model.ModelCfg.Provider); cmd != nil {
+		if cmd := refreshAccountLabelCmd(m.com, m, model.ModelCfg.Provider); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -540,7 +546,7 @@ func (m *UI) loadInitialSession() tea.Cmd {
 			if err != nil || len(sessions) == 0 {
 				return nil
 			}
-			return requestSessionLoad{sessionID: sessions[0].ID}
+			return requestSessionLoad{uiOwned: uiOwned{owner: m}, sessionID: sessions[0].ID}
 		}
 	default:
 		return nil
@@ -566,7 +572,7 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 // not the palette's business — it asks the workspace for the list and
 // renders it. Whatever could be read is still returned when part of it
 // failed, so a broken commands directory costs the skills nothing.
-func loadCustomCommands(com *common.Common) tea.Cmd {
+func loadCustomCommands(com *common.Common, owner *UI) tea.Cmd {
 	ws := com.Workspace
 	ctx := com.Context()
 	return func() tea.Msg {
@@ -574,7 +580,7 @@ func loadCustomCommands(com *common.Common) tea.Cmd {
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
-		return userCommandsLoadedMsg{Commands: customCommands}
+		return userCommandsLoadedMsg{uiOwned: uiOwned{owner: owner}, Commands: customCommands}
 	}
 }
 
@@ -702,7 +708,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.TerminalVersionMsg:
 			return m.updateTerminalVersion(msg)
 		case copyChatHighlightMsg:
-			cmds = append(cmds, m.copyChatHighlight())
+			cmds = append(cmds, m.copyChatHighlight(m))
 		case clearChatMouseMsg:
 			m.chat.ClearMouse()
 		case fileCompletionMsg:
@@ -713,7 +719,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		case openEditorReadyMsg:
-			cmds = append(cmds, execEditorCmd(msg))
+			cmds = append(cmds, execEditorCmd(msg, m))
 		case tea.KeyPressMsg:
 			if cmd := m.handleKeyPressMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -949,6 +955,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		cmds = append(cmds, func() tea.Msg {
 			ws.ImportCopilot()
 			return importCopilotResult{
+				uiOwned:      uiOwned{owner: m},
 				providerID:   providerID,
 				model:        msg.Model,
 				isOnboarding: isOnboarding,
@@ -976,9 +983,9 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	ws := m.com.Workspace
 	cmds = append(cmds, func() tea.Msg {
 		if err := ws.UpdatePreferredModel(config.ScopeGlobal, capturedModel); err != nil {
-			return modelSelectResult{Err: err, generation: generation}
+			return modelSelectResult{uiOwned: uiOwned{owner: m}, Err: err, generation: generation}
 		}
-		return modelSelectResult{Onboarding: isOnboarding, Model: capturedModel, generation: generation}
+		return modelSelectResult{uiOwned: uiOwned{owner: m}, Onboarding: isOnboarding, Model: capturedModel, generation: generation}
 	})
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
@@ -996,20 +1003,20 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 func (m *UI) initAgentAndReportModel(isOnboarding bool, model config.SelectedModel, generation uint64) tea.Cmd {
 	ws := m.com.Workspace
 	ctx := m.com.Context()
-	return updateAgentModelCmd(func() tea.Msg {
+	return updateAgentModelCmd(m, func() tea.Msg {
 		// InitCoderAgent brings the coder agent up for the first time
 		// (onboarding); it must complete before UpdateAgentModel touches
 		// it, so both run in this single off-thread step rather than as
 		// separate commands racing each other.
 		if isOnboarding {
 			if err := ws.InitCoderAgent(ctx); err != nil {
-				return agentModelInitializedMsg{Err: err, Onboarding: isOnboarding, Model: model, generation: generation}
+				return agentModelInitializedMsg{uiOwned: uiOwned{owner: m}, Err: err, Onboarding: isOnboarding, Model: model, generation: generation}
 			}
 		}
 		if err := ws.UpdateAgentModel(ctx); err != nil {
-			return agentModelInitializedMsg{Err: err, Onboarding: isOnboarding, Model: model, generation: generation}
+			return agentModelInitializedMsg{uiOwned: uiOwned{owner: m}, Err: err, Onboarding: isOnboarding, Model: model, generation: generation}
 		}
-		return agentModelInitializedMsg{Onboarding: isOnboarding, Model: model, generation: generation}
+		return agentModelInitializedMsg{uiOwned: uiOwned{owner: m}, Onboarding: isOnboarding, Model: model, generation: generation}
 	})
 }
 
@@ -1047,7 +1054,7 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	desired := !m.lay.forceCompactMode
 	workspace := m.com.Workspace
 	return func() tea.Msg {
-		return compactModeToggledMsg{Err: workspace.SetCompactMode(config.ScopeGlobal, desired), Enabled: desired, generation: generation}
+		return compactModeToggledMsg{uiOwned: uiOwned{owner: m}, Err: workspace.SetCompactMode(config.ScopeGlobal, desired), Enabled: desired, generation: generation}
 	}
 }
 
@@ -1105,6 +1112,7 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 	ws := m.com.Workspace
 	return tea.Batch(cmd, func() tea.Msg {
 		return themeSetMsg{
+			uiOwned:    uiOwned{owner: m},
 			Err:        ws.SetConfigField(config.ScopeGlobal, "options.tui.theme", id),
 			ID:         id,
 			Previous:   previous,
@@ -1242,7 +1250,14 @@ func attachSkill(com *common.Common, skillID, name string) tea.Cmd {
 	}
 }
 
+// uiOwned: dispatched by handleSelectModel's Copilot-import branch. Routed
+// by active screen instead, importing Copilot tokens from a thread's own
+// models dialog could apply to the main screen's modelOperation state
+// instead, leaving whichever one actually started it stuck "already being
+// updated".
 type importCopilotResult struct {
+	uiOwned
+
 	providerID   string
 	model        config.SelectedModel
 	isOnboarding bool
@@ -1350,7 +1365,7 @@ func (m *UI) newSession() tea.Cmd {
 			ws.LSPStopAll(ctx)
 			return nil
 		},
-		m.sess.loadPromptHistory(m.com),
+		m.sess.loadPromptHistory(m.com, m),
 		m.sess.reportCurrentSession(m.com, ""),
 	)
 }
@@ -1358,15 +1373,20 @@ func (m *UI) newSession() tea.Cmd {
 // clearChatMouseMsg asks Update to clear the chat's mouse selection state
 // after a copy completes. copyChatHighlight's callback runs on the tea.Cmd
 // goroutine, so it must not touch m.chat directly.
-type clearChatMouseMsg struct{}
+//
+// uiOwned: dispatched by copyChatHighlight's clipboard-copy callback.
+// Routed by active screen instead, this cleared whichever UI's chat
+// happened to be on top instead of the one whose highlight was actually
+// copied, leaving that UI's selection stuck visible.
+type clearChatMouseMsg struct{ uiOwned }
 
-func (w *widgets) copyChatHighlight() tea.Cmd {
+func (w *widgets) copyChatHighlight(owner *UI) tea.Cmd {
 	text := w.chat.HighlightContent()
 	return common.CopyToClipboardWithCallback(
 		text,
 		"Selected text copied to clipboard",
 		func() tea.Msg {
-			return clearChatMouseMsg{}
+			return clearChatMouseMsg{uiOwned{owner: owner}}
 		},
 	)
 }

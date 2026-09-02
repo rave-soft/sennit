@@ -12,8 +12,19 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
+// uiOwned on every settings-result type below: each is dispatched by an
+// async config-mutation or model-flow command started from one *UI's own
+// dialog (command palette, theme picker, models dialog, permission
+// prompt, ...). Routed by active screen instead, the result of a change
+// started on one screen applied its generation/loading-state bookkeeping
+// to whichever screen was active when it landed, not the one that started
+// it — leaving the screen that actually asked stuck "already being
+// updated" forever, since only its own result clears that flag.
+
 // transparentToggledMsg carries the result of a transparency-toggle config mutation.
 type transparentToggledMsg struct {
+	uiOwned
+
 	Err        error
 	Enabled    bool
 	generation uint64
@@ -24,6 +35,8 @@ type transparentToggledMsg struct {
 // message only reports whether the choice survived to disk; Previous is the
 // palette to fall back to if it did not.
 type themeSetMsg struct {
+	uiOwned
+
 	Err        error
 	ID         string
 	Previous   string
@@ -32,6 +45,8 @@ type themeSetMsg struct {
 
 // compactModeToggledMsg carries the result of a compact-mode config mutation.
 type compactModeToggledMsg struct {
+	uiOwned
+
 	Err        error
 	Enabled    bool
 	generation uint64
@@ -40,6 +55,8 @@ type compactModeToggledMsg struct {
 // providerConfiguredResult carries the outcome of the async provider-config
 // flow (UpdatePreferredModel + init) dispatched by ActionProviderConfigured.
 type providerConfiguredResult struct {
+	uiOwned
+
 	Err        error
 	Model      config.SelectedModel
 	Onboarding bool
@@ -49,6 +66,8 @@ type providerConfiguredResult struct {
 // modelSelectResult carries the outcome of the async model-select flow
 // dispatched by handleSelectModel.
 type modelSelectResult struct {
+	uiOwned
+
 	Err        error
 	Onboarding bool
 	Model      config.SelectedModel
@@ -56,6 +75,8 @@ type modelSelectResult struct {
 }
 
 type agentModelInitializedMsg struct {
+	uiOwned
+
 	Err        error
 	Onboarding bool
 	Model      config.SelectedModel
@@ -63,6 +84,8 @@ type agentModelInitializedMsg struct {
 }
 
 type modelSettingUpdatedMsg struct {
+	uiOwned
+
 	Err        error
 	Info       string
 	generation uint64
@@ -70,18 +93,24 @@ type modelSettingUpdatedMsg struct {
 
 // notificationStyleSetMsg carries the result of a notification-style config mutation.
 type notificationStyleSetMsg struct {
+	uiOwned
+
 	Err        error
 	Style      string
 	generation uint64
 }
 
 type yoloToggledMsg struct {
+	uiOwned
+
 	Err        error
 	Enabled    bool
 	generation uint64
 }
 
 type permissionResponseMsg struct {
+	uiOwned
+
 	Accepted   bool
 	Permission string
 	generation uint64
@@ -119,7 +148,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// init above (see account_label.go). Harmless for every other
 		// caller of this same success path: refreshAccountLabelCmd is a
 		// cheap no-op for a single-account provider.
-		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.Model.Provider))
+		cmds = append(cmds, refreshAccountLabelCmd(m.com, m, msg.Model.Provider))
 
 	case modelSelectResult:
 		if !m.modelOperation.owns(msg.generation) {
@@ -136,7 +165,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// provider the UI had not seen at startup would render its plan
 		// line with no account label until something else happened to
 		// refresh it (see account_label.go).
-		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.Model.Provider))
+		cmds = append(cmds, refreshAccountLabelCmd(m.com, m, msg.Model.Provider))
 
 	case agentModelInitializedMsg:
 		if !m.modelOperation.owns(msg.generation) {
@@ -158,7 +187,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				modelName = selected.Name
 			}
 		}
-		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Model changed to %s", modelName)), func() tea.Msg { return agentModelChangedMsg{} })
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Model changed to %s", modelName)), func() tea.Msg { return agentModelChangedCmd(m) })
 
 	case modelSettingUpdatedMsg:
 		if !m.modelOperation.owns(msg.generation) {
@@ -289,9 +318,9 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		generation := msg.generation
 		cmds = append(cmds, updatePreferredModelCmd(ws, capturedModel, func(err error) tea.Msg {
 			if err != nil {
-				return modelSelectResult{Err: err, generation: generation}
+				return modelSelectResult{uiOwned: uiOwned{owner: m}, Err: err, generation: generation}
 			}
-			return modelSelectResult{Onboarding: msg.isOnboarding, Model: capturedModel, generation: generation}
+			return modelSelectResult{uiOwned: uiOwned{owner: m}, Onboarding: msg.isOnboarding, Model: capturedModel, generation: generation}
 		}))
 		return cmds, true
 	}

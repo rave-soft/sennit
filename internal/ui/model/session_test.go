@@ -173,7 +173,7 @@ func TestHandleFileEvent_SessionClearedBeforeCmdRuns(t *testing.T) {
 	m := &UI{com: com}
 	m.sess.current = &session.Session{ID: "s1"}
 
-	cmd := m.sess.refreshModifiedFiles(m.com)
+	cmd := m.sess.refreshModifiedFiles(m.com, m)
 	require.NotNil(t, cmd)
 
 	// Simulate ctrl+n clearing the session between Update returning the cmd

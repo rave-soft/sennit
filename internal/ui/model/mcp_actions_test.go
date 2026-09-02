@@ -37,7 +37,7 @@ func TestRunMCPPromptClosesOnlyItsOwnDialog(t *testing.T) {
 	// or commands dialog).
 	m.dialog.OpenDialog(stubIDDialog{id: dialog.CommandsID})
 
-	cmd := m.runMCPPrompt(m.com, "client", "prompt", nil)
+	cmd := m.runMCPPrompt(m.com, m, "client", "prompt", nil)
 	require.NotNil(t, cmd)
 
 	// While GetMCPPrompt is "in flight" a different dialog (a permission

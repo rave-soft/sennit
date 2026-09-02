@@ -17,6 +17,7 @@ package model
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -29,7 +30,9 @@ import (
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
+	fimage "github.com/rave-soft/sennit/internal/ui/image"
 	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/uimsg"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -239,6 +242,19 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// synchronously), so a mismatch is silently dropped, not an error.
 		if r.attachment.thread != nil && r.attachment.thread.threadID == msg.threadID {
 			_, cmd := r.attachment.thread.ui.Update(msg.inner)
+			return r, cmd
+		}
+		return r, nil
+	case ownedMsg:
+		// Checked ahead of the generic uiOwnedMsg branch in default: below
+		// (ownedMsg embeds uiOwned and would otherwise match there too),
+		// because that branch forwards msg itself, and forwarding the
+		// envelope unopened would hand the owner a type its own Update
+		// never registered a case for. See ownedMsg's doc for why a stale
+		// owner (e.g. a detached thread's UI) is safe to forward to
+		// anyway.
+		if owner := msg.ownerUI(); owner != nil {
+			_, cmd := owner.Update(msg.inner)
 			return r, cmd
 		}
 		return r, nil
@@ -829,10 +845,131 @@ type uiOwned struct{ owner *UI }
 
 func (o uiOwned) ownerUI() *UI { return o.owner }
 
+// ownedMsg envelopes a message Root cannot tag by embedding uiOwned
+// directly in its type — because that type is defined in a package model
+// already imports (util, completions, image, dialog), and embedding there
+// would need that package to import model back, closing a cycle — with
+// the *UI that dispatched it. Root's ownedMsg case above unwraps it and
+// forwards inner to owner, exactly the shape threadEventMsg already uses
+// to forward a thread's own pump event to the thread's UI.
+//
+// Unlike threadEventMsg, ownedMsg identifies its target by *UI pointer
+// rather than by thread ID, so it needs no "is this still the attached
+// thread" check: the pointer names one specific *UI instance, not
+// "whichever thread is attached right now," so a second thread attaching
+// before this lands can never receive it — there is no ID to collide on,
+// only a pointer to an instance that either still matters or does not. A
+// stale owner (its thread since detached) is simply a *UI nobody renders
+// any more; forwarding to it is wasted, not unsafe — AttachThread's own
+// doc notes detach is a no-op in local mode (the thread's App outlives
+// whoever is viewing it), so nothing reachable through a stale owner's
+// Update is a resource that has actually been released.
+//
+// Construct one through ownCmd rather than by hand — it also knows how to
+// carry a tea.BatchMsg through without boxing it opaquely (see its doc).
+type ownedMsg struct {
+	uiOwned
+	inner tea.Msg
+}
+
+// ownCmd tags cmd's eventual result with owner, so Root's ownedMsg case
+// delivers it back to this *UI instead of whichever screen is active when
+// it lands. Used at dispatch sites for a message type defined outside
+// model that therefore cannot embed uiOwned itself, and for
+// applyChromeDialogAction's dialog.ActionCmd case, where the wrap site
+// does not choose the message type — it's whatever the open dialog's own
+// async work produces.
+//
+// cmd may itself be a tea.Batch(...) result — dialog.ActionCmd's Cmd
+// sometimes is (see FilePicker.HandleMsg, which batches its preview-prepare
+// cmd alongside its embedded bubble's own cmd) — so the result is checked
+// for tea.BatchMsg one level deep and, if found, each element is re-wrapped
+// individually rather than the whole batch being boxed as one opaque
+// envelope Bubble Tea never learns to expand back into separate messages.
+// tea.Sequence's message type is unexported and cannot be detected the
+// same way, so this must never wrap a Cmd that might be Sequence-composed
+// — confirmed by inspection that internal/ui/dialog uses tea.Batch only,
+// never tea.Sequence.
+//
+// Because applyChromeDialogAction's dialog.ActionCmd case funnels cmds
+// this generic (it doesn't know in advance what a dialog's own command
+// will produce), the result is only wrapped when it is one of the known
+// cross-package types ownedResultTypes lists — never unconditionally.
+// FilePicker's own preview-prepare cmd sits in that same batch alongside
+// ActionCmd{Cmd: tea.Raw(msg.Output)} (see FilePicker.handlePreviewPrepared)
+// for copying preview output to the terminal: tea.RawMsg is a Bubble Tea
+// runtime sentinel the Program intercepts before Update ever sees it, the
+// same category as tea.Quit's message — boxing it in ownedMsg silently
+// broke that terminal write (caught by
+// TestCmdDriving_PreviewResultRoutedToCoveredFilePicker). Wrapping only
+// what's on the list, and passing everything else through unchanged, is
+// what keeps that safe while still tagging the types that do need it.
+func ownCmd(owner *UI, cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return ownResult(owner, cmd())
+	}
+}
+
+// ownedResultTypes is the allow-list ownResult wraps: message types
+// defined outside model, dispatched via ownCmd because they cannot embed
+// uiOwned themselves. Deliberately narrow — see ownCmd's doc for why a
+// wrap-everything version broke a Bubble Tea runtime sentinel.
+//
+// This is a maintenance point, not a closed set: any future message type
+// defined outside model that a dialog's async work (ActionCmd) can produce
+// must be added here to get owner-routed. There is no compiler check for
+// that — an omission does not fail to build, it just routes by active
+// screen again, the original bug, silently. If you add a dialog whose
+// HandleMsg returns ActionCmd wrapping a new outside-model type and it
+// needs to reach the UI that opened the dialog while another screen is on
+// top, add that type's reflect.Type here.
+var ownedResultTypes = map[reflect.Type]bool{
+	reflect.TypeFor[util.ClearStatusMsg]():                  true,
+	reflect.TypeFor[completions.CompletionItemsLoadedMsg](): true,
+	reflect.TypeFor[fimage.PreviewPreparedMsg]():            true,
+}
+
+// ownResult wraps a single command result for ownCmd, expanding one level
+// of tea.BatchMsg first — see ownCmd's doc for why — and otherwise only
+// wrapping a type ownedResultTypes recognizes; anything else (a Bubble Tea
+// runtime sentinel, or a message type nothing here needs to route by
+// owner) is returned unchanged.
+func ownResult(owner *UI, msg tea.Msg) tea.Msg {
+	if msg == nil {
+		return nil
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		wrapped := make(tea.BatchMsg, 0, len(batch))
+		for _, c := range batch {
+			if w := ownCmd(owner, c); w != nil {
+				wrapped = append(wrapped, w)
+			}
+		}
+		return wrapped
+	}
+	if !ownedResultTypes[reflect.TypeOf(msg)] {
+		return msg
+	}
+	return ownedMsg{uiOwned: uiOwned{owner: owner}, inner: msg}
+}
+
 // Compile-time proof that each main-owned message actually claims the
 // interface. Embedding a struct whose method shares its own type name
 // silently fails to promote that method, so without these the marker can
 // look present and do nothing.
+//
+// This list is not exhaustive of every owner-tagged message: a type
+// defined outside model (util.ClearStatusMsg, completions.
+// CompletionItemsLoadedMsg, fimage.PreviewPreparedMsg, and the
+// dialog.Action* values that round-trip through applyChromeDialogAction's
+// default arm) is tagged via the ownedMsg envelope at its dispatch site
+// instead, since it cannot embed uiOwned without model importing back into
+// a package it already imports. ownedMsg itself is asserted below; there
+// is nothing further to assert per envelope-wrapped type, since the
+// wrapping — not the wrapped type — is what carries the ownership tag.
 var (
 	_ uimsg.MainScreenMsg = threads.DockActivityLoadedMsg{}
 
@@ -848,4 +985,42 @@ var (
 	_ uiOwnedMsg = createSessionMsg{}
 	_ uiOwnedMsg = bangSessionCreatedMsg{}
 	_ uiOwnedMsg = cancelTimerExpiredMsg{}
+	_ uiOwnedMsg = ownedMsg{}
+
+	// Tagged in the second pass (piece 2): every remaining message type
+	// defined in model that a *UI command can dispatch. See ownedMsg's doc
+	// and ownedResultTypes above for the disjoint set — types defined
+	// outside model — that cannot embed uiOwned and are tagged at their
+	// dispatch site instead.
+	_ uiOwnedMsg = requestSessionLoad{}
+	_ uiOwnedMsg = sessionFilesUpdatesMsg{}
+	_ uiOwnedMsg = sendMessageMsg{}
+	_ uiOwnedMsg = sendPendingQueueMsg{}
+	_ uiOwnedMsg = userCommandsLoadedMsg{}
+	_ uiOwnedMsg = mcpStateChangedMsg{}
+	_ uiOwnedMsg = mcpPromptsLoadedMsg{}
+	_ uiOwnedMsg = promptHistoryLoadedMsg{}
+	_ uiOwnedMsg = accountLabelsLoadedMsg{}
+	_ uiOwnedMsg = closeDialogMsg{}
+	_ uiOwnedMsg = providerConfiguredResult{}
+	_ uiOwnedMsg = modelSelectResult{}
+	_ uiOwnedMsg = agentModelInitializedMsg{}
+	_ uiOwnedMsg = modelSettingUpdatedMsg{}
+	_ uiOwnedMsg = transparentToggledMsg{}
+	_ uiOwnedMsg = themeSetMsg{}
+	_ uiOwnedMsg = compactModeToggledMsg{}
+	_ uiOwnedMsg = notificationStyleSetMsg{}
+	_ uiOwnedMsg = permissionResponseMsg{}
+	_ uiOwnedMsg = yoloToggledMsg{}
+	_ uiOwnedMsg = notificationSentMsg{}
+	_ uiOwnedMsg = importCopilotResult{}
+	_ uiOwnedMsg = openEditorMsg{}
+	_ uiOwnedMsg = shellStreamMsg{}
+	_ uiOwnedMsg = agentModelChangedMsg{}
+	_ uiOwnedMsg = copyChatHighlightMsg{}
+	_ uiOwnedMsg = clearChatMouseMsg{}
+	_ uiOwnedMsg = fileCompletionMsg{}
+	_ uiOwnedMsg = pasteFilesCheckedMsg{}
+	_ uiOwnedMsg = openEditorReadyMsg{}
+	_ uiOwnedMsg = richPasteMsg{}
 )

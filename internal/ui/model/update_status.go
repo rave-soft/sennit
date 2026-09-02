@@ -42,7 +42,12 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
 		}
-		cmds = append(cmds, m.status.ShowInfo(msg))
+		// util.ClearStatusMsg is defined outside model, so it cannot embed
+		// uiOwned itself (model already imports util) — wrapped here via
+		// ownCmd instead. Routed by active screen instead, a thread's own
+		// status message got cleared by whichever UI happened to be on top
+		// when its timer fired, not necessarily the one that showed it.
+		cmds = append(cmds, ownCmd(m, m.status.ShowInfo(msg)))
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg(msg.Seq)
 	}

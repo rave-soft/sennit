@@ -20,7 +20,13 @@ import (
 // permission prompt raised while an MCP prompt call was in flight must
 // not be swept away by that call's own completion. An empty id falls back
 // to closing the front dialog.
+//
+// uiOwned: dispatched by runMCPPrompt. Routed by active screen instead,
+// this closed whichever UI's front dialog happened to be on top when the
+// prompt call landed, not necessarily the dialog it was meant for.
 type closeDialogMsg struct {
+	uiOwned
+
 	id string
 }
 

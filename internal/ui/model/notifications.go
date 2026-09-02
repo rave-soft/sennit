@@ -46,7 +46,7 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 		return nil
 	}
 	backend := m.notifyBackend
-	return tea.Sequence(backend.Send(n), func() tea.Msg { return notificationSentMsg{} })
+	return tea.Sequence(backend.Send(n), func() tea.Msg { return notificationSentMsg{uiOwned{owner: m}} })
 }
 
 // maxNotificationBodyLen caps notification body text so OS notification
