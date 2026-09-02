@@ -155,7 +155,14 @@ multiedit не дублирует проверку в `applyFileMutation`: бе�
 на каждое делегирование к именованному агенту; бюджет ограничен
 `subagent_memory.go`.
 
-## Фаза 5. UI за `Workspace`
+## Фаза 5. UI за `Workspace` — закрыта
+
+5.4 (`d2b57ec47`): контракт получил свои `BackgroundJobCounts`,
+`AccountCapabilities` и алиасы `Usage`/`UsageWindow`; `ui/model` и
+`ui/common` больше не импортируют `internal/shell`,
+`internal/providers/runtime` и `internal/providers/accounts`.
+Конверсия `ToProvider` в `auth.go` оказалась литералом из трёх полей и
+встроена по месту вместо нового DTO.
 
 5.1 закрыт (`cf9ebb9dd`). При переносе едва не потеряли защиту: старый код
 не писал `proxy_url`, если значение не изменилось, потому что настроенным
@@ -176,24 +183,7 @@ multiedit не дублирует проверку в `applyFileMutation`: бе�
 добавлены nil-безопасные аксессоры на `Config`, дублирующиеся обработчики
 диалогов сведены к двум хелперам, тестовые символы убраны из продакшн-кода.
 
-### 5.4 [M] DTO вместо импортов бэкенда в `model` и `common`
-
-- `model/sidebar.go:89,270-272`: `shell.BackgroundJobCounts`,
-  `shell.MaxBackgroundJobs`.
-- `model/auth.go:25`: `providerruntime.ToProvider(providerCfg)`.
-- `common/elements.go:83`, `dialog/provider_settings.go:104`,
-  `dialog/accounts.go:75,280`: `accounts.Usage`, `accounts.CapabilitiesOf`.
-- `model/update_session.go:313`, `ui.go:638`: `pubsub.Event[history.File]`.
-
-Действия: DTO/алиасы в `workspace` по образцу `workspace.LSPClientInfo`
-(`BackgroundJobCounts`, `MaxBackgroundJobs`, `AccountUsage`,
-`ProviderCapabilities`); `Workspace.KnownProvider(id) (catwalk.Provider,
-bool)` вместо `ToProvider`. `permission.PermissionRequest` в UI остаётся,
-это задокументированный компромисс через alias-идентичность.
-
----
-
-## Фаза 6. Границы workspace / app / proto
+## Фаза 6. Границы workspace / app / proto — закрыта
 
 6.1, 6.2 и 6.4 закрыты. По 6.2 (`955da337c`): `internal/ui` больше не
 линкует MCP-клиент агента — контракт получил свои DTO для команд и
@@ -207,59 +197,17 @@ bool)` вместо `ToProvider`. `permission.PermissionRequest` в UI оста�
 `ui/model/mcp_auth.go`. Восемь однометодных ролей свёрнуты обратно с
 восстановлением документации из `a09ecd54a^`.
 
-### 6.3 [M] `appws → threadspawn` и три копии flatten
+## Фаза 7. Мёртвый код и мелкие дубли — закрыта
 
-- `threadspawn/protoconv.go` (конвертация в UI-DTO) перенести в `appws`;
-  `proto.ThreadEvent` и `EventToProto` удалить, единственный потребитель
-  (`app_workspace_lifecycle.go:71-75`) тут же разбирает на поля.
-- Одна `flatten(thread.Thread)`, от которой строятся `proto.Thread`,
-  `tools.ThreadInfo` (`agenttool.go:129-145`), `tools.TaskInfo`
-  (`tasktool.go:147-159`).
-- `thread.RunComplete ↔ notify.RunComplete`
-  (`coordinator_adapter.go:220-270`): заменить pump-горутину на каждую
-  подписку map-адаптером без горутины.
-- `threadspawn/spawner.go:37`: `frontend func(*app.App) workspace.Workspace`
-  → `any` + type-assert в `appws`, чтобы `threadspawn` не импортировал
-  `workspace`.
-- Вызов `attach` из `appws` вынести в `cmd/root.go:282`, где он и
-  используется.
-
-
+Последний пункт (`5b43d2ff0`): три строковые функции убраны из интерфейса
+хранилища сессий в пакет `session`, интерфейс похудел с 20 методов до 17,
+`IsAgentToolSession` оказался тестовым и удалён.
 
 ---
 
-## Фаза 7. Мёртвый код и мелкие дубли
+## Осталось
 
-- [S] `internal/event`: все функции пустые, `internal/log` зависит от
-  него только ради no-op `event.Error` в `RecoverPanic`. Убрать импорт из
-  `log`; пакет удалить или оставить заглушку `NewSessionTelemetry` для
-  `sessionstore.TelemetrySink`.
-- [S] `session/store/service.go:72-74,556-574`:
-  `CreateAgentToolSessionID`/`ParseAgentToolSessionID` не трогают БД,
-  `IsAgentToolSession` без production-вызовов. Перенести функциями в
-  `session`, из интерфейса убрать; `read_only_workspace.go:652,728`
-  перестаёт их проксировать.
----
+### 1.1-bis [L] Экран треда всё ещё маршрутизирует по активному экрану
+### 3.7 [L] Два владельца живых кредов
 
-## Что проверено и оставлено как есть
-
-- SQLite: все запросы пишут `strftime('%s','now')`, `Finish.Time` везде в
-  секундах, `db.InTx` и `UpdateFileRead` корректно делают
-  `defer Rollback` + `Commit`.
-- Pubsub-брокер ограничен (буфер 4096, drop вместо блокировки,
-  `PublishMustDeliver` с таймаутом), `csync` и `lock` без замечаний.
-- Bubble Tea: ни одного `go func` в UI, ни одной `tea.Msg`-замыкания,
-  мутирующей модель; все записи через `Workspace` внутри `tea.Cmd`;
-  `thread_completion.go` (4bb5c66ae) корректен.
-- Shutdown-последовательность `app/shutdown.go`, `AgentDispatcher`,
-  `AgentRunStream`, `Manager.Shutdown`, read-only обёртка с
-  compile-time default-deny.
-- Лок-дисциплина в `mcp`, `hooks.Runner.Run`, `permission`, порядок
-  «хуки → permission».
-- Допустимые связи: `thread → permission/git`, `cmd → ui/*` (composition
-  root), `db → brand`, `fsext → lock`, `tools → lsp`,
-  `agent → session/store`, `skills → pubsub` (после удаления глобального
-  брокера).
-- В TECHDEBT.md ничего из перечисленного не отслеживается; Copilot-заголовки
-  (`providers/runtime/provider.go:214-215`, после 9f367e6a7 применяются
-  безусловно) относятся к уже записанному пункту «GitHub Copilot identity».
+Описания выше по файлу.
