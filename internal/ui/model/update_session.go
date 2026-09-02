@@ -268,7 +268,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// Not the current session — it may be a running delegation's
 			// child session, updated as its own turns complete. Surface
 			// its running token count on the parent's status line.
-			m.handleChildSessionUpdate(m.com, msg.Payload)
+			m.handleChildSessionUpdate(msg.Payload)
 		}
 	case pubsub.Event[message.Message]:
 		// Check if this is a child session message for an agent tool.

@@ -27,7 +27,6 @@ import (
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 )
@@ -176,8 +175,6 @@ type SessionStore interface {
 	GetLastSession(ctx context.Context) (session.Session, error)
 	SaveSession(ctx context.Context, sess session.Session) (session.Session, error)
 	DeleteSession(ctx context.Context, sessionID string) error
-	CreateAgentToolSessionID(messageID, toolCallID string) string
-	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
 	// SetCurrentSession reports the session this client is currently
 	// viewing. Empty sessionID clears the entry (e.g. landing screen).
 	// For AppWorkspace this is a no-op.
@@ -615,7 +612,7 @@ type TaskController interface {
 // EventSubscriber wires a frontend into the workspace's event stream and
 // tears it down.
 type BackgroundJobs interface {
-	BackgroundJobCounts() shell.BackgroundJobCounts
+	BackgroundJobCounts() BackgroundJobCounts
 }
 
 type EventSubscriber interface {
@@ -721,6 +718,11 @@ type FrontendWorkspace interface {
 	// that vendor's sign-in flow, and the UI has no business importing
 	// that to read a percentage.
 	CurrentPlanUsage(providerID string) (accounts.Usage, bool)
+
+	// AccountCapabilities reports what the provider's accounts support —
+	// whether it quotes a usage snapshot, and when it rotates — so the
+	// settings dialog can render only the fields that apply.
+	AccountCapabilities(providerID string) AccountCapabilities
 	ProjectLifecycle
 	MCPController
 	ThreadController

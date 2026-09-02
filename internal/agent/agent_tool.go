@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/session"
 )
 
 //go:embed templates/agent_tool.md
@@ -132,15 +133,12 @@ type AgentBackgroundResponseMetadata struct {
 // message id in context, leaving the task manager to generate one — an
 // unopenable delegation is worse than a blocked one, but a delegation that
 // refuses to start is worse than both.
-func delegationSessionID(ctx context.Context, sessions interface {
-	CreateAgentToolSessionID(messageID, toolCallID string) string
-}, toolCallID string,
-) string {
+func delegationSessionID(ctx context.Context, toolCallID string) string {
 	messageID := tools.GetMessageFromContext(ctx)
 	if messageID == "" || toolCallID == "" {
 		return ""
 	}
-	return sessions.CreateAgentToolSessionID(messageID, toolCallID)
+	return session.CreateAgentToolSessionID(messageID, toolCallID)
 }
 
 // delegationDepth is the depth a delegation started by ctx's turn runs

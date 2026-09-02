@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/zeebo/xxh3"
 )
@@ -93,4 +94,24 @@ type Session struct {
 	Todos            []Todo
 	CreatedAt        int64
 	UpdatedAt        int64
+}
+
+// CreateAgentToolSessionID builds the session ID an agent-tool delegation's
+// child session gets: "messageID$$toolCallID". This is a pure string
+// format, not a database operation - it must not change, since the result
+// is persisted as a session's primary key.
+func CreateAgentToolSessionID(messageID, toolCallID string) string {
+	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
+}
+
+// ParseAgentToolSessionID reverses [CreateAgentToolSessionID], splitting an
+// agent-tool session ID back into the message and tool-call ids it was
+// built from. ok is false for any ID that is not in that format, including
+// an ordinary (non agent-tool) session ID.
+func ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool) {
+	parts := strings.Split(sessionID, "$$")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }

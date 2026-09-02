@@ -11,9 +11,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/logo"
@@ -86,7 +84,7 @@ type sidebarSig struct {
 	secondaryWindowMinutes int
 	secondaryResetsAt      int64
 
-	jobCounts shell.BackgroundJobCounts
+	jobCounts mcp.BackgroundJobCounts
 
 	filesVersion  int
 	lspVersion    int
@@ -252,9 +250,9 @@ func (a *accountLabelsState) planInfo(com *common.Common, model *mcp.AgentModel)
 
 // planWindows converts the account's rate-limit windows into the shape the
 // renderer takes, dropping any the plan does not have.
-func planWindows(usage accounts.Usage) []common.PlanWindow {
+func planWindows(usage mcp.Usage) []common.PlanWindow {
 	var windows []common.PlanWindow
-	for _, w := range []accounts.UsageWindow{usage.Primary, usage.Secondary} {
+	for _, w := range []mcp.UsageWindow{usage.Primary, usage.Secondary} {
 		if !w.Known() {
 			continue
 		}
@@ -267,9 +265,9 @@ func planWindows(usage accounts.Usage) []common.PlanWindow {
 	return windows
 }
 
-func backgroundJobsInfo(t *styles.Styles, counts shell.BackgroundJobCounts, width int) string {
+func backgroundJobsInfo(t *styles.Styles, counts mcp.BackgroundJobCounts, width int) string {
 	header := common.Section(t, "Background Jobs", width)
-	active := t.Resource.Name.Render("Active") + " " + t.Resource.CapabilityCount.Render(fmt.Sprintf("%d/%d", counts.Active, shell.MaxBackgroundJobs))
+	active := t.Resource.Name.Render("Active") + " " + t.Resource.CapabilityCount.Render(fmt.Sprintf("%d/%d", counts.Active, mcp.MaxBackgroundJobs))
 	return lipgloss.JoinVertical(lipgloss.Left, header, active)
 }
 

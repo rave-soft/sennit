@@ -11,7 +11,6 @@ type sessionResolver interface {
 	CreateSession(ctx context.Context, title string) (session.Session, error)
 	GetSession(ctx context.Context, sessionID string) (session.Session, error)
 	GetLastSession(ctx context.Context) (session.Session, error)
-	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
 }
 
 // ResolveSession resolves which session a non-interactive run should
@@ -23,11 +22,11 @@ type sessionResolver interface {
 // This is shared across Workspace implementations (via cmd/run.go) so
 // `sennit run` behaves identically regardless of which one is in use; it
 // is a free function rather than an interface method because it only
-// needs sessionResolver's four operations.
+// needs sessionResolver's three operations.
 func ResolveSession(ctx context.Context, ws sessionResolver, continueSessionID string, useLast bool, title string) (session.Session, error) {
 	switch {
 	case continueSessionID != "":
-		if _, _, ok := ws.ParseAgentToolSessionID(continueSessionID); ok {
+		if _, _, ok := session.ParseAgentToolSessionID(continueSessionID); ok {
 			return session.Session{}, fmt.Errorf("cannot continue an agent tool session: %s", continueSessionID)
 		}
 		sess, err := ws.GetSession(ctx, continueSessionID)

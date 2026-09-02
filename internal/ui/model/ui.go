@@ -778,7 +778,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // childSessionRef identifies a sub-agent delegation (agent / agentic_fetch
 // tool call) that can be entered as its own child session, via
-// workspace.Workspace.CreateAgentToolSessionID(messageID, toolCallID).
+// session.CreateAgentToolSessionID(messageID, toolCallID).
 // childSessionRef identifies one delegation in a parent chat, together
 // with the display data captured from its chat item at the moment the
 // sibling list was built (see Chat.NestedToolContainerRefs). Carrying that

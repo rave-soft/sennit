@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -46,7 +47,7 @@ func TestRunSubAgentReportsChildSessionBusyWhileRunning(t *testing.T) {
 	parent, err := coord.sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
 
-	childID := coord.sessions.CreateAgentToolSessionID("msg-1", "call-1")
+	childID := session.CreateAgentToolSessionID("msg-1", "call-1")
 
 	var busyDuringRun, busyAfterRun bool
 	delegate := &busyProbeAgent{

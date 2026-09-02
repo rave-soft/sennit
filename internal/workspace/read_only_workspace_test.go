@@ -19,7 +19,6 @@ import (
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/stretchr/testify/require"
@@ -218,14 +217,6 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	_, err = ro.GetThread(t.Context(), "id")
 	require.NoError(t, err)
 
-	// Utility functions pass through.
-	sid := ro.CreateAgentToolSessionID("msg-1", "tool-1")
-	require.Equal(t, "msg-1$$tool-1", sid)
-	msgID, toolID, ok := ro.ParseAgentToolSessionID(sid)
-	require.True(t, ok)
-	require.Equal(t, "msg-1", msgID)
-	require.Equal(t, "tool-1", toolID)
-
 	// SetCurrentSession only updates local UI state.
 	require.NoError(t, ro.SetCurrentSession(t.Context(), "sess-1"))
 	require.Error(t, ro.SetCurrentSession(t.Context(), "other-session"))
@@ -332,8 +323,8 @@ func (s *stubWorkspace) track(name string) {
 }
 
 // SessionStore
-func (s *stubWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
-	return shell.BackgroundJobCounts{}
+func (s *stubWorkspace) BackgroundJobCounts() BackgroundJobCounts {
+	return BackgroundJobCounts{}
 }
 
 func (s *stubWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
@@ -369,19 +360,6 @@ func (s *stubWorkspace) SaveSession(ctx context.Context, sess session.Session) (
 func (s *stubWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
 	s.track("DeleteSession")
 	return nil
-}
-
-func (s *stubWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return messageID + "$$" + toolCallID
-}
-
-func (s *stubWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	for i := 0; i <= len(sessionID)-2; i++ {
-		if sessionID[i:i+2] == "$$" {
-			return sessionID[:i], sessionID[i+2:], true
-		}
-	}
-	return "", "", false
 }
 
 func (s *stubWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
@@ -656,6 +634,11 @@ func (s *stubWorkspace) ListCustomCommands(ctx context.Context) ([]CustomCommand
 func (s *stubWorkspace) CurrentPlanUsage(providerID string) (accounts.Usage, bool) {
 	s.track("CurrentPlanUsage")
 	return accounts.Usage{}, false
+}
+
+func (s *stubWorkspace) AccountCapabilities(providerID string) AccountCapabilities {
+	s.track("AccountCapabilities")
+	return AccountCapabilities{}
 }
 
 func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error {

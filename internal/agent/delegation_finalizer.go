@@ -31,6 +31,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/session"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -736,7 +737,7 @@ func (d *delegationFinalizer) resolveSubAgentSessionID(ctx context.Context, para
 	if params.ChildSessionID != "" {
 		return params.ChildSessionID, nil
 	}
-	agentToolSessionID := d.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
+	agentToolSessionID := session.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := d.sessions.CreateSubAgentSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle, params.AgentID)
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
@@ -941,7 +942,7 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allo
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
 			if params.SubagentType == "" {
-				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, d.sessions, call.ID), delegationDepth(ctx))
+				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, call.ID), delegationDepth(ctx))
 			}
 			if !allowNamedAgents {
 				return fantasy.NewTextErrorResponse(
@@ -984,7 +985,7 @@ func (d *delegationFinalizer) runNamedAgent(ctx context.Context, parentID string
 		ParentSessionID: parentID,
 		SessionTitle:    title,
 		AgentID:         id,
-		SessionID:       delegationSessionID(ctx, d.sessions, call.ID),
+		SessionID:       delegationSessionID(ctx, call.ID),
 		Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 			definition, ok := d.cfg.Config().Agents[id]
 			if !ok {
@@ -1043,7 +1044,7 @@ func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.C
 				Goal:            params.Prompt,
 				ParentSessionID: validation.SessionID,
 				SessionTitle:    "Fetch Analysis",
-				SessionID:       d.sessions.CreateAgentToolSessionID(validation.AgentMessageID, call.ID),
+				SessionID:       session.CreateAgentToolSessionID(validation.AgentMessageID, call.ID),
 				Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 					return d.agenticFetchFactory(ctx, client, params, validation, call, childDepth, childID)
 				},

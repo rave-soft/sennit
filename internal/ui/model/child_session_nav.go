@@ -190,7 +190,7 @@ func (m *UI) delegationHasTaskRecord(toolCallID string) bool {
 		return true
 	}
 	for _, task := range m.agentList.cache.Value {
-		if _, id, ok := m.com.Workspace.ParseAgentToolSessionID(task.SessionID); ok && id == toolCallID {
+		if _, id, ok := session.ParseAgentToolSessionID(task.SessionID); ok && id == toolCallID {
 			return true
 		}
 	}
@@ -215,7 +215,7 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 		return nil
 	}
 
-	childID := m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID)
+	childID := session.CreateAgentToolSessionID(messageID, toolCallID)
 
 	// m.sess.current still refers to the parent here — loadSession is async and
 	// doesn't repoint it synchronously — so this is the last cheap chance
@@ -345,7 +345,7 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 	// chat when the frame was pushed (see NestedToolContainerRefs), the
 	// same way frame.parentTitle was.
 	frame.adoptRef(sibling)
-	frame.childSessionID = m.com.Workspace.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID)
+	frame.childSessionID = session.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID)
 
 	return m.requestSessionLoad(frame.childSessionID)
 }
@@ -355,8 +355,8 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 // effort: it's a no-op when the session isn't an agent-tool child session,
 // or the parent item can't be found (e.g. scrolled out of the loaded
 // window).
-func (w *widgets) handleChildSessionUpdate(com *common.Common, payload session.Session) {
-	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(payload.ID)
+func (w *widgets) handleChildSessionUpdate(payload session.Session) {
+	_, toolCallID, ok := session.ParseAgentToolSessionID(payload.ID)
 	if !ok {
 		return
 	}
@@ -383,7 +383,7 @@ func (w *widgets) handleChildSessionMessage(com *common.Common, event pubsub.Eve
 
 	// Check if this is an agent tool session and parse it.
 	childSessionID := event.Payload.SessionID
-	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(childSessionID)
+	_, toolCallID, ok := session.ParseAgentToolSessionID(childSessionID)
 	if !ok {
 		return nil
 	}

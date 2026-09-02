@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
+	"github.com/rave-soft/sennit/internal/session"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -240,7 +241,7 @@ func TestRunSubAgent_SummarizedPriorSessionCarriesOnlyItsSummaryOnward(t *testin
 
 	// Summarize the child session the way sessionAgent.Summarize would:
 	// append a summary message and point the session at it.
-	childID := env.sessions.CreateAgentToolSessionID("msg-1", "call-1")
+	childID := session.CreateAgentToolSessionID("msg-1", "call-1")
 	summary, err := env.messages.Create(t.Context(), childID, message.CreateMessageParams{
 		Role:  message.Assistant,
 		Parts: []message.ContentPart{message.TextContent{Text: "the summary of what happened"}},

@@ -9,7 +9,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
@@ -31,14 +30,14 @@ type sidebarCacheWorkspace struct {
 
 	cfg     *config.Config
 	cwd     string
-	counts  shell.BackgroundJobCounts
+	counts  workspace.BackgroundJobCounts
 	countsN int // number of BackgroundJobCounts calls, for tests that want to distinguish
 }
 
 func (w *sidebarCacheWorkspace) Config() *config.Config         { return w.cfg }
 func (w *sidebarCacheWorkspace) WorkingDir() string             { return w.cwd }
 func (w *sidebarCacheWorkspace) BuiltinSkills() []*skills.Skill { return nil }
-func (w *sidebarCacheWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+func (w *sidebarCacheWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {
 	w.countsN++
 	return w.counts
 }
@@ -150,7 +149,7 @@ func TestUpdateSidebarScrollState_RerendersOnJobCountsChange(t *testing.T) {
 
 	const poison = "\x00poison\x00"
 	u.sidebar.content = poison
-	ws.counts = shell.BackgroundJobCounts{Active: 2}
+	ws.counts = workspace.BackgroundJobCounts{Active: 2}
 
 	u.updateSidebarScrollState()
 	require.NotEqual(t, poison, u.sidebar.content, "a job-count change must invalidate the cache")

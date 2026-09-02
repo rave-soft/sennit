@@ -23,7 +23,6 @@ import (
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/stats"
@@ -145,8 +144,8 @@ func (w *cmdDrivingWorkspace) Config() *config.Config {
 
 func (w *cmdDrivingWorkspace) WorkingDir() string                { return "/tmp" }
 func (w *cmdDrivingWorkspace) Resolver() config.VariableResolver { return nil }
-func (w *cmdDrivingWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
-	return shell.BackgroundJobCounts{}
+func (w *cmdDrivingWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {
+	return workspace.BackgroundJobCounts{}
 }
 
 func (w *cmdDrivingWorkspace) UncommittedFiles(context.Context) ([]git.FileChange, error) {
@@ -303,14 +302,6 @@ func (w *cmdDrivingWorkspace) SaveSession(_ context.Context, s session.Session) 
 
 func (w *cmdDrivingWorkspace) DeleteSession(_ context.Context, _ string) error {
 	return nil
-}
-
-func (w *cmdDrivingWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return messageID + ":" + toolCallID
-}
-
-func (w *cmdDrivingWorkspace) ParseAgentToolSessionID(_ string) (string, string, bool) {
-	return "", "", false
 }
 
 func (w *cmdDrivingWorkspace) SetCurrentSession(_ context.Context, sessionID string) error {
@@ -1214,8 +1205,8 @@ func TestCmdDriving_LoadSession_NestedToolsApplied(t *testing.T) {
 				ID: "parent-message", Role: message.Assistant, SessionID: "parent",
 				Parts: []message.ContentPart{message.ToolCall{ID: "agent-call", Name: "agent", Input: `{}`}},
 			}},
-			"parent-message:agent-call": {{
-				ID: "child-message", Role: message.Assistant, SessionID: "parent-message:agent-call",
+			"parent-message$$agent-call": {{
+				ID: "child-message", Role: message.Assistant, SessionID: "parent-message$$agent-call",
 				Parts: []message.ContentPart{message.ToolCall{ID: "child-call", Name: "bash", Input: `{}`}},
 			}},
 		},
@@ -1260,15 +1251,15 @@ func TestCmdDriving_LoadSession_MultipleChildrenBatched(t *testing.T) {
 					},
 				},
 			},
-			"parent-message:agent-1": {
+			"parent-message$$agent-1": {
 				{
-					ID: "child1-msg", Role: message.Assistant, SessionID: "parent-message:agent-1",
+					ID: "child1-msg", Role: message.Assistant, SessionID: "parent-message$$agent-1",
 					Parts: []message.ContentPart{message.ToolCall{ID: "child1-call", Name: "bash", Input: `{}`}},
 				},
 			},
-			"parent-message:agent-2": {
+			"parent-message$$agent-2": {
 				{
-					ID: "child2-msg", Role: message.Assistant, SessionID: "parent-message:agent-2",
+					ID: "child2-msg", Role: message.Assistant, SessionID: "parent-message$$agent-2",
 					Parts: []message.ContentPart{message.ToolCall{ID: "child2-call", Name: "bash", Input: `{}`}},
 				},
 			},
@@ -1298,7 +1289,7 @@ func TestCmdDriving_LoadSession_MultipleChildrenBatched(t *testing.T) {
 
 	require.Equal(t, 1, ws.listMessagesCalls)
 	require.Equal(t, 1, ws.listMessagesByIDsCalls)
-	require.ElementsMatch(t, []string{"parent-message:agent-1", "parent-message:agent-2"}, ws.listMessagesByIDs[0])
+	require.ElementsMatch(t, []string{"parent-message$$agent-1", "parent-message$$agent-2"}, ws.listMessagesByIDs[0])
 }
 
 func TestCmdDriving_LoadSession_DeepNestingRecursiveBatch(t *testing.T) {
@@ -1318,17 +1309,17 @@ func TestCmdDriving_LoadSession_DeepNestingRecursiveBatch(t *testing.T) {
 					},
 				},
 			},
-			"msg-level1:agent-level1": {
+			"msg-level1$$agent-level1": {
 				{
-					ID: "msg-level2", Role: message.Assistant, SessionID: "msg-level1:agent-level1",
+					ID: "msg-level2", Role: message.Assistant, SessionID: "msg-level1$$agent-level1",
 					Parts: []message.ContentPart{
 						message.ToolCall{ID: "agent-level2", Name: "agent", Input: `{}`},
 					},
 				},
 			},
-			"msg-level2:agent-level2": {
+			"msg-level2$$agent-level2": {
 				{
-					ID: "msg-level3", Role: message.Assistant, SessionID: "msg-level2:agent-level2",
+					ID: "msg-level3", Role: message.Assistant, SessionID: "msg-level2$$agent-level2",
 					Parts: []message.ContentPart{message.ToolCall{ID: "deep-call", Name: "bash", Input: `{}`}},
 				},
 			},
@@ -1353,8 +1344,8 @@ func TestCmdDriving_LoadSession_DeepNestingRecursiveBatch(t *testing.T) {
 	require.Equal(t, "deep-call", level2Nested[0].ToolCall().ID)
 	require.Equal(t, 1, ws.listMessagesCalls)
 	require.Equal(t, 2, ws.listMessagesByIDsCalls)
-	require.Equal(t, []string{"msg-level1:agent-level1"}, ws.listMessagesByIDs[0])
-	require.Equal(t, []string{"msg-level2:agent-level2"}, ws.listMessagesByIDs[1])
+	require.Equal(t, []string{"msg-level1$$agent-level1"}, ws.listMessagesByIDs[0])
+	require.Equal(t, []string{"msg-level2$$agent-level2"}, ws.listMessagesByIDs[1])
 }
 
 func TestCmdDriving_LoadSession_CapturesWorkspace(t *testing.T) {

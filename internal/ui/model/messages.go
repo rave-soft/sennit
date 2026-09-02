@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -98,7 +99,7 @@ func loadNestedToolCalls(ctx context.Context, ws workspace.SessionStore, sty *st
 		}
 		tc := toolItem.ToolCall()
 		children = append(children, childLoad{
-			sessionID: ws.CreateAgentToolSessionID(toolItem.MessageID(), tc.ID),
+			sessionID: session.CreateAgentToolSessionID(toolItem.MessageID(), tc.ID),
 			container: nestedContainer,
 		})
 	}

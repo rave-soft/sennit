@@ -2,8 +2,8 @@ package model
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 )
@@ -20,9 +20,14 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 		return nil
 	}
+	// Inlined from providerruntime.ToProvider: openAuthenticationDialog only
+	// needs a catwalk.Provider's Name/ID/Models, and building one from the
+	// three fields is not backend work worth an internal/providers/runtime
+	// import for.
+	provider := catwalk.Provider{Name: providerCfg.Name, ID: catwalk.InferenceProvider(providerCfg.ID), Models: providerCfg.Models}
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
-	return m.openAuthenticationDialog(providerruntime.ToProvider(providerCfg), cfg.Model)
+	return m.openAuthenticationDialog(provider, cfg.Model)
 }
 
 // handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL

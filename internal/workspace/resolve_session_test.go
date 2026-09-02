@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/session"
@@ -51,14 +50,6 @@ func (w *fakeSessionWorkspace) GetLastSession(context.Context) (session.Session,
 		return session.Session{}, sql.ErrNoRows
 	}
 	return last, nil
-}
-
-func (w *fakeSessionWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	parts := strings.Split(sessionID, "$$")
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 var (

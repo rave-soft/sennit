@@ -133,7 +133,7 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 // sessions dialog (ctrl+s): child sessions created for sub-agent
 // delegations (agent/agentic_fetch tool calls) have a "$$"-formatted ID
 // and a non-null ParentSessionID (see CreateTaskSession /
-// CreateAgentToolSessionID), and must never show up in List() — the
+// session.CreateAgentToolSessionID), and must never show up in List() — the
 // underlying ListSessions query filters on parent_session_id IS NULL.
 func TestListExcludesAgentToolChildSessions(t *testing.T) {
 	dataDir := t.TempDir()
@@ -150,7 +150,7 @@ func TestListExcludesAgentToolChildSessions(t *testing.T) {
 	parent, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
 
-	childID := sessions.CreateAgentToolSessionID("msg-1", "tc-1")
+	childID := session.CreateAgentToolSessionID("msg-1", "tc-1")
 	_, err = sessions.CreateTaskSession(t.Context(), childID, parent.ID, "sub-agent delegation")
 	require.NoError(t, err)
 
@@ -403,7 +403,7 @@ func TestGetLastExcludesChildSessions(t *testing.T) {
 	require.NoError(t, err)
 	setUpdatedAt(t, conn, parent.ID, 10)
 
-	childID := sessions.CreateAgentToolSessionID("msg-1", "tc-1")
+	childID := session.CreateAgentToolSessionID("msg-1", "tc-1")
 	_, err = sessions.CreateTaskSession(t.Context(), childID, parent.ID, "sub-agent delegation")
 	require.NoError(t, err)
 	setUpdatedAt(t, conn, childID, 100)

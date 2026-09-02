@@ -98,7 +98,7 @@ func (m *UI) panelledDelegations() map[string]bool {
 	}
 	ids := make(map[string]bool, len(live))
 	for _, delegation := range live {
-		if _, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(delegation.SessionID); ok {
+		if _, toolCallID, ok := session.ParseAgentToolSessionID(delegation.SessionID); ok {
 			ids[toolCallID] = true
 		}
 	}
@@ -378,7 +378,7 @@ func (w *widgets) delegationChatItem(com *common.Common, t proto.Thread) chat.To
 	if com == nil || com.Workspace == nil {
 		return nil
 	}
-	_, toolCallID, ok := com.Workspace.ParseAgentToolSessionID(t.SessionID)
+	_, toolCallID, ok := session.ParseAgentToolSessionID(t.SessionID)
 	if !ok {
 		return nil
 	}
@@ -1236,7 +1236,7 @@ func (m *UI) enterDelegation(t proto.Thread) tea.Cmd {
 	if m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
-	messageID, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(t.SessionID)
+	messageID, toolCallID, ok := session.ParseAgentToolSessionID(t.SessionID)
 	if !ok {
 		return util.ReportWarn("This delegation has no transcript to open")
 	}

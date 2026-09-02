@@ -33,14 +33,6 @@ func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) erro
 	return w.app.Sessions().Delete(ctx, sessionID)
 }
 
-func (w *AppWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return w.app.Sessions().CreateAgentToolSessionID(messageID, toolCallID)
-}
-
-func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	return w.app.Sessions().ParseAgentToolSessionID(sessionID)
-}
-
 // SetCurrentSession reports the active session to herdr so the pane
 // can persist a resumable reference. Multi-client presence tracking
 // is irrelevant in single-client local mode, but herdr still needs

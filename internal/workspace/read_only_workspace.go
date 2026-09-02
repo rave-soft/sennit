@@ -17,7 +17,6 @@ import (
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 )
@@ -103,7 +102,7 @@ func (w *readOnlyWorkspace) allowsSession(ctx context.Context, id string) (bool,
 	if id == w.sessionID {
 		return true, nil
 	}
-	if _, _, ok := w.ws.ParseAgentToolSessionID(id); !ok {
+	if _, _, ok := session.ParseAgentToolSessionID(id); !ok {
 		return false, nil
 	}
 
@@ -120,7 +119,7 @@ func (w *readOnlyWorkspace) allowsSession(ctx context.Context, id string) (bool,
 		if parentID == w.sessionID {
 			return true, nil
 		}
-		if _, _, ok := w.ws.ParseAgentToolSessionID(parentID); !ok {
+		if _, _, ok := session.ParseAgentToolSessionID(parentID); !ok {
 			return false, nil
 		}
 		if _, alreadySeen := seen[parentID]; alreadySeen {
@@ -664,16 +663,18 @@ func (w *readOnlyWorkspace) AgentReadyErr() error {
 	return w.ws.AgentReadyErr()
 }
 
-func (w *readOnlyWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+func (w *readOnlyWorkspace) BackgroundJobCounts() BackgroundJobCounts {
 	return w.ws.BackgroundJobCounts()
+}
+
+// AccountCapabilities is a read: it reports what a provider supports, and
+// touches no account state.
+func (w *readOnlyWorkspace) AccountCapabilities(providerID string) AccountCapabilities {
+	return w.ws.AccountCapabilities(providerID)
 }
 
 func (w *readOnlyWorkspace) Config() *config.Config {
 	return w.ws.Config()
-}
-
-func (w *readOnlyWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return w.ws.CreateAgentToolSessionID(messageID, toolCallID)
 }
 
 func (w *readOnlyWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
@@ -750,10 +751,6 @@ func (w *readOnlyWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
 
 func (w *readOnlyWorkspace) MCPResources() []MCPResourceInfo {
 	return w.ws.MCPResources()
-}
-
-func (w *readOnlyWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	return w.ws.ParseAgentToolSessionID(sessionID)
 }
 
 func (w *readOnlyWorkspace) PermissionSkipRequests() bool {

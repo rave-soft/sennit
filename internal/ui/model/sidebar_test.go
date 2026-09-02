@@ -6,8 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +16,7 @@ func TestBackgroundJobsInfo(t *testing.T) {
 
 	sty := styles.SennitDark()
 	const width = 24
-	info := backgroundJobsInfo(&sty, shell.BackgroundJobCounts{Active: 3, Completed: 7}, width)
+	info := backgroundJobsInfo(&sty, workspace.BackgroundJobCounts{Active: 3, Completed: 7}, width)
 	plain := ansi.Strip(info)
 
 	require.Contains(t, plain, "Background Jobs")
