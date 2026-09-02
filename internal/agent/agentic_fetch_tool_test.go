@@ -105,18 +105,18 @@ func TestAgenticFetchTool_SharesClientAcrossCalls(t *testing.T) {
 
 	_, err := d.agenticFetchTool(t.Context(), nil)
 	require.NoError(t, err)
-	first := d.fetchClient
+	first := d.fetch.client
 	require.NotNil(t, first, "agenticFetchTool(nil) must build a shared client")
 
 	_, err = d.agenticFetchTool(t.Context(), nil)
 	require.NoError(t, err)
-	require.Same(t, first, d.fetchClient, "a second nil-client call must reuse the same *http.Client")
+	require.Same(t, first, d.fetch.client, "a second nil-client call must reuse the same *http.Client")
 
 	other := &delegationFinalizer{agentDeps: &agentDeps{}}
 	custom := &http.Client{}
 	_, err = other.agenticFetchTool(t.Context(), custom)
 	require.NoError(t, err)
-	require.Nil(t, other.fetchClient, "a caller-supplied client must be used as-is, not replaced by the shared one")
+	require.Nil(t, other.fetch.client, "a caller-supplied client must be used as-is, not replaced by the shared one")
 }
 
 // TestBuildAgenticFetchAgent_IsSubAgentAndToolSet guards two properties of

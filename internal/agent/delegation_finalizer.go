@@ -42,14 +42,9 @@ type delegationFinalizer struct {
 
 	lifecycle *readinessLifecycle
 
-	// fetchClientOnce/fetchClient lazily construct the *http.Client the
-	// agentic-fetch tool falls back to when no caller-supplied client is
-	// given. Built once and reused: cloning a transport per call (as
-	// agenticFetchTool used to) leaks that clone's idle-connection pool
-	// forever and starts every fetch cold instead of reusing warm
-	// connections from a shared pool.
-	fetchClientOnce sync.Once
-	fetchClient     *http.Client
+	// fetch lazily builds the shared *http.Client the agentic-fetch tool
+	// falls back to when no caller-supplied client is given.
+	fetch fetchClient
 
 	// subSessions counts the delegations currently running under each
 	// sub-agent session id, so IsSessionBusy can answer for them.
@@ -70,35 +65,8 @@ type delegationFinalizer struct {
 	// invoke tools, but a reader always receives a complete pair.
 	delegationTools atomic.Pointer[delegationToolsSnapshot]
 
-	// skillsMu guards allSkills/activeSkills/skillTracker. They start as a
-	// session-start snapshot, but RefreshSkills (called from the app's
-	// skills-directory watcher goroutine, internal/app/watch.go) can
-	// replace them mid-session
-	// while a Run is concurrently reading them via buildTools/
-	// logTurnSkillUsage — a plain field would race those reads. The
-	// skillTracker pointer itself is not replaced (see RefreshSkills), so
-	// its own internal lock is what protects loaded/activeNames; this
-	// mutex only protects which *slices*/tracker the coordinator hands out.
-	skillsMu     sync.RWMutex
-	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
-	activeSkills []*skills.Skill // Post-filter: active skills only.
-	skillTracker *skills.Tracker
-	// skillsGen counts RefreshSkills calls. runtimeInputsCache keys its
-	// cached skills snapshot on this rather than on allSkills/activeSkills
-	// themselves, since RefreshSkills always installs new slice headers —
-	// comparing slices for identity would never hit, and comparing
-	// contents would redo the sameSkills work RefreshSkills already did.
-	skillsGen uint64
-	// skillsMgr is the workspace's own skills manager, kept only to read
-	// the discovery state snapshot (which SKILL.md files failed to parse
-	// or validate) for sennit_info's [problems] section. It is read live
-	// rather than snapshotted alongside the slices above because the
-	// manager already owns the hot-reload path — its States() is current
-	// by construction — and because it needs no lock of ours: the manager
-	// guards its own snapshot. Nil for the legacy callers that construct a
-	// coordinator without a manager (see NewCoordinator), in which case
-	// there is simply no discovery state to report.
-	skillsMgr *skills.Manager
+	// skills holds the coordinator's skill discovery snapshot.
+	skills skillsState
 
 	agentPort *coordinatorAgentPort
 
@@ -128,6 +96,63 @@ type delegationFinalizer struct {
 	// refreshed with a live call before being handed back.
 	runtimeInputsMu    sync.Mutex
 	runtimeInputsCache *runtimeInputsCacheEntry
+}
+
+// skillsState owns the coordinator's skill discovery snapshot: the
+// deduped/full skill set, the active subset, and the tracker that records
+// which skills a run has loaded. mu guards all, active, tracker and gen.
+// They start as a session-start snapshot, but RefreshSkills (called from
+// the app's skills-directory watcher goroutine, internal/app/watch.go) can
+// replace them mid-session while a Run is concurrently reading them via
+// buildTools/logTurnSkillUsage — a plain field would race those reads. The
+// tracker pointer itself is not replaced (see RefreshSkills), so its own
+// internal lock is what protects loaded/activeNames; mu only protects
+// which *slices*/tracker the coordinator hands out.
+type skillsState struct {
+	mu      sync.RWMutex
+	all     []*skills.Skill // Pre-filter: all discovered after dedup.
+	active  []*skills.Skill // Post-filter: active skills only.
+	tracker *skills.Tracker
+	// gen counts RefreshSkills calls. runtimeInputsCache keys its cached
+	// skills snapshot on this rather than on all/active themselves, since
+	// RefreshSkills always installs new slice headers — comparing slices
+	// for identity would never hit, and comparing contents would redo the
+	// sameSkills work RefreshSkills already did.
+	gen uint64
+	// mgr is the workspace's own skills manager, kept only to read the
+	// discovery state snapshot (which SKILL.md files failed to parse or
+	// validate) for sennit_info's [problems] section. It is read live
+	// rather than snapshotted alongside the slices above because the
+	// manager already owns the hot-reload path — its States() is current
+	// by construction — and because it needs no lock of ours: the manager
+	// guards its own snapshot. Nil for the legacy callers that construct a
+	// coordinator without a manager (see NewCoordinator), in which case
+	// there is simply no discovery state to report.
+	mgr *skills.Manager
+}
+
+// fetchClient lazily builds and caches the *http.Client the agentic-fetch
+// tool falls back to when no caller-supplied client is given. Built once
+// and reused: cloning a transport per call (as agenticFetchTool used to)
+// leaks that clone's idle-connection pool forever and starts every fetch
+// cold instead of reusing warm connections from a shared pool.
+type fetchClient struct {
+	once   sync.Once
+	client *http.Client
+}
+
+// get returns the shared *http.Client, constructing it on first use. An
+// *http.Client is safe for concurrent use, so every caller after the first
+// gets the same instance and shares its connection pool.
+func (f *fetchClient) get() *http.Client {
+	f.once.Do(func() {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+		f.client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	})
+	return f.client
 }
 
 // runtimeInputsCacheEntry is one memoized runtimeInputs() result, along
@@ -398,20 +423,20 @@ func (d *delegationFinalizer) SetDelegationTools(threads tools.ThreadManager, ta
 // not appear to forget itself.
 func (d *delegationFinalizer) RefreshSkills(allSkills, activeSkills []*skills.Skill) {
 	d.invalidate(context.Background(), "skills_changed", func() bool {
-		d.skillsMu.Lock()
-		changed := !sameSkills(d.allSkills, allSkills) || !sameSkills(d.activeSkills, activeSkills)
-		d.allSkills = allSkills
-		d.activeSkills = activeSkills
+		d.skills.mu.Lock()
+		changed := !sameSkills(d.skills.all, allSkills) || !sameSkills(d.skills.active, activeSkills)
+		d.skills.all = allSkills
+		d.skills.active = activeSkills
 		// Bumped on every call, not only when changed: RefreshSkills
 		// always installs new slice headers, so runtimeInputs' cache (keyed
 		// on this) must treat every call as a potential change too, even
 		// one sameSkills would call a no-op.
-		d.skillsGen++
+		d.skills.gen++
 		// The tracker itself is not replaced: UpdateActiveSkills mutates it
 		// in place under its own lock, keeping loaded state for names still
 		// active rather than wiping it (see UpdateActiveSkills).
-		tracker := d.skillTracker
-		d.skillsMu.Unlock()
+		tracker := d.skills.tracker
+		d.skills.mu.Unlock()
 		if tracker != nil {
 			tracker.UpdateActiveSkills(activeSkills)
 		}
@@ -425,10 +450,10 @@ func (d *delegationFinalizer) RefreshSkills(allSkills, activeSkills []*skills.Sk
 // follow never loaded — see config.SkillProblems for why that particular
 // failure is worth surfacing to the agent and not only to the log.
 func (d *delegationFinalizer) skillStates() []*skills.SkillState {
-	if d.skillsMgr == nil {
+	if d.skills.mgr == nil {
 		return nil
 	}
-	return d.skillsMgr.States()
+	return d.skills.mgr.States()
 }
 
 // skillsSnapshot returns the current skill discovery results under
@@ -443,9 +468,9 @@ func (d *delegationFinalizer) skillsSnapshot() (allSkills, activeSkills []*skill
 // same lock so the two can never observe two different RefreshSkills
 // calls (see runtimeInputs' cache, the only caller that needs gen).
 func (d *delegationFinalizer) skillsSnapshotWithGen() (allSkills, activeSkills []*skills.Skill, tracker *skills.Tracker, gen uint64) {
-	d.skillsMu.RLock()
-	defer d.skillsMu.RUnlock()
-	return d.allSkills, d.activeSkills, d.skillTracker, d.skillsGen
+	d.skills.mu.RLock()
+	defer d.skills.mu.RUnlock()
+	return d.skills.all, d.skills.active, d.skills.tracker, d.skills.gen
 }
 
 // delegationToolsForRead returns a complete adapter generation.
@@ -974,25 +999,10 @@ func (d *delegationFinalizer) runNamedAgent(ctx context.Context, parentID string
 	})
 }
 
-// sharedFetchClient returns the delegationFinalizer's shared *http.Client
-// for the agentic-fetch tool, constructing it on first use. An *http.Client
-// is safe for concurrent use, so every caller after the first gets the same
-// instance and shares its connection pool.
-func (d *delegationFinalizer) sharedFetchClient() *http.Client {
-	d.fetchClientOnce.Do(func() {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 10
-		transport.IdleConnTimeout = 90 * time.Second
-		d.fetchClient = &http.Client{Timeout: 30 * time.Second, Transport: transport}
-	})
-	return d.fetchClient
-}
-
 //nolint:unparam // matches the (tool, error) signature of the other buildTools helpers
 func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
 	if client == nil {
-		client = d.sharedFetchClient()
+		client = d.fetch.get()
 	}
 	return tools.WithToolSchemaConstraints(fantasy.NewAgentTool(
 		tools.AgenticFetchToolName,

@@ -19,11 +19,13 @@ func TestRuntimeInputsCacheReflectsSkillsRefresh(t *testing.T) {
 	after := []*skills.Skill{{Name: "after"}}
 
 	d := &delegationFinalizer{
-		agentDeps:    &agentDeps{},
-		builder:      &runtimeBuilder{agentDeps: &agentDeps{}},
-		allSkills:    before,
-		activeSkills: before,
-		skillTracker: skills.NewTracker(before),
+		agentDeps: &agentDeps{},
+		builder:   &runtimeBuilder{agentDeps: &agentDeps{}},
+		skills: skillsState{
+			all:     before,
+			active:  before,
+			tracker: skills.NewTracker(before),
+		},
 	}
 
 	got := d.runtimeInputs()

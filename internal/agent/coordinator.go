@@ -317,10 +317,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.newCoordinatorComponents()
 
-	c.delegation.allSkills = allSkills
-	c.delegation.activeSkills = activeSkills
-	c.delegation.skillTracker = skillTracker
-	c.delegation.skillsMgr = opts.Skills
+	c.delegation.skills.all = allSkills
+	c.delegation.skills.active = activeSkills
+	c.delegation.skills.tracker = skillTracker
+	c.delegation.skills.mgr = opts.Skills
 
 	c.delegation.SetDelegationTools(opts.Threads, opts.Tasks)
 
