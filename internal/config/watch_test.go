@@ -299,7 +299,7 @@ func TestUpdateLocked_TypedMutatorIgnoresOwnWrite(t *testing.T) {
 	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 
-	before := store.trackedConfigPathSet()
+	before := store.staleness.trackedPathSet()
 	require.NotEmpty(t, before, "a loaded store should already be tracking its candidate config paths")
 
 	require.NoError(t, store.SetCompactMode(ScopeGlobal, true))
@@ -308,7 +308,7 @@ func TestUpdateLocked_TypedMutatorIgnoresOwnWrite(t *testing.T) {
 		"SetCompactMode's own write must not be mistaken for an external change:%s",
 		describeExternalChange(t, store))
 
-	after := store.trackedConfigPathSet()
+	after := store.staleness.trackedPathSet()
 	require.Equal(t, before, after,
 		"SetCompactMode must not narrow the tracked path set down to loadedPaths+its own path")
 }
@@ -374,7 +374,7 @@ func TestExternalChangeDetected_NewCandidateFileAfterTypedMutator(t *testing.T) 
 func describeExternalChange(t *testing.T, s *ConfigStore) string {
 	t.Helper()
 	staleness := s.ConfigStaleness()
-	tracked := s.trackedConfigPathSet()
+	tracked := s.staleness.trackedPathSet()
 	trackedList := make([]string, 0, len(tracked))
 	for p := range tracked {
 		trackedList = append(trackedList, p)

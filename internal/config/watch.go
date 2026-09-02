@@ -117,7 +117,7 @@ func (s *ConfigStore) externalChangeDetected() bool {
 }
 
 func (s *ConfigStore) hasUntrackedCandidate(candidates []string) bool {
-	tracked := s.trackedConfigPathSet()
+	tracked := s.staleness.trackedPathSet()
 	for _, path := range candidates {
 		if path == "" {
 			continue

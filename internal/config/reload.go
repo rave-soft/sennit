@@ -32,16 +32,7 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 func (s *ConfigStore) snapshotOverrides() RuntimeOverrides {
 	s.writeMu.RLock()
 	defer s.writeMu.RUnlock()
-	var model *SelectedModel
-	if s.overrides.Model != nil {
-		m := *s.overrides.Model
-		model = &m
-	}
-	return RuntimeOverrides{
-		SkipPermissionRequests: s.overrides.SkipPermissionRequests,
-		EnabledChannels:        slices.Clone(s.overrides.EnabledChannels),
-		Model:                  model,
-	}
+	return cloneRuntimeOverrides(s.overrides)
 }
 
 // reloadFromDisk performs the actual reload. Caller must hold reloadMu (to
@@ -85,11 +76,11 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	}
 
 	// Stat every currently tracked config file now, before buildConfig
-	// re-reads their contents below; see preReloadFileSnapshots. Statting
+	// re-reads their contents below; see fileStaleness.preReloadSnapshots. Statting
 	// only at the end (after the swap) would record the mtime/size of a
 	// file written mid-reload without ever having loaded its new content,
 	// silently absorbing that write instead of flagging it as stale.
-	preRead := s.preReloadFileSnapshots()
+	preRead := s.staleness.preReloadSnapshots()
 
 	// Apply defaults using the existing data directory, if set.
 	var dataDir string
@@ -213,8 +204,8 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// is detected as a change on the next staleness check. preRead supplies
 	// the pre-buildConfig stat for every path already tracked, so a write
 	// that landed after we read the files but before this point is not
-	// mistaken for "seen" — see preReloadFileSnapshots.
-	s.captureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...), preRead)
+	// mistaken for "seen" — see fileStaleness.preReloadSnapshots.
+	s.staleness.capture(append(slices.Clone(built.configPaths), built.loadedPaths...), []string{s.workspacePath.Get(), s.globalDataPath}, preRead)
 	s.watcher.captureAgentFiles(s.workingDir)
 
 	return nil

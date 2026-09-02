@@ -35,6 +35,23 @@ type RuntimeOverrides struct {
 	Model *SelectedModel
 }
 
+// cloneRuntimeOverrides deep-copies o's slice/pointer fields (EnabledChannels,
+// Model) so the result stays safe to read after the caller's lock on the live
+// overrides is released. It does no locking itself; callers hold whatever
+// lock guards s.overrides (writeMu) for the read that produces o.
+func cloneRuntimeOverrides(o RuntimeOverrides) RuntimeOverrides {
+	var model *SelectedModel
+	if o.Model != nil {
+		m := *o.Model
+		model = &m
+	}
+	return RuntimeOverrides{
+		SkipPermissionRequests: o.SkipPermissionRequests,
+		EnabledChannels:        slices.Clone(o.EnabledChannels),
+		Model:                  model,
+	}
+}
+
 // ConfigStore is the single entry point for all config access. It owns the
 // pure-data Config, runtime state (working directory, resolver, known
 // providers), and persistence to both global and workspace config files.
@@ -167,20 +184,11 @@ func (s *ConfigStore) RuntimeSnapshot() RuntimeSnapshot {
 	defer s.writeMu.RUnlock()
 
 	cfg := s.Config()
-	var model *SelectedModel
-	if s.overrides.Model != nil {
-		m := *s.overrides.Model
-		model = &m
-	}
 	return RuntimeSnapshot{
-		Config:     cfg,
-		Resolver:   cfg.RuntimeResolver(),
-		WorkingDir: s.workingDir,
-		Overrides: RuntimeOverrides{
-			SkipPermissionRequests: s.overrides.SkipPermissionRequests,
-			EnabledChannels:        slices.Clone(s.overrides.EnabledChannels),
-			Model:                  model,
-		},
+		Config:      cfg,
+		Resolver:    cfg.RuntimeResolver(),
+		WorkingDir:  s.workingDir,
+		Overrides:   cloneRuntimeOverrides(s.overrides),
 		LoadedPaths: slices.Clone(s.loadedPaths),
 		Staleness:   s.ConfigStaleness(),
 	}
@@ -348,46 +356,46 @@ func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 		}
 		paths = []string{path}
 	}
-	s.staleness.mu.Lock()
-	defer s.staleness.mu.Unlock()
-	var wrote bool
-	for _, path := range paths {
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		ctx, cancel := configWriteContext()
-		err := s.file.atomicWrite(ctx, path, func(data []byte) ([]byte, error) {
-			if !gjson.GetBytes(data, key).Exists() {
-				return nil, errAtomicWriteNoop
+	// The writes and the staleness-snapshot refresh happen under one
+	// fileStaleness.withWrite section; see its doc comment for why.
+	_ = s.staleness.withWrite(func() (bool, error) {
+		var wrote bool
+		for _, path := range paths {
+			if _, err := os.Stat(path); err != nil {
+				continue
 			}
-			value, err := sjson.Delete(string(data), key)
+			ctx, cancel := configWriteContext()
+			err := s.file.atomicWrite(ctx, path, func(data []byte) ([]byte, error) {
+				if !gjson.GetBytes(data, key).Exists() {
+					return nil, errAtomicWriteNoop
+				}
+				value, err := sjson.Delete(string(data), key)
+				if err != nil {
+					return nil, fmt.Errorf("failed to delete config field %s: %w", key, err)
+				}
+				return []byte(value), nil
+			})
+			cancel()
 			if err != nil {
-				return nil, fmt.Errorf("failed to delete config field %s: %w", key, err)
+				slog.Warn("Failed to remove runtime config field", "key", key, "path", path, "error", err)
+			} else {
+				wrote = true
 			}
-			return []byte(value), nil
-		})
-		cancel()
-		if err != nil {
-			slog.Warn("Failed to remove runtime config field", "key", key, "path", path, "error", err)
-		} else {
-			wrote = true
 		}
-	}
-	if wrote {
-		s.staleness.refreshLocked(nil)
-	}
+		return wrote, nil
+	})
 }
 
 // WriteRuntimeConfigFields writes fields to the config file for the given
 // scope without reloading in-memory state. See RemoveRuntimeConfigField for
 // why the staleness snapshot is still refreshed under fileStaleness mutex.
 func (s *ConfigStore) WriteRuntimeConfigFields(scope Scope, fields map[string]any) {
-	s.staleness.mu.Lock()
-	err := s.writeConfigFields(scope, fields)
-	if err == nil {
-		s.staleness.refreshLocked(nil)
-	}
-	s.staleness.mu.Unlock()
+	// The write and the staleness-snapshot refresh happen under one
+	// fileStaleness.withWrite section; see its doc comment for why.
+	err := s.staleness.withWrite(func() (bool, error) {
+		err := s.writeConfigFields(scope, fields)
+		return err == nil, err
+	})
 	if err != nil {
 		slog.Warn("Failed to write runtime config fields", "error", err)
 	}
@@ -453,24 +461,11 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	// The write and the staleness-snapshot refresh happen under one
-	// fileStaleness mutex section so a concurrent ConfigStaleness() (the watcher
-	// poll loop, sennit_info) can never observe the new on-disk mtime
-	// against a snapshot that hasn't caught up yet — the only way to
-	// close that window, rather than just narrow it, since any gap
-	// between "write returns" and "snapshot refreshed" is itself a
-	// (smaller) instance of the same race. This used to be two separate
-	// steps: write, then run the whole (possibly slow, network-touching)
-	// autoReload pipeline, which only refreshed the snapshot at the very
-	// end — so a poll landing anywhere in that much wider window misread
-	// this process's own write as an external change (see
-	// TestWatchForExternalChanges_IgnoresOwnWrites and *_TightPoll).
-	// refreshStalenessSnapshotLocked (not
-	// CaptureStalenessSnapshot) is safe to call without writeMu here: it
-	// only restats the tracked path set, which the write's own path is
-	// always already a member of — CaptureStalenessSnapshot always adds
-	// both scopes' paths (Load, reloadFromDisk, updateLocked) — and,
-	// unlike CaptureStalenessSnapshot, it never reads the writeMu-guarded
-	// workspacePath/globalDataPath fields.
+	// fileStaleness.withWrite section; see its doc comment for why the lock
+	// must span both halves (this used to be two separate steps, and a poll
+	// landing between them misread this process's own write as an external
+	// change — see TestWatchForExternalChanges_IgnoresOwnWrites and
+	// *_TightPoll).
 	//
 	// The cost of closing the window this way: ConfigStaleness() now
 	// waits behind a config write, including its cross-process flock.
@@ -478,12 +473,10 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	// when another process is mid-write, so the worst case is a
 	// delayed watcher poll or a slow sennit_info -- deliberately
 	// preferred over reporting this process's own write as external.
-	s.staleness.mu.Lock()
-	err := s.writeConfigFields(scope, kv)
-	if err == nil {
-		s.staleness.refreshLocked(nil)
-	}
-	s.staleness.mu.Unlock()
+	err := s.staleness.withWrite(func() (bool, error) {
+		err := s.writeConfigFields(scope, kv)
+		return err == nil, err
+	})
 	if err != nil {
 		return err
 	}
@@ -582,10 +575,8 @@ func (s *ConfigStore) updateLockedErr(scope Scope, mutate func(*Config) (map[str
 		return nil
 	}
 	// The write and the staleness-snapshot refresh happen under one
-	// fileStaleness mutex section, exactly as SetConfigFields does, so a
-	// concurrent ConfigStaleness()/watcher poll can never land between the
-	// write and the refresh and mistake this process's own write for an
-	// external change. See SetConfigFields for the full rationale.
+	// fileStaleness.withWriteAddPath section, exactly as SetConfigFields'
+	// withWrite does; see fileStaleness.withWrite for the full rationale.
 	//
 	// Unlike the old CaptureStalenessSnapshot(loadedPaths + path) this used
 	// to call, addAndRefreshLocked never narrows the tracked set to just
@@ -594,16 +585,14 @@ func (s *ConfigStore) updateLockedErr(scope Scope, mutate func(*Config) (map[str
 	// disk, so a global config appearing for the first time still counts
 	// as an external change) and only adds the scope's own path if it is
 	// somehow not already a member.
-	s.staleness.mu.Lock()
-	err = s.writeConfigFields(scope, fields)
-	if err == nil {
-		path, pathErr := s.ConfigPath(scope)
-		if pathErr != nil {
-			path = ""
-		}
-		s.staleness.addAndRefreshLocked(path)
+	path, pathErr := s.ConfigPath(scope)
+	if pathErr != nil {
+		path = ""
 	}
-	s.staleness.mu.Unlock()
+	err = s.staleness.withWriteAddPath(path, func() (bool, error) {
+		err := s.writeConfigFields(scope, fields)
+		return err == nil, err
+	})
 	if err != nil {
 		return err
 	}
@@ -657,24 +646,20 @@ func (s *ConfigStore) pinPreferredModelLocked(model SelectedModel) {
 // The write is protected by an in-process mutex and a cross-process flock.
 //
 // Like SetConfigFields, the write(s) and the staleness-snapshot refresh
-// happen under one fileStaleness mutex section so a concurrent ConfigStaleness() can
-// never observe the new on-disk mtime against a stale snapshot and mistake
-// this process's own write for an external change. See SetConfigFields for
+// happen under one fileStaleness.withWrite section; see its doc comment for
 // the full rationale.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	if scope != ScopeGlobal {
-		s.staleness.mu.Lock()
-		err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
-			v, sErr := sjson.Delete(string(data), key)
-			if sErr != nil {
-				return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
-			}
-			return []byte(v), nil
+		err := s.staleness.withWrite(func() (bool, error) {
+			err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+				v, sErr := sjson.Delete(string(data), key)
+				if sErr != nil {
+					return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+				}
+				return []byte(v), nil
+			})
+			return err == nil, err
 		})
-		if err == nil {
-			s.staleness.refreshLocked(nil)
-		}
-		s.staleness.mu.Unlock()
 		if err != nil {
 			return err
 		}
@@ -698,48 +683,45 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	// against a stand-in data path (test doubles that never call Load)
 	// still deserves ConfigPath(ScopeGlobal)'s own file cleared — that is
 	// the one layer this method's doc comment promises is never skipped.
-	s.staleness.mu.Lock()
 	paths := globalConfigPaths()
 	if s.globalDataPath != "" && !slices.Contains(paths, s.globalDataPath) {
 		paths = append(paths, s.globalDataPath)
 	}
 	var wrote bool
-	var errs []error
-	for _, path := range paths {
-		if _, err := os.Stat(path); err != nil {
-			continue // layer not present on this machine; nothing to clear
-		}
-		// atomicWrite returns nil for errAtomicWriteNoop (configfile.go),
-		// so a plain err == nil check cannot tell "this layer changed"
-		// from "this layer never had the key" — changed is set only on
-		// the branch that actually hands back new bytes, and wrote is
-		// driven off that instead of off the call's error.
-		var changed bool
-		ctx, cancel := configWriteContext()
-		err := s.file.atomicWrite(ctx, path, func(data []byte) ([]byte, error) {
-			if !gjson.GetBytes(data, key).Exists() {
-				return nil, errAtomicWriteNoop
+	err := s.staleness.withWrite(func() (bool, error) {
+		var errs []error
+		for _, path := range paths {
+			if _, err := os.Stat(path); err != nil {
+				continue // layer not present on this machine; nothing to clear
 			}
-			v, sErr := sjson.Delete(string(data), key)
-			if sErr != nil {
-				return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+			// atomicWrite returns nil for errAtomicWriteNoop (configfile.go),
+			// so a plain err == nil check cannot tell "this layer changed"
+			// from "this layer never had the key" — changed is set only on
+			// the branch that actually hands back new bytes, and wrote is
+			// driven off that instead of off the call's error.
+			var changed bool
+			ctx, cancel := configWriteContext()
+			err := s.file.atomicWrite(ctx, path, func(data []byte) ([]byte, error) {
+				if !gjson.GetBytes(data, key).Exists() {
+					return nil, errAtomicWriteNoop
+				}
+				v, sErr := sjson.Delete(string(data), key)
+				if sErr != nil {
+					return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+				}
+				changed = true
+				return []byte(v), nil
+			})
+			cancel()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", path, err))
+			} else if changed {
+				wrote = true
 			}
-			changed = true
-			return []byte(v), nil
-		})
-		cancel()
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", path, err))
-		} else if changed {
-			wrote = true
 		}
-	}
-	if wrote {
-		s.staleness.refreshLocked(nil)
-	}
-	s.staleness.mu.Unlock()
-
-	if err := errors.Join(errs...); err != nil {
+		return wrote, errors.Join(errs...)
+	})
+	if err != nil {
 		return err
 	}
 

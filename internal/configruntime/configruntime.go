@@ -6,9 +6,5 @@ import (
 )
 
 func Load(workingDir, dataDir string, debug bool) (*config.ConfigStore, error) {
-	return LoadWithProcessor(workingDir, dataDir, debug, providerload.New())
-}
-
-func LoadWithProcessor(workingDir, dataDir string, debug bool, processor config.RuntimeProcessor) (*config.ConfigStore, error) {
-	return config.LoadWithProcessor(workingDir, dataDir, debug, processor)
+	return config.LoadWithProcessor(workingDir, dataDir, debug, providerload.New())
 }

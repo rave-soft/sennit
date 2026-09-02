@@ -137,6 +137,41 @@ func (f *fileStaleness) capture(paths, requiredPaths []string, preRead map[strin
 	f.refreshLocked(preRead)
 }
 
+// withWrite runs fn, which performs a config-file write, and — if fn reports
+// wrote — refreshes every tracked path's snapshot before releasing the lock.
+// Holding f.mu across both halves is load-bearing: it is the only way to
+// close (not just narrow) the window in which a concurrent poll
+// (ConfigStaleness, the watcher, sennit_info) could observe the write's new
+// on-disk mtime against a snapshot that has not caught up yet and mistake
+// this process's own write for an external change. fn reports wrote
+// separately from err because a write that turns out to be a no-op (the key
+// was already absent, or a precondition failed) must return err == nil
+// without triggering a refresh — refreshing then would fold a real,
+// concurrent external change into the snapshot and hide it from the next
+// staleness check.
+func (f *fileStaleness) withWrite(fn func() (wrote bool, err error)) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	wrote, err := fn()
+	if wrote {
+		f.refreshLocked(nil)
+	}
+	return err
+}
+
+// withWriteAddPath is withWrite for a write whose target path might not
+// already be a tracked path: path is added to the tracked set (see
+// addAndRefreshLocked) as part of the same locked refresh.
+func (f *fileStaleness) withWriteAddPath(path string, fn func() (wrote bool, err error)) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	wrote, err := fn()
+	if wrote {
+		f.addAndRefreshLocked(path)
+	}
+	return err
+}
+
 func (f *fileStaleness) preReloadSnapshots() map[string]fileSnapshot {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -165,17 +200,5 @@ func (s *ConfigStore) ConfigStaleness() StalenessResult { return s.staleness.che
 // workspace paths. Callers that can race publication must hold writeMu while
 // reading those store-owned paths, as existing mutation and reload paths do.
 func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
-	s.captureStalenessSnapshot(paths, nil)
-}
-
-func (s *ConfigStore) captureStalenessSnapshot(paths []string, preRead map[string]fileSnapshot) {
-	s.staleness.capture(paths, []string{s.workspacePath.Get(), s.globalDataPath}, preRead)
-}
-
-func (s *ConfigStore) preReloadFileSnapshots() map[string]fileSnapshot {
-	return s.staleness.preReloadSnapshots()
-}
-
-func (s *ConfigStore) trackedConfigPathSet() map[string]struct{} {
-	return s.staleness.trackedPathSet()
+	s.staleness.capture(paths, []string{s.workspacePath.Get(), s.globalDataPath}, nil)
 }

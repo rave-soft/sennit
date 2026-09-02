@@ -132,6 +132,11 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 	var providers []catwalk.Provider
 	resolver := cfg.RuntimeResolver()
 	if opts.processor != nil {
+		// KnownProviders is intentionally left unset here: providers is only
+		// ever populated below, from the processor's own result, so there is
+		// nothing yet to hand it. RuntimeProcessor implementations (see
+		// internal/providerload) fall back to their own default catalog when
+		// it is empty.
 		result, err := opts.processor.Process(opts.ctx, RuntimeInput{
 			Config:          cfg,
 			Store:           store,
@@ -139,7 +144,6 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 			CredentialsHome: opts.credentialsFile.homeDir,
 			Stat:            opts.credentialsFile.stat,
 			Initial:         opts.migrateModelCache,
-			KnownProviders:  providers,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to configure providers: %w", err)

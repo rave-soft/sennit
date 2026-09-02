@@ -101,36 +101,69 @@ func (s *ConfigStore) mutateMCPToken(ctx context.Context, reservation *MCPTokenM
 
 	mutated := false
 	skipReason := ""
+	path, pathErr := s.ConfigPath(scope)
+	if pathErr != nil {
+		path = ""
+	}
 	// The write and the staleness-snapshot refresh happen under one
-	// fileStaleness mutex section, exactly as SetConfigFields and
-	// updateLockedErr do, so a concurrent ConfigStaleness()/watcher poll can
-	// never land between the on-disk write and the refresh and mistake this
-	// process's own token write for an external change. Before this fix the
-	// refresh ran after setConfig below, using
-	// CaptureStalenessSnapshot(loadedPaths+path) — narrowing the tracked set
-	// to only the files that loaded, and doing so well after the write had
-	// already landed on disk, wide open to that race. addAndRefreshLocked
-	// instead restats every path Load/reloadFromDisk already tracked
-	// (including global layers absent on disk) and only adds the scope's own
-	// path if it is somehow not already a member.
-	s.staleness.mu.Lock()
-	err := s.atomicWriteContext(ctx, scope, func(data []byte) ([]byte, error) {
-		if scope == ScopeGlobal {
-			// The full declaration is expected to live in this file, so the
-			// identity guard (command/url/etc. unchanged since reservation)
-			// still applies here, mirroring the in-memory checks above.
-			server := gjson.GetBytes(data, serverKey)
-			if !server.Exists() {
-				skipReason = "server declaration no longer present in the global config"
-				return nil, errAtomicWriteNoop
+	// fileStaleness.withWriteAddPath section, exactly as updateLockedErr's
+	// does; see fileStaleness.withWrite for why. Before this fix the refresh
+	// ran after setConfig below, using CaptureStalenessSnapshot(loadedPaths+
+	// path) — narrowing the tracked set to only the files that loaded, and
+	// doing so well after the write had already landed on disk, wide open to
+	// that race. addAndRefreshLocked instead restats every path Load/
+	// reloadFromDisk already tracked (including global layers absent on
+	// disk) and only adds the scope's own path if it is somehow not already
+	// a member.
+	//
+	// mutated (not err == nil) is what gates the refresh: atomicWrite
+	// returns nil for the errAtomicWriteNoop skips below too, and refreshing
+	// on a skip would fold a real concurrent external change into the
+	// snapshot instead of reporting it.
+	err := s.staleness.withWriteAddPath(path, func() (bool, error) {
+		err := s.atomicWriteContext(ctx, scope, func(data []byte) ([]byte, error) {
+			if scope == ScopeGlobal {
+				// The full declaration is expected to live in this file, so the
+				// identity guard (command/url/etc. unchanged since reservation)
+				// still applies here, mirroring the in-memory checks above.
+				server := gjson.GetBytes(data, serverKey)
+				if !server.Exists() {
+					skipReason = "server declaration no longer present in the global config"
+					return nil, errAtomicWriteNoop
+				}
+				var disk MCPConfig
+				if err := json.Unmarshal([]byte(server.Raw), &disk); err != nil {
+					return nil, fmt.Errorf("decode MCP config %s: %w", reservation.name, err)
+				}
+				if disk.Disabled || !sameMCPIdentity(disk, reservation.expected) ||
+					!reflect.DeepEqual(disk.OAuthToken, expectedToken) {
+					skipReason = "on-disk MCP config changed since reservation"
+					return nil, errAtomicWriteNoop
+				}
+				mutated = true
+				if clear {
+					return sjson.DeleteBytes(data, tokenKey)
+				}
+				return sjson.SetBytes(data, tokenKey, token)
 			}
-			var disk MCPConfig
-			if err := json.Unmarshal([]byte(server.Raw), &disk); err != nil {
-				return nil, fmt.Errorf("decode MCP config %s: %w", reservation.name, err)
+
+			// ScopeWorkspace: the server may be declared only in a
+			// project-scoped config, so this file can hold nothing but a
+			// token-only overlay (mcp.<name>.oauth_token) with no identity
+			// fields to compare against. sameMCPIdentity cannot apply here;
+			// the epoch/ownership/token checks already taken above under
+			// writeMu are what guards this write, plus comparing against
+			// whatever token the overlay already holds.
+			diskToken := gjson.GetBytes(data, tokenKey)
+			var current *oauth.Token
+			if diskToken.Exists() {
+				current = &oauth.Token{}
+				if err := json.Unmarshal([]byte(diskToken.Raw), current); err != nil {
+					return nil, fmt.Errorf("decode MCP token %s: %w", reservation.name, err)
+				}
 			}
-			if disk.Disabled || !sameMCPIdentity(disk, reservation.expected) ||
-				!reflect.DeepEqual(disk.OAuthToken, expectedToken) {
-				skipReason = "on-disk MCP config changed since reservation"
+			if !reflect.DeepEqual(current, expectedToken) {
+				skipReason = "on-disk MCP token overlay changed since reservation"
 				return nil, errAtomicWriteNoop
 			}
 			mutated = true
@@ -138,41 +171,9 @@ func (s *ConfigStore) mutateMCPToken(ctx context.Context, reservation *MCPTokenM
 				return sjson.DeleteBytes(data, tokenKey)
 			}
 			return sjson.SetBytes(data, tokenKey, token)
-		}
-
-		// ScopeWorkspace: the server may be declared only in a
-		// project-scoped config, so this file can hold nothing but a
-		// token-only overlay (mcp.<name>.oauth_token) with no identity
-		// fields to compare against. sameMCPIdentity cannot apply here;
-		// the epoch/ownership/token checks already taken above under
-		// writeMu are what guards this write, plus comparing against
-		// whatever token the overlay already holds.
-		diskToken := gjson.GetBytes(data, tokenKey)
-		var current *oauth.Token
-		if diskToken.Exists() {
-			current = &oauth.Token{}
-			if err := json.Unmarshal([]byte(diskToken.Raw), current); err != nil {
-				return nil, fmt.Errorf("decode MCP token %s: %w", reservation.name, err)
-			}
-		}
-		if !reflect.DeepEqual(current, expectedToken) {
-			skipReason = "on-disk MCP token overlay changed since reservation"
-			return nil, errAtomicWriteNoop
-		}
-		mutated = true
-		if clear {
-			return sjson.DeleteBytes(data, tokenKey)
-		}
-		return sjson.SetBytes(data, tokenKey, token)
+		})
+		return mutated, err
 	})
-	if err == nil && mutated {
-		path, pathErr := s.ConfigPath(scope)
-		if pathErr != nil {
-			path = ""
-		}
-		s.staleness.addAndRefreshLocked(path)
-	}
-	s.staleness.mu.Unlock()
 	if err != nil || !mutated {
 		if err == nil {
 			slog.Warn("Skipped persisting MCP OAuth token", "server", reservation.name, "scope", scope, "reason", skipReason)

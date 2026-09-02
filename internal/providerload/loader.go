@@ -1,7 +1,6 @@
 package providerload
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -11,7 +10,6 @@ import (
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/migrate"
 	"github.com/rave-soft/sennit/internal/csync"
@@ -40,7 +38,7 @@ func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config
 	cfg := input.Config
 	knownProviders := input.KnownProviders
 	if knownProviders == nil {
-		knownProviders = providers(cfg)
+		knownProviders = providerruntime.Providers(cfg)
 	}
 	if input.Initial {
 		migrate.BloatedModelCache(input.GlobalDataPath, knownProviders, func(path, providerID string, models []catwalk.Model) error {
@@ -81,13 +79,6 @@ func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config
 		runtimeProviders.Set(id, provider)
 	}
 	return config.RuntimeResult{KnownProviders: knownProviders, RuntimeProviders: runtimeProviders, Resolver: cfg.RuntimeResolver()}, nil
-}
-
-func providers(cfg *config.Config) []catwalk.Provider {
-	if cfg.Options.DisableDefaultProviders {
-		return nil
-	}
-	return append(embedded.GetAll(), providerruntime.CodexProvider())
 }
 
 //nolint:unparam // The error result keeps provider pipeline stages uniformly fallible.
@@ -227,5 +218,3 @@ func providerProblem(id, message, hint string) config.Problem {
 func providerDropProblem(id, reason, hint string) config.Problem {
 	return providerProblem(id, fmt.Sprintf("provider %s dropped: %s", id, reason), hint)
 }
-
-var _ = cmp.Or[string]

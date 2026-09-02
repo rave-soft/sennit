@@ -228,7 +228,7 @@ func TestSetMCPToken_IgnoresOwnWrite(t *testing.T) {
 	store, err := LoadData(workingDir, "", false)
 	require.NoError(t, err)
 
-	before := store.trackedConfigPathSet()
+	before := store.staleness.trackedPathSet()
 	require.NotEmpty(t, before, "a loaded store should already be tracking its candidate config paths")
 
 	mcp, ok := store.Config().MCP["server"]
@@ -244,7 +244,7 @@ func TestSetMCPToken_IgnoresOwnWrite(t *testing.T) {
 		"SetMCPToken's own write must not be mistaken for an external change:%s",
 		describeExternalChange(t, store))
 
-	after := store.trackedConfigPathSet()
+	after := store.staleness.trackedPathSet()
 	require.Equal(t, before, after,
 		"SetMCPToken must not narrow the tracked path set down to loadedPaths+its own path")
 }
