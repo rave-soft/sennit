@@ -32,37 +32,38 @@ func (t fileTracking) RecordEdit(ctx context.Context, sessionID, path string, st
 }
 
 func (t fileTracking) ReadCoverage(ctx context.Context, sessionID, path string) tools.FileCoverage {
-	coverage := t.service.ReadCoverage(ctx, sessionID, path)
-	ranges := make([]tools.FileLineRange, len(coverage.Ranges))
-	for i, r := range coverage.Ranges {
-		ranges[i] = tools.FileLineRange{Start: r.Start, End: r.End}
-	}
-	return tools.FileCoverage{Full: coverage.Full, Ranges: ranges}
+	// filetracker.Coverage and tools.FileCoverage are the same type (both
+	// alias internal/filetracker/coverage.Coverage), so no conversion is
+	// needed here.
+	return t.service.ReadCoverage(ctx, sessionID, path)
 }
 
 func (t fileTracking) LastReadTime(ctx context.Context, sessionID, path string) time.Time {
 	return t.service.LastReadTime(ctx, sessionID, path)
 }
 
-// todoSessions adapts the session store's larger API to the tools-owned port.
-type todoSessions struct {
-	get func(context.Context, string) (session.Session, error)
-	set func(context.Context, string, []session.Todo) error
-}
-
-func newTodoSessions(service interface {
+// todoSessionService is the slice of the session store this adapter needs.
+// sessionstore.Service satisfies it structurally, so nothing here pins the
+// concrete store type — but its Get returns a whole session.Session where
+// tools.TodoSessions wants just the todo list, so a real (if small)
+// adaptation is still needed and this type can't just be handed through.
+type todoSessionService interface {
 	Get(context.Context, string) (session.Session, error)
 	SetTodos(context.Context, string, []session.Todo) error
-},
-) tools.TodoSessions {
+}
+
+// todoSessions adapts the session store's larger API to the tools-owned port.
+type todoSessions struct{ service todoSessionService }
+
+func newTodoSessions(service todoSessionService) tools.TodoSessions {
 	if service == nil {
 		return nil
 	}
-	return todoSessions{get: service.Get, set: service.SetTodos}
+	return todoSessions{service: service}
 }
 
 func (s todoSessions) Todos(ctx context.Context, sessionID string) ([]session.Todo, error) {
-	current, err := s.get(ctx, sessionID)
+	current, err := s.service.Get(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,5 +71,5 @@ func (s todoSessions) Todos(ctx context.Context, sessionID string) ([]session.To
 }
 
 func (s todoSessions) SetTodos(ctx context.Context, sessionID string, todos []session.Todo) error {
-	return s.set(ctx, sessionID, todos)
+	return s.service.SetTodos(ctx, sessionID, todos)
 }

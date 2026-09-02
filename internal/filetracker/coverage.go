@@ -3,144 +3,22 @@ package filetracker
 import (
 	"encoding/json"
 	"log/slog"
-	"slices"
+
+	"github.com/rave-soft/sennit/internal/filetracker/coverage"
 )
 
-// LineRange is an inclusive, 1-based span of lines.
-type LineRange struct {
-	Start int
-	End   int
-}
+// Coverage and LineRange are aliases onto the leaf coverage package so
+// callers here keep their existing names. The interval arithmetic itself
+// (Covers, Empty, Add, Shift) lives there — see that package's doc comment
+// for why it had to move out of filetracker: internal/agent/tools needs
+// the same logic but must not import filetracker, which pulls in
+// internal/db.
+type Coverage = coverage.Coverage
 
-// Coverage is how much of a file a session has actually seen. Full means
-// the whole file was read and Ranges is irrelevant; otherwise Ranges holds
-// the merged, sorted spans that were.
-//
-// The distinction matters because the read tool serves windows: a read of
-// lines 1-50 of a 2000-line file used to record the same "this file was
-// read" fact as a read of all of it, which let an edit land on line 1900
-// with nothing to check it against.
-type Coverage struct {
-	Full   bool
-	Ranges []LineRange
-}
+type LineRange = coverage.LineRange
 
 // FullCoverage is the coverage of a file that was read end to end.
-var FullCoverage = Coverage{Full: true}
-
-// Covers reports whether every line in [start, end] was read. A file never
-// read at all has no coverage; a fully read one covers everything.
-//
-// A span that runs past the end of the recorded ranges is not covered:
-// lines can only have been read if they were in a window that was served.
-func (c Coverage) Covers(start, end int) bool {
-	if c.Full {
-		return true
-	}
-	if start > end {
-		start, end = end, start
-	}
-	for _, r := range c.Ranges {
-		if r.Start > start {
-			// Ranges are sorted and merged, so a gap here means the
-			// remaining ranges start even later.
-			return false
-		}
-		if r.End >= end {
-			return true
-		}
-		if r.End >= start {
-			// Partially covered: the tail continues past this range, and
-			// a merged range list has a gap after it by construction.
-			return false
-		}
-	}
-	return false
-}
-
-// Empty reports whether nothing at all has been read.
-func (c Coverage) Empty() bool {
-	return !c.Full && len(c.Ranges) == 0
-}
-
-// Add returns the coverage with r merged in. Adjacent and overlapping
-// ranges are fused, so reading lines 1-50 and then 51-100 yields a single
-// 1-100 span and an edit spanning that boundary is allowed.
-func (c Coverage) Add(r LineRange) Coverage {
-	if c.Full {
-		return c
-	}
-	if r.Start > r.End {
-		r.Start, r.End = r.End, r.Start
-	}
-	if r.Start < 1 {
-		r.Start = 1
-	}
-
-	merged := append(slices.Clone(c.Ranges), r)
-	slices.SortFunc(merged, func(a, b LineRange) int { return a.Start - b.Start })
-
-	out := merged[:1]
-	for _, next := range merged[1:] {
-		last := &out[len(out)-1]
-		if next.Start <= last.End+1 {
-			last.End = max(last.End, next.End)
-			continue
-		}
-		out = append(out, next)
-	}
-	return Coverage{Ranges: out}
-}
-
-// Shift returns the coverage renumbered after an edit that replaced the
-// lines [start, end] with delta more (or, negative, fewer) of them.
-// Coverage is line numbers, so it has to move when the lines under it do:
-// without this, editing near the top of a file silently slides every
-// range recorded below the edit out of alignment with the text it stands
-// for.
-//
-// A range overlapping the edit keeps its start and absorbs the delta: the
-// session read that whole region and has just been shown the replacement,
-// so it is still covered. Ranges wholly below the edit move by delta;
-// ranges wholly above are untouched.
-func (c Coverage) Shift(start, end, delta int) Coverage {
-	if c.Full || delta == 0 || len(c.Ranges) == 0 {
-		return c
-	}
-	// shift maps one line number through the edit. Anything above it
-	// stays; anything below moves by delta; anything inside lands on the
-	// replacement, whose new extent is [start, end+delta].
-	shift := func(line int, inside int) int {
-		switch {
-		case line < start:
-			return line
-		case line > end:
-			return line + delta
-		default:
-			return inside
-		}
-	}
-	out := make([]LineRange, 0, len(c.Ranges))
-	for _, r := range c.Ranges {
-		// Both ends go through the same mapping — the end used to absorb
-		// delta on its own and then be clamped up to the start whenever
-		// that pushed it below. For a range whose start lies inside a
-		// shrinking edit that clamp collapsed it to a single line, so
-		// everything the session had in fact read below the edit was
-		// recorded as unread, and the next edit to those lines was
-		// refused as "read the file first".
-		r.Start, r.End = shift(r.Start, start), shift(r.End, end+delta)
-		if r.End < r.Start {
-			// The edit removed every line this range stood for.
-			continue
-		}
-		out = append(out, r)
-	}
-	if len(out) == 0 {
-		return Coverage{}
-	}
-	return Coverage{Ranges: out}
-}
+var FullCoverage = coverage.FullCoverage
 
 // encodeRanges serializes coverage for storage: the empty string for a
 // full read (which is also what rows written before ranges existed hold,
