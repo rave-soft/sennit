@@ -7,7 +7,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -67,7 +66,7 @@ func typeIntoProviderSettings(t *testing.T, m *ProviderSettings, s string) {
 // does not.
 func TestProviderSettings_RotateThreshold_ShowsThresholdNotCooldown(t *testing.T) {
 	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
-	m := newProviderSettings(com, "codex", accounts.Capabilities{RotateOn: accounts.RotateThreshold})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
 
 	require.Equal(t, []providerSettingsField{
 		providerSettingsFieldProxy, providerSettingsFieldEnabled, providerSettingsFieldThreshold,
@@ -78,7 +77,7 @@ func TestProviderSettings_RotateThreshold_ShowsThresholdNotCooldown(t *testing.T
 // symmetric case for a 429-triggered provider.
 func TestProviderSettings_RotateRateLimit_ShowsCooldownNotThreshold(t *testing.T) {
 	com := newProviderSettingsTestCommon(t, "opencode", config.ProviderConfig{})
-	m := newProviderSettings(com, "opencode", accounts.Capabilities{RotateOn: accounts.RotateRateLimit})
+	m := newProviderSettings(com, "opencode", workspace.AccountCapabilities{RotateOn: workspace.RotateRateLimit})
 
 	require.Equal(t, []providerSettingsField{
 		providerSettingsFieldProxy, providerSettingsFieldEnabled, providerSettingsFieldCooldown,
@@ -91,7 +90,7 @@ func TestProviderSettings_RotateRateLimit_ShowsCooldownNotThreshold(t *testing.T
 // either in the focusable field list or in what Draw renders.
 func TestProviderSettings_RotateNever_NoRotationControls(t *testing.T) {
 	com := newProviderSettingsTestCommon(t, "solo", config.ProviderConfig{})
-	m := newProviderSettings(com, "solo", accounts.Capabilities{RotateOn: accounts.RotateNever})
+	m := newProviderSettings(com, "solo", workspace.AccountCapabilities{RotateOn: workspace.RotateNever})
 
 	require.Equal(t, []providerSettingsField{providerSettingsFieldProxy}, m.fields,
 		"a RotateNever provider must offer only the proxy field")
@@ -106,7 +105,7 @@ func TestProviderSettings_PrefillsProxyAndRotationFromConfig(t *testing.T) {
 		ProxyURL: "http://provider-proxy.example:8080",
 		Rotation: &config.RotationConfig{Enabled: true, MinRemainingPercent: 25},
 	})
-	m := newProviderSettings(com, "codex", accounts.Capabilities{RotateOn: accounts.RotateThreshold})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
 
 	require.Equal(t, "http://provider-proxy.example:8080", m.proxy.Value())
 	require.True(t, m.enabled)
@@ -118,7 +117,7 @@ func TestProviderSettings_PrefillsProxyAndRotationFromConfig(t *testing.T) {
 // submit.
 func TestProviderSettings_InvalidProxyRejectedBeforeSaving(t *testing.T) {
 	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
-	m := newProviderSettings(com, "codex", accounts.Capabilities{RotateOn: accounts.RotateThreshold})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
 	typeIntoProviderSettings(t, m, "://not-a-url")
 
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -132,7 +131,7 @@ func TestProviderSettings_InvalidProxyRejectedBeforeSaving(t *testing.T) {
 // value ever reaches config so the user sees the error immediately.
 func TestProviderSettings_ThresholdOutOfRangeRejectedBeforeSaving(t *testing.T) {
 	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
-	m := newProviderSettings(com, "codex", accounts.Capabilities{RotateOn: accounts.RotateThreshold})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
 	m.advanceFocus(2) // Proxy -> Enabled -> Threshold
 	require.Equal(t, providerSettingsFieldThreshold, m.currentField())
 	typeIntoProviderSettings(t, m, "150")
@@ -146,7 +145,7 @@ func TestProviderSettings_ThresholdOutOfRangeRejectedBeforeSaving(t *testing.T) 
 // analogue of the threshold range check above.
 func TestProviderSettings_CooldownInvalidRejectedBeforeSaving(t *testing.T) {
 	com := newProviderSettingsTestCommon(t, "opencode", config.ProviderConfig{})
-	m := newProviderSettings(com, "opencode", accounts.Capabilities{RotateOn: accounts.RotateRateLimit})
+	m := newProviderSettings(com, "opencode", workspace.AccountCapabilities{RotateOn: workspace.RotateRateLimit})
 	m.advanceFocus(2) // Proxy -> Enabled -> Cooldown
 	require.Equal(t, providerSettingsFieldCooldown, m.currentField())
 	typeIntoProviderSettings(t, m, "not-a-duration")
@@ -165,7 +164,7 @@ func TestProviderSettings_CooldownInvalidRejectedBeforeSaving(t *testing.T) {
 func TestProviderSettings_SubmitCarriesRotationOnlyWhenApplicable(t *testing.T) {
 	t.Run("RotateNever", func(t *testing.T) {
 		com := newProviderSettingsTestCommon(t, "solo", config.ProviderConfig{})
-		m := newProviderSettings(com, "solo", accounts.Capabilities{RotateOn: accounts.RotateNever})
+		m := newProviderSettings(com, "solo", workspace.AccountCapabilities{RotateOn: workspace.RotateNever})
 
 		action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 		submit, ok := action.(ActionSubmitProviderSettings)
@@ -175,7 +174,7 @@ func TestProviderSettings_SubmitCarriesRotationOnlyWhenApplicable(t *testing.T) 
 
 	t.Run("RotateThreshold", func(t *testing.T) {
 		com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
-		m := newProviderSettings(com, "codex", accounts.Capabilities{RotateOn: accounts.RotateThreshold})
+		m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
 		m.advanceFocus(2)
 		typeIntoProviderSettings(t, m, "15")
 
@@ -189,7 +188,7 @@ func TestProviderSettings_SubmitCarriesRotationOnlyWhenApplicable(t *testing.T) 
 
 	t.Run("RotateRateLimit", func(t *testing.T) {
 		com := newProviderSettingsTestCommon(t, "opencode", config.ProviderConfig{})
-		m := newProviderSettings(com, "opencode", accounts.Capabilities{RotateOn: accounts.RotateRateLimit})
+		m := newProviderSettings(com, "opencode", workspace.AccountCapabilities{RotateOn: workspace.RotateRateLimit})
 		m.advanceFocus(2)
 		typeIntoProviderSettings(t, m, "15m")
 
@@ -213,7 +212,7 @@ func TestProviderSettings_SubmitPreservesAccountOrder(t *testing.T) {
 			Order:   []string{"acc_work", "acc_personal"},
 		},
 	})
-	m := newProviderSettings(com, "codex", accounts.Capabilities{RotateOn: accounts.RotateThreshold})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
 
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	submit, ok := action.(ActionSubmitProviderSettings)

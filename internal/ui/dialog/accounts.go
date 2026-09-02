@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // AccountsID is the identifier for the accounts dialog.
@@ -58,7 +59,7 @@ type Accounts struct {
 	err        error
 	sd         *selectDialog      // built once accounts are loaded; nil until then
 	accs       []accounts.Account // last loaded set, kept for e/d's lookup by ID
-	caps       accounts.Capabilities
+	caps       workspace.AccountCapabilities
 	keyMap     struct{ Edit, Delete, Refresh key.Binding }
 }
 
@@ -72,7 +73,7 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 		com:        com,
 		providerID: providerID,
 		state:      accountsStateLoading,
-		caps:       accounts.CapabilitiesOf(providerID),
+		caps:       com.Workspace.AccountCapabilities(providerID),
 	}
 	m.spinner = newOAuthSpinner(com.Styles)
 	// ctrl+x for delete mirrors sessions.go's Delete binding — this list is
@@ -277,7 +278,7 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 // disabled one) via [Accounts.activateAccountCmd].
 func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfig {
 	activeAccountID := m.currentActiveAccountID()
-	caps := accounts.CapabilitiesOf(m.providerID)
+	caps := m.com.Workspace.AccountCapabilities(m.providerID)
 	t := m.com.Styles
 	providerID := m.providerID
 
@@ -478,7 +479,7 @@ type AccountItem struct {
 	list.BaseItem
 	account accounts.Account
 	active  bool
-	caps    accounts.Capabilities
+	caps    workspace.AccountCapabilities
 	t       *styles.Styles
 }
 

@@ -74,6 +74,21 @@ func (w *accountsTestWorkspace) ActivateAccount(scope config.Scope, providerID, 
 	return w.activateErr
 }
 
+// AccountCapabilities mirrors the real accounts.CapabilitiesOf the dialog
+// used to call directly, so tests that depend on "codex" reporting usage
+// (or another provider's RotateOn) still see production behavior.
+func (w accountsTestWorkspace) AccountCapabilities(providerID string) workspace.AccountCapabilities {
+	c := accounts.CapabilitiesOf(providerID)
+	rotateOn := workspace.RotateNever
+	switch c.RotateOn {
+	case accounts.RotateThreshold:
+		rotateOn = workspace.RotateThreshold
+	case accounts.RotateRateLimit:
+		rotateOn = workspace.RotateRateLimit
+	}
+	return workspace.AccountCapabilities{Usage: c.Usage, RotateOn: rotateOn}
+}
+
 func (w *accountsTestWorkspace) RefreshAccountLimits(_ context.Context, providerID string) ([]accounts.Account, error) {
 	w.refreshCalls++
 	w.lastRefreshedProviderID = providerID

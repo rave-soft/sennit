@@ -13,9 +13,9 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/proxyhttp"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // ProviderSettingsID is the identifier for the provider settings dialog.
@@ -25,16 +25,17 @@ const providerSettingsMaxWidth = 60
 
 // providerSettingsField indexes this dialog's focusable fields. Which ones
 // actually exist for a given provider is decided once, in
-// NewProviderSettings, from accounts.CapabilitiesOf(providerID).RotateOn.
+// NewProviderSettings, from
+// com.Workspace.AccountCapabilities(providerID).RotateOn.
 type providerSettingsField int
 
 const (
 	providerSettingsFieldProxy providerSettingsField = iota
 	providerSettingsFieldEnabled
-	// providerSettingsFieldThreshold exists only for accounts.RotateThreshold
+	// providerSettingsFieldThreshold exists only for workspace.RotateThreshold
 	// providers (Codex: it reports remaining allowance).
 	providerSettingsFieldThreshold
-	// providerSettingsFieldCooldown exists only for accounts.RotateRateLimit
+	// providerSettingsFieldCooldown exists only for workspace.RotateRateLimit
 	// providers (everyone else: rotation triggers on HTTP 429).
 	providerSettingsFieldCooldown
 )
@@ -55,7 +56,7 @@ type ProviderSettings struct {
 	com *common.Common
 
 	providerID string
-	caps       accounts.Capabilities
+	caps       workspace.AccountCapabilities
 
 	proxy     textinput.Model
 	enabled   bool
@@ -95,21 +96,22 @@ var _ Dialog = (*ProviderSettings)(nil)
 
 // NewProviderSettings creates the settings form for providerID, prefilled
 // from its current config. Which fields it offers is driven entirely by
-// accounts.CapabilitiesOf(providerID).RotateOn: a RotateNever provider gets
-// only the proxy field; RotateThreshold adds the remaining-allowance
-// threshold; RotateRateLimit adds the post-429 cooldown instead — never
-// both, and never a field config validation would reject (see
-// providerload's rotation validation).
+// com.Workspace.AccountCapabilities(providerID).RotateOn: a RotateNever
+// provider gets only the proxy field; RotateThreshold adds the
+// remaining-allowance threshold; RotateRateLimit adds the post-429
+// cooldown instead — never both, and never a field config validation
+// would reject (see providerload's rotation validation).
 func NewProviderSettings(com *common.Common, providerID string) *ProviderSettings {
-	return newProviderSettings(com, providerID, accounts.CapabilitiesOf(providerID))
+	return newProviderSettings(com, providerID, com.Workspace.AccountCapabilities(providerID))
 }
 
 // newProviderSettings is NewProviderSettings with caps passed in rather
-// than looked up, so tests can exercise the accounts.RotateNever branch
-// directly — accounts.CapabilitiesOf never actually returns RotateNever
-// for any provider in its current registry, but the field-hiding logic
-// below still has to honor it if a provider registry entry ever does.
-func newProviderSettings(com *common.Common, providerID string, caps accounts.Capabilities) *ProviderSettings {
+// than looked up, so tests can exercise the workspace.RotateNever branch
+// directly — the backing accounts.CapabilitiesOf never actually returns
+// RotateNever for any provider in its current registry, but the
+// field-hiding logic below still has to honor it if a provider registry
+// entry ever does.
+func newProviderSettings(com *common.Common, providerID string, caps workspace.AccountCapabilities) *ProviderSettings {
 	pc, _ := com.Config().Providers.Get(providerID)
 
 	m := &ProviderSettings{
@@ -128,7 +130,7 @@ func newProviderSettings(com *common.Common, providerID string, caps accounts.Ca
 	m.proxy.SetValue(pc.ProxyURL)
 	m.proxy.Focus()
 
-	if caps.RotateOn != accounts.RotateNever {
+	if caps.RotateOn != workspace.RotateNever {
 		m.fields = append(m.fields, providerSettingsFieldEnabled)
 		m.enabled = pc.Rotation != nil && pc.Rotation.Enabled
 		if pc.Rotation != nil {
@@ -136,21 +138,21 @@ func newProviderSettings(com *common.Common, providerID string, caps accounts.Ca
 		}
 
 		switch caps.RotateOn {
-		case accounts.RotateThreshold:
+		case workspace.RotateThreshold:
 			m.fields = append(m.fields, providerSettingsFieldThreshold)
 			m.threshold = textinput.New()
 			m.threshold.SetVirtualCursor(false)
-			m.threshold.Placeholder = fmt.Sprintf("1-99, default %d", accounts.DefaultMinRemainingPercent)
+			m.threshold.Placeholder = fmt.Sprintf("1-99, default %d", workspace.DefaultMinRemainingPercent)
 			m.threshold.SetStyles(com.Styles.TextInput)
 			m.threshold.Prompt = "> "
 			if pc.Rotation != nil && pc.Rotation.MinRemainingPercent != 0 {
 				m.threshold.SetValue(strconv.Itoa(pc.Rotation.MinRemainingPercent))
 			}
-		case accounts.RotateRateLimit:
+		case workspace.RotateRateLimit:
 			m.fields = append(m.fields, providerSettingsFieldCooldown)
 			m.cooldown = textinput.New()
 			m.cooldown.SetVirtualCursor(false)
-			m.cooldown.Placeholder = "e.g. 10m, default " + accounts.DefaultCooldown.String()
+			m.cooldown.Placeholder = "e.g. 10m, default " + workspace.DefaultCooldown.String()
 			m.cooldown.SetStyles(com.Styles.TextInput)
 			m.cooldown.Prompt = "> "
 			if pc.Rotation != nil {
@@ -265,7 +267,7 @@ func (m *ProviderSettings) updateFocusedInput(msg tea.Msg) Action {
 // anything the form does not offer has to be preserved explicitly or it is
 // lost.
 //
-// Rotation is left nil when the provider is accounts.RotateNever — there is
+// Rotation is left nil when the provider is workspace.RotateNever — there is
 // nothing to save for it, and the caller (applyProviderDialogAction) skips
 // the rotation write entirely in that case rather than persisting an empty
 // object. The threshold/cooldown range and format checks mirror
@@ -280,10 +282,10 @@ func (m *ProviderSettings) submit() Action {
 	}
 
 	var rotation *config.RotationConfig
-	if m.caps.RotateOn != accounts.RotateNever {
+	if m.caps.RotateOn != workspace.RotateNever {
 		rotation = &config.RotationConfig{Enabled: m.enabled, Order: m.order}
 		switch m.caps.RotateOn {
-		case accounts.RotateThreshold:
+		case workspace.RotateThreshold:
 			if raw := strings.TrimSpace(m.threshold.Value()); raw != "" {
 				value, err := strconv.Atoi(raw)
 				if err != nil || value < 1 || value > 99 {
@@ -292,7 +294,7 @@ func (m *ProviderSettings) submit() Action {
 				}
 				rotation.MinRemainingPercent = value
 			}
-		case accounts.RotateRateLimit:
+		case workspace.RotateRateLimit:
 			if raw := strings.TrimSpace(m.cooldown.Value()); raw != "" {
 				d, err := time.ParseDuration(raw)
 				if err != nil || d <= 0 {
@@ -340,9 +342,9 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	m.proxy.SetWidth(dialogInputTextWidth(t, m.proxy, innerWidth))
 	switch m.caps.RotateOn {
-	case accounts.RotateThreshold:
+	case workspace.RotateThreshold:
 		m.threshold.SetWidth(dialogInputTextWidth(t, m.threshold, innerWidth))
-	case accounts.RotateRateLimit:
+	case workspace.RotateRateLimit:
 		m.cooldown.SetWidth(dialogInputTextWidth(t, m.cooldown, innerWidth))
 	}
 
@@ -366,13 +368,13 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.fieldRow = make(map[providerSettingsField]int, len(m.fields))
 	addField(providerSettingsFieldProxy, "Proxy (optional)", m.proxy)
 
-	if m.caps.RotateOn != accounts.RotateNever {
+	if m.caps.RotateOn != workspace.RotateNever {
 		addPart(labelStyle.Render("Rotate accounts automatically") + "  " + m.enabledView())
 		switch m.caps.RotateOn {
-		case accounts.RotateThreshold:
+		case workspace.RotateThreshold:
 			addPart(t.Dialog.SecondaryText.Render("Switches when the remaining limit drops below the threshold."))
 			addField(providerSettingsFieldThreshold, "Remaining-allowance threshold, %", m.threshold)
-		case accounts.RotateRateLimit:
+		case workspace.RotateRateLimit:
 			addPart(t.Dialog.SecondaryText.Render("Switches when the provider answers with a rate-limit error."))
 			addField(providerSettingsFieldCooldown, "Cooldown after a rate limit", m.cooldown)
 		}

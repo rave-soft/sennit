@@ -10,8 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/home"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -80,9 +80,9 @@ func FormatPlanUsage(plan string, windows []PlanWindow, label string) string {
 // into the shape FormatPlanUsage takes. Mirrors the model package's
 // conversion for codex.Usage (see sidebar.go's planWindows) — same shape,
 // different type, so there is no shared function to call instead.
-func AccountUsageWindows(u accounts.Usage) []PlanWindow {
+func AccountUsageWindows(u workspace.Usage) []PlanWindow {
 	var windows []PlanWindow
-	for _, w := range []accounts.UsageWindow{u.Primary, u.Secondary} {
+	for _, w := range []workspace.UsageWindow{u.Primary, u.Secondary} {
 		if !w.Known() {
 			continue
 		}

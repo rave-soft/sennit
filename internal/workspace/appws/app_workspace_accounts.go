@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- Accounts --
@@ -103,4 +104,19 @@ func (w *AppWorkspace) CustomProviderTypes() []string {
 // KnownProviders implements Workspace.
 func (w *AppWorkspace) KnownProviders() []catwalk.Provider {
 	return w.store.KnownProviders()
+}
+
+// AccountCapabilities converts the accounts package's capability record
+// into the contract's own shape, so internal/ui can render the settings
+// dialog without importing internal/providers/accounts for it.
+func (w *AppWorkspace) AccountCapabilities(providerID string) workspace.AccountCapabilities {
+	c := accounts.CapabilitiesOf(providerID)
+	rotateOn := workspace.RotateNever
+	switch c.RotateOn {
+	case accounts.RotateThreshold:
+		rotateOn = workspace.RotateThreshold
+	case accounts.RotateRateLimit:
+		rotateOn = workspace.RotateRateLimit
+	}
+	return workspace.AccountCapabilities{Usage: c.Usage, RotateOn: rotateOn}
 }
