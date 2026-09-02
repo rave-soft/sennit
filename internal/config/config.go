@@ -580,14 +580,6 @@ type Config struct {
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
-	// resolvedEnv holds the Env entries after resolution, computed once
-	// when the Config is assembled. Only this half is cached: resolving an
-	// entry may execute a "$(cmd)", and doing that per resolved value ran
-	// the command once per value instead of once per build. The process
-	// environment itself is re-read on every RuntimeEnvironment call, so a
-	// rotated "$MY_KEY" is still picked up — see that method.
-	resolvedEnv map[string]string
-
 	// Agents holds both the built-in agents and any the user defines.
 	// SetupAgents populates this from .sennit/agents/*.md files (via
 	// discoverMarkdownAgents) plus the two built-ins; nothing decodes user
@@ -630,9 +622,7 @@ type Config struct {
 // copied too, so a mutator can rewrite one provider's credentials without
 // racing a reader iterating the old map; the remaining fields are
 // immutable after load from the mutators' standpoint and are likewise
-// shared. That includes resolvedEnv: credential and option writes never
-// touch Env, so the struct copy above sharing the already-resolved
-// entries with the clone is correct, not a shortcut.
+// shared.
 func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.RecentModels = slices.Clone(c.RecentModels)
