@@ -762,6 +762,18 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 			slog.Warn("Failed to update parent session cost", "child_session", sessionID, "parent_session", params.SessionID, "error", costErr)
 		}
 	}
+	// A run cancelled by the caller's context (app shutdown, a parent run
+	// being torn down, an explicit TaskManager.Cancel racing this one) must
+	// come back as a Go error, not as finishSubAgent's text-error response:
+	// folding it into text loses the sentinel, and subAgentTaskRun would
+	// rebuild it with errors.New(resp.Content), which thread.lifecycle's
+	// errors.Is(err, context.Canceled) check can no longer match — the
+	// delegation is then finalized as failed instead of cancelled. A model
+	// or provider failure has no such sentinel to preserve, so it still
+	// goes through finishSubAgent below, unchanged.
+	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil) {
+		return fantasy.ToolResponse{}, err
+	}
 	return d.finishSubAgent(subAgentOutcome{result: result, err: err}), nil
 }
 

@@ -410,6 +410,62 @@ func TestRunSubAgent(t *testing.T) {
 	})
 }
 
+// TestSubAgentTaskRun_Cancellation proves that a sub-agent run cancelled by
+// its context (app shutdown, a parent run tearing down) is reported to
+// thread.lifecycle as a cancellation, not a failure. Before the fix,
+// runSubAgent folded context.Canceled into a text error response and
+// subAgentTaskRun rebuilt it with errors.New(resp.Content), which broke the
+// errors.Is(err, context.Canceled) chain lifecycle.go relies on.
+func TestSubAgentTaskRun_Cancellation(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerCfg)
+
+	agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		return nil, context.Canceled
+	})
+
+	run := coord.delegation.subAgentTaskRun("parent-session", "child-session", "test", agent, 0)
+	_, err := run(t.Context())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "expected error chain to satisfy errors.Is(err, context.Canceled), got: %v", err)
+}
+
+// TestSubAgentTaskRun_OrdinaryError proves the non-cancellation path is
+// unchanged: a plain model/provider failure still comes back through
+// finishSubAgent's text-error response (which subAgentTaskRun then turns
+// into a plain error via errors.New(resp.Content)) rather than as a
+// propagated Go error from runSubAgent.
+func TestSubAgentTaskRun_OrdinaryError(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerCfg)
+
+	agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		return nil, errors.New("provider request failed")
+	})
+
+	resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
+		Agent:          agent,
+		SessionID:      "parent-session",
+		ChildSessionID: "child-session",
+		Prompt:         "test",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.IsError)
+	assert.Contains(t, resp.Content, "Failed to generate response")
+
+	run := coord.delegation.subAgentTaskRun("parent-session", "child-session", "test", agent, 0)
+	_, err = run(t.Context())
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, context.Canceled))
+	assert.Contains(t, err.Error(), "Failed to generate response")
+}
+
 func TestUpdateParentSessionCost(t *testing.T) {
 	t.Run("accumulates cost correctly", func(t *testing.T) {
 		env := testEnv(t)
