@@ -240,6 +240,22 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		lockToRelease.Release()
 		return nil
 	}); err != nil {
+		// appInstance is fully built at this point: New already wired
+		// mainDBRelease unconditionally on its own success, so ownership of
+		// the pooled DB reference has already moved from this function's
+		// dbConnected defer to the App, unlike New's own late-failure path
+		// (app.go's InitCoderAgent branch), which clears mainDBRelease
+		// before calling Shutdown because ownership there never left the
+		// caller. Disarm dbConnected here so that defer does not also
+		// release it — Shutdown below is what actually releases it now —
+		// and then tear the App down: MCP init, the config/skills watchers
+		// and the herdr bridge are all live goroutines and this error
+		// leaves the caller with no *App to shut down itself. (This branch
+		// fires only once Shutdown has already started elsewhere, in which
+		// case this call just joins that teardown instead of starting a
+		// second one.)
+		dbConnected = false
+		appInstance.Shutdown()
 		return nil, fmt.Errorf("failed to register workspace lock cleanup: %w", err)
 	}
 	wsLock = nil

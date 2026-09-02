@@ -8,11 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	gitpkg "github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/hooks"
@@ -23,6 +26,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 // setBootstrapTestEnv isolates config/skills discovery from the running
@@ -383,6 +387,108 @@ func TestBootstrap_NewFailureReleasesPooledDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, conn.PingContext(t.Context()))
 	require.NoError(t, db.Release(config.GlobalDBDir()))
+}
+
+// syncLogBuffer is a thread-safe io.Writer, since the concurrent Shutdown
+// this test drives can log while the test goroutine reads the buffer back.
+type syncLogBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
+
+// TestBootstrap_LateFinalCleanupRegistrationFailureShutsDownAppAndReleasesDBOnce
+// is the regression test for Bootstrap leaking a started App when
+// AddFinalCleanup fails after newApp has already succeeded (bootstrap.go's
+// final cleanup registration, right before the dbConnected handoff). By
+// that point MCP initialization, the config/skills watchers and the herdr
+// bridge are all live goroutines, and the caller used to get only an error
+// back with no *App to shut down itself.
+//
+// That registration can only fail once Shutdown has already begun on this
+// App (see shutdownPhases.addHook), so the test drives exactly that: a
+// concurrent Shutdown() is started from inside newApp and this goroutine
+// waits for it to actually begin before returning, guaranteeing Bootstrap's
+// own AddFinalCleanup call observes it and fails with
+// ErrAppShutdownBlocked.
+func TestBootstrap_LateFinalCleanupRegistrationFailureShutsDownAppAndReleasesDBOnce(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	var logBuf syncLogBuffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	// Captured before Bootstrap starts anything, so the check below reports
+	// only what this App's own construction left running.
+	ignoreBaseline := goleak.IgnoreCurrent()
+
+	var appInstance *App
+	_, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
+		DataDir: t.TempDir(),
+		newApp: func(ctx context.Context, conn *sql.DB, store *config.ConfigStore, mgr *skills.Manager) (*App, error) {
+			a, err := New(ctx, conn, store, mgr)
+			if err != nil {
+				return nil, err
+			}
+			appInstance = a
+			go a.Shutdown()
+			for {
+				a.shutdownMu.Lock()
+				started := a.shutdownState >= shutdownStateShuttingDown
+				a.shutdownMu.Unlock()
+				if started {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			return a, nil
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrAppShutdownBlocked)
+	require.NotNil(t, appInstance)
+
+	// By the time Bootstrap returns, its own call into Shutdown (in the
+	// AddFinalCleanup failure branch) has either run the teardown itself
+	// or joined the one already in flight above — either way, teardown is
+	// complete and every goroutine New started (MCP init, watchers, herdr)
+	// must be gone.
+	deadline := time.Now().Add(2 * time.Second)
+	var leakErr error
+	for time.Now().Before(deadline) {
+		leakErr = goleak.Find(ignoreBaseline)
+		if leakErr == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.NoError(t, leakErr, "a late AddFinalCleanup failure must still shut the App down")
+
+	// Snapshot the log before this test's own extra Release call below,
+	// which is guaranteed to find nothing left and log an over-release
+	// error of its own regardless of the bug — so it must not pollute the
+	// assertion that Bootstrap's own defer did not double-release.
+	logsFromBootstrap := logBuf.String()
+	require.NotContains(t, logsFromBootstrap, "over-released",
+		"the pooled DB reference must be released exactly once, not double-released")
+
+	// The App released the pooled DB reference itself (via mainDBRelease):
+	// a bare Release now, with no matching Connect from this test, must
+	// find nothing left to release, proving it was not leaked either.
+	require.Error(t, db.Release(config.GlobalDBDir()),
+		"the App's own DB reference must already be fully released, not leaked, by the time Bootstrap returns")
 }
 
 func TestBootstrap_WorkspaceLockReleasedAfterPostConnectError(t *testing.T) {

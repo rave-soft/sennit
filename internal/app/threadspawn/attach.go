@@ -30,6 +30,7 @@ type attachDeps struct {
 	shutdown           func(*thread.Manager, context.Context) error
 	addShutdownHook    func(*app.App, func(context.Context) error) error
 	addCriticalCleanup func(*app.App, func(context.Context) error) error
+	addPreCleanupHook  func(*app.App, func(context.Context) error) error
 	forwardEvents      func(*app.App, *thread.Manager)
 	finalizeTurns      func(context.Context, *app.App, *thread.Manager)
 }
@@ -51,6 +52,9 @@ var productionAttachDeps = attachDeps{
 	},
 	addCriticalCleanup: func(a *app.App, fn func(context.Context) error) error {
 		return a.AddCriticalCleanup(fn)
+	},
+	addPreCleanupHook: func(a *app.App, fn func(context.Context) error) error {
+		return a.AddPreCleanupHook(fn)
 	},
 	forwardEvents: func(a *app.App, mgr *thread.Manager) {
 		app.ForwardEvents(a, "thread", mgr.Subscribe)
@@ -193,8 +197,24 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	a.SetDelegationManagers(threadMgr, tasks, threadTools, AsAgentToolTaskManager(tasks))
 	if isGitWorkspace {
 		if local, ok := spawner.(*LocalSpawner); ok {
-			go forwardSkillsToThreads(ctx, a, local)
-			go forwardAgentsToThreads(ctx, a, local)
+			// Bound to a's own shutdown, not ctx (the command context):
+			// parent.Skills.SubscribeEvents(ctx) does not close when the
+			// App's broker shuts down the way parent.Events(ctx) does, so a
+			// forwarder started on ctx outlives the App it forwards for —
+			// see internal/app/watch.go's startExternalChangeWatchers,
+			// which registers the same kind of pre-cleanup hook for the
+			// config/skills watchers.
+			forwardCtx, cancel := context.WithCancel(ctx)
+			if err := deps.addPreCleanupHook(a, func(context.Context) error {
+				cancel()
+				return nil
+			}); err != nil {
+				slog.Warn("Failed to register thread forwarder shutdown", "error", err)
+				cancel()
+				return
+			}
+			go forwardSkillsToThreads(forwardCtx, a, local)
+			go forwardAgentsToThreads(forwardCtx, a, local)
 		}
 	}
 }
