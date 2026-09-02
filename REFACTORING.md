@@ -72,6 +72,17 @@ compile-time проверками в `root.go:780-796`) и один через
 
 ## Фаза 3. `ConfigStore`
 
+3.6 закрыт (`3a199a2cc`): `ProviderConfig`, `VariableResolver` и хелперы
+разрешения переехали в листовой `internal/providers/config`,
+`providers/runtime` больше не импортирует `internal/config`,
+`RuntimeProcessor` сузился до `Process`, три ветки `processor == nil`
+удалены. `Providers()` теперь принимает `bool`, а не весь конфиг.
+Остаётся 3.7.
+
+3.5 закрыт (`7eedfe354`): семь копий хореографии «запись + обновление
+снимка под одним мьютексом» сведены к `fileStaleness.withWrite` и
+`withWriteAddPath`, форвардеры убраны, мёртвая обвязка процессора удалена.
+
 Пункты 3.1-3.3 закрыты (`056addc33`, `49ae3f1c2`). Пункт 3.4 **отклонён**,
 подробности ниже. Остаются структурные 3.5-3.7.
 
@@ -98,59 +109,6 @@ compile-time проверками в `root.go:780-796`) и один через
 пройти оба теста выше. Пока не найдено решение, отвечающее этому —
 оставить как есть.
 
-### 3.5 [L] Разбор `ConfigStore`
-
-Методы размазаны по `store.go`, `store_credentials.go`,
-`provider_accounts.go`, `mcp_token.go`, `docker_mcp.go`, `reload.go`,
-`watch.go`, `staleness.go`, `accounts_service.go`; пять мьютексов плюс два
-в watcher; порядок захвата описан в трёх разных комментариях
-(`store.go:38-67`, `configfile.go:24-34`, `credentials.go:176-182`).
-
-Действия, по порядку:
-- `fileStaleness.withWrite(fn func() (wrote bool, err error)) error`,
-  все мутаторы через него; форвардеры `preReloadFileSnapshots`/
-  `trackedConfigPathSet`/`captureStalenessSnapshot` (`staleness.go:145-159`)
-  убрать. Закрывает пять копий `s.staleness.mu.Lock(); write; refresh`
-  в `store.go:351-723`.
-- `snapshotOverridesLocked()` без лока для `RuntimeSnapshot`
-  (`store.go:170-183`) и `snapshotOverrides` (`reload.go:394-407`).
-- Выделить `credentialsPublisher` (`UpdateProviderAccount`,
-  `SetProviderAPIKey`, `PersistRefreshedToken`) и `mcpTokenStore` в
-  отдельные типы с явной зависимостью от `mutateInMemory`/`update`.
-- Удалить мёртвое: `RuntimeInput.KnownProviders` (`build.go:363,373`
-  всегда nil), `providerload/loader.go:86-91 providers()` (дубль
-  `providers/runtime.Providers()`), заглушку `var _ = cmp.Or[string]`
-  (`loader.go:231`), `configruntime.LoadWithProcessor`,
-  `RuntimeResult.Resolver` после 3.4.
-
-- Свести `Resolver()` и `RuntimeSnapshot().Resolver` к одному значению.
-  После кеширования окружения (3.4) `cfg.RuntimeResolver()` дёшев, поэтому
-  `Resolver()` может возвращать `s.Config().RuntimeResolver()` вместо
-  отдельного поля `s.resolver`. Сейчас они расходятся только в одном окне:
-  store, созданный через `NewStore` с `StoreOptions.Resolver`, до первого
-  reload отдаёт инжектированный резолвер из `Resolver()`, но не из
-  `RuntimeSnapshot()`; первый же reload его затирает
-  (`reload.go:207`). Решить заодно судьбу `StoreOptions.Resolver`.
-
-### 3.6 [L] Развязать `config` ↔ `providers/runtime`
-
-`providers/runtime/provider.go:173` импортирует `config` ради
-`ProviderConfig`, `VariableResolver`, `ResolveProviderHeaders`; поэтому
-`config` вызывает `FromConfig`/`ApplyPostCredentialSetup` через
-`RuntimeProcessor` (`runtime.go:42-46`) с единственной реализацией из
-однострочных форвардеров (`providerload/loader.go:30-37`) и ветками
-`s.processor == nil` в трёх мутаторах.
-
-Действия:
-- Вынести `ProviderConfig`, `VariableResolver`, `ResolveProviderHeaders`,
-  `ResolveOptionalProviderProxy` в листовой пакет
-  (`providers/config` или расширить `providers/state`).
-- `providers/runtime` перестаёт зависеть от `config`; `config` зовёт compile
-  напрямую; `RuntimeProcessor` сужается до `Process`.
-- Codex-специфику из `config/provider_accounts.go:469-494,570-576`
-  (`backfillCodexIdentity`, AccountID из JWT) перенести туда, где живёт
-  `AccountUsageFetcher` (`workspace/appws`).
-
 ### 3.7 [L] Два владельца живых кредов
 
 Остаток от 3.1. После точечного фикса `APIKey`/`OAuthToken`/`Account`
@@ -170,58 +128,27 @@ compile-time проверками в `root.go:780-796`) и один через
 
 ## Фаза 4. `internal/agent`
 
+4.4 закрыт (`28db54638`). Реальный баг там был один: fetch-делегат не
+помечался `IsSubAgent`, из-за чего получал напоминание про todo,
+предназначенное верхнеуровневому агенту, не имея самого инструмента.
+Через общий `buildAgent` его не пустили осознанно: `toolSpecs` привязан к
+реальному рабочему каталогу и разрешениям, и это утекло бы в песочницу
+делегата. Остаётся 4.5.
+
+4.3 закрыт (`18ff70d4e`), но **не полностью**: первый пункт задания
+отклонён по существу. Ранняя проверка границ рабочей папки в edit/write/
+multiedit не дублирует проверку в `applyFileMutation`: без неё сначала
+срабатывают stat и проверка свежести, отказ приходит с другим текстом, а
+файлы вне рабочей папки читаются до отказа. Оставлено как есть.
+
+4.2 закрыт (`4d927b7d2`): арифметика покрытия чтения переехала в листовой
+`internal/filetracker/coverage`, дубль в `tools` стал алиасом, минус 300
+строк.
+
 Пункт 4.1 закрыт (`919bab433`): память именованных агентов включена.
 Это включает ранее не работавшую функцию, которая тратит входные токены
 на каждое делегирование к именованному агенту; бюджет ограничен
 `subagent_memory.go`.
-
-### 4.2 [M] Откат дубля `FileCoverage` из коммита 09a6d8a3d
-
-`tools/file_tracking.go:19-105` копирует `filetracker/coverage.go:36-145`
-(с ручной O(n²) сортировкой). В проде из `tools` нужен только `Covers`
-(`edit.go:225`); `Add/Shift/Empty` живут ради мока в `edit_test.go:36-40`.
-Причина копии: `filetracker` тянет `db`, хотя `coverage.go` от него не
-зависит.
-
-Действия:
-- Вынести `Coverage`/`LineRange` в leaf-пакет
-  `internal/filetracker/coverage`, использовать в обоих местах.
-- `tools.FileTracking` возвращает его напрямую; конверсию в
-  `tool_adapters.go:24-31` убрать.
-- `todoSessions` (`tool_adapters.go:159-186`) удалить:
-  `sessionstore.Service` удовлетворяет `TodoSessions{Get; SetTodos}`
-  напрямую, `tools/todos.go` и так импортирует `session`.
-- Адаптер `fileHistory` оставить, он транслирует `sql.ErrNoRows`.
-
-### 4.3 [M] Дублирование в мутирующих инструментах
-
-- `confinementRefusal` дважды на мутацию: в `edit.go:69`, `multiedit.go`,
-  `write.go` и снова в `applyFileMutation`.
-- Freshness-сообщение скопировано `edit.go:304-327` ↔ `write.go:511-534`.
-- Эпилог `mutationCommitted → IsError → notifyLSPs → result+diagnostics`
-  повторён в edit/multiedit/write/replace_symbol.
-- `read_core.go:29` игнорирует `*lsp.Manager` и `*skills.Tracker`, но
-  `NewMultiReadTool`/`NewReadTool` и `tool_registry.go:169` их передают.
-
-Действия: `finishFileMutation(...)`, общий билдер freshness-сообщения,
-один confinement-чек, убрать мёртвые параметры.
-
-### 4.4 [M] Ceremony в делегировании
-
-- `runtimeOperationPort{agent: ..., inputs: ...}` набран 9 раз
-  (`turn_dispatcher.go:106,141,143,223`, `delegation_finalizer.go:403-423`).
-  Сделать `port()`.
-- Форвардинг-обёртки без non-test ссылок: `delegation_finalizer.go:394-422,
-  509`, `runtime_builder.go:1251,1624`. Удалить, тестировать реальные
-  методы.
-- «Синхронный» путь субагента (`ChildSessionID == ""`,
-  `updateParentSessionCost`, `parentCostMu`, `SessionSetup`,
-  `:571-585,759-782`) достижим только из `coordinator_test.go`. Удалить
-  вместе с тестами или оставить с явным TODO.
-- `agenticFetchFactory` (`:1135-1145`) собирает `NewSessionAgent` мимо
-  `buildAgent`: `IsSubAgent` не выставлен, `compat.go:40` инжектит
-  родительский todo-reminder; второй ручной список инструментов. Строить
-  через `buildAgent` с allowlist из `toolSpecs`.
 
 ### 4.5 [L] Auth-политика вне билдера рантайма
 
@@ -246,6 +173,14 @@ config.GlobalAccountsFile())`; `:904` читает `codex.UsageFor`; ротац�
 
 ## Фаза 5. UI за `Workspace`
 
+5.2 и 5.3 закрыты (`8f139c19e`). Проверка ключа идёт через
+`Workspace.VerifyProviderAPIKey` и строит провайдера тем же путём, что и
+агент; `TestConnection` получил `ctx`, так что закрытие диалога реально
+отменяет запрос (таймаут в 5 с там был, а отмены от вызывающего не было
+вовсе). `NewDoctor` вернулся к форме `(диалог, cmd)` и не делает
+ввод-вывод в конструкторе; `ui/dialog` больше не импортирует
+`internal/doctor`.
+
 Пункты 5.5-5.7 закрыты (`8fb2275e9`): вместо россыпи nil-guard'ов
 добавлены nil-безопасные аксессоры на `Config`, дублирующиеся обработчики
 диалогов сведены к двум хелперам, тестовые символы убраны из продакшн-кода.
@@ -266,27 +201,6 @@ RecordAccount и post-save. `cmd/login_codex.go` использует те же 
 Диалог остаётся view + Action; импорты `oauth/codex`, `oauth/copilot`,
 `proxyhttp` из `ui/dialog` исчезают.
 
-### 5.2 [M] Проверка API-ключа из UI
-
-`ui/dialog/api_key_input.go:305-333` строит `config.ProviderConfig`,
-зовёт `providerruntime.FromConfig` и `TestConnection`; проверяет ключ не
-тем провайдером, каким потом будет ходить агент (без `ProxyURL`, ротации,
-кастомных заголовков). Плюс `time.Sleep(750ms)` в команде.
-
-Действия: `Workspace.VerifyProviderAPIKey(ctx, providerID, key) error`;
-минимальную длительность спиннера через `tea.Tick`.
-
-### 5.3 [M] Doctor: I/O в Update и агрегация в UI
-
-`ui/dialog/doctor.go:71-72,240-262`, вызов из `model/dialogs.go:100`.
-Конструктор синхронно зовёт `doctor.EnvironmentProblems()` →
-`clipboard.MissingHTMLHelpers()` → `exec.LookPath` по PATH. Рядом UI сам
-склеивает `ConfigProblems` + `SkillProblems` + `MCPGetStates`.
-
-Действия: `Workspace.DoctorProblems() []config.Problem`; `NewDoctor` в
-форме `(dlg, tea.Cmd)` как `NewFilePicker`; импорт `internal/doctor` из UI
-исчезает.
-
 ### 5.4 [M] DTO вместо импортов бэкенда в `model` и `common`
 
 - `model/sidebar.go:89,270-272`: `shell.BackgroundJobCounts`,
@@ -306,21 +220,11 @@ bool)` вместо `ToProvider`. `permission.PermissionRequest` в UI оста�
 
 ## Фаза 6. Границы workspace / app / proto
 
-### 6.1 [M] Сузить `Workspace`
-
-`workspace/workspace.go:575-609`: 113 методов; после a09ecd54a
-`FrontendWorkspace` встраивает 21 однометодный интерфейс, из них 11 без
-потребителей (`ConfigResolver`, `PreferredModelOverrider`,
-`CompactModeSetter`, `ProviderAPIKeySetter`, `CopilotImporter`,
-`OAuthTokenRefresher`, `ProviderCatalog`, `CustomProviderTypeLister`,
-`AccountLimitsRefresher`, `PlanUsageReporter`). Методы без вызовов из
-`ui`/`cmd`: `ActivateThread`, `SendThread`, `MCPAuthURL`,
-`AgentQueuedPrompts`. Каждый обязан быть в `read_only_workspace.go`
-(775 строк форвардинга) и стабах.
-
-Действия: удалить 4 мёртвых метода; схлопнуть однометодные интерфейсы в
-2–3 роли (`ConfigMutator`, `ProviderAccounts`, `ProviderInfo`); вернуть
-контрактные комментарии, удалённые в a09ecd54a.
+6.1 и 6.4 закрыты (`ce9d6ecdf`, AGENTS.md). Из «мёртвых» методов реально
+мёртвыми оказались только `SendThread` и `AgentQueuedPrompts`:
+`ActivateThread` получил вызов в 2.1, а `MCPAuthURL` используется в
+`ui/model/mcp_auth.go`. Восемь однометодных ролей свёрнуты обратно с
+восстановлением документации из `a09ecd54a^`.
 
 ### 6.2 [M] `workspace` как контракт, а не use-case'ы
 
