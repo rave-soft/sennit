@@ -200,7 +200,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// that landed after we read the files but before this point is not
 	// mistaken for "seen" — see preReloadFileSnapshots.
 	s.captureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...), preRead)
-	s.captureAgentFileSnapshot()
+	s.watcher.captureAgentFiles(s.workingDir)
 
 	return nil
 }

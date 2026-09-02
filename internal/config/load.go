@@ -49,12 +49,12 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 	migrateDisableNotifications()
 
 	store := &ConfigStore{
-		workingDir:                 workingDir,
-		globalDataPath:             GlobalConfigData(),
-		externalChangePollInterval: externalChangePollInterval,
-		debugOverride:              debug,
-		credentialsFile:            credentialsFile,
-		processor:                  processor,
+		workingDir:      workingDir,
+		globalDataPath:  GlobalConfigData(),
+		watcher:         externalChangeWatcher{pollInterval: externalChangePollInterval},
+		debugOverride:   debug,
+		credentialsFile: credentialsFile,
+		processor:       processor,
 	}
 
 	built, err := buildConfig(store, buildConfigOptions{
@@ -82,12 +82,12 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 	if !built.configured {
 		slog.Warn("No providers configured")
 		// Capture the staleness snapshot even on this early return.
-		// Without it, trackedConfigPaths stays empty and a background
+		// Without it, tracked path set stays empty and a background
 		// watcher (WatchForExternalChanges) would treat every discovered
 		// config path as "new" on every poll, reloading in a busy loop
 		// until a provider gets configured.
 		store.CaptureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...))
-		store.captureAgentFileSnapshot()
+		store.watcher.captureAgentFiles(store.workingDir)
 		return store, nil
 	}
 
@@ -122,7 +122,7 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 	// not just the ones that loaded, so a config file created after startup
 	// (e.g. a sennitrc added mid-session) is detected as a change.
 	store.CaptureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...))
-	store.captureAgentFileSnapshot()
+	store.watcher.captureAgentFiles(store.workingDir)
 
 	return store, nil
 }

@@ -17,7 +17,7 @@ func TestRuntimeSnapshotDoesNotMixConcurrentPublication(t *testing.T) {
 	})
 	store.OverridePreferredModel(modelA)
 
-	store.stalenessMu.Lock()
+	store.staleness.mu.Lock()
 	snapshotDone := make(chan RuntimeSnapshot, 1)
 	go func() {
 		snapshotDone <- store.RuntimeSnapshot()
@@ -45,7 +45,7 @@ func TestRuntimeSnapshotDoesNotMixConcurrentPublication(t *testing.T) {
 	default:
 	}
 
-	store.stalenessMu.Unlock()
+	store.staleness.mu.Unlock()
 	snapshot := <-snapshotDone
 	<-publicationDone
 

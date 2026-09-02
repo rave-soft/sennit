@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 )
 
 // fileSnapshot captures metadata about a config file at a point in time.
@@ -22,180 +23,137 @@ type StalenessResult struct {
 	Errors  map[string]error // stat errors by path
 }
 
-// ConfigStaleness checks whether any tracked config files have changed on disk
-// since the last snapshot. Returns dirty=true if any files changed or went
-// missing, along with sorted lists of affected paths. Stat errors are
-// captured in Errors map but still treated as non-existence for dirty detection.
-func (s *ConfigStore) ConfigStaleness() StalenessResult {
-	s.stalenessMu.Lock()
-	defer s.stalenessMu.Unlock()
+// fileStaleness owns the snapshots used to distinguish external file changes
+// from writes performed by this process. Its mutex deliberately covers an
+// atomic config-file write and its following refresh, so a poller cannot see
+// the new on-disk stamp against the old snapshot.
+type fileStaleness struct {
+	mu      sync.Mutex
+	tracked []string
+	snaps   map[string]fileSnapshot
+}
+
+func (f *fileStaleness) check() StalenessResult {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	var result StalenessResult
 	result.Errors = make(map[string]error)
-
-	for _, path := range s.trackedConfigPaths {
-		snapshot, hadSnapshot := s.snapshots[path]
-
+	for _, path := range f.tracked {
+		snapshot, hadSnapshot := f.snaps[path]
 		info, err := os.Stat(path)
 		exists := err == nil && !info.IsDir()
-
 		if err != nil && !os.IsNotExist(err) {
-			// Capture permission/IO errors separately from non-existence
 			result.Errors[path] = err
 			result.Dirty = true
 		}
-
 		if !exists {
 			if hadSnapshot && snapshot.Exists {
-				// File existed before but now missing
 				result.Missing = append(result.Missing, path)
 				result.Dirty = true
 			}
 			continue
 		}
-
-		// File exists now
-		if !hadSnapshot || !snapshot.Exists {
-			// File didn't exist before but does now
-			result.Changed = append(result.Changed, path)
-			result.Dirty = true
-			continue
-		}
-
-		// Check for content or metadata changes
-		if snapshot.Size != info.Size() || snapshot.ModTime != info.ModTime().UnixNano() {
+		if !hadSnapshot || !snapshot.Exists || snapshot.Size != info.Size() || snapshot.ModTime != info.ModTime().UnixNano() {
 			result.Changed = append(result.Changed, path)
 			result.Dirty = true
 		}
 	}
-
-	// Sort for deterministic output
 	slices.Sort(result.Changed)
 	slices.Sort(result.Missing)
-
 	return result
 }
 
-// statSnapshot stats a single path and reports its current fileSnapshot.
 func statSnapshot(path string) fileSnapshot {
 	info, err := os.Stat(path)
 	exists := err == nil && !info.IsDir()
-
-	snapshot := fileSnapshot{
-		Path:   path,
-		Exists: exists,
-	}
-
+	snapshot := fileSnapshot{Path: path, Exists: exists}
 	if exists {
 		snapshot.Size = info.Size()
 		snapshot.ModTime = info.ModTime().UnixNano()
 	}
-
 	return snapshot
 }
 
-// refreshStalenessSnapshotLocked captures snapshots of all tracked config
-// files. preRead, if non-nil, supplies the snapshot for any path already
-// present in it instead of statting the path fresh — see
-// captureStalenessSnapshot for why reloadFromDisk needs this. Caller must
-// hold stalenessMu.
-func (s *ConfigStore) refreshStalenessSnapshotLocked(preRead map[string]fileSnapshot) {
-	if s.snapshots == nil {
-		s.snapshots = make(map[string]fileSnapshot)
+// refreshLocked captures all currently tracked paths. Caller must hold f.mu.
+func (f *fileStaleness) refreshLocked(preRead map[string]fileSnapshot) {
+	if f.snaps == nil {
+		f.snaps = make(map[string]fileSnapshot)
 	}
-
-	for _, path := range s.trackedConfigPaths {
+	for _, path := range f.tracked {
 		if snapshot, ok := preRead[path]; ok {
-			s.snapshots[path] = snapshot
+			f.snaps[path] = snapshot
 			continue
 		}
-		s.snapshots[path] = statSnapshot(path)
+		f.snaps[path] = statSnapshot(path)
 	}
 }
 
-// CaptureStalenessSnapshot captures snapshots for the given paths, building the
-// tracked config paths list. Paths are deduplicated and normalized.
-func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
-	s.captureStalenessSnapshot(paths, nil)
+func (f *fileStaleness) capture(paths, requiredPaths []string, preRead map[string]fileSnapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	seen := make(map[string]struct{})
+	addPaths := func(paths []string) {
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				abs = path
+			}
+			seen[abs] = struct{}{}
+		}
+	}
+	addPaths(paths)
+	addPaths(requiredPaths)
+	f.tracked = make([]string, 0, len(seen))
+	for path := range seen {
+		f.tracked = append(f.tracked, path)
+	}
+	slices.Sort(f.tracked)
+	f.refreshLocked(preRead)
 }
 
-// preReloadFileSnapshots stats every currently tracked config path and
-// returns their snapshots. reloadFromDisk calls this before buildConfig
-// re-reads file contents, then feeds the result back into
-// captureStalenessSnapshot as preRead once the reload is done. Without
-// this, a write landing after the files were read but before the reload
-// finishes would get its fresh-at-swap-time mtime/size recorded even
-// though its new content was never loaded, and the change would be
-// silently absorbed instead of showing up as stale on the next check.
-func (s *ConfigStore) preReloadFileSnapshots() map[string]fileSnapshot {
-	s.stalenessMu.Lock()
-	defer s.stalenessMu.Unlock()
-
-	snapshots := make(map[string]fileSnapshot, len(s.trackedConfigPaths))
-	for _, path := range s.trackedConfigPaths {
+func (f *fileStaleness) preReloadSnapshots() map[string]fileSnapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	snapshots := make(map[string]fileSnapshot, len(f.tracked))
+	for _, path := range f.tracked {
 		snapshots[path] = statSnapshot(path)
 	}
 	return snapshots
 }
 
-// captureStalenessSnapshot is CaptureStalenessSnapshot's implementation.
-// preRead lets a caller (reloadFromDisk) supply snapshots taken before this
-// call for paths it already knew about; only paths first discovered by
-// this call (i.e. absent from preRead) are stat'd here. A nil preRead
-// stats every path fresh, which is CaptureStalenessSnapshot's documented
-// behaviour for its other callers.
-func (s *ConfigStore) captureStalenessSnapshot(paths []string, preRead map[string]fileSnapshot) {
-	s.stalenessMu.Lock()
-	defer s.stalenessMu.Unlock()
-
-	// Build unique set of normalized paths
-	seen := make(map[string]struct{})
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
-		// Normalize path
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			abs = p
-		}
-		seen[abs] = struct{}{}
-	}
-
-	// Also track workspace and global config paths if set
-	if workspacePath := s.workspacePath.Get(); workspacePath != "" {
-		abs, err := filepath.Abs(workspacePath)
-		if err == nil {
-			seen[abs] = struct{}{}
-		}
-	}
-	if s.globalDataPath != "" {
-		abs, err := filepath.Abs(s.globalDataPath)
-		if err == nil {
-			seen[abs] = struct{}{}
-		}
-	}
-
-	// Build sorted list for deterministic ordering
-	s.trackedConfigPaths = make([]string, 0, len(seen))
-	for p := range seen {
-		s.trackedConfigPaths = append(s.trackedConfigPaths, p)
-	}
-	slices.Sort(s.trackedConfigPaths)
-
-	// Capture initial snapshots
-	s.refreshStalenessSnapshotLocked(preRead)
-}
-
-// trackedConfigPathSet returns a copy of the currently tracked config paths
-// as a set, for callers (externalChangeDetected in watch.go) that need to
-// check membership without racing CaptureStalenessSnapshot/reloadFromDisk.
-func (s *ConfigStore) trackedConfigPathSet() map[string]struct{} {
-	s.stalenessMu.Lock()
-	defer s.stalenessMu.Unlock()
-	set := make(map[string]struct{}, len(s.trackedConfigPaths))
-	for _, p := range s.trackedConfigPaths {
-		set[p] = struct{}{}
+func (f *fileStaleness) trackedPathSet() map[string]struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	set := make(map[string]struct{}, len(f.tracked))
+	for _, path := range f.tracked {
+		set[path] = struct{}{}
 	}
 	return set
+}
+
+// ConfigStaleness checks whether tracked config files changed since the last
+// snapshot. Its output is sorted and safe to read concurrently with refreshes.
+func (s *ConfigStore) ConfigStaleness() StalenessResult { return s.staleness.check() }
+
+// CaptureStalenessSnapshot tracks paths plus this store's active global and
+// workspace paths. Callers that can race publication must hold writeMu while
+// reading those store-owned paths, as existing mutation and reload paths do.
+func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
+	s.captureStalenessSnapshot(paths, nil)
+}
+
+func (s *ConfigStore) captureStalenessSnapshot(paths []string, preRead map[string]fileSnapshot) {
+	s.staleness.capture(paths, []string{s.workspacePath.Get(), s.globalDataPath}, preRead)
+}
+
+func (s *ConfigStore) preReloadFileSnapshots() map[string]fileSnapshot {
+	return s.staleness.preReloadSnapshots()
+}
+
+func (s *ConfigStore) trackedConfigPathSet() map[string]struct{} {
+	return s.staleness.trackedPathSet()
 }

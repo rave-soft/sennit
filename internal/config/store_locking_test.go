@@ -73,7 +73,7 @@ func TestConfigStore_ConcurrentReadDuringReload(t *testing.T) {
 	wg.Wait()
 }
 
-// TestConfigStore_StalenessSnapshotRacesWrite exercises stalenessMu against
+// TestConfigStore_StalenessSnapshotRacesWrite exercises fileStaleness mutex against
 // a concurrent SetConfigFields write: ConfigStaleness (called without
 // writeMu held, e.g. from the sennit_info tool or the external-change poll
 // loop) must not race the writeMu-held snapshot recapture that follows a

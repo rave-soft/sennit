@@ -31,7 +31,7 @@ func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	require.Empty(t, store.Config().MCP)
-	store.externalChangePollInterval = 100 * time.Millisecond
+	store.watcher.pollInterval = 100 * time.Millisecond
 
 	notified := make(chan struct{}, 1)
 	store.OnExternalChange(func() { notified <- struct{}{} })
@@ -81,7 +81,7 @@ func TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll(t *testing.T) {
 
 		store, err := loadRuntimeForTest(dir, "", false)
 		require.NoError(t, err)
-		store.externalChangePollInterval = 10 * time.Millisecond
+		store.watcher.pollInterval = 10 * time.Millisecond
 
 		notified := make(chan struct{}, 8)
 		store.OnExternalChange(func() {
@@ -101,7 +101,7 @@ func TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll(t *testing.T) {
 			cancel()
 			t.Fatalf("WatchForExternalChanges fired for this process's own write:%s",
 				describeExternalChange(t, store))
-		case <-time.After(15 * store.externalChangePollInterval):
+		case <-time.After(15 * store.watcher.pollInterval):
 		}
 		cancel()
 	}
@@ -122,7 +122,7 @@ func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	const pollInterval = 100 * time.Millisecond
-	store.externalChangePollInterval = pollInterval
+	store.watcher.pollInterval = pollInterval
 
 	var notifications int
 	notified := make(chan struct{}, 8)
@@ -161,7 +161,7 @@ func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField_TightPoll(t *testin
 
 		store, err := loadRuntimeForTest(dir, "", false)
 		require.NoError(t, err)
-		store.externalChangePollInterval = 10 * time.Millisecond
+		store.watcher.pollInterval = 10 * time.Millisecond
 
 		notified := make(chan struct{}, 8)
 		store.OnExternalChange(func() {
@@ -181,7 +181,7 @@ func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField_TightPoll(t *testin
 			cancel()
 			t.Fatalf("WatchForExternalChanges fired for this process's own RemoveConfigField write:%s",
 				describeExternalChange(t, store))
-		case <-time.After(15 * store.externalChangePollInterval):
+		case <-time.After(15 * store.watcher.pollInterval):
 		}
 		cancel()
 	}
@@ -207,7 +207,7 @@ func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField(t *testing.T) {
 	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	const pollInterval = 100 * time.Millisecond
-	store.externalChangePollInterval = pollInterval
+	store.watcher.pollInterval = pollInterval
 
 	var notifications int
 	notified := make(chan struct{}, 8)
@@ -250,7 +250,7 @@ func TestWatchForExternalChanges_IgnoresOwnRuntimeConfigWrites(t *testing.T) {
 	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	const pollInterval = 100 * time.Millisecond
-	store.externalChangePollInterval = pollInterval
+	store.watcher.pollInterval = pollInterval
 
 	var notifications int
 	notified := make(chan struct{}, 8)
@@ -307,7 +307,7 @@ func describeExternalChange(t *testing.T, s *ConfigStore) string {
 		"\n  staleness.Dirty=%v\n  workingDir=%q\n  workspacePath=%q\n  globalDataPath=%q"+
 			"\n  untracked candidates=%q\n  tracked=%q\n  agentFilesChanged=%v",
 		staleness.Dirty, s.workingDir, s.workspacePath.Get(), s.globalDataPath,
-		untracked, trackedList, s.agentFilesChanged())
+		untracked, trackedList, s.watcher.agentFilesChanged(s.workingDir))
 }
 
 // TestExternalChangeDetected_NewCandidateFile verifies the gap ConfigStaleness
@@ -397,7 +397,7 @@ func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
 	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	require.NotContains(t, store.Config().Agents, "dev")
-	store.externalChangePollInterval = 100 * time.Millisecond
+	store.watcher.pollInterval = 100 * time.Millisecond
 
 	notified := make(chan struct{}, 8)
 	store.OnExternalChange(func() {
@@ -459,7 +459,7 @@ func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
 
 	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
-	store.externalChangePollInterval = 100 * time.Millisecond
+	store.watcher.pollInterval = 100 * time.Millisecond
 
 	notified := make(chan struct{}, 1)
 	store.OnExternalChange(func() {

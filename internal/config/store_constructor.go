@@ -32,11 +32,11 @@ func NewStore(options StoreOptions) *ConfigStore {
 		pollInterval = externalChangePollInterval
 	}
 	return &ConfigStore{
-		config:                     options.Config,
-		workingDir:                 options.WorkingDir,
-		resolver:                   resolver,
-		globalDataPath:             options.GlobalDataPath,
-		loadedPaths:                slices.Clone(options.LoadedPaths),
-		externalChangePollInterval: pollInterval,
+		config:         options.Config,
+		workingDir:     options.WorkingDir,
+		resolver:       resolver,
+		globalDataPath: options.GlobalDataPath,
+		loadedPaths:    slices.Clone(options.LoadedPaths),
+		watcher:        externalChangeWatcher{pollInterval: pollInterval},
 	}
 }

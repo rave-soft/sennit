@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/csync"
@@ -90,32 +89,15 @@ type ConfigStore struct {
 	// Load/reloadFromDisk, both of which already run
 	// single-threaded with respect to this field (Load before the store is
 	// published; reloadFromDisk under reloadMu), so no separate mutex.
-	debugOverride      bool
-	loadedPaths        []string // config files that were successfully loaded
-	knownProviders     []catwalk.Provider
-	overrides          RuntimeOverrides
-	trackedConfigPaths []string                // unique, normalized config file paths
-	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
+	debugOverride  bool
+	loadedPaths    []string // config files that were successfully loaded
+	knownProviders []catwalk.Provider
+	overrides      RuntimeOverrides
 
-	// stalenessMu guards trackedConfigPaths and snapshots. Writers
-	// (CaptureStalenessSnapshot) already run under writeMu via
-	// updateLocked/reloadFromDisk, but ConfigStaleness
-	// is a read-only diagnostic called from other goroutines without
-	// writeMu (the sennit_info tool, and WatchForExternalChanges' poll
-	// loop in watch.go) — a separate mutex, rather than reusing writeMu,
-	// keeps that read cheap and avoids adding staleness bookkeeping to
-	// writeMu's contention.
-	//
-	// Undocumented coupling worth knowing before touching this: within its
-	// stalenessMu section, CaptureStalenessSnapshot also reads workspacePath
-	// and globalDataPath (to make sure both are always tracked), but those
-	// two fields are not guarded by stalenessMu — they are writeMu-guarded
-	// fields, so this read is only safe because every current caller of
-	// CaptureStalenessSnapshot (Load, reloadFromDisk, updateLocked) already
-	// holds writeMu for the duration of the call. A caller that took only
-	// stalenessMu would race a concurrent writeMu-held mutator of
-	// workspacePath/globalDataPath.
-	stalenessMu sync.Mutex
+	// staleness owns tracked paths and their on-disk snapshots. It remains
+	// separate from writeMu because diagnostics and watcher polling read it
+	// without blocking config publication.
+	staleness fileStaleness
 
 	// configMu guards the config pointer field against concurrent
 	// readers (Config) and the writeMu-serialised swap (setConfig). It
@@ -135,29 +117,10 @@ type ConfigStore struct {
 	writeMu  sync.RWMutex // serialises in-memory config production (mutators + the reload swap); RLock for readers
 	reloadMu sync.Mutex   // serialises reload attempts against each other; see the ConfigStore doc comment
 
-	// onExternalChangeMu guards onExternalChange, the callback
-	// WatchForExternalChanges runs after a reload it triggered itself
-	// (as opposed to one caused by this process's own writes). See
-	// watch.go.
-	onExternalChangeMu sync.Mutex
-
-	// externalChangePollInterval overrides how often WatchForExternalChanges
-	// polls; see the externalChangePollInterval constant in watch.go for the
-	// production default. Tests set this directly to run the poll loop at
-	// millisecond scale. Must be set before WatchForExternalChanges' poll
-	// goroutine starts (it is read without synchronization); a zero value
-	// falls back to the default rather than panicking on time.NewTicker(0).
-	externalChangePollInterval time.Duration
-	onExternalChange           func()
-
-	// agentSnapshotMu guards agentFileSnapshot, the last-seen state of
-	// every *.md file under agentDirs (agents_markdown.go) plus the global
-	// agents directory. Unlike trackedConfigPaths, this tracks directory
-	// membership rather than a fixed path list, so agent files can be
-	// added or removed, not just edited, between polls. See watch.go.
-	agentSnapshotMu   sync.Mutex
-	agentFileSnapshot map[string]fileSnapshot
-	inheritedAgents   map[string]Agent
+	// watcher owns polling configuration, callback, and agent-directory
+	// snapshots. It does not own reload or config publication.
+	watcher         externalChangeWatcher
+	inheritedAgents map[string]Agent
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -369,7 +332,7 @@ func (s *ConfigStore) atomicWriteContext(ctx context.Context, scope Scope, fn fu
 // through ConfigPath.
 //
 // Like SetConfigFields, the writes and the staleness-snapshot refresh happen
-// under one stalenessMu section so a concurrent ConfigStaleness() cannot
+// under one fileStaleness mutex section so a concurrent ConfigStaleness() cannot
 // mistake one of these writes for an external change. See SetConfigFields
 // for the full rationale. Unlike SetConfigFields, this deliberately skips
 // autoReload: these are "runtime" writes callers do not want reflected back
@@ -385,8 +348,8 @@ func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 		}
 		paths = []string{path}
 	}
-	s.stalenessMu.Lock()
-	defer s.stalenessMu.Unlock()
+	s.staleness.mu.Lock()
+	defer s.staleness.mu.Unlock()
 	var wrote bool
 	for _, path := range paths {
 		if _, err := os.Stat(path); err != nil {
@@ -411,20 +374,20 @@ func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 		}
 	}
 	if wrote {
-		s.refreshStalenessSnapshotLocked(nil)
+		s.staleness.refreshLocked(nil)
 	}
 }
 
 // WriteRuntimeConfigFields writes fields to the config file for the given
 // scope without reloading in-memory state. See RemoveRuntimeConfigField for
-// why the staleness snapshot is still refreshed under stalenessMu.
+// why the staleness snapshot is still refreshed under fileStaleness mutex.
 func (s *ConfigStore) WriteRuntimeConfigFields(scope Scope, fields map[string]any) {
-	s.stalenessMu.Lock()
+	s.staleness.mu.Lock()
 	err := s.writeConfigFields(scope, fields)
 	if err == nil {
-		s.refreshStalenessSnapshotLocked(nil)
+		s.staleness.refreshLocked(nil)
 	}
-	s.stalenessMu.Unlock()
+	s.staleness.mu.Unlock()
 	if err != nil {
 		slog.Warn("Failed to write runtime config fields", "error", err)
 	}
@@ -490,7 +453,7 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	// The write and the staleness-snapshot refresh happen under one
-	// stalenessMu section so a concurrent ConfigStaleness() (the watcher
+	// fileStaleness mutex section so a concurrent ConfigStaleness() (the watcher
 	// poll loop, sennit_info) can never observe the new on-disk mtime
 	// against a snapshot that hasn't caught up yet — the only way to
 	// close that window, rather than just narrow it, since any gap
@@ -503,7 +466,7 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	// TestWatchForExternalChanges_IgnoresOwnWrites and *_TightPoll).
 	// refreshStalenessSnapshotLocked (not
 	// CaptureStalenessSnapshot) is safe to call without writeMu here: it
-	// only restats s.trackedConfigPaths, which the write's own path is
+	// only restats the tracked path set, which the write's own path is
 	// always already a member of — CaptureStalenessSnapshot always adds
 	// both scopes' paths (Load, reloadFromDisk, updateLocked) — and,
 	// unlike CaptureStalenessSnapshot, it never reads the writeMu-guarded
@@ -515,12 +478,12 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	// when another process is mid-write, so the worst case is a
 	// delayed watcher poll or a slow sennit_info -- deliberately
 	// preferred over reporting this process's own write as external.
-	s.stalenessMu.Lock()
+	s.staleness.mu.Lock()
 	err := s.writeConfigFields(scope, kv)
 	if err == nil {
-		s.refreshStalenessSnapshotLocked(nil)
+		s.staleness.refreshLocked(nil)
 	}
-	s.stalenessMu.Unlock()
+	s.staleness.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -677,13 +640,13 @@ func (s *ConfigStore) pinPreferredModelLocked(model SelectedModel) {
 // The write is protected by an in-process mutex and a cross-process flock.
 //
 // Like SetConfigFields, the write(s) and the staleness-snapshot refresh
-// happen under one stalenessMu section so a concurrent ConfigStaleness() can
+// happen under one fileStaleness mutex section so a concurrent ConfigStaleness() can
 // never observe the new on-disk mtime against a stale snapshot and mistake
 // this process's own write for an external change. See SetConfigFields for
 // the full rationale.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	if scope != ScopeGlobal {
-		s.stalenessMu.Lock()
+		s.staleness.mu.Lock()
 		err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
 			v, sErr := sjson.Delete(string(data), key)
 			if sErr != nil {
@@ -692,9 +655,9 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 			return []byte(v), nil
 		})
 		if err == nil {
-			s.refreshStalenessSnapshotLocked(nil)
+			s.staleness.refreshLocked(nil)
 		}
-		s.stalenessMu.Unlock()
+		s.staleness.mu.Unlock()
 		if err != nil {
 			return err
 		}
@@ -718,7 +681,7 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	// against a stand-in data path (test doubles that never call Load)
 	// still deserves ConfigPath(ScopeGlobal)'s own file cleared — that is
 	// the one layer this method's doc comment promises is never skipped.
-	s.stalenessMu.Lock()
+	s.staleness.mu.Lock()
 	paths := globalConfigPaths()
 	if s.globalDataPath != "" && !slices.Contains(paths, s.globalDataPath) {
 		paths = append(paths, s.globalDataPath)
@@ -755,9 +718,9 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 		}
 	}
 	if wrote {
-		s.refreshStalenessSnapshotLocked(nil)
+		s.staleness.refreshLocked(nil)
 	}
-	s.stalenessMu.Unlock()
+	s.staleness.mu.Unlock()
 
 	if err := errors.Join(errs...); err != nil {
 		return err
