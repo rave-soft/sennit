@@ -126,7 +126,12 @@ compile-time проверками в `root.go:780-796`) и один через
 
 ---
 
-## Фаза 4. `internal/agent`
+## Фаза 4. `internal/agent` — закрыта
+
+4.5 (`ac12d8f3f`): accounts-хранилище и поиск использования Codex
+передаются снаружи через `CoordinatorOptions`; `runtime_builder.go`
+разрезан с 1699 строк до 561 плюс `rotation.go`,
+`credential_refresh.go`, `providers_build.go`.
 
 4.4 закрыт (`28db54638`). Реальный баг там был один: fetch-делегат не
 помечался `IsSubAgent`, из-за чего получал напоминание про todo,
@@ -150,28 +155,14 @@ multiedit не дублирует проверку в `applyFileMutation`: бе�
 на каждое делегирование к именованному агенту; бюджет ограничен
 `subagent_memory.go`.
 
-### 4.5 [L] Auth-политика вне билдера рантайма
-
-`runtime_builder.go:180-185` конструирует `accounts.NewFileStore(
-config.GlobalAccountsFile())`; `:904` читает `codex.UsageFor`; ротация
-аккаунтов (`:795-1071`) и refresh кредов (`:626-1240`) живут внутри
-билдера; сравнения с `codex.ProviderID` в `maxtokens.go:29`,
-`providers.go:131`, `provider_log.go:181,412`, `runtime_builder.go:1356-1364`.
-
-Действия:
-- Инжектить `accounts.Store` и `UsageLookup` через `CoordinatorOpts`.
-- Вынести ротацию, refresh и `build*Provider` в `rotation.go`,
-  `credential_refresh.go`, `providers_build.go`.
-- Provider-специфику скрыть за `typeclass`/capabilities.
-- `CoordinatorOpts.History` принимать узкий `fileHistoryStore` (2 метода),
-  тогда импорт `history/store` из `coordinator.go:141` и
-  `delegation_finalizer.go:52` исчезает.
-- `tools/sennit_info.go`: `EnvironmentProblems` передавать функцией через
-  конструктор вместо импорта `internal/doctor`.
-
----
-
 ## Фаза 5. UI за `Workspace`
+
+5.1 закрыт (`cf9ebb9dd`). При переносе едва не потеряли защиту: старый код
+не писал `proxy_url`, если значение не изменилось, потому что настроенным
+может быть шаблон `$HTTPS_PROXY`, а записываемым — уже разрешённая строка.
+Без проверки первый вход без флага навсегда затирал шаблон. Сторож
+восстановлен и сравнивает с содержимым файла, а не со снимком в памяти:
+снимок бывает устаревшим, а перезаписывается именно файл. Остаётся 5.4.
 
 5.2 и 5.3 закрыты (`8f139c19e`). Проверка ключа идёт через
 `Workspace.VerifyProviderAPIKey` и строит провайдера тем же путём, что и
@@ -184,22 +175,6 @@ config.GlobalAccountsFile())`; `:904` читает `codex.UsageFor`; ротац�
 Пункты 5.5-5.7 закрыты (`8fb2275e9`): вместо россыпи nil-guard'ов
 добавлены nil-безопасные аксессоры на `Config`, дублирующиеся обработчики
 диалогов сведены к двум хелперам, тестовые символы убраны из продакшн-кода.
-
-### 5.1 [L] Codex/Copilot OAuth из диалога в Workspace
-
-`ui/dialog/oauth_codex.go:127-167` (`initiateAuth`) читает токены Codex
-CLI с диска, обменивает refresh-token по сети, биндит loopback-порт;
-`:219-243` (`afterSave`) качает модели и пишет `providers.codex.models` и
-`proxy_url` в конфиг. Это дубль `cmd/login_codex.go:219-240`.
-`oauth_copilot.go:108,150` аналогично зовёт `copilot.RequestDeviceCode`/
-`PollForToken`.
-
-Действия: `Workspace.StartOAuth(ctx, providerID, proxy) (OAuthSession,
-error)` с DTO `{URL, UserCode, ExpiresIn, Interval}` + `Wait`/`Cancel`;
-`Workspace.CompleteOAuth(providerID, token, opts)` внутри делает
-RecordAccount и post-save. `cmd/login_codex.go` использует те же методы.
-Диалог остаётся view + Action; импорты `oauth/codex`, `oauth/copilot`,
-`proxyhttp` из `ui/dialog` исчезают.
 
 ### 5.4 [M] DTO вместо импортов бэкенда в `model` и `common`
 
@@ -220,23 +195,17 @@ bool)` вместо `ToProvider`. `permission.PermissionRequest` в UI оста�
 
 ## Фаза 6. Границы workspace / app / proto
 
+6.1, 6.2 и 6.4 закрыты. По 6.2 (`955da337c`): `internal/ui` больше не
+линкует MCP-клиент агента — контракт получил свои DTO для команд и
+промптов, конверсия живёт в `appws`. Сторож переписан на транзитивное
+замыкание, старый смотрел только прямые импорты. Перенос трёх use-case'ов
+из контракта отменён: дал бы цикл импорта или вернул нарушение слоёв.
+
 6.1 и 6.4 закрыты (`ce9d6ecdf`, AGENTS.md). Из «мёртвых» методов реально
 мёртвыми оказались только `SendThread` и `AgentQueuedPrompts`:
 `ActivateThread` получил вызов в 2.1, а `MCPAuthURL` используется в
 `ui/model/mcp_auth.go`. Восемь однометодных ролей свёрнуты обратно с
 восстановлением документации из `a09ecd54a^`.
-
-### 6.2 [M] `workspace` как контракт, а не use-case'ы
-
-- `custom_provider.go` (импорт `discover`), `session_changes.go`
-  (`diff`), `resolve_session.go` → в `appws` или `workspace/usecase`.
-- `MCPController.ListMCPPrompts() []commands.MCPPrompt`
-  (`workspace.go:484`) транзитивно тянет `agent/tools/mcp`, `hooks`,
-  `shellconfig` в UI. Свой DTO `workspace.MCPPrompt`.
-- `dependency_guard_test.go:42-48` проверяет только прямые импорты.
-  Переписать на `go list -deps` / `packages.Load` с запретом `agent/...`.
-- `LSPEvent.Error` и `MCPClientInfo.Error` (`workspace.go:139,460`) —
-  `error` в data-only DTO; сделать `string`, как `proto.LSPClientInfo.Error`.
 
 ### 6.3 [M] `appws → threadspawn` и три копии flatten
 
