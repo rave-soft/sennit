@@ -250,6 +250,16 @@ func TestBranchExists(t *testing.T) {
 	require.False(t, exists)
 }
 
+// TestBranchExistsNotARepository proves BranchExists reports an error, not a
+// false "does not exist", when it cannot determine the answer at all.
+func TestBranchExistsNotARepository(t *testing.T) {
+	requireGit(t)
+
+	exists, err := BranchExists(context.Background(), t.TempDir(), "main")
+	require.Error(t, err)
+	require.False(t, exists)
+}
+
 func TestWorktreeAdd(t *testing.T) {
 	repo := initRepo(t)
 	ctx := context.Background()

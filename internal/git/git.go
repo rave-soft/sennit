@@ -257,15 +257,23 @@ func UncommittedFiles(ctx context.Context, dir string) ([]FileChange, error) {
 }
 
 // BranchExists reports whether a local branch named name exists in repo.
+// err is non-nil when the existence of the branch could not be determined —
+// callers must not read that as "the branch is gone".
 func BranchExists(ctx context.Context, repo, name string) (bool, error) {
-	_, err := run(ctx, repo, "rev-parse", "--verify", "refs/heads/"+name)
-	if err != nil {
-		// git rev-parse --verify fails both for a missing ref and for
-		// other errors, but for our purposes a failed verify means the
-		// branch does not exist.
+	// "show-ref --verify" (unlike "rev-parse --verify") gives a clean
+	// discriminator: exit 1 means the ref does not exist, any other exit
+	// (including a non-repository or otherwise broken repo) means the
+	// question could not be answered. "--" keeps a branch name beginning
+	// with "-" from being parsed as an option.
+	_, err := run(ctx, repo, "show-ref", "--verify", "--quiet", "--", "refs/heads/"+name)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 		return false, nil
 	}
-	return true, nil
+	return false, err
 }
 
 // WorktreeAdd creates a new worktree at path, checking out a new branch
@@ -561,6 +569,9 @@ func DeleteBranch(ctx context.Context, repo, name string, force bool) error {
 	// "--" keeps a branch name beginning with "-" from being parsed as a
 	// second flag.
 	if _, err := run(ctx, repo, "branch", flag, "--", name); err != nil {
+		// Only a confirmed absence excuses the failed delete. If the probe
+		// itself errored, existsErr != nil so this falls through to the
+		// original delete error instead of reporting a silent success.
 		if exists, existsErr := BranchExists(ctx, repo, name); existsErr == nil && !exists {
 			return nil
 		}

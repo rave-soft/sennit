@@ -164,9 +164,11 @@ func (m *Manager) discardMerged(ctx context.Context, threadID string) {
 // thread's base branch is the normal case, not the exception. Ask about the
 // two branches that actually matter, then act on the answer.
 func (m *Manager) keepMergedBranch(ctx context.Context, st Thread) bool {
+	// Only a confirmed absence means the branch is already gone. A probe
+	// error falls through to the ancestor check, which fails against the
+	// same broken repo and leaves the branch kept — never deleted on
+	// unverified information.
 	if exists, err := git.BranchExists(ctx, m.repoRoot, st.Branch); err == nil && !exists {
-		// Already deleted, by hand or by an earlier run. That is the state
-		// this wants, so there is nothing to verify and nothing to report.
 		return false
 	}
 	merged, err := git.IsAncestor(ctx, m.repoRoot, st.Branch, st.BaseBranch)
