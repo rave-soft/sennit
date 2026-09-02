@@ -100,7 +100,25 @@ func (cm *connectionManager) closeSession(name string, s *ClientSession) {
 
 func (cm *connectionManager) createSession(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
-	mcpCtx, cancel := context.WithCancel(ctx)
+	// The session's context must not be ctx itself: for an SSE server the
+	// go-sdk binds the long-lived event-stream GET to the context passed to
+	// Connect (unlike the streamable transport, which detaches it), so that
+	// stream dies the instant ctx is cancelled. ctx here can be a single tool
+	// call's context (killed the moment the call returns) or an OAuth flow's
+	// context (cancelled by the coordinator the moment auth succeeds) - in
+	// neither case should the caller's lifetime become the session's. Building
+	// off context.WithoutCancel(ctx) keeps ctx's values (suppressBrowserKey
+	// below, tracing) but not its cancellation, so a caller giving up mid-connect
+	// no longer aborts it; that is fine because cancelTimer below still bounds
+	// the connect with the mcpTimeout-derived deadline, and the session's own
+	// lifetime is still ended explicitly via cancel, stored on ClientSession.
+	// A caller that gives up mid-connect (e.g. abortAuthFlow on a cancelled
+	// interactive auth flow, authcoordinator.go) doesn't rely on this connect
+	// observing that cancellation either: it releases ownership and settles
+	// terminal state itself, synchronously, so the still-running connect is
+	// later discarded by publishOrClose's r.owns check and its
+	// close-on-uncommitted guard rather than by context cancellation.
+	mcpCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
 	transport, oauthHandler, err := cm.reg.createTransportFor(mcpCtx, cfg, name, m, owner.gen, owner.seq, resolver)
@@ -481,24 +499,14 @@ func (cm *connectionManager) getOrRenewClient(ctx context.Context, cfg ConfigPro
 	if usesOAuth(m) && !cm.reg.reserveTokenMutation(cfg, name, m, renewal) {
 		return nil, errLostOwnership
 	}
-	// Detach from ctx before building the renewed session: on the lazy
-	// renewal path (a broken ping discovered inside a tool call), ctx is
-	// that tool call's own context, derived from the turn's per-generation
-	// ctx (run_turn.go) - not the long-lived init ctx a fresh server gets
-	// on startup. createSession derives the stdio transport's
-	// exec.CommandContext and SIGKILL-the-group cmd.Cancel from whatever
-	// context it is given, so a session built on the caller's ctx gets
-	// killed the moment that tool call returns, and the very next call
-	// pings it, finds it dead, and renews again - paying process start +
-	// initialize + list-tools on every single call and losing all
-	// per-process server state in between. context.WithoutCancel keeps
-	// this call's values (for tracing) but not its cancellation; the
-	// connect itself is still bounded by createSession's own
-	// mcpTimeout-derived timer, so a renewal can't hang forever even
-	// detached. ctx itself is still used for ping/list above and
-	// publishOrClose below, where a caller cancellation genuinely should
-	// be observed.
-	newSess, err := cm.newSession(context.WithoutCancel(ctx), cfg, name, m, renewal, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	// ctx here can be the lazy renewal path's tool-call context (a broken
+	// ping discovered inside a tool call) or the fresh-server init path's
+	// long-lived context; either way createSession itself now detaches the
+	// session from ctx's cancellation (see the comment there), so this call
+	// passes ctx straight through. ctx is still used for ping/list above and
+	// publishOrClose below, where a caller cancellation genuinely should be
+	// observed.
+	newSess, err := cm.newSession(ctx, cfg, name, m, renewal, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		cm.reg.clearMCPDataFor(name, renewal)
 		if usesOAuth(m) && isOAuthInitErr(err) {

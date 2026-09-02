@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -702,9 +703,10 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 // cmd.Cancel from. The tool call's own ctx is cancelled the moment the
 // tool call returns, killing the freshly spawned server immediately - the
 // next call would ping it, find it dead, and renew again, paying process
-// start + initialize + list-tools on every single call. The fix builds the
-// renewed session off context.WithoutCancel(ctx) instead, so the session
-// outlives the tool call that happened to trigger the renewal.
+// start + initialize + list-tools on every single call. The fix now lives
+// inside createSession itself (every session-creating path gets it, not
+// just renewal), so this only pins that getOrRenewClient still passes its
+// ctx straight through to newSession rather than re-detaching it itself.
 func TestGetOrRenewClient_RenewalDetachesFromCallerContext(t *testing.T) {
 	r := NewRegistry()
 	const name = "test-renew-detached-ctx"
@@ -748,9 +750,67 @@ func TestGetOrRenewClient_RenewalDetachesFromCallerContext(t *testing.T) {
 	require.Same(t, replacement, sess)
 	require.NotNil(t, capturedCtx, "newSession must have been called for the renewal")
 
-	// The tool call returns and its ctx is cancelled - the renewed
-	// session's own context must not observe it.
+	// getOrRenewClient no longer detaches ctx itself - that responsibility
+	// moved into createSession - so what it hands to newSession is exactly
+	// the caller's ctx, cancellation included. This mocked newSession
+	// bypasses createSession entirely, so it is the wrong place to assert
+	// detachment; TestCreateSession_SurvivesCallerContextCancellation below
+	// covers that against the real implementation.
 	cancelCaller()
-	require.NoError(t, capturedCtx.Err(),
-		"the renewed session's context must be detached from the caller's tool-call ctx")
+	require.ErrorIs(t, capturedCtx.Err(), context.Canceled,
+		"getOrRenewClient must pass its ctx through to newSession unmodified")
+}
+
+// TestCreateSession_SurvivesCallerContextCancellation is the regression test
+// for the SSE-session-severed-after-OAuth-succeeds bug: createSession used to
+// build the session straight off the caller's ctx (context.WithCancel(ctx)).
+// For an SSE server - whose go-sdk transport binds the long-lived event
+// stream to the connect context - that meant cancelling the caller's ctx (a
+// tool call returning, or an OAuth flow cancelling on success) killed the
+// stream even though the session was otherwise healthy. The fix derives the
+// session context from context.WithoutCancel(ctx) inside createSession
+// itself, so every session-creating path gets it, not just the renewal path
+// that already had its own detach.
+//
+// This exercises createSession's stdio path end to end (a real subprocess,
+// via the SENNIT_MCP_STDIO_SERVER self-exec helper in TestMain) rather than
+// a real SSE server: an in-process httptest SSE server hits an unrelated
+// go-sdk race in the SEP-2575 "subscriptions/listen" teardown handshake
+// (createSession's ClientOptions always register list-changed handlers,
+// which makes the client open a background subscriptions/listen call at
+// connect time; on Close, the client's cancellation of that call can race
+// the transport teardown, which then leaves the in-process test server's
+// handler goroutine blocked forever and its httptest.Server.Close() hung) -
+// a go-sdk teardown bug orthogonal to the ctx-detachment fix under test
+// here, and not something this package's tests should paper over by
+// working around it. The stdio path exercises the exact same createSession
+// code (same ClientOptions, same context derivation) without hitting that
+// race: killing the child process on Close is unconditional and immediate
+// (SIGKILL via cmd.Cancel, see process_unix.go), so it does not depend on a
+// graceful protocol-level handshake completing first.
+func TestCreateSession_SurvivesCallerContextCancellation(t *testing.T) {
+	registry := NewRegistry()
+	const name = "test-stdio-survives-cancel"
+	m := config.MCPConfig{
+		Type:    config.MCPStdio,
+		Command: os.Args[0],
+		Env:     map[string]string{"SENNIT_MCP_STDIO_SERVER": "1"},
+	}
+	owner, err := registry.beginAttempt(name)
+	require.NoError(t, err)
+	t.Cleanup(func() { registry.states.Del(name) })
+
+	callerCtx, cancelCaller := context.WithCancel(context.Background())
+	sess, err := registry.createSession(callerCtx, nil, name, m, owner, shellResolverWithPath(t, nil), false)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close() })
+
+	// The caller (a tool call, or an OAuth flow finishing) is done with its
+	// own context; the session - and the child process backing it - must
+	// not have been tied to it.
+	cancelCaller()
+
+	result, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpStdioServerToolName})
+	require.NoError(t, err, "session must still be usable after the creating ctx is cancelled")
+	require.False(t, result.IsError)
 }

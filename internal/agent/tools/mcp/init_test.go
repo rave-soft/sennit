@@ -991,6 +991,68 @@ func TestBeginAuth_CancelSettlesExactStartingOwner(t *testing.T) {
 	require.Equal(t, StateNeedsAuth, info.State)
 }
 
+// TestBeginAuth_CancelReleasesOwnershipAndReturnsCancelled pins the three
+// guarantees abortAuthFlow makes when a user cancels an in-flight
+// interactive OAuth flow. This is the mechanism that makes it safe for
+// createSession to no longer abort on the caller's own ctx cancellation
+// (see the comment on createSession): a stale connect that keeps running
+// in the background after cancel is discarded by ownership and by
+// publishOrClose's close-on-uncommitted guard, not by the connect itself
+// observing cancellation. Each of the three assertions below is what stops
+// that stale attempt from surfacing later:
+//   - the server settles StateNeedsAuth (it was in StateStarting);
+//   - the ownership entry for the name is released, so a late-finishing
+//     connect fails publishOrClose's r.owns check and is discarded instead
+//     of publishing a session for a server the user cancelled;
+//   - finish returns context.Canceled.
+//
+// Like TestBeginAuth_CancelSettlesExactStartingOwner above, runAuth is
+// stubbed so this does not depend on real network timing against an
+// unreachable OAuth server - the point is the abort transition itself, not
+// the connect.
+func TestBeginAuth_CancelReleasesOwnershipAndReturnsCancelled(t *testing.T) {
+	const name = "begin-auth-cancel-ownership"
+	r := NewRegistry()
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	r.runAuth = func(ctx context.Context, _ ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
+		r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
+		close(started)
+		<-release
+		return ctx.Err()
+	}
+
+	finish, cancel, err := r.BeginAuth(cfg, name)
+	require.NoError(t, err)
+	<-started
+	// Grab the flow before cancelling, not after: completeAuthFlow deletes
+	// it from authFlows as soon as the worker exits.
+	r.authMu.Lock()
+	flow := r.authFlows[name]
+	r.authMu.Unlock()
+	require.NotNil(t, flow)
+
+	cancel()
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer waitCancel()
+	err = finish(waitCtx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateNeedsAuth, info.State)
+
+	r.publishMu.Lock()
+	_, hasOwner := r.owners[name]
+	r.publishMu.Unlock()
+	require.False(t, hasOwner, "ownership must be released so a late-finishing connect fails r.owns and is discarded")
+
+	close(release)
+	<-flow.workerDone
+}
+
 func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1074,54 +1136,77 @@ func TestAuthenticateMCP_NoTokenStartsInteractiveFlow(t *testing.T) {
 	const name = "auth-no-token"
 	r := NewRegistry()
 	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
-	// A cancelled context makes createSession fail fast without network,
-	// exercising the full AuthenticateMCP → connectAndRegister → setAuthTerminal
-	// path. The handler is created and published before the connect attempt.
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	err := r.AuthenticateMCP(ctx, cfg, name)
-	require.ErrorIs(t, err, context.Canceled)
-	// A cancelled interactive flow settles back in StateNeedsAuth, not
-	// StateError: the user can re-trigger the flow.
+	// createSession derives the connect's own context from
+	// context.WithoutCancel(ctx) (see the comment on createSession), so a
+	// caller-cancelled ctx no longer aborts the connect attempt - that is
+	// the point of that fix. This URL fails fast on its own (connection
+	// refused, no listener), exercising the full
+	// AuthenticateMCP → connectAndRegister → setAuthTerminal path without
+	// depending on cancellation to short-circuit it. The handler is
+	// created and published before the connect attempt.
+	err := r.AuthenticateMCP(t.Context(), cfg, name)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, context.Canceled)
+	// A plain connect failure (not cancellation, not an OAuth-init error)
+	// settles in StateError, same as any other non-recoverable connect
+	// failure.
 	info, ok := r.states.Get(name)
 	require.True(t, ok)
-	require.Equal(t, StateNeedsAuth, info.State)
+	require.Equal(t, StateError, info.State)
 	// The handler was detached from the publication by the attempt's defer.
 	_, ok = r.authURLs.Get(name)
 	require.False(t, ok)
 }
 
-// TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth pins that
-// a cancelled interactive OAuth flow returns context.Canceled to the caller
-// (AuthenticateMCP propagates it) while still settling the server in
-// StateNeedsAuth so the user can re-trigger.
-func TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth(t *testing.T) {
-	const name = "auth-cancel"
+// TestSetAuthTerminal_CancelSettlesNeedsAuth pins the cancel→NeedsAuth
+// mapping AuthenticateMCP relies on via setAuthTerminal: a cancelled
+// interactive OAuth flow settles the server in StateNeedsAuth (not
+// StateError), so the user can re-trigger it.
+//
+// This used to be exercised end to end through AuthenticateMCP with a
+// pre-cancelled ctx and an unreachable URL, on the assumption that
+// createSession would fail fast with context.Canceled without touching the
+// network. createSession no longer aborts on the caller's own ctx
+// cancellation (see the comment on createSession) - a cancelled ctx now
+// only surfaces once the caller's ctx is actually used again, e.g. by
+// publishSession listing tools/prompts/resources after a real successful
+// connect. Reconstructing that end to end needs a real, working OAuth-
+// capable HTTP/SSE server (connectAndRegister's createSession call has no
+// test seam to fake success on, unlike getOrRenewClient's newSession field),
+// which is disproportionate for pinning this one mapping, so this tests
+// setAuthTerminal directly instead - the exact piece of logic that
+// implements it.
+func TestSetAuthTerminal_CancelSettlesNeedsAuth(t *testing.T) {
+	const name = "auth-terminal-cancel"
 	r := NewRegistry()
-	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	err := r.AuthenticateMCP(ctx, cfg, name)
-	require.ErrorIs(t, err, context.Canceled)
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.updateStateFor(name, owner, StateStarting, nil)
+
+	r.setAuthTerminal(name, owner, context.Canceled)
+
 	info, ok := r.states.Get(name)
 	require.True(t, ok)
 	require.Equal(t, StateNeedsAuth, info.State)
 }
 
 // TestInitClient_NonOAuthCancellationIsError pins the startup semantics: a
-// cancelled non-OAuth connect must surface context.Canceled to the caller
-// and settle in StateError, NOT StateNeedsAuth (which is reserved for
-// OAuth). Guards against a blanket Canceled->NeedsAuth rewrite of initClient.
+// connect failure for a non-OAuth server must settle in StateError, NOT
+// StateNeedsAuth (which is reserved for OAuth). Guards against a blanket
+// Canceled->NeedsAuth rewrite of initClient.
+//
+// createSession no longer aborts on the caller's own ctx cancellation (see
+// the comment on createSession), so - unlike this test's previous form -
+// cancelling ctx up front no longer determines the error; a connect failure
+// of any kind (here, connection refused) must still land in StateError.
 func TestInitClient_NonOAuthCancellationIsError(t *testing.T) {
 	const name = "non-oauth-cancel"
 	r := NewRegistry()
 	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp"}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	err = r.initClient(ctx, cfg, name, cfg.Config().MCP[name], owner, cfg.Resolver())
-	require.ErrorIs(t, err, context.Canceled)
+	err = r.initClient(t.Context(), cfg, name, cfg.Config().MCP[name], owner, cfg.Resolver())
+	require.Error(t, err)
 	info, ok := r.states.Get(name)
 	require.True(t, ok)
 	require.Equal(t, StateError, info.State)
@@ -1316,7 +1401,34 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// SENNIT_MCP_STDIO_SERVER re-execs this test binary as a real MCP stdio
+	// server (self-exec, mirroring the SENNIT_STDIO_CHECK_HELPER pattern
+	// above) so tests can exercise createSession's stdio path end to end
+	// without a network listener. See mcpStdioServerToolName.
+	if os.Getenv("SENNIT_MCP_STDIO_SERVER") == "1" {
+		runMCPStdioServerHelper()
+		os.Exit(0)
+	}
 	os.Exit(m.Run())
+}
+
+// mcpStdioServerToolName is the single tool exposed by the
+// SENNIT_MCP_STDIO_SERVER helper process.
+const mcpStdioServerToolName = "ping_tool"
+
+// runMCPStdioServerHelper runs a real MCP server over stdio, exposing one
+// tool that always succeeds. It exits when its stdin closes (i.e. when the
+// parent kills or releases the child), same as any real stdio MCP server.
+func runMCPStdioServerHelper() {
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "srv"}, nil)
+	mcp.AddTool(
+		mcpServer,
+		&mcp.Tool{Name: mcpStdioServerToolName, Description: "test tool"},
+		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil, nil
+		},
+	)
+	_ = mcpServer.Run(context.Background(), &mcp.StdioTransport{})
 }
 
 func TestStdioCheckArgv(t *testing.T) {
