@@ -85,9 +85,11 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderCo
 	require.NoError(t, err)
 	cfg.Config().SetRuntimeProvider(providerCfg.ID, effective)
 	coord := &coordinator{
-		cfg:      cfg,
-		sessions: env.sessions,
-		messages: env.messages,
+		agentDeps: agentDeps{
+			cfg:      cfg,
+			sessions: env.sessions,
+			messages: env.messages,
+		},
 	}
 	coord.newCoordinatorComponents()
 	return coord

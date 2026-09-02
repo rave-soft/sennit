@@ -67,14 +67,16 @@ func TestCoordinatorCloseRaceWithBuildAgent(t *testing.T) {
 	cfg.SetupAgents()
 
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		mcp:         mcp.NewRegistry(),
-		background:  shell.NewBackgroundShellManager(),
+		agentDeps: agentDeps{
+			cfg:         cfg,
+			sessions:    env.sessions,
+			messages:    env.messages,
+			permissions: env.permissions,
+			history:     env.history,
+			filetracker: *env.filetracker,
+			mcp:         mcp.NewRegistry(),
+			background:  shell.NewBackgroundShellManager(),
+		},
 	}
 	coord.newCoordinatorComponents()
 

@@ -72,14 +72,16 @@ func newTasksTestCoordinator(t *testing.T, taskManager tools.TaskManager) (*coor
 	cfg.SetupAgents()
 
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		mcp:         mcp.NewRegistry(),
-		background:  shell.NewBackgroundShellManager(),
+		agentDeps: agentDeps{
+			cfg:         cfg,
+			sessions:    env.sessions,
+			messages:    env.messages,
+			permissions: env.permissions,
+			history:     env.history,
+			filetracker: *env.filetracker,
+			mcp:         mcp.NewRegistry(),
+			background:  shell.NewBackgroundShellManager(),
+		},
 	}
 	coord.newCoordinatorComponents()
 	coord.SetDelegationTools(nil, taskManager)

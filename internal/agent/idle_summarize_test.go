@@ -51,8 +51,10 @@ func newIdleSweepFixture(t *testing.T, cfgJSON string, promptTokens int64) (*idl
 
 	f := &idleSweepFixture{agent: agent, sessions: env.sessions}
 	f.dispatcher = &turnDispatcher{
-		cfg:          store,
-		sessions:     env.sessions,
+		agentDeps: &agentDeps{
+			cfg:      store,
+			sessions: env.sessions,
+		},
 		agentPort:    &coordinatorAgentPort{agent: agent},
 		lifecycle:    &readinessLifecycle{},
 		lastActivity: csync.NewMap[string, time.Time](),

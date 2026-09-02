@@ -15,19 +15,14 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openrouter"
 
-	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/agent/tools"
-	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
-	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -112,11 +107,7 @@ type runtimeToolInputs struct {
 }
 
 type runtimeBuilder struct {
-	cfg         *config.ConfigStore
-	credentials *credentials.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	mcp         *mcp.Registry
-	interactive bool
+	*agentDeps
 
 	localVersion atomic.Uint64
 	runtime      *runtimeCache
@@ -140,18 +131,6 @@ type runtimeBuilder struct {
 	// enabled - see rotatorFor for why a disabled provider never gets an
 	// entry here at all.
 	rotators map[string]*accounts.Rotator
-
-	// accStore is the shared accounts.Store used to list a provider's
-	// candidates for Pick, injected via CoordinatorOptions.AccountsStore
-	// (production wires accounts.NewFileStore(config.GlobalAccountsFile())
-	// - see internal/app/services.go). Tests set it directly, often to a
-	// fake, before exercising a rotation path.
-	accStore accounts.Store
-
-	// codexUsage resolves an account ID to its last recorded Codex usage
-	// snapshot, for makeThresholdRotateCallback. Injected via
-	// CoordinatorOptions.CodexUsage (production wires codex.UsageFor).
-	codexUsage func(accountID string) (codex.Usage, bool)
 }
 
 // waitForMCPInit blocks until this builder's MCP registry finishes

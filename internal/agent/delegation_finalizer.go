@@ -17,24 +17,14 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/agent/tools"
-	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/filetracker"
-	historystore "github.com/rave-soft/sennit/internal/history/store"
-	"github.com/rave-soft/sennit/internal/latency"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
-	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
-	sessionstore "github.com/rave-soft/sennit/internal/session/store"
-	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
 )
 
@@ -46,20 +36,9 @@ import (
 // continuation wake, SendToParent) stays on the sessionAgent's dispatcher:
 // it is per-session turn state, not per-coordinator state.
 type delegationFinalizer struct {
-	cfg         *config.ConfigStore
-	sessions    sessionstore.Service
-	messages    MessageService
-	permissions permission.Requester
-	questions   question.Service
-	history     historystore.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	background  *shell.BackgroundShellManager
-	builder     *runtimeBuilder
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
-	mcp         *mcp.Registry
-	latency     latency.Recorder
+	*agentDeps
+
+	builder *runtimeBuilder
 
 	lifecycle *readinessLifecycle
 

@@ -57,7 +57,7 @@ https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-EFGH`,
 
 func TestRefreshAWSCredentials_Headless_ReturnsErrNoInteractiveAuth(t *testing.T) {
 	t.Parallel()
-	c := &runtimeBuilder{}
+	c := &runtimeBuilder{agentDeps: &agentDeps{}}
 	err := c.refreshAWSCredentials(t.Context(), config.ProviderConfig{ID: "bedrock", AWSAuthRefresh: "aws sso login"}, runtimeOperationPort{})
 	require.ErrorIs(t, err, errNoInteractiveAuth,
 		"with no notifier available, refreshAWSCredentials must not attempt to run the refresh command")

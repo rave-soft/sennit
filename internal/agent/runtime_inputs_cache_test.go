@@ -19,7 +19,8 @@ func TestRuntimeInputsCacheReflectsSkillsRefresh(t *testing.T) {
 	after := []*skills.Skill{{Name: "after"}}
 
 	d := &delegationFinalizer{
-		builder:      &runtimeBuilder{},
+		agentDeps:    &agentDeps{},
+		builder:      &runtimeBuilder{agentDeps: &agentDeps{}},
 		allSkills:    before,
 		activeSkills: before,
 		skillTracker: skills.NewTracker(before),
@@ -41,7 +42,7 @@ func TestRuntimeInputsCacheReflectsSkillsRefresh(t *testing.T) {
 // visible on the next runtimeInputs() call even though it does not change
 // the config version or the skills generation the cache also keys on.
 func TestRuntimeInputsCacheReflectsSetDelegationTools(t *testing.T) {
-	d := &delegationFinalizer{builder: &runtimeBuilder{}}
+	d := &delegationFinalizer{agentDeps: &agentDeps{}, builder: &runtimeBuilder{agentDeps: &agentDeps{}}}
 
 	got := d.runtimeInputs()
 	require.Nil(t, got.delegationTools.threads)

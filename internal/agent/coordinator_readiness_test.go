@@ -54,14 +54,16 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 
 	reg := mcp.NewRegistry()
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		mcp:         reg,
-		background:  shell.NewBackgroundShellManager(),
+		agentDeps: agentDeps{
+			cfg:         cfg,
+			sessions:    env.sessions,
+			messages:    env.messages,
+			permissions: env.permissions,
+			history:     env.history,
+			filetracker: *env.filetracker,
+			mcp:         reg,
+			background:  shell.NewBackgroundShellManager(),
+		},
 	}
 	coord.newCoordinatorComponents()
 

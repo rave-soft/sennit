@@ -11,13 +11,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
-	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
-	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
 // turnDispatcher owns the turn lifecycle of the coordinator's own agent:
@@ -31,15 +27,10 @@ import (
 // the seam that orders those two behind the session's own dispatch
 // protocol.
 type turnDispatcher struct {
-	cfg         *config.ConfigStore
-	sessions    sessionstore.Service
-	messages    MessageService
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
-	mcp         *mcp.Registry
-	latency     latency.Recorder
-	builder     *runtimeBuilder
-	delegation  *delegationFinalizer
+	*agentDeps
+
+	builder    *runtimeBuilder
+	delegation *delegationFinalizer
 
 	agentPort *coordinatorAgentPort
 

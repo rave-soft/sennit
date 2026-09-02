@@ -36,13 +36,15 @@ func agentModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
 	cfg.SetupAgents()
 
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		background:  shell.NewBackgroundShellManager(),
+		agentDeps: agentDeps{
+			cfg:         cfg,
+			sessions:    env.sessions,
+			messages:    env.messages,
+			permissions: env.permissions,
+			history:     env.history,
+			filetracker: *env.filetracker,
+			background:  shell.NewBackgroundShellManager(),
+		},
 	}
 	coord.newCoordinatorComponents()
 

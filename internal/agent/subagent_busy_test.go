@@ -119,14 +119,16 @@ func newSubAgentBusyTestCoordinator(t *testing.T) *coordinator {
 	cfg.SetupAgents()
 
 	c := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		mcp:         mcp.NewRegistry(),
-		background:  shell.NewBackgroundShellManager(),
+		agentDeps: agentDeps{
+			cfg:         cfg,
+			sessions:    env.sessions,
+			messages:    env.messages,
+			permissions: env.permissions,
+			history:     env.history,
+			filetracker: *env.filetracker,
+			mcp:         mcp.NewRegistry(),
+			background:  shell.NewBackgroundShellManager(),
+		},
 	}
 	c.newCoordinatorComponents()
 	c.dispatcher.agentPort.set(&sessionAgent{dispatcher: newDispatcher()})

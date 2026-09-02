@@ -58,7 +58,7 @@ func TestRuntimeForUsesCapturedPublishedConfigGeneration(t *testing.T) {
 		WorkingDir: t.TempDir(),
 	})
 	env := testEnv(t)
-	builder := &runtimeBuilder{cfg: store, runtime: newRuntimeCache()}
+	builder := &runtimeBuilder{agentDeps: &agentDeps{cfg: store}, runtime: newRuntimeCache()}
 
 	runtime, err := builder.runtimeFor(context.Background(), runtimeToolInputs{
 		permissions: env.permissions,

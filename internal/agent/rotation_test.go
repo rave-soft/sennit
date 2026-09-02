@@ -98,11 +98,11 @@ var _ accounts.Store = (*fakeAccountStore)(nil)
 func TestRotatorFor_DisabledOrNilRotation_ReturnsNilAndBuildsNothing(t *testing.T) {
 	t.Parallel()
 
-	b := &runtimeBuilder{runtime: newRuntimeCache()}
+	b := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	require.Nil(t, b.rotatorFor(config.ProviderConfig{ID: "p"}))
 	require.Empty(t, b.rotators, "no Rotation config must not build a rotator entry")
 
-	b = &runtimeBuilder{runtime: newRuntimeCache()}
+	b = &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	require.Nil(t, b.rotatorFor(config.ProviderConfig{ID: "p", Rotation: &config.RotationConfig{Enabled: false}}))
 	require.Empty(t, b.rotators, "Rotation.Enabled=false must not build a rotator entry")
 }
@@ -114,7 +114,7 @@ func TestRotatorFor_DisabledOrNilRotation_ReturnsNilAndBuildsNothing(t *testing.
 func TestRotatorFor_Enabled_BuildsOnceAndReuses(t *testing.T) {
 	t.Parallel()
 
-	b := &runtimeBuilder{runtime: newRuntimeCache()}
+	b := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	cfg := config.ProviderConfig{ID: "p", Rotation: &config.RotationConfig{Enabled: true}}
 
 	r1 := b.rotatorFor(cfg)
@@ -156,7 +156,7 @@ const diskCodexProviderJSON = `{"providers":{"codex":{"id":"codex","name":"Test"
 // never even be handed a callback to call.
 func TestMakeRateLimitCallback_Disabled_ReturnsNil(t *testing.T) {
 	t.Parallel()
-	b := &runtimeBuilder{runtime: newRuntimeCache()}
+	b := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	cb := b.makeRateLimitCallback(config.ProviderConfig{ID: "p"}, providerstate.Provider{}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
@@ -165,7 +165,7 @@ func TestMakeRateLimitCallback_Disabled_ReturnsNil(t *testing.T) {
 // RotateThreshold provider (codex) has no 429 trigger to speak of.
 func TestMakeRateLimitCallback_NonRateLimitProvider_ReturnsNil(t *testing.T) {
 	t.Parallel()
-	b := &runtimeBuilder{runtime: newRuntimeCache()}
+	b := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	cfg := config.ProviderConfig{ID: codex.ProviderID, Rotation: &config.RotationConfig{Enabled: true}}
 	cb := b.makeRateLimitCallback(cfg, providerstate.Provider{Account: "a"}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
@@ -186,7 +186,7 @@ func TestMakeRateLimitCallback_SingleAccount_NoOp(t *testing.T) {
 			p.Rotation = &config.RotationConfig{Enabled: true}
 			p.Account = "only"
 		}))
-	co.builder.accStore = newFakeAccountStore(authProviderID, apiKeyAccount("only", "orig-key"))
+	co.builder.accountsStore = newFakeAccountStore(authProviderID, apiKeyAccount("only", "orig-key"))
 
 	before, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
@@ -229,7 +229,7 @@ func TestMakeRateLimitCallback_RotatesAndAppliesNewCredentials(t *testing.T) {
 			p.APIKey = "key-a"
 		}),
 	)
-	co.builder.accStore = newFakeAccountStore(authProviderID,
+	co.builder.accountsStore = newFakeAccountStore(authProviderID,
 		apiKeyAccount("acct-a", "key-a"),
 		apiKeyAccount("acct-b", "key-b"),
 	)
@@ -278,7 +278,7 @@ func TestMakeRateLimitCallback_AllExhausted_SurfacesOriginalError(t *testing.T) 
 			p.APIKey = "key-a"
 		}),
 	)
-	co.builder.accStore = newFakeAccountStore(authProviderID,
+	co.builder.accountsStore = newFakeAccountStore(authProviderID,
 		accounts.Account{ID: "acct-a", Label: "acct-a", APIKey: "key-a", Disabled: false},
 		accounts.Account{ID: "acct-b", Label: "acct-b", APIKey: "key-b", Disabled: true},
 	)
@@ -325,7 +325,7 @@ func TestMakeRateLimitCallback_HonorsRetryAfterHeader(t *testing.T) {
 			p.Account = "acct-a"
 			p.APIKey = "key-a"
 		}))
-	co.builder.accStore = newFakeAccountStore(authProviderID,
+	co.builder.accountsStore = newFakeAccountStore(authProviderID,
 		apiKeyAccount("acct-a", "key-a"),
 		apiKeyAccount("acct-b", "key-b"),
 	)
@@ -351,7 +351,7 @@ func TestMakeRateLimitCallback_HonorsRetryAfterHeader(t *testing.T) {
 	// call the callback makes: a 1-second header must cool down for ~1s,
 	// not accounts.DefaultCooldown's 10 minutes.
 	rotator.MarkRateLimited("acct-b", 0) // no header: falls back to default (10m)
-	all, err := co.builder.accStore.List(authProviderID)
+	all, err := co.builder.accountsStore.List(authProviderID)
 	require.NoError(t, err)
 	_, pickErr := rotator.Pick(authProviderID, "acct-b", all)
 	var exhausted *accounts.ErrAllExhausted
@@ -380,7 +380,7 @@ func TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount(t *testing.T)
 			p.APIKey = "key-a"
 		}),
 	)
-	co.builder.accStore = newFakeAccountStore(authProviderID,
+	co.builder.accountsStore = newFakeAccountStore(authProviderID,
 		apiKeyAccount("acct-a", "key-a"),
 		apiKeyAccount("acct-b", "key-b"),
 	)
@@ -436,7 +436,7 @@ func codexProviderConfig(account string, enabled bool) config.ProviderConfig {
 
 func TestMakeThresholdRotateCallback_Disabled_ReturnsNil(t *testing.T) {
 	t.Parallel()
-	b := &runtimeBuilder{runtime: newRuntimeCache()}
+	b := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	cb := b.makeThresholdRotateCallback(codexProviderConfig("a", false), providerstate.Provider{Account: "a"}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
@@ -446,7 +446,7 @@ func TestMakeThresholdRotateCallback_Disabled_ReturnsNil(t *testing.T) {
 // to compare against a threshold.
 func TestMakeThresholdRotateCallback_NonThresholdProvider_ReturnsNil(t *testing.T) {
 	t.Parallel()
-	b := &runtimeBuilder{runtime: newRuntimeCache()}
+	b := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	cfg := config.ProviderConfig{ID: "some-other-provider", Rotation: &config.RotationConfig{Enabled: true}}
 	cb := b.makeThresholdRotateCallback(cfg, providerstate.Provider{}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
@@ -471,9 +471,13 @@ func TestMakeThresholdRotateCallback_BelowThreshold_NoOp(t *testing.T) {
 	cfg.Config().SetRuntimeProvider(codex.ProviderID, effective)
 
 	b := &runtimeBuilder{
-		cfg: cfg, notify: notifier, runtime: newRuntimeCache(),
-		accStore:   codexAccountStore(apiKeyAccount("acct-below", "key-a"), apiKeyAccount("acct-b", "key-b")),
-		codexUsage: codex.UsageFor,
+		agentDeps: &agentDeps{
+			cfg:           cfg,
+			notify:        notifier,
+			accountsStore: codexAccountStore(apiKeyAccount("acct-below", "key-a"), apiKeyAccount("acct-b", "key-b")),
+			codexUsage:    codex.UsageFor,
+		},
+		runtime: newRuntimeCache(),
 	}
 
 	cb := b.makeThresholdRotateCallback(providerCfg, effective, nil, runtimeOperationPort{})
@@ -503,9 +507,13 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 	cfg.Config().SetRuntimeProvider(codex.ProviderID, effective)
 
 	b := &runtimeBuilder{
-		cfg: cfg, notify: notifier, runtime: newRuntimeCache(),
-		accStore:   codexAccountStore(apiKeyAccount("acct-over", "key-a"), apiKeyAccount("acct-c", "key-c")),
-		codexUsage: codex.UsageFor,
+		agentDeps: &agentDeps{
+			cfg:           cfg,
+			notify:        notifier,
+			accountsStore: codexAccountStore(apiKeyAccount("acct-over", "key-a"), apiKeyAccount("acct-c", "key-c")),
+			codexUsage:    codex.UsageFor,
+		},
+		runtime: newRuntimeCache(),
 	}
 
 	cb := b.makeThresholdRotateCallback(providerCfg, effective, nil, runtimeOperationPort{})
@@ -542,7 +550,7 @@ func TestMakeThresholdRotateCallback_SecondStepReadsRotatedAccountUsage(t *testi
 			p.Account = "acct-over-2"
 		}),
 	)
-	co.builder.accStore = codexAccountStore(apiKeyAccount("acct-over-2", "key-a"), apiKeyAccount("acct-c-2", "key-c"))
+	co.builder.accountsStore = codexAccountStore(apiKeyAccount("acct-over-2", "key-a"), apiKeyAccount("acct-c-2", "key-c"))
 
 	providerCfg, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
@@ -795,7 +803,7 @@ func TestRotateThreshold_OnlyFiresFromOnStepFinish(t *testing.T) {
 
 // TestNewCoordinator_UsesInjectedAccountsStore proves the coordinator
 // wires CoordinatorOptions.AccountsStore straight into the runtime
-// builder's accStore field, rather than ever falling back to a
+// builder's accountsStore field, rather than ever falling back to a
 // production accounts.NewFileStore(...). Without dependency injection,
 // nothing observable would distinguish an injected fake from a lazily
 // constructed file store; the injected field is the seam to assert on.
@@ -803,6 +811,6 @@ func TestNewCoordinator_UsesInjectedAccountsStore(t *testing.T) {
 	fake := newFakeAccountStore(authProviderID)
 	co := authTestCoordinator(t, withAccountsStore(fake))
 
-	require.Same(t, fake, co.builder.accStore,
+	require.Same(t, fake, co.builder.accountsStore,
 		"the builder must hold the exact injected accounts.Store instance")
 }

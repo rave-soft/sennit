@@ -190,7 +190,7 @@ func TestRuntimeCacheLogsLifecycleAndCorrelation(t *testing.T) {
 }
 
 func TestCoordinatorInvalidationKeepsNewestReasonAndGeneration(t *testing.T) {
-	builder := &runtimeBuilder{runtime: newRuntimeCache()}
+	builder := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	firstMutated := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	firstDone := make(chan struct{})
@@ -220,7 +220,7 @@ func TestCoordinatorInvalidationKeepsNewestReasonAndGeneration(t *testing.T) {
 }
 
 func TestCoordinatorInvalidationDoesNotWaitForRuntimeBuild(t *testing.T) {
-	builder := &runtimeBuilder{runtime: newRuntimeCache()}
+	builder := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var startOnce sync.Once
@@ -257,7 +257,7 @@ func TestCoordinatorInvalidationDoesNotWaitForRuntimeBuild(t *testing.T) {
 }
 
 func TestRuntimeCacheWaiterCancellationDoesNotBlockMutation(t *testing.T) {
-	builder := &runtimeBuilder{runtime: newRuntimeCache()}
+	builder := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var startOnce sync.Once

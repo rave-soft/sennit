@@ -91,15 +91,17 @@ func newThreadsTestCoordinator(t *testing.T, threads tools.ThreadManager) (*coor
 	cfg.SetupAgents()
 
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		mcp:         mcp.NewRegistry(),
-		background:  shell.NewBackgroundShellManager(),
-		questions:   question.NewService(),
+		agentDeps: agentDeps{
+			cfg:         cfg,
+			sessions:    env.sessions,
+			messages:    env.messages,
+			permissions: env.permissions,
+			history:     env.history,
+			filetracker: *env.filetracker,
+			mcp:         mcp.NewRegistry(),
+			background:  shell.NewBackgroundShellManager(),
+			questions:   question.NewService(),
+		},
 	}
 	coord.newCoordinatorComponents()
 	coord.SetDelegationTools(threads, nil)
@@ -207,7 +209,7 @@ func TestCoordinator_SetDelegationToolsThreadTakesEffectOnNextBuild(t *testing.T
 // readers never observe a thread adapter from a different generation than the
 // task adapter, even while concurrent publishers replace the pair.
 func TestCoordinator_SetDelegationToolsPublishesOneAdapterGeneration(t *testing.T) {
-	coord := &coordinator{builder: &runtimeBuilder{runtime: newRuntimeCache()}}
+	coord := &coordinator{builder: &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}}
 	coord.delegation = &delegationFinalizer{builder: coord.builder}
 	const (
 		generations = 64

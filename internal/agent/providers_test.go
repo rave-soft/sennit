@@ -19,7 +19,7 @@ func newProxyTestCoordinator(t *testing.T, debug bool) *coordinator {
 	t.Helper()
 	cfg, err := configruntime.Load(t.TempDir(), t.TempDir(), debug)
 	require.NoError(t, err)
-	coord := &coordinator{cfg: cfg}
+	coord := &coordinator{agentDeps: agentDeps{cfg: cfg}}
 	coord.newCoordinatorComponents()
 	return coord
 }

@@ -101,7 +101,7 @@ func TestAgenticFetchSubAgentView_OutsideWorkdirRequiresPermission(t *testing.T)
 func TestAgenticFetchTool_SharesClientAcrossCalls(t *testing.T) {
 	t.Parallel()
 
-	d := &delegationFinalizer{}
+	d := &delegationFinalizer{agentDeps: &agentDeps{}}
 
 	_, err := d.agenticFetchTool(t.Context(), nil)
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestAgenticFetchTool_SharesClientAcrossCalls(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, first, d.fetchClient, "a second nil-client call must reuse the same *http.Client")
 
-	other := &delegationFinalizer{}
+	other := &delegationFinalizer{agentDeps: &agentDeps{}}
 	custom := &http.Client{}
 	_, err = other.agenticFetchTool(t.Context(), custom)
 	require.NoError(t, err)

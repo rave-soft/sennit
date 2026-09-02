@@ -133,24 +133,43 @@ type coordinatorAgentPort struct{ agent SessionAgent }
 func (p *coordinatorAgentPort) current() SessionAgent  { return p.agent }
 func (p *coordinatorAgentPort) set(agent SessionAgent) { p.agent = agent }
 
-type coordinator struct {
-	cfg           *config.ConfigStore
-	credentials   *credentials.Manager
-	sessions      sessionstore.Service
-	messages      MessageService
-	permissions   permission.Requester
-	questions     question.Service
-	history       historystore.Service
-	filetracker   filetracker.Service
-	lspManager    *lsp.Manager
-	notify        pubsub.Publisher[notify.Notification]
-	runComplete   pubsub.Publisher[notify.RunComplete]
-	interactive   bool
-	mcp           *mcp.Registry
-	background    *shell.BackgroundShellManager
-	latency       latency.Recorder
+// agentDeps is the set of collaborators shared by the coordinator's three
+// components (turnDispatcher, delegationFinalizer, runtimeBuilder). It is
+// embedded by value in coordinator and by pointer in each component, so a
+// component's own fields (d.cfg, d.sessions, b.notify, ...) keep resolving
+// through Go's field promotion exactly as if the component still held its
+// own copy of each dependency.
+type agentDeps struct {
+	cfg         *config.ConfigStore
+	credentials *credentials.Manager
+	sessions    sessionstore.Service
+	messages    MessageService
+	permissions permission.Requester
+	questions   question.Service
+	history     historystore.Service
+	filetracker filetracker.Service
+	lspManager  *lsp.Manager
+	notify      pubsub.Publisher[notify.Notification]
+	runComplete pubsub.Publisher[notify.RunComplete]
+	interactive bool
+	mcp         *mcp.Registry
+	background  *shell.BackgroundShellManager
+	latency     latency.Recorder
+	// accountsStore is the shared accounts.Store used to list a
+	// provider's candidates for Pick, injected via
+	// CoordinatorOptions.AccountsStore (production wires
+	// accounts.NewFileStore(config.GlobalAccountsFile()) — see
+	// internal/app/services.go). Tests set it directly, often to a
+	// fake, before exercising a rotation path.
 	accountsStore accounts.Store
-	codexUsage    func(accountID string) (codex.Usage, bool)
+	// codexUsage resolves an account ID to its last recorded Codex usage
+	// snapshot, for makeThresholdRotateCallback. Injected via
+	// CoordinatorOptions.CodexUsage (production wires codex.UsageFor).
+	codexUsage func(accountID string) (codex.Usage, bool)
+}
+
+type coordinator struct {
+	agentDeps
 
 	builder    *runtimeBuilder
 	dispatcher *turnDispatcher
@@ -172,45 +191,21 @@ func (c *coordinator) newCoordinatorComponents() {
 	agentPort := &coordinatorAgentPort{}
 	lifecycle := &readinessLifecycle{}
 	c.dispatcher = &turnDispatcher{
-		cfg:          c.cfg,
+		agentDeps:    &c.agentDeps,
 		lastActivity: csync.NewMap[string, time.Time](),
-		sessions:     c.sessions,
-		messages:     c.messages,
-		notify:       c.notify,
-		runComplete:  c.runComplete,
-		mcp:          c.mcp,
-		latency:      c.latency,
 		agentPort:    agentPort,
 		lifecycle:    lifecycle,
 	}
 
 	c.builder = &runtimeBuilder{
-		cfg:         c.cfg,
-		credentials: c.credentials,
-		notify:      c.notify,
-		mcp:         c.mcp,
-		interactive: c.interactive,
-		runtime:     newRuntimeCache(),
-		accStore:    c.accountsStore,
-		codexUsage:  c.codexUsage,
+		agentDeps: &c.agentDeps,
+		runtime:   newRuntimeCache(),
 	}
 
 	c.delegation = &delegationFinalizer{
-		cfg:         c.cfg,
-		sessions:    c.sessions,
-		messages:    c.messages,
-		permissions: c.permissions,
-		questions:   c.questions,
-		history:     c.history,
-		filetracker: c.filetracker,
-		lspManager:  c.lspManager,
-		background:  c.background,
-		notify:      c.notify,
-		runComplete: c.runComplete,
-		mcp:         c.mcp,
-		latency:     c.latency,
-		agentPort:   agentPort,
-		lifecycle:   lifecycle,
+		agentDeps: &c.agentDeps,
+		agentPort: agentPort,
+		lifecycle: lifecycle,
 	}
 
 	// Wire every cross-component seam now that all three exist. The
@@ -266,8 +261,8 @@ type CoordinatorOptions struct {
 	// agent observes are logged but not recorded. See internal/latency.
 	Latency latency.Recorder
 	// AccountsStore is the shared accounts.Store the runtime builder
-	// lists a provider's rotation candidates from (see runtimeBuilder's
-	// accStore field). Production wires it to
+	// lists a provider's rotation candidates from (see agentDeps'
+	// accountsStore field). Production wires it to
 	// accounts.NewFileStore(config.GlobalAccountsFile()); tests supply a
 	// fake so rotation behavior can be driven without touching disk.
 	AccountsStore accounts.Store
@@ -300,23 +295,25 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:           opts.Config,
-		credentials:   opts.Credentials,
-		sessions:      opts.Sessions,
-		messages:      opts.Messages,
-		permissions:   opts.Permissions,
-		questions:     opts.Questions,
-		history:       opts.History,
-		filetracker:   opts.FileTracker,
-		lspManager:    opts.LSPManager,
-		notify:        opts.Notify,
-		runComplete:   opts.RunComplete,
-		interactive:   opts.Interactive,
-		mcp:           opts.MCP,
-		background:    opts.BackgroundShells,
-		latency:       opts.Latency,
-		accountsStore: opts.AccountsStore,
-		codexUsage:    opts.CodexUsage,
+		agentDeps: agentDeps{
+			cfg:           opts.Config,
+			credentials:   opts.Credentials,
+			sessions:      opts.Sessions,
+			messages:      opts.Messages,
+			permissions:   opts.Permissions,
+			questions:     opts.Questions,
+			history:       opts.History,
+			filetracker:   opts.FileTracker,
+			lspManager:    opts.LSPManager,
+			notify:        opts.Notify,
+			runComplete:   opts.RunComplete,
+			interactive:   opts.Interactive,
+			mcp:           opts.MCP,
+			background:    opts.BackgroundShells,
+			latency:       opts.Latency,
+			accountsStore: opts.AccountsStore,
+			codexUsage:    opts.CodexUsage,
+		},
 	}
 	c.newCoordinatorComponents()
 

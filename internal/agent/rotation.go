@@ -24,7 +24,7 @@ import (
 // disabled: every rotation call site (makeThresholdRotateCallback,
 // makeRateLimitCallback) starts here and returns nil itself as soon as
 // this does, so a disabled provider never gets a Rotator constructed, never
-// consults accStore, and never wires an OnRateLimit/RotateThreshold
+// consults accountsStore, and never wires an OnRateLimit/RotateThreshold
 // callback onto a call at all - behavior is provably identical to before
 // rotation existed, not merely "happens to be a no-op" once invoked.
 func (b *runtimeBuilder) rotatorFor(providerCfg config.ProviderConfig) *accounts.Rotator {
@@ -162,7 +162,7 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 		if !ok {
 			return
 		}
-		all, err := b.accStore.List(providerCfg.ID)
+		all, err := b.accountsStore.List(providerCfg.ID)
 		if err != nil {
 			slog.Warn("Threshold rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
 			return
@@ -247,7 +247,7 @@ func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig
 		account := currentRotationAccount(providerCfg, cred, active)
 		rotator.MarkRateLimited(account, retryAfterFromHeaders(providerErr))
 
-		all, err := b.accStore.List(providerCfg.ID)
+		all, err := b.accountsStore.List(providerCfg.ID)
 		if err != nil {
 			slog.Warn("Rate-limit rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
 			return err
