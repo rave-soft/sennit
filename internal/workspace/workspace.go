@@ -322,6 +322,8 @@ type WorkingDirectory interface {
 type ConfigFieldEditor interface {
 	SetConfigField(scope config.Scope, key string, value any) error
 	RemoveConfigField(scope config.Scope, key string) error
+	// SetCompactMode sets whether compact mode is enabled at scope.
+	SetCompactMode(scope config.Scope, enabled bool) error
 }
 
 type AccountRecorder interface {
@@ -352,16 +354,88 @@ type AccountsPurger interface {
 	PurgeAccounts(scope config.Scope, providerID string) error
 }
 
+// AccountUsage reports on the accounts that already exist, as opposed to
+// the AccountRecorder/AccountLister/... roles above, which manage which
+// accounts exist in the first place.
+type AccountUsage interface {
+	// RefreshAccountLimits fetches a fresh rate-limit snapshot for every
+	// OAuth account of providerID that reports usage
+	// (accounts.CapabilitiesOf(providerID).Usage) and persists what was
+	// learned, returning the provider's accounts. A single account's
+	// fetch failing does not fail the call — see config.RefreshAccountLimits
+	// for the full contract.
+	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
+	// CurrentPlanUsage reports the rate-limit snapshot the provider quoted
+	// on its most recent response, and whether there is one. It is not the
+	// stored per-account snapshot RefreshAccountLimits persists: this one
+	// is whatever the last request came back with, which is what the
+	// sidebar shows while a turn is running.
+	//
+	// Empty for every provider that does not quote usage, and empty for
+	// one that does until it has answered once. It is on the facade
+	// because the numbers live in the vendor package that also carries
+	// that vendor's sign-in flow, and the UI has no business importing
+	// that to read a percentage.
+	CurrentPlanUsage(providerID string) (accounts.Usage, bool)
+	// AccountCapabilities reports what the provider's accounts support —
+	// whether it quotes a usage snapshot, and when it rotates — so the
+	// settings dialog can render only the fields that apply.
+	AccountCapabilities(providerID string) AccountCapabilities
+}
+
 type ConfigResolver interface {
 	Resolver() config.VariableResolver
 }
 
 type PreferredModelUpdater interface {
 	UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error
+	// OverridePreferredModel applies a preferred-model override for the
+	// current process, for callers (namely `sennit run -m/--model`) that
+	// must not surprise the user with a config-file write from a single
+	// invocation. In local mode this is purely in-memory (see
+	// config.ConfigStore.OverridePreferredModel).
+	OverridePreferredModel(model config.SelectedModel) error
 }
 
 type ProviderAPIKeySetter interface {
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
+}
+
+// ProviderCatalog answers what providers this workspace knows about and
+// whether a given API key is good for one, independent of whether an
+// account is actually recorded for it.
+type ProviderCatalog interface {
+	// VerifyProviderAPIKey tests apiKey against providerID by building the
+	// same kind of runtime provider the agent itself would use for that
+	// provider (proxy, extra headers, account rotation, and a base URL
+	// resolved from the known-providers catalog when the provider isn't
+	// configured yet) and probing it, rather than a caller-assembled
+	// stand-in. It returns nil when the key checks out and a descriptive
+	// error otherwise; it does not persist apiKey — SetProviderAPIKey does
+	// that once the caller is satisfied.
+	VerifyProviderAPIKey(ctx context.Context, providerID, apiKey string) error
+	// KnownProviders is the provider catalog this workspace was built
+	// with: the embedded list plus Codex, or nothing at all when
+	// disable_default_providers is set.
+	//
+	// It is the store's cached copy, which is the same list model
+	// resolution and credential setup use. The UI used to recompute it
+	// from the config on every call — seven call sites, some on a render
+	// path — which rebuilt the embedded catalog each time and, worse, was
+	// a second answer to a question the store already answers. A reload
+	// recomputes the store's copy; a recomputation here could disagree
+	// with the one the agent is actually using.
+	KnownProviders() []catwalk.Provider
+	// CustomProviderTypes lists the provider types a custom provider may
+	// declare beyond catwalk's own catalog — the ones this build has a
+	// discovery enricher registered for.
+	//
+	// It is on the facade because the list is derived from that registry,
+	// not written down: a hardcoded copy in the form would drift the
+	// moment an enricher is added or removed, and importing the discovery
+	// engine into a dialog to read five strings is the trade this
+	// boundary exists to refuse.
+	CustomProviderTypes() []string
 }
 
 // OAuthStartResult is what a caller must show the user to complete a
@@ -451,6 +525,12 @@ type OAuthController interface {
 	OAuthConfiguredProxy(providerID string) string
 	// OAuthValidateProxy checks proxyURL is well-formed for providerID.
 	OAuthValidateProxy(providerID, proxyURL string) error
+	// ImportCopilot imports the credentials of an existing GitHub Copilot
+	// CLI login, if one is present on this machine, for use as this
+	// workspace's Copilot provider token.
+	ImportCopilot() (*oauth.Token, bool)
+	// RefreshOAuthToken refreshes providerID's stored OAuth token at scope.
+	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
 }
 
 // ProjectLifecycle covers first-run project initialization and skill
@@ -639,7 +719,14 @@ type EventSubscriber interface {
 //
 // A hundred and ten is a lot, and the role interfaces are what keep that
 // from being the number every consumer depends on. A new method belongs on
-// the role it serves, not here.
+// the role it serves, not here — including a method that is, for now, the
+// only one its role has: AccountRecorder, AccountLister, ProviderProxySetter
+// and their one-method siblings below look collapsible, but each is already
+// depended on individually (see internal/cmd/login.go, accounts.go,
+// logout.go) by code that wants exactly that one capability and nothing
+// else the account-management surface offers. Folding them back into one
+// interface would force those call sites wider for no benefit; a one-method
+// role earns its keep the moment something names it.
 type FrontendWorkspace interface {
 	SessionStore
 	AgentController
@@ -658,79 +745,12 @@ type FrontendWorkspace interface {
 	AccountUpdater
 	AccountRemover
 	AccountsPurger
+	AccountUsage
 	OAuthController
 	PreferredModelUpdater
-	// OverridePreferredModel applies a preferred-model override for the
-	// current process, for callers (namely `sennit run -m/--model`) that
-	// must not surprise the user with a config-file write from a single
-	// invocation. In local mode this is purely in-memory (see
-	// config.ConfigStore.OverridePreferredModel).
-	OverridePreferredModel(model config.SelectedModel) error
-	// SetCompactMode sets whether compact mode is enabled at scope.
-	SetCompactMode(scope config.Scope, enabled bool) error
 	ProviderAPIKeySetter
-	// VerifyProviderAPIKey tests apiKey against providerID by building the
-	// same kind of runtime provider the agent itself would use for that
-	// provider (proxy, extra headers, account rotation, and a base URL
-	// resolved from the known-providers catalog when the provider isn't
-	// configured yet) and probing it, rather than a caller-assembled
-	// stand-in. It returns nil when the key checks out and a descriptive
-	// error otherwise; it does not persist apiKey — SetProviderAPIKey does
-	// that once the caller is satisfied.
-	VerifyProviderAPIKey(ctx context.Context, providerID, apiKey string) error
-	// ImportCopilot imports the credentials of an existing GitHub Copilot
-	// CLI login, if one is present on this machine, for use as this
-	// workspace's Copilot provider token.
-	ImportCopilot() (*oauth.Token, bool)
-	// RefreshOAuthToken refreshes providerID's stored OAuth token at scope.
-	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
-	// KnownProviders is the provider catalog this workspace was built
-	// with: the embedded list plus Codex, or nothing at all when
-	// disable_default_providers is set.
-	//
-	// It is the store's cached copy, which is the same list model
-	// resolution and credential setup use. The UI used to recompute it
-	// from the config on every call — seven call sites, some on a render
-	// path — which rebuilt the embedded catalog each time and, worse, was
-	// a second answer to a question the store already answers. A reload
-	// recomputes the store's copy; a recomputation here could disagree
-	// with the one the agent is actually using.
-	KnownProviders() []catwalk.Provider
-	// CustomProviderTypes lists the provider types a custom provider may
-	// declare beyond catwalk's own catalog — the ones this build has a
-	// discovery enricher registered for.
-	//
-	// It is on the facade because the list is derived from that registry,
-	// not written down: a hardcoded copy in the form would drift the
-	// moment an enricher is added or removed, and importing the discovery
-	// engine into a dialog to read five strings is the trade this
-	// boundary exists to refuse.
-	CustomProviderTypes() []string
+	ProviderCatalog
 	ProviderProxySetter
-	// RefreshAccountLimits fetches a fresh rate-limit snapshot for every
-	// OAuth account of providerID that reports usage
-	// (accounts.CapabilitiesOf(providerID).Usage) and persists what was
-	// learned, returning the provider's accounts. A single account's
-	// fetch failing does not fail the call — see config.RefreshAccountLimits
-	// for the full contract.
-	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
-	// CurrentPlanUsage reports the rate-limit snapshot the provider quoted
-	// on its most recent response, and whether there is one. It is not the
-	// stored per-account snapshot RefreshAccountLimits persists: this one
-	// is whatever the last request came back with, which is what the
-	// sidebar shows while a turn is running.
-	//
-	// Empty for every provider that does not quote usage, and empty for
-	// one that does until it has answered once. It is on the facade
-	// because the numbers live in the vendor package that also carries
-	// that vendor's sign-in flow, and the UI has no business importing
-	// that to read a percentage.
-	CurrentPlanUsage(providerID string) (accounts.Usage, bool)
-
-	// AccountCapabilities reports what the provider's accounts support —
-	// whether it quotes a usage snapshot, and when it rotates — so the
-	// settings dialog can render only the fields that apply.
-	AccountCapabilities(providerID string) AccountCapabilities
 	ProjectLifecycle
 	MCPController
 	ThreadController
