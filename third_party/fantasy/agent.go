@@ -770,13 +770,40 @@ func (a *agent) executeTools(ctx context.Context, allTools []AgentTool, execProv
 	// Execute all tool calls sequentially in order
 	results := make([]ToolResultContent, 0, len(toolCalls))
 
+	// Sennit patch: once a result carries StopTurn, the remaining calls in
+	// this batch must not run. hooked_tool.go and tools.go's permission
+	// denial and question.go's user-question path all set StopTurn to mean
+	// "halt now", not "let the model decide after finishing the batch" -
+	// upstream only consulted StopTurn afterwards via hasStopTurn, so a
+	// blocked bash call still let a sibling write call through. Every
+	// skipped call still needs a result (providers require one per tool
+	// call), so synthesize an error result for each instead of running it.
+	halted := false
 	for _, toolCall := range toolCalls {
+		if halted {
+			result := ToolResultContent{
+				ToolCallID: toolCall.ToolCallID,
+				ToolName:   toolCall.ToolName,
+				Result: ToolResultOutputContentError{
+					Error: fmt.Errorf("tool call %q not executed: turn was halted by a prior tool result in this batch", toolCall.ToolName),
+				},
+			}
+			if toolResultCallback != nil {
+				_ = toolResultCallback(result)
+			}
+			results = append(results, result)
+			continue
+		}
+
 		result, isCriticalError := a.executeSingleTool(ctx, toolMap, execProviderToolMap, toolCall, toolResultCallback)
 		results = append(results, result)
 		if isCriticalError {
 			if errorResult, ok := result.Result.(ToolResultOutputContentError); ok && errorResult.Error != nil {
 				return nil, errorResult.Error
 			}
+		}
+		if result.StopTurn {
+			halted = true
 		}
 	}
 

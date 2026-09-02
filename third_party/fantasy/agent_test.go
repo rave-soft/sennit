@@ -2831,3 +2831,111 @@ func TestAgent_Generate_ParallelToolPanicBecomesFailedResult(t *testing.T) {
 	require.ErrorContains(t, errResult.Error, "panicking_parallel_tool")
 	require.ErrorContains(t, errResult.Error, "parallel boom")
 }
+
+// TestAgent_ExecuteTools_StopTurnSkipsSiblingCalls is a Sennit-specific
+// regression test: a StopTurn result must stop the rest of the batch, not
+// just the next model call (see the patch note above executeTools).
+func TestAgent_ExecuteTools_StopTurnSkipsSiblingCalls(t *testing.T) {
+	t.Parallel()
+
+	type TestInput struct {
+		Value string `json:"value" description:"Test value"`
+	}
+
+	tool1 := NewAgentTool(
+		"tool1",
+		"Halts the turn",
+		func(ctx context.Context, input TestInput, _ ToolCall) (ToolResponse, error) {
+			resp := NewTextErrorResponse("permission denied: this tool call was blocked")
+			resp.StopTurn = true
+			return resp, nil
+		},
+	)
+
+	tool2Called := false
+	tool2 := NewAgentTool(
+		"tool2",
+		"Should never run once the turn is halted",
+		func(ctx context.Context, input TestInput, _ ToolCall) (ToolResponse, error) {
+			tool2Called = true
+			return ToolResponse{Content: "should not happen", IsError: false}, nil
+		},
+	)
+
+	toolCalls := []ToolCallContent{
+		{ToolCallID: "call-1", ToolName: "tool1", Input: `{"value":"a"}`},
+		{ToolCallID: "call-2", ToolName: "tool2", Input: `{"value":"b"}`},
+	}
+
+	a := &agent{}
+	results, err := a.executeTools(context.Background(), []AgentTool{tool1, tool2}, nil, toolCalls, nil)
+
+	require.NoError(t, err)
+	require.False(t, tool2Called, "tool2.Run must not be invoked after a StopTurn result")
+	require.Len(t, results, 2)
+
+	require.Equal(t, "call-1", results[0].ToolCallID)
+	require.True(t, results[0].StopTurn)
+
+	require.Equal(t, "call-2", results[1].ToolCallID)
+	require.Equal(t, "tool2", results[1].ToolName)
+	require.False(t, results[1].StopTurn)
+	skippedErr, ok := results[1].Result.(ToolResultOutputContentError)
+	require.True(t, ok, "expected error result for skipped call, got %T", results[1].Result)
+	require.ErrorContains(t, skippedErr.Error, "not executed")
+	require.ErrorContains(t, skippedErr.Error, "halted")
+}
+
+// TestAgent_ExecuteTools_StopTurnCallback verifies toolResultCallback fires
+// once per call in the batch, including calls skipped because a prior
+// result in the same batch set StopTurn.
+func TestAgent_ExecuteTools_StopTurnCallback(t *testing.T) {
+	t.Parallel()
+
+	type TestInput struct {
+		Value string `json:"value" description:"Test value"`
+	}
+
+	tool1 := NewAgentTool(
+		"tool1",
+		"Halts the turn",
+		func(ctx context.Context, input TestInput, _ ToolCall) (ToolResponse, error) {
+			resp := NewTextErrorResponse("permission denied: this tool call was blocked")
+			resp.StopTurn = true
+			return resp, nil
+		},
+	)
+
+	tool2 := NewAgentTool(
+		"tool2",
+		"Should never run once the turn is halted",
+		func(ctx context.Context, input TestInput, _ ToolCall) (ToolResponse, error) {
+			return ToolResponse{Content: "should not happen", IsError: false}, nil
+		},
+	)
+
+	toolCalls := []ToolCallContent{
+		{ToolCallID: "call-1", ToolName: "tool1", Input: `{"value":"a"}`},
+		{ToolCallID: "call-2", ToolName: "tool2", Input: `{"value":"b"}`},
+	}
+
+	var callbackResults []ToolResultContent
+	callback := func(result ToolResultContent) error {
+		callbackResults = append(callbackResults, result)
+		return nil
+	}
+
+	a := &agent{}
+	results, err := a.executeTools(context.Background(), []AgentTool{tool1, tool2}, nil, toolCalls, callback)
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	require.Len(t, callbackResults, 2, "callback must fire once per call, including the skipped one")
+
+	require.Equal(t, "call-1", callbackResults[0].ToolCallID)
+	require.True(t, callbackResults[0].StopTurn)
+
+	require.Equal(t, "call-2", callbackResults[1].ToolCallID)
+	_, ok := callbackResults[1].Result.(ToolResultOutputContentError)
+	require.True(t, ok, "expected error result for skipped call in callback, got %T", callbackResults[1].Result)
+}
