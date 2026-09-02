@@ -250,6 +250,29 @@ func (l *lifecycle) control(id string) *threadControl {
 	return c
 }
 
+// beginControlledCreate is the shared opening move of Manager.Create and
+// TaskManager.Create, once their own store.Create has made id resolvable:
+// it takes id's control, locks c.opMu so a concurrent Remove either ran
+// before this (nothing beyond the row exists yet) or waits for the
+// runtime this create is about to install, and stashes the parent/depth
+// link while nothing else can be reading it yet.
+//
+// c.opMu is returned locked — the caller must defer c.opMu.Unlock() itself;
+// this cannot do that for them. removed reports whether the entity was
+// already torn down by a Remove that raced ahead of this call; the caller
+// must then fail fast instead of building a worktree or spawning a
+// workspace for an entity nothing will ever reach again.
+func (l *lifecycle) beginControlledCreate(id, parentSessionID string, depth int) (c *threadControl, removed bool) {
+	c = l.control(id)
+	c.opMu.Lock()
+	c.mu.Lock()
+	removed = c.removed
+	c.depth = depth
+	c.parentSessionID = parentSessionID
+	c.mu.Unlock()
+	return c, removed
+}
+
 func (l *lifecycle) existingControl(id string) *threadControl {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -776,27 +799,26 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		_ = spawner.Release(context.Background(), handle.ID()) // ok: detached - bgCtx is already done; this is the cleanup for that
 		return SendDisposition{}, err
 	}
-	// This call owns the freshly spawned handle until startRun installs it
-	// as the shared runtime; release it on every earlier exit.
-	owned := true
-	defer func() {
-		if owned {
-			// detachForTerminalWork, not ctx directly: this defer can fire
-			// because setStatus below failed precisely because ctx was
-			// already cancelled, and a Release built on that same dead ctx
-			// would fail too, leaking the freshly spawned handle (and its
-			// App/DB connection) for the life of the process.
-			releaseCtx, cancel := detachForTerminalWork(ctx)
-			defer cancel()
-			_ = spawner.Release(releaseCtx, handle.ID())
-		}
-	}()
+	// rb unwinds the freshly spawned handle if this returns before startRun
+	// installs it as the shared runtime — see [unwinder].
+	var rb unwinder
+	defer rb.unwind()
+	rb.push(func() {
+		// detachForTerminalWork, not ctx directly: this can run because
+		// setStatus below failed precisely because ctx was already
+		// cancelled, and a Release built on that same dead ctx would fail
+		// too, leaking the freshly spawned handle (and its App/DB
+		// connection) for the life of the process.
+		releaseCtx, cancel := detachForTerminalWork(ctx)
+		defer cancel()
+		_ = spawner.Release(releaseCtx, handle.ID())
+	})
 
 	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
 		return SendDisposition{}, err
 	}
 	l.startRun(bgCtx, handle, spawner, id, sessionID, msg)
-	owned = false // Ownership transferred to the shared runtime state.
+	rb.commit()
 	// A workspace that had to be respawned has no turn in flight, so this
 	// message is the one that runs, never a queued follow-up.
 	return SendDisposition{Resumed: true}, nil

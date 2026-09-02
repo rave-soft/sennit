@@ -963,6 +963,33 @@ func TestTaskManager_CreateFailsWithRealIDWhenSetSessionErrors(t *testing.T) {
 	require.Contains(t, got.Error, setSessionErr.Error())
 }
 
+// TestTaskManager_CreateReleasesSpawnedHandleWhenSetSessionErrors proves the
+// [unwinder] rollback that replaced tasks.go Create's old owned-flag
+// pattern still releases the freshly spawned handle when a later step
+// (SetSession here) fails after Spawn already succeeded.
+func TestTaskManager_CreateReleasesSpawnedHandleWhenSetSessionErrors(t *testing.T) {
+	setSessionErr := fmt.Errorf("set-session boom")
+	store := &setSessionErrStore{Store: thread.NewStoreForTest(t), err: setSessionErr}
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:    store,
+		Spawner:  newFakeSpawner(t),
+		RepoRoot: t.TempDir(),
+	})
+	shutdownManagerOnCleanup(t, mgr)
+	parentApp := newTestParentApp(t)
+	taskSpawner := newFakeSpawner(t)
+	tasks := thread.NewTaskManagerFromManager(mgr, taskSpawner, NewTestMessageService(parentApp.Messages()))
+
+	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, setSessionErr)
+
+	// The task always spawns at the empty path (see TaskManager.Create's
+	// spawner.Spawn(t.ctx, "") call), so the handle's id is "".
+	require.True(t, taskSpawner.wasReleased(""),
+		"Create must release the spawned handle when SetSession fails after Spawn already succeeded")
+}
+
 // setStatusRunningErrStore wraps a real Store and fails only the
 // SetStatus(StatusRunning) call Create makes right before startRun,
 // leaving every other SetStatus call (notably failCreate's own

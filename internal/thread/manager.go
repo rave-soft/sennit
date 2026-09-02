@@ -288,24 +288,12 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	}
 	m.lc.publish(EventCreated, st)
 
-	// The thread is resolvable from here on, so a concurrent Remove can
-	// race the rest of creation. Hold the per-thread lifecycle lock across
-	// worktree/spawn/startRun: Remove takes the same lock, so it either
-	// runs before this point (nothing beyond the row exists yet) or waits
-	// until the runtime is fully installed and tears it down normally.
-	c := m.lc.control(st.ID)
-	c.opMu.Lock()
+	// A thread's parent link is optional, unlike a task's required one;
+	// resolveDeliveryTarget reads it back once this thread reaches a
+	// terminal status, treating an empty link as "nobody to deliver to"
+	// rather than an error. depth is always 0 - a thread has no cascade.
+	c, removed := m.lc.beginControlledCreate(st.ID, args.ParentSessionID, 0)
 	defer c.opMu.Unlock()
-	c.mu.Lock()
-	removed := c.removed
-	// Stash the parent link now, while nothing else can be reading it yet
-	// - resolveDeliveryTarget reads it back once this thread reaches a
-	// terminal status. Empty when args.ParentSessionID is empty (a thread
-	// created with no parent, unlike a task's required one), which
-	// resolveDeliveryTarget then correctly treats as "nobody to deliver
-	// to" rather than an error.
-	c.parentSessionID = args.ParentSessionID
-	c.mu.Unlock()
 	if removed {
 		return Thread{}, fmt.Errorf("thread: %q was removed during creation", name)
 	}

@@ -192,26 +192,11 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	}
 	t.lc.publish(EventCreated, st)
 
-	// The task is resolvable from here on. Nothing tears a task down yet
-	// (this step does not wire task removal), but startRun's contract
-	// requires the caller hold the entity's opMu across installation
-	// regardless, so this mirrors Manager.Create's guard for when that
-	// changes.
-	c := t.lc.control(st.ID)
-	c.opMu.Lock()
+	// deliverTaskCompletion reads the cascade depth back through this same
+	// control once the task finishes; checkActiveCaps reads the parent
+	// link back to count this task against its parent turn's budget.
+	c, removed := t.lc.beginControlledCreate(st.ID, args.ParentSessionID, args.Depth)
 	defer c.opMu.Unlock()
-	c.mu.Lock()
-	removed := c.removed
-	// Stash the creating turn's cascade depth on the control now, while
-	// nothing else can be reading it yet - deliverTaskCompletion reads it
-	// back through this same control once the task finishes. parentSessionID
-	// is stashed the same way Manager.Create stashes it for a thread (see
-	// threadControl.parentSessionID) - checkActiveCaps reads it back to
-	// count this task against its own parent turn's budget while it is
-	// active.
-	c.depth = args.Depth
-	c.parentSessionID = args.ParentSessionID
-	c.mu.Unlock()
 	if removed {
 		return Thread{}, fmt.Errorf("thread: task %q was removed during creation", st.ID)
 	}
@@ -220,15 +205,15 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
-	// This call owns handle until startRun installs it as the shared
-	// runtime; release it on every earlier exit. ParentAppSpawner.Release
-	// is a no-op, but a future Spawner for this kind might not be.
-	owned := true
-	defer func() {
-		if owned {
-			_ = t.spawner.Release(ctx, handle.ID())
-		}
-	}()
+	// rb unwinds the spawned handle if Create returns before startRun
+	// installs it as the shared runtime — see [unwinder].
+	var rb unwinder
+	defer rb.unwind()
+	// ParentAppSpawner.Release is a no-op, but a future Spawner for this
+	// kind might not be.
+	rb.push(func() {
+		_ = t.spawner.Release(ctx, handle.ID())
+	})
 
 	title := args.SessionTitle
 	if title == "" {
@@ -296,7 +281,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	} else {
 		t.lc.startFactoryRun(runCtx, handle, t.spawner, st.ID, st.SessionID, args.Factory)
 	}
-	owned = false // Ownership transferred to the shared runtime state.
+	rb.commit()
 
 	// ids and depth only — args.Goal is the user's prompt and never
 	// belongs in a log line (see the package-level logging note in
