@@ -89,10 +89,17 @@ compile-time проверками в `root.go:780-796`) и один через
 runtime-токен устаревшим. Если запись на диск не удалась, следующий ход
 обменяет уже потраченный refresh token.
 
-Действие: в `UpdateProviderAccount`/`SetProviderAPIKey`/
-`PersistRefreshedToken` синхронно обновлять
-`cfg.Providers[id].APIKey/OAuthToken/Account`. Альтернатива — перевести
-всех читателей на `cfg.RuntimeProvider(id)`, но это больше правок.
+Действие: в `UpdateProviderAccount` синхронно обновлять
+`cfg.Providers[id].APIKey/OAuthToken/Account`. `ProxyURL` и
+`APIKeyTemplate` не зеркалить: они существуют только в памяти, никогда не
+являются значением с диска, и reload переносит их отдельно (см. комментарий
+`reload.go:151-164`).
+
+Альтернатива — перевести всех читателей на `cfg.RuntimeProvider(id)` —
+отклонена: `Providers.Get` вызывается в 46 местах, и большинство читают
+дисковые поля (имя, «сконфигурирован ли провайдер», прокси для показа).
+Сужение владения живыми кредами до одной карты — отдельная работа, см.
+3.7 ниже.
 
 ### 3.2 [M] Reload при конкурентном refresh копирует runtime всех провайдеров
 
@@ -179,6 +186,21 @@ APIKeyTemplate`. Тест из аудита добавить в пакет.
 - Codex-специфику из `config/provider_accounts.go:469-494,570-576`
   (`backfillCodexIdentity`, AccountID из JWT) перенести туда, где живёт
   `AccountUsageFetcher` (`workspace/appws`).
+
+### 3.7 [L] Два владельца живых кредов
+
+Остаток от 3.1. После точечного фикса `APIKey`/`OAuthToken`/`Account`
+живут одновременно в `Providers` и в `RuntimeProviders`, и обе копии надо
+держать согласованными вручную — ровно та конструкция, из которой выросли
+3.1, 3.2 и 3.5.
+
+Целевое состояние: `Providers` — только то, что лежит на диске;
+`RuntimeProviders` — единственный владелец живых кредов. Работа:
+разметить 46 вызовов `Providers.Get` на «читает дисковое поле» и «читает
+кред», перевести вторую группу на `RuntimeProvider(id)`, затем убрать
+зеркалирование из `UpdateProviderAccount`. Делать после 3.6, когда
+`ProviderConfig` переедет в листовой пакет.
+
 
 ---
 

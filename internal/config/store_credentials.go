@@ -160,6 +160,32 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 		return fmt.Errorf("applying credentials for provider %s: %w", providerID, err)
 	}
 	cfg.SetRuntimeProvider(providerID, provider)
+
+	// Mirror the published credential fields onto the disk-shaped entry
+	// too. Several readers (credentials.Manager's refresh path,
+	// runtime_builder.go's expiry check and its own republish back into
+	// this function) still take OAuthToken/APIKey from cfg.Providers
+	// rather than RuntimeProvider; leaving those two views disagreeing
+	// makes a just-refreshed token look expired again on the very next
+	// read. Narrowing every such reader onto RuntimeProvider alone is
+	// real work for a later change, not something to fold into this fix,
+	// so the two are kept in sync here instead.
+	//
+	// ProxyURL and APIKeyTemplate are deliberately NOT mirrored, for two
+	// different reasons. ProviderConfig has no APIKeyTemplate at all: the
+	// unresolved form an API key was resolved from exists only in the
+	// runtime view. ProviderConfig does have a ProxyURL, but it means the
+	// provider's own configured proxy, whereas the value published here is
+	// the account's effective route resolved against it — writing that
+	// back would make the next reload treat an in-memory-only value as a
+	// disk one. See reload.go's carry-forward comment.
+	configured.APIKey = cred.APIKey
+	configured.OAuthToken = cred.Token
+	if cred.ActiveAccountID != "" {
+		configured.Account = cred.ActiveAccountID
+	}
+	cfg.Providers.Set(providerID, configured)
+
 	s.credentialVersion.Add(1)
 	s.setConfig(cfg)
 	return nil

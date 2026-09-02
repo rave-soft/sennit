@@ -195,6 +195,51 @@ func TestUpdateProviderAccount_EmptyConfiguredFallsBackToAccountProxy(t *testing
 	require.Equal(t, "http://account:9090", provider.ProxyURL)
 }
 
+// TestUpdateProviderCredentials_PublishesToBothProvidersAndRuntime is the
+// regression test for the bug where UpdateProviderAccount stopped writing
+// the published credential onto cfg.Providers, leaving readers that still
+// take the token from there (credentials.Manager's refresh path,
+// runtime_builder.go) looking at a stale entry forever — the very next read
+// would see the just-refreshed token as still expired. ProxyURL and
+// APIKeyTemplate must NOT be mirrored: ProviderConfig has no such fields,
+// and an account's effective proxy/template only ever live in the runtime
+// view (see reload.go's carry-forward comment).
+func TestUpdateProviderCredentials_PublishesToBothProvidersAndRuntime(t *testing.T) {
+	t.Parallel()
+
+	store := newCodexTestStoreWithProxy(t, "http://provider:8080")
+
+	newToken := fakeCodexJWT(t, "acct-new")
+	accountProxy := "http://account:9090"
+	cred := AccountCredential{
+		APIKey:          newToken,
+		APIKeyTemplate:  "$SHOULD_NOT_LEAK",
+		Token:           &oauth.Token{AccessToken: newToken},
+		ProxyURL:        &accountProxy,
+		ActiveAccountID: "acct-new",
+	}
+	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, cred))
+
+	configured, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, newToken, configured.APIKey, "Config().Providers must see the new token")
+	require.NotNil(t, configured.OAuthToken)
+	require.Equal(t, newToken, configured.OAuthToken.AccessToken)
+	require.Equal(t, "acct-new", configured.Account)
+
+	runtime, ok := store.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, newToken, runtime.APIKey, "RuntimeProvider must see the new token")
+	require.NotNil(t, runtime.OAuthToken)
+	require.Equal(t, newToken, runtime.OAuthToken.AccessToken)
+	require.Equal(t, "acct-new", runtime.Account)
+	require.Equal(t, "$SHOULD_NOT_LEAK", runtime.APIKeyTemplate, "runtime side still gets the template")
+	require.Equal(t, "http://account:9090", runtime.ProxyURL, "runtime side gets the account's effective proxy")
+
+	require.Equal(t, "http://provider:8080", configured.ProxyURL,
+		"the account's proxy override must not leak into Providers — it is a runtime-only concept")
+}
+
 func TestUpdateProviderAccount_CopilotPathUnaffected(t *testing.T) {
 	t.Parallel()
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 )
 
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
@@ -60,6 +62,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 
 	s.writeMu.RLock()
 	startCredentialVersion := s.CredentialVersion()
+	startRuntimeProviders := snapshotRuntimeProviders(s.Config())
 	s.writeMu.RUnlock()
 
 	// Snapshot runtime overrides up front (a brief writeMu.RLock) rather
@@ -141,6 +144,18 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		current := s.Config()
 		if current != nil && current.RuntimeProviders != nil {
 			for id, provider := range current.RuntimeProviders.Seq2() {
+				// Only a provider a racing credential publish actually
+				// touched needs its runtime state carried forward — compare
+				// against the pre-reload snapshot, not just "did this
+				// provider exist". Copying every provider unconditionally
+				// (as this used to) meant an untouched provider's freshly
+				// built runtime state (a base_url edit picked up by this
+				// very reload, say) was discarded in favor of what was
+				// running before the reload even started.
+				startProvider, existed := startRuntimeProviders[id]
+				if existed && runtimeCredentialFieldsEqual(startProvider, provider) {
+					continue
+				}
 				if _, ok := cfg.Providers.Get(id); ok {
 					cfg.SetRuntimeProvider(id, provider)
 				}
@@ -231,4 +246,38 @@ func (s *ConfigStore) autoReload(ctx context.Context) error {
 	}
 	defer s.reloadMu.Unlock()
 	return s.reloadFromDisk(ctx)
+}
+
+// snapshotRuntimeProviders copies cfg.RuntimeProviders' entries into a plain
+// map, by value, at the start of a reload. It exists so the credential-race
+// check in reloadFromDisk can compare "what credential state was running
+// before this reload started" against "what is running now" even though a
+// concurrent mutator (UpdateProviderAccount, SetProviderAPIKey) replaces the
+// whole *Config — and its RuntimeProviders map along with it, per
+// cloneForWrite — rather than mutating either in place. The values copied
+// out here are unaffected by that replacement: a clone-and-swap never
+// mutates the map or Provider values an earlier snapshot already read out
+// of it.
+func snapshotRuntimeProviders(cfg *Config) map[string]providerstate.Provider {
+	if cfg == nil || cfg.RuntimeProviders == nil {
+		return nil
+	}
+	snap := make(map[string]providerstate.Provider, cfg.RuntimeProviders.Len())
+	for id, provider := range cfg.RuntimeProviders.Seq2() {
+		snap[id] = provider
+	}
+	return snap
+}
+
+// runtimeCredentialFieldsEqual compares the five fields a credential publish
+// (UpdateProviderAccount/SetProviderAPIKey) can change on a runtime
+// provider. Used to decide, during reloadFromDisk's credential-race check,
+// whether a provider was actually touched by a racing publish or merely
+// happened to exist in both snapshots.
+func runtimeCredentialFieldsEqual(a, b providerstate.Provider) bool {
+	return a.APIKey == b.APIKey &&
+		a.Account == b.Account &&
+		a.ProxyURL == b.ProxyURL &&
+		a.APIKeyTemplate == b.APIKeyTemplate &&
+		reflect.DeepEqual(a.OAuthToken, b.OAuthToken)
 }
