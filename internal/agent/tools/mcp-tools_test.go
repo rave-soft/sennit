@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
@@ -62,4 +64,80 @@ func TestIsWhitelistedDockerTool_OnlyForTheManagedGateway(t *testing.T) {
 
 	nilCfg := &Tool{mcpName: "docker", tool: &mcp.Tool{Name: "mcp-find"}, cfg: &stubMCPConfigProvider{}}
 	require.False(t, nilCfg.isWhitelistedDockerTool(), "no config means fail closed")
+}
+
+// cancelingRunner stands in for the real *mcp.Registry, always failing the
+// way an in-flight MCP call does when the caller's own context is
+// cancelled (Esc on a queued tool call) — see connectionManager's
+// getOrRenewClient in mcp/connection.go, which returns ctx.Err() directly
+// for exactly this case.
+type cancelingRunner struct{ err error }
+
+func (c cancelingRunner) RunTool(context.Context, mcp.ConfigProvider, string, string, string) (mcp.ToolResult, error) {
+	return mcp.ToolResult{}, c.err
+}
+
+// TestToolRun_PropagatesCancellationAsGoError is the regression test for
+// the "context canceled" text result: RunTool failing with
+// context.Canceled used to come back as an ordinary (if IsError) tool
+// response, so the model saw a normal-looking failure it could retry
+// instead of the batch aborting. See AGENTS.md's "Tool failures: text
+// response vs. Go error".
+func TestToolRun_PropagatesCancellationAsGoError(t *testing.T) {
+	t.Parallel()
+
+	tool := &Tool{
+		mcpName: "srv",
+		tool:    &mcp.Tool{Name: "do_thing"},
+		cfg:     &stubMCPConfigProvider{cfg: &config.Config{}},
+		reg:     cancelingRunner{err: context.Canceled},
+	}
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "sess")
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "1", Name: tool.Name(), Input: "{}"})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.Canceled))
+	require.Equal(t, fantasy.ToolResponse{}, resp)
+}
+
+// TestToolRun_ExpiredContextPropagatesAsGoError covers the ctx.Err() half
+// of the check: even an error that does not itself wrap
+// context.DeadlineExceeded must still abort the batch once the caller's
+// own context has expired.
+func TestToolRun_ExpiredContextPropagatesAsGoError(t *testing.T) {
+	t.Parallel()
+
+	tool := &Tool{
+		mcpName: "srv",
+		tool:    &mcp.Tool{Name: "do_thing"},
+		cfg:     &stubMCPConfigProvider{cfg: &config.Config{}},
+		reg:     cancelingRunner{err: errors.New("mcp: connection reset")},
+	}
+	ctx, cancel := context.WithTimeout(context.WithValue(t.Context(), SessionIDContextKey, "sess"), 0)
+	defer cancel()
+	<-ctx.Done()
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "1", Name: tool.Name(), Input: "{}"})
+	require.Error(t, err)
+	require.Equal(t, fantasy.ToolResponse{}, resp)
+}
+
+// TestToolRun_GenuineToolFailureStaysTextResponse pins the other side of
+// the split: an ordinary MCP failure (not cancellation) must still come
+// back as a text response the model can react to.
+func TestToolRun_GenuineToolFailureStaysTextResponse(t *testing.T) {
+	t.Parallel()
+
+	tool := &Tool{
+		mcpName: "srv",
+		tool:    &mcp.Tool{Name: "do_thing"},
+		cfg:     &stubMCPConfigProvider{cfg: &config.Config{}},
+		reg:     cancelingRunner{err: errors.New("mcp: no such tool")},
+	}
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "sess")
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "1", Name: tool.Name(), Input: "{}"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "no such tool")
 }

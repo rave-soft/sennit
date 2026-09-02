@@ -97,6 +97,16 @@ func invalidParam(name string) fantasy.ToolResponse {
 	return fantasy.NewTextErrorResponse(name + " is required")
 }
 
+// errSennitIO marks a failure as Sennit's own file I/O going wrong —
+// opening or stat-ing a log file, writing or seeking a scratch file it
+// created for itself — rather than something the caller's arguments
+// caused. It is not something the model can react to (there is no
+// argument to correct), so a caller wraps an error with it via a second
+// %w verb and checks errors.Is against it to route the failure to a Go
+// error instead of a text response. See the error-vs-response rule next
+// to "Tools are self-documenting" in AGENTS.md.
+var errSennitIO = errors.New("sennit I/O error")
+
 // missingSessionID reports that a tool ran without a session ID bound to
 // its context while performing action. The model has no way to supply
 // one — it is wired in by the caller, not a tool argument — so unlike

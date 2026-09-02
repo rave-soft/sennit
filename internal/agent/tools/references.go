@@ -45,6 +45,9 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			searchDir := filepathext.SmartJoin(workingDir, params.Path)
 			results, err := resolveSymbolResults(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
+				if !isGenuineSymbolMiss(err) {
+					return fantasy.ToolResponse{}, fmt.Errorf("resolve symbol: %w", err)
+				}
 				return fantasy.NewTextResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 			}
 
@@ -73,6 +76,9 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			}
 
 			if allErrs != nil {
+				if ctx.Err() != nil || errors.Is(allErrs, context.Canceled) || errors.Is(allErrs, context.DeadlineExceeded) {
+					return fantasy.ToolResponse{}, fmt.Errorf("find references: %w", allErrs)
+				}
 				return fantasy.NewTextErrorResponse(allErrs.Error()), nil
 			}
 			return fantasy.NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil

@@ -62,6 +62,9 @@ func NewRenameTool(
 			searchDir := filepathext.SmartJoin(workingDir, params.Path)
 			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
+				if !isGenuineSymbolMiss(err) {
+					return fantasy.ToolResponse{}, fmt.Errorf("resolve symbol: %w", err)
+				}
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 			}
 

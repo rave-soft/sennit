@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -10,6 +11,14 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 )
+
+// mcpToolRunner is the subset of *mcp.Registry that Tool.Run needs to
+// invoke the underlying MCP tool. Narrowing it to an interface lets a
+// test substitute a fake that returns context.Canceled without standing
+// up a real, connected MCP session.
+type mcpToolRunner interface {
+	RunTool(ctx context.Context, cfg mcp.ConfigProvider, name, toolName string, input string) (mcp.ToolResult, error)
+}
 
 // whitelistDockerTools lists tools of the managed Docker MCP gateway that
 // run without a permission request. The bypass applies only to the built-in
@@ -54,7 +63,7 @@ type Tool struct {
 	permissions     permission.Requester
 	workingDir      string
 	providerOptions fantasy.ProviderOptions
-	reg             *mcp.Registry
+	reg             mcpToolRunner
 }
 
 func (m *Tool) SetProviderOptions(opts fantasy.ProviderOptions) {
@@ -168,6 +177,14 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 
 	result, err := m.reg.RunTool(ctx, m.cfg, m.mcpName, m.tool.Name, params.Input)
 	if err != nil {
+		// Cancellation (Esc on a queued tool call, a hook timeout, ...) is
+		// not something the model can react to — it means the turn itself
+		// is over, not that this call failed and can be retried — so it
+		// must abort the tool-call batch as a Go error rather than land in
+		// the transcript as an ordinary "context canceled" text result.
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fantasy.ToolResponse{}, fmt.Errorf("run MCP tool %s: %w", m.Name(), err)
+		}
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 

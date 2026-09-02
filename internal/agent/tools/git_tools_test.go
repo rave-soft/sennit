@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -240,4 +241,68 @@ func TestSpoolStatOverLegacyOutputCapAndRemovesTempFile(t *testing.T) {
 	entries, err := os.ReadDir(tmp)
 	require.NoError(t, err)
 	require.Empty(t, entries)
+}
+
+// TestGitStatusTool_PropagatesCancellationAsGoError is the regression test
+// for group 3 of the "text response vs. Go error" rule: gitError used to
+// turn every failure, cancellation included, into a text response. See
+// AGENTS.md's "Tool failures: text response vs. Go error".
+func TestGitStatusTool_PropagatesCancellationAsGoError(t *testing.T) {
+	dir := gitToolRepo(t)
+	tool := NewGitStatusTool(dir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "1", Name: GitStatusToolName, Input: "{}"})
+	require.Error(t, err)
+	require.True(t, ctx.Err() != nil)
+	require.Equal(t, fantasy.ToolResponse{}, resp)
+}
+
+// TestGitDiffTool_NotAWorktreeStaysTextResponse pins the other side of the
+// split: a directory that is not a git worktree is something the model
+// can react to (a bad path argument), so it must stay a text response.
+func TestGitDiffTool_NotAWorktreeStaysTextResponse(t *testing.T) {
+	dir := t.TempDir()
+	tool := NewGitDiffTool(dir)
+
+	resp, err := tool.Run(context.Background(), fantasy.ToolCall{ID: "1", Name: GitDiffToolName, Input: "{}"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "not a git worktree")
+}
+
+// TestGitDiffTool_InvalidCursorStaysTextResponse covers the other
+// user-facing case named in the task: a malformed cursor is a caller
+// mistake, not an infrastructure failure.
+func TestGitDiffTool_InvalidCursorStaysTextResponse(t *testing.T) {
+	dir := gitToolRepo(t)
+	tool := NewGitDiffTool(dir)
+
+	resp, err := tool.Run(context.Background(), fantasy.ToolCall{ID: "1", Name: GitDiffToolName, Input: mustJSONInput(t, GitDiffParams{Cursor: "not-a-real-cursor"})})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+}
+
+// TestGitScratchFileFailures_AreGoErrors is the regression test for the
+// "Sennit's own I/O" half of group 3: spoolGitOutput/readUTF8Page/
+// pageStatFile failing on their own temp file (CreateTemp/Write/Seek) must
+// be classified as errSennitIO so gitError routes them to a Go error
+// rather than a text response describing an unrelated git failure.
+func TestGitScratchFileFailures_AreGoErrors(t *testing.T) {
+	_, _, err := readUTF8PageOnClosedFile(t)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errSennitIO))
+}
+
+// readUTF8PageOnClosedFile exercises readUTF8Page's Seek failure directly:
+// a file closed out from under it makes Seek fail deterministically,
+// without depending on any real disk-full/permission condition.
+func readUTF8PageOnClosedFile(t *testing.T) ([]byte, int, error) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "closed-*")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	return readUTF8Page(f, 0, 10, 5)
 }

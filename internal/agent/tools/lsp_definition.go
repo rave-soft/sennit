@@ -48,6 +48,9 @@ func NewDefinitionTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			searchDir := filepathext.SmartJoin(workingDir, params.Path)
 			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
+				if !isGenuineSymbolMiss(err) {
+					return fantasy.ToolResponse{}, fmt.Errorf("resolve symbol: %w", err)
+				}
 				return fantasy.NewTextResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
 			}
 

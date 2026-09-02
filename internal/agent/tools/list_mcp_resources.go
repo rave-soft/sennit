@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,6 +15,14 @@ import (
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/permission"
 )
+
+// mcpResourceLister is the subset of *mcp.Registry that
+// NewListMCPResourcesTool needs. Narrowing it to an interface lets a test
+// substitute a fake that returns context.Canceled without standing up a
+// real, connected MCP session.
+type mcpResourceLister interface {
+	ListResources(ctx context.Context, cfg mcp.ConfigProvider, name string) ([]*mcp.Resource, error)
+}
 
 type ListMCPResourcesParams struct {
 	MCPName string `json:"mcp_name" description:"The MCP server name"`
@@ -41,7 +50,7 @@ type mcpResourceConfig interface {
 
 var _ mcpResourceConfig = (*config.ConfigStore)(nil)
 
-func NewListMCPResourcesTool(cfg mcpResourceConfig, reg *mcp.Registry, permissions permission.Requester) fantasy.AgentTool {
+func NewListMCPResourcesTool(cfg mcpResourceConfig, reg mcpResourceLister, permissions permission.Requester) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		ListMCPResourcesToolName,
 		listMCPResourcesDescription,
@@ -75,6 +84,11 @@ func NewListMCPResourcesTool(cfg mcpResourceConfig, reg *mcp.Registry, permissio
 
 			resources, err := reg.ListResources(ctx, cfg, params.MCPName)
 			if err != nil {
+				// See mcp-tools.go's Run for why cancellation must propagate
+				// as a Go error instead of a normal-looking tool result.
+				if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return fantasy.ToolResponse{}, fmt.Errorf("list MCP resources: %w", err)
+				}
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			if len(resources) == 0 {

@@ -3,6 +3,7 @@ package tools
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -12,6 +13,29 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
+
+// errSymbolNotFound marks a resolveSymbol/resolveSymbolResults failure as
+// "the search completed and matched nothing" rather than "the search
+// failed". Callers map only an error wrapping this sentinel to the
+// model-facing not-found text; anything else — a canceled walk, a
+// filesystem permission error, an LSP round-trip failure — is an
+// infrastructure failure and must propagate as a Go error instead.
+var errSymbolNotFound = errors.New("no matching symbol")
+
+// isGenuineSymbolMiss reports whether err from resolveSymbol/
+// resolveSymbolResults is a genuine "no such symbol" — the search
+// completed and matched nothing — rather than an infrastructure failure:
+// a canceled walk, a filesystem permission error, an LSP round-trip
+// failure. A caller maps only a genuine miss (true) to its own
+// model-facing not-found text; anything else must propagate as a Go
+// error instead, so cancellation aborts the tool-call batch rather than
+// being reported as "not found". Cancellation errors are never also
+// wrapped with errSymbolNotFound, so this one check is sufficient — a
+// caller does not need a separate ctx.Err()/context.Canceled check
+// alongside it.
+func isGenuineSymbolMiss(err error) bool {
+	return errors.Is(err, errSymbolNotFound)
+}
 
 // resolvedSymbol holds the result of resolving a symbol name to an LSP position.
 type resolvedSymbol struct {
@@ -54,7 +78,7 @@ func firstWithDefinition[T any](results []T, definition func(T) ([]protocol.Loca
 	if lastErr != nil {
 		return zero, lastErr
 	}
-	return zero, fmt.Errorf("no definition found for any symbol candidate")
+	return zero, fmt.Errorf("no definition found for any symbol candidate: %w", errSymbolNotFound)
 }
 
 // resolveSymbolResults greps for a symbol and returns all viable
@@ -71,7 +95,7 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 		return nil, fmt.Errorf("failed to search for symbol: %w", err)
 	}
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("symbol '%s' not found in grep results", symbol)
+		return nil, fmt.Errorf("symbol '%s' not found in grep results: %w", symbol, errSymbolNotFound)
 	}
 
 	var results []*resolvedSymbol
@@ -100,7 +124,7 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no LSP client handles any file matching '%s'", symbol)
+		return nil, fmt.Errorf("no LSP client handles any file matching '%s': %w", symbol, errSymbolNotFound)
 	}
 	return results, nil
 }

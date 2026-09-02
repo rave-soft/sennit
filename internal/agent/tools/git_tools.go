@@ -199,7 +199,19 @@ func gitResponse(text string, meta gitMeta) fantasy.ToolResponse {
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text), meta)
 }
 
-func gitError(err error) (fantasy.ToolResponse, error) {
+// gitError classifies a failure from a git-tool call. Cancellation
+// (ctx already done, or an error wrapping context.Canceled/
+// DeadlineExceeded) and errSennitIO — Sennit's own scratch-file I/O going
+// wrong, as opposed to git's — are infrastructure failures: neither is
+// something the model can react to, so both abort the tool-call batch as
+// a Go error. Everything else here is genuinely something the model can
+// react to (a bad path/revision/mode/cursor, a directory that is not a
+// worktree, git exiting non-zero with a message) and stays a text
+// response.
+func gitError(ctx context.Context, err error) (fantasy.ToolResponse, error) {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errSennitIO) {
+		return fantasy.ToolResponse{}, fmt.Errorf("git tool: %w", err)
+	}
 	return fantasy.NewTextErrorResponse(err.Error()), nil
 }
 
@@ -207,19 +219,19 @@ func NewGitStatusTool(dir string) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(GitStatusToolName, "Read current git worktree status.", func(ctx context.Context, p GitStatusParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		paths, err := safeGitPaths(ctx, dir, p.Paths)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		limit := p.Limit
 		if limit == 0 {
 			limit = 100
 		}
 		if limit < 1 || limit > 1000 {
-			return gitError(fmt.Errorf("limit must be between 1 and 1000"))
+			return gitError(ctx, fmt.Errorf("limit must be between 1 and 1000"))
 		}
 		query := fingerprintPage(strings.Join(paths, "\x00"), fmt.Sprint(p.IncludeUntracked))
 		cursor, err := openPageKeyCursor(p.Cursor, GitStatusToolName, query)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		a := []string{"status", "--porcelain=v1", "-z", "--untracked-files=no"}
 		if p.IncludeUntracked {
@@ -227,11 +239,11 @@ func NewGitStatusTool(dir string) fantasy.AgentTool {
 		}
 		data, err := runGit(ctx, dir, appendPaths(a, paths)...)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		entries, err := parseGitStatus(data)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		scan := newPageScan[gitStatusEntry](cursor.Last, limit)
 		for _, entry := range entries {
@@ -239,7 +251,7 @@ func NewGitStatusTool(dir string) fantasy.AgentTool {
 		}
 		page, last, truncated, total, gen := scan.Finish()
 		if err := finishPageKeyCursor(cursor, gen); err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		meta := gitMeta{Count: len(page), Total: total, Truncated: truncated, Entries: page}
 		if truncated {
@@ -292,37 +304,37 @@ func NewGitLogTool(dir string) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(GitLogToolName, "Read git commit history from the current worktree.", func(ctx context.Context, p GitLogParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		paths, err := safeGitPaths(ctx, dir, p.Paths)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		rev := p.Revision
 		if rev == "" {
 			rev = "HEAD"
 		}
 		if !safeRev(rev) {
-			return gitError(fmt.Errorf("invalid revision"))
+			return gitError(ctx, fmt.Errorf("invalid revision"))
 		}
 		limit := p.Limit
 		if limit == 0 {
 			limit = 50
 		}
 		if limit < 1 || limit > 200 {
-			return gitError(fmt.Errorf("limit must be between 1 and 200"))
+			return gitError(ctx, fmt.Errorf("limit must be between 1 and 200"))
 		}
 		query := fingerprintPage(rev, strings.Join(paths, "\x00"))
 		cursor, err := openPageKeyCursor(p.Cursor, GitLogToolName, query)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		data, err := runGit(ctx, dir, appendPaths([]string{"log", rev, "-z", "--format=%H%x00%an%x00%ae%x00%aI%x00%s"}, paths)...)
 		if err != nil {
 			if _, headErr := runGit(ctx, dir, "rev-parse", "--verify", "HEAD"); headErr != nil {
 				return gitResponse("", gitMeta{Entries: []gitLogEntry{}}), nil
 			}
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		entries, err := parseGitLog(data)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		scan := newPageScan[gitLogEntry](cursor.Last, limit)
 		for _, e := range entries {
@@ -330,7 +342,7 @@ func NewGitLogTool(dir string) fantasy.AgentTool {
 		}
 		page, last, tr, total, gen := scan.Finish()
 		if err := finishPageKeyCursor(cursor, gen); err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		meta := gitMeta{Count: len(page), Total: total, Truncated: tr, Entries: page}
 		if tr {
@@ -368,14 +380,14 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(GitDiffToolName, "Read a git diff from the current worktree.", func(ctx context.Context, p GitDiffParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		paths, err := safeGitPaths(ctx, dir, p.Paths)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		max := p.MaxBytes
 		if max == 0 {
 			max = 200000
 		}
 		if max < 1 || max > 200000 {
-			return gitError(fmt.Errorf("max_bytes must be between 1 and 200000"))
+			return gitError(ctx, fmt.Errorf("max_bytes must be between 1 and 200000"))
 		}
 		mode := p.Mode
 		if mode == "" {
@@ -388,7 +400,7 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 			a = append(a, "--cached")
 		case "revision":
 			if !safeRev(p.Base) || (p.Head != "" && !safeRev(p.Head)) {
-				return gitError(fmt.Errorf("invalid revision"))
+				return gitError(ctx, fmt.Errorf("invalid revision"))
 			}
 			r := p.Base
 			if p.Head != "" {
@@ -396,7 +408,7 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 			}
 			a = append(a, r)
 		default:
-			return gitError(fmt.Errorf("invalid mode"))
+			return gitError(ctx, fmt.Errorf("invalid mode"))
 		}
 		format := p.Format
 		if format == "" {
@@ -408,26 +420,26 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 		case "patch":
 			a = append(a, "--patch")
 		default:
-			return gitError(fmt.Errorf("format must be patch or stat"))
+			return gitError(ctx, fmt.Errorf("format must be patch or stat"))
 		}
 		a = appendPaths(a, paths)
 		query := fingerprintPage(mode, p.Base, p.Head, format, strings.Join(paths, "\x00"))
 		cursor, err := openPageKeyCursor(p.Cursor, GitDiffToolName, query)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		if format == "stat" {
 			file, total, gen, err := spoolGitOutput(ctx, dir, false, a...)
 			if err != nil {
-				return gitError(err)
+				return gitError(ctx, err)
 			}
 			defer closeAndRemove(file)
 			if err := finishPageKeyCursor(cursor, gen); err != nil {
-				return gitError(err)
+				return gitError(ctx, err)
 			}
 			page, last, rendered, more, count, err := pageStatFile(file, cursor.Last, max)
 			if err != nil {
-				return gitError(err)
+				return gitError(ctx, err)
 			}
 			text := renderStat(page)
 			meta := gitMeta{Count: len(page), Total: count, Truncated: more, Entries: page, TotalBytes: total, RenderedBytes: rendered, SHA256: gen}
@@ -438,18 +450,18 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 		}
 		file, total, gen, err := spoolGitOutput(ctx, dir, true, a...)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		defer closeAndRemove(file)
 		if err := finishPageKeyCursor(cursor, gen); err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		if cursor.Offset < 0 || cursor.Offset > total {
-			return gitError(fmt.Errorf("invalid cursor"))
+			return gitError(ctx, fmt.Errorf("invalid cursor"))
 		}
 		page, end, err := readUTF8Page(file, cursor.Offset, total, max)
 		if err != nil {
-			return gitError(err)
+			return gitError(ctx, err)
 		}
 		meta := gitMeta{Count: 1, Total: 1, TotalBytes: total, RenderedBytes: len(page), SHA256: gen, Truncated: end < total}
 		if meta.Truncated {
@@ -474,7 +486,7 @@ func spoolGitOutput(ctx context.Context, dir string, normalizeUTF8 bool, args ..
 	}
 	file, err := os.CreateTemp("", "sennit-git-diff-*")
 	if err != nil {
-		return nil, 0, "", err
+		return nil, 0, "", fmt.Errorf("create git scratch file: %w (%w)", err, errSennitIO)
 	}
 	fail := func(err error) (*os.File, int, string, error) { closeAndRemove(file); return nil, 0, "", err }
 	child, cancel := context.WithCancel(ctx)
@@ -518,7 +530,7 @@ func spoolGitOutput(ctx context.Context, dir string, normalizeUTF8 bool, args ..
 			return fmt.Errorf("git diff exceeds safety limit")
 		}
 		if _, err := file.Write(chunk); err != nil {
-			return err
+			return fmt.Errorf("write git scratch file: %w (%w)", err, errSennitIO)
 		}
 		_, _ = hash.Write(chunk)
 		return nil
@@ -578,7 +590,7 @@ func readUTF8Page(file *os.File, offset, total, max int) ([]byte, int, error) {
 		return nil, total, nil
 	}
 	if _, err := file.Seek(int64(offset), io.SeekStart); err != nil {
-		return nil, offset, err
+		return nil, offset, fmt.Errorf("seek git scratch file: %w (%w)", err, errSennitIO)
 	}
 	want := min(max+utf8.UTFMax, total-offset)
 	b := make([]byte, want)
@@ -634,7 +646,7 @@ func pageStat(entries []gitDiffStatEntry, after string, budget int) ([]gitDiffSt
 
 func pageStatFile(file *os.File, after string, budget int) ([]gitDiffStatEntry, string, int, bool, int, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return nil, "", 0, false, 0, err
+		return nil, "", 0, false, 0, fmt.Errorf("seek git scratch file: %w (%w)", err, errSennitIO)
 	}
 	limit := budget/5 + 2
 	h := statEntryHeap{}

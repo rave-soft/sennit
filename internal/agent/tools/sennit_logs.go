@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -174,8 +175,23 @@ func NewSennitLogsTool(logFile string) fantasy.AgentTool {
 		SennitLogsToolName,
 		sennitLogsDescription(),
 		func(ctx context.Context, params SennitLogsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// Cancellation is not model-recoverable: it means the run
+			// itself is over, not that this call failed and can be
+			// retried. Checked before any of runSennitLogs's own
+			// failures, so a canceled call never turns into a normal
+			// tool result.
+			if err := ctx.Err(); err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			output, metadata, err := runSennitLogs(logFile, params)
 			if err != nil {
+				// Opening/stat-ing the log file is Sennit's own I/O, not
+				// something the model's arguments caused — an
+				// infrastructure failure, unlike an invalid cursor/level/
+				// since/limit, which stays a text response below.
+				if errors.Is(err, errSennitIO) {
+					return fantasy.ToolResponse{}, fmt.Errorf("sennit logs: %w", err)
+				}
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
@@ -213,7 +229,7 @@ func runSennitLogs(logFile string, params SennitLogsParams) (string, SennitLogsR
 		if os.IsNotExist(err) {
 			return "No log file found", SennitLogsResponseMetadata{}, nil
 		}
-		return "", SennitLogsResponseMetadata{}, fmt.Errorf("error accessing log file: %w", err)
+		return "", SennitLogsResponseMetadata{}, fmt.Errorf("error accessing log file: %w (%w)", err, errSennitIO)
 	}
 	if info.Size() == 0 {
 		return "Log file is empty", SennitLogsResponseMetadata{}, nil
@@ -221,13 +237,13 @@ func runSennitLogs(logFile string, params SennitLogsParams) (string, SennitLogsR
 
 	f, err := os.Open(logFile)
 	if err != nil {
-		return "", SennitLogsResponseMetadata{}, fmt.Errorf("error opening log file: %w", err)
+		return "", SennitLogsResponseMetadata{}, fmt.Errorf("error opening log file: %w (%w)", err, errSennitIO)
 	}
 	defer f.Close()
 
 	size, err := f.Stat()
 	if err != nil {
-		return "", SennitLogsResponseMetadata{}, fmt.Errorf("error statting log file: %w", err)
+		return "", SennitLogsResponseMetadata{}, fmt.Errorf("error statting log file: %w (%w)", err, errSennitIO)
 	}
 
 	filt, _ := newLogFilter(params) // validated before the filesystem access
@@ -258,7 +274,7 @@ func runSennitLogs(logFile string, params SennitLogsParams) (string, SennitLogsR
 		if !stale {
 			same, ierr := curID.matches(f, size, curOffset)
 			if ierr != nil {
-				return "", SennitLogsResponseMetadata{}, fmt.Errorf("verifying cursor identity: %w", ierr)
+				return "", SennitLogsResponseMetadata{}, fmt.Errorf("verifying cursor identity: %w (%w)", ierr, errSennitIO)
 			}
 			stale = !same
 		}
@@ -315,7 +331,7 @@ func runSennitLogs(logFile string, params SennitLogsParams) (string, SennitLogsR
 	if truncated && len(shown) > 0 {
 		cursorID, ierr := newFileIdentity(f, size, shown[0].offset)
 		if ierr != nil {
-			return "", SennitLogsResponseMetadata{}, fmt.Errorf("creating cursor identity: %w", ierr)
+			return "", SennitLogsResponseMetadata{}, fmt.Errorf("creating cursor identity: %w (%w)", ierr, errSennitIO)
 		}
 		nextCursor = encodeCursor(shown[0].offset, returned+int64(len(shown)), cursorID)
 	}

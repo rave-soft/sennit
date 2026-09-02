@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -71,8 +72,17 @@ type agentTraceResponse struct {
 
 func NewAgentTraceTool(logFile string) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewParallelAgentTool(AgentTraceToolName, "Read a redacted structured diagnostic trace for a session or run. Never returns prompts, arguments, outputs, or error messages.", func(ctx context.Context, p AgentTraceParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		// See sennit_logs.go's NewSennitLogsTool for why cancellation and
+		// Sennit's own file I/O failures must propagate as Go errors
+		// rather than land in the transcript as ordinary tool results.
+		if err := ctx.Err(); err != nil {
+			return fantasy.ToolResponse{}, err
+		}
 		response, err := runAgentTrace(logFile, p)
 		if err != nil {
+			if errors.Is(err, errSennitIO) {
+				return fantasy.ToolResponse{}, fmt.Errorf("agent trace: %w", err)
+			}
 			return fantasy.NewTextErrorResponse(err.Error()), nil
 		}
 		return fantasy.NewTextResponse(response), nil
@@ -104,12 +114,12 @@ func runAgentTrace(logFile string, p AgentTraceParams) (string, error) {
 			b, _ := json.Marshal(agentTraceResponse{Events: []agentTraceEvent{}})
 			return string(b), nil
 		}
-		return "", err
+		return "", fmt.Errorf("opening log file: %w (%w)", err, errSennitIO)
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("statting log file: %w (%w)", err, errSennitIO)
 	}
 	start, boundary := st.Size(), int64(-1)
 	if p.Cursor != "" {
@@ -123,7 +133,7 @@ func runAgentTrace(logFile string, p AgentTraceParams) (string, error) {
 		}
 		same, e := id.matches(f, st, off)
 		if e != nil {
-			return "", e
+			return "", fmt.Errorf("verifying cursor identity: %w (%w)", e, errSennitIO)
 		}
 		if off >= st.Size() || !same {
 			b, _ := json.Marshal(agentTraceResponse{Events: []agentTraceEvent{}})
@@ -155,7 +165,7 @@ func runAgentTrace(logFile string, p AgentTraceParams) (string, error) {
 	if page.truncated && len(page.entries) > 0 {
 		id, e := newFileIdentity(f, st, page.entries[0].offset)
 		if e != nil {
-			return "", e
+			return "", fmt.Errorf("creating cursor identity: %w (%w)", e, errSennitIO)
 		}
 		out.NextCursor = traceQueryHash(p) + "." + encodeCursor(page.entries[0].offset, 0, id)
 	}
