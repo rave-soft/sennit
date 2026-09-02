@@ -48,21 +48,41 @@
 
 ## Фаза 2. SOLID
 
-### 2.1 [L] `config.ConfigStore` — god-объект
+### 2.1 [L, открыт] `config.ConfigStore` — god-объект
 
 71 метод: чтение и запись конфига, credentials, accounts, MCP-токены,
-reload/watch, staleness и Docker MCP (`config/docker_mcp.go:121-182`).
-Там же `var defaultDockerMCPCache` — процессное глобальное состояние в
-пакете, о котором AGENTS.md говорит «config is a store, not global
-state». Первый шаг — вынести Docker MCP (см. 5.4), затем credentials и
-accounts в свои типы, оставив стору только снимок и запись полей.
+reload/watch, staleness. Процессный кеш Docker MCP оттуда уже вынесен
+(5.4).
 
-### 2.2 [L] `agent.delegationFinalizer` делает всё
+**По креденшелам шва нет — проверено, не предполагается.** Попытка
+вынести 13 методов `store_credentials.go` в отдельный тип провалилась по
+существу: запись креденшела *и есть* запись конфига. Каждый такой метод
+публикует новый `*Config` под тем же `writeMu`, что и любой другой
+мутатор (клонировать живой `Config`, изменить клон, поставить через
+`setConfig`), а часть идёт ещё и через `SetConfigFields`/`update`/
+`autoReload`. Вынесенный тип всё равно принимал `*ConfigStore`
+параметром ради `writeMu`, `configMu`, `Config()`/`setConfig()`,
+`autoReload`, `SetConfigFields`, `Resolve`, `knownProviders`,
+`globalDataPath` — два получателя на одну сущность плюс шесть
+форвардеров ради сохранения публичного API. Свой мьютекс вместо этого
+дал бы гонку записи креденшела с обычным мутатором на одном и том же
+указателе `*Config`; инвариант зафиксирован тестом
+`TestConfigStore_CredentialWritesShareWriteMuWithConfigMutators`.
 
-29 полей, пять мьютексов, `atomic.Pointer`, `sync.Once`: skills,
-счётчики под-сессий, HTTP-клиент для fetch, delegation tools, кеш
-runtime-inputs, readiness. Название говорит «финализатор». Разрезать по
-ответственностям; skills и fetch-клиент точно не его.
+Осталась только группировка: методы переехали в `credential_store.go`
+как обычные методы `ConfigStore`. Следующему, кто возьмётся за 2.1,
+искать шов **не по данным, а по времени жизни**: `watch`/`reload`/
+`staleness` работают с файлами на диске и своим `reloadMu`, а не с
+`*Config` под `writeMu`, — это единственная группа, у которой есть шанс
+отделиться.
+
+### 2.2 [L, частично закрыт] `agent.delegationFinalizer` делает всё
+
+Skills-состояние и HTTP-клиент fetch-инструмента вынесены в свои типы
+(`skillsState`, `fetchClient`); пять мьютексов/атомиков стали три.
+Осталось: `subSessions`, `delegationTools`, `runtimeInputsCache` — они
+про делегирование по существу, и разрезать их дальше стоит только если
+появится причина, а не ради счёта полей.
 
 ### 2.3 [M] `ui/model.UI`
 
@@ -83,15 +103,22 @@ workspace. Встраивание обменяло бы ошибку компи�
 `TestReadOnlyWorkspace_MethodClassificationIsComplete`. Форвардеры —
 цена default-deny, а не небрежность.
 
-### 2.5 [M] Контракт `FrontendWorkspace` неоднороден
+### 2.5 [закрыт] Контракт `FrontendWorkspace` неоднороден
 
-`workspace.go:635-680` — 20 ролевых интерфейсов вперемешку с десятью
-«голыми» методами (`VerifyProviderAPIKey`, `ImportCopilot`,
-`KnownProviders`, `CurrentPlanUsage`…), плюс семь одно-методных
-`Account*`-интерфейсов (`:319-345`) без самостоятельных потребителей.
-Первый аудит (6.4) сообщал, что однометодные роли свёрнуты — семь
-остались. Либо все методы в роли, либо роли только там, где уже есть
-потребитель.
+Десять «голых» методов разложены по ролям (`OAuthController`,
+`PreferredModelUpdater`, `ConfigFieldEditor` плюс новые
+`ProviderCatalog` и `AccountUsage`); в теле `FrontendWorkspace` не
+осталось ни одного. Набор методов контракта не изменился — 118 имён до и
+после, ни одна реализация и ни одна тестовая заглушка не тронуты.
+
+**Утверждение аудита про семь однометодных `Account*` было неверным.**
+Они не «без потребителей»: все семь берутся в `internal/cmd` как типы
+параметров и поля локальных составных интерфейсов —
+`recordCopilotAccount(ws workspace.AccountRecorder, …)`,
+`findAuthAccount(ws workspace.AccountLister, …)` и так далее. Роль с
+настоящим узким потребителем — это то, ради чего роли и заводят;
+сворачивать их было бы регрессом. Проверять потребителей **до**, а не
+после.
 
 ### 2.6 [частично закрыт] `shutdownPhases.Shutdown`
 
