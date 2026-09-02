@@ -146,6 +146,20 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// request.
 	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() AcceptedRunner { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
 
+	// Set up callback for LSP state updates.
+	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
+		if client == nil {
+			app.lsp.updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
+			return
+		}
+		client.SetDiagnosticsCallback(app.lsp.updateLSPDiagnostics)
+		app.lsp.updateLSPState(name, client.GetServerState(), nil, client, 0)
+	})
+
+	// TrackConfigured must run after SetCallback so the callback is already
+	// installed when configured-but-not-yet-started LSPs are announced.
+	go app.LSPManager.TrackConfigured(ctx)
+
 	// Keep the application available until a provider is configured:
 	// configuration and skill watchers can still observe a later setup, while
 	// dispatch reports that no coordinator has been initialized.
@@ -173,20 +187,6 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		app.Shutdown()
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
-
-	// Set up callback for LSP state updates.
-	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
-		if client == nil {
-			app.lsp.updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
-			return
-		}
-		client.SetDiagnosticsCallback(app.lsp.updateLSPDiagnostics)
-		app.lsp.updateLSPState(name, client.GetServerState(), nil, client, 0)
-	})
-
-	// TrackConfigured must run after SetCallback so the callback is already
-	// installed when configured-but-not-yet-started LSPs are announced.
-	go app.LSPManager.TrackConfigured(ctx)
 
 	return app, nil
 }
