@@ -385,10 +385,6 @@ func (d *delegationFinalizer) buildAgent(ctx context.Context, prompt *prompt.Pro
 	return result, nil
 }
 
-func (d *delegationFinalizer) makeAuthRefreshCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
-	return d.builder.makeAuthRefreshCallback(providerCfg, cred, active, d.operationPort())
-}
-
 // operationPort assembles the {agent, inputs} pair every credential-refresh
 // and rotation call needs: the coordinator's current top-level agent (for
 // UpdateModels) and this generation's runtime inputs (for rebuilding a
@@ -397,26 +393,6 @@ func (d *delegationFinalizer) makeAuthRefreshCallback(providerCfg config.Provide
 // place that composes it rather than every call site rebuilding it.
 func (d *delegationFinalizer) operationPort() runtimeOperationPort {
 	return runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()}
-}
-
-// makeSubAgentAuthRefreshCallback is makeAuthRefreshCallback for a
-// delegation - see buildSubAgentCall's comment for why the sub-agent's own
-// model, not the coordinator's, has to drive what a refresh stores into
-// active.
-func (d *delegationFinalizer) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, model Model, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
-	return d.builder.makeSubAgentAuthRefreshCallback(providerCfg, cred, model, active, d.operationPort())
-}
-
-func (d *delegationFinalizer) waitForInteractiveReauth(ctx context.Context, providerID string) error {
-	return d.builder.waitForInteractiveReauth(ctx, providerID, d.operationPort())
-}
-
-func (d *delegationFinalizer) refreshTokenIfExpired(ctx context.Context, cfg config.ProviderConfig, cred providerstate.Provider) error {
-	return d.builder.refreshTokenIfExpired(ctx, cfg, cred, d.operationPort())
-}
-
-func (d *delegationFinalizer) retryAfterUnauthorized(ctx context.Context, cfg config.ProviderConfig, cred providerstate.Provider) error {
-	return d.builder.retryAfterUnauthorized(ctx, cfg, cred, d.operationPort())
 }
 
 // SetDelegationTools atomically publishes the thread and task tool
@@ -796,6 +772,11 @@ func (d *delegationFinalizer) subAgentCarryOverMessages(ctx context.Context, par
 // a successful mid-delegation credential refresh depends on (see
 // runSubAgent's own comment on active) - so this must stay a plain
 // pass-through, never a copy or a fresh instance.
+//
+// OnAuthRefresh uses makeSubAgentAuthRefreshCallback, not
+// makeAuthRefreshCallback: see that function's own comment for why the
+// sub-agent's own model, not the coordinator's, has to drive what a
+// refresh stores into active.
 func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID string, priorMessages []message.Message, maxTokens int64, model Model, providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime) SessionAgentCall {
 	return SessionAgentCall{
 		SessionID:       sessionID,
@@ -814,7 +795,7 @@ func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
 		ActiveRuntime:    active,
-		OnAuthRefresh:    d.makeSubAgentAuthRefreshCallback(providerCfg, cred, model, active),
+		OnAuthRefresh:    d.builder.makeSubAgentAuthRefreshCallback(providerCfg, cred, model, active, d.operationPort()),
 	}
 }
 
