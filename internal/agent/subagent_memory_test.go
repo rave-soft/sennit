@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -254,6 +259,209 @@ func TestRunSubAgent_SummarizedPriorSessionCarriesOnlyItsSummaryOnward(t *testin
 		"the summary must be carried over")
 	assert.NotContains(t, carried, "ancient detail",
 		"messages the prior session summarized away must not be replayed")
+}
+
+// factoryRunningTaskManager is a tools.TaskManager that actually runs what
+// it is asked to create, synchronously, on the calling goroutine - unlike
+// the fakeTaskManager elsewhere in this package, which only records
+// TaskCreateArgs. It mirrors the two things internal/thread.TaskManager.Create
+// does before a delegation's Factory ever runs: pick a child session id and
+// stamp that session (via CreateSubAgentSession) with the parent and agent
+// id Factory was given, so ListSubAgentSessions can find it on a later
+// delegation the same way it would in production.
+type factoryRunningTaskManager struct {
+	sessions sessionstore.Service
+	nextID   int
+}
+
+func (m *factoryRunningTaskManager) Create(ctx context.Context, args tools.TaskCreateArgs) (tools.TaskInfo, error) {
+	title := args.SessionTitle
+	if title == "" {
+		title = args.Goal
+	}
+	childSessionID := args.SessionID
+	if childSessionID == "" {
+		m.nextID++
+		childSessionID = fmt.Sprintf("factory-child-%d", m.nextID)
+	}
+	sess, err := m.sessions.CreateSubAgentSession(ctx, childSessionID, args.ParentSessionID, title, args.AgentID)
+	if err != nil {
+		return tools.TaskInfo{}, err
+	}
+	run, cleanup, err := args.Factory(ctx, sess.ID)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return tools.TaskInfo{}, err
+	}
+	result, err := run(ctx)
+	if err != nil {
+		return tools.TaskInfo{}, err
+	}
+	return tools.TaskInfo{ID: sess.ID, SessionID: sess.ID, Status: "completed", ResultSummary: result.Text}, nil
+}
+
+func (m *factoryRunningTaskManager) List(context.Context) ([]tools.TaskInfo, error) { return nil, nil }
+
+func (m *factoryRunningTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
+	return tools.TaskInfo{}, nil
+}
+
+func (m *factoryRunningTaskManager) Cancel(context.Context, string, string) error { return nil }
+
+func (m *factoryRunningTaskManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
+	return tools.SendOutcome{}, nil
+}
+
+func (m *factoryRunningTaskManager) Output(context.Context, string, int) (tools.TaskOutput, error) {
+	return tools.TaskOutput{}, nil
+}
+
+// TestRunNamedAgent_CarriesEarlierConversationThroughTheRealToolPath is the
+// regression test for the actual bug: every test above drives
+// runSubAgent directly with subAgentParams.AgentID set by hand, which is
+// not how production reaches it. Production only ever populates AgentID
+// through runNamedAgent (the "agent" tool's subagent_type branch) via
+// subAgentTaskRun - and until that wiring existed, subAgentTaskRun always
+// built subAgentParams with AgentID left empty, so carryOverMessages's
+// `if agentID == "" { return nil, nil }` guard made this feature dead code
+// in production even though the tests above (correctly) proved the
+// machinery worked. This drives the real "agent" tool, through a real
+// (httptest) provider, twice with the same subagent_type under the same
+// parent session, and asserts the second call's request carries the first
+// call's exchange.
+func TestRunNamedAgent_CarriesEarlierConversationThroughTheRealToolPath(t *testing.T) {
+	var (
+		mu         sync.Mutex
+		turnBodies []string
+		turnCount  int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := readAndReplaceBody(r)
+		require.NoError(t, err)
+		var payload struct {
+			Tools json.RawMessage `json:"tools"`
+		}
+		require.NoError(t, json.Unmarshal(body, &payload))
+		if len(payload.Tools) == 0 {
+			// Title generation; not part of the delegation's own turns.
+			sseStream(w, FixtureTurn{Text: "Test session"}, authModelID)
+			return
+		}
+		mu.Lock()
+		turnCount++
+		turnBodies = append(turnBodies, string(body))
+		reply := fmt.Sprintf("reviewer reply %d", turnCount)
+		mu.Unlock()
+		sseStream(w, FixtureTurn{Text: reply}, authModelID)
+	}))
+	defer srv.Close()
+
+	co := authTestCoordinator(t, withProvider(func(p *config.ProviderConfig) {
+		p.BaseURL = srv.URL + "/v1"
+	}))
+	co.cfg.Config().Agents["reviewer"] = config.Agent{
+		ID: "reviewer", Name: "Reviewer", Description: "Reviews a diff.", Prompt: "You review.",
+		// A real user-defined agent has to declare its own tool access
+		// (filterToolsByAllowlist keeps only what AllowedTools names); an
+		// empty list here would make every turn look identical to a
+		// title-generation request below, which this test tells apart by
+		// whether "tools" is present.
+		AllowedTools: []string{"bash"},
+	}
+	co.SetDelegationTools(nil, &factoryRunningTaskManager{sessions: co.sessions})
+
+	tool, err := co.delegation.agentTool(t.Context(), newAgentConfig(co.cfg.Config()), true)
+	require.NoError(t, err)
+
+	parent, err := co.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parent.ID)
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "call-1",
+		Input: `{"prompt":"review the first diff","subagent_type":"reviewer"}`,
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+
+	resp, err = tool.Run(ctx, fantasy.ToolCall{
+		ID:    "call-2",
+		Input: `{"prompt":"review the second diff","subagent_type":"reviewer"}`,
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, turnBodies, 2, "each delegation makes exactly one turn against the fixture server")
+	assert.Contains(t, turnBodies[1], "review the first diff",
+		"the second delegation must carry the first delegation's prompt")
+	assert.Contains(t, turnBodies[1], "reviewer reply 1",
+		"the second delegation must carry what the reviewer answered the first time")
+}
+
+// TestRunBackgroundAgent_StaysStatelessThroughTheRealToolPath proves the
+// other half of the wiring: the anonymous `agent` delegation (no
+// subagent_type) must keep getting no carried history, even now that
+// subAgentTaskRun threads an id through for the named case. Getting this
+// backwards - passing an id for an anonymous task - would be a regression
+// in the other direction: every one-off task would start inheriting
+// whatever the last anonymous task under the same parent happened to say.
+func TestRunBackgroundAgent_StaysStatelessThroughTheRealToolPath(t *testing.T) {
+	var (
+		mu         sync.Mutex
+		turnBodies []string
+		turnCount  int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := readAndReplaceBody(r)
+		require.NoError(t, err)
+		var payload struct {
+			Tools json.RawMessage `json:"tools"`
+		}
+		require.NoError(t, json.Unmarshal(body, &payload))
+		if len(payload.Tools) == 0 {
+			sseStream(w, FixtureTurn{Text: "Test session"}, authModelID)
+			return
+		}
+		mu.Lock()
+		turnCount++
+		turnBodies = append(turnBodies, string(body))
+		reply := fmt.Sprintf("task reply %d", turnCount)
+		mu.Unlock()
+		sseStream(w, FixtureTurn{Text: reply}, authModelID)
+	}))
+	defer srv.Close()
+
+	co := authTestCoordinator(t, withProvider(func(p *config.ProviderConfig) {
+		p.BaseURL = srv.URL + "/v1"
+	}))
+	co.SetDelegationTools(nil, &factoryRunningTaskManager{sessions: co.sessions})
+
+	tool, err := co.delegation.agentTool(t.Context(), newAgentConfig(co.cfg.Config()), true)
+	require.NoError(t, err)
+
+	parent, err := co.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parent.ID)
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: `{"prompt":"first anonymous task"}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+
+	resp, err = tool.Run(ctx, fantasy.ToolCall{ID: "call-2", Input: `{"prompt":"second anonymous task"}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, turnBodies, 2)
+	assert.NotContains(t, turnBodies[1], "first anonymous task",
+		"an anonymous task must never inherit an earlier anonymous task's prompt")
+	assert.NotContains(t, turnBodies[1], "task reply 1",
+		"an anonymous task must never inherit an earlier anonymous task's answer")
 }
 
 // TestApplyCarryOverBudget covers the bound on how much a long-lived

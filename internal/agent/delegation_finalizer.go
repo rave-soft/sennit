@@ -642,7 +642,9 @@ func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID,
 			if err != nil {
 				return nil, nil, err
 			}
-			return d.subAgentTaskRun(sessionID, childSessionID, delegatedPrompt, agent, childDepth), nil, nil
+			// Anonymous: this is the built-in `agent` tool's own
+			// stateless delegate, not a named agent - see subAgentTaskRun.
+			return d.subAgentTaskRun(sessionID, childSessionID, delegatedPrompt, agent, childDepth, ""), nil, nil
 		},
 	})
 }
@@ -861,7 +863,18 @@ func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID
 	}
 }
 
-func (d *delegationFinalizer) subAgentTaskRun(parentSessionID, childSessionID, prompt string, agent SessionAgent, depth int) func(context.Context) (tools.TaskRunResult, error) {
+// subAgentTaskRun builds the closure a task's Factory hands back to run the
+// delegation. agentID must be the *named* agent's config id for a
+// delegation to a named agent, and empty for the anonymous `agent` and
+// `agentic_fetch` delegations (see subAgentParams.AgentID) - it is threaded
+// straight into subAgentParams so carryOverMessages can find that agent's
+// earlier sessions under this parent.
+//
+// Setting it turns on real, ongoing cost: every delegation to that named
+// agent now pays to replay its earlier conversations under the same
+// parent (trimmed to the carry-over budget in subagent_memory.go), which is
+// input tokens on every call, not just the first.
+func (d *delegationFinalizer) subAgentTaskRun(parentSessionID, childSessionID, prompt string, agent SessionAgent, depth int, agentID string) func(context.Context) (tools.TaskRunResult, error) {
 	return func(ctx context.Context) (tools.TaskRunResult, error) {
 		resp, err := d.runSubAgent(ctx, subAgentParams{
 			Agent:          agent,
@@ -869,6 +882,7 @@ func (d *delegationFinalizer) subAgentTaskRun(parentSessionID, childSessionID, p
 			ChildSessionID: childSessionID,
 			Prompt:         prompt,
 			Depth:          depth,
+			AgentID:        agentID,
 		})
 		if err != nil {
 			return tools.TaskRunResult{}, err
@@ -1036,7 +1050,11 @@ func (d *delegationFinalizer) runNamedAgent(ctx context.Context, parentID string
 			if err != nil {
 				return nil, nil, err
 			}
-			return d.subAgentTaskRun(parentID, childID, params.Prompt, agent, childDepth), nil, nil
+			// Named: id is this delegation's target agent, so
+			// carryOverMessages can replay its earlier sessions under
+			// parentID - see subAgentTaskRun's doc comment for the cost
+			// this switches on.
+			return d.subAgentTaskRun(parentID, childID, params.Prompt, agent, childDepth, id), nil, nil
 		},
 	})
 }
@@ -1157,7 +1175,8 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 			tools.NewReadTool(d.lspManager, d.permissions, newFileTracking(d.filetracker), nil, tmpDir),
 		},
 	})
-	return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth), cleanup, nil
+	// Anonymous: agentic_fetch has no named-agent identity of its own.
+	return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth, ""), cleanup, nil
 }
 
 // delegatableAgentID reports whether id names an agent a caller may hand
