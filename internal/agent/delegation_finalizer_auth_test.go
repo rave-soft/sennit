@@ -83,7 +83,7 @@ func TestRunSubAgent_RetryUsesRefreshedCredential(t *testing.T) {
 	co := authTestCoordinator(t, withProvider(func(p *config.ProviderConfig) {
 		p.BaseURL = srv.URL + "/v1"
 		p.APIKey = "$" + subAgentRotateEnvVar
-		p.APIKeyTemplate = "$" + subAgentRotateEnvVar
+		p.APIKey = "$" + subAgentRotateEnvVar
 	}))
 
 	parent, err := co.sessions.Create(t.Context(), "Parent")
@@ -183,7 +183,7 @@ func TestRunSubAgent_RetryUsesRefreshedCredential_DifferentModel(t *testing.T) {
 	co := authTestCoordinator(t, withProvider(func(p *config.ProviderConfig) {
 		p.BaseURL = srv.URL + "/v1"
 		p.APIKey = "$" + subAgentRotateEnvVar
-		p.APIKeyTemplate = "$" + subAgentRotateEnvVar
+		p.APIKey = "$" + subAgentRotateEnvVar
 		// A second catalog model that only the custom agent below names,
 		// so the delegation's own model genuinely differs from the
 		// coordinator's selected authModelID.

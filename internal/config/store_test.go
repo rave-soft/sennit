@@ -15,6 +15,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -953,6 +954,67 @@ func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
 // sent the literal "$VAR" string as the bearer token, and the 401 retry
 // path re-resolved the OLD template since APIKeyTemplate was never
 // updated to the new one.
+type failingCredentialProcessor struct {
+	compileErr error
+	setupErr   error
+}
+
+func (p failingCredentialProcessor) CompileProvider(configured ProviderConfig, _ VariableResolver) (state.Provider, error) {
+	if p.compileErr != nil {
+		return state.Provider{}, p.compileErr
+	}
+	return state.Provider{ID: configured.ID, APIKey: configured.APIKey}, nil
+}
+
+func (p failingCredentialProcessor) ApplyProviderCredentials(provider state.Provider) (state.Provider, error) {
+	if p.setupErr != nil {
+		return state.Provider{}, p.setupErr
+	}
+	return provider, nil
+}
+
+func (failingCredentialProcessor) Process(context.Context, RuntimeInput) (RuntimeResult, error) {
+	return RuntimeResult{}, nil
+}
+
+func TestSetProviderAPIKey_PreparationFailureIsTransactional(t *testing.T) {
+	tests := []struct {
+		name      string
+		processor RuntimeProcessor
+		wantError string
+	}{
+		{name: "compile", processor: failingCredentialProcessor{compileErr: errors.New("compile failed")}, wantError: "compile failed"},
+		{name: "setup", processor: failingCredentialProcessor{setupErr: errors.New("setup failed")}, wantError: "setup failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sennit.json")
+			const initial = `{"providers":{"custom":{"type":"openai-compat","base_url":"https://example.test/v1","api_key":"old-key"}}}`
+			require.NoError(t, os.WriteFile(path, []byte(initial), 0o600))
+
+			providers := csync.NewMap[string, ProviderConfig]()
+			providers.Set("custom", ProviderConfig{ID: "custom", Type: "openai-compat", BaseURL: "https://example.test/v1", APIKey: "old-key"})
+			store := newTestStore(t, &Config{Providers: providers})
+			store.globalDataPath = path
+			store.processor = tt.processor
+			beforeVersion := store.CredentialVersion()
+			beforeConfig := store.Config()
+
+			err := store.SetProviderAPIKey(ScopeGlobal, "custom", "new-key")
+			require.ErrorContains(t, err, tt.wantError)
+			require.Same(t, beforeConfig, store.Config(), "failed preparation must not publish a config generation")
+			require.Equal(t, beforeVersion, store.CredentialVersion())
+			require.Equal(t, initial, string(requireFile(t, path)), "failed preparation must not persist credentials")
+			configured, ok := store.Config().Providers.Get("custom")
+			require.True(t, ok)
+			require.Equal(t, "old-key", configured.APIKey)
+			_, ok = store.Config().RuntimeProvider("custom")
+			require.False(t, ok, "failed preparation must not publish partial runtime state")
+		})
+	}
+}
+
 func TestSetProviderAPIKey_TemplateResolvesLiveKeyAndKeepsTemplate(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "sennit.json")
@@ -981,7 +1043,7 @@ func TestSetProviderAPIKey_TemplateResolvesLiveKeyAndKeepsTemplate(t *testing.T)
 
 	require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "my-custom", "$SENNIT_TEST_API_KEY"))
 
-	pc, ok := store.Config().Providers.Get("my-custom")
+	pc, ok := store.Config().RuntimeProvider("my-custom")
 	require.True(t, ok)
 	require.Equal(t, "resolved-secret", pc.APIKey, "the live key must be the resolved value, not the raw template")
 	require.Equal(t, "$SENNIT_TEST_API_KEY", pc.APIKeyTemplate, "APIKeyTemplate must track the new template")

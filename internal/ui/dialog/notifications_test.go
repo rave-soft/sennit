@@ -6,6 +6,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
@@ -25,7 +26,7 @@ type notificationsTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w notificationsTestWorkspace) KnownProviders() []catwalk.Provider {
-	return config.Providers(w.cfg)
+	return providerruntime.Providers(w.cfg)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test

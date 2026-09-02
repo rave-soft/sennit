@@ -12,6 +12,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/state"
 )
 
 // racingRuntimeProcessor wraps testRuntimeProcessor and, on its first call
@@ -25,6 +26,14 @@ type racingRuntimeProcessor struct {
 	store     *ConfigStore
 	onProcess func(*ConfigStore)
 	once      sync.Once
+}
+
+func (p *racingRuntimeProcessor) CompileProvider(configured ProviderConfig, resolver VariableResolver) (state.Provider, error) {
+	return (testRuntimeProcessor{}).CompileProvider(configured, resolver)
+}
+
+func (p *racingRuntimeProcessor) ApplyProviderCredentials(provider state.Provider) (state.Provider, error) {
+	return (testRuntimeProcessor{}).ApplyProviderCredentials(provider)
 }
 
 func (p *racingRuntimeProcessor) Process(ctx context.Context, input RuntimeInput) (RuntimeResult, error) {
@@ -95,7 +104,7 @@ func TestReloadFromDisk_CredentialRacePreservesFullAccountSwitch(t *testing.T) {
 
 	require.NoError(t, store.ReloadFromDisk(context.Background()))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken, provider.APIKey, "APIKey must survive the race")
 	require.NotNil(t, provider.OAuthToken)

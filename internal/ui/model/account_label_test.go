@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -29,7 +30,7 @@ type accountLabelTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w accountLabelTestWorkspace) KnownProviders() []catwalk.Provider {
-	return config.Providers(w.cfg)
+	return providerruntime.Providers(w.cfg)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test

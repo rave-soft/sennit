@@ -10,11 +10,20 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/require"
 )
 
 type countingProcessor struct {
 	calls atomic.Int64
+}
+
+func (processor *countingProcessor) CompileProvider(configured config.ProviderConfig, _ config.VariableResolver) (state.Provider, error) {
+	return state.Provider{ID: configured.ID}, nil
+}
+
+func (processor *countingProcessor) ApplyProviderCredentials(provider state.Provider) (state.Provider, error) {
+	return provider, nil
 }
 
 func (processor *countingProcessor) Process(_ context.Context, input config.RuntimeInput) (config.RuntimeResult, error) {

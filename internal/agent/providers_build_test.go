@@ -14,6 +14,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -446,6 +447,20 @@ func TestBuildGoogleVertexProvider(t *testing.T) {
 // Anthropic-Messages override, the anthropic-beta header it adds for a
 // thinking model, each provider-type branch, the ZAI extra_body injection,
 // and the known/unknown custom-provider fallback.
+func buildTestProvider(t *testing.T, c *coordinator, providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
+	t.Helper()
+	effective, err := providerruntime.FromConfig(providerCfg, c.cfg.Config().RuntimeResolver())
+	if err != nil {
+		return nil, err
+	}
+	if providerCfg.Type == "google-vertex" {
+		effective.ExtraParams["project"] = "p"
+		effective.ExtraParams["location"] = "us-central1"
+	}
+	c.cfg.Config().SetRuntimeProvider(providerCfg.ID, effective)
+	return c.builder.buildProvider(providerCfg, model)
+}
+
 func TestBuildProvider(t *testing.T) {
 	t.Parallel()
 
@@ -454,7 +469,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "openai", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gpt-4"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "gpt-4"})
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -466,7 +481,7 @@ func TestBuildProvider(t *testing.T) {
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "anthropic", APIKey: "akey", BaseURL: server.URL}
 		model := config.SelectedModel{Model: "claude-3", Think: true}
-		provider, err := c.builder.buildProvider(providerCfg, model)
+		provider, err := buildTestProvider(t, c, providerCfg, model)
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Equal(t, "interleaved-thinking-2025-05-14", captured.Header.Get("Anthropic-Beta"))
@@ -481,7 +496,7 @@ func TestBuildProvider(t *testing.T) {
 			ExtraHeaders: map[string]string{"anthropic-beta": "other-beta-2024"},
 		}
 		model := config.SelectedModel{Model: "claude-3", Think: true}
-		provider, err := c.builder.buildProvider(providerCfg, model)
+		provider, err := buildTestProvider(t, c, providerCfg, model)
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Equal(t, "other-beta-2024,interleaved-thinking-2025-05-14", captured.Header.Get("Anthropic-Beta"))
@@ -492,7 +507,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "anthropic", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "claude-3"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "claude-3"})
 		require.NoError(t, err)
 		probe(t, provider, "claude-3")
 		require.Empty(t, captured.Header.Get("Anthropic-Beta"))
@@ -506,7 +521,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderOpenCodeGo),
 			APIKey: "akey", BaseURL: server.URL + "/v1",
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "qwen3.7-max"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "qwen3.7-max"})
 		require.NoError(t, err)
 		probe(t, provider, "qwen3.7-max")
 		// The anthropic builder was used (X-Api-Key), not openaicompat
@@ -524,7 +539,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderOpenCodeGo),
 			APIKey: "akey", BaseURL: server.URL,
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-other-model"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "some-other-model"})
 		require.NoError(t, err)
 		probe(t, provider, "some-other-model")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -535,7 +550,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "azure", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gpt-4o"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "gpt-4o"})
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4o")
 		require.Equal(t, "akey", captured.Header.Get("Api-Key"))
@@ -546,7 +561,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "google", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"})
 		require.NoError(t, err)
 		probe(t, provider, "gemini-2.5-pro")
 		require.Equal(t, "akey", captured.Header.Get("X-Goog-Api-Key"))
@@ -555,8 +570,8 @@ func TestBuildProvider(t *testing.T) {
 	t.Run("google-vertex type routes to buildGoogleVertexProvider", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
-		providerCfg := config.ProviderConfig{Type: "google-vertex", ExtraParams: map[string]string{"project": "p", "location": "us-central1"}}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"})
+		providerCfg := config.ProviderConfig{Type: "google-vertex"}
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "gemini-2.5-pro"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -565,7 +580,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "bedrock", APIKey: "akey"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "claude-3"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "claude-3"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -574,7 +589,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "openrouter", APIKey: "akey"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "some-model"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -583,7 +598,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "vercel", APIKey: "akey"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "some-model"})
 		require.NoError(t, err)
 		require.NotNil(t, provider)
 	})
@@ -596,7 +611,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderZAI),
 			APIKey: "akey", BaseURL: server.URL,
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "glm-5"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "glm-5"})
 		require.NoError(t, err)
 		probe(t, provider, "glm-5")
 		var body map[string]any
@@ -618,7 +633,7 @@ func TestBuildProvider(t *testing.T) {
 			Type: "openai-compat", ID: string(catwalk.InferenceProviderZAI),
 			APIKey: "akey", BaseURL: server.URL, ExtraBody: sharedExtraBody,
 		}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "glm-5"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "glm-5"})
 		require.NoError(t, err)
 		probe(t, provider, "glm-5")
 		require.NotContains(t, sharedExtraBody, "tool_stream", "buildProvider must not write into the caller's ExtraBody map")
@@ -630,7 +645,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "openai-compat", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "some-model"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "some-model"})
 		require.NoError(t, err)
 		probe(t, provider, "some-model")
 		var body map[string]any
@@ -643,7 +658,7 @@ func TestBuildProvider(t *testing.T) {
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		providerCfg := config.ProviderConfig{Type: "ollama", APIKey: "akey", BaseURL: server.URL}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "llama3"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "llama3"})
 		require.NoError(t, err)
 		probe(t, provider, "llama3")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
@@ -653,7 +668,7 @@ func TestBuildProvider(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		providerCfg := config.ProviderConfig{Type: "totally-unknown"}
-		provider, err := c.builder.buildProvider(providerCfg, config.SelectedModel{Model: "m"})
+		provider, err := buildTestProvider(t, c, providerCfg, config.SelectedModel{Model: "m"})
 		require.Error(t, err)
 		require.Nil(t, provider)
 		require.Contains(t, err.Error(), "totally-unknown")

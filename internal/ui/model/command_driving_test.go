@@ -21,6 +21,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -125,7 +126,7 @@ func (w cmdDrivingWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w cmdDrivingWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w cmdDrivingWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 func (w *cmdDrivingWorkspace) KnownProviders() []catwalk.Provider {
-	return config.Providers(w.Config())
+	return providerruntime.Providers(w.Config())
 }
 
 // CurrentPlanUsage: no provider in these tests quotes rate limits, so the

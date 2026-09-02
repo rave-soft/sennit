@@ -9,6 +9,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -29,9 +30,11 @@ type doctorTestWorkspace struct {
 // tests still exercise the real diagnostic and the real catalog against
 // their own config. SkillStates is empty because no test here has a skill
 // catalog to report on.
-func (w doctorTestWorkspace) ConfigProblems() []config.Problem   { return config.Doctor(w.cfg) }
-func (w doctorTestWorkspace) SkillStates() []*skills.SkillState  { return nil }
-func (w doctorTestWorkspace) KnownProviders() []catwalk.Provider { return config.Providers(w.cfg) }
+func (w doctorTestWorkspace) ConfigProblems() []config.Problem  { return config.Doctor(w.cfg) }
+func (w doctorTestWorkspace) SkillStates() []*skills.SkillState { return nil }
+func (w doctorTestWorkspace) KnownProviders() []catwalk.Provider {
+	return providerruntime.Providers(w.cfg)
+}
 
 func (w *doctorTestWorkspace) SupportsThreads() bool { return false }
 

@@ -88,13 +88,13 @@ func TestRemoveAccount_LastAccountRefused(t *testing.T) {
 func TestRemoveAccount_ActiveAccountActivatesReplacementFirst(t *testing.T) {
 	ws, providerID, first, second := setupTwoAccountProvider(t)
 
-	pc, ok := ws.Config().Providers.Get(providerID)
+	pc, ok := ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account, "RecordAccount should have left the second account active")
 
 	require.NoError(t, ws.RemoveAccount(config.ScopeGlobal, providerID, second.ID))
 
-	pc, ok = ws.Config().Providers.Get(providerID)
+	pc, ok = ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, first.ID, pc.Account, "the surviving account must now be active")
 
@@ -109,13 +109,13 @@ func TestRemoveAccount_ActiveAccountActivatesReplacementFirst(t *testing.T) {
 func TestRemoveAccount_InactiveAccountJustRemoved(t *testing.T) {
 	ws, providerID, first, second := setupTwoAccountProvider(t)
 
-	pc, ok := ws.Config().Providers.Get(providerID)
+	pc, ok := ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account)
 
 	require.NoError(t, ws.RemoveAccount(config.ScopeGlobal, providerID, first.ID))
 
-	pc, ok = ws.Config().Providers.Get(providerID)
+	pc, ok = ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account, "removing the inactive account must not disturb the active one")
 
@@ -133,7 +133,7 @@ func TestRemoveAccount_InactiveAccountJustRemoved(t *testing.T) {
 func TestUpdateAccount_ActiveAccountProxyChangePublishesToRuntime(t *testing.T) {
 	ws, providerID, _, second := setupTwoAccountProvider(t)
 
-	pc, ok := ws.Config().Providers.Get(providerID)
+	pc, ok := ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account)
 	require.Empty(t, pc.ProxyURL, "no proxy configured yet")
@@ -142,7 +142,7 @@ func TestUpdateAccount_ActiveAccountProxyChangePublishesToRuntime(t *testing.T) 
 	updated.ProxyURL = "http://proxy.example:8080"
 	require.NoError(t, ws.UpdateAccount(providerID, updated))
 
-	pc, ok = ws.Config().Providers.Get(providerID)
+	pc, ok = ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, "http://proxy.example:8080", pc.ProxyURL, "the new proxy must be live in the running config")
 
@@ -158,7 +158,7 @@ func TestUpdateAccount_ActiveAccountProxyChangePublishesToRuntime(t *testing.T) 
 func TestUpdateAccount_InactiveAccountDoesNotTouchRuntime(t *testing.T) {
 	ws, providerID, first, second := setupTwoAccountProvider(t)
 
-	pc, ok := ws.Config().Providers.Get(providerID)
+	pc, ok := ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account, "second account is active, first is not")
 
@@ -167,7 +167,7 @@ func TestUpdateAccount_InactiveAccountDoesNotTouchRuntime(t *testing.T) {
 	updated.ProxyURL = "http://proxy.example:9090"
 	require.NoError(t, ws.UpdateAccount(providerID, updated))
 
-	pc, ok = ws.Config().Providers.Get(providerID)
+	pc, ok = ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Empty(t, pc.ProxyURL, "editing the inactive account must not change the live provider's proxy")
 
@@ -194,7 +194,7 @@ func accountsStoreFor(t *testing.T) accounts.Store {
 func TestSetProviderProxy_ReachesEffectiveProxyForAccountWithoutOwnProxy(t *testing.T) {
 	ws, providerID, _, second := setupTwoAccountProvider(t)
 
-	pc, ok := ws.Config().Providers.Get(providerID)
+	pc, ok := ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account)
 	require.Empty(t, second.ProxyURL, "the active account has no proxy of its own")
@@ -202,7 +202,7 @@ func TestSetProviderProxy_ReachesEffectiveProxyForAccountWithoutOwnProxy(t *test
 
 	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
 
-	pc, ok = ws.Config().Providers.Get(providerID)
+	pc, ok = ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider-proxy.example:8080", pc.ConfiguredProxyURL)
 	require.Equal(t, "http://provider-proxy.example:8080", pc.ProxyURL, "the effective proxy must pick up the new provider proxy immediately")
@@ -220,7 +220,7 @@ func TestSetProviderProxy_AccountOwnProxyStillWins(t *testing.T) {
 
 	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
 
-	pc, ok := ws.Config().Providers.Get(providerID)
+	pc, ok := ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider-proxy.example:8080", pc.ConfiguredProxyURL, "the provider-level base still updates")
 	require.Equal(t, "http://account-proxy.example:9090", pc.ProxyURL, "the account's own proxy still wins as the effective one")
@@ -233,12 +233,12 @@ func TestSetProviderProxy_EmptyClearsProviderProxy(t *testing.T) {
 	ws, providerID, _, _ := setupTwoAccountProvider(t)
 
 	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
-	pc, ok := ws.Config().Providers.Get(providerID)
+	pc, ok := ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider-proxy.example:8080", pc.ProxyURL)
 
 	require.NoError(t, ws.SetProviderProxy(providerID, ""))
-	pc, ok = ws.Config().Providers.Get(providerID)
+	pc, ok = ws.Config().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Empty(t, pc.ConfiguredProxyURL)
 	require.Empty(t, pc.ProxyURL)

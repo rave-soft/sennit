@@ -60,7 +60,6 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 
 	s.writeMu.RLock()
 	startCredentialVersion := s.CredentialVersion()
-	startConfig := s.Config()
 	s.writeMu.RUnlock()
 
 	// Snapshot runtime overrides up front (a brief writeMu.RLock) rather
@@ -140,30 +139,11 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 
 	if s.CredentialVersion() != startCredentialVersion {
 		current := s.Config()
-		if startConfig != nil && current != nil && startConfig.Providers != nil && current.Providers != nil && cfg.Providers != nil {
-			for id, currentProvider := range current.Providers.Seq2() {
-				startProvider, existed := startConfig.Providers.Get(id)
-				if existed && startProvider.APIKey == currentProvider.APIKey && reflect.DeepEqual(startProvider.OAuthToken, currentProvider.OAuthToken) {
-					continue
+		if current != nil && current.RuntimeProviders != nil {
+			for id, provider := range current.RuntimeProviders.Seq2() {
+				if _, ok := cfg.Providers.Get(id); ok {
+					cfg.SetRuntimeProvider(id, provider)
 				}
-				provider, ok := cfg.Providers.Get(id)
-				if !ok {
-					continue
-				}
-				// Preserve the whole published-credential set, not just
-				// APIKey/OAuthToken: UpdateProviderAccount can also publish
-				// Account, ProxyURL, and APIKeyTemplate, and a reload that
-				// only copied the first two used to leave those three
-				// pointing at whatever the disk read produced — a stale
-				// combination (new key, old proxy/account) that fails at
-				// request time in a way the user can't diagnose.
-				provider.APIKey = currentProvider.APIKey
-				provider.OAuthToken = currentProvider.OAuthToken
-				provider.Account = currentProvider.Account
-				provider.ProxyURL = currentProvider.ProxyURL
-				provider.APIKeyTemplate = currentProvider.APIKeyTemplate
-				provider.ApplyPostCredentialSetup(id)
-				cfg.Providers.Set(id, provider)
 			}
 		}
 	}
@@ -183,22 +163,15 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// Guarded on ConfiguredProxyURL staying the same as well as Account: if
 	// the user actually edited the provider's own proxy_url on disk, that
 	// edit must win, not be shadowed by a stale in-memory override.
-	if current := s.Config(); startConfig != nil && current != nil && current.Providers != nil && cfg.Providers != nil {
-		for id, currentProvider := range current.Providers.Seq2() {
-			if currentProvider.Account == "" {
-				continue
-			}
-			provider, ok := cfg.Providers.Get(id)
-			if !ok || provider.Account != currentProvider.Account {
-				continue
-			}
-			if provider.ConfiguredProxyURL != currentProvider.ConfiguredProxyURL {
+	if current := s.Config(); current != nil && current.RuntimeProviders != nil && cfg.RuntimeProviders != nil {
+		for id, currentProvider := range current.RuntimeProviders.Seq2() {
+			provider, ok := cfg.RuntimeProviders.Get(id)
+			if !ok || provider.Account != currentProvider.Account || provider.ConfiguredProxyURL != currentProvider.ConfiguredProxyURL {
 				continue
 			}
 			provider.ProxyURL = currentProvider.ProxyURL
 			provider.APIKeyTemplate = currentProvider.APIKeyTemplate
-			provider.ApplyPostCredentialSetup(id)
-			cfg.Providers.Set(id, provider)
+			cfg.SetRuntimeProvider(id, provider)
 		}
 	}
 

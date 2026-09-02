@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -25,7 +26,7 @@ type providerSettingsTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w providerSettingsTestWorkspace) KnownProviders() []catwalk.Provider {
-	return config.Providers(w.cfg)
+	return providerruntime.Providers(w.cfg)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -102,8 +103,8 @@ func TestProviderSettings_RotateNever_NoRotationControls(t *testing.T) {
 // Rotation settings.
 func TestProviderSettings_PrefillsProxyAndRotationFromConfig(t *testing.T) {
 	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{
-		ConfiguredProxyURL: "http://provider-proxy.example:8080",
-		Rotation:           &config.RotationConfig{Enabled: true, MinRemainingPercent: 25},
+		ProxyURL: "http://provider-proxy.example:8080",
+		Rotation: &config.RotationConfig{Enabled: true, MinRemainingPercent: 25},
 	})
 	m := newProviderSettings(com, "codex", accounts.Capabilities{RotateOn: accounts.RotateThreshold})
 

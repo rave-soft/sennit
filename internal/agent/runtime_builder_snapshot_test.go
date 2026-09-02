@@ -9,6 +9,7 @@ import (
 	agenttools "github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -32,22 +33,28 @@ func TestRuntimeForUsesCapturedPublishedConfigGeneration(t *testing.T) {
 		BaseURL: "$SNAPSHOT_URL",
 		Models:  []catwalk.Model{{ID: "snapshot-model", ContextWindow: 1024, DefaultMaxTokens: 256}},
 	})
-	store := config.NewStore(config.StoreOptions{
-		Config: &config.Config{
-			Model:     config.SelectedModel{Provider: "snapshot", Model: "snapshot-model"},
-			Providers: providers,
-			Options: &config.Options{
-				Attribution:          &config.Attribution{},
-				Debug:                true,
-				DisableAutoSummarize: true,
-				AutoSummarizeAt:      111,
-			},
-			Agents: map[string]config.Agent{config.AgentCoder: {AllowedTools: coreToolNames()}},
-			Env: map[string]string{
-				"SNAPSHOT_KEY": "old-overlay-key",
-				"SNAPSHOT_URL": server.URL,
-			},
+	cfg := &config.Config{
+		Model:     config.SelectedModel{Provider: "snapshot", Model: "snapshot-model"},
+		Providers: providers,
+		Options: &config.Options{
+			Attribution:          &config.Attribution{},
+			Debug:                true,
+			DisableAutoSummarize: true,
+			AutoSummarizeAt:      111,
 		},
+		Agents: map[string]config.Agent{config.AgentCoder: {AllowedTools: coreToolNames()}},
+		Env: map[string]string{
+			"SNAPSHOT_KEY": "old-overlay-key",
+			"SNAPSHOT_URL": server.URL,
+		},
+	}
+	configured, ok := providers.Get("snapshot")
+	require.True(t, ok)
+	effective, err := providerruntime.FromConfig(configured, cfg.RuntimeResolver())
+	require.NoError(t, err)
+	cfg.SetRuntimeProvider("snapshot", effective)
+	store := config.NewStore(config.StoreOptions{
+		Config:     cfg,
 		WorkingDir: t.TempDir(),
 	})
 	env := testEnv(t)

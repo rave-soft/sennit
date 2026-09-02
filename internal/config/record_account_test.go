@@ -30,9 +30,10 @@ func newCleanMachineStore(t *testing.T) *ConfigStore {
 	dir := t.TempDir()
 	return &ConfigStore{
 		config:         &Config{Providers: csync.NewMap[string, ProviderConfig]()},
-		knownProviders: []catwalk.Provider{CodexProvider()},
+		knownProviders: []catwalk.Provider{{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName, APIEndpoint: codex.APIBaseURL, Type: catwalk.TypeOpenAI}},
 		globalDataPath: filepath.Join(dir, "sennit.json"),
 		resolver:       NewShellVariableResolver(env.New()),
+		processor:      testRuntimeProcessor{},
 	}
 }
 
@@ -81,7 +82,7 @@ func TestRecordAccount_MigratesExistingAndAddsNew(t *testing.T) {
 	require.True(t, sawOld, "the migrated account should carry the old token's account ID")
 	require.True(t, sawNew)
 
-	activeProvider, ok := store.Config().Providers.Get(codex.ProviderID)
+	activeProvider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken, activeProvider.APIKey, "the new account should be the one published to the runtime")
 
@@ -126,7 +127,7 @@ func TestRecordAccount_ReloginSameAccountUpdatesInPlace(t *testing.T) {
 	require.Equal(t, "My Account", all[0].Label, "the account's label must survive a relogin")
 	require.Equal(t, secondToken, all[0].Token.AccessToken, "the credential itself must be refreshed")
 
-	activeProvider, ok := store.Config().Providers.Get(codex.ProviderID)
+	activeProvider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, secondToken, activeProvider.APIKey)
 }
@@ -179,7 +180,9 @@ func TestRecordAccount_CreatesProviderEntryOnCleanMachine(t *testing.T) {
 	require.Equal(t, codex.ProviderName, provider.Name)
 	require.Equal(t, codex.APIBaseURL, provider.BaseURL)
 	require.Equal(t, catwalk.TypeOpenAI, provider.Type)
-	require.Equal(t, token, provider.APIKey, "the new account should be active")
+	runtimeProvider, ok := store.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, token, runtimeProvider.APIKey, "the new account should be active")
 
 	all, err := accStore.List(codex.ProviderID)
 	require.NoError(t, err)
@@ -257,7 +260,7 @@ func TestRecordAccount_NoAccountIDReloginUpdatesActiveInPlace(t *testing.T) {
 	require.Equal(t, "My Account", all[0].Label, "the account's label must survive a relogin")
 	require.Equal(t, secondToken, all[0].Token.AccessToken, "the credential itself must be refreshed")
 
-	activeProvider, ok := store.Config().Providers.Get(codex.ProviderID)
+	activeProvider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, secondToken, activeProvider.APIKey, "the account remains active")
 }
@@ -297,7 +300,7 @@ func TestRecordAccount_ForceNewAccountCreatesSecondAccount(t *testing.T) {
 	require.Len(t, all, 2, "a deliberate add must create a new account, not update the existing one")
 	require.NotEqual(t, first.ID, second.ID)
 
-	activeProvider, ok := store.Config().Providers.Get(codex.ProviderID)
+	activeProvider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, secondToken, activeProvider.APIKey, "the newly added account becomes active")
 }

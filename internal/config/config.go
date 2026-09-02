@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/oauth"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 )
 
 const (
@@ -562,6 +563,8 @@ type Config struct {
 	// a cloned repository can never repoint a session at another endpoint.
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations. Read only from the global config — a providers block in a project config is ignored"`
 
+	RuntimeProviders *csync.Map[string, providerstate.Provider] `json:"-" jsonschema:"-"`
+
 	MCP MCPs `json:"mcp,omitempty" jsonschema:"description=Model Context Protocol server configurations"`
 
 	LSP LSPs `json:"lsp,omitempty" jsonschema:"description=Language Server Protocol configurations"`
@@ -635,7 +638,6 @@ func (c *Config) cloneForWrite() *Config {
 			provider.ExtraHeaders = maps.Clone(provider.ExtraHeaders)
 			provider.ExtraBody = maps.Clone(provider.ExtraBody)
 			provider.ProviderOptions = maps.Clone(provider.ProviderOptions)
-			provider.ExtraParams = maps.Clone(provider.ExtraParams)
 			if provider.OAuthToken != nil {
 				token := *provider.OAuthToken
 				if token.Client != nil {
@@ -645,6 +647,12 @@ func (c *Config) cloneForWrite() *Config {
 				provider.OAuthToken = &token
 			}
 			nc.Providers.Set(id, provider)
+		}
+	}
+	if c.RuntimeProviders != nil {
+		nc.RuntimeProviders = csync.NewMap[string, providerstate.Provider]()
+		for id, provider := range c.RuntimeProviders.Seq2() {
+			nc.RuntimeProviders.Set(id, providerstate.Clone(provider))
 		}
 	}
 	if c.Options != nil {

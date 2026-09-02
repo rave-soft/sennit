@@ -6,17 +6,58 @@ import (
 	"maps"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/modelcache"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/providers/state"
 )
 
 type testRuntimeProcessor struct{}
 
+func (testRuntimeProcessor) CompileProvider(configured ProviderConfig, resolver VariableResolver) (state.Provider, error) {
+	apiKey, err := resolver.ResolveValue(configured.APIKey)
+	if err != nil {
+		return state.Provider{}, err
+	}
+	baseURL, err := resolver.ResolveValue(configured.BaseURL)
+	if err != nil {
+		return state.Provider{}, err
+	}
+	provider := state.Provider{ID: configured.ID, Name: configured.Name, Type: configured.Type, APIKey: apiKey, APIKeyTemplate: configured.APIKey, OAuthToken: configured.OAuthToken, BaseURL: baseURL, ProxyURL: configured.ProxyURL, ConfiguredProxyURL: configured.ProxyURL, Account: configured.Account, ExtraHeaders: maps.Clone(configured.ExtraHeaders), Models: configured.Models}
+	return (testRuntimeProcessor{}).ApplyProviderCredentials(provider)
+}
+
+func (testRuntimeProcessor) ApplyProviderCredentials(provider state.Provider) (state.Provider, error) {
+	if provider.ExtraHeaders == nil {
+		provider.ExtraHeaders = make(map[string]string)
+	}
+	switch provider.ID {
+	case string(catwalk.InferenceProviderCopilot):
+		maps.Copy(provider.ExtraHeaders, copilot.Headers())
+	case codex.ProviderID:
+		accountID := codex.AccountID(provider.APIKey)
+		if accountID == "" && provider.OAuthToken != nil {
+			accountID = codex.AccountID(provider.OAuthToken.AccessToken)
+		}
+		if accountID == "" {
+			delete(provider.ExtraHeaders, codex.AccountIDHeader)
+		}
+		maps.Copy(provider.ExtraHeaders, codex.Headers(accountID))
+	}
+	return provider, nil
+}
+
 func (testRuntimeProcessor) Process(ctx context.Context, input RuntimeInput) (RuntimeResult, error) {
 	resolver := NewShellVariableResolver(input.Config.RuntimeEnvironment())
-	knownProviders := Providers(input.Config)
+	knownProviders := input.KnownProviders
+	if knownProviders == nil && !input.Config.Options.DisableDefaultProviders {
+		knownProviders = append(embedded.GetAll(), catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName, APIEndpoint: codex.APIBaseURL, Type: catwalk.TypeOpenAI})
+	}
 	if input.Initial {
 		migrateBloatedModelCache(input.GlobalDataPath, knownProviders)
 	}
@@ -89,7 +130,15 @@ func (testRuntimeProcessor) Process(ctx context.Context, input RuntimeInput) (Ru
 		maps.Copy(provider.ExtraHeaders, map[string]string{})
 		input.Config.Providers.Set(id, provider)
 	}
-	return RuntimeResult{KnownProviders: knownProviders, Resolver: resolver}, nil
+	runtimeProviders := csync.NewMap[string, state.Provider]()
+	for id, configured := range input.Config.Providers.Seq2() {
+		apiKey, _ := resolver.ResolveValue(configured.APIKey)
+		baseURL, _ := resolver.ResolveValue(configured.BaseURL)
+		provider := state.Provider{ID: id, Name: configured.Name, Type: configured.Type, APIKey: apiKey, APIKeyTemplate: configured.APIKey, OAuthToken: configured.OAuthToken, BaseURL: baseURL, ProxyURL: configured.ProxyURL, ConfiguredProxyURL: configured.ProxyURL, Account: configured.Account, ExtraHeaders: maps.Clone(configured.ExtraHeaders), Models: configured.Models}
+		prepared, _ := (testRuntimeProcessor{}).ApplyProviderCredentials(provider)
+		runtimeProviders.Set(id, prepared)
+	}
+	return RuntimeResult{KnownProviders: knownProviders, RuntimeProviders: runtimeProviders, Resolver: resolver}, nil
 }
 
 func migrateBloatedModelCache(path string, knownProviders []catwalk.Provider) {

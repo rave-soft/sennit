@@ -14,16 +14,27 @@ import (
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/modelcache"
-	"github.com/rave-soft/sennit/internal/oauth/codex"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 )
 
 type Loader struct{}
 
 func New() *Loader { return &Loader{} }
+
+func (l *Loader) CompileProvider(configured config.ProviderConfig, resolver config.VariableResolver) (providerstate.Provider, error) {
+	return providerruntime.FromConfig(configured, resolver)
+}
+
+func (l *Loader) ApplyProviderCredentials(provider providerstate.Provider) (providerstate.Provider, error) {
+	providerruntime.ApplyPostCredentialSetup(&provider)
+	return provider, nil
+}
 
 func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config.RuntimeResult, error) {
 	cfg := input.Config
@@ -61,16 +72,25 @@ func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config
 	if cfg.Providers.Len() == 0 && cfg.Options.DisableDefaultProviders {
 		return config.RuntimeResult{}, fmt.Errorf("default providers are disabled and no custom providers are configured")
 	}
-	return config.RuntimeResult{KnownProviders: knownProviders, Resolver: cfg.RuntimeResolver()}, nil
+	runtimeProviders := csync.NewMap[string, providerstate.Provider]()
+	for id, configured := range cfg.Providers.Seq2() {
+		provider, err := providerruntime.FromConfig(configured, resolver)
+		if err != nil {
+			return config.RuntimeResult{}, err
+		}
+		runtimeProviders.Set(id, provider)
+	}
+	return config.RuntimeResult{KnownProviders: knownProviders, RuntimeProviders: runtimeProviders, Resolver: cfg.RuntimeResolver()}, nil
 }
 
 func providers(cfg *config.Config) []catwalk.Provider {
 	if cfg.Options.DisableDefaultProviders {
 		return nil
 	}
-	return append(embedded.GetAll(), config.CodexProvider())
+	return append(embedded.GetAll(), providerruntime.CodexProvider())
 }
 
+//nolint:unparam // The error result keeps provider pipeline stages uniformly fallible.
 func (l *Loader) mergeCatalogProviders(cfg *config.Config, store config.RuntimeStore, environment env.Env, resolver config.VariableResolver, known []catwalk.Provider, credentialsHome string, stat func(string) (os.FileInfo, error)) (map[string]bool, error) {
 	if credentialsHome == "" {
 		credentialsHome = home.Dir()
@@ -87,35 +107,21 @@ func (l *Loader) mergeCatalogProviders(cfg *config.Config, store config.RuntimeS
 		headers := map[string]string{}
 		maps.Copy(headers, provider.DefaultHeaders)
 		maps.Copy(headers, userConfig.ExtraHeaders)
-		if err := config.ResolveProviderHeaders(headers, resolver, id); err != nil {
-			return nil, err
-		}
 		prepared := userConfig
 		prepared.ID = id
 		prepared.Name = provider.Name
 		prepared.BaseURL = provider.APIEndpoint
 		prepared.APIKey = provider.APIKey
-		prepared.APIKeyTemplate = provider.APIKey
 		prepared.Type = provider.Type
 		prepared.Models = provider.Models
 		prepared.ExtraHeaders = headers
-		prepared.ProxyURL = config.ResolveOptionalProviderProxy(userConfig.ProxyURL, resolver, id)
-		prepared.ConfiguredProxyURL = prepared.ProxyURL
-		if prepared.ExtraParams == nil {
-			prepared.ExtraParams = make(map[string]string)
-		}
+		prepared.ProxyURL = userConfig.ProxyURL
 		if provider.ID == catwalk.InferenceProviderAnthropic && userConfig.OAuthToken != nil {
 			cfg.Providers.Del(id)
 			if store != nil {
 				store.RemoveRuntimeConfigField(config.ScopeGlobal, "providers.anthropic")
 			}
 			continue
-		}
-		if provider.ID == catwalk.InferenceProviderCopilot && userConfig.OAuthToken != nil {
-			prepared.SetupGitHubCopilot()
-		}
-		if id == codex.ProviderID {
-			prepared.SetupCodex()
 		}
 		if !l.applyCredentials(cfg, environment, resolver, provider, exists, &prepared, credentialsHome, stat) {
 			continue
@@ -165,7 +171,6 @@ func (l *Loader) applyCredentials(cfg *config.Config, environment env.Env, resol
 			}
 			return false
 		}
-		prepared.ExtraParams["project"], prepared.ExtraParams["location"] = project, location
 	case catwalk.InferenceProviderAzure:
 		endpoint, err := resolver.ResolveValue(provider.APIEndpoint)
 		if err != nil || endpoint == "" {
@@ -175,7 +180,6 @@ func (l *Loader) applyCredentials(cfg *config.Config, environment env.Env, resol
 			return false
 		}
 		prepared.BaseURL = endpoint
-		prepared.ExtraParams["apiVersion"] = environment.Get("AZURE_OPENAI_API_VERSION")
 	case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
 		if provider.APIKey == "" && !hasAWSCredentials(environment, credentialsHome, stat) {
 			if exists {
@@ -222,14 +226,6 @@ func providerProblem(id, message, hint string) config.Problem {
 
 func providerDropProblem(id, reason, hint string) config.Problem {
 	return providerProblem(id, fmt.Sprintf("provider %s dropped: %s", id, reason), hint)
-}
-
-func resolveProviderHeaders(headers map[string]string, resolver config.VariableResolver, providerID string) error {
-	return config.ResolveProviderHeaders(headers, resolver, providerID)
-}
-
-func resolveOptionalProxy(proxyURL string, resolver config.VariableResolver, providerID string) string {
-	return config.ResolveOptionalProviderProxy(proxyURL, resolver, providerID)
 }
 
 var _ = cmp.Or[string]

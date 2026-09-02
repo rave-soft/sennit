@@ -9,6 +9,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,7 +42,7 @@ func TestSharedCredentialsManager(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_DATA", globalDataDir)
 	require.NoError(t, os.WriteFile(filepath.Join(globalDataDir, "sennit.json"), []byte("{}"), 0o600))
 
-	store, err := config.LoadData(t.TempDir(), t.TempDir(), false)
+	store, err := configruntime.Load(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
 	store.Config().Providers.Set("test-provider", config.ProviderConfig{ID: "test-provider", Name: "Test"})
 

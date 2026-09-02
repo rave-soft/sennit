@@ -63,8 +63,8 @@ type builtConfig struct {
 // SetupAgents(WithInherited), and the staleness snapshot.
 func providersFromConfig(cfg *Config) []catwalk.Provider {
 	providers := make([]catwalk.Provider, 0, cfg.Providers.Len())
-	for _, provider := range cfg.Providers.Seq2() {
-		providers = append(providers, provider.ToProvider())
+	for id, configured := range cfg.Providers.Seq2() {
+		providers = append(providers, catwalk.Provider{Name: configured.Name, ID: catwalk.InferenceProvider(id), Models: configured.Models})
 	}
 	return providers
 }
@@ -129,7 +129,7 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 		cfg.Model = *opts.presetModel
 	}
 
-	providers := Providers(cfg)
+	var providers []catwalk.Provider
 	resolver := cfg.RuntimeResolver()
 	if opts.processor != nil {
 		result, err := opts.processor.Process(opts.ctx, RuntimeInput{
@@ -145,6 +145,7 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 			return nil, fmt.Errorf("failed to configure providers: %w", err)
 		}
 		providers = result.KnownProviders
+		cfg.RuntimeProviders = result.RuntimeProviders
 		resolver = result.Resolver
 	} else {
 		providers = providersFromConfig(cfg)

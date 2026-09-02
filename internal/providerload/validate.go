@@ -27,6 +27,8 @@ const (
 // endpoint). Providers whose models were freshly discovered are written to
 // the global model-discovery cache, so a later load
 // can skip the HTTP round trip.
+//
+//nolint:unparam // The error result keeps provider pipeline stages uniformly fallible.
 func (l *Loader) validateCustomProviders(cfg *config.Config, knownProviderNames map[string]bool, resolver config.VariableResolver, discoveryResults map[string]discoveryResult, globalDataPath string) error {
 	for id, providerConfig := range cfg.Providers.Seq2() {
 		if knownProviderNames[id] {
@@ -148,15 +150,6 @@ func (l *Loader) validateCustomProviders(cfg *config.Config, knownProviderNames 
 			l.dropProvider(cfg, id, problem.Message, problem.Hint)
 			continue
 		}
-
-		// Custom-provider headers share the MCP error contract; see
-		// mergeCatalogProviders' known-provider loop.
-		if err := resolveProviderHeaders(providerConfig.ExtraHeaders, resolver, id); err != nil {
-			return err
-		}
-
-		providerConfig.ProxyURL = resolveOptionalProxy(providerConfig.ProxyURL, resolver, id)
-		providerConfig.ConfiguredProxyURL = providerConfig.ProxyURL
 
 		cfg.Providers.Set(id, providerConfig)
 	}

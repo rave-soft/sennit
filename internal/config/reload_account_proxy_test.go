@@ -47,7 +47,7 @@ func TestReloadFromDisk_PreservesAccountProxyOnUnrelatedReload(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(seed), 0o644))
 
 	workingDir := t.TempDir()
-	store, err := LoadData(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 
 	account := accounts.Account{
@@ -57,7 +57,7 @@ func TestReloadFromDisk_PreservesAccountProxyOnUnrelatedReload(t *testing.T) {
 	}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, account))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "socks5://account-proxy:1080", provider.ProxyURL, "sanity: account proxy published")
 
@@ -65,7 +65,7 @@ func TestReloadFromDisk_PreservesAccountProxyOnUnrelatedReload(t *testing.T) {
 	// credentialVersion between here and the reload below).
 	require.NoError(t, store.ReloadFromDisk(context.Background()))
 
-	provider, ok = store.Config().Providers.Get(codex.ProviderID)
+	provider, ok = store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-only", provider.Account, "account must still be active")
 	require.Equal(t, "socks5://account-proxy:1080", provider.ProxyURL,

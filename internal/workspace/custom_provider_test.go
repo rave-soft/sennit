@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -117,7 +118,7 @@ func (a *testConfigAccessor) RefreshAccountLimits(ctx context.Context, providerI
 }
 
 func (a *testConfigAccessor) KnownProviders() []catwalk.Provider {
-	return config.Providers(a.store.Config())
+	return providerruntime.Providers(a.store.Config())
 }
 
 func (a *testConfigAccessor) CustomProviderTypes() []string { return nil }

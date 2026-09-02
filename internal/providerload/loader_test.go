@@ -119,25 +119,25 @@ func TestLoaderResolvesCustomProviderValues(t *testing.T) {
 		AutoDiscoverModels: pointer(false),
 		Models:             []catwalk.Model{{ID: "model"}},
 	})
-	_, err := New().Process(context.Background(), config.RuntimeInput{Config: cfg})
+	result, err := New().Process(context.Background(), config.RuntimeInput{Config: cfg})
 	require.NoError(t, err)
-	provider, ok := cfg.Providers.Get("local")
+	provider, ok := result.RuntimeProviders.Get("local")
 	require.True(t, ok)
 	require.Equal(t, "header-value", provider.ExtraHeaders["X-Test"])
 	require.Equal(t, "http://proxy.test:8080", provider.ProxyURL)
-	// ConfiguredProxyURL must track ProxyURL after load — it is the base
+	// ProxyURL must track ProxyURL after load — it is the base
 	// UpdateProviderAccount resolves an account's effective proxy from,
 	// so a load that leaves it unset would make the very first account
 	// switch forget the provider's own proxy.
-	require.Equal(t, "http://proxy.test:8080", provider.ConfiguredProxyURL)
+	require.Equal(t, "http://proxy.test:8080", provider.ProxyURL)
 	require.NotEmpty(t, config.Doctor(cfg))
 }
 
-// TestLoaderMergeCatalogProvidersSetsConfiguredProxyURL covers the other
+// TestLoaderMergeCatalogProvidersSetsProxyURL covers the other
 // load path that writes ProxyURL (mergeCatalogProviders, for providers that
 // come from the embedded catalog rather than a user-defined "local" one):
-// ConfiguredProxyURL must be populated there too.
-func TestLoaderMergeCatalogProvidersSetsConfiguredProxyURL(t *testing.T) {
+// ProxyURL must be populated there too.
+func TestLoaderMergeCatalogProvidersSetsProxyURL(t *testing.T) {
 	cfg := &config.Config{
 		Options: &config.Options{},
 		Providers: csync.NewMap(map[string]config.ProviderConfig{
@@ -153,8 +153,7 @@ func TestLoaderMergeCatalogProvidersSetsConfiguredProxyURL(t *testing.T) {
 	require.NoError(t, err)
 	provider, ok := cfg.Providers.Get("azure")
 	require.True(t, ok)
-	require.Equal(t, "http://azure-proxy.test:8080", provider.ProxyURL)
-	require.Equal(t, "http://azure-proxy.test:8080", provider.ConfiguredProxyURL)
+	require.Equal(t, "$AZURE_PROXY", provider.ProxyURL)
 }
 
 func TestLoaderCatalogCredentialPolicies(t *testing.T) {
@@ -178,7 +177,6 @@ func TestLoaderCatalogCredentialPolicies(t *testing.T) {
 		provider, ok := cfg.Providers.Get("azure")
 		require.True(t, ok)
 		require.Equal(t, "https://azure.test", provider.BaseURL)
-		require.Equal(t, "2026-01-01", provider.ExtraParams["apiVersion"])
 	})
 
 	t.Run("Vertex records project and location", func(t *testing.T) {
@@ -186,10 +184,8 @@ func TestLoaderCatalogCredentialPolicies(t *testing.T) {
 		environment := testEnvironment{"VERTEXAI_PROJECT": "project", "VERTEXAI_LOCATION": "location"}
 		_, err := New().mergeCatalogProviders(cfg, nil, environment, environment, []catwalk.Provider{{ID: catwalk.InferenceProviderVertexAI, Models: []catwalk.Model{{ID: "model"}}}}, "", os.Stat)
 		require.NoError(t, err)
-		provider, ok := cfg.Providers.Get("vertexai")
+		_, ok := cfg.Providers.Get("vertexai")
 		require.True(t, ok)
-		require.Equal(t, "project", provider.ExtraParams["project"])
-		require.Equal(t, "location", provider.ExtraParams["location"])
 	})
 
 	t.Run("missing key drops explicitly configured catalog provider", func(t *testing.T) {

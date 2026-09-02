@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
@@ -153,6 +154,9 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 		s.configureProv(&providerCfg)
 	}
 	cfg.Config().Providers.Set(providerID, providerCfg)
+	effective, err := runtime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
+	require.NoError(t, err)
+	cfg.Config().SetRuntimeProvider(providerID, effective)
 	cfg.OverridePreferredModel(config.SelectedModel{Provider: providerID, Model: authModelID})
 	cfg.SetupAgents()
 
@@ -247,7 +251,7 @@ func TestRefreshTokenIfExpired_Expired_Refreshes(t *testing.T) {
 	err := co.delegation.refreshTokenIfExpired(t.Context(), providerCfg)
 	require.NoError(t, err)
 
-	got, ok := co.cfg.Config().Providers.Get(authProviderID)
+	got, ok := co.cfg.Config().RuntimeProvider(authProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken.AccessToken, got.OAuthToken.AccessToken,
 		"an expired token must be replaced by the refreshed one")
@@ -269,7 +273,7 @@ func TestRetryAfterUnauthorized_OAuthSuccess(t *testing.T) {
 	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
 	require.NoError(t, err)
 
-	got, ok := co.cfg.Config().Providers.Get(authProviderID)
+	got, ok := co.cfg.Config().RuntimeProvider(authProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken.AccessToken, got.OAuthToken.AccessToken)
 }
@@ -336,17 +340,17 @@ func TestRetryAfterUnauthorized_APIKeyTemplate_Refreshes(t *testing.T) {
 	t.Setenv("SENNIT_TEST_AUTH_API_KEY", "resolved-key-123")
 	co := authTestCoordinator(t,
 		withProvider(func(p *config.ProviderConfig) {
-			p.APIKeyTemplate = "$SENNIT_TEST_AUTH_API_KEY"
+			p.APIKey = "$SENNIT_TEST_AUTH_API_KEY"
 		}),
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
-	require.Contains(t, providerCfg.APIKeyTemplate, "$")
+	require.Contains(t, providerCfg.APIKey, "$")
 
 	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
 	require.NoError(t, err)
 
-	got, ok := co.cfg.Config().Providers.Get(authProviderID)
+	got, ok := co.cfg.Config().RuntimeProvider(authProviderID)
 	require.True(t, ok)
 	require.Equal(t, "resolved-key-123", got.APIKey,
 		"a $-templated API key must be re-resolved and applied to the live provider config")
@@ -466,7 +470,7 @@ func TestMakeAuthRefreshCallback_RefreshesAndStoresRecompiledRuntime(t *testing.
 
 	require.NotSame(t, initial, active.load(),
 		"a successful refresh must recompile the runtime and store it on active")
-	got, ok := co.cfg.Config().Providers.Get(authProviderID)
+	got, ok := co.cfg.Config().RuntimeProvider(authProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken.AccessToken, got.OAuthToken.AccessToken)
 }

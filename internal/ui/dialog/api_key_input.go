@@ -14,6 +14,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/rave-soft/sennit/internal/config"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -312,7 +313,10 @@ func (m *APIKeyInput) verifyAPIKeyCmd() tea.Cmd {
 	return func() tea.Msg {
 		start := time.Now()
 
-		err := providerConfig.TestConnection(resolver)
+		provider, err := providerruntime.FromConfig(providerConfig, resolver)
+		if err == nil {
+			err = providerruntime.TestConnection(provider, resolver)
+		}
 
 		// intentionally wait for at least 750ms to make sure the user sees the spinner
 		elapsed := time.Since(start)

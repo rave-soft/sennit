@@ -279,7 +279,7 @@ func (m *Models) setProviderItems() tea.Cmd {
 		// Check if this provider is not in the known providers list
 		if !slices.ContainsFunc(knownProviders, containsProviderFunc(id)) ||
 			!slices.ContainsFunc(m.providers, containsProviderFunc(id)) {
-			provider := p.ToProvider()
+			provider := catwalk.Provider{ID: catwalk.InferenceProvider(id), Name: p.Name, Models: p.Models}
 
 			// Add this unknown provider to the list
 			name := cmp.Or(p.Name, id)

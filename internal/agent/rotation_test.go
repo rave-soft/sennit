@@ -18,6 +18,7 @@ import (
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
@@ -454,6 +455,9 @@ func TestMakeThresholdRotateCallback_BelowThreshold_NoOp(t *testing.T) {
 	require.NoError(t, err)
 	providerCfg := codexProviderConfig("acct-below", true)
 	cfg.Config().Providers.Set(codex.ProviderID, providerCfg)
+	effective, err := providerruntime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
+	require.NoError(t, err)
+	cfg.Config().SetRuntimeProvider(codex.ProviderID, effective)
 
 	b := &runtimeBuilder{
 		cfg: cfg, notify: notifier, runtime: newRuntimeCache(),
@@ -464,7 +468,7 @@ func TestMakeThresholdRotateCallback_BelowThreshold_NoOp(t *testing.T) {
 	require.NotNil(t, cb)
 	cb(t.Context())
 
-	after, ok := cfg.Config().Providers.Get(codex.ProviderID)
+	after, ok := cfg.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-below", after.Account, "usage under threshold must not rotate")
 	require.Equal(t, 0, notifier.count("", notify.TypeAccountRotated))
@@ -482,6 +486,9 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 	require.NoError(t, err)
 	providerCfg := codexProviderConfig("acct-over", true)
 	cfg.Config().Providers.Set(codex.ProviderID, providerCfg)
+	effective, err := providerruntime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
+	require.NoError(t, err)
+	cfg.Config().SetRuntimeProvider(codex.ProviderID, effective)
 
 	b := &runtimeBuilder{
 		cfg: cfg, notify: notifier, runtime: newRuntimeCache(),
@@ -492,7 +499,7 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 	require.NotNil(t, cb)
 	cb(t.Context())
 
-	after, ok := cfg.Config().Providers.Get(codex.ProviderID)
+	after, ok := cfg.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-c", after.Account, "usage over threshold must rotate to the next account")
 

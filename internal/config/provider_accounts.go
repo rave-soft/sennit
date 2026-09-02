@@ -147,7 +147,7 @@ func UpdateAccount(store *ConfigStore, accStore accounts.Store, providerID strin
 	if err := accStore.Upsert(providerID, account); err != nil {
 		return fmt.Errorf("updating account %s for provider %s: %w", account.ID, providerID, err)
 	}
-	pc, ok := store.Config().Providers.Get(providerID)
+	pc, ok := store.Config().RuntimeProvider(providerID)
 	if !ok || pc.Account != account.ID {
 		return nil
 	}
@@ -171,9 +171,9 @@ func UpdateAccount(store *ConfigStore, accStore accounts.Store, providerID strin
 			// live ProviderConfig.Account is cleared even when that reload
 			// no-ops.
 			store.mutateInMemory(func(c *Config) {
-				if pc, ok := c.Providers.Get(providerID); ok {
+				if pc, ok := c.RuntimeProvider(providerID); ok {
 					pc.Account = ""
-					c.Providers.Set(providerID, pc)
+					c.SetRuntimeProvider(providerID, pc)
 				}
 			})
 			return nil
@@ -193,7 +193,7 @@ func UpdateAccount(store *ConfigStore, accStore accounts.Store, providerID strin
 // SetProviderProxy sets providerID's provider-level proxy — the base
 // UpdateAccount/ActivateAccount resolve an account's effective proxy
 // against, exposed on disk as providers.<id>.proxy_url and in memory as
-// ProviderConfig.ConfiguredProxyURL — and republishes the active account's
+// the runtime provider's ConfiguredProxyURL — and republishes the active account's
 // effective proxy so the change is live immediately.
 //
 // Without the republish step, a provider whose active account has no
@@ -218,7 +218,7 @@ func SetProviderProxy(store *ConfigStore, accStore accounts.Store, providerID, p
 		return fmt.Errorf("setting proxy for provider %s: %w", providerID, err)
 	}
 
-	pc, ok := store.Config().Providers.Get(providerID)
+	pc, ok := store.Config().RuntimeProvider(providerID)
 	if !ok || pc.Account == "" {
 		// No active account to republish for yet (e.g. the provider
 		// hasn't been signed into) — the reload SetConfigField already
@@ -298,7 +298,7 @@ func RefreshAccountLimits(ctx context.Context, store *ConfigStore, accStore acco
 	}
 
 	var providerProxy string
-	if pc, ok := store.Config().Providers.Get(providerID); ok {
+	if pc, ok := store.Config().RuntimeProvider(providerID); ok {
 		providerProxy = pc.ConfiguredProxyURL
 	}
 
@@ -360,7 +360,7 @@ func RemoveAccount(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 		return fmt.Errorf("cannot remove the last account for provider %s: this would leave it signed in with no account to use — run `sennit logout` instead", providerID)
 	}
 
-	if pc, ok := store.Config().Providers.Get(providerID); ok && pc.Account == accountID {
+	if pc, ok := store.Config().RuntimeProvider(providerID); ok && pc.Account == accountID {
 		next, ok := nextAccountAfterRemoval(existing, accountID)
 		if !ok {
 			return fmt.Errorf("no replacement account found for provider %s", providerID)
@@ -532,7 +532,7 @@ func activeAccountID(store *ConfigStore, providerID string) string {
 	if cfg == nil || cfg.Providers == nil {
 		return ""
 	}
-	pc, ok := cfg.Providers.Get(providerID)
+	pc, ok := cfg.RuntimeProvider(providerID)
 	if !ok {
 		return ""
 	}
@@ -556,11 +556,12 @@ func legacyCredentialFromProvider(store *ConfigStore, providerID string) account
 		return accounts.LegacyCredential{}
 	}
 
-	cred := accounts.LegacyCredential{ProxyURL: pc.ConfiguredProxyURL}
+	runtimeProvider, _ := cfg.RuntimeProvider(providerID)
+	cred := accounts.LegacyCredential{ProxyURL: runtimeProvider.ConfiguredProxyURL}
 	if pc.OAuthToken != nil {
 		cred.Token = pc.OAuthToken
 	} else {
-		cred.APIKey = cmp.Or(pc.APIKeyTemplate, pc.APIKey)
+		cred.APIKey = cmp.Or(runtimeProvider.APIKeyTemplate, pc.APIKey)
 	}
 
 	// Only Codex can derive AccountID from what it already has on hand

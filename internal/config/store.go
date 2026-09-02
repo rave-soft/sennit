@@ -589,8 +589,19 @@ func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) e
 
 // updateLocked is the lock-free core of update. Caller must hold writeMu.
 func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]any) error {
+	return s.updateLockedErr(scope, func(cfg *Config) (map[string]any, error) {
+		return mutate(cfg), nil
+	})
+}
+
+// updateLockedErr is the transactional variant used when preparing a mutation
+// can fail. Caller must hold writeMu.
+func (s *ConfigStore) updateLockedErr(scope Scope, mutate func(*Config) (map[string]any, error)) error {
 	nc := s.Config().cloneForWrite()
-	fields := mutate(nc)
+	fields, err := mutate(nc)
+	if err != nil {
+		return err
+	}
 	// Load returns early — without SetupAgents — when no provider is
 	// configured yet (fresh install). The first mutation that makes the
 	// config usable (onboarding writing a provider key / preferred model)

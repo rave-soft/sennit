@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -9,11 +10,15 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/providers/state"
 )
 
 type RuntimeProcessor interface {
 	Process(context.Context, RuntimeInput) (RuntimeResult, error)
+	CompileProvider(ProviderConfig, VariableResolver) (state.Provider, error)
+	ApplyProviderCredentials(state.Provider) (state.Provider, error)
 }
 
 type RuntimeInput struct {
@@ -27,8 +32,16 @@ type RuntimeInput struct {
 }
 
 type RuntimeResult struct {
-	KnownProviders []catwalk.Provider
-	Resolver       VariableResolver
+	KnownProviders   []catwalk.Provider
+	RuntimeProviders *csync.Map[string, state.Provider]
+	Resolver         VariableResolver
+}
+
+func (s *ConfigStore) applyProviderCredentials(provider state.Provider) (state.Provider, error) {
+	if s.processor == nil {
+		return state.Provider{}, fmt.Errorf("provider runtime processor is not configured")
+	}
+	return s.processor.ApplyProviderCredentials(provider)
 }
 
 type RuntimeStore interface {

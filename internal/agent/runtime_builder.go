@@ -659,7 +659,7 @@ func (b *runtimeBuilder) retryAfterUnauthorized(ctx context.Context, providerCfg
 		return nil
 	case providerCfg.AWSAuthRefresh != "":
 		return b.refreshAWSCredentials(ctx, providerCfg, port)
-	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
+	case strings.Contains(providerCfg.APIKey, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return b.refreshApiKeyTemplate(ctx, providerCfg, port)
 	default:
@@ -716,7 +716,7 @@ func (b *runtimeBuilder) waitForInteractiveReauth(ctx context.Context, providerI
 func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConfig, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
 	inputs := port.inputs
 	if providerCfg.OAuthToken == nil &&
-		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
+		!strings.Contains(providerCfg.APIKey, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
@@ -752,7 +752,7 @@ func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConf
 // actually matches what modelProvider is comparing against.
 func (b *runtimeBuilder) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, model Model, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
 	if providerCfg.OAuthToken == nil &&
-		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
+		!strings.Contains(providerCfg.APIKey, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
@@ -1086,7 +1086,7 @@ func (b *runtimeBuilder) refreshOAuth2Token(ctx context.Context, providerCfg con
 
 func (b *runtimeBuilder) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
 	agent, inputs := port.agent, port.inputs
-	newAPIKey, err := b.cfg.Resolve(providerCfg.APIKeyTemplate)
+	newAPIKey, err := b.cfg.Resolve(providerCfg.APIKey)
 	if err != nil {
 		slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
@@ -1628,7 +1628,11 @@ func (b *runtimeBuilder) buildProvider(providerCfg config.ProviderConfig, model 
 }
 
 func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, snapshot runtimeConfigSnapshot) (fantasy.Provider, error) {
-	headers := maps.Clone(providerCfg.ExtraHeaders)
+	effective, ok := snapshot.config.RuntimeProvider(providerCfg.ID)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	headers := maps.Clone(effective.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
 	}
@@ -1648,40 +1652,34 @@ func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderCon
 	// here rather than dropping it: the call still proceeds on what it
 	// has, which is what it did before, but the reason is now on the
 	// record.
-	apiKey, err := snapshot.resolver.ResolveValue(providerCfg.APIKey)
-	if err != nil {
-		slog.Warn("Failed to resolve provider API key", "provider", providerCfg.ID, "error", err)
-	}
-	baseURL, err := snapshot.resolver.ResolveValue(providerCfg.BaseURL)
-	if err != nil {
-		slog.Warn("Failed to resolve provider base URL", "provider", providerCfg.ID, "error", err)
-	}
+	apiKey := effective.APIKey
+	baseURL := effective.BaseURL
 
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		if opencodeMessagesModels[model.Model] {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+			return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, effective.ProxyURL, snapshot.config.Options.Debug)
 		}
 	}
 
 	switch typeclass.Of(providerCfg.Type) {
 	case typeclass.OpenAI:
-		return b.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ID, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.Anthropic:
-		return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.OpenRouter:
-		return b.buildOpenrouterProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildOpenrouterProvider(baseURL, apiKey, headers, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.Vercel:
-		return b.buildVercelProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildVercelProvider(baseURL, apiKey, headers, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.Azure:
-		return b.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildAzureProvider(baseURL, apiKey, headers, effective.ExtraParams, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.Bedrock:
-		return b.buildBedrockProvider(apiKey, headers, providerCfg.ID, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildBedrockProvider(apiKey, headers, providerCfg.ID, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.Google:
-		return b.buildGoogleProvider(baseURL, apiKey, headers, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildGoogleProvider(baseURL, apiKey, headers, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.GoogleVertex:
-		return b.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildGoogleVertexProvider(headers, effective.ExtraParams, effective.ProxyURL, snapshot.config.Options.Debug)
 	case typeclass.OpenAICompat:
 		switch providerCfg.ID {
 		case string(catwalk.InferenceProviderZAI):
@@ -1693,14 +1691,14 @@ func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderCon
 				extraBody = map[string]any{}
 			}
 			extraBody["tool_stream"] = true
-			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, extraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, extraBody, providerCfg.ID, isSubAgent, effective.ProxyURL, snapshot.config.Options.Debug)
 		}
-		return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+		return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, effective.ProxyURL, snapshot.config.Options.Debug)
 	default:
 		// Known custom providers (litellm, ollama, omlx) are
 		// openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL, snapshot.config.Options.Debug)
+			return b.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, effective.ProxyURL, snapshot.config.Options.Debug)
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

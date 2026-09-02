@@ -34,14 +34,14 @@ func TestUpdateAccount_DisablingActiveAccountSwitchesToReplacement(t *testing.T)
 	})
 	require.NoError(t, err)
 
-	pc, ok := store.Config().Providers.Get(codex.ProviderID)
+	pc, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account, "sanity: the second sign-in is the active one")
 
 	second.Disabled = true
 	require.NoError(t, UpdateAccount(store, accStore, codex.ProviderID, second))
 
-	pc, ok = store.Config().Providers.Get(codex.ProviderID)
+	pc, ok = store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, first.ID, pc.Account,
 		"disabling the active account must switch the provider to another, non-disabled account")
@@ -75,7 +75,7 @@ func TestUpdateAccount_DisablingTheOnlyAccountClearsActivePointer(t *testing.T) 
 	only.Disabled = true
 	require.NoError(t, UpdateAccount(store, accStore, codex.ProviderID, only))
 
-	pc, ok := store.Config().Providers.Get(codex.ProviderID)
+	pc, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Empty(t, pc.Account,
 		"disabling the only account must leave the provider with no active account, not a republished disabled one")
@@ -100,7 +100,7 @@ func TestUpdateAccount_NonDisabledEditToActiveAccountStillRepublishes(t *testing
 	active.ProxyURL = "socks5://edited-proxy:1080"
 	require.NoError(t, UpdateAccount(store, accStore, codex.ProviderID, active))
 
-	pc, ok := store.Config().Providers.Get(codex.ProviderID)
+	pc, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, active.ID, pc.Account, "the account must remain active")
 	require.Equal(t, "socks5://edited-proxy:1080", pc.ProxyURL,

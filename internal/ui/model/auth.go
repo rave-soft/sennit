@@ -3,6 +3,7 @@ package model
 import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/config"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 )
@@ -12,7 +13,7 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 	if cfg == nil {
 		return nil
 	}
-	providerCfg, ok := cfg.Providers.Get(providerID)
+	providerCfg, ok := cfg.RuntimeProvider(providerID)
 	if !ok {
 		return nil
 	}
@@ -21,7 +22,7 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 	}
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
-	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Model)
+	return m.openAuthenticationDialog(providerruntime.ToProvider(providerCfg), cfg.Model)
 }
 
 // handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL

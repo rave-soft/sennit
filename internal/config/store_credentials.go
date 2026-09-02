@@ -35,7 +35,7 @@ const credentialWriteLockDeadline = 10 * time.Second
 // It is a thin wrapper over UpdateProviderAccount with an AccountCredential
 // carrying only APIKey and Token — ProxyURL nil, i.e. "leave the provider's
 // effective proxy alone", and APIKeyTemplate empty, i.e. "leave
-// ProviderConfig.APIKeyTemplate alone". This entry point predates accounts
+// runtime provider's APIKeyTemplate alone". This entry point predates accounts
 // entirely; its callers (credentials.Manager, runtime_builder.go's token
 // refresh path) are updating a token or a resolved key in place, not
 // switching accounts, so neither the request route nor the template should
@@ -57,7 +57,7 @@ type AccountCredential struct {
 	// APIKeyTemplate is the unresolved form APIKey was resolved from
 	// ("$VAR", "$(cmd)", or a literal key an account happens to store
 	// verbatim). It is kept alongside the resolved APIKey because
-	// ProviderConfig.APIKeyTemplate is what a later auth-error retry
+	// runtime provider's APIKeyTemplate is what a later auth-error retry
 	// re-resolves from (see runtime_builder.go's refreshApiKeyTemplate);
 	// without republishing it here, a retry after an account switch
 	// would re-resolve the PREVIOUS account's template. Empty means
@@ -124,12 +124,24 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 	if cfg.Providers == nil {
 		cfg.Providers = csync.NewMap[string, ProviderConfig]()
 	}
-	provider, ok := cfg.Providers.Get(providerID)
+	configured, ok := cfg.Providers.Get(providerID)
 	if !ok {
 		var err error
-		provider, err = s.providerConfigFromCatalogLocked(providerID)
+		configured, err = s.providerConfigFromCatalogLocked(providerID)
 		if err != nil {
 			return fmt.Errorf("provider %s has no config entry and %w", providerID, err)
+		}
+		cfg.Providers.Set(providerID, configured)
+	}
+	provider, ok := cfg.RuntimeProvider(providerID)
+	if !ok {
+		if s.processor == nil {
+			return fmt.Errorf("provider %s has no compiled runtime state", providerID)
+		}
+		var err error
+		provider, err = s.processor.CompileProvider(configured, cfg.RuntimeResolver())
+		if err != nil {
+			return fmt.Errorf("compiling runtime state for provider %s: %w", providerID, err)
 		}
 	}
 	provider.APIKey = cred.APIKey
@@ -143,8 +155,11 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 	if cred.ActiveAccountID != "" {
 		provider.Account = cred.ActiveAccountID
 	}
-	provider.ApplyPostCredentialSetup(providerID)
-	cfg.Providers.Set(providerID, provider)
+	provider, err := s.applyProviderCredentials(provider)
+	if err != nil {
+		return fmt.Errorf("applying credentials for provider %s: %w", providerID, err)
+	}
+	cfg.SetRuntimeProvider(providerID, provider)
 	s.credentialVersion.Add(1)
 	s.setConfig(cfg)
 	return nil
@@ -268,7 +283,6 @@ func (s *ConfigStore) providerConfigFromCatalogLocked(providerID string) (Provid
 		Type:         found.Type,
 		Disable:      false,
 		ExtraHeaders: make(map[string]string),
-		ExtraParams:  make(map[string]string),
 		Models:       found.Models,
 	}, nil
 }
@@ -302,6 +316,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 	fields := map[string]any{}
 	var isToken bool
+	var effectiveAPIKey string
 
 	switch v := apiKey.(type) {
 	case string:
@@ -320,14 +335,14 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		if resolved == "" {
 			return fmt.Errorf("api key for provider %s resolved to an empty value", providerID)
 		}
-		providerConfig.APIKey = resolved
-		providerConfig.APIKeyTemplate = v
+		providerConfig.APIKey = v
+		effectiveAPIKey = resolved
 		fields[ProviderFieldKey(providerID, "api_key")] = v
 	case *oauth.Token:
 		isToken = true
 		providerConfig.APIKey = v.AccessToken
+		effectiveAPIKey = v.AccessToken
 		providerConfig.OAuthToken = v
-		providerConfig.ApplyPostCredentialSetup(providerID)
 		fields[ProviderFieldKey(providerID, "api_key")] = v.AccessToken
 		fields[ProviderFieldKey(providerID, "oauth")] = v
 	default:
@@ -346,17 +361,36 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	persist := func() error {
 		s.writeMu.Lock()
 		defer s.writeMu.Unlock()
-		err := s.updateLocked(scope, func(cfg *Config) map[string]any {
+		err := s.updateLockedErr(scope, func(cfg *Config) (map[string]any, error) {
 			current, ok := cfg.Providers.Get(providerID)
 			if !ok {
 				current = providerConfig
 			}
 			current.APIKey = providerConfig.APIKey
-			current.APIKeyTemplate = providerConfig.APIKeyTemplate
 			current.OAuthToken = providerConfig.OAuthToken
-			current.ApplyPostCredentialSetup(providerID)
+
+			runtimeProvider, ok := cfg.RuntimeProvider(providerID)
+			if !ok {
+				if s.processor == nil {
+					return nil, fmt.Errorf("provider runtime processor is not configured")
+				}
+				var compileErr error
+				runtimeProvider, compileErr = s.processor.CompileProvider(current, cfg.RuntimeResolver())
+				if compileErr != nil {
+					return nil, fmt.Errorf("compiling runtime state for provider %s: %w", providerID, compileErr)
+				}
+			}
+			runtimeProvider.APIKey = effectiveAPIKey
+			runtimeProvider.APIKeyTemplate = current.APIKey
+			runtimeProvider.OAuthToken = current.OAuthToken
+			prepared, setupErr := s.applyProviderCredentials(runtimeProvider)
+			if setupErr != nil {
+				return nil, fmt.Errorf("applying credentials for provider %s: %w", providerID, setupErr)
+			}
+
 			cfg.Providers.Set(providerID, current)
-			return fields
+			cfg.SetRuntimeProvider(providerID, prepared)
+			return fields, nil
 		})
 		if err == nil {
 			s.credentialVersion.Add(1)

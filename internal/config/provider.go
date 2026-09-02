@@ -1,29 +1,11 @@
 package config
 
-// This file holds the provider entry as it appears in the config file
-// (ProviderConfig, the fields sennitrc/sennit.json can set for a provider)
-// plus the per-vendor setup that turns one into something usable: filling in
-// the headers GitHub Copilot and Codex expect, converting to catwalk's
-// provider shape, and probing a provider's credentials over the network.
-
 import (
-	"cmp"
-	"context"
-	"errors"
-	"fmt"
-	"maps"
-	"net/http"
-	"strings"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/oauth/codex"
-	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
-	"github.com/rave-soft/sennit/internal/providers/typeclass"
-	"github.com/rave-soft/sennit/internal/proxyhttp"
 )
 
 type ProviderConfig struct {
@@ -40,30 +22,11 @@ type ProviderConfig struct {
 	// HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment variables via net/http's
 	// default proxy resolution.
 	//
-	// This is the EFFECTIVE proxy: everywhere in Sennit that sends a
-	// request reads this field and this field alone, so a switch to an
-	// account with its own proxy is published here (see
-	// ConfigStore.UpdateProviderAccount), not through a second field
-	// every call site would have had to learn to also check. See
-	// ConfiguredProxyURL for the value this is computed from.
 	ProxyURL string `json:"proxy_url,omitempty" jsonschema:"description=Proxy URL for requests to this provider (http/https/socks5); set to \"none\" to force a direct connection even if HTTP_PROXY/HTTPS_PROXY are set in the environment,example=http://localhost:8080"`
-	// ConfiguredProxyURL is the provider-level proxy exactly as
-	// configured (i.e. what ProxyURL held before any account ever
-	// overrode it) — the base that UpdateProviderAccount resolves the
-	// effective ProxyURL from on every account switch. Without it, a
-	// switch away from an account with its own proxy to one with none
-	// would have nothing to fall back to except whatever ProxyURL
-	// happened to hold at that moment — the PREVIOUS account's proxy —
-	// instead of the provider's own. Set once, at load time, alongside
-	// ProxyURL (see providerload); never serialized, since it is derived
-	// from the same source ProxyURL already reads from disk.
-	ConfiguredProxyURL string `json:"-"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
-	// The original API key template before resolution (for re-resolution on auth errors).
-	APIKeyTemplate string `json:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.
@@ -106,9 +69,6 @@ type ProviderConfig struct {
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies\\, only works with openai-compatible providers"`
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
-
-	// Used to pass extra parameters to the provider.
-	ExtraParams map[string]string `json:"-"`
 
 	// AWSAuthRefresh is a shell command run when Bedrock returns a
 	// credential error. Output is discarded to avoid corrupting the TUI.
@@ -207,275 +167,4 @@ func (r *RotationConfig) EffectiveCooldown() time.Duration {
 		return accounts.DefaultCooldown
 	}
 	return d
-}
-
-// ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
-func (c *ProviderConfig) ToProvider() catwalk.Provider {
-	// Convert config provider to provider.Provider format
-	provider := catwalk.Provider{
-		Name:   c.Name,
-		ID:     catwalk.InferenceProvider(c.ID),
-		Models: make([]catwalk.Model, len(c.Models)),
-	}
-
-	// Convert models
-	for i, model := range c.Models {
-		provider.Models[i] = catwalk.Model{
-			ID:                     model.ID,
-			Name:                   model.Name,
-			CostPer1MIn:            model.CostPer1MIn,
-			CostPer1MOut:           model.CostPer1MOut,
-			CostPer1MInCached:      model.CostPer1MInCached,
-			CostPer1MOutCached:     model.CostPer1MOutCached,
-			ContextWindow:          model.ContextWindow,
-			DefaultMaxTokens:       model.DefaultMaxTokens,
-			CanReason:              model.CanReason,
-			ReasoningLevels:        model.ReasoningLevels,
-			DefaultReasoningEffort: model.DefaultReasoningEffort,
-			SupportsImages:         model.SupportsImages,
-		}
-	}
-
-	return provider
-}
-
-// SetupGitHubCopilot adds the headers Copilot requires to the provider.
-//
-// The map is created when absent: a provider declared without extra_headers
-// decodes with a nil map, and copying into a nil map panics. That is reachable
-// from the OAuth refresh path, where a Copilot entry holding only a token would
-// take down the process.
-func (c *ProviderConfig) SetupGitHubCopilot() {
-	if c.ExtraHeaders == nil {
-		c.ExtraHeaders = make(map[string]string)
-	}
-	maps.Copy(c.ExtraHeaders, copilot.Headers())
-}
-
-// SetupCodex adds the headers the Codex backend requires to the provider.
-//
-// The account header is derived from the access token rather than stored:
-// the token is a JWT that names the account it was issued for, so a token
-// refresh or an account switch carries the right value automatically, and
-// nothing extra has to be kept in sync on disk.
-func (c *ProviderConfig) SetupCodex() {
-	if c.ExtraHeaders == nil {
-		c.ExtraHeaders = make(map[string]string)
-	}
-	accountID := codex.AccountID(c.APIKey)
-	if accountID == "" && c.OAuthToken != nil {
-		accountID = codex.AccountID(c.OAuthToken.AccessToken)
-	}
-	// codex.Headers omits the account header entirely when accountID is
-	// "" (personal-plan tokens carry no chatgpt_account_id claim), and
-	// maps.Copy only ever adds or overwrites — it never deletes. Left
-	// alone, a switch from an account whose token names one to an
-	// account whose token doesn't would leave the PREVIOUS account's
-	// header sitting in ExtraHeaders, so the backend would keep acting
-	// on its behalf instead of falling back to the token's own account
-	// as it should. Delete it explicitly so an unclaimed accountID
-	// really does mean "let the backend decide," not "whoever asked
-	// last."
-	if accountID == "" {
-		delete(c.ExtraHeaders, codex.AccountIDHeader)
-	}
-	maps.Copy(c.ExtraHeaders, codex.Headers(accountID))
-}
-
-// ApplyPostCredentialSetup re-runs the per-vendor header setup a provider
-// needs after its credentials change. Copilot's and Codex's extra headers
-// both derive from the credential just published, so every call site that
-// writes new credentials into a ProviderConfig must re-run this or leave a
-// stale (or missing) header behind. The provider ID is taken as a parameter
-// rather than read from c.ID because callers cannot assume c.ID is always
-// populated (a provider fetched from the config map is keyed by ID, but the
-// field itself is not guaranteed set on every path that builds one).
-// Centralizing the switch here means the store.go call sites
-// (UpdateProviderAccount, SetProviderAPIKey) and reload.go's mid-reload
-// race-preservation path all stay in sync — a provider added to one can't
-// be forgotten in another.
-func (c *ProviderConfig) ApplyPostCredentialSetup(providerID string) {
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
-		c.SetupGitHubCopilot()
-	case codex.ProviderID:
-		c.SetupCodex()
-	}
-}
-
-// Providers returns the provider catalog for cfg.
-//
-// It used to memoize the result process-globally via sync.Once, but that
-// cached the first cfg it ever saw and kept returning that answer to every
-// other *Config passed in afterwards — fatal once a single process can hold
-// several ConfigStores (e.g. one per workspace) with different
-// DisableDefaultProviders settings. embedded.GetAll() is just an in-memory
-// slice, so recomputing per call is cheap; callers that already hold a
-// ConfigStore should prefer its cached ConfigStore.KnownProviders() instead
-// of calling this repeatedly.
-func Providers(cfg *Config) []catwalk.Provider {
-	// The provider catalog ships with the binary. Upstream refreshed it
-	// from Charm's catwalk service at startup; that call is removed, so
-	// Sennit never reaches the network to decide what models exist.
-	// Anything the embedded list does not know about is declared in the
-	// user's own config.
-	if cfg.Options.DisableDefaultProviders {
-		return nil
-	}
-	return append(embedded.GetAll(), CodexProvider())
-}
-
-// CodexProvider is the catalog entry for OpenAI Codex.
-//
-// Codex is not in the embedded catalog: it is not an API-key provider, it is
-// what a ChatGPT subscription unlocks, so it only exists once the user signs
-// in. Declaring it here rather than writing an endpoint and a type into the
-// user's config at sign-in time means a later Sennit can move the endpoint
-// or change the headers without every existing install being stuck on the
-// values it was set up with.
-//
-// The model list stays empty on purpose: which models an account may use is
-// per-plan and changes over time, so it is fetched from OpenAI's Codex API at
-// sign-in (see oauth/codex.FetchModels) and merged in from the user's config
-// (see mergeCatalogProviders).
-func CodexProvider() catwalk.Provider {
-	return catwalk.Provider{
-		ID:          catwalk.InferenceProvider(codex.ProviderID),
-		Name:        codex.ProviderName,
-		APIEndpoint: codex.APIBaseURL,
-		// The Codex endpoint speaks the Responses API, which is exactly
-		// what the OpenAI provider type sends.
-		Type: catwalk.TypeOpenAI,
-	}
-}
-
-func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	var (
-		providerID = catwalk.InferenceProvider(c.ID)
-		testURL    = ""
-		headers    = make(map[string]string)
-	)
-
-	apiKey, err := resolver.ResolveValue(c.APIKey)
-	if err != nil {
-		return fmt.Errorf("failed to resolve API key for provider %s: %w", c.ID, err)
-	}
-
-	switch providerID {
-	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
-		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
-		return nil
-	case catwalk.InferenceProviderAlibabaSingapore:
-		// NOTE: Alibaba has no good endpoint we can use to validate the API key.
-		// Let's at least check the pattern.
-		if !strings.HasPrefix(apiKey, "sk-") {
-			return fmt.Errorf("invalid API key format for provider %s", c.ID)
-		}
-		return nil
-	}
-
-	switch typeclass.Of(c.Type) {
-	case typeclass.OpenAI, typeclass.OpenAICompat, typeclass.OpenRouter:
-		baseURL, err := resolver.ResolveValue(c.BaseURL)
-		if err != nil {
-			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
-		}
-		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
-
-		switch providerID {
-		case catwalk.InferenceProviderOpenRouter:
-			testURL = baseURL + "/credits"
-		case catwalk.InferenceProviderOpenCodeGo:
-			testURL = strings.Replace(baseURL, "/go", "", 1) + "/models"
-		default:
-			testURL = baseURL + "/models"
-		}
-
-		headers["Authorization"] = "Bearer " + apiKey
-	case typeclass.Anthropic:
-		baseURL, err := resolver.ResolveValue(c.BaseURL)
-		if err != nil {
-			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
-		}
-		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
-
-		switch providerID {
-		case catwalk.InferenceKimiCoding:
-			testURL = baseURL + "/v1/models"
-		default:
-			testURL = baseURL + "/models"
-		}
-
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
-	case typeclass.Google:
-		baseURL, err := resolver.ResolveValue(c.BaseURL)
-		if err != nil {
-			return fmt.Errorf("failed to resolve base URL for provider %s: %w", c.ID, err)
-		}
-		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
-		// The key goes in a header, never the URL: a failed request wraps
-		// the full URL into the returned error (*url.Error), which ends up
-		// in the UI and logs.
-		testURL = baseURL + "/v1beta/models"
-		headers["x-goog-api-key"] = apiKey
-	case typeclass.Bedrock:
-		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
-		// theory use, but apparently the authorization is region-specific,
-		// so it's not so trivial.
-		if strings.HasPrefix(apiKey, "ABSK") { // Bedrock API keys
-			return nil
-		}
-		return errors.New("not a valid bedrock api key")
-	case typeclass.Vercel:
-		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
-		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
-			return nil
-		}
-		return errors.New("not a valid vercel api key")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Route through the same proxy the provider's real requests use — a
-	// plain client here would report a failure that has nothing to do
-	// with the credentials being tested.
-	var client *http.Client
-	if c.ProxyURL == "" {
-		client = &http.Client{Timeout: 5 * time.Second}
-	} else {
-		client, err = proxyhttp.NewClient(c.ProxyURL, 5*time.Second)
-		if err != nil {
-			return fmt.Errorf("failed to build proxy client for provider %s: %w", c.ID, err)
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to connect to provider %s: %w", c.ID, err)
-	}
-	defer resp.Body.Close()
-
-	switch providerID {
-	case catwalk.InferenceProviderZAI:
-		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
-		}
-	default:
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
-		}
-	}
-	return nil
 }

@@ -40,7 +40,7 @@ const (
 )
 
 // ProviderSettings edits a provider's own settings: its base proxy (see
-// ProviderConfig.ConfiguredProxyURL, which every account's effective proxy
+// the runtime provider's ConfiguredProxyURL, which every account's effective proxy
 // is resolved against) and, where the provider supports it, automatic
 // account rotation (see internal/providers/accounts and
 // internal/config.RotationConfig). It does no IO itself — submitting
@@ -125,7 +125,7 @@ func newProviderSettings(com *common.Common, providerID string, caps accounts.Ca
 	m.proxy.Placeholder = "Empty inherits HTTP_PROXY/HTTPS_PROXY, \"none\" forces a direct connection"
 	m.proxy.SetStyles(com.Styles.TextInput)
 	m.proxy.Prompt = "> "
-	m.proxy.SetValue(pc.ConfiguredProxyURL)
+	m.proxy.SetValue(pc.ProxyURL)
 	m.proxy.Focus()
 
 	if caps.RotateOn != accounts.RotateNever {

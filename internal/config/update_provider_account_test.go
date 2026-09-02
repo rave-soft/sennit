@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/state"
 )
 
 // fakeCodexJWT builds an unsigned token carrying the given chatgpt_account_id
@@ -53,12 +54,10 @@ func newCodexTestStoreWithProxy(t *testing.T, proxyURL string) *ConfigStore {
 func newCodexTestStoreWithProxies(t *testing.T, proxyURL, configuredProxyURL string) *ConfigStore {
 	t.Helper()
 	providers := csync.NewMap[string, ProviderConfig]()
-	providers.Set(codex.ProviderID, ProviderConfig{
-		ID:                 codex.ProviderID,
-		ProxyURL:           proxyURL,
-		ConfiguredProxyURL: configuredProxyURL,
-	})
-	return &ConfigStore{config: &Config{Providers: providers}}
+	providers.Set(codex.ProviderID, ProviderConfig{ID: codex.ProviderID, ProxyURL: configuredProxyURL})
+	runtimeProviders := csync.NewMap[string, state.Provider]()
+	runtimeProviders.Set(codex.ProviderID, state.Provider{ID: codex.ProviderID, ProxyURL: proxyURL, ConfiguredProxyURL: configuredProxyURL})
+	return &ConfigStore{config: &Config{Providers: providers, RuntimeProviders: runtimeProviders}, processor: testRuntimeProcessor{}}
 }
 
 // TestUpdateProviderCredentials_CodexRefreshesAccountHeader pins the bug the
@@ -73,13 +72,13 @@ func TestUpdateProviderCredentials_CodexRefreshesAccountHeader(t *testing.T) {
 
 	tokenA := fakeCodexJWT(t, "acct-aaa")
 	require.NoError(t, store.UpdateProviderCredentials(codex.ProviderID, tokenA, &oauth.Token{AccessToken: tokenA}))
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-aaa", provider.ExtraHeaders["chatgpt-account-id"])
 
 	tokenB := fakeCodexJWT(t, "acct-bbb")
 	require.NoError(t, store.UpdateProviderCredentials(codex.ProviderID, tokenB, &oauth.Token{AccessToken: tokenB}))
-	provider, ok = store.Config().Providers.Get(codex.ProviderID)
+	provider, ok = store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-bbb", provider.ExtraHeaders["chatgpt-account-id"])
 }
@@ -96,13 +95,13 @@ func TestUpdateProviderCredentials_CodexClearsHeaderWhenAccountUnclaimed(t *test
 
 	tokenA := fakeCodexJWT(t, "acct-aaa")
 	require.NoError(t, store.UpdateProviderCredentials(codex.ProviderID, tokenA, &oauth.Token{AccessToken: tokenA}))
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-aaa", provider.ExtraHeaders["chatgpt-account-id"])
 
 	unclaimed := "opaque-token-without-claims"
 	require.NoError(t, store.UpdateProviderCredentials(codex.ProviderID, unclaimed, &oauth.Token{AccessToken: unclaimed}))
-	provider, ok = store.Config().Providers.Get(codex.ProviderID)
+	provider, ok = store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	_, present := provider.ExtraHeaders["chatgpt-account-id"]
 	require.False(t, present, "stale chatgpt-account-id header should have been removed")
@@ -116,7 +115,7 @@ func TestUpdateProviderAccount_NilAccountProxyLeavesRouteUntouched(t *testing.T)
 	before := store.CredentialVersion()
 	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key"}))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://existing:8080", provider.ProxyURL)
 	require.Equal(t, "http://existing:8080", provider.ConfiguredProxyURL)
@@ -132,7 +131,7 @@ func TestUpdateProviderAccount_AccountProxyOverridesConfigured(t *testing.T) {
 	before := store.CredentialVersion()
 	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &accountProxy}))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://account:9090", provider.ProxyURL, "effective proxy should be the account's")
 	require.Equal(t, "http://provider:8080", provider.ConfiguredProxyURL, "provider's configured proxy must survive the switch")
@@ -151,13 +150,13 @@ func TestUpdateProviderAccount_SwitchingBackFallsBackToProviderProxy(t *testing.
 
 	accountProxy := "http://account:9090"
 	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &accountProxy}))
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://account:9090", provider.ProxyURL)
 
 	noOwnProxy := ""
 	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &noOwnProxy}))
-	provider, ok = store.Config().Providers.Get(codex.ProviderID)
+	provider, ok = store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider:8080", provider.ProxyURL, "must fall back to the provider's proxy, not stay on the old account's")
 	require.Equal(t, "http://provider:8080", provider.ConfiguredProxyURL)
@@ -172,7 +171,7 @@ func TestUpdateProviderAccount_AccountProxyNoneForcesDirect(t *testing.T) {
 	before := store.CredentialVersion()
 	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &none}))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "none", provider.ProxyURL)
 	require.Equal(t, "http://provider:8080", provider.ConfiguredProxyURL)
@@ -191,7 +190,7 @@ func TestUpdateProviderAccount_EmptyConfiguredFallsBackToAccountProxy(t *testing
 	accountProxy := "http://account:9090"
 	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, AccountCredential{APIKey: "key", ProxyURL: &accountProxy}))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://account:9090", provider.ProxyURL)
 }
@@ -201,12 +200,12 @@ func TestUpdateProviderAccount_CopilotPathUnaffected(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set(string(catwalk.InferenceProviderCopilot), ProviderConfig{ID: string(catwalk.InferenceProviderCopilot)})
-	store := &ConfigStore{config: &Config{Providers: providers}}
+	store := &ConfigStore{config: &Config{Providers: providers}, processor: testRuntimeProcessor{}}
 
 	before := store.CredentialVersion()
 	require.NoError(t, store.UpdateProviderCredentials(string(catwalk.InferenceProviderCopilot), "key", nil))
 
-	provider, ok := store.Config().Providers.Get(string(catwalk.InferenceProviderCopilot))
+	provider, ok := store.Config().RuntimeProvider(string(catwalk.InferenceProviderCopilot))
 	require.True(t, ok)
 	require.NotEmpty(t, provider.ExtraHeaders, "Copilot headers should be present")
 	require.Greater(t, store.CredentialVersion(), before)

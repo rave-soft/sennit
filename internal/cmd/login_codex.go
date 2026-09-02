@@ -92,7 +92,7 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 	hadProxyURL := false
 	if cfg := ws.Config(); cfg != nil {
 		if pc, ok := cfg.Providers.Get(codex.ProviderID); ok {
-			previousProxyURL = pc.ConfiguredProxyURL
+			previousProxyURL = pc.ProxyURL
 			hadProxyURL = previousProxyURL != ""
 		}
 	}
@@ -210,7 +210,7 @@ func configuredCodexProxy(ws workspace.ConfigReader) string {
 	if !ok {
 		return ""
 	}
-	return pc.ConfiguredProxyURL
+	return pc.ProxyURL
 }
 
 // codexToken obtains a token, preferring an existing Codex CLI login on disk

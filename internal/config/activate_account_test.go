@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/providers/state"
 )
 
 // newActivateAccountTestStore builds a store whose codex provider has
@@ -24,15 +25,14 @@ func newActivateAccountTestStore(t *testing.T, providerProxy string) *ConfigStor
 	t.Helper()
 	dir := t.TempDir()
 	providers := csync.NewMap[string, ProviderConfig]()
-	providers.Set(codex.ProviderID, ProviderConfig{
-		ID:                 codex.ProviderID,
-		ProxyURL:           providerProxy,
-		ConfiguredProxyURL: providerProxy,
-	})
+	providers.Set(codex.ProviderID, ProviderConfig{ID: codex.ProviderID, ProxyURL: providerProxy})
+	runtimeProviders := csync.NewMap[string, state.Provider]()
+	runtimeProviders.Set(codex.ProviderID, state.Provider{ID: codex.ProviderID, ProxyURL: providerProxy, ConfiguredProxyURL: providerProxy})
 	return &ConfigStore{
-		config:         &Config{Providers: providers},
+		config:         &Config{Providers: providers, RuntimeProviders: runtimeProviders},
 		globalDataPath: filepath.Join(dir, "sennit.json"),
 		resolver:       NewShellVariableResolver(env.New()),
+		processor:      testRuntimeProcessor{},
 	}
 }
 
@@ -46,7 +46,7 @@ func TestActivateAccount_OAuthAccountPublishesTokenAndPersistsChoice(t *testing.
 	acct := accounts.Account{ID: "acct-1", Token: &oauth.Token{AccessToken: token}}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, token, provider.APIKey)
 	require.Equal(t, token, provider.OAuthToken.AccessToken)
@@ -65,7 +65,7 @@ func TestActivateAccount_APIKeyAccountPublishesResolvedValue(t *testing.T) {
 	acct := accounts.Account{ID: "acct-2", APIKey: "$SENNIT_TEST_ACCOUNT_KEY"}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "resolved-secret", provider.APIKey, "the resolved value must go out on the wire, not the template")
 	require.Equal(t, "$SENNIT_TEST_ACCOUNT_KEY", provider.APIKeyTemplate)
@@ -80,7 +80,7 @@ func TestActivateAccount_UnresolvableAPIKeyPublishesNothing(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, before, store.CredentialVersion())
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Empty(t, provider.APIKey)
 }
@@ -91,14 +91,14 @@ func TestActivateAccount_SwitchingToAccountWithoutProxyFallsBackToProvider(t *te
 	withProxy := accounts.Account{ID: "acct-a", APIKey: "$SENNIT_TEST_ACCOUNT_KEY_A", ProxyURL: "http://account:9090"}
 	t.Setenv("SENNIT_TEST_ACCOUNT_KEY_A", "a-secret")
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, withProxy))
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://account:9090", provider.ProxyURL)
 
 	withoutProxy := accounts.Account{ID: "acct-b", APIKey: "$SENNIT_TEST_ACCOUNT_KEY_B"}
 	t.Setenv("SENNIT_TEST_ACCOUNT_KEY_B", "b-secret")
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, withoutProxy))
-	provider, ok = store.Config().Providers.Get(codex.ProviderID)
+	provider, ok = store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider:8080", provider.ProxyURL, "must fall back to the provider's proxy, not the previous account's")
 }
@@ -132,7 +132,7 @@ func newLoadedActivateAccountStore(t *testing.T, globalDir string, oldToken stri
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(seed), 0o644))
 
 	workingDir := t.TempDir()
-	store, err := LoadData(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 	return store
 }
@@ -152,7 +152,7 @@ func TestActivateAccount_OAuthSwitchPersistsToDiskAndMemory(t *testing.T) {
 	acct := accounts.Account{ID: "acct-new", Token: &oauth.Token{AccessToken: newToken}}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken, provider.APIKey, "the new account's token must survive the reload")
 	require.Equal(t, newToken, provider.OAuthToken.AccessToken)
@@ -166,9 +166,9 @@ func TestActivateAccount_OAuthSwitchPersistsToDiskAndMemory(t *testing.T) {
 	// must come back to the new account, not the old one — this is the
 	// exact scenario the bug broke, since disk never actually got the
 	// new credentials before.
-	restarted, err := LoadData(t.TempDir(), "", false)
+	restarted, err := loadRuntimeForTest(t.TempDir(), "", false)
 	require.NoError(t, err)
-	restartedProvider, ok := restarted.Config().Providers.Get(codex.ProviderID)
+	restartedProvider, ok := restarted.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken, restartedProvider.APIKey, "a restarted process must see the new account's credentials")
 }
@@ -180,13 +180,13 @@ func TestActivateAccount_OAuthSwitchPersistsToDiskAndMemory(t *testing.T) {
 func TestActivateAccount_APIKeySwitchWritesTemplateNotResolvedSecret(t *testing.T) {
 	globalDir := t.TempDir()
 	oldToken := fakeCodexJWT(t, "acct-old")
+	t.Setenv("MY_TEST_VAR", "the-resolved-secret")
 	store := newLoadedActivateAccountStore(t, globalDir, oldToken)
 
-	t.Setenv("MY_TEST_VAR", "the-resolved-secret")
 	acct := accounts.Account{ID: "acct-key", APIKey: "$MY_TEST_VAR"}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "the-resolved-secret", provider.APIKey, "memory must carry the resolved value")
 
@@ -200,13 +200,13 @@ func TestActivateAccount_APIKeySwitchWritesTemplateNotResolvedSecret(t *testing.
 func TestActivateAccount_ProxySurvivesReload(t *testing.T) {
 	globalDir := t.TempDir()
 	oldToken := fakeCodexJWT(t, "acct-old")
+	t.Setenv("MY_TEST_VAR2", "another-secret")
 	store := newLoadedActivateAccountStore(t, globalDir, oldToken)
 
-	t.Setenv("MY_TEST_VAR2", "another-secret")
 	acct := accounts.Account{ID: "acct-proxy", APIKey: "$MY_TEST_VAR2", ProxyURL: "http://account-proxy:9090"}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "http://account-proxy:9090", provider.ProxyURL, "the account's proxy override must survive the reload")
 
@@ -228,7 +228,7 @@ func TestActivateAccount_HandBuiltStorePublishesActiveAccountToMemory(t *testing
 	acct := accounts.Account{ID: "acct-mem-id", Token: &oauth.Token{AccessToken: token}}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-mem-id", provider.Account, "the active account ID must be published to memory, not just disk")
 }
@@ -246,7 +246,7 @@ func TestActivateAccount_LoadedStorePublishesActiveAccountToMemoryAndDisk(t *tes
 	acct := accounts.Account{ID: "acct-loaded-id", Token: &oauth.Token{AccessToken: newToken}}
 	require.NoError(t, store.ActivateAccount(ScopeGlobal, codex.ProviderID, acct))
 
-	provider, ok := store.Config().Providers.Get(codex.ProviderID)
+	provider, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-loaded-id", provider.Account, "the active account ID must be in memory immediately, with no wait")
 

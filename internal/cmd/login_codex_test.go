@@ -41,8 +41,7 @@ func TestConfiguredCodexProxy_UsesConfiguredNotEffective(t *testing.T) {
 	t.Parallel()
 
 	ws := &codexProviderConfigAccessor{provider: config.ProviderConfig{
-		ProxyURL:           "none",
-		ConfiguredProxyURL: "socks5://configured-proxy:1080",
+		ProxyURL: "socks5://configured-proxy:1080",
 	}}
 
 	require.Equal(t, "socks5://configured-proxy:1080", configuredCodexProxy(ws))
