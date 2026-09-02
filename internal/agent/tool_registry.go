@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 
 	"charm.land/fantasy"
@@ -159,7 +160,7 @@ func toolSpecs() []toolSpec {
 				tools.NewEditTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
 				tools.NewMultiEditTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
 				tools.NewFetchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.toolAvailability),
-				tools.NewWebFetchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.toolAvailability),
+				tools.NewWebFetchTool(f.permissions, b.runtimeCfg.workingDir, filepath.Join(b.cfg.DataDirectory(), "fetch"), nil, b.toolAvailability),
 				tools.NewWebSearchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.searchBackend, b.toolAvailability),
 				tools.NewGlobTool(b.runtimeCfg.workingDir, b.cfg.Glob()),
 				tools.NewSearchTool(b.runtimeCfg.workingDir, b.cfg.Grep()),

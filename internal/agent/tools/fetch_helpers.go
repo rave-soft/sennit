@@ -86,8 +86,8 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 // FetchURLAndConvert. If the result exceeds LargeContentThreshold it is
 // written to a temp file under dir instead of being returned inline, so
 // callers can point the agent at grep/view instead of dumping a huge page
-// into the conversation. Exactly one of content/filePath is non-empty on
-// success.
+// into the conversation. dir is created (0o700) if it does not already
+// exist. Exactly one of content/filePath is non-empty on success.
 func FetchLargeContent(ctx context.Context, client *http.Client, dir, url string) (content string, filePath string, err error) {
 	content, err = FetchURLAndConvert(ctx, client, url)
 	if err != nil {
@@ -96,6 +96,10 @@ func FetchLargeContent(ctx context.Context, client *http.Client, dir, url string
 
 	if len(content) <= LargeContentThreshold {
 		return content, "", nil
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", fmt.Errorf("failed to create page directory: %w", err)
 	}
 
 	tempFile, err := os.CreateTemp(dir, "page-*.md")

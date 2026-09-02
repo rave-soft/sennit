@@ -22,6 +22,9 @@ type agentConfig interface {
 	Glob() config.ToolGlob
 	Grep() config.ToolGrep
 	Ls() config.ToolLs
+	// DataDirectory is the project-local directory for workspace-scoped
+	// state (Options.DataDirectory).
+	DataDirectory() string
 	HasLSP() bool
 	// AutoLSPEnabled reports whether options.auto_lsp allows automatic
 	// LSP setup: unset (nil) defaults to enabled.
@@ -40,6 +43,7 @@ type configSnapshot struct {
 	glob            config.ToolGlob
 	grep            config.ToolGrep
 	ls              config.ToolLs
+	dataDirectory   string
 	hasLSP          bool
 	autoLSP         bool
 	hasMCP          bool
@@ -61,6 +65,7 @@ func newAgentConfig(cfg *config.Config) agentConfig {
 		glob:            cfg.Tools.Glob,
 		grep:            cfg.Tools.Grep,
 		ls:              cfg.Tools.Ls,
+		dataDirectory:   cfg.Options.DataDirectory,
 		hasLSP:          len(cfg.LSP) > 0,
 		autoLSP:         cfg.Options.AutoLSP == nil || *cfg.Options.AutoLSP,
 		hasMCP:          len(cfg.MCP) > 0,
@@ -75,6 +80,7 @@ func (s *configSnapshot) SkillsPaths() []string                { return s.skills
 func (s *configSnapshot) Glob() config.ToolGlob                { return s.glob }
 func (s *configSnapshot) Grep() config.ToolGrep                { return s.grep }
 func (s *configSnapshot) Ls() config.ToolLs                    { return s.ls }
+func (s *configSnapshot) DataDirectory() string                { return s.dataDirectory }
 func (s *configSnapshot) HasLSP() bool                         { return s.hasLSP }
 func (s *configSnapshot) AutoLSPEnabled() bool                 { return s.autoLSP }
 func (s *configSnapshot) HasMCP() bool                         { return s.hasMCP }

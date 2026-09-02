@@ -25,8 +25,11 @@ var webFetchDescriptionTpl = template.Must(
 // NewWebFetchTool creates a web fetch tool that converts pages to markdown.
 // When permissions is nil, the permission check is skipped entirely — used
 // by the agentic_fetch sub-agent, whose own top-level call is already
-// permission-gated.
-func NewWebFetchTool(permissions permission.Requester, workingDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
+// permission-gated. pageDir is where large fetched pages are written
+// (created if missing) — kept separate from workingDir so a scratch fetch
+// file never lands in the user's project tree; workingDir still names the
+// permission request's Path.
+func NewWebFetchTool(permissions permission.Requester, workingDir, pageDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	if client == nil {
 		client = newHTTPClient(30 * time.Second)
@@ -63,7 +66,7 @@ func NewWebFetchTool(permissions permission.Requester, workingDir string, client
 				}
 			}
 
-			content, filePath, err := FetchLargeContent(ctx, client, workingDir, params.URL)
+			content, filePath, err := FetchLargeContent(ctx, client, pageDir, params.URL)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 			}

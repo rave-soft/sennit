@@ -1138,7 +1138,7 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 		AutoSummarizeAt:      d.cfg.Config().Options.AutoSummarizeAt,
 		Sessions:             d.sessions, Messages: d.messages,
 		Tools: []fantasy.AgentTool{
-			tools.NewWebFetchTool(nil, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
+			tools.NewWebFetchTool(nil, tmpDir, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
 			tools.NewGlobTool(tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, d.cfg.Config().Tools.Grep),
 			tools.NewReadTool(d.lspManager, d.permissions, newFileTracking(d.filetracker), nil, tmpDir),
 		},

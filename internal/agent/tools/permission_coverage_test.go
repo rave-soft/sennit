@@ -166,7 +166,7 @@ func toolClassifications() []toolClassification {
 		{
 			name: WebFetchToolName, writes: true,
 			run: func(t *testing.T, perms permission.Service, workingDir, _ string) fantasy.ToolResponse {
-				tool := NewWebFetchTool(perms, workingDir, nil)
+				tool := NewWebFetchTool(perms, workingDir, workingDir, nil)
 				resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 					ID: "call-1", Name: WebFetchToolName,
 					Input: mustJSONInput(t, WebFetchParams{URL: "https://example.invalid/x"}),

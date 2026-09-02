@@ -301,7 +301,7 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 	case FetchToolName:
 		return NewFetchTool(perms, dir, nil)
 	case WebFetchToolName:
-		return NewWebFetchTool(perms, dir, nil)
+		return NewWebFetchTool(perms, dir, dir, nil)
 	case WebSearchToolName:
 		return NewWebSearchTool(perms, dir, nil, &stubSearchBackend{})
 	case DownloadToolName:
