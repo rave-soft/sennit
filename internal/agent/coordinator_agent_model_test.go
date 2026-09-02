@@ -85,7 +85,7 @@ func TestCoordinatorAgentModelSelection(t *testing.T) {
 		coder.Model = "mock/agent-model"
 		coord.cfg.Config().Agents[config.AgentCoder] = coder
 
-		runtime, err := coord.delegation.runtimeFor(t.Context())
+		runtime, err := coord.builder.runtimeFor(t.Context(), coord.delegation.runtimeInputs())
 		require.NoError(t, err)
 		require.Equal(t, "agent-model", runtime.model.ModelCfg.Model)
 	})

@@ -103,7 +103,7 @@ func (d *turnDispatcher) runUpdateModels(ctx context.Context, agent SessionAgent
 // it did before this was extracted, only a re-resolve failure is
 // reported to the caller.
 func (d *turnDispatcher) refreshRuntimeToken(ctx context.Context, runtime *compiledRuntime, logMsg string) (*compiledRuntime, error) {
-	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}); err != nil {
+	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, d.delegation.operationPort()); err != nil {
 		slog.Error(logMsg, "error", err)
 		return runtime, nil
 	}
@@ -138,9 +138,9 @@ func (d *turnDispatcher) Summarize(ctx context.Context, sessionID string) error 
 	summaryOptions := withPromptCacheKey(runtime.providerOptions, runtime.model, runtime.providerCfg, sessionID)
 	agent := d.agentPort.current()
 	if sa, ok := agent.(*sessionAgent); ok {
-		return sa.summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}), runtime.model, runtime.systemPromptPrefix, active, nil)
+		return sa.summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, active, d.delegation.operationPort()), runtime.model, runtime.systemPromptPrefix, active, nil)
 	}
-	return agent.Summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}))
+	return agent.Summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, active, d.delegation.operationPort()))
 }
 
 // GenerateTitle generates a session title using the current agent, with
@@ -220,7 +220,7 @@ func (d *turnDispatcher) makeRunCall(call SessionAgentCall) SessionAgentCall {
 	call.TopK = runtime.topK
 	call.FrequencyPenalty = runtime.frequencyPenalty
 	call.PresencePenalty = runtime.presencePenalty
-	port := runtimeOperationPort{agent: d.agentPort.current(), inputs: d.delegation.runtimeInputs()}
+	port := d.delegation.operationPort()
 	call.OnAuthRefresh = d.builder.makeAuthRefreshCallback(runtime.providerCfg, call.ActiveRuntime, port)
 	// Both rotation triggers (plan §5.5) are wired here, at the primary
 	// per-turn call site: an interactive turn hitting a 429 mid-conversation,

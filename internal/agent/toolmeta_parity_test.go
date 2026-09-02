@@ -27,7 +27,7 @@ var expectedGateByName = map[toolmeta.Gate][]string{
 
 func TestToolSpecsMatchFrozenGateMatrixAndBuildNames(t *testing.T) {
 	coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
-	coord.SetDelegationTools(coord.delegation.threadsManager(), noopTaskManager{})
+	coord.SetDelegationTools(coord.delegation.delegationToolsForRead().threads, noopTaskManager{})
 	b := &buildToolsCtx{
 		agent:              config.Agent{AllowedTools: toolmeta.NamesAll()},
 		interactive:        true,
@@ -143,7 +143,7 @@ func TestBuildToolsMatchesFrozenGateScenarios(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
-			coord.SetDelegationTools(coord.delegation.threadsManager(), noopTaskManager{})
+			coord.SetDelegationTools(coord.delegation.delegationToolsForRead().threads, noopTaskManager{})
 			coord.interactive = true
 			coord.builder.interactive = true
 			cfg := coord.cfg.Config()
@@ -152,7 +152,7 @@ func TestBuildToolsMatchesFrozenGateScenarios(t *testing.T) {
 				tt.configure(cfg)
 			}
 
-			built, err := coord.delegation.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: tt.allowedTools}, tt.isSubAgent)
+			built, err := coord.builder.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: tt.allowedTools}, tt.isSubAgent, coord.delegation.runtimeInputs())
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, toolNames(t, built))
 		})
@@ -162,7 +162,7 @@ func TestBuildToolsMatchesFrozenGateScenarios(t *testing.T) {
 func TestCoordinatorBuiltToolMetadataMatchesInfo(t *testing.T) {
 	coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
 	coord.background = shell.NewBackgroundShellManager()
-	built, err := coord.delegation.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: toolmeta.NamesAll()}, false)
+	built, err := coord.builder.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: toolmeta.NamesAll()}, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 	seen := make(map[string]bool)
 	for _, tool := range built {

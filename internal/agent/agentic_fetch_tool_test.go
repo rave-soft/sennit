@@ -118,3 +118,34 @@ func TestAgenticFetchTool_SharesClientAcrossCalls(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, other.fetchClient, "a caller-supplied client must be used as-is, not replaced by the shared one")
 }
+
+// TestBuildAgenticFetchAgent_IsSubAgentAndToolSet guards two properties of
+// the agentic-fetch delegate agenticFetchFactory builds by hand instead of
+// through buildAgent (see that method's doc comment):
+//
+//  1. IsSubAgent is set. Before this was added, preparePrompt (compat.go)
+//     treated the delegate as the top-level agent and injected the parent
+//     todo-reminder system message into it - a reminder pointing at a
+//     "todos" tool this scratch-dir analysis agent was never given.
+//  2. Its tool set is exactly the five tmpDir-scoped tools it hand-builds
+//     (web_fetch, web_search, glob, the available search tool, read) - no
+//     more, no less - proving the hand-written list still matches intent
+//     even though it cannot be sourced from the shared toolSpecs registry
+//     (see the doc comment on why: every toolSpecs row is rooted at the
+//     workspace's real working directory, not a disposable scratch one).
+func TestBuildAgenticFetchAgent_IsSubAgentAndToolSet(t *testing.T) {
+	coord := newAgentToolTestCoordinator(t, nil)
+
+	agent, err := coord.delegation.buildAgenticFetchAgent(t.Context(), nil, t.TempDir())
+	require.NoError(t, err)
+
+	sa, ok := agent.(*sessionAgent)
+	require.True(t, ok, "buildAgenticFetchAgent must return a *sessionAgent")
+	require.True(t, sa.isSubAgent, "the agentic-fetch delegate must be marked IsSubAgent so it does not get the parent todo-reminder")
+
+	require.ElementsMatch(t,
+		[]string{tools.WebFetchToolName, tools.WebSearchToolName, tools.GlobToolName, searchToolName(), tools.ReadToolName},
+		toolNames(t, sa.tools.Copy()),
+		"the agentic-fetch delegate must get exactly its hand-picked, tmpDir-scoped tool set",
+	)
+}

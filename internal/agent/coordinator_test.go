@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -145,27 +143,6 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "done", resp.Content)
 		assert.False(t, resp.IsError)
-	})
-
-	t.Run("cost update failure preserves output", func(t *testing.T) {
-		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerCfg)
-
-		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
-			return agentResultWithText("output before cost failure"), nil
-		})
-
-		resp, err := coord.delegation.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      "missing-parent-session",
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
-		})
-		require.NoError(t, err)
-		assert.False(t, resp.IsError)
-		assert.Equal(t, "output before cost failure", resp.Content)
 	})
 
 	t.Run("response with text returns it", func(t *testing.T) {
@@ -345,69 +322,6 @@ func TestRunSubAgent(t *testing.T) {
 		assert.True(t, resp.IsError)
 		assert.Equal(t, "Failed to generate response: provider request failed", resp.Content)
 	})
-
-	t.Run("session setup callback is invoked", func(t *testing.T) {
-		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerCfg)
-
-		parentSession, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-
-		var setupCalledWith string
-		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
-			return agentResultWithText("ok"), nil
-		})
-
-		_, err = coord.delegation.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
-			SessionSetup: func(sessionID string) {
-				setupCalledWith = sessionID
-			},
-		})
-		require.NoError(t, err)
-		assert.NotEmpty(t, setupCalledWith, "SessionSetup should have been called")
-	})
-
-	t.Run("cost propagation to parent session", func(t *testing.T) {
-		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerCfg)
-
-		parentSession, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-
-		agent := newMockAgent(providerID, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
-			// Simulate the agent incurring cost by updating the child session.
-			childSession, err := env.sessions.Get(ctx, call.SessionID)
-			if err != nil {
-				return nil, err
-			}
-			childSession.Cost = 0.05
-			_, err = env.sessions.Save(ctx, childSession)
-			if err != nil {
-				return nil, err
-			}
-			return agentResultWithText("ok"), nil
-		})
-
-		_, err = coord.delegation.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
-		})
-		require.NoError(t, err)
-
-		updated, err := env.sessions.Get(t.Context(), parentSession.ID)
-		require.NoError(t, err)
-		assert.InDelta(t, 0.05, updated.Cost, 1e-9)
-	})
 }
 
 // TestSubAgentTaskRun_Cancellation proves that a sub-agent run cancelled by
@@ -464,162 +378,6 @@ func TestSubAgentTaskRun_OrdinaryError(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, context.Canceled))
 	assert.Contains(t, err.Error(), "Failed to generate response")
-}
-
-func TestUpdateParentSessionCost(t *testing.T) {
-	t.Run("accumulates cost correctly", func(t *testing.T) {
-		env := testEnv(t)
-		cfg, err := configruntime.Load(env.workingDir, "", false)
-		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-		coord.newCoordinatorComponents()
-		parent, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-
-		child, err := env.sessions.CreateTaskSession(t.Context(), "tool-1", parent.ID, "Child")
-		require.NoError(t, err)
-
-		// Set child cost.
-		child.Cost = 0.10
-		_, err = env.sessions.Save(t.Context(), child)
-		require.NoError(t, err)
-
-		err = coord.delegation.updateParentSessionCost(t.Context(), child.ID, parent.ID)
-		require.NoError(t, err)
-
-		updated, err := env.sessions.Get(t.Context(), parent.ID)
-		require.NoError(t, err)
-		assert.InDelta(t, 0.10, updated.Cost, 1e-9)
-	})
-
-	t.Run("accumulates multiple child costs", func(t *testing.T) {
-		env := testEnv(t)
-		cfg, err := configruntime.Load(env.workingDir, "", false)
-		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-		coord.newCoordinatorComponents()
-		parent, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-
-		child1, err := env.sessions.CreateTaskSession(t.Context(), "tool-1", parent.ID, "Child1")
-		require.NoError(t, err)
-		child1.Cost = 0.05
-		_, err = env.sessions.Save(t.Context(), child1)
-		require.NoError(t, err)
-
-		child2, err := env.sessions.CreateTaskSession(t.Context(), "tool-2", parent.ID, "Child2")
-		require.NoError(t, err)
-		child2.Cost = 0.03
-		_, err = env.sessions.Save(t.Context(), child2)
-		require.NoError(t, err)
-
-		err = coord.delegation.updateParentSessionCost(t.Context(), child1.ID, parent.ID)
-		require.NoError(t, err)
-		err = coord.delegation.updateParentSessionCost(t.Context(), child2.ID, parent.ID)
-		require.NoError(t, err)
-
-		updated, err := env.sessions.Get(t.Context(), parent.ID)
-		require.NoError(t, err)
-		assert.InDelta(t, 0.08, updated.Cost, 1e-9)
-	})
-
-	t.Run("child session not found", func(t *testing.T) {
-		env := testEnv(t)
-		cfg, err := configruntime.Load(env.workingDir, "", false)
-		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-		coord.newCoordinatorComponents()
-		parent, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-
-		err = coord.delegation.updateParentSessionCost(t.Context(), "non-existent", parent.ID)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "get child session")
-	})
-
-	t.Run("parent session not found", func(t *testing.T) {
-		env := testEnv(t)
-		cfg, err := configruntime.Load(env.workingDir, "", false)
-		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-		coord.newCoordinatorComponents()
-		parent, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-		child, err := env.sessions.CreateTaskSession(t.Context(), "tool-1", parent.ID, "Child")
-		require.NoError(t, err)
-
-		err = coord.delegation.updateParentSessionCost(t.Context(), child.ID, "non-existent")
-		require.Error(t, err)
-		// AddCost failing is a write-path failure, not a read: the wrap
-		// used to say "get parent session", which was misleading (nothing
-		// here reads the parent session).
-		assert.Contains(t, err.Error(), "add cost to parent session")
-	})
-
-	t.Run("concurrent updates from several sub-agents do not lose a delta", func(t *testing.T) {
-		// Regression test for the read-modify-write race: several
-		// sub-agents of the same parent can finish at roughly the same
-		// time (e.g. concurrent "agent" tool calls in one turn's tool
-		// batch), each calling updateParentSessionCost for its own child.
-		// Without serialization, two concurrent Get/Save pairs can both
-		// read the same starting cost and each save their own delta on
-		// top of it, silently dropping one of the two deltas.
-		env := testEnv(t)
-		cfg, err := configruntime.Load(env.workingDir, "", false)
-		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-		coord.newCoordinatorComponents()
-		parent, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-
-		const n = 20
-		childIDs := make([]string, n)
-		for i := range n {
-			child, err := env.sessions.CreateTaskSession(t.Context(), fmt.Sprintf("tool-%d", i), parent.ID, fmt.Sprintf("Child%d", i))
-			require.NoError(t, err)
-			child.Cost = 0.01
-			_, err = env.sessions.Save(t.Context(), child)
-			require.NoError(t, err)
-			childIDs[i] = child.ID
-		}
-
-		var wg sync.WaitGroup
-		errs := make([]error, n)
-		for i := range n {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				errs[i] = coord.delegation.updateParentSessionCost(t.Context(), childIDs[i], parent.ID)
-			}(i)
-		}
-		wg.Wait()
-		for _, err := range errs {
-			require.NoError(t, err)
-		}
-
-		updated, err := env.sessions.Get(t.Context(), parent.ID)
-		require.NoError(t, err)
-		assert.InDelta(t, 0.01*n, updated.Cost, 1e-9, "every child's cost must land on the parent, none lost to the race")
-	})
-
-	t.Run("zero cost handled correctly", func(t *testing.T) {
-		env := testEnv(t)
-		cfg, err := configruntime.Load(env.workingDir, "", false)
-		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
-		coord.newCoordinatorComponents()
-		parent, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-		child, err := env.sessions.CreateTaskSession(t.Context(), "tool-1", parent.ID, "Child")
-		require.NoError(t, err)
-
-		err = coord.delegation.updateParentSessionCost(t.Context(), child.ID, parent.ID)
-		require.NoError(t, err)
-
-		updated, err := env.sessions.Get(t.Context(), parent.ID)
-		require.NoError(t, err)
-		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
-	})
 }
 
 func TestGetProviderOptionsReasoningEffort(t *testing.T) {

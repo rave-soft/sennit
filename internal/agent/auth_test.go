@@ -459,7 +459,7 @@ func TestMakeAuthRefreshCallback_RefreshesAndStoresRecompiledRuntime(t *testing.
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
 
-	initial, err := co.delegation.runtimeFor(t.Context())
+	initial, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
 	require.NoError(t, err)
 	active := newActiveRuntime(initial)
 

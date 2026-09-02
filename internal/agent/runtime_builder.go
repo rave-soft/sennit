@@ -1618,13 +1618,9 @@ func (b *runtimeBuilder) isAnthropicThinking(model config.SelectedModel) bool {
 	return err == nil && opts.Thinking != nil
 }
 
-// buildProvider returns a fantasy.Provider for the configured provider,
-// resolving its API key and base URL through the config's shell-expansion
-// resolver.
-func (b *runtimeBuilder) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
-	return b.buildProviderForSnapshot(providerCfg, model, false, b.runtimeConfigSnapshot())
-}
-
+// buildProviderForSnapshot returns a fantasy.Provider for the configured
+// provider, resolving its API key and base URL through the config's
+// shell-expansion resolver.
 func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, snapshot runtimeConfigSnapshot) (fantasy.Provider, error) {
 	effective, ok := snapshot.config.RuntimeProvider(providerCfg.ID)
 	if !ok {

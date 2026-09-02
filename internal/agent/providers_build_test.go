@@ -458,7 +458,7 @@ func buildTestProvider(t *testing.T, c *coordinator, providerCfg config.Provider
 		effective.ExtraParams["location"] = "us-central1"
 	}
 	c.cfg.Config().SetRuntimeProvider(providerCfg.ID, effective)
-	return c.builder.buildProvider(providerCfg, model)
+	return c.builder.buildProviderForSnapshot(providerCfg, model, false, c.builder.runtimeConfigSnapshot())
 }
 
 func TestBuildProvider(t *testing.T) {

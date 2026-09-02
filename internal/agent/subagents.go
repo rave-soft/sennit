@@ -27,9 +27,6 @@ type subAgentParams struct {
 	// the delegate's own call so a delegation that delegates again is
 	// counted as the nesting it is; see maxTaskCascadeDepth.
 	Depth int
-	// SessionSetup is an optional callback invoked after session creation
-	// but before agent execution, for custom session configuration.
-	SessionSetup func(sessionID string)
 }
 
 type subAgentOutcome struct {

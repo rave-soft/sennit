@@ -118,7 +118,7 @@ func toolNames(t *testing.T, agentTools []fantasy.AgentTool) []string {
 func TestBuildTools_ThreadToolsPresentForMainAgentWithManager(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
-	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -130,7 +130,7 @@ func TestBuildTools_ThreadToolsPresentForMainAgentWithManager(t *testing.T) {
 func TestBuildTools_ThreadToolsAbsentWhenManagerNil(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, nil)
 
-	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -145,7 +145,7 @@ func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
 	// isSubAgent=true mirrors how the coordinator builds the "agent"
 	// delegation tool's target and other sub-agents: thread tools must
 	// never be handed to them even when the workspace owns a manager.
-	built, err := coord.delegation.buildTools(t.Context(), agentCfg, true)
+	built, err := coord.builder.buildTools(t.Context(), agentCfg, true, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 
 	names := toolNames(t, built)
@@ -165,7 +165,7 @@ func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
 func TestBuildTools_AgentSendReachesThreadsByDefault(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
-	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 	require.Contains(t, toolNames(t, built), tools.AgentSendToolName,
 		"one send tool for both kinds, and it is in the default set")
@@ -180,7 +180,7 @@ func TestBuildTools_DelegationToolsSurviveBackgroundAgentsOff(t *testing.T) {
 	disabled := false
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
-	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 	names := toolNames(t, built)
 	for _, name := range threadToolNames {
@@ -192,13 +192,13 @@ func TestBuildTools_DelegationToolsSurviveBackgroundAgentsOff(t *testing.T) {
 func TestCoordinator_SetDelegationToolsThreadTakesEffectOnNextBuild(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, nil)
 
-	built, err := coord.delegation.buildTools(t.Context(), agentCfg, false)
+	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 	require.NotContains(t, toolNames(t, built), tools.ThreadCreateToolName)
 
 	coord.SetDelegationTools(noopThreadManager{}, nil)
 
-	built, err = coord.delegation.buildTools(t.Context(), agentCfg, false)
+	built, err = coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 	require.Contains(t, toolNames(t, built), tools.ThreadCreateToolName)
 }

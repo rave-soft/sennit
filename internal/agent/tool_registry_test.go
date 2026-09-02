@@ -92,7 +92,7 @@ func TestBuildToolsPinnedSet_Coder(t *testing.T) {
 	coord := pinTestCoordinator(t, false)
 	agent := config.Agent{Name: "coder", AllowedTools: pinTestAllowedTools}
 
-	built, err := coord.delegation.buildTools(t.Context(), agent, false)
+	built, err := coord.builder.buildTools(t.Context(), agent, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 
 	expected := []string{
@@ -122,7 +122,7 @@ func TestBuildToolsPinnedSet_SubAgent(t *testing.T) {
 	coord := pinTestCoordinator(t, false)
 	agent := config.Agent{Name: "task", AllowedTools: pinTestAllowedTools}
 
-	built, err := coord.delegation.buildTools(t.Context(), agent, true)
+	built, err := coord.builder.buildTools(t.Context(), agent, true, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
 
 	expected := []string{

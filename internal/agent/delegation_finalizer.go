@@ -70,15 +70,6 @@ type delegationFinalizer struct {
 	fetchClientOnce sync.Once
 	fetchClient     *http.Client
 
-	// parentCostMu serializes updateParentSessionCost's read-modify-write
-	// of a parent session's cost. Sub-agents of the same parent can
-	// finish concurrently (e.g. several "agent" tool calls from the same
-	// turn's tool batch, or nested delegations), and without this lock
-	// their Get/Save pairs interleave: two updates that both read the
-	// pre-update cost and each add their own delta drop one of the two
-	// deltas on the floor.
-	parentCostMu sync.Mutex
-
 	// subSessions counts the delegations currently running under each
 	// sub-agent session id, so IsSessionBusy can answer for them.
 	//
@@ -392,16 +383,18 @@ func (d *delegationFinalizer) buildAgent(ctx context.Context, prompt *prompt.Pro
 	return result, nil
 }
 
-func (d *delegationFinalizer) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
-	return d.builder.buildTools(ctx, agent, isSubAgent, d.runtimeInputs())
-}
-
-func (d *delegationFinalizer) runtimeFor(ctx context.Context) (*compiledRuntime, error) {
-	return d.builder.runtimeFor(ctx, d.runtimeInputs())
-}
-
 func (d *delegationFinalizer) makeAuthRefreshCallback(providerCfg config.ProviderConfig, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
-	return d.builder.makeAuthRefreshCallback(providerCfg, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
+	return d.builder.makeAuthRefreshCallback(providerCfg, active, d.operationPort())
+}
+
+// operationPort assembles the {agent, inputs} pair every credential-refresh
+// and rotation call needs: the coordinator's current top-level agent (for
+// UpdateModels) and this generation's runtime inputs (for rebuilding a
+// runtime after a refresh). Both turnDispatcher and delegationFinalizer
+// share the same agentPort pointer (see NewCoordinator), so this is the one
+// place that composes it rather than every call site rebuilding it.
+func (d *delegationFinalizer) operationPort() runtimeOperationPort {
+	return runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()}
 }
 
 // makeSubAgentAuthRefreshCallback is makeAuthRefreshCallback for a
@@ -409,19 +402,19 @@ func (d *delegationFinalizer) makeAuthRefreshCallback(providerCfg config.Provide
 // model, not the coordinator's, has to drive what a refresh stores into
 // active.
 func (d *delegationFinalizer) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, model Model, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
-	return d.builder.makeSubAgentAuthRefreshCallback(providerCfg, model, active, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
+	return d.builder.makeSubAgentAuthRefreshCallback(providerCfg, model, active, d.operationPort())
 }
 
 func (d *delegationFinalizer) waitForInteractiveReauth(ctx context.Context, providerID string) error {
-	return d.builder.waitForInteractiveReauth(ctx, providerID, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
+	return d.builder.waitForInteractiveReauth(ctx, providerID, d.operationPort())
 }
 
 func (d *delegationFinalizer) refreshTokenIfExpired(ctx context.Context, cfg config.ProviderConfig) error {
-	return d.builder.refreshTokenIfExpired(ctx, cfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
+	return d.builder.refreshTokenIfExpired(ctx, cfg, d.operationPort())
 }
 
 func (d *delegationFinalizer) retryAfterUnauthorized(ctx context.Context, cfg config.ProviderConfig) error {
-	return d.builder.retryAfterUnauthorized(ctx, cfg, runtimeOperationPort{agent: d.agentPort.current(), inputs: d.runtimeInputs()})
+	return d.builder.retryAfterUnauthorized(ctx, cfg, d.operationPort())
 }
 
 // SetDelegationTools atomically publishes the thread and task tool
@@ -506,11 +499,6 @@ func (d *delegationFinalizer) delegationToolsForRead() delegationToolsSnapshot {
 	return delegationToolsSnapshot{}
 }
 
-// threadsManager returns the thread adapter from one delegation generation.
-func (d *delegationFinalizer) threadsManager() tools.ThreadManager {
-	return d.delegationToolsForRead().threads
-}
-
 // tasksManager returns the task adapter from one delegation generation.
 func (d *delegationFinalizer) tasksManager() tools.TaskManager {
 	return d.delegationToolsForRead().tasks
@@ -555,34 +543,6 @@ func (d *delegationFinalizer) markSubSessionBusy(sessionID string) func() {
 		}
 		d.subSessions[sessionID]--
 	}
-}
-
-// updateParentSessionCost accumulates the cost from a child session to its
-// parent session.
-//
-// The accumulation is a single narrow UPDATE (cost = cost + delta), which
-// is what makes it safe against every other writer of that row. The
-// Get-modify-Save it replaces did not just race sibling delegations — it
-// wrote the whole row back, so a turn's usage save or a todo write that
-// landed between the read and the write was overwritten with the values
-// this call had read before them. parentCostMu is kept: two siblings
-// still read the child cost and issue their updates concurrently, and
-// serialising them keeps the published session events in a sensible
-// order.
-func (d *delegationFinalizer) updateParentSessionCost(ctx context.Context, childSessionID, parentSessionID string) error {
-	d.parentCostMu.Lock()
-	defer d.parentCostMu.Unlock()
-
-	childSession, err := d.sessions.Get(ctx, childSessionID)
-	if err != nil {
-		return fmt.Errorf("get child session: %w", err)
-	}
-
-	if err := d.sessions.AddCost(ctx, parentSessionID, childSession.Cost); err != nil {
-		return fmt.Errorf("add cost to parent session: %w", err)
-	}
-
-	return nil
 }
 
 // launchDelegation creates a durable background delegation through the
@@ -710,11 +670,6 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 		)
 	}
 
-	// Call session setup function if provided
-	if params.SessionSetup != nil {
-		params.SessionSetup(sessionID)
-	}
-
 	// Get model configuration
 	maxTokens := modelMaxOutputTokens(model)
 
@@ -758,13 +713,6 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 	releaseBusy := d.markSubSessionBusy(sessionID)
 	result, err := run(ctx)
 	releaseBusy()
-	// Legacy direct callers still own synchronous cost propagation. Task
-	// launches provide ChildSessionID and are finalized atomically by the store.
-	if params.ChildSessionID == "" {
-		if costErr := d.updateParentSessionCost(context.WithoutCancel(ctx), sessionID, params.SessionID); costErr != nil {
-			slog.Warn("Failed to update parent session cost", "child_session", sessionID, "parent_session", params.SessionID, "error", costErr)
-		}
-	}
 	// A run cancelled by the caller's context (app shutdown, a parent run
 	// being torn down, an explicit TaskManager.Cancel racing this one) must
 	// come back as a Go error, not as finishSubAgent's text-error response:
@@ -1109,6 +1057,26 @@ func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.C
 // directory, builds that delegation's own system prompt and sub-agent, and
 // hands back its run function and cleanup. Split out of agenticFetchTool
 // only to keep that closure's nesting shallow - behavior is unchanged.
+//
+// This builds its own NewSessionAgent by hand instead of going through
+// buildAgent/buildTools, deliberately: every tool this delegate gets is
+// rooted at tmpDir, a throwaway scratch directory, not the workspace's
+// real working directory - that confinement is the whole point of running
+// URL/search content through a disposable sub-agent rather than the
+// caller's own turn. buildToolsCtx.runtimeCfg (and so every toolSpecs
+// row) is always the workspace's own runtimeConfigSnapshot from
+// b.runtimeConfigSnapshot() - there is no per-call override to point one
+// delegation's tools at a different root - so routing through the shared
+// registry would hand this delegate read/glob/grep/web_fetch/web_search
+// (and, since the registry's core row is one grouped Build func, every
+// other core tool too - bash, edit, write included) scoped to the real
+// project instead of tmpDir. It would also wire web_fetch/web_search
+// through the live permission.Requester the registry's row uses, which
+// would prompt the user again for a fetch this delegation was already
+// granted permission for by the outer agentic_fetch call - see
+// TestAgenticFetchSubAgentView_OutsideWorkdirRequiresPermission for the
+// read tool's own (already-live) permission wiring. Both are why this
+// hand-builds its tool list rather than routing through buildAgent.
 func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *http.Client, params tools.AgenticFetchParams, validation agenticFetchValidationResult, call fantasy.ToolCall, childDepth int, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 	description := "Search the web and analyze results"
 	if params.URL != "" {
@@ -1142,29 +1110,53 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 			fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
 		}
 	}
-	promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), prompt.WithWorkingDir(tmpDir))
+	agent, err := d.buildAgenticFetchAgent(ctx, client, tmpDir)
 	if err != nil {
 		return nil, cleanup, err
+	}
+	// Anonymous: agentic_fetch has no named-agent identity of its own.
+	return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth, ""), cleanup, nil
+}
+
+// buildAgenticFetchAgent builds the sandboxed sub-agent one agentic-fetch
+// delegation runs on: its system prompt (from the agentic_fetch template,
+// rooted at tmpDir) and its hand-picked, tmpDir-scoped tool set (see
+// agenticFetchFactory's doc comment for why this can't go through
+// buildAgent). Split out of agenticFetchFactory so the agent itself - the
+// piece a test needs to check IsSubAgent and the tool set against - can be
+// built and inspected without also running a permission request or a
+// fetch.
+func (d *delegationFinalizer) buildAgenticFetchAgent(ctx context.Context, client *http.Client, tmpDir string) (SessionAgent, error) {
+	promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), prompt.WithWorkingDir(tmpDir))
+	if err != nil {
+		return nil, err
 	}
 	model, err := d.resolveAgentModel(ctx, config.Agent{}, true)
 	if err != nil {
-		return nil, cleanup, err
+		return nil, err
 	}
 	systemPrompt, err := promptTemplate.Build(ctx, model.Model.Provider(), model.Model.Model(), d.cfg)
 	if err != nil {
-		return nil, cleanup, err
+		return nil, err
 	}
 	providerCfg, ok := d.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
-		return nil, cleanup, errors.New("model provider not configured")
+		return nil, errors.New("model provider not configured")
 	}
 	searchBackend, err := d.resolveWebSearchBackend()
 	if err != nil {
-		return nil, cleanup, fmt.Errorf("web_search: %w", err)
+		return nil, fmt.Errorf("web_search: %w", err)
 	}
 	availability := tools.ResolveSystemToolAvailability()
-	agent := NewSessionAgent(SessionAgentOptions{
+	return NewSessionAgent(SessionAgentOptions{
 		Model: model, SystemPromptPrefix: providerCfg.SystemPromptPrefix, SystemPrompt: systemPrompt,
+		// This delegate never goes through buildAgent (see
+		// agenticFetchFactory's doc comment), so it must set IsSubAgent
+		// itself: preparePrompt only skips the parent todo-reminder
+		// injection (compat.go) for an agent explicitly marked as one, and
+		// this scratch-dir analysis agent has neither a todo list nor a
+		// "todos" tool to act on it with.
+		IsSubAgent:           true,
 		DisableAutoSummarize: d.cfg.Config().Options.DisableAutoSummarize,
 		AutoSummarizeAt:      d.cfg.Config().Options.AutoSummarizeAt,
 		Sessions:             d.sessions, Messages: d.messages,
@@ -1174,9 +1166,7 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 			tools.NewGlobTool(tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, d.cfg.Config().Tools.Grep),
 			tools.NewReadTool(d.lspManager, d.permissions, newFileTracking(d.filetracker), nil, tmpDir),
 		},
-	})
-	// Anonymous: agentic_fetch has no named-agent identity of its own.
-	return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth, ""), cleanup, nil
+	}), nil
 }
 
 // delegatableAgentID reports whether id names an agent a caller may hand
