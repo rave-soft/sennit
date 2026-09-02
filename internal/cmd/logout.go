@@ -144,7 +144,7 @@ func pickLoggedInProvider(ws workspace.ConfigReader) string {
 
 	var loggedIn []loggedInProvider
 	for _, platform := range oauthPlatforms {
-		if p, ok := cfg.Providers.Get(platform.ID); ok && p.OAuthToken != nil {
+		if p, ok := cfg.RuntimeProvider(platform.ID); ok && p.OAuthToken != nil {
 			loggedIn = append(loggedIn, loggedInProvider{id: platform.ID, name: platform.DisplayName})
 		}
 	}

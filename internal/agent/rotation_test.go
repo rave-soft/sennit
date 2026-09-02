@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
@@ -156,7 +157,7 @@ const diskCodexProviderJSON = `{"providers":{"codex":{"id":"codex","name":"Test"
 func TestMakeRateLimitCallback_Disabled_ReturnsNil(t *testing.T) {
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
-	cb := b.makeRateLimitCallback(config.ProviderConfig{ID: "p"}, nil, runtimeOperationPort{})
+	cb := b.makeRateLimitCallback(config.ProviderConfig{ID: "p"}, providerstate.Provider{}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -165,8 +166,8 @@ func TestMakeRateLimitCallback_Disabled_ReturnsNil(t *testing.T) {
 func TestMakeRateLimitCallback_NonRateLimitProvider_ReturnsNil(t *testing.T) {
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
-	cfg := config.ProviderConfig{ID: codex.ProviderID, Account: "a", Rotation: &config.RotationConfig{Enabled: true}}
-	cb := b.makeRateLimitCallback(cfg, nil, runtimeOperationPort{})
+	cfg := config.ProviderConfig{ID: codex.ProviderID, Rotation: &config.RotationConfig{Enabled: true}}
+	cb := b.makeRateLimitCallback(cfg, providerstate.Provider{Account: "a"}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -191,9 +192,11 @@ func TestMakeRateLimitCallback_SingleAccount_NoOp(t *testing.T) {
 	require.True(t, ok)
 	beforeVersion := co.cfg.CredentialVersion()
 
-	providerCfg, _ := co.cfg.Config().Providers.Get(authProviderID)
-	providerCfg.Account = "only"
-	cb := co.builder.makeRateLimitCallback(providerCfg, nil, runtimeOperationPort{})
+	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
+	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+	cb := co.builder.makeRateLimitCallback(providerCfg, cred, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 
 	err := cb(t.Context(), rateLimitErr(nil))
@@ -233,25 +236,27 @@ func TestMakeRateLimitCallback_RotatesAndAppliesNewCredentials(t *testing.T) {
 
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
 	runtime, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
 	require.NoError(t, err)
 	active := newActiveRuntime(runtime)
 
 	port := runtimeOperationPort{agent: co.dispatcher.agentPort.current(), inputs: co.delegation.runtimeInputs()}
-	cb := co.builder.makeRateLimitCallback(providerCfg, active, port)
+	cb := co.builder.makeRateLimitCallback(providerCfg, cred, active, port)
 	require.NotNil(t, cb)
 
 	err = cb(t.Context(), rateLimitErr(nil))
 	require.NoError(t, err, "a successful rotation must return nil so fantasy retries immediately")
 
-	after, ok := co.cfg.Config().Providers.Get(authProviderID)
+	after, ok := co.cfg.Config().RuntimeProvider(authProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-b", after.Account)
-	require.Equal(t, "key-b", after.APIKey, "the retried request's credentials come from ProviderConfig.APIKey")
+	require.Equal(t, "key-b", after.APIKey, "the retried request's credentials come from the runtime provider")
 
 	require.NotNil(t, active.load(), "the active runtime must be rebuilt so a retried request's ModelProvider sees it")
-	require.Equal(t, "acct-b", active.load().providerCfg.Account, "the rebuilt runtime must carry the NEW account, not the rate-limited one")
+	require.Equal(t, "acct-b", active.load().providerCredentials.Account, "the rebuilt runtime must carry the NEW account, not the rate-limited one")
 
 	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
 }
@@ -280,9 +285,11 @@ func TestMakeRateLimitCallback_AllExhausted_SurfacesOriginalError(t *testing.T) 
 
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 	beforeVersion := co.cfg.CredentialVersion()
 
-	cb := co.builder.makeRateLimitCallback(providerCfg, nil, runtimeOperationPort{})
+	cb := co.builder.makeRateLimitCallback(providerCfg, cred, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 
 	// acct-a is the only enabled account, and it is the one being marked
@@ -294,7 +301,7 @@ func TestMakeRateLimitCallback_AllExhausted_SurfacesOriginalError(t *testing.T) 
 	require.True(t, errors.As(err, &exhausted), "must return *accounts.ErrAllExhausted, not a different error, so the ORIGINAL 429 survives upstream")
 	require.Equal(t, authProviderID, exhausted.ProviderID)
 
-	after, ok := co.cfg.Config().Providers.Get(authProviderID)
+	after, ok := co.cfg.Config().RuntimeProvider(authProviderID)
 	require.True(t, ok)
 	require.Equal(t, "key-a", after.APIKey, "exhaustion must not change the active credentials")
 	require.Equal(t, beforeVersion, co.cfg.CredentialVersion())
@@ -324,8 +331,10 @@ func TestMakeRateLimitCallback_HonorsRetryAfterHeader(t *testing.T) {
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
-	cb := co.builder.makeRateLimitCallback(providerCfg, nil, runtimeOperationPort{})
+	cb := co.builder.makeRateLimitCallback(providerCfg, cred, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 
 	// First 429 rotates a -> b (debounce then blocks a second rotation).
@@ -378,6 +387,8 @@ func TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount(t *testing.T)
 
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
 	runtime, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
 	require.NoError(t, err)
@@ -386,11 +397,11 @@ func TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount(t *testing.T)
 	port := runtimeOperationPort{agent: co.dispatcher.agentPort.current(), inputs: co.delegation.runtimeInputs()}
 	// The callback is built once, exactly like turn_dispatcher.go does for
 	// the whole turn, and reused across both simulated 429s below.
-	cb := co.builder.makeRateLimitCallback(providerCfg, active, port)
+	cb := co.builder.makeRateLimitCallback(providerCfg, cred, active, port)
 	require.NotNil(t, cb)
 
 	require.NoError(t, cb(t.Context(), rateLimitErr(nil)), "first 429 rotates acct-a -> acct-b")
-	require.Equal(t, "acct-b", active.load().providerCfg.Account)
+	require.Equal(t, "acct-b", active.load().providerCredentials.Account)
 	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
 
 	err = cb(t.Context(), rateLimitErr(nil))
@@ -426,7 +437,7 @@ func codexProviderConfig(account string, enabled bool) config.ProviderConfig {
 func TestMakeThresholdRotateCallback_Disabled_ReturnsNil(t *testing.T) {
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
-	cb := b.makeThresholdRotateCallback(codexProviderConfig("a", false), nil, runtimeOperationPort{})
+	cb := b.makeThresholdRotateCallback(codexProviderConfig("a", false), providerstate.Provider{Account: "a"}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -437,7 +448,7 @@ func TestMakeThresholdRotateCallback_NonThresholdProvider_ReturnsNil(t *testing.
 	t.Parallel()
 	b := &runtimeBuilder{runtime: newRuntimeCache()}
 	cfg := config.ProviderConfig{ID: "some-other-provider", Rotation: &config.RotationConfig{Enabled: true}}
-	cb := b.makeThresholdRotateCallback(cfg, nil, runtimeOperationPort{})
+	cb := b.makeThresholdRotateCallback(cfg, providerstate.Provider{}, nil, runtimeOperationPort{})
 	require.Nil(t, cb)
 }
 
@@ -465,7 +476,7 @@ func TestMakeThresholdRotateCallback_BelowThreshold_NoOp(t *testing.T) {
 		codexUsage: codex.UsageFor,
 	}
 
-	cb := b.makeThresholdRotateCallback(providerCfg, nil, runtimeOperationPort{})
+	cb := b.makeThresholdRotateCallback(providerCfg, effective, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 	cb(t.Context())
 
@@ -497,7 +508,7 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 		codexUsage: codex.UsageFor,
 	}
 
-	cb := b.makeThresholdRotateCallback(providerCfg, nil, runtimeOperationPort{})
+	cb := b.makeThresholdRotateCallback(providerCfg, effective, nil, runtimeOperationPort{})
 	require.NotNil(t, cb)
 	cb(t.Context())
 
@@ -535,6 +546,8 @@ func TestMakeThresholdRotateCallback_SecondStepReadsRotatedAccountUsage(t *testi
 
 	providerCfg, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
 
 	runtime, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
 	require.NoError(t, err)
@@ -543,21 +556,21 @@ func TestMakeThresholdRotateCallback_SecondStepReadsRotatedAccountUsage(t *testi
 	port := runtimeOperationPort{agent: co.dispatcher.agentPort.current(), inputs: co.delegation.runtimeInputs()}
 	// Built once, exactly like turn_dispatcher.go does for the whole turn,
 	// and reused across both simulated steps below.
-	cb := co.builder.makeThresholdRotateCallback(providerCfg, active, port)
+	cb := co.builder.makeThresholdRotateCallback(providerCfg, cred, active, port)
 	require.NotNil(t, cb)
 
 	cb(t.Context())
-	after, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
+	after, ok := co.cfg.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-c-2", after.Account, "first step rotates over-threshold acct-over-2 to acct-c-2")
-	require.Equal(t, "acct-c-2", active.load().providerCfg.Account)
+	require.Equal(t, "acct-c-2", active.load().providerCredentials.Account)
 	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
 
 	// acct-c-2 has no recorded usage, so a step that correctly reads ITS
 	// (unknown) usage must be a no-op, not a repeat rotation driven by
 	// acct-over-2's stale, still-over-threshold snapshot.
 	cb(t.Context())
-	after, ok = co.cfg.Config().Providers.Get(codex.ProviderID)
+	after, ok = co.cfg.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, "acct-c-2", after.Account, "a later step must not re-rotate off the already-current account")
 	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated),
@@ -586,17 +599,19 @@ func testRotationConfigStore(t *testing.T) (*config.ConfigStore, error) {
 // config names, which may no longer be the provider this callback was built
 // for (the user switched the main model mid-turn). Trusting that runtime's
 // Account would mark/rotate an account this provider's Rotator never heard
-// of - the captured providerCfg.Account is what must come back instead.
+// of - the captured cred.Account is what must come back instead.
 func TestCurrentRotationAccount_ActiveForDifferentProvider_FallsBackToCaptured(t *testing.T) {
 	t.Parallel()
 
-	providerCfg := config.ProviderConfig{ID: "provider-x", Account: "captured-account"}
+	providerCfg := config.ProviderConfig{ID: "provider-x"}
+	cred := providerstate.Provider{Account: "captured-account"}
 	otherProviderRuntime := &compiledRuntime{
-		providerCfg: config.ProviderConfig{ID: "provider-y", Account: "other-provider-account"},
+		providerCfg:         config.ProviderConfig{ID: "provider-y"},
+		providerCredentials: providerstate.Provider{Account: "other-provider-account"},
 	}
 	active := newActiveRuntime(otherProviderRuntime)
 
-	got := currentRotationAccount(providerCfg, active)
+	got := currentRotationAccount(providerCfg, cred, active)
 	require.Equal(t, "captured-account", got, "active describes a different provider, so the captured account must win")
 }
 
@@ -607,13 +622,15 @@ func TestCurrentRotationAccount_ActiveForDifferentProvider_FallsBackToCaptured(t
 func TestCurrentRotationAccount_ActiveForSameProvider_UsesLoaded(t *testing.T) {
 	t.Parallel()
 
-	providerCfg := config.ProviderConfig{ID: "provider-x", Account: "captured-account"}
+	providerCfg := config.ProviderConfig{ID: "provider-x"}
+	cred := providerstate.Provider{Account: "captured-account"}
 	sameProviderRuntime := &compiledRuntime{
-		providerCfg: config.ProviderConfig{ID: "provider-x", Account: "rotated-account"},
+		providerCfg:         config.ProviderConfig{ID: "provider-x"},
+		providerCredentials: providerstate.Provider{Account: "rotated-account"},
 	}
 	active := newActiveRuntime(sameProviderRuntime)
 
-	got := currentRotationAccount(providerCfg, active)
+	got := currentRotationAccount(providerCfg, cred, active)
 	require.Equal(t, "rotated-account", got, "same provider: the loaded runtime's account is the live one")
 }
 

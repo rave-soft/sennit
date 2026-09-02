@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
@@ -44,13 +45,13 @@ func (b *runtimeBuilder) rotatorFor(providerCfg config.ProviderConfig) *accounts
 }
 
 // currentRotationAccount resolves the account a rotation callback should
-// act on for providerCfg's provider. providerCfg is captured by value once
-// per turn (turn_dispatcher.go), so after the first rotation it still names
+// act on for providerCfg's provider. cred is captured by value once per
+// turn (turn_dispatcher.go), so after the first rotation it still names
 // the pre-rotation account; active, if present, is restored on every
 // successful applyRotationPick with a freshly rebuilt runtime whose
-// providerCfg carries the account that is actually live now. Falling back
-// to providerCfg.Account keeps this correct for callers that pass a nil
-// active (e.g. no top-level agent to rebuild for).
+// providerCredentials carries the account that is actually live now.
+// Falling back to cred.Account keeps this correct for callers that pass a
+// nil active (e.g. no top-level agent to rebuild for).
 //
 // active is shared with makeAuthRefreshCallback, which stores whatever
 // runtimeFor built for the CURRENT config - not necessarily this provider.
@@ -59,15 +60,17 @@ func (b *runtimeBuilder) rotatorFor(providerCfg config.ProviderConfig) *accounts
 // sub-agent on a second provider, say), active now describes that other
 // provider. Trusting its Account blindly would mark/rotate an account this
 // provider's Rotator has never heard of. Only adopt the loaded runtime's
-// account when it was actually built for providerCfg; otherwise fall back
-// to the captured value exactly as when active is nil.
-func currentRotationAccount(providerCfg config.ProviderConfig, active *activeRuntime) string {
+// account when it was actually built for providerCfg (identity is compared
+// on providerCfg.ID, which is identical to providerCredentials.ID — both
+// are keyed by and set to the same provider id at build time); otherwise
+// fall back to the captured value exactly as when active is nil.
+func currentRotationAccount(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime) string {
 	if active != nil {
 		if runtime := active.load(); runtime != nil && runtime.providerCfg.ID == providerCfg.ID {
-			return runtime.providerCfg.Account
+			return runtime.providerCredentials.Account
 		}
 	}
-	return providerCfg.Account
+	return cred.Account
 }
 
 // accountLabel returns a's display name for a rotation notification:
@@ -134,18 +137,18 @@ func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID strin
 // over quota on a single-account setup - the user keeps using the current
 // (over-threshold) account rather than losing the step's own result over
 // a rotation that didn't work out.
-func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.ProviderConfig, active *activeRuntime, port runtimeOperationPort) func(context.Context) {
+func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, port runtimeOperationPort) func(context.Context) {
 	rotator := b.rotatorFor(providerCfg)
 	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateThreshold {
 		return nil
 	}
 	inputs := port.inputs
 	return func(ctx context.Context) {
-		// Resolve the account live rather than trusting providerCfg.Account:
-		// providerCfg is captured by value once per turn, so after a
+		// Resolve the account live rather than trusting cred.Account:
+		// cred is captured by value once per turn, so after a
 		// rotation it still names the pre-rotation account (see
 		// currentRotationAccount's doc comment).
-		account := currentRotationAccount(providerCfg, active)
+		account := currentRotationAccount(providerCfg, cred, active)
 		// RotateThreshold is Codex-only today (see capabilities.go), so
 		// reading its usage snapshot through the injected codexUsage
 		// lookup (production: codex.UsageFor) is deliberate, not a
@@ -228,20 +231,20 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 // treats as "rotation didn't help" - normal backoff resumes and the
 // ORIGINAL 429 (not this error) is what a caller ultimately sees; see
 // RetryWithExponentialBackoffRespectingRetryHeaders and runTurn.handleStreamError.
-func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig, active *activeRuntime, port runtimeOperationPort) fantasy.OnRateLimitFunc {
+func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, port runtimeOperationPort) fantasy.OnRateLimitFunc {
 	rotator := b.rotatorFor(providerCfg)
 	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateRateLimit {
 		return nil
 	}
 	inputs := port.inputs
 	return func(ctx context.Context, providerErr *fantasy.ProviderError) error {
-		// Resolve the account live rather than trusting providerCfg.Account:
-		// providerCfg is captured by value once per turn, so after a
+		// Resolve the account live rather than trusting cred.Account:
+		// cred is captured by value once per turn, so after a
 		// rotation it still names the pre-rotation account (see
 		// currentRotationAccount's doc comment) - without this, a second
 		// 429 on the newly-picked account would mark the WRONG account
 		// rate-limited and hot-loop retrying on the still-limited one.
-		account := currentRotationAccount(providerCfg, active)
+		account := currentRotationAccount(providerCfg, cred, active)
 		rotator.MarkRateLimited(account, retryAfterFromHeaders(providerErr))
 
 		all, err := b.accStore.List(providerCfg.ID)

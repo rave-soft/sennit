@@ -522,11 +522,15 @@ func (b *runtimeBuilder) runtimeFor(ctx context.Context, inputs runtimeToolInput
 		if !ok {
 			return nil, errModelProviderNotConfigured
 		}
+		providerCredentials, ok := runtimeCfg.config.RuntimeProvider(model.ModelCfg.Provider)
+		if !ok {
+			return nil, errModelProviderNotConfigured
+		}
 		options, temp, topP, topK, freqPenalty, presPenalty := b.mergeCallOptions(model, providerCfg)
 		maxTokens := modelMaxOutputTokens(model)
 		return &compiledRuntime{
 			key: key, model: model, tools: builtTools, systemPrompt: systemPrompt,
-			providerCfg: providerCfg, providerOptions: options,
+			providerCfg: providerCfg, providerCredentials: providerCredentials, providerOptions: options,
 			temperature: temp, topP: topP, topK: topK,
 			frequencyPenalty: freqPenalty, presencePenalty: presPenalty,
 			maxOutputTokens:      maxTokens,

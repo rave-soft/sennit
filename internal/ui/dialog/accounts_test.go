@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -105,7 +106,11 @@ func newAccountsTestCommon(t *testing.T, providerID, activeAccountID string) (*c
 		Options:   &config.Options{},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	}
-	cfg.Providers.Set(providerID, config.ProviderConfig{
+	cfg.Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+	// The active account lives on the runtime provider, not the
+	// disk-shaped one: RuntimeProviders is the sole carrier of live
+	// credential state.
+	cfg.SetRuntimeProvider(providerID, providerstate.Provider{
 		ID:      providerID,
 		Account: activeAccountID,
 	})

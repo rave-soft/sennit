@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
@@ -384,8 +385,8 @@ func (d *delegationFinalizer) buildAgent(ctx context.Context, prompt *prompt.Pro
 	return result, nil
 }
 
-func (d *delegationFinalizer) makeAuthRefreshCallback(providerCfg config.ProviderConfig, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
-	return d.builder.makeAuthRefreshCallback(providerCfg, active, d.operationPort())
+func (d *delegationFinalizer) makeAuthRefreshCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
+	return d.builder.makeAuthRefreshCallback(providerCfg, cred, active, d.operationPort())
 }
 
 // operationPort assembles the {agent, inputs} pair every credential-refresh
@@ -402,20 +403,20 @@ func (d *delegationFinalizer) operationPort() runtimeOperationPort {
 // delegation - see buildSubAgentCall's comment for why the sub-agent's own
 // model, not the coordinator's, has to drive what a refresh stores into
 // active.
-func (d *delegationFinalizer) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, model Model, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
-	return d.builder.makeSubAgentAuthRefreshCallback(providerCfg, model, active, d.operationPort())
+func (d *delegationFinalizer) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, model Model, active *activeRuntime) func(context.Context, *fantasy.ProviderError) error {
+	return d.builder.makeSubAgentAuthRefreshCallback(providerCfg, cred, model, active, d.operationPort())
 }
 
 func (d *delegationFinalizer) waitForInteractiveReauth(ctx context.Context, providerID string) error {
 	return d.builder.waitForInteractiveReauth(ctx, providerID, d.operationPort())
 }
 
-func (d *delegationFinalizer) refreshTokenIfExpired(ctx context.Context, cfg config.ProviderConfig) error {
-	return d.builder.refreshTokenIfExpired(ctx, cfg, d.operationPort())
+func (d *delegationFinalizer) refreshTokenIfExpired(ctx context.Context, cfg config.ProviderConfig, cred providerstate.Provider) error {
+	return d.builder.refreshTokenIfExpired(ctx, cfg, cred, d.operationPort())
 }
 
-func (d *delegationFinalizer) retryAfterUnauthorized(ctx context.Context, cfg config.ProviderConfig) error {
-	return d.builder.retryAfterUnauthorized(ctx, cfg, d.operationPort())
+func (d *delegationFinalizer) retryAfterUnauthorized(ctx context.Context, cfg config.ProviderConfig, cred providerstate.Provider) error {
+	return d.builder.retryAfterUnauthorized(ctx, cfg, cred, d.operationPort())
 }
 
 // SetDelegationTools atomically publishes the thread and task tool
@@ -674,7 +675,12 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 	// Get model configuration
 	maxTokens := modelMaxOutputTokens(model)
 
-	providerCfg, ok := d.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	cfg := d.cfg.Config()
+	providerCfg, ok := cfg.Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+	}
+	providerCredentials, ok := cfg.RuntimeProvider(model.ModelCfg.Provider)
 	if !ok {
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
 	}
@@ -697,7 +703,7 @@ func (d *delegationFinalizer) runSubAgent(ctx context.Context, params subAgentPa
 	// below runs it with ctx directly, the detachable path with a child
 	// context that can outlive ctx.
 	run := func(runCtx context.Context) (*fantasy.AgentResult, error) {
-		call := d.buildSubAgentCall(params, sessionID, priorMessages, maxTokens, model, providerCfg, active)
+		call := d.buildSubAgentCall(params, sessionID, priorMessages, maxTokens, model, providerCfg, providerCredentials, active)
 		if runtimeAgent, ok := params.Agent.(interface {
 			runWithStreamRuntime(context.Context, SessionAgentCall, streamRuntime) (*fantasy.AgentResult, error)
 		}); ok && runtime != nil {
@@ -790,7 +796,7 @@ func (d *delegationFinalizer) subAgentCarryOverMessages(ctx context.Context, par
 // a successful mid-delegation credential refresh depends on (see
 // runSubAgent's own comment on active) - so this must stay a plain
 // pass-through, never a copy or a fresh instance.
-func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID string, priorMessages []message.Message, maxTokens int64, model Model, providerCfg config.ProviderConfig, active *activeRuntime) SessionAgentCall {
+func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID string, priorMessages []message.Message, maxTokens int64, model Model, providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime) SessionAgentCall {
 	return SessionAgentCall{
 		SessionID:       sessionID,
 		Depth:           params.Depth,
@@ -808,7 +814,7 @@ func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
 		ActiveRuntime:    active,
-		OnAuthRefresh:    d.makeSubAgentAuthRefreshCallback(providerCfg, model, active),
+		OnAuthRefresh:    d.makeSubAgentAuthRefreshCallback(providerCfg, cred, model, active),
 	}
 }
 

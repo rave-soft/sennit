@@ -17,12 +17,13 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
-func (b *runtimeBuilder) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
-	if providerCfg.OAuthToken == nil || !providerCfg.OAuthToken.IsExpired() {
+func (b *runtimeBuilder) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig, cred providerstate.Provider, port runtimeOperationPort) error {
+	if cred.OAuthToken == nil || !cred.OAuthToken.IsExpired() {
 		return nil
 	}
 	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
@@ -34,9 +35,9 @@ func (b *runtimeBuilder) refreshTokenIfExpired(ctx context.Context, providerCfg 
 // refresh token is revoked, and for Bedrock providers whose AWS SSO session
 // has expired, it triggers interactive re-authentication and blocks until the
 // user completes it (or the context is cancelled).
-func (b *runtimeBuilder) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
+func (b *runtimeBuilder) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, cred providerstate.Provider, port runtimeOperationPort) error {
 	switch {
-	case providerCfg.OAuthToken != nil:
+	case cred.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
 		if err := b.refreshOAuth2Token(ctx, providerCfg, port); err != nil {
 			// If the refresh token was revoked, trigger interactive
@@ -55,9 +56,9 @@ func (b *runtimeBuilder) retryAfterUnauthorized(ctx context.Context, providerCfg
 		return nil
 	case providerCfg.AWSAuthRefresh != "":
 		return b.refreshAWSCredentials(ctx, providerCfg, port)
-	case strings.Contains(providerCfg.APIKey, "$"):
+	case strings.Contains(cred.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
-		return b.refreshApiKeyTemplate(ctx, providerCfg, port)
+		return b.refreshApiKeyTemplate(ctx, providerCfg, cred, port)
 	default:
 		return nil
 	}
@@ -109,15 +110,15 @@ func (b *runtimeBuilder) waitForInteractiveReauth(ctx context.Context, providerI
 // nil if no refresh mechanism is configured for the provider. If active is
 // non-nil, it is refreshed with the recompiled runtime after a successful
 // credential refresh; pass nil when there is no active runtime to track.
-func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConfig, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
+func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
 	inputs := port.inputs
-	if providerCfg.OAuthToken == nil &&
-		!strings.Contains(providerCfg.APIKey, "$") &&
+	if cred.OAuthToken == nil &&
+		!strings.Contains(cred.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
-		if err := b.retryAfterUnauthorized(ctx, providerCfg, port); err != nil {
+		if err := b.retryAfterUnauthorized(ctx, providerCfg, cred, port); err != nil {
 			return err
 		}
 		if active != nil {
@@ -146,14 +147,14 @@ func (b *runtimeBuilder) makeAuthRefreshCallback(providerCfg config.ProviderConf
 // scoped to model (the sub-agent's own, already resolved by buildAgentModel
 // in buildAgent) instead, so what lands in active
 // actually matches what modelProvider is comparing against.
-func (b *runtimeBuilder) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, model Model, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
-	if providerCfg.OAuthToken == nil &&
-		!strings.Contains(providerCfg.APIKey, "$") &&
+func (b *runtimeBuilder) makeSubAgentAuthRefreshCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, model Model, active *activeRuntime, port runtimeOperationPort) func(context.Context, *fantasy.ProviderError) error {
+	if cred.OAuthToken == nil &&
+		!strings.Contains(cred.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
-		if err := b.retryAfterUnauthorized(ctx, providerCfg, port); err != nil {
+		if err := b.retryAfterUnauthorized(ctx, providerCfg, cred, port); err != nil {
 			return err
 		}
 		if active != nil {
@@ -170,16 +171,21 @@ func (b *runtimeBuilder) makeSubAgentAuthRefreshCallback(providerCfg config.Prov
 // buildSubAgentRuntime rebuilds model's provider/language-model pair against
 // the current config (i.e. after a credential refresh has landed a new
 // token or key), the same way buildAgentModel does for
-// a fresh delegation build. It re-reads providerCfg from the live config
-// store rather than trusting a value captured before the refresh, since
-// that value's credential is exactly what the refresh just replaced.
+// a fresh delegation build. It re-reads providerCfg and providerCredentials
+// from the live config store rather than trusting values captured before
+// the refresh, since those are exactly what the refresh just replaced.
 // Deliberately minimal: the only field a sub-agent's OnAuthRefresh path
 // reads back out of the stored compiledRuntime is .model (see
 // modelProvider in turn.go and summarize's ModelProvider in usage.go) -
 // tools and system prompt are not rebuilt here, unlike runtimeFor's
 // coder-runtime construction, because nothing on this path consults them.
 func (b *runtimeBuilder) buildSubAgentRuntime(ctx context.Context, model Model) (*compiledRuntime, error) {
-	providerCfg, ok := b.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	cfg := b.cfg.Config()
+	providerCfg, ok := cfg.Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	providerCredentials, ok := cfg.RuntimeProvider(model.ModelCfg.Provider)
 	if !ok {
 		return nil, errModelProviderNotConfigured
 	}
@@ -187,7 +193,7 @@ func (b *runtimeBuilder) buildSubAgentRuntime(ctx context.Context, model Model) 
 	if err != nil {
 		return nil, err
 	}
-	return &compiledRuntime{model: rebuilt, providerCfg: providerCfg}, nil
+	return &compiledRuntime{model: rebuilt, providerCfg: providerCfg, providerCredentials: providerCredentials}, nil
 }
 
 func (b *runtimeBuilder) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
@@ -202,15 +208,15 @@ func (b *runtimeBuilder) refreshOAuth2Token(ctx context.Context, providerCfg con
 	return b.UpdateModels(ctx, agent, inputs)
 }
 
-func (b *runtimeBuilder) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig, port runtimeOperationPort) error {
+func (b *runtimeBuilder) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig, cred providerstate.Provider, port runtimeOperationPort) error {
 	agent, inputs := port.agent, port.inputs
-	newAPIKey, err := b.cfg.Resolve(providerCfg.APIKey)
+	newAPIKey, err := b.cfg.Resolve(cred.APIKeyTemplate)
 	if err != nil {
 		slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
 	}
 
-	if err := b.cfg.UpdateProviderCredentials(providerCfg.ID, newAPIKey, providerCfg.OAuthToken); err != nil {
+	if err := b.cfg.UpdateProviderCredentials(providerCfg.ID, newAPIKey, cred.OAuthToken); err != nil {
 		return err
 	}
 

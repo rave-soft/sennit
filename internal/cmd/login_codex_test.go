@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -339,6 +340,9 @@ type codexLoginTokenFake struct {
 func (w *codexLoginTokenFake) Config() *config.Config {
 	return &config.Config{
 		Providers: csync.NewMap(map[string]config.ProviderConfig{
+			codex.ProviderID: {ID: codex.ProviderID},
+		}),
+		RuntimeProviders: csync.NewMap(map[string]providerstate.Provider{
 			codex.ProviderID: {ID: codex.ProviderID, OAuthToken: &oauth.Token{AccessToken: "existing"}},
 		}),
 	}

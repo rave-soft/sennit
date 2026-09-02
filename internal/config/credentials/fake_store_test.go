@@ -69,13 +69,16 @@ func (f *fakeStore) HasConfigField(_ config.Scope, key string) bool {
 func (f *fakeStore) UpdateProviderCredentials(providerID, apiKey string, token *oauth.Token) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	p, ok := f.cfg.Providers.Get(providerID)
+	if _, ok := f.cfg.Providers.Get(providerID); !ok {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
+	rp, ok := f.cfg.RuntimeProvider(providerID)
 	if !ok {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
-	p.APIKey = apiKey
-	p.OAuthToken = token
-	f.cfg.Providers.Set(providerID, p)
+	rp.APIKey = apiKey
+	rp.OAuthToken = token
+	f.cfg.SetRuntimeProvider(providerID, rp)
 	return nil
 }
 
@@ -86,16 +89,24 @@ func (f *fakeStore) SetProviderAPIKey(_ config.Scope, providerID string, apiKey 
 	if !ok {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
+	rp, ok := f.cfg.RuntimeProvider(providerID)
+	if !ok {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
 	switch v := apiKey.(type) {
 	case string:
 		p.APIKey = v
+		rp.APIKey = v
 	case *oauth.Token:
 		p.APIKey = v.AccessToken
 		p.OAuthToken = v
+		rp.APIKey = v.AccessToken
+		rp.OAuthToken = v
 	default:
 		return fmt.Errorf("unsupported credential type %T for provider %s", apiKey, providerID)
 	}
 	f.cfg.Providers.Set(providerID, p)
+	f.cfg.SetRuntimeProvider(providerID, rp)
 	return f.writeFields(providerID, p)
 }
 

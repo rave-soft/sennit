@@ -195,19 +195,24 @@ func TestUpdateProviderAccount_EmptyConfiguredFallsBackToAccountProxy(t *testing
 	require.Equal(t, "http://account:9090", provider.ProxyURL)
 }
 
-// TestUpdateProviderCredentials_PublishesToBothProvidersAndRuntime is the
-// regression test for the bug where UpdateProviderAccount stopped writing
-// the published credential onto cfg.Providers, leaving readers that still
-// take the token from there (credentials.Manager's refresh path,
-// runtime_builder.go) looking at a stale entry forever — the very next read
-// would see the just-refreshed token as still expired. ProxyURL and
-// APIKeyTemplate must NOT be mirrored: ProviderConfig has no such fields,
-// and an account's effective proxy/template only ever live in the runtime
-// view (see reload.go's carry-forward comment).
-func TestUpdateProviderCredentials_PublishesToBothProvidersAndRuntime(t *testing.T) {
+// TestUpdateProviderCredentials_RuntimeProviderIsTheSoleCredentialView pins
+// the current state, post credential-classification: RuntimeProviders is
+// the only view a published credential lands on. cfg.Providers, the
+// disk-shaped entry, is left exactly as it was before the call — no
+// mirroring, so a reader that still took a credential from there (as
+// credentials.Manager's refresh path and runtime_builder.go used to)
+// would see a stale value forever, which is exactly why every such reader
+// was moved onto RuntimeProvider instead. ProxyURL and APIKeyTemplate were
+// never mirrored either: ProviderConfig has no APIKeyTemplate field, and
+// its ProxyURL means the provider's own configured proxy, not an
+// account's effective override (see reload.go's carry-forward comment).
+func TestUpdateProviderCredentials_RuntimeProviderIsTheSoleCredentialView(t *testing.T) {
 	t.Parallel()
 
 	store := newCodexTestStoreWithProxy(t, "http://provider:8080")
+
+	configuredBefore, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
 
 	newToken := fakeCodexJWT(t, "acct-new")
 	accountProxy := "http://account:9090"
@@ -220,13 +225,6 @@ func TestUpdateProviderCredentials_PublishesToBothProvidersAndRuntime(t *testing
 	}
 	require.NoError(t, store.UpdateProviderAccount(codex.ProviderID, cred))
 
-	configured, ok := store.Config().Providers.Get(codex.ProviderID)
-	require.True(t, ok)
-	require.Equal(t, newToken, configured.APIKey, "Config().Providers must see the new token")
-	require.NotNil(t, configured.OAuthToken)
-	require.Equal(t, newToken, configured.OAuthToken.AccessToken)
-	require.Equal(t, "acct-new", configured.Account)
-
 	runtime, ok := store.Config().RuntimeProvider(codex.ProviderID)
 	require.True(t, ok)
 	require.Equal(t, newToken, runtime.APIKey, "RuntimeProvider must see the new token")
@@ -236,6 +234,12 @@ func TestUpdateProviderCredentials_PublishesToBothProvidersAndRuntime(t *testing
 	require.Equal(t, "$SHOULD_NOT_LEAK", runtime.APIKeyTemplate, "runtime side still gets the template")
 	require.Equal(t, "http://account:9090", runtime.ProxyURL, "runtime side gets the account's effective proxy")
 
+	configured, ok := store.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, configuredBefore.APIKey, configured.APIKey,
+		"Config().Providers must not change — RuntimeProvider is the only credential view now")
+	require.Equal(t, configuredBefore.OAuthToken, configured.OAuthToken)
+	require.Equal(t, configuredBefore.Account, configured.Account)
 	require.Equal(t, "http://provider:8080", configured.ProxyURL,
 		"the account's proxy override must not leak into Providers — it is a runtime-only concept")
 }

@@ -52,10 +52,17 @@ func TestRecordAccount_MigratesExistingAndAddsNew(t *testing.T) {
 
 	store := newRecordAccountStore(t)
 	oldToken := fakeCodexJWT(t, "acct-old")
+	// The legacy, pre-account credential lived on ProviderConfig; a real
+	// load would compile the identical value into RuntimeProviders too
+	// (see providerload/loader.go), so both are set here to match.
 	provider, _ := store.Config().Providers.Get(codex.ProviderID)
 	provider.APIKey = oldToken
 	provider.OAuthToken = &oauth.Token{AccessToken: oldToken}
 	store.Config().Providers.Set(codex.ProviderID, provider)
+	runtimeProvider, _ := store.Config().RuntimeProvider(codex.ProviderID)
+	runtimeProvider.APIKey = oldToken
+	runtimeProvider.OAuthToken = &oauth.Token{AccessToken: oldToken}
+	store.Config().SetRuntimeProvider(codex.ProviderID, runtimeProvider)
 
 	accStore := newTestAccountsStore(t)
 	newToken := fakeCodexJWT(t, "acct-new")

@@ -10,6 +10,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 )
 
 var errRuntimeChanged = errors.New("agent runtime changed while it was being built")
@@ -30,7 +31,17 @@ type compiledRuntime struct {
 	// consult the live ConfigStore after runtimeFor returns: config reloads and
 	// credential rotation are allowed to publish a new runtime while the old
 	// one is still executing.
-	providerCfg          config.ProviderConfig
+	providerCfg config.ProviderConfig
+	// providerCredentials is providerCfg's RuntimeProviders counterpart,
+	// captured at the same moment for the same reason providerCfg is: a
+	// Run must not consult the live ConfigStore after runtimeFor returns,
+	// so the credential a refresh or rotation acts on has to be the one
+	// this turn started with, not whatever RuntimeProviders holds by the
+	// time a retry fires. credential_refresh.go and rotation.go read
+	// OAuthToken/APIKey/APIKeyTemplate/Account/ProxyURL from here —
+	// providerCfg no longer carries live credentials at all. Do not
+	// replace this with a live cfg.RuntimeProvider(id) lookup.
+	providerCredentials  providerstate.Provider
 	providerOptions      fantasy.ProviderOptions
 	temperature          *float64
 	topP                 *float64

@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -80,6 +81,9 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderCo
 	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
+	effective, err := providerruntime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
+	require.NoError(t, err)
+	cfg.Config().SetRuntimeProvider(providerCfg.ID, effective)
 	coord := &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,

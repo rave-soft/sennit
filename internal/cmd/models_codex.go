@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/spf13/cobra"
 )
 
@@ -16,10 +17,10 @@ import (
 // `sennit login codex`.
 func codexConfigured(cfg *config.ConfigStore) bool {
 	current := cfg.Config()
-	if current == nil || current.Providers == nil {
+	if current == nil {
 		return false
 	}
-	pc, ok := current.Providers.Get(codex.ProviderID)
+	pc, ok := current.RuntimeProvider(codex.ProviderID)
 	return ok && pc.OAuthToken != nil
 }
 
@@ -33,17 +34,25 @@ func codexConfigured(cfg *config.ConfigStore) bool {
 // model on the account, or a field Sennit has started reading, as
 // max_context_window was) is to sign in again.
 func refreshCodexModels(ctx context.Context, cmd *cobra.Command, cfg *config.ConfigStore) error {
-	pc, ok := cfg.Config().Providers.Get(codex.ProviderID)
-	if !ok || pc.OAuthToken == nil {
+	current := cfg.Config()
+	// Models comes off the disk-shaped entry (what refresh is about to
+	// diff against and overwrite); the credential and effective proxy
+	// come off the runtime provider, the only view that carries them.
+	pc, ok := current.Providers.Get(codex.ProviderID)
+	if !ok {
+		return fmt.Errorf("not signed in to Codex; run `sennit login codex`")
+	}
+	cred, ok := current.RuntimeProvider(codex.ProviderID)
+	if !ok || cred.OAuthToken == nil {
 		return fmt.Errorf("not signed in to Codex; run `sennit login codex`")
 	}
 
-	token, err := codexRefreshToken(ctx, cfg, pc)
+	token, err := codexRefreshToken(ctx, cfg, cred)
 	if err != nil {
 		return err
 	}
 
-	models, err := codex.FetchModels(ctx, pc.ProxyURL, token.AccessToken, codex.AccountID(token.AccessToken))
+	models, err := codex.FetchModels(ctx, cred.ProxyURL, token.AccessToken, codex.AccountID(token.AccessToken))
 	if err != nil {
 		return err
 	}
@@ -79,17 +88,17 @@ func refreshCodexModels(ctx context.Context, cmd *cobra.Command, cfg *config.Con
 // so spending ours to list models would log out whichever tool holds the
 // older one. An exchange is the last resort, and its result is persisted —
 // a rotation that is not written down strands the next refresh.
-func codexRefreshToken(ctx context.Context, cfg *config.ConfigStore, pc config.ProviderConfig) (*oauth.Token, error) {
-	if !pc.OAuthToken.IsExpired() {
-		return pc.OAuthToken, nil
+func codexRefreshToken(ctx context.Context, cfg *config.ConfigStore, cred providerstate.Provider) (*oauth.Token, error) {
+	if !cred.OAuthToken.IsExpired() {
+		return cred.OAuthToken, nil
 	}
-	if token, ok := codex.TokenFromDiskFor(codex.AccountID(pc.APIKey)); ok && !token.IsExpired() {
+	if token, ok := codex.TokenFromDiskFor(codex.AccountID(cred.APIKey)); ok && !token.IsExpired() {
 		return token, nil
 	}
-	if pc.OAuthToken.RefreshToken == "" {
+	if cred.OAuthToken.RefreshToken == "" {
 		return nil, fmt.Errorf("the Codex login has expired and cannot be refreshed; run `sennit login codex -f`")
 	}
-	token, err := codex.RefreshToken(ctx, pc.ProxyURL, pc.OAuthToken.RefreshToken)
+	token, err := codex.RefreshToken(ctx, cred.ProxyURL, cred.OAuthToken.RefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("could not refresh the Codex login: %w", err)
 	}

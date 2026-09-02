@@ -161,7 +161,7 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 	var proxyURL string
 	cfg := ws.Config()
 	if cfg != nil {
-		if pc, ok := cfg.Providers.Get("copilot"); ok {
+		if pc, ok := cfg.RuntimeProvider("copilot"); ok {
 			proxyURL = pc.ProxyURL
 			if !force && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to GitHub Copilot.")

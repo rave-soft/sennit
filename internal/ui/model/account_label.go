@@ -37,7 +37,14 @@ type accountLabelInfo struct {
 }
 
 // accountLabelsLoadedMsg carries the result of refreshAccountLabelCmd.
+//
+// uiOwned: dispatched from Init and from several account/model dialog
+// actions. Routed by active screen instead, a thread's own account-label
+// refresh could update the main screen's sidebar cache instead, or vice
+// versa.
 type accountLabelsLoadedMsg struct {
+	uiOwned
+
 	providerID string
 	info       accountLabelInfo
 }
@@ -49,17 +56,17 @@ type accountLabelsLoadedMsg struct {
 // the cached entry rather than surfacing an error dialog — the sidebar
 // silently falls back to its no-label form, the same as for a provider
 // with only one account.
-func refreshAccountLabelCmd(com *common.Common, providerID string) tea.Cmd {
+func refreshAccountLabelCmd(com *common.Common, owner *UI, providerID string) tea.Cmd {
 	if providerID == "" {
 		return nil
 	}
 	return func() tea.Msg {
 		accs, err := com.Workspace.ListAccounts(providerID)
 		if err != nil || len(accs) <= 1 {
-			return accountLabelsLoadedMsg{providerID: providerID}
+			return accountLabelsLoadedMsg{uiOwned: uiOwned{owner: owner}, providerID: providerID}
 		}
 		activeID := ""
-		if pc, ok := com.Config().Providers.Get(providerID); ok {
+		if pc, ok := com.Config().RuntimeProvider(providerID); ok {
 			activeID = pc.Account
 		}
 		label := ""
@@ -69,7 +76,7 @@ func refreshAccountLabelCmd(com *common.Common, providerID string) tea.Cmd {
 				break
 			}
 		}
-		return accountLabelsLoadedMsg{providerID: providerID, info: accountLabelInfo{label: label, multiple: true}}
+		return accountLabelsLoadedMsg{uiOwned: uiOwned{owner: owner}, providerID: providerID, info: accountLabelInfo{label: label, multiple: true}}
 	}
 }
 

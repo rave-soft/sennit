@@ -56,7 +56,7 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 
 	if !force {
 		if cfg := ws.Config(); cfg != nil {
-			if pc, ok := cfg.Providers.Get(codex.ProviderID); ok && pc.OAuthToken != nil {
+			if pc, ok := cfg.RuntimeProvider(codex.ProviderID); ok && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to OpenAI Codex.")
 				fmt.Println("Use --force to re-authenticate.")
 				return nil

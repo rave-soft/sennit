@@ -165,10 +165,14 @@ func (m *Manager) refreshOAuthTokenLocked(ctx context.Context, scope config.Scop
 	if !exists {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
-	if providerConfig.OAuthToken == nil {
+	cred, exists := cfg.RuntimeProvider(providerID)
+	if !exists {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
+	if cred.OAuthToken == nil {
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
-	entryToken := providerConfig.OAuthToken
+	entryToken := cred.OAuthToken
 
 	// Acquire the per-provider cross-process refresh lock. This is a
 	// dedicated lock file, not the config-write lock, and it does not take
@@ -417,26 +421,28 @@ func (m *Manager) providerAccount(providerID string) string {
 	if cfg == nil {
 		return ""
 	}
-	pc, ok := cfg.Providers.Get(providerID)
+	rp, ok := cfg.RuntimeProvider(providerID)
 	if !ok {
 		return ""
 	}
-	return codex.AccountID(pc.APIKey)
+	return codex.AccountID(rp.APIKey)
 }
 
-// providerProxy returns the proxy configured for a provider, or "" when it
-// has none. A missing provider is not an error here: the refresh path can
-// run while the entry is mid-rewrite, and no proxy is the right default.
+// providerProxy returns the effective proxy for a provider (its own
+// configured route, or an active account's override — see
+// providerstate.Provider.ProxyURL), or "" when it has none. A missing
+// provider is not an error here: the refresh path can run while the entry
+// is mid-rewrite, and no proxy is the right default.
 func (m *Manager) providerProxy(providerID string) string {
 	cfg := m.store.Config()
 	if cfg == nil {
 		return ""
 	}
-	pc, ok := cfg.Providers.Get(providerID)
+	rp, ok := cfg.RuntimeProvider(providerID)
 	if !ok {
 		return ""
 	}
-	return pc.ProxyURL
+	return rp.ProxyURL
 }
 
 // applyToken updates the in-memory provider config with the given token.

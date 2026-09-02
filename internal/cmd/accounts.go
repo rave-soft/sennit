@@ -395,7 +395,7 @@ var (
 func printAccountList(ws workspace.ConfigReader, providerID string, accts []accounts.Account) {
 	activeID := ""
 	if cfg := ws.Config(); cfg != nil {
-		if pc, ok := cfg.Providers.Get(providerID); ok {
+		if pc, ok := cfg.RuntimeProvider(providerID); ok {
 			activeID = pc.Account
 		}
 	}

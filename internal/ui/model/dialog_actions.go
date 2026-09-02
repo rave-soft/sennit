@@ -73,9 +73,9 @@ func (m *UI) updateCoderModelCmd(extraGuard func() tea.Cmd, mutate func(*config.
 	ctx := m.com.Context()
 	return updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
 		if err != nil {
-			return modelSettingUpdatedMsg{Err: err, generation: generation}
+			return modelSettingUpdatedMsg{uiOwned: uiOwned{owner: m}, Err: err, generation: generation}
 		}
-		return modelSettingUpdatedMsg{Err: ws.UpdateAgentModel(ctx), Info: info, generation: generation}
+		return modelSettingUpdatedMsg{uiOwned: uiOwned{owner: m}, Err: ws.UpdateAgentModel(ctx), Info: info, generation: generation}
 	}), true
 }
 
@@ -152,7 +152,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 				"Notification settings are already being updated",
 				"options.notifications", style,
 				func(err error, generation uint64) tea.Msg {
-					return notificationStyleSetMsg{Err: err, Style: style, generation: generation}
+					return notificationStyleSetMsg{uiOwned: uiOwned{owner: m}, Err: err, Style: style, generation: generation}
 				})
 			cmds = append(cmds, cmd)
 		}
@@ -194,7 +194,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			"Transparency is already being updated",
 			"options.tui.transparent", desired,
 			func(err error, generation uint64) tea.Msg {
-				return transparentToggledMsg{Err: err, Enabled: desired, generation: generation}
+				return transparentToggledMsg{uiOwned: uiOwned{owner: m}, Err: err, Enabled: desired, generation: generation}
 			})
 		cmds = append(cmds, cmd)
 		if started {
@@ -296,7 +296,7 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			case dialog.PermissionDeny:
 				accepted = workspace.PermissionDeny(perm)
 			}
-			return permissionResponseMsg{Accepted: accepted, Permission: permissionID, generation: generation}
+			return permissionResponseMsg{uiOwned: uiOwned{owner: m}, Accepted: accepted, Permission: permissionID, generation: generation}
 		})
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
@@ -325,7 +325,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// between its stored accounts instead of starting the auth flow
 		// over again. Both checks are pure in-memory reads, so onboarding
 		// and a fresh (never-configured) provider are unaffected.
-		if pc, ok := m.com.Config().Providers.Get(msg.ProviderID); ok && (pc.APIKey != "" || pc.OAuthToken != nil) {
+		if pc, ok := m.com.Config().RuntimeProvider(msg.ProviderID); ok && (pc.APIKey != "" || pc.OAuthToken != nil) {
 			if cmd := m.openAccountsDialog(m.com, msg.ProviderID); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -360,12 +360,12 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		})
 	case dialog.ActionAccountSaved:
 		m.dialog.CloseDialog(dialog.AccountFormID)
-		cmds = append(cmds, reloadAccountsCmd(m.com, msg.ProviderID), refreshAccountLabelCmd(m.com, msg.ProviderID))
+		cmds = append(cmds, reloadAccountsCmd(m.com, msg.ProviderID), refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionRequestAccountRemoval:
 		m.dialog.OpenDialog(dialog.NewAccountRemoveConfirm(m.com, msg.ProviderID, msg.Account))
 	case dialog.ActionRemoveAccountConfirmed:
 		m.dialog.CloseDialog(dialog.AccountRemoveConfirmID)
-		cmds = append(cmds, removeAccountCmd(m.com, msg.ProviderID, msg.AccountID), refreshAccountLabelCmd(m.com, msg.ProviderID))
+		cmds = append(cmds, removeAccountCmd(m.com, msg.ProviderID, msg.AccountID), refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionAccountActivated:
 		// See ActionAccountActivated's doc comment: this used to be a
 		// bare ActionClose{} handled by applyChromeDialogAction's default
@@ -373,7 +373,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// different account also refreshes the sidebar's cached label
 		// for the newly active one (see account_label.go).
 		m.dialog.CloseDialog(dialog.AccountsID)
-		cmds = append(cmds, refreshAccountLabelCmd(m.com, msg.ProviderID))
+		cmds = append(cmds, refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionOpenProviderSettings:
 		m.dialog.OpenDialog(dialog.NewProviderSettings(m.com, msg.ProviderID))
 	case dialog.ActionSubmitProviderSettings:
@@ -451,9 +451,9 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		capturedModel := model
 		cmds = append(cmds, updatePreferredModelCmd(ws, capturedModel, func(err error) tea.Msg {
 			if err != nil {
-				return providerConfiguredResult{Err: err, generation: generation}
+				return providerConfiguredResult{uiOwned: uiOwned{owner: m}, Err: err, generation: generation}
 			}
-			return providerConfiguredResult{Model: capturedModel, Onboarding: true, generation: generation}
+			return providerConfiguredResult{uiOwned: uiOwned{owner: m}, Model: capturedModel, Onboarding: true, generation: generation}
 		}))
 	default:
 		return nil, false
@@ -499,8 +499,17 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 			cmds = append(cmds, m.editor.textarea.Focus())
 		}
 	case dialog.ActionCmd:
+		// The result belongs to this UI instance, not to whichever screen
+		// is active when it lands — wrapped via ownCmd rather than tagged
+		// at each dialog's own construction site, since dialog.Action's
+		// concrete payload types are defined in dialog and cannot embed
+		// uiOwned without dialog importing model back. msg.Cmd can be a
+		// tea.Batch(...) of several leaf cmds (FilePicker.HandleMsg's
+		// preview-prepare alongside its embedded bubble's own cmd is one
+		// example), which is exactly what ownCmd unwraps one level to
+		// avoid boxing.
 		if msg.Cmd != nil {
-			cmds = append(cmds, msg.Cmd)
+			cmds = append(cmds, ownCmd(m, msg.Cmd))
 		}
 
 	// Open dialog message.
@@ -575,9 +584,17 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 			m.dialog.OpenDialog(argsDialog)
 			break
 		}
-		cmds = append(cmds, m.runMCPPrompt(m.com, msg.ClientID, msg.PromptID, msg.Args))
+		cmds = append(cmds, m.runMCPPrompt(m.com, m, msg.ClientID, msg.PromptID, msg.Args))
 	default:
-		cmds = append(cmds, util.CmdHandler(msg))
+		// msg is whatever Action the front dialog's HandleMsg returned
+		// that none of the named cases above claimed — an open-ended set
+		// (see ActionCustomProviderResult's doc, and
+		// dialog.ActionMCPAuthStarted/Complete/Errored, handled this way)
+		// that round-trips back through Update via util.CmdHandler. Per-type
+		// uiOwned tagging cannot cover a set nobody can enumerate, so it is
+		// wrapped once, here, at the one place all of it funnels through,
+		// instead.
+		cmds = append(cmds, util.CmdHandler(ownedMsg{uiOwned: uiOwned{owner: m}, inner: msg}))
 	}
 
 	return tea.Batch(cmds...)

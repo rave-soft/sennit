@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
@@ -243,7 +244,7 @@ func TestRefreshTokenIfExpired_NilToken_NoOp(t *testing.T) {
 	t.Parallel()
 	c := &coordinator{}
 	c.newCoordinatorComponents()
-	err := c.delegation.refreshTokenIfExpired(t.Context(), config.ProviderConfig{ID: "p"})
+	err := c.delegation.refreshTokenIfExpired(t.Context(), config.ProviderConfig{ID: "p"}, providerstate.Provider{})
 	require.NoError(t, err)
 }
 
@@ -251,7 +252,7 @@ func TestRefreshTokenIfExpired_NotExpired_NoOp(t *testing.T) {
 	t.Parallel()
 	c := &coordinator{}
 	c.newCoordinatorComponents()
-	err := c.delegation.refreshTokenIfExpired(t.Context(), config.ProviderConfig{ID: "p", OAuthToken: freshToken("still-good")})
+	err := c.delegation.refreshTokenIfExpired(t.Context(), config.ProviderConfig{ID: "p"}, providerstate.Provider{OAuthToken: freshToken("still-good")})
 	require.NoError(t, err)
 }
 
@@ -263,9 +264,11 @@ func TestRefreshTokenIfExpired_Expired_Refreshes(t *testing.T) {
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
-	require.True(t, providerCfg.OAuthToken.IsExpired())
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+	require.True(t, cred.OAuthToken.IsExpired())
 
-	err := co.delegation.refreshTokenIfExpired(t.Context(), providerCfg)
+	err := co.delegation.refreshTokenIfExpired(t.Context(), providerCfg, cred)
 	require.NoError(t, err)
 
 	got, ok := co.cfg.Config().RuntimeProvider(authProviderID)
@@ -286,8 +289,10 @@ func TestRetryAfterUnauthorized_OAuthSuccess(t *testing.T) {
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
-	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
+	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg, cred)
 	require.NoError(t, err)
 
 	got, ok := co.cfg.Config().RuntimeProvider(authProviderID)
@@ -314,10 +319,12 @@ func TestRetryAfterUnauthorized_OAuthRevoked_WithNotifier_WaitsThenSucceeds(t *t
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
 	co.credentials.SignalAuthComplete(authProviderID)
 
-	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
+	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg, cred)
 	require.NoError(t, err, "once the interactive re-auth signal arrives, retryAfterUnauthorized must return nil so the caller retries")
 	require.Equal(t, 1, notifier.count("", notify.TypeReAuthenticate),
 		"a revoked refresh token with a notifier available must publish exactly one re-authenticate notification")
@@ -336,8 +343,10 @@ func TestRetryAfterUnauthorized_OAuthRevoked_Headless_ReturnsError(t *testing.T)
 	require.Nil(t, co.notify, "this test only means something headless")
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
-	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
+	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg, cred)
 	require.Error(t, err)
 	var exchangeErr *oauth.TokenExchangeError
 	require.True(t, errors.As(err, &exchangeErr), "the original TokenExchangeError must be preserved in the error chain")
@@ -349,7 +358,7 @@ func TestRetryAfterUnauthorized_AWSAuthRefresh_Headless_ReturnsErrNoInteractiveA
 	require.Nil(t, co.notify)
 	providerCfg := config.ProviderConfig{ID: authProviderID, AWSAuthRefresh: "aws sso login"}
 
-	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
+	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg, providerstate.Provider{})
 	require.ErrorIs(t, err, errNoInteractiveAuth)
 }
 
@@ -362,9 +371,11 @@ func TestRetryAfterUnauthorized_APIKeyTemplate_Refreshes(t *testing.T) {
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
-	require.Contains(t, providerCfg.APIKey, "$")
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+	require.Contains(t, cred.APIKeyTemplate, "$")
 
-	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
+	err := co.delegation.retryAfterUnauthorized(t.Context(), providerCfg, cred)
 	require.NoError(t, err)
 
 	got, ok := co.cfg.Config().RuntimeProvider(authProviderID)
@@ -377,8 +388,8 @@ func TestRetryAfterUnauthorized_NoRefreshMechanism_NoOp(t *testing.T) {
 	t.Parallel()
 	c := &coordinator{}
 	c.newCoordinatorComponents()
-	providerCfg := config.ProviderConfig{ID: "plain", APIKey: "static-key"}
-	err := c.delegation.retryAfterUnauthorized(t.Context(), providerCfg)
+	providerCfg := config.ProviderConfig{ID: "plain"}
+	err := c.delegation.retryAfterUnauthorized(t.Context(), providerCfg, providerstate.Provider{APIKeyTemplate: "static-key"})
 	require.NoError(t, err)
 }
 
@@ -460,10 +471,12 @@ func TestMakeAuthRefreshCallback_NilWhenNoRefreshMechanism(t *testing.T) {
 	co := authTestCoordinator(t)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
-	require.Nil(t, providerCfg.OAuthToken)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+	require.Nil(t, cred.OAuthToken)
 	require.Empty(t, providerCfg.AWSAuthRefresh)
 
-	cb := co.delegation.makeAuthRefreshCallback(providerCfg, nil)
+	cb := co.delegation.makeAuthRefreshCallback(providerCfg, cred, nil)
 	require.Nil(t, cb, "a provider with no OAuth token, AWS refresh command, or templated API key has nothing to refresh")
 }
 
@@ -475,12 +488,14 @@ func TestMakeAuthRefreshCallback_RefreshesAndStoresRecompiledRuntime(t *testing.
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
 	initial, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
 	require.NoError(t, err)
 	active := newActiveRuntime(initial)
 
-	cb := co.delegation.makeAuthRefreshCallback(providerCfg, active)
+	cb := co.delegation.makeAuthRefreshCallback(providerCfg, cred, active)
 	require.NotNil(t, cb)
 
 	require.NoError(t, cb(t.Context(), nil))
@@ -500,8 +515,10 @@ func TestMakeAuthRefreshCallback_NilActive_DoesNotPanic(t *testing.T) {
 	)
 	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
 	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
 
-	cb := co.delegation.makeAuthRefreshCallback(providerCfg, nil)
+	cb := co.delegation.makeAuthRefreshCallback(providerCfg, cred, nil)
 	require.NotNil(t, cb)
 	require.NoError(t, cb(t.Context(), nil))
 }

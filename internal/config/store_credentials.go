@@ -156,30 +156,16 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 	provider = s.applyProviderCredentials(provider)
 	cfg.SetRuntimeProvider(providerID, provider)
 
-	// Mirror the published credential fields onto the disk-shaped entry
-	// too. Several readers (credentials.Manager's refresh path,
-	// runtime_builder.go's expiry check and its own republish back into
-	// this function) still take OAuthToken/APIKey from cfg.Providers
-	// rather than RuntimeProvider; leaving those two views disagreeing
-	// makes a just-refreshed token look expired again on the very next
-	// read. Narrowing every such reader onto RuntimeProvider alone is
-	// real work for a later change, not something to fold into this fix,
-	// so the two are kept in sync here instead.
-	//
-	// ProxyURL and APIKeyTemplate are deliberately NOT mirrored, for two
-	// different reasons. ProviderConfig has no APIKeyTemplate at all: the
-	// unresolved form an API key was resolved from exists only in the
-	// runtime view. ProviderConfig does have a ProxyURL, but it means the
-	// provider's own configured proxy, whereas the value published here is
-	// the account's effective route resolved against it — writing that
-	// back would make the next reload treat an in-memory-only value as a
-	// disk one. See reload.go's carry-forward comment.
-	configured.APIKey = cred.APIKey
-	configured.OAuthToken = cred.Token
-	if cred.ActiveAccountID != "" {
-		configured.Account = cred.ActiveAccountID
-	}
-	cfg.Providers.Set(providerID, configured)
+	// cfg.Providers (the disk-shaped view) is deliberately left untouched
+	// here: RuntimeProviders is the only view live credentials publish to.
+	// Every reader that needs APIKey/OAuthToken/Account now reads
+	// RuntimeProvider(id) instead of Providers.Get(id) — see the
+	// credential-classification work this mutator's mirroring used to
+	// paper over. ProxyURL and APIKeyTemplate were never mirrored either,
+	// for the reasons that used to be documented here: ProviderConfig has
+	// no APIKeyTemplate field at all, and its ProxyURL means the
+	// provider's own configured proxy, not the account-resolved effective
+	// route published above.
 
 	s.credentialVersion.Add(1)
 	s.setConfig(cfg)

@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -49,9 +50,14 @@ func newAccountLabelTestUI(t *testing.T, activeAccountID string, accs []accounts
 	t.Helper()
 	const providerID = "codex"
 	providers := csync.NewMap[string, config.ProviderConfig]()
-	providers.Set(providerID, config.ProviderConfig{ID: providerID, Account: activeAccountID})
+	providers.Set(providerID, config.ProviderConfig{ID: providerID})
+	cfg := &config.Config{Providers: providers, Options: &config.Options{}}
+	// The active account lives on the runtime provider, not the
+	// disk-shaped one: RuntimeProviders is the sole carrier of live
+	// credential state.
+	cfg.SetRuntimeProvider(providerID, providerstate.Provider{ID: providerID, Account: activeAccountID})
 	ws := &accountLabelTestWorkspace{
-		cfg:  &config.Config{Providers: providers, Options: &config.Options{}},
+		cfg:  cfg,
 		accs: accs,
 	}
 	com := common.DefaultCommon(context.Background(), ws)
@@ -66,7 +72,7 @@ func TestRefreshAccountLabelCmd_MultipleAccounts_ReportsActiveLabel(t *testing.T
 		{ID: "acct-2", Label: "Личный Plus"},
 	})
 
-	cmd := refreshAccountLabelCmd(u.com, "codex")
+	cmd := refreshAccountLabelCmd(u.com, u, "codex")
 	require.NotNil(t, cmd)
 	msg, ok := cmd().(accountLabelsLoadedMsg)
 	require.True(t, ok)
@@ -83,7 +89,7 @@ func TestRefreshAccountLabelCmd_SingleAccount_ReportsNoLabel(t *testing.T) {
 		{ID: "acct-1", Label: "Only Account"},
 	})
 
-	msg, ok := refreshAccountLabelCmd(u.com, "codex")().(accountLabelsLoadedMsg)
+	msg, ok := refreshAccountLabelCmd(u.com, u, "codex")().(accountLabelsLoadedMsg)
 	require.True(t, ok)
 	require.False(t, msg.info.multiple)
 	require.Empty(t, msg.info.label)
@@ -94,7 +100,7 @@ func TestRefreshAccountLabelCmd_SingleAccount_ReportsNoLabel(t *testing.T) {
 // scheduled at all.
 func TestRefreshAccountLabelCmd_EmptyProviderID_NoCmd(t *testing.T) {
 	u, _ := newAccountLabelTestUI(t, "acct-1", nil)
-	require.Nil(t, refreshAccountLabelCmd(u.com, ""))
+	require.Nil(t, refreshAccountLabelCmd(u.com, u, ""))
 }
 
 // TestRefreshAccountLabelCmd_ListErrorClearsCache mirrors the config-level
@@ -105,7 +111,7 @@ func TestRefreshAccountLabelCmd_ListErrorClearsCache(t *testing.T) {
 	})
 	ws.err = errors.New("boom")
 
-	msg, ok := refreshAccountLabelCmd(u.com, "codex")().(accountLabelsLoadedMsg)
+	msg, ok := refreshAccountLabelCmd(u.com, u, "codex")().(accountLabelsLoadedMsg)
 	require.True(t, ok)
 	require.False(t, msg.info.multiple)
 	require.Empty(t, msg.info.label)

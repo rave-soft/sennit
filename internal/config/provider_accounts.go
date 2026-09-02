@@ -540,8 +540,10 @@ func activeAccountID(store *ConfigStore, providerID string) string {
 }
 
 // legacyCredentialFromProvider builds the accounts.LegacyCredential that
-// describes whatever single credential providerID currently has in
-// ProviderConfig, for accounts.Migrate to fold into the account store.
+// describes whatever single credential providerID currently has, for
+// accounts.Migrate to fold into the account store. Every credential field
+// comes off RuntimeProvider, the only view that carries one: Providers is
+// consulted only to confirm the provider has a config entry at all.
 // ProxyURL comes from ConfiguredProxyURL, not the (possibly
 // account-overridden) effective ProxyURL, since a migrated account should
 // carry the provider's own configured proxy, not whatever an in-memory
@@ -551,26 +553,28 @@ func legacyCredentialFromProvider(store *ConfigStore, providerID string) account
 	if cfg == nil || cfg.Providers == nil {
 		return accounts.LegacyCredential{}
 	}
-	pc, ok := cfg.Providers.Get(providerID)
+	if _, ok := cfg.Providers.Get(providerID); !ok {
+		return accounts.LegacyCredential{}
+	}
+	runtimeProvider, ok := cfg.RuntimeProvider(providerID)
 	if !ok {
 		return accounts.LegacyCredential{}
 	}
 
-	runtimeProvider, _ := cfg.RuntimeProvider(providerID)
 	cred := accounts.LegacyCredential{ProxyURL: runtimeProvider.ConfiguredProxyURL}
-	if pc.OAuthToken != nil {
-		cred.Token = pc.OAuthToken
+	if runtimeProvider.OAuthToken != nil {
+		cred.Token = runtimeProvider.OAuthToken
 	} else {
-		cred.APIKey = cmp.Or(runtimeProvider.APIKeyTemplate, pc.APIKey)
+		cred.APIKey = cmp.Or(runtimeProvider.APIKeyTemplate, runtimeProvider.APIKey)
 	}
 
 	// Only Codex can derive AccountID from what it already has on hand
 	// (the chatgpt_account_id claim in its token); every other provider
 	// leaves it empty rather than guessing.
 	if providerID == codex.ProviderID {
-		accountID := codex.AccountID(pc.APIKey)
-		if accountID == "" && pc.OAuthToken != nil {
-			accountID = codex.AccountID(pc.OAuthToken.AccessToken)
+		accountID := codex.AccountID(runtimeProvider.APIKey)
+		if accountID == "" && runtimeProvider.OAuthToken != nil {
+			accountID = codex.AccountID(runtimeProvider.OAuthToken.AccessToken)
 		}
 		cred.AccountID = accountID
 	}

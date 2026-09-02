@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/require"
 )
 
@@ -153,21 +154,27 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	providers.Set("hyper", config.ProviderConfig{
+		ID:   "hyper",
+		Name: "Hyper",
+	})
+	runtimeProviders := csync.NewMap[string, providerstate.Provider]()
+	runtimeProviders.Set("hyper", providerstate.Provider{
 		ID:         "hyper",
 		Name:       "Hyper",
 		APIKey:     oldToken.AccessToken,
 		OAuthToken: oldToken,
 	})
 
-	store := newFakeStore(&config.Config{Providers: providers}, configPath, filepath.Join(dir, "locks"))
+	store := newFakeStore(&config.Config{Providers: providers, RuntimeProviders: runtimeProviders}, configPath, filepath.Join(dir, "locks"))
 	m := New(store)
 
 	// Refresh should use the disk token without making an external call
 	err := m.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "hyper")
 	require.NoError(t, err)
 
-	// Verify the in-memory token was updated to the disk token
-	updatedConfig, ok := store.Config().Providers.Get("hyper")
+	// Verify the in-memory token was updated to the disk token. Credentials
+	// live only on RuntimeProvider now — Providers carries none.
+	updatedConfig, ok := store.Config().RuntimeProvider("hyper")
 	require.True(t, ok)
 	require.Equal(t, "newer-access-token", updatedConfig.APIKey)
 	require.Equal(t, "newer-access-token", updatedConfig.OAuthToken.AccessToken)

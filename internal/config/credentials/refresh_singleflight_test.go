@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/require"
 )
 
@@ -77,8 +78,15 @@ func newRefreshTestManagerWithStore(t *testing.T, configPath string, exchange fu
 		APIKey:     expired.AccessToken,
 		OAuthToken: expired,
 	})
+	runtimeProviders := csync.NewMap[string, providerstate.Provider]()
+	runtimeProviders.Set("copilot", providerstate.Provider{
+		ID:         "copilot",
+		Name:       "GitHub Copilot",
+		APIKey:     expired.AccessToken,
+		OAuthToken: expired,
+	})
 
-	store := newFakeStore(&config.Config{Providers: providers}, configPath, filepath.Join(filepath.Dir(configPath), "locks"))
+	store := newFakeStore(&config.Config{Providers: providers, RuntimeProviders: runtimeProviders}, configPath, filepath.Join(filepath.Dir(configPath), "locks"))
 	m := New(store)
 	m.exchangeToken = exchange
 	return m, store
@@ -121,7 +129,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 	}
 	require.Equal(t, int64(1), exchanges.Load(), "concurrent refreshes should collapse into one exchange")
 
-	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	pc, ok := mgr.store.Config().RuntimeProvider("copilot")
 	require.True(t, ok)
 	require.Equal(t, "at1", pc.OAuthToken.AccessToken)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
@@ -187,7 +195,7 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 
 	// Both instances converge on the rotated token.
 	for name, m := range map[string]*Manager{"a": a, "b": b} {
-		pc, ok := m.store.Config().Providers.Get("copilot")
+		pc, ok := m.store.Config().RuntimeProvider("copilot")
 		require.True(t, ok, name)
 		require.Equal(t, "at1", pc.OAuthToken.AccessToken, name)
 		require.Equal(t, "rt1", pc.OAuthToken.RefreshToken, name)
@@ -250,7 +258,7 @@ func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 	require.Equal(t, int64(1), exchanges.Load())
 	require.Equal(t, int64(0), reuse.Load(), "must not present its own revoked refresh token")
 
-	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	pc, ok := mgr.store.Config().RuntimeProvider("copilot")
 	require.True(t, ok)
 	require.Equal(t, "at4", pc.OAuthToken.AccessToken)
 	require.Equal(t, "rt4", pc.OAuthToken.RefreshToken)
@@ -275,7 +283,7 @@ func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 	require.NoError(t, mgr.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot"))
 	require.Equal(t, int64(0), exchanges.Load(), "a usable peer token needs no exchange")
 
-	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	pc, ok := mgr.store.Config().RuntimeProvider("copilot")
 	require.True(t, ok)
 	require.Equal(t, "at9", pc.OAuthToken.AccessToken)
 	require.Equal(t, "at9", pc.APIKey)
@@ -300,7 +308,7 @@ func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
 	require.Equal(t, int64(1), exchanges.Load())
 	require.Equal(t, int64(0), reuse.Load())
 
-	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	pc, ok := mgr.store.Config().RuntimeProvider("copilot")
 	require.True(t, ok)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
 }
@@ -321,7 +329,7 @@ func TestRefreshOAuthToken_RetriesPersistBeforeGivingUp(t *testing.T) {
 	require.Equal(t, int64(1), exchanges.Load(), "a persist failure must not trigger a second exchange")
 	require.Equal(t, refreshPersistAttempts, store.persistCallCount)
 
-	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	pc, ok := mgr.store.Config().RuntimeProvider("copilot")
 	require.True(t, ok)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken, "the refreshed token must still be published once persist eventually succeeds")
 }
@@ -348,7 +356,7 @@ func TestRefreshOAuthToken_PublishesTokenEvenIfPersistNeverSucceeds(t *testing.T
 	// one must still be published in memory even though disk was never
 	// updated -- silently discarding it here would leave the process
 	// unable to refresh again with the (now stale) token still on disk.
-	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	pc, ok := mgr.store.Config().RuntimeProvider("copilot")
 	require.True(t, ok)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
 }
