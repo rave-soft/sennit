@@ -26,7 +26,6 @@ import (
 	// other tool-owned leaf types instead of redeclaring them.
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
@@ -127,7 +126,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	}
 
 	svc := &sessionServices{
-		sessions: sessionstore.NewService(queries, conn, cfg.WorkingDir(), sessionstore.WithTelemetry(event.NewSessionTelemetry())),
+		sessions: sessionstore.NewService(queries, conn, cfg.WorkingDir()),
 		messages: messagestore.NewService(queries),
 		cfg:      cfg,
 	}
@@ -135,8 +134,6 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
-	event.SetNonInteractive(true)
-
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -144,8 +141,6 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	defer cleanup()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
-	event.SessionListed(jsonOut)
-
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
@@ -212,8 +207,6 @@ type sessionMutationResult struct {
 }
 
 func runSessionShow(cmd *cobra.Command, args []string) error {
-	event.SetNonInteractive(true)
-
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -221,8 +214,6 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
-	event.SessionShown(jsonOut)
-
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
@@ -241,8 +232,6 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
-	event.SetNonInteractive(true)
-
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -250,8 +239,6 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
-	event.SessionDeletedCommand(jsonOut)
-
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
@@ -276,8 +263,6 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionRename(cmd *cobra.Command, args []string) error {
-	event.SetNonInteractive(true)
-
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -285,8 +270,6 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
-	event.SessionRenamed(jsonOut)
-
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
@@ -312,8 +295,6 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionLast(cmd *cobra.Command, _ []string) error {
-	event.SetNonInteractive(true)
-
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -321,8 +302,6 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	defer cleanup()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
-	event.SessionLastShown(jsonOut)
-
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)

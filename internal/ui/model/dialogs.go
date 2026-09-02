@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -380,7 +379,6 @@ func (m *UI) openStatsDialog() tea.Cmd {
 		return nil
 	}
 
-	event.StatsViewed()
 	// No session yet is an ordinary state — the screen opens on the
 	// project tab and its Session tab says there is nothing to report.
 	// m.sess.current is a pointer that is nil until one is loaded.
@@ -458,7 +456,6 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	if layoutCmd := m.applyDialogAction(m.dialog.UpdateDialog(dialog.FilePickerID, dialog.FilePickerUpdateMsg{Capabilities: m.caps, WindowSize: &size})); layoutCmd != nil {
 		cmd = tea.Batch(cmd, layoutCmd)
 	}
-	event.FilePickerOpened()
 
 	return cmd
 }

@@ -748,9 +748,6 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	)
 	t.historyTokens = estimateMessageTokens(ownHistory)
 
-	startTime := time.Now()
-	a.eventPromptSent(call)
-
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
@@ -813,9 +810,6 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 			},
 		},
 	})
-
-	a.eventPromptResponded(call, time.Since(startTime).Truncate(time.Second))
-
 	if err != nil {
 		streamResult, streamErr := t.handleStreamError(err)
 		// Cancel already clears the queue (see dispatcher.Cancel), so there

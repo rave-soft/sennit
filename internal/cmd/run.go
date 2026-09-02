@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/format"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -82,22 +81,11 @@ sennit run --continue "Follow up on your last response"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		event.SetNonInteractive(true)
-
-		switch {
-		case sessionID != "":
-			event.SetContinueBySessionID(true)
-		case useLast:
-			event.SetContinueLastSession(true)
-		}
-
 		ws, cleanup, err := setupLocalWorkspace(cmd)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
-
-		event.AppInitialized()
 
 		if !ws.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'sennit' to set up a provider interactively")

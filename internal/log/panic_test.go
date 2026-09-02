@@ -1,6 +1,8 @@
 package log
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,6 +62,35 @@ func TestRecoverPanicRunsCleanupOnSuccess(t *testing.T) {
 	}()
 
 	require.True(t, cleaned, "cleanup should run when the panic log file is written successfully")
+}
+
+// TestRecoverPanicLogsTheRecoveredValue covers the slog side of
+// RecoverPanic directly: independent of the panic dump file, it must emit
+// an error-level "Recovered from panic" record naming both the caller and
+// the recovered value. This is what used to also reach the (now removed)
+// internal/event no-op sink; slog is the only place a panic surfaces now.
+func TestRecoverPanicLogsTheRecoveredValue(t *testing.T) {
+	// Not run in parallel: swaps the package-global slog default, and
+	// mutates logDir like its sibling tests in this file.
+	dir := t.TempDir()
+	logDir.Store(dir)
+	t.Cleanup(func() { logDir.Store("") })
+
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	func() {
+		defer RecoverPanic("test-logged", nil)
+		panic("boom")
+	}()
+
+	out := buf.String()
+	require.Contains(t, out, "Recovered from panic")
+	require.Contains(t, out, "test-logged")
+	require.Contains(t, out, "boom")
 }
 
 func TestRecoverPanicRunsCleanupWhenLogFileCannotBeCreated(t *testing.T) {

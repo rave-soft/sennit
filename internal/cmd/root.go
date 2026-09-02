@@ -21,7 +21,6 @@ import (
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/event"
 	sennitlog "github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -113,8 +112,6 @@ sennit --continue
 			sessionID = sess.ID
 		}
 
-		event.AppInitialized()
-
 		com := common.DefaultCommon(cmd.Context(), ws)
 		model := ui.NewRoot(com, sessionID, continueLast)
 
@@ -132,7 +129,6 @@ sennit --continue
 		_, err = program.Run()
 		model.Cleanup()
 		if err != nil {
-			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Sennit crashed. Please copy the stacktrace above and open an issue at " + brand.RepoURL + "/issues/new?template=bug.yml") //nolint:staticcheck
 		}

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/stats/gather"
 	"github.com/spf13/cobra"
@@ -119,8 +118,6 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize config: %w", err)
 	}
-	event.StatsViewed()
-
 	queries, _, cleanup, err := connectDB(ctx)
 	if err != nil {
 		return err

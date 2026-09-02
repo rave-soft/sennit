@@ -14,7 +14,6 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/sennit/internal/brand"
-	"github.com/rave-soft/sennit/internal/event"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -159,8 +158,6 @@ func RecoverPanic(name string, cleanup func()) {
 		if cleanup != nil {
 			defer cleanup()
 		}
-
-		event.Error(r, "panic", true, "name", name)
 
 		stack := debug.Stack()
 		slog.Error("Recovered from panic", "name", name, "panic", r, "stack", string(stack))

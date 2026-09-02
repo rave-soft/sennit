@@ -458,10 +458,6 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 	cost := catalogCost(model, usage)
 
-	if !estimated {
-		a.eventTokensUsed(session.ID, model, usage, cost)
-	}
-
 	if estimated {
 		cost = 0
 	} else {

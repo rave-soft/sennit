@@ -7,8 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/rave-soft/sennit/internal/event"
 )
 
 // coordinatorCloser is implemented by the production agent.Coordinator
@@ -54,8 +52,8 @@ var ErrAppShutdownBlocked = errors.New("app: shutdown already started, cannot re
 // close MCP, which can still touch the DB, before phase 5 releases it; (5)
 // run critical cleanups (only if phase 1's hooks all succeeded) then
 // release the main DB last, since every phase above needs it open; (6)
-// parallel, independent teardown (AppExited, background shells, LSP,
-// herdr), then final cleanups — only once those repository users actually
+// parallel, independent teardown (background shells, LSP, herdr), then
+// final cleanups — only once those repository users actually
 // stopped, since outliving them is a final cleanup's whole purpose.
 type shutdownPhases struct {
 	// app is set once, by New/NewForTest, before Shutdown can be called.
@@ -367,10 +365,6 @@ func (p *shutdownPhases) Shutdown() {
 	var wg sync.WaitGroup
 	var repoUsersStopped atomic.Bool
 	repoUsersStopped.Store(true)
-
-	wg.Go(func() {
-		event.AppExited()
-	})
 
 	wg.Go(func() {
 		stop := p.stopBackgroundShells
