@@ -148,6 +148,16 @@ type DockActivityLoadedMsg struct {
 // detaches, even on error, and always delivers a message (with a zero
 // activity on failure) so the caller's inFlight flag is cleared rather than
 // left stuck. Guards against a nil workspace like the other dispatchers.
+//
+// This calls AttachThread only, never ActivateThread: it fires on an
+// ~8s TTL over every thread ActiveDockThreads returns, which deliberately
+// includes idle ones, so it runs against most threads in the dock on
+// every cycle. AttachThread must stay side-effect-free for a thread that
+// is not currently running — it hands back a read-only view instead of
+// reviving anything — or this background poll would silently respawn a
+// full App per idle thread it glances at. Do not "fix" a nil/read-only
+// result here by reaching for ActivateThread; that call belongs only to
+// a caller that means to revive the thread, like attachThreadCmd.
 func (c *DockState) dispatchThreadActivityRefresh(com *common.Common, threadID, sessionID string) tea.Cmd {
 	if com == nil || com.Workspace == nil {
 		return nil

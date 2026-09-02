@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/threads"
+	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -720,4 +721,108 @@ func TestChatWarmStepReachesMainScreenWhileThreadIsOpen(t *testing.T) {
 	}
 	require.False(t, r.main.chat.Resizing(), "the main chat must leave resizing even while a thread is on top")
 	require.Equal(t, screenThread, r.active)
+}
+
+// activateThenAttachWorkspace records the order ActivateThread and
+// AttachThread are called in, and lets a test control each call's error
+// independently. It backs
+// TestAttachThreadCmdActivatesBeforeAttaching and
+// TestHandleThreadAttachedReportsActivateErrorButStillOpensThread.
+type activateThenAttachWorkspace struct {
+	rootTestWorkspace
+	calls []string
+
+	activateErr error
+	attachWS    workspace.Workspace
+	attachErr   error
+}
+
+func (w *activateThenAttachWorkspace) ActivateThread(context.Context, string) (proto.Thread, error) {
+	w.calls = append(w.calls, "activate")
+	return proto.Thread{}, w.activateErr
+}
+
+func (w *activateThenAttachWorkspace) AttachThread(context.Context, string) (workspace.Workspace, func(), error) {
+	w.calls = append(w.calls, "attach")
+	return w.attachWS, func() {}, w.attachErr
+}
+
+// TestAttachThreadCmdActivatesBeforeAttaching proves attachThreadCmd calls
+// ActivateThread before AttachThread — this is the drill-in path's
+// deliberate revival of a thread that may not currently be running, as
+// opposed to the dock's background refresh (dispatchThreadActivityRefresh),
+// which must call AttachThread only and never trigger a spawn.
+func TestAttachThreadCmdActivatesBeforeAttaching(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	ws := &activateThenAttachWorkspace{attachWS: &rootTestWorkspace{}}
+	r.com.Workspace = ws
+
+	cmd := r.attachThreadCmd("thread-1", "session-1", "thread")
+	require.NotNil(t, cmd)
+	msg, ok := cmd().(threadAttachedMsg)
+	require.True(t, ok)
+	require.NoError(t, msg.err)
+	require.NoError(t, msg.activateErr)
+	require.Equal(t, []string{"activate", "attach"}, ws.calls,
+		"attachThreadCmd must activate the thread before attaching to it")
+}
+
+// TestHandleThreadAttachedWarnsOnActivateErrorButStillOpensThread proves
+// that an ActivateThread failure does not abort the attach: the thread
+// still opens (read-only, via AttachThread's own fallback), and the
+// activation failure is explained to the user as a warning (via
+// util.ReportWarn), not flagged as an error — the common case is a
+// merged/merging thread, for which read-only is the correct and permanent
+// state, not a failure of anything the user did. The reason text itself
+// must still reach the user rather than being swallowed — see
+// AppWorkspace.AttachThread and attachThreadCmd's doc comments for why it
+// would otherwise only surface once the person tries to type into a
+// read-only thread.
+func TestHandleThreadAttachedWarnsOnActivateErrorButStillOpensThread(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	r.attachment.pendingID = "thread-1"
+
+	activateErr := fmt.Errorf("thread could not be revived")
+	model, cmd := r.handleThreadAttached(threadAttachedMsg{
+		id:          "thread-1",
+		sessionID:   "session-1",
+		name:        "thread",
+		ws:          &rootTestWorkspace{},
+		detach:      func() {},
+		activateErr: activateErr,
+	})
+	r = model.(*Root)
+
+	// The thread still opened despite the activation failure.
+	require.Equal(t, screenThread, r.active)
+	require.NotNil(t, r.attachment.thread)
+
+	// The activation failure was explained as a warning, not swallowed
+	// and not flagged as an error.
+	var reported *util.InfoMsg
+	var walk func(c tea.Cmd)
+	walk = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		switch m := safeRunCmd(c).(type) {
+		case tea.BatchMsg:
+			for _, cc := range m {
+				walk(cc)
+			}
+		case util.InfoMsg:
+			if m.Type == util.InfoTypeWarn {
+				mm := m
+				reported = &mm
+			}
+		}
+	}
+	walk(cmd)
+	require.NotNil(t, reported, "the ActivateThread failure must be explained to the user, not swallowed")
+	require.Equal(t, util.InfoTypeWarn, reported.Type, "a thread that could not be revived is a state to explain, not an error to flag")
+	require.Contains(t, reported.Msg, activateErr.Error(), "the underlying reason must still reach the user")
 }

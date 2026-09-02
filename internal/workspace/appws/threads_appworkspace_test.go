@@ -383,10 +383,14 @@ func TestAppWorkspace_AttachThread_UnknownID(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestAppWorkspace_AttachThread_CompletedThread verifies that attaching
-// to a thread whose run has finished reactivates it: the workspace is
-// respawned and the caller gets a writable workspace, so the user can
-// keep working in the thread by hand instead of only reading it.
+// TestAppWorkspace_AttachThread_CompletedThread verifies that attaching to
+// a thread whose run has finished does NOT respawn it: AttachThread must
+// never spawn anything on its own (that used to happen via an implicit
+// reactivate call, which meant the dock's background activity refresh
+// silently booted a full App for every idle thread it glanced at — see
+// AppWorkspace.AttachThread's doc comment). The caller gets a read-only
+// workspace instead; reviving the thread is now something only
+// ActivateThread does, and only when a caller means it.
 func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 
@@ -438,19 +442,21 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	require.NotNil(t, detach)
 	require.NotPanics(t, detach)
 
-	// The thread was reactivated: a writable workspace bound to the
-	// thread's own respawned app, not the read-only view.
-	// A writable workspace over the thread's own respawned app, not the
-	// read-only view — wrapped so the turns the person starts in it are
-	// dispatched through the Manager (see attachedThreadWorkspace).
-	require.IsType(t, &attachedThreadWorkspace{}, attached, "attaching to a finished thread should reactivate it")
-	require.NotNil(t, mgr.Handle(created.ID), "reactivation should install a runtime")
+	// Read-only fallback: AttachThread must not spawn anything on its own.
+	_, saveErr := attached.SaveSession(t.Context(), session.Session{})
+	require.True(t, workspace.IsReadOnlyError(saveErr), "AttachThread must not reactivate a non-live thread")
+	require.Nil(t, mgr.Handle(created.ID), "AttachThread must not install a runtime")
+	spawner.mu.Lock()
+	spawnCount := len(spawner.byPath)
+	spawner.mu.Unlock()
+	require.Zero(t, spawnCount, "AttachThread must never call Spawn")
 
-	// It now rests at idle, and the finished run's summary survives.
+	// The status and the finished run's summary are still readable through
+	// the read-only view.
 	got, err := aw.GetThread(t.Context(), created.ID)
 	require.NoError(t, err)
-	require.Equal(t, string(thread.StatusIdle), got.Status)
-	require.Equal(t, "did the thing", got.ResultSummary, "reactivation must not erase the earlier run's result")
+	require.Equal(t, string(thread.StatusCompleted), got.Status)
+	require.Equal(t, "did the thing", got.ResultSummary)
 }
 
 // TestAppWorkspace_AttachThread_LiveThread verifies that AttachThread for
@@ -540,10 +546,10 @@ func TestAppWorkspace_TranslateEvent_ThreadLifecycle(t *testing.T) {
 }
 
 // TestAppWorkspace_AttachThread_MergedThread_ReadMessages verifies the
-// read-only fallback: a thread in the merge flow is deliberately refused
-// reactivation, so attaching to it still yields a read-only workspace
-// whose session metadata is read from the shared database via the main
-// app's session store.
+// read-only fallback: a thread with no live handle (here, one in the merge
+// flow) yields a read-only workspace whose session metadata is read from
+// the shared database via the main app's session store, without
+// AttachThread attempting to spawn anything.
 func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 
@@ -584,8 +590,8 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 
 	require.Nil(t, mgr.Handle(created.ID), "handle should be nil after completion")
 
-	// Attach to the merged thread — reactivation is refused, so this
-	// falls back to a read-only workspace.
+	// Attach to the merged thread — it has no live handle, so AttachThread
+	// falls back to a read-only workspace without attempting to spawn one.
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	attached, detach, err := aw.AttachThread(t.Context(), created.ID)
 	require.NoError(t, err)
@@ -596,8 +602,8 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	// so its read-only-ness is asserted through behavior instead of a type
 	// check: a mutating call must be refused as a read-only operation.
 	_, saveErr := attached.SaveSession(t.Context(), session.Session{})
-	require.True(t, workspace.IsReadOnlyError(saveErr), "merge-flow threads must not be reactivated")
-	require.Nil(t, mgr.Handle(created.ID), "refused reactivation must not spawn a workspace")
+	require.True(t, workspace.IsReadOnlyError(saveErr), "a non-live thread must not be reactivated by AttachThread")
+	require.Nil(t, mgr.Handle(created.ID), "AttachThread must not spawn a workspace")
 
 	// The attached workspace can read the persisted session from the
 	// shared session store via the main app.
@@ -666,9 +672,9 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 }
 
 // TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly pins
-// the half of the fallback the user actually meets. Opening a thread that
-// cannot be reactivated succeeds and looks ordinary; the refusal only
-// arrives later, when they type into it. Naming just the operation there
+// the half of the fallback the user actually meets. Opening a thread with
+// no live handle succeeds and looks ordinary; the refusal only arrives
+// later, when they type into it. Naming just the operation there
 // ("AgentRun is not allowed") describes a decision taken silently minutes
 // earlier and leaves the reason reachable only by turning on debug logging.
 func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testing.T) {
@@ -710,7 +716,7 @@ func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testin
 	runErr := attached.AgentRun(t.Context(), "sess-1", "hello")
 	require.True(t, workspace.IsReadOnlyError(runErr))
 	require.Contains(t, runErr.Error(), "AgentRun", "the refusal must still name the operation")
-	require.Contains(t, runErr.Error(), "merge flow", "the refusal must carry why reactivation was refused")
+	require.Contains(t, runErr.Error(), "thread is not running", "the refusal must carry why the workspace is read-only")
 }
 
 // TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt covers the

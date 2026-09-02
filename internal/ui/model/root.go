@@ -16,6 +16,7 @@ package model
 // to UI.
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -153,7 +154,8 @@ type threadEventMsg struct {
 	inner    tea.Msg
 }
 
-// threadAttachedMsg delivers the result of an off-thread AttachThread call.
+// threadAttachedMsg delivers the result of an off-thread ActivateThread +
+// AttachThread call.
 type threadAttachedMsg struct {
 	id        string
 	sessionID string
@@ -161,6 +163,14 @@ type threadAttachedMsg struct {
 	ws        common.Workspace
 	detach    func()
 	err       error
+	// activateErr is set when ActivateThread failed to revive the thread.
+	// It does not abort the attach — msg.ws is still the read-only view
+	// AttachThread fell back to — but the reason is worth explaining to
+	// the user at open time (as a warning, not an error: the common case
+	// is a merged/merging thread, whose read-only state is correct and
+	// permanent) rather than leaving them to discover it only once they
+	// try to type and are refused.
+	activateErr error
 }
 
 // threadActionDoneMsg delivers the result of an off-thread merge/remove
@@ -578,14 +588,27 @@ func (r *Root) handleDashboardDialogAction(action dialog.Action) tea.Cmd {
 	return nil
 }
 
-// attachThreadCmd calls AttachThread off-thread. Per AGENTS.md, model state
-// is never touched inside a command closure — only locals are captured.
+// attachThreadCmd calls ActivateThread then AttachThread off-thread. Per
+// AGENTS.md, model state is never touched inside a command closure — only
+// locals are captured.
+//
+// ActivateThread revives the thread's own isolated workspace if it is not
+// already running — this is the drill-in path (the user pressed Enter to
+// open a thread), which is exactly the caller that wants reactivation, as
+// opposed to e.g. the dock's background activity refresh, which must
+// never trigger a spawn as a side effect of drawing itself. A failure here
+// does not abort: AttachThread still runs and hands back its read-only
+// fallback, so the user gets *something* to look at, with the reason
+// carried in activateErr for handleThreadAttached to explain to them —
+// most commonly a merged/merging thread, for which read-only is the
+// correct and permanent state, not a failure.
 func (r *Root) attachThreadCmd(id, sessionID, name string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	return func() tea.Msg {
+		_, activateErr := ws.ActivateThread(ctx, id)
 		attached, detach, err := ws.AttachThread(ctx, id)
-		return threadAttachedMsg{id: id, sessionID: sessionID, name: name, ws: attached, detach: detach, err: err}
+		return threadAttachedMsg{id: id, sessionID: sessionID, name: name, ws: attached, detach: detach, err: err, activateErr: activateErr}
 	}
 }
 
@@ -654,6 +677,16 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	cmds = append(cmds, childUI.Init())
 	_, cmd := childUI.Update(tea.WindowSizeMsg{Width: r.width, Height: r.height})
 	cmds = append(cmds, cmd)
+	if msg.activateErr != nil {
+		// The thread still opened (read-only, via AttachThread's
+		// fallback). This is not a failure to flag — the most common
+		// reason is a merged/merging thread, whose read-only state is
+		// correct and permanent, not something gone wrong — so it is a
+		// warning explaining what they're looking at, not an error, and
+		// it says so rather than leaving them to discover it only once
+		// they try to type.
+		cmds = append(cmds, util.ReportWarn(fmt.Sprintf("Thread opened read-only: %s", msg.activateErr)))
+	}
 	return r, tea.Batch(cmds...)
 }
 

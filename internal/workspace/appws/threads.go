@@ -196,49 +196,16 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (workspace.W
 	if err != nil {
 		return nil, nil, err
 	}
-	// Reactivate it so attaching lands in a writable session: the
-	// worktree and branch are still on disk, so the workspace can simply
-	// be respawned, and a thread whose run is over is exactly the one a
-	// user wants to open and keep working in by hand.
-	//
-	// Reactivation is not always possible — threads in the merge flow are
-	// deliberately refused, the worktree may be gone, and a spawn can fail
-	// outright — so this falls back to a read-only workspace bound to the
-	// main app with the thread's worktree as WorkingDir, which still shows
-	// the persisted session data.
-	//
-	// Whatever went wrong is carried into that fallback rather than only
-	// into the log. A read-only thread looks exactly like a live one until
-	// the person types into it, and what they were told then named the
-	// symptom and nothing else ("AgentRun is not allowed"), for a decision
-	// taken silently minutes earlier. The log line is WARN for the same
-	// reason: this is a thread the user asked to work in and cannot, not a
-	// detail worth having to turn debug logging on to see.
-	ws, err := reactivate(ctx, mgr, id)
-	if err != nil {
-		slog.Warn("Thread could not be reactivated; opening it read-only",
-			"component", "thread", "thread", id, "error", err)
-		return workspace.NewReadOnlyWorkspace(w, st.WorktreePath, st.SessionID, err.Error()), func() {}, nil
-	}
-	// Same wrapping as the live branch — and this is the branch that most
-	// needs it: a thread revived here is idle by definition, and everything
-	// that happens in it next is the person's own doing.
-	return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, parent: w, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
-}
-
-// reactivate brings a thread's own frontend workspace back up, or reports
-// why it could not. Every outcome that leaves the caller without a writable
-// workspace is an error here, including reactivation that reports success
-// but leaves no handle installed.
-func reactivate(ctx context.Context, mgr *thread.Manager, id string) (workspace.Workspace, error) {
-	if _, err := mgr.Activate(ctx, id); err != nil {
-		return nil, err
-	}
-	h := mgr.Handle(id)
-	if h == nil {
-		return nil, fmt.Errorf("thread: reactivated workspace was released before it could be attached")
-	}
-	return frontendWorkspace(h)
+	// Attaching never revives it on its own — that used to happen here
+	// implicitly (via reactivate/mgr.Activate), which meant every caller,
+	// including the dock's background activity refresh, silently spawned
+	// a full App per idle thread it glanced at. Reviving a thread is now
+	// something only a caller that means it does explicitly, via
+	// ActivateThread, before calling AttachThread — see
+	// ui/model/root.go's attachThreadCmd. This just returns a read-only
+	// workspace bound to the main app with the thread's worktree as
+	// WorkingDir, which still shows the persisted session data.
+	return workspace.NewReadOnlyWorkspace(w, st.WorktreePath, st.SessionID, "thread is not running"), func() {}, nil
 }
 
 // frontendWorkspace obtains the frontend-facing view supplied by a handle's
