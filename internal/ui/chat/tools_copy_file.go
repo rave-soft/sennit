@@ -75,6 +75,28 @@ func (t *baseToolMessageItem) formatReadResultForCopy() string {
 	return result.String()
 }
 
+// formatDiffResultForCopy renders the shared diff-with-header body used by
+// formatEditResultForCopy and formatMultiEditResultForCopy, once metadata
+// and params have been decoded into their common fields.
+func formatDiffResultForCopy(oldContent, newContent, filePath string) string {
+	var result strings.Builder
+
+	if oldContent != "" || newContent != "" {
+		fileName := filePath
+		if fileName != "" {
+			fileName = fsext.PrettyPath(fileName)
+		}
+		diffContent, additions, removals := diff.GenerateDiff(oldContent, newContent, fileName)
+
+		fmt.Fprintf(&result, "Changes: +%d -%d\n", additions, removals)
+		result.WriteString("```diff\n")
+		result.WriteString(diffContent)
+		result.WriteString("\n```")
+	}
+
+	return result.String()
+}
+
 // formatEditResultForCopy formats edit tool results for clipboard.
 func (t *baseToolMessageItem) formatEditResultForCopy() string {
 	if t.result == nil || t.result.Metadata == "" {
@@ -95,22 +117,7 @@ func (t *baseToolMessageItem) formatEditResultForCopy() string {
 		params = tools.EditParams{}
 	}
 
-	var result strings.Builder
-
-	if meta.OldContent != "" || meta.NewContent != "" {
-		fileName := params.FilePath
-		if fileName != "" {
-			fileName = fsext.PrettyPath(fileName)
-		}
-		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
-
-		fmt.Fprintf(&result, "Changes: +%d -%d\n", additions, removals)
-		result.WriteString("```diff\n")
-		result.WriteString(diffContent)
-		result.WriteString("\n```")
-	}
-
-	return result.String()
+	return formatDiffResultForCopy(meta.OldContent, meta.NewContent, params.FilePath)
 }
 
 // formatMultiEditResultForCopy formats multi-edit tool results for clipboard.
@@ -133,21 +140,7 @@ func (t *baseToolMessageItem) formatMultiEditResultForCopy() string {
 		params = tools.MultiEditParams{}
 	}
 
-	var result strings.Builder
-	if meta.OldContent != "" || meta.NewContent != "" {
-		fileName := params.FilePath
-		if fileName != "" {
-			fileName = fsext.PrettyPath(fileName)
-		}
-		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
-
-		fmt.Fprintf(&result, "Changes: +%d -%d\n", additions, removals)
-		result.WriteString("```diff\n")
-		result.WriteString(diffContent)
-		result.WriteString("\n```")
-	}
-
-	return result.String()
+	return formatDiffResultForCopy(meta.OldContent, meta.NewContent, params.FilePath)
 }
 
 // formatWriteResultForCopy formats write tool results for clipboard.

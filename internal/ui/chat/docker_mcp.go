@@ -208,7 +208,7 @@ func (d *DockerMCPToolRenderContext) makeHeader(sty *styles.Styles, tool string,
 
 func (d *DockerMCPToolRenderContext) formatToolName(sty *styles.Styles, tool string) string {
 	mainTool := "Docker MCP"
-	action := tool
+	var action string
 	actionStyle := sty.Tool.MCPToolName
 	switch tool {
 	case "mcp-exec":
@@ -237,7 +237,7 @@ func (d *DockerMCPToolRenderContext) formatToolName(sty *styles.Styles, tool str
 }
 
 func (d *DockerMCPToolRenderContext) makeCompactHeader(sty *styles.Styles, tool string, width int, params ...string) string {
-	action := tool
+	var action string
 	switch tool {
 	case "mcp-exec":
 		action = "exec"
