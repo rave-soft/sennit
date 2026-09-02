@@ -466,7 +466,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 
 	// Add transparent background toggle.
 	transparentAlias := "disable background color"
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {
+	if cfg.TransparentEnabled() {
 		transparentAlias = "enable background color"
 	}
 	commands = append(commands, NewCommandItem(sty, "toggle_transparent", "transparency", "", ActionToggleTransparentBackground{}).

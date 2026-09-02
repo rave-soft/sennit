@@ -127,31 +127,9 @@ func (dv *DiffView) clearCaches() {
 	dv.isComputed = false
 }
 
-// ContextLines sets the number of context lines for the DiffView.
-func (dv *DiffView) ContextLines(contextLines int) *DiffView {
-	dv.contextLines = contextLines
-	// computeDiff caches its result behind isComputed; without dropping
-	// that here, a ContextLines() call after the first String() would
-	// silently keep the diff computed under the old value.
-	dv.clearCaches()
-	return dv
-}
-
 // Style sets the style for the DiffView.
 func (dv *DiffView) Style(style Style) *DiffView {
 	dv.style = style
-	return dv
-}
-
-// LineNumbers sets whether to display line numbers in the DiffView.
-func (dv *DiffView) LineNumbers(lineNumbers bool) *DiffView {
-	dv.lineNumbers = lineNumbers
-	return dv
-}
-
-// Height sets the height of the DiffView.
-func (dv *DiffView) Height(height int) *DiffView {
-	dv.height = height
 	return dv
 }
 
@@ -176,18 +154,6 @@ func (dv *DiffView) XOffset(xOffset int) *DiffView {
 // effect, since every column of a wrapped line is already visible.
 func (dv *DiffView) WrapLines(wrapLines bool) *DiffView {
 	dv.wrapLines = wrapLines
-	return dv
-}
-
-// YOffset sets the vertical offset for the DiffView.
-func (dv *DiffView) YOffset(yOffset int) *DiffView {
-	dv.yOffset = yOffset
-	return dv
-}
-
-// InfiniteYScroll allows the YOffset to scroll beyond the last line.
-func (dv *DiffView) InfiniteYScroll(infiniteYScroll bool) *DiffView {
-	dv.infiniteYScroll = infiniteYScroll
 	return dv
 }
 

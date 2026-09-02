@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/rave-soft/sennit/internal/ui/diffview"
 	"github.com/stretchr/testify/assert"
@@ -105,7 +107,7 @@ var (
 
 	LightModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.
-			Style(diffview.DefaultLightStyle()).
+			Style(defaultLightStyle()).
 			ChromaStyle(styles.Get("catppuccin-latte"))
 	}
 	DarkModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
@@ -133,6 +135,66 @@ var (
 		"DarkMode":  DarkModeFunc,
 	}
 )
+
+// defaultLightStyle is diffview's former exported DefaultLightStyle: kept
+// here since it turned out nothing but this file's own LightModeFunc ever
+// called it (deadcode confirmed it unreachable from main).
+func defaultLightStyle() diffview.Style {
+	return diffview.Style{
+		DividerLine: diffview.LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Iron).
+				Background(charmtone.Thunder),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Oyster).
+				Background(charmtone.Anchovy),
+		},
+		MissingLine: diffview.LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Background(charmtone.Sash),
+			Code: lipgloss.NewStyle().
+				Background(charmtone.Sash),
+		},
+		EqualLine: diffview.LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Char).
+				Background(charmtone.Sash),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Pepper).
+				Background(charmtone.Salt),
+		},
+		InsertLine: diffview.LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Turtle).
+				Background(lipgloss.Color("#c8e6c9")),
+			Symbol: lipgloss.NewStyle().
+				Foreground(charmtone.Turtle).
+				Background(lipgloss.Color("#e8f5e9")),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Pepper).
+				Background(lipgloss.Color("#e8f5e9")),
+		},
+		DeleteLine: diffview.LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Cherry).
+				Background(lipgloss.Color("#ffcdd2")),
+			Symbol: lipgloss.NewStyle().
+				Foreground(charmtone.Cherry).
+				Background(lipgloss.Color("#ffebee")),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Pepper).
+				Background(lipgloss.Color("#ffebee")),
+		},
+		Filename: diffview.LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Iron).
+				Background(charmtone.Thunder),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Iron).
+				Background(charmtone.Thunder),
+		},
+	}
+}
 
 func TestDiffView(t *testing.T) {
 	for layoutName, layoutFunc := range LayoutFuncs {
@@ -175,7 +237,7 @@ func TestDiffViewTabs(t *testing.T) {
 			dv := diffview.New().
 				Before("main.go", TestTabsBefore).
 				After("main.go", TestTabsAfter).
-				Style(diffview.DefaultLightStyle()).
+				Style(defaultLightStyle()).
 				ChromaStyle(styles.Get("catppuccin-latte"))
 			dv = layoutFunc(dv)
 
@@ -252,7 +314,7 @@ func TestDiffViewLineBreakIssue(t *testing.T) {
 			dv := diffview.New().
 				Before("index.js", TestLineBreakIssueBefore).
 				After("index.js", TestLineBreakIssueAfter).
-				Style(diffview.DefaultLightStyle()).
+				Style(defaultLightStyle()).
 				ChromaStyle(styles.Get("catppuccin-latte"))
 			dv = layoutFunc(dv)
 
@@ -275,7 +337,7 @@ func TestDiffViewWidth(t *testing.T) {
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
 						Width(width).
-						Style(diffview.DefaultLightStyle()).
+						Style(defaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte"))
 					dv = layoutFunc(dv)
 
@@ -298,7 +360,7 @@ func TestDiffViewHeight(t *testing.T) {
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
 						Height(height).
-						Style(diffview.DefaultLightStyle()).
+						Style(defaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte"))
 					dv = layoutFunc(dv)
 
@@ -318,7 +380,7 @@ func TestDiffViewXOffset(t *testing.T) {
 					dv := diffview.New().
 						Before("main.go", TestDefaultBefore).
 						After("main.go", TestDefaultAfter).
-						Style(diffview.DefaultLightStyle()).
+						Style(defaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte")).
 						Width(60).
 						XOffset(xOffset)
@@ -342,7 +404,7 @@ func TestDiffViewYOffset(t *testing.T) {
 					dv := diffview.New().
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
-						Style(diffview.DefaultLightStyle()).
+						Style(defaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte")).
 						Height(5).
 						YOffset(yOffset)
@@ -364,7 +426,7 @@ func TestDiffViewYOffsetInfinite(t *testing.T) {
 					dv := diffview.New().
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
-						Style(diffview.DefaultLightStyle()).
+						Style(defaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte")).
 						Height(5).
 						YOffset(yOffset).

@@ -50,11 +50,6 @@ func (s *permissionResponseState) complete(permission string, generation uint64)
 	return true
 }
 
-// isLoading reports whether the current request has a response in flight.
-func (s *permissionResponseState) isLoading() bool {
-	return s.loading
-}
-
 // current returns the current request identity and generation for a response
 // command after begin has claimed it.
 func (s *permissionResponseState) current() (permission string, generation uint64) {

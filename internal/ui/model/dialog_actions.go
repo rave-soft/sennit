@@ -30,6 +30,76 @@ func updatePreferredModelCmd(ws workspace.PreferredModelUpdater, model config.Se
 	}
 }
 
+// updateCoderModelCmd runs the shared "mutate the coder agent's selected
+// model and report a toast" flow behind ActionToggleThinking and
+// ActionSelectReasoningEffort: the loading guard, the nil-config check, the
+// coder-agent lookup, the state transition, and dispatching the toast +
+// underlying update. mutate applies the caller's change to a copy of the
+// current model and returns the toast text to show on success.
+//
+// extraGuard, when non-nil, runs immediately after the loading guard —
+// ActionSelectReasoningEffort's additional "agent busy" check, which
+// ActionToggleThinking does not have — and aborts with its returned cmd if
+// that cmd is non-nil.
+//
+// The returned bool reports whether the operation actually started; callers
+// use it to decide whether to close their dialog, exactly as the original
+// inline code did (a warning/error never closes the dialog).
+func (m *UI) updateCoderModelCmd(extraGuard func() tea.Cmd, mutate func(*config.SelectedModel) string) (tea.Cmd, bool) {
+	if m.modelOperation.isLoading() {
+		return util.ReportWarn("Model settings are already being updated"), false
+	}
+	if extraGuard != nil {
+		if cmd := extraGuard(); cmd != nil {
+			return cmd, false
+		}
+	}
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found")), false
+	}
+	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
+		return util.ReportError(errors.New("agent configuration not found")), false
+	}
+
+	currentModel := cfg.Model
+	info := mutate(&currentModel)
+
+	generation, started := m.modelOperation.begin()
+	if !started {
+		return util.ReportWarn("Model settings are already being updated"), false
+	}
+	ws := m.com.Workspace
+	ctx := m.com.Context()
+	return updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
+		if err != nil {
+			return modelSettingUpdatedMsg{Err: err, generation: generation}
+		}
+		return modelSettingUpdatedMsg{Err: ws.UpdateAgentModel(ctx), Info: info, generation: generation}
+	}), true
+}
+
+// updateGlobalOptionCmd runs the shared "write one global config field off
+// the Update goroutine and report a toast" flow behind
+// ActionSelectNotificationStyle and ActionToggleTransparentBackground: the
+// state transition and dispatching the write. Both handlers check their own
+// loading guard and validate cfg before calling this (their nil-config
+// handling differs — one silently skips the write, the other reports an
+// error — so that stays at the call site), which is why isLoading isn't
+// re-checked here. buildMsg turns the write's error (and the generation
+// that owns this operation) into the tea.Msg the caller's Update loop
+// expects.
+func (m *UI) updateGlobalOptionCmd(state *asyncOperationState, warnText, key string, value any, buildMsg func(err error, generation uint64) tea.Msg) (tea.Cmd, bool) {
+	generation, started := state.begin()
+	if !started {
+		return util.ReportWarn(warnText), false
+	}
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		return buildMsg(ws.SetConfigField(config.ScopeGlobal, key, value), generation)
+	}, true
+}
+
 // applyDialogAction executes a [dialog.Action] regardless of where it came
 // from: a dialog's HandleMsg (the usual path, via handleDialogMsg) or a
 // command selected directly from the editor's "/" completion popup, which
@@ -77,16 +147,14 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			break
 		}
 		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
-			generation, started := m.notificationStyle.begin()
-			if !started {
-				cmds = append(cmds, util.ReportWarn("Notification settings are already being updated"))
-				break
-			}
 			style := msg.Style
-			workspace := m.com.Workspace
-			cmds = append(cmds, func() tea.Msg {
-				return notificationStyleSetMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.notifications", style), Style: style, generation: generation}
-			})
+			cmd, _ := m.updateGlobalOptionCmd(&m.notificationStyle.asyncOperationState,
+				"Notification settings are already being updated",
+				"options.notifications", style,
+				func(err error, generation uint64) tea.Msg {
+					return notificationStyleSetMsg{Err: err, Style: style, generation: generation}
+				})
+			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
@@ -97,39 +165,18 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		if m.modelOperation.isLoading() {
-			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
-			break
-		}
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
-		}
-		if _, ok := cfg.Agents[config.AgentCoder]; !ok {
-			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
-			break
-		}
-		currentModel := cfg.Model
-		currentModel.Think = !currentModel.Think
-		status := "disabled"
-		if currentModel.Think {
-			status = "enabled"
-		}
-		generation, started := m.modelOperation.begin()
-		if !started {
-			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
-			break
-		}
-		ws := m.com.Workspace
-		ctx := m.com.Context()
-		cmds = append(cmds, updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
-			if err != nil {
-				return modelSettingUpdatedMsg{Err: err, generation: generation}
+		cmd, started := m.updateCoderModelCmd(nil, func(model *config.SelectedModel) string {
+			model.Think = !model.Think
+			status := "disabled"
+			if model.Think {
+				status = "enabled"
 			}
-			return modelSettingUpdatedMsg{Err: ws.UpdateAgentModel(ctx), Info: "Thinking mode " + status, generation: generation}
-		}))
-		m.dialog.CloseDialog(dialog.CommandsID)
+			return "Thinking mode " + status
+		})
+		cmds = append(cmds, cmd)
+		if started {
+			m.dialog.CloseDialog(dialog.CommandsID)
+		}
 	case dialog.ActionToggleTransparentBackground:
 		// Preserve the in-flight warning even if the configuration changed while
 		// the write was running. Validation applies only to a new operation.
@@ -142,17 +189,17 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
-		desired := cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.Transparent == nil || !*cfg.Options.TUI.Transparent
-		generation, started := m.transparency.begin()
-		if !started {
-			cmds = append(cmds, util.ReportWarn("Transparency is already being updated"))
-			break
+		desired := !cfg.TransparentEnabled()
+		cmd, started := m.updateGlobalOptionCmd(&m.transparency.asyncOperationState,
+			"Transparency is already being updated",
+			"options.tui.transparent", desired,
+			func(err error, generation uint64) tea.Msg {
+				return transparentToggledMsg{Err: err, Enabled: desired, generation: generation}
+			})
+		cmds = append(cmds, cmd)
+		if started {
+			m.dialog.CloseDialog(dialog.CommandsID)
 		}
-		workspace := m.com.Workspace
-		cmds = append(cmds, func() tea.Msg {
-			return transparentToggledMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", desired), Enabled: desired, generation: generation}
-		})
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -168,47 +215,23 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.ThemeID)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectReasoningEffort:
-		if m.modelOperation.isLoading() {
-			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
-			break
-		}
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
-		}
-
-		if _, ok := cfg.Agents[config.AgentCoder]; !ok {
-			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
-			break
-		}
-
 		// The coder agent leaves Model unset (it inherits the app's
 		// configured model), so the model it actually runs on is always
 		// cfg.Model.
-		currentModel := cfg.Model
-		currentModel.ReasoningEffort = msg.Effort
 		effort := msg.Effort
-
-		generation, started := m.modelOperation.begin()
-		if !started {
-			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
-			break
-		}
-		ws := m.com.Workspace
-		ctx := m.com.Context()
-		cmds = append(cmds, updatePreferredModelCmd(ws, currentModel, func(err error) tea.Msg {
-			if err != nil {
-				return modelSettingUpdatedMsg{Err: err, generation: generation}
+		cmd, started := m.updateCoderModelCmd(func() tea.Cmd {
+			if m.isAgentBusy() {
+				return util.ReportWarn("Agent is busy, please wait...")
 			}
-			return modelSettingUpdatedMsg{Err: ws.UpdateAgentModel(ctx), Info: "Reasoning effort set to " + effort, generation: generation}
-		}))
-		m.dialog.CloseDialog(dialog.ReasoningID)
+			return nil
+		}, func(model *config.SelectedModel) string {
+			model.ReasoningEffort = effort
+			return "Reasoning effort set to " + effort
+		})
+		cmds = append(cmds, cmd)
+		if started {
+			m.dialog.CloseDialog(dialog.ReasoningID)
+		}
 	default:
 		return nil, false
 	}

@@ -7,6 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newEditorPlaceholderStateWithValues is editorPlaceholderState's former
+// production constructor for a fixed (non-randomized) placeholder pair;
+// only tests ever needed a pinned value, so it lives here now (deadcode
+// confirmed it unreachable from main).
+func newEditorPlaceholderStateWithValues(ready, working string) editorPlaceholderState {
+	return editorPlaceholderState{ready: ready, working: working}
+}
+
 func TestEditorPlaceholderStateSelectPlaceholder(t *testing.T) {
 	state := newEditorPlaceholderStateWithValues("ready", "working")
 	childPlaceholder := "viewing subagent session · ctrl+o to return"

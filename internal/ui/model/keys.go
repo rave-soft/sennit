@@ -78,10 +78,6 @@ type KeyMap struct {
 	Threads    key.Binding
 }
 
-func DefaultKeyMap() KeyMap {
-	return keyMapForPlatform("", nil)
-}
-
 func configuredKeyMap(goos string, overrides map[string][]string) KeyMap {
 	return keyMapForPlatform(goos, overrides)
 }

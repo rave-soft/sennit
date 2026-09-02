@@ -32,6 +32,13 @@ func newTestUIForOpeningPermissions(t *testing.T) *UI {
 	return u
 }
 
+// isLoading is permissionResponseState's former production accessor;
+// nothing but this file's and update_settings_test.go's assertions ever
+// called it (deadcode confirmed it unreachable from main).
+func (s *permissionResponseState) isLoading() bool {
+	return s.loading
+}
+
 func TestHandlePermissionNotification_RemoteGrantClosesDialog(t *testing.T) {
 	t.Parallel()
 

@@ -8,6 +8,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// withGOOS is ui.go's former production Option for pinning the platform
+// configuredKeyMap renders bindings for, overriding the runtime.GOOS
+// default. Golden/keybinding-sensitive tests use it so their expectations
+// don't depend on the host they run on; there is no production caller — a
+// real UI always wants the host's own keys (deadcode confirmed it
+// unreachable from main).
+func withGOOS(goos string) Option {
+	return func(m *UI) { m.goos = goos }
+}
+
+// DefaultKeyMap is keys.go's former production entry point for the
+// unconfigured, unpinned-platform key map; every real caller goes through
+// New(), which always resolves a goos (see withGOOS), so only tests ever
+// needed the bare default (deadcode confirmed it unreachable from main).
+func DefaultKeyMap() KeyMap {
+	return keyMapForPlatform("", nil)
+}
+
 func TestConfiguredKeyMapLinuxDefaults(t *testing.T) {
 	t.Parallel()
 

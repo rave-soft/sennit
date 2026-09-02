@@ -489,7 +489,7 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 	// Get diff mode from config.
 	var opts []dialog.PermissionsOption
-	if diffMode := m.com.Config().Options.TUI.DiffMode; diffMode != "" {
+	if diffMode := m.com.Config().DiffMode(); diffMode != "" {
 		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))
 	}
 

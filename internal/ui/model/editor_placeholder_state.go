@@ -41,10 +41,6 @@ func newEditorPlaceholderState() editorPlaceholderState {
 	return state
 }
 
-func newEditorPlaceholderStateWithValues(ready, working string) editorPlaceholderState {
-	return editorPlaceholderState{ready: ready, working: working}
-}
-
 func (p *editorPlaceholderState) randomize() {
 	p.working = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
 	p.ready = readyPlaceholders[rand.Intn(len(readyPlaceholders))]

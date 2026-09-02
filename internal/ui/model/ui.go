@@ -251,14 +251,6 @@ func WithBreadcrumbRoot(name string) Option {
 	return func(m *UI) { m.crumbRoot = name }
 }
 
-// withGOOS pins the platform configuredKeyMap renders bindings for,
-// overriding the runtime.GOOS default. Golden/keybinding-sensitive tests
-// use it so their expectations don't depend on the host they run on; there
-// is no production caller — a real UI always wants the host's own keys.
-func withGOOS(goos string) Option {
-	return func(m *UI) { m.goos = goos }
-}
-
 // surfacesThreads reports whether this UI shows other threads at all: the
 // panel's threads block, the header's active-thread badge, and the
 // refreshes that feed them.
@@ -309,8 +301,8 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	ta.Focus()
 
 	scrollbarMode := config.ScrollbarDefault
-	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
-		scrollbarMode = cfg.Options.TUI.Scrollbar
+	if sb := com.Config().Scrollbar(); sb != "" {
+		scrollbarMode = sb
 	}
 	ch := chatlist.NewChat(com, scrollbarMode)
 
@@ -374,12 +366,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	if ui.goos == "" {
 		ui.goos = runtime.GOOS
 	}
-	cfg := com.Config()
-	var keybindings map[string][]string
-	if cfg.Options != nil && cfg.Options.TUI != nil {
-		keybindings = cfg.Options.TUI.Keybindings
-	}
-	ui.keyMap = configuredKeyMap(ui.goos, keybindings)
+	ui.keyMap = configuredKeyMap(ui.goos, com.Config().Keybindings())
 	ui.editor.attachments = attachments.New(
 		attachments.NewRenderer(
 			com.Styles.Attachments.Normal,
@@ -416,7 +403,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	ui.status = status
 
 	// Initialize compact mode from config
-	ui.lay.forceCompactMode = com.Config().Options.TUI.CompactMode
+	ui.lay.forceCompactMode = com.Config().CompactMode()
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
@@ -445,12 +432,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
 
-	cfgOpts := com.Config().Options
+	cfg := com.Config()
 
 	// disable indeterminate progress bar
-	ui.progressBarEnabled = cfgOpts.Progress == nil || *cfgOpts.Progress
+	ui.progressBarEnabled = cfg.Options == nil || cfg.Options.Progress == nil || *cfg.Options.Progress
 	// enable transparent mode
-	ui.lay.isTransparent = cfgOpts.TUI.Transparent != nil && *cfgOpts.TUI.Transparent
+	ui.lay.isTransparent = cfg.TransparentEnabled()
 	if ui.embedded {
 		// Only one UI instance may own the terminal's progress bar.
 		ui.progressBarEnabled = false

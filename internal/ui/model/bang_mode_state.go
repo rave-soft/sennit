@@ -21,10 +21,6 @@ func (b *bangModeState) isActive() bool {
 	return b.active
 }
 
-func (b *bangModeState) isEmpty() bool {
-	return b.wasEmpty
-}
-
 func (b *bangModeState) enter(wasEmpty bool) {
 	b.active = true
 	b.wasEmpty = wasEmpty

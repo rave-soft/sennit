@@ -24,63 +24,6 @@ type Style struct {
 	Filename    LineStyle
 }
 
-func DefaultLightStyle() Style {
-	return Style{
-		DividerLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Iron).
-				Background(charmtone.Thunder),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Oyster).
-				Background(charmtone.Anchovy),
-		},
-		MissingLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Background(charmtone.Sash),
-			Code: lipgloss.NewStyle().
-				Background(charmtone.Sash),
-		},
-		EqualLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Char).
-				Background(charmtone.Sash),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(charmtone.Salt),
-		},
-		InsertLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#c8e6c9")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#e8f5e9")),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(lipgloss.Color("#e8f5e9")),
-		},
-		DeleteLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#ffcdd2")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#ffebee")),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(lipgloss.Color("#ffebee")),
-		},
-		Filename: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Iron).
-				Background(charmtone.Thunder),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Iron).
-				Background(charmtone.Thunder),
-		},
-	}
-}
-
 // DefaultDarkStyle provides a default dark theme style for the diff view.
 func DefaultDarkStyle() Style {
 	return Style{

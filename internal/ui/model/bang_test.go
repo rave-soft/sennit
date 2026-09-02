@@ -8,6 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// isEmpty is bangModeState's former production method; nothing but this
+// file's tests ever called it, so it lives here (deadcode confirmed it
+// unreachable from main).
+func (b *bangModeState) isEmpty() bool {
+	return b.wasEmpty
+}
+
 // TestBangTypedAtEmptyEditorEntersBangMode covers the entry path: typing
 // "!" as the first character strips it from the visible text and flips
 // bangMode, mirroring Claude Code's "!" shell prefix.
