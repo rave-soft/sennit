@@ -369,15 +369,24 @@ type ProjectLifecycle interface {
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
 	// ConfigProblems runs the config diagnostic and returns what it found.
-	// It answers from the config alone — see internal/doctor for the
-	// problems that depend on the machine or on discovery, which the
-	// caller merges in.
+	// It answers from the config alone — see DoctorProblems below for the
+	// merged list that also covers the machine and discovery.
 	ConfigProblems() []config.Problem
 	// SkillStates is the outcome of the last skill discovery: what loaded
 	// and what failed to.
 	SkillStates() []*skills.SkillState
 	// BuiltinSkills are the skills shipped with the binary.
 	BuiltinSkills() []*skills.Skill
+	// DoctorProblems is the full config.Problem list the /doctor dialog
+	// shows: ConfigProblems' static findings, an environment probe (e.g.
+	// missing clipboard helpers — machine state, not config), SkillStates
+	// run through internal/doctor's validation, and any MCP server stuck
+	// in an error/needs-auth state. The environment probe shells out and
+	// walks PATH, so this call can block; callers on the UI thread must
+	// run it from a tea.Cmd rather than a dialog constructor. Mirrors
+	// sennit_info's own [problems] section (the agent-tool side of the
+	// same merge).
+	DoctorProblems() []config.Problem
 	// ListCustomCommands returns everything the command palette offers
 	// under "user commands": the markdown commands found on disk, plus
 	// the user-invocable skills, already merged.
@@ -566,6 +575,15 @@ type FrontendWorkspace interface {
 	// SetCompactMode sets whether compact mode is enabled at scope.
 	SetCompactMode(scope config.Scope, enabled bool) error
 	ProviderAPIKeySetter
+	// VerifyProviderAPIKey tests apiKey against providerID by building the
+	// same kind of runtime provider the agent itself would use for that
+	// provider (proxy, extra headers, account rotation, and a base URL
+	// resolved from the known-providers catalog when the provider isn't
+	// configured yet) and probing it, rather than a caller-assembled
+	// stand-in. It returns nil when the key checks out and a descriptive
+	// error otherwise; it does not persist apiKey — SetProviderAPIKey does
+	// that once the caller is satisfied.
+	VerifyProviderAPIKey(ctx context.Context, providerID, apiKey string) error
 	// ImportCopilot imports the credentials of an existing GitHub Copilot
 	// CLI login, if one is present on this machine, for use as this
 	// workspace's Copilot provider token.

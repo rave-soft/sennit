@@ -2,8 +2,6 @@ package dialog
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -11,11 +9,9 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/doctor"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	mcptools "github.com/rave-soft/sennit/internal/workspace"
 )
 
 const (
@@ -42,12 +38,19 @@ const (
 // implementation detail of the list->detail handoff.
 type doctorShowDetail struct{ id string }
 
+// doctorProblemsLoadedMsg carries the result of com.Workspace.DoctorProblems,
+// run off the Update goroutine — see loadDoctorProblemsCmd.
+type doctorProblemsLoadedMsg struct{ problems []config.Problem }
+
 // Doctor is the /doctor command's dialog: a filterable list of every
-// config.Problem in the workspace (config.Doctor's static findings plus any
-// MCP server stuck in an error/needs-auth state), backed by [selectDialog].
-// Enter on a problem switches to a detail screen with the untruncated
-// message/hint and, for provider/model problems, a key to jump straight to
-// the dialog that fixes it.
+// config.Problem in the workspace, backed by [selectDialog]. Enter on a
+// problem switches to a detail screen with the untruncated message/hint
+// and, for provider/model problems, a key to jump straight to the dialog
+// that fixes it.
+//
+// The problem list is not known at construction: NewDoctor returns before
+// it has one (see doctorProblemsLoadedMsg), so the dialog opens empty and
+// populates itself once the workspace answers.
 type Doctor struct {
 	*selectDialog
 	Base
@@ -67,15 +70,14 @@ type Doctor struct {
 
 var _ Dialog = (*Doctor)(nil)
 
-// NewDoctor creates the /doctor problems dialog.
-func NewDoctor(com *common.Common) *Doctor {
-	return newDoctorWithEnvironment(com, doctor.EnvironmentProblems)
-}
-
-func newDoctorWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) *Doctor {
-	problems := doctorProblemsWithEnvironment(com, environmentProblems)
-
-	d := &Doctor{Base: NewBase(com, doctorDialogMaxWidth), com: com, problems: problems}
+// NewDoctor creates the /doctor problems dialog. It performs no IO itself:
+// the returned dialog starts with an empty problem list, and the returned
+// tea.Cmd fetches the real one from com.Workspace.DoctorProblems — which
+// shells out to probe the environment (missing clipboard helpers, etc.) and
+// so must not run on the Update goroutine. See NewFilePicker for the same
+// (dialog, tea.Cmd) shape.
+func NewDoctor(com *common.Common) (*Doctor, tea.Cmd) {
+	d := &Doctor{Base: NewBase(com, doctorDialogMaxWidth), com: com}
 
 	// buildItems never fails for the doctor list, so the error from
 	// newSelectDialog is always nil here.
@@ -86,7 +88,7 @@ func newDoctorWithEnvironment(com *common.Common, environmentProblems func() []c
 		dynamicHeight: true,
 		minHeight:     doctorDialogMinHeight,
 		maxHeight:     doctorDialogMaxHeight,
-		buildItems:    func() ([]list.FilterableItem, int, error) { return doctorItemsFrom(com, problems) },
+		buildItems:    func() ([]list.FilterableItem, int, error) { return doctorItemsFrom(com, d.problems) },
 		onSelect:      func(id string) Action { return doctorShowDetail{id: id} },
 	})
 	d.selectDialog = sd
@@ -109,7 +111,17 @@ func newDoctorWithEnvironment(com *common.Common, environmentProblems func() []c
 	)
 	d.keyMap.Close = CloseKey
 
-	return d
+	return d, loadDoctorProblemsCmd(com)
+}
+
+// loadDoctorProblemsCmd fetches the merged problem list off the Update
+// goroutine (see Workspace.DoctorProblems's doc comment for why it can
+// block) and reports it as doctorProblemsLoadedMsg.
+func loadDoctorProblemsCmd(com *common.Common) tea.Cmd {
+	ws := com.Workspace
+	return func() tea.Msg {
+		return doctorProblemsLoadedMsg{problems: ws.DoctorProblems()}
+	}
 }
 
 // HandleMsg implements [Dialog], overriding the embedded selectDialog to
@@ -118,6 +130,15 @@ func newDoctorWithEnvironment(com *common.Common, environmentProblems func() []c
 // the Enter/Select outcome is intercepted, since onSelect above turns it
 // into a doctorShowDetail instead of an ActionClose.
 func (d *Doctor) HandleMsg(msg tea.Msg) Action {
+	if loaded, ok := msg.(doctorProblemsLoadedMsg); ok {
+		d.problems = loaded.problems
+		// The item source changed out from under the user (they didn't
+		// ask for this reload — it's the initial load landing), so keep
+		// whatever filter they've already typed.
+		_ = d.replaceItems(func() ([]list.FilterableItem, int, error) { return doctorItemsFrom(d.com, d.problems) }, true)
+		return nil
+	}
+
 	if d.mode == doctorModeDetail {
 		return d.handleDetailMsg(msg)
 	}
@@ -225,43 +246,6 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 		return d.selectDialog.FullHelp()
 	}
 	return [][]key.Binding{d.ShortHelp()}
-}
-
-// doctorProblemsWithEnvironment collects every config.Problem for this
-// workspace: the static findings from config.Doctor, any MCP server
-// currently stuck in an error/needs-auth state, and any SKILL.md that
-// failed to parse or validate. This mirrors sennit_info's [problems]
-// section (domain/agent/tools/sennit_info.go's writeProblems) — the same
-// merge, on the UI side of the workspace.Workspace boundary since
-// internal/config cannot import the MCP client package.
-//
-// environmentProblems is injected so tests can drive the dialog without
-// the real environment probe.
-func doctorProblemsWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) []config.Problem {
-	problems := com.Workspace.ConfigProblems()
-	problems = append(problems, environmentProblems()...)
-	problems = append(problems, doctor.SkillProblems(com.Workspace.SkillStates())...)
-	// Sorted, because map iteration is random and this list is rendered:
-	// the MCP problems shuffled on every open, so the row under the
-	// cursor was a different server each time.
-	states := com.Workspace.MCPGetStates()
-	for _, name := range slices.Sorted(maps.Keys(states)) {
-		info := states[name]
-		if info.State != mcptools.MCPStateError && info.State != mcptools.MCPStateNeedsAuth {
-			continue
-		}
-		msg := fmt.Sprintf("mcp server %s is in state %s", name, info.State)
-		if info.Error != nil {
-			msg += ": " + info.Error.Error()
-		}
-		problems = append(problems, config.Problem{
-			Severity: config.SeverityError,
-			Area:     config.AreaMCP,
-			Subject:  name,
-			Message:  msg,
-		})
-	}
-	return problems
 }
 
 // doctorItemID builds the stable id shared by DoctorItem.ID() (what the

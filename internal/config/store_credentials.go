@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 )
 
 // credentialWriteLockDeadline bounds how long a credential write (e.g.
@@ -135,11 +136,8 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 	}
 	provider, ok := cfg.RuntimeProvider(providerID)
 	if !ok {
-		if s.processor == nil {
-			return fmt.Errorf("provider %s has no compiled runtime state", providerID)
-		}
 		var err error
-		provider, err = s.processor.CompileProvider(configured, cfg.RuntimeResolver())
+		provider, err = providerruntime.FromConfig(configured, cfg.RuntimeResolver())
 		if err != nil {
 			return fmt.Errorf("compiling runtime state for provider %s: %w", providerID, err)
 		}
@@ -155,10 +153,7 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 	if cred.ActiveAccountID != "" {
 		provider.Account = cred.ActiveAccountID
 	}
-	provider, err := s.applyProviderCredentials(provider)
-	if err != nil {
-		return fmt.Errorf("applying credentials for provider %s: %w", providerID, err)
-	}
+	provider = s.applyProviderCredentials(provider)
 	cfg.SetRuntimeProvider(providerID, provider)
 
 	// Mirror the published credential fields onto the disk-shaped entry
@@ -397,11 +392,8 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 			runtimeProvider, ok := cfg.RuntimeProvider(providerID)
 			if !ok {
-				if s.processor == nil {
-					return nil, fmt.Errorf("provider runtime processor is not configured")
-				}
 				var compileErr error
-				runtimeProvider, compileErr = s.processor.CompileProvider(current, cfg.RuntimeResolver())
+				runtimeProvider, compileErr = providerruntime.FromConfig(current, cfg.RuntimeResolver())
 				if compileErr != nil {
 					return nil, fmt.Errorf("compiling runtime state for provider %s: %w", providerID, compileErr)
 				}
@@ -409,10 +401,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 			runtimeProvider.APIKey = effectiveAPIKey
 			runtimeProvider.APIKeyTemplate = current.APIKey
 			runtimeProvider.OAuthToken = current.OAuthToken
-			prepared, setupErr := s.applyProviderCredentials(runtimeProvider)
-			if setupErr != nil {
-				return nil, fmt.Errorf("applying credentials for provider %s: %w", providerID, setupErr)
-			}
+			prepared := s.applyProviderCredentials(runtimeProvider)
 
 			cfg.Providers.Set(providerID, current)
 			cfg.SetRuntimeProvider(providerID, prepared)

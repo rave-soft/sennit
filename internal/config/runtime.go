@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -12,13 +11,27 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/env"
+	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/providers/state"
 )
 
+// RuntimeProcessor runs the provider-catalog/discovery pipeline that turns
+// cfg.Providers into RuntimeInput.KnownProviders/RuntimeProviders. It used
+// to also carry CompileProvider and ApplyProviderCredentials, forwarders
+// that existed only so ConfigStore could reach
+// internal/providers/runtime.FromConfig/ApplyPostCredentialSetup without
+// internal/config importing that package directly (it used to import
+// internal/config, so the reverse import would have cycled). Now that
+// internal/providers/runtime depends on internal/providers/config instead
+// (see that package), ConfigStore calls FromConfig/ApplyPostCredentialSetup
+// directly — see applyProviderCredentials below and store_credentials.go —
+// leaving Process as the one real injection seam: it does substantial,
+// non-trivial work (catalog merge, model discovery, credential validation)
+// that config's own tests substitute fakes for (see runtime_test.go's
+// testRuntimeProcessor) to stay fast and deterministic rather than hitting
+// the network or the embedded catalog on every test.
 type RuntimeProcessor interface {
 	Process(context.Context, RuntimeInput) (RuntimeResult, error)
-	CompileProvider(ProviderConfig, VariableResolver) (state.Provider, error)
-	ApplyProviderCredentials(state.Provider) (state.Provider, error)
 }
 
 type RuntimeInput struct {
@@ -37,11 +50,11 @@ type RuntimeResult struct {
 	Resolver         VariableResolver
 }
 
-func (s *ConfigStore) applyProviderCredentials(provider state.Provider) (state.Provider, error) {
-	if s.processor == nil {
-		return state.Provider{}, fmt.Errorf("provider runtime processor is not configured")
-	}
-	return s.processor.ApplyProviderCredentials(provider)
+// applyProviderCredentials runs post-credential vendor setup (Copilot's
+// static headers, Codex's chatgpt-account-id header) on provider.
+func (s *ConfigStore) applyProviderCredentials(provider state.Provider) state.Provider {
+	providerruntime.ApplyPostCredentialSetup(&provider)
+	return provider
 }
 
 type RuntimeStore interface {

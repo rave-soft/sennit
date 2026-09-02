@@ -3,7 +3,6 @@ package dialog
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -14,7 +13,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/rave-soft/sennit/internal/config"
-	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -297,34 +295,27 @@ func (m *APIKeyInput) ShortHelp() []key.Binding {
 }
 
 // verifyAPIKeyCmd snapshots the current provider/key state in Update and
-// does the actual network check off the Update goroutine, the same pattern
+// does the actual verification off the Update goroutine, the same pattern
 // as saveAPIKeyCmd below and OAuthCodex.startPolling: the returned closure
 // touches only its captured copies, never m, so it's safe to run
 // concurrently with future Update calls that mutate m.input.
+//
+// The verification itself goes through com.Workspace.VerifyProviderAPIKey
+// rather than building a provider here: only the workspace knows how the
+// agent would actually construct this provider (proxy, extra headers,
+// account rotation, catalog base URL), and a dialog-built stand-in could
+// pass while the real provider would fail, or vice versa. There is no
+// artificial minimum duration here (the previous version slept in the
+// command to hold the spinner visible for 750ms): the workspace call is a
+// real network round trip, so the spinner already has something to show
+// for the time it's up.
 func (m *APIKeyInput) verifyAPIKeyCmd() tea.Cmd {
-	providerConfig := config.ProviderConfig{
-		ID:      string(m.provider.ID),
-		Name:    m.provider.Name,
-		APIKey:  m.input.Value(),
-		Type:    m.provider.Type,
-		BaseURL: m.provider.APIEndpoint,
-	}
-	resolver := m.com.Workspace.Resolver()
+	ws := m.com.Workspace
+	ctx := m.com.Context()
+	providerID := string(m.provider.ID)
+	apiKey := m.input.Value()
 	return func() tea.Msg {
-		start := time.Now()
-
-		provider, err := providerruntime.FromConfig(providerConfig, resolver)
-		if err == nil {
-			err = providerruntime.TestConnection(provider, resolver)
-		}
-
-		// intentionally wait for at least 750ms to make sure the user sees the spinner
-		elapsed := time.Since(start)
-		minimum := 750 * time.Millisecond
-		if elapsed < minimum {
-			time.Sleep(minimum - elapsed)
-		}
-
+		err := ws.VerifyProviderAPIKey(ctx, providerID, apiKey)
 		if err == nil {
 			return ActionChangeAPIKeyState{APIKeyInputStateVerified}
 		}

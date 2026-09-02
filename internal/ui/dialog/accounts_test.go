@@ -51,7 +51,7 @@ func (w *accountsTestWorkspace) SupportsThreads() bool { return false }
 // KnownProviders mirrors what the dialog used to compute for itself: the
 // embedded catalog for this fake's config.
 func (w accountsTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg)
+	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test

@@ -1,4 +1,4 @@
-package config
+package providerconfig
 
 import "github.com/rave-soft/sennit/internal/providers/accounts"
 

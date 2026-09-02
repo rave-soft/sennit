@@ -427,6 +427,15 @@ func (w *readOnlyWorkspace) SetProviderAPIKey(scope config.Scope, providerID str
 	return w.readOnlyError("SetProviderAPIKey")
 }
 
+// VerifyProviderAPIKey is refused rather than passed through, for the same
+// reason RefreshAccountLimits is below: although the probe itself writes
+// nothing, it is a live network call made in the parent workspace's name,
+// and a read-only thread view exists to let a completed/interrupted thread
+// be inspected without acting as the workspace it is attached to.
+func (w *readOnlyWorkspace) VerifyProviderAPIKey(ctx context.Context, providerID, apiKey string) error {
+	return w.readOnlyError("VerifyProviderAPIKey")
+}
+
 func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
 	return accounts.Account{}, w.readOnlyError("RecordAccount")
 }
@@ -687,6 +696,10 @@ func (w *readOnlyWorkspace) SkillStates() []*skills.SkillState {
 
 func (w *readOnlyWorkspace) BuiltinSkills() []*skills.Skill {
 	return w.ws.BuiltinSkills()
+}
+
+func (w *readOnlyWorkspace) DoctorProblems() []config.Problem {
+	return w.ws.DoctorProblems()
 }
 
 func (w *readOnlyWorkspace) ListCustomCommands(ctx context.Context) ([]commands.CustomCommand, error) {

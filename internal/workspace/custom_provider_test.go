@@ -119,7 +119,7 @@ func (a *testConfigAccessor) RefreshAccountLimits(ctx context.Context, providerI
 }
 
 func (a *testConfigAccessor) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(a.store.Config())
+	return providerruntime.Providers(a.store.Config().Options.DisableDefaultProviders)
 }
 
 func (a *testConfigAccessor) CustomProviderTypes() []string { return nil }

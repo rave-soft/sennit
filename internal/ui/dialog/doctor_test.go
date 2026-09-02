@@ -1,151 +1,95 @@
 package dialog
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/csync"
-	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
-	"github.com/rave-soft/sennit/internal/skills"
-	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
-// doctorTestWorkspace is a minimal [workspace.Workspace] stub covering what
-// DoctorProblems reads: Config() and MCPGetStates().
+// doctorTestWorkspace is a minimal [workspace.Workspace] stub: DoctorProblems
+// returns whatever problems is set to, and calls is incremented each time
+// it's called — so tests can prove NewDoctor doesn't call it synchronously.
 type doctorTestWorkspace struct {
 	workspace.Workspace
-	cfg    *config.Config
-	states map[string]workspace.MCPClientInfo
-}
-
-// The three below mirror what the dialog used to run for itself, so these
-// tests still exercise the real diagnostic and the real catalog against
-// their own config. SkillStates is empty because no test here has a skill
-// catalog to report on.
-func (w doctorTestWorkspace) ConfigProblems() []config.Problem  { return config.Doctor(w.cfg) }
-func (w doctorTestWorkspace) SkillStates() []*skills.SkillState { return nil }
-func (w doctorTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg)
+	problems []config.Problem
+	calls    int
 }
 
 func (w *doctorTestWorkspace) SupportsThreads() bool { return false }
 
-func (w *doctorTestWorkspace) Config() *config.Config { return w.cfg }
-
-func (w *doctorTestWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo { return w.states }
-
-func (w *doctorTestWorkspace) Stats(context.Context, stats.Request) (stats.Snapshot, error) {
-	return stats.Snapshot{}, nil
+func (w *doctorTestWorkspace) DoctorProblems() []config.Problem {
+	w.calls++
+	return w.problems
 }
 
-func newDoctorTestCommon(t *testing.T, cfg *config.Config, states map[string]workspace.MCPClientInfo) *common.Common {
+func newDoctorTestCommon(t *testing.T, problems []config.Problem) (*common.Common, *doctorTestWorkspace) {
 	t.Helper()
 	s := styles.SennitDark()
-	return &common.Common{
-		Styles:    &s,
-		Workspace: &doctorTestWorkspace{cfg: cfg, states: states},
-	}
+	ws := &doctorTestWorkspace{problems: problems}
+	return &common.Common{Styles: &s, Workspace: ws}, ws
 }
 
-func TestDoctorProblems_StaticConfigCheck(t *testing.T) {
-	t.Parallel()
-
-	// DoctorProblems is config.Doctor(cfg) plus MCP state — it reads
-	// cfg.Problems as-is rather than recomputing them (that recomputation
-	// is validUserAgents' job, exercised end to end in
-	// internal/config/doctor_test.go), so a Problem the way SetupAgents
-	// would have added it is set directly here.
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{
-				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
-				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
-				Hint:    "run 'sennit models' to see available provider/model pairs",
-			},
-		},
-	}
-
-	com := newDoctorTestCommon(t, cfg, nil)
-	problems := doctorProblemsWithEnvironment(com, func() []config.Problem { return nil })
-
-	require.Len(t, problems, 1)
-	require.Equal(t, config.AreaAgent, problems[0].Area)
-	require.Contains(t, problems[0].Message, "falls back to the main model")
+// newDoctorForTest builds a Doctor and drives its returned tea.Cmd to
+// completion, feeding the result back into HandleMsg — the sequence the
+// real program loop performs, condensed for tests that don't care about
+// the intermediate empty-list state.
+func newDoctorForTest(com *common.Common) *Doctor {
+	d, cmd := NewDoctor(com)
+	d.HandleMsg(cmd())
+	return d
 }
 
-// TestDoctorProblems_MCPFailedState verifies a failed MCP server (the
-// registry's existing state, per domain/agent/tools/mcp) is merged in
-// alongside the static config.Doctor findings.
-func TestDoctorProblems_MCPFailedState(t *testing.T) {
+// TestNewDoctor_PerformsNoIOAtConstruction is the regression test for the
+// dialog reaching into internal/doctor (which shells out and walks PATH)
+// synchronously from its constructor. NewDoctor must return immediately
+// with an empty problem list and a command that fetches the real one; the
+// workspace's DoctorProblems must not be called until that command runs.
+func TestNewDoctor_PerformsNoIOAtConstruction(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{Options: &config.Options{}, Providers: csync.NewMap[string, config.ProviderConfig]()}
-	states := map[string]workspace.MCPClientInfo{
-		"github": {Name: "github", State: workspace.MCPStateError, Error: errors.New("connection refused")},
-		"docs":   {Name: "docs", State: workspace.MCPStateConnected},
-	}
+	com, ws := newDoctorTestCommon(t, []config.Problem{
+		{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
+	})
 
-	com := newDoctorTestCommon(t, cfg, states)
-	problems := doctorProblemsWithEnvironment(com, func() []config.Problem { return nil })
+	d, cmd := NewDoctor(com)
+	require.Zero(t, ws.calls, "NewDoctor must not call DoctorProblems synchronously")
+	require.Empty(t, d.problems, "the dialog must start with an empty problem list")
+	require.NotNil(t, cmd, "NewDoctor must return a command to fetch the problem list")
 
-	require.Len(t, problems, 1)
-	require.Equal(t, config.AreaMCP, problems[0].Area)
-	require.Equal(t, "github", problems[0].Subject)
-	require.Contains(t, problems[0].Message, "connection refused")
-}
+	msg := cmd()
+	loaded, ok := msg.(doctorProblemsLoadedMsg)
+	require.True(t, ok, "expected doctorProblemsLoadedMsg, got %#v", msg)
+	require.Equal(t, 1, ws.calls)
+	require.Equal(t, ws.problems, loaded.problems)
 
-func TestDoctorProblems_UsesInjectedEnvironmentProblems(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{Options: &config.Options{}, Providers: csync.NewMap[string, config.ProviderConfig]()}
-	com := newDoctorTestCommon(t, cfg, nil)
-	injected := config.Problem{Severity: config.SeverityWarn, Area: config.AreaEnvironment, Subject: "clipboard", Message: "injected environment problem"}
-
-	problems := doctorProblemsWithEnvironment(com, func() []config.Problem { return []config.Problem{injected} })
-	require.Equal(t, []config.Problem{injected}, problems)
-}
-
-func TestDoctorProblems_Clean(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{Options: &config.Options{}, Providers: csync.NewMap[string, config.ProviderConfig]()}
-	com := newDoctorTestCommon(t, cfg, nil)
-
-	require.Empty(t, doctorProblemsWithEnvironment(com, func() []config.Problem { return nil }))
+	action := d.HandleMsg(msg)
+	require.Nil(t, action)
+	require.Equal(t, ws.problems, d.problems, "HandleMsg must populate the dialog once the command's result lands")
 }
 
 // TestNewDoctor_ListsProblems checks the dialog's item list reflects
-// DoctorProblems, so the /doctor command actually shows what's wrong.
+// DoctorProblems once loaded, so the /doctor command actually shows what's
+// wrong.
 func TestNewDoctor_ListsProblems(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{
-				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
-				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
-				Hint:    "run 'sennit models' to see available provider/model pairs",
-			},
+	com, _ := newDoctorTestCommon(t, []config.Problem{
+		{
+			Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
+			Message: "agent reviewer: model nope/nope not found — falls back to the main model",
+			Hint:    "run 'sennit models' to see available provider/model pairs",
 		},
-	}
-	com := newDoctorTestCommon(t, cfg, nil)
+	})
 
-	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
+	d := newDoctorForTest(com)
 	require.Equal(t, DoctorID, d.ID())
 
-	items, _, err := doctorItemsFrom(com, doctorProblemsWithEnvironment(com, func() []config.Problem { return nil }))
+	items, _, err := doctorItemsFrom(com, d.problems)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 
@@ -160,19 +104,14 @@ func TestNewDoctor_ListsProblems(t *testing.T) {
 func TestDoctor_EnterOpensDetail(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{
-				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
-				Message: "agent reviewer: model x/y not found — falls back to the main model",
-				Hint:    "run 'sennit models' to see available provider/model pairs",
-			},
+	com, _ := newDoctorTestCommon(t, []config.Problem{
+		{
+			Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
+			Message: "agent reviewer: model x/y not found — falls back to the main model",
+			Hint:    "run 'sennit models' to see available provider/model pairs",
 		},
-	}
-	com := newDoctorTestCommon(t, cfg, nil)
-	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
+	})
+	d := newDoctorForTest(com)
 
 	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, action, "Enter must not silently close the dialog anymore")
@@ -190,15 +129,10 @@ func TestDoctor_EnterOpensDetail(t *testing.T) {
 func TestDoctor_EscFromList_Closes(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
-		},
-	}
-	com := newDoctorTestCommon(t, cfg, nil)
-	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
+	com, _ := newDoctorTestCommon(t, []config.Problem{
+		{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
+	})
+	d := newDoctorForTest(com)
 
 	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.IsType(t, ActionClose{}, action)
@@ -210,15 +144,10 @@ func TestDoctor_EscFromList_Closes(t *testing.T) {
 func TestDoctor_EscFromDetail_GoesBackToList(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
-		},
-	}
-	com := newDoctorTestCommon(t, cfg, nil)
-	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
+	com, _ := newDoctorTestCommon(t, []config.Problem{
+		{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
+	})
+	d := newDoctorForTest(com)
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Equal(t, doctorModeDetail, d.mode)
@@ -234,15 +163,10 @@ func TestDoctor_EscFromDetail_GoesBackToList(t *testing.T) {
 func TestDoctor_ProviderDetail_POpensProviders(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{Severity: config.SeverityWarn, Area: config.AreaProvider, Subject: "local", Message: "provider local has no api_key"},
-		},
-	}
-	com := newDoctorTestCommon(t, cfg, nil)
-	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
+	com, _ := newDoctorTestCommon(t, []config.Problem{
+		{Severity: config.SeverityWarn, Area: config.AreaProvider, Subject: "local", Message: "provider local has no api_key"},
+	})
+	d := newDoctorForTest(com)
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Equal(t, doctorModeDetail, d.mode)
@@ -256,15 +180,10 @@ func TestDoctor_ProviderDetail_POpensProviders(t *testing.T) {
 func TestDoctor_ModelDetail_MOpensModels(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{Severity: config.SeverityError, Area: config.AreaModel, Subject: "openai/ghost", Message: "main model not found"},
-		},
-	}
-	com := newDoctorTestCommon(t, cfg, nil)
-	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
+	com, _ := newDoctorTestCommon(t, []config.Problem{
+		{Severity: config.SeverityError, Area: config.AreaModel, Subject: "openai/ghost", Message: "main model not found"},
+	})
+	d := newDoctorForTest(com)
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Equal(t, doctorModeDetail, d.mode)
@@ -278,15 +197,10 @@ func TestDoctor_ModelDetail_MOpensModels(t *testing.T) {
 func TestDoctor_AgentDetail_NoFixShortcut(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Problems: []config.Problem{
-			{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
-		},
-	}
-	com := newDoctorTestCommon(t, cfg, nil)
-	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
+	com, _ := newDoctorTestCommon(t, []config.Problem{
+		{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
+	})
+	d := newDoctorForTest(com)
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: 'p', Text: "p"}))

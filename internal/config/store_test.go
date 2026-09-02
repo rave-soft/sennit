@@ -15,7 +15,6 @@ import (
 
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -954,65 +953,44 @@ func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
 // sent the literal "$VAR" string as the bearer token, and the 401 retry
 // path re-resolved the OLD template since APIKeyTemplate was never
 // updated to the new one.
-type failingCredentialProcessor struct {
-	compileErr error
-	setupErr   error
-}
-
-func (p failingCredentialProcessor) CompileProvider(configured ProviderConfig, _ VariableResolver) (state.Provider, error) {
-	if p.compileErr != nil {
-		return state.Provider{}, p.compileErr
-	}
-	return state.Provider{ID: configured.ID, APIKey: configured.APIKey}, nil
-}
-
-func (p failingCredentialProcessor) ApplyProviderCredentials(provider state.Provider) (state.Provider, error) {
-	if p.setupErr != nil {
-		return state.Provider{}, p.setupErr
-	}
-	return provider, nil
-}
-
-func (failingCredentialProcessor) Process(context.Context, RuntimeInput) (RuntimeResult, error) {
-	return RuntimeResult{}, nil
-}
-
+// TestSetProviderAPIKey_PreparationFailureIsTransactional pins the
+// transactional-failure behavior of SetProviderAPIKey's compile step:
+// when the provider has no cached runtime state yet, SetProviderAPIKey
+// compiles one via providerruntime.FromConfig (called directly — see
+// internal/config/runtime.go's doc comment on RuntimeProcessor for why
+// this is no longer reached through a processor seam), and a resolver
+// failure there must leave the config file and in-memory state untouched.
+//
+// It used to inject the failure via a fake RuntimeProcessor.CompileProvider;
+// that seam is gone now that ConfigStore calls providerruntime.FromConfig
+// directly, so the failure is triggered the same way FromConfig actually
+// fails in production: an unresolvable ${VAR:?msg} in the provider's
+// base_url. There is no equivalent "apply-credentials failed" case anymore
+// — providerruntime.ApplyPostCredentialSetup (what used to be
+// ApplyProviderCredentials) has no failure mode, so that half of the
+// table is dropped rather than kept as untestable dead code.
 func TestSetProviderAPIKey_PreparationFailureIsTransactional(t *testing.T) {
-	tests := []struct {
-		name      string
-		processor RuntimeProcessor
-		wantError string
-	}{
-		{name: "compile", processor: failingCredentialProcessor{compileErr: errors.New("compile failed")}, wantError: "compile failed"},
-		{name: "setup", processor: failingCredentialProcessor{setupErr: errors.New("setup failed")}, wantError: "setup failed"},
-	}
+	path := filepath.Join(t.TempDir(), "sennit.json")
+	const initial = `{"providers":{"custom":{"type":"openai-compat","base_url":"${SENNIT_TEST_MISSING_VAR:?required}","api_key":"old-key"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(initial), 0o600))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "sennit.json")
-			const initial = `{"providers":{"custom":{"type":"openai-compat","base_url":"https://example.test/v1","api_key":"old-key"}}}`
-			require.NoError(t, os.WriteFile(path, []byte(initial), 0o600))
+	providers := csync.NewMap[string, ProviderConfig]()
+	providers.Set("custom", ProviderConfig{ID: "custom", Type: "openai-compat", BaseURL: "${SENNIT_TEST_MISSING_VAR:?required}", APIKey: "old-key"})
+	store := newTestStore(t, &Config{Providers: providers})
+	store.globalDataPath = path
+	beforeVersion := store.CredentialVersion()
+	beforeConfig := store.Config()
 
-			providers := csync.NewMap[string, ProviderConfig]()
-			providers.Set("custom", ProviderConfig{ID: "custom", Type: "openai-compat", BaseURL: "https://example.test/v1", APIKey: "old-key"})
-			store := newTestStore(t, &Config{Providers: providers})
-			store.globalDataPath = path
-			store.processor = tt.processor
-			beforeVersion := store.CredentialVersion()
-			beforeConfig := store.Config()
-
-			err := store.SetProviderAPIKey(ScopeGlobal, "custom", "new-key")
-			require.ErrorContains(t, err, tt.wantError)
-			require.Same(t, beforeConfig, store.Config(), "failed preparation must not publish a config generation")
-			require.Equal(t, beforeVersion, store.CredentialVersion())
-			require.Equal(t, initial, string(requireFile(t, path)), "failed preparation must not persist credentials")
-			configured, ok := store.Config().Providers.Get("custom")
-			require.True(t, ok)
-			require.Equal(t, "old-key", configured.APIKey)
-			_, ok = store.Config().RuntimeProvider("custom")
-			require.False(t, ok, "failed preparation must not publish partial runtime state")
-		})
-	}
+	err := store.SetProviderAPIKey(ScopeGlobal, "custom", "new-key")
+	require.ErrorContains(t, err, "compiling runtime state for provider custom")
+	require.Same(t, beforeConfig, store.Config(), "failed preparation must not publish a config generation")
+	require.Equal(t, beforeVersion, store.CredentialVersion())
+	require.Equal(t, initial, string(requireFile(t, path)), "failed preparation must not persist credentials")
+	configured, ok := store.Config().Providers.Get("custom")
+	require.True(t, ok)
+	require.Equal(t, "old-key", configured.APIKey)
+	_, ok = store.Config().RuntimeProvider("custom")
+	require.False(t, ok, "failed preparation must not publish partial runtime state")
 }
 
 func TestSetProviderAPIKey_TemplateResolvesLiveKeyAndKeepsTemplate(t *testing.T) {

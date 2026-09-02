@@ -126,7 +126,7 @@ func (w cmdDrivingWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w cmdDrivingWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w cmdDrivingWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 func (w *cmdDrivingWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.Config())
+	return providerruntime.Providers(w.Config().Options.DisableDefaultProviders)
 }
 
 // CurrentPlanUsage: no provider in these tests quotes rate limits, so the

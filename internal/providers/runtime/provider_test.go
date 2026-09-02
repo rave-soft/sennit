@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	providerconfig "github.com/rave-soft/sennit/internal/providers/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,7 +31,7 @@ func accessToken(t *testing.T, account string) string {
 }
 
 func TestFromConfigSeparatesPersistedAndEffectiveValues(t *testing.T) {
-	configured := config.ProviderConfig{
+	configured := providerconfig.ProviderConfig{
 		ID:           "custom",
 		APIKey:       "$KEY",
 		ProxyURL:     "$PROXY",
@@ -52,8 +52,8 @@ func TestFromConfigSeparatesPersistedAndEffectiveValues(t *testing.T) {
 }
 
 func TestProvidersHonorDisableDefaults(t *testing.T) {
-	require.NotEmpty(t, Providers(&config.Config{Options: &config.Options{}}))
-	require.Empty(t, Providers(&config.Config{Options: &config.Options{DisableDefaultProviders: true}}))
+	require.NotEmpty(t, Providers(false))
+	require.Empty(t, Providers(true))
 }
 
 func TestApplyPostCredentialSetupAddsVendorHeaders(t *testing.T) {
@@ -73,7 +73,7 @@ func (r failingResolver) ResolveValue(string) (string, error) { return "", r.err
 
 func TestFromConfigPropagatesResolverError(t *testing.T) {
 	want := errors.New("missing")
-	_, err := FromConfig(config.ProviderConfig{ID: "openai", APIKey: "$MISSING"}, failingResolver{err: want})
+	_, err := FromConfig(providerconfig.ProviderConfig{ID: "openai", APIKey: "$MISSING"}, failingResolver{err: want})
 	require.ErrorIs(t, err, want)
 }
 

@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"errors"
 	"image"
 	"strings"
@@ -31,6 +32,16 @@ type apiKeyTestWorkspace struct {
 	// saveAPIKeyCmd must only ever be reached through the [tea.Cmd] HandleMsg
 	// returns, never synchronously from HandleMsg itself.
 	setCalls int
+
+	// verifiedProviderID/verifiedAPIKey capture what VerifyProviderAPIKey
+	// was called with, so tests can prove the dialog delegates the check
+	// to the workspace instead of building a provider itself. verifyCalls
+	// mirrors setCalls: verifyAPIKeyCmd must only ever be reached through
+	// the [tea.Cmd] HandleMsg returns.
+	verifiedProviderID string
+	verifiedAPIKey     string
+	verifyCalls        int
+	verifyErr          error
 }
 
 func (w *apiKeyTestWorkspace) SupportsThreads() bool { return false }
@@ -45,6 +56,13 @@ func (w *apiKeyTestWorkspace) SetProviderAPIKey(_ config.Scope, providerID strin
 	w.savedProviderID = providerID
 	w.savedAPIKey = apiKey.(string)
 	return nil
+}
+
+func (w *apiKeyTestWorkspace) VerifyProviderAPIKey(_ context.Context, providerID, apiKey string) error {
+	w.verifyCalls++
+	w.verifiedProviderID = providerID
+	w.verifiedAPIKey = apiKey
+	return w.verifyErr
 }
 
 func newAPIKeyTestCommon(t *testing.T) (*common.Common, *apiKeyTestWorkspace) {
@@ -176,15 +194,9 @@ func TestAPIKeyInput_SaveErrorReportsAndKeepsDialogOpen(t *testing.T) {
 // so any HandleMsg call reached before that goroutine ran (a paste, say)
 // raced with it and could change which key got verified. The fix snapshots
 // the key inside HandleMsg, before the cmd is returned.
-//
-// The Alibaba-Singapore provider is used because TestConnection checks that
-// provider's key with a plain prefix check and returns before doing any
-// network I/O (see (*config.ProviderConfig).TestConnection), which keeps
-// this test hermetic while still exercising the real snapshot/lazy-read
-// difference.
 func TestAPIKeyInput_VerifySnapshotsInputBeforeAsyncCheck(t *testing.T) {
-	com, _ := newAPIKeyTestCommon(t)
-	provider := catwalk.Provider{ID: catwalk.InferenceProviderAlibabaSingapore, Name: "Alibaba"}
+	com, ws := newAPIKeyTestCommon(t)
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider("test-provider"), Name: "Test Provider"}
 	dlg, _ := NewAPIKeyInput(com, false, provider, nil)
 
 	for _, r := range "sk-original" {
@@ -198,9 +210,10 @@ func TestAPIKeyInput_VerifySnapshotsInputBeforeAsyncCheck(t *testing.T) {
 
 	// Simulate a message reaching HandleMsg after the Verifying transition
 	// but before the async cmd runs — the window the old lazy read raced
-	// against. Pasting at the (rewound) start of the field breaks the
-	// "sk-" prefix check, so this only passes if the cmd already captured
-	// "sk-original" rather than reading m.input lazily when it runs.
+	// against. Pasting at the (rewound) start of the field would change
+	// the value m.input.Value() reports, so this only passes if the cmd
+	// already captured "sk-original" rather than reading m.input lazily
+	// when it runs.
 	dlg.HandleMsg(tea.PasteMsg{Content: "nope"})
 
 	batch, ok := cmdAction.Cmd().(tea.BatchMsg)
@@ -211,12 +224,43 @@ func TestAPIKeyInput_VerifySnapshotsInputBeforeAsyncCheck(t *testing.T) {
 		msg := sub()
 		if verify, ok := msg.(ActionChangeAPIKeyState); ok {
 			gotResult = true
-			// The snapshotted key ("sk-original") passes the prefix
-			// check; the pasted one ("nope") would not.
 			require.Equal(t, APIKeyInputStateVerified, verify.State)
 		}
 	}
 	require.True(t, gotResult, "expected the verify cmd to produce ActionChangeAPIKeyState")
+	require.Equal(t, "sk-original", ws.verifiedAPIKey, "must verify the snapshotted key, not the pasted one")
+}
+
+// TestAPIKeyInput_VerifyDelegatesToWorkspace is the regression test for the
+// dialog reimplementing provider construction: verifyAPIKeyCmd must call
+// com.Workspace.VerifyProviderAPIKey with the provider ID and typed key,
+// and must not build a provider (or reach the network) itself. Only the
+// workspace knows how the agent would actually construct this provider
+// (proxy, extra headers, account rotation, catalog base URL); a
+// dialog-built stand-in could disagree with it.
+func TestAPIKeyInput_VerifyDelegatesToWorkspace(t *testing.T) {
+	com, ws := newAPIKeyTestCommon(t)
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider("test-provider"), Name: "Test Provider"}
+	dlg, _ := NewAPIKeyInput(com, false, provider, nil)
+
+	for _, r := range "sk-test-key" {
+		dlg.HandleMsg(keyMsg(r))
+	}
+
+	action := dlg.HandleMsg(ActionChangeAPIKeyState{State: APIKeyInputStateVerifying})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected ActionCmd carrying the batched verify, got %#v", action)
+	require.Zero(t, ws.verifyCalls, "HandleMsg must not call VerifyProviderAPIKey synchronously")
+
+	batch, ok := cmdAction.Cmd().(tea.BatchMsg)
+	require.True(t, ok, "expected a batched command (spinner tick + verify)")
+	for _, sub := range batch {
+		sub()
+	}
+
+	require.Equal(t, 1, ws.verifyCalls)
+	require.Equal(t, "test-provider", ws.verifiedProviderID)
+	require.Equal(t, "sk-test-key", ws.verifiedAPIKey)
 }
 
 // TestActionChangeAPIKeyState_IsDialogAddressed is the regression test for

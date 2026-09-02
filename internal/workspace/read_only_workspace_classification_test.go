@@ -79,6 +79,7 @@ var refusedMethods = []string{
 	"UpdateAccount",
 	"UpdateAgentModel",
 	"UpdatePreferredModel",
+	"VerifyProviderAPIKey",
 }
 
 // readOnlySafeMethods are every other Workspace method: pure reads that
@@ -102,6 +103,7 @@ var readOnlySafeMethods = []string{
 	"CreateAgentToolSessionID",
 	"CurrentPlanUsage",
 	"CustomProviderTypes",
+	"DoctorProblems",
 	"DockerMCPAvailable",
 	"RefreshDockerMCPAvailability",
 	"ListCustomCommands",
@@ -398,6 +400,10 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"UpdatePreferredModel": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.UpdatePreferredModel(config.ScopeWorkspace, config.SelectedModel{})
+			require.True(t, IsReadOnlyError(err))
+		},
+		"VerifyProviderAPIKey": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.VerifyProviderAPIKey(t.Context(), "provider", "key")
 			require.True(t, IsReadOnlyError(err))
 		},
 	}

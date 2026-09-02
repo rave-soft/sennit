@@ -30,7 +30,7 @@ type accountLabelTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w accountLabelTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg)
+	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test

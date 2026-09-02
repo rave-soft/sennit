@@ -25,20 +25,20 @@ type Loader struct{}
 
 func New() *Loader { return &Loader{} }
 
-func (l *Loader) CompileProvider(configured config.ProviderConfig, resolver config.VariableResolver) (providerstate.Provider, error) {
-	return providerruntime.FromConfig(configured, resolver)
-}
-
-func (l *Loader) ApplyProviderCredentials(provider providerstate.Provider) (providerstate.Provider, error) {
-	providerruntime.ApplyPostCredentialSetup(&provider)
-	return provider, nil
-}
+// CompileProvider and ApplyProviderCredentials used to forward to
+// providerruntime.FromConfig / ApplyPostCredentialSetup so ConfigStore
+// could reach them through the RuntimeProcessor interface without
+// internal/config importing internal/providers/runtime directly. Now that
+// internal/providers/runtime no longer imports internal/config (see
+// internal/providers/config), ConfigStore calls those functions directly
+// instead — see internal/config/runtime.go and store_credentials.go — so
+// RuntimeProcessor, and this Loader, only need Process.
 
 func (l *Loader) Process(ctx context.Context, input config.RuntimeInput) (config.RuntimeResult, error) {
 	cfg := input.Config
 	knownProviders := input.KnownProviders
 	if knownProviders == nil {
-		knownProviders = providerruntime.Providers(cfg)
+		knownProviders = providerruntime.Providers(cfg.Options.DisableDefaultProviders)
 	}
 	if input.Initial {
 		migrate.BloatedModelCache(input.GlobalDataPath, knownProviders, func(path, providerID string, models []catwalk.Model) error {

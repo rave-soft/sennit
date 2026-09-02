@@ -98,7 +98,9 @@ func (m *UI) openDialog(id string) tea.Cmd {
 	case dialog.QuitID:
 		m.openQuitDialog(m.com)
 	case dialog.DoctorID:
-		m.openDoctorDialog(m.com)
+		if cmd := m.openDoctorDialog(m.com); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.StatsID:
 		if cmd := m.openStatsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -392,13 +394,15 @@ func (m *UI) openStatsDialog() tea.Cmd {
 }
 
 // openDoctorDialog opens the /doctor config-problems dialog.
-func (w *widgets) openDoctorDialog(com *common.Common) {
+func (w *widgets) openDoctorDialog(com *common.Common) tea.Cmd {
 	if w.dialog.ContainsDialog(dialog.DoctorID) {
 		w.dialog.BringToFront(dialog.DoctorID)
-		return
+		return nil
 	}
 
-	w.dialog.OpenDialog(dialog.NewDoctor(com))
+	doctorDialog, cmd := dialog.NewDoctor(com)
+	w.dialog.OpenDialog(doctorDialog)
+	return cmd
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already

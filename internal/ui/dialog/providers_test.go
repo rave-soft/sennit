@@ -26,7 +26,7 @@ type providersTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w providersTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg)
+	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -63,7 +63,7 @@ func TestNewProviders_ListsCatalogAndCustomEntry(t *testing.T) {
 	providers, err := NewProviders(com, false)
 	require.NoError(t, err)
 
-	knownProviders := providerruntime.Providers(com.Config())
+	knownProviders := providerruntime.Providers(com.Config().Options.DisableDefaultProviders)
 	require.NotEmpty(t, knownProviders)
 
 	items := providers.list.FilteredItems()

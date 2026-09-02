@@ -12,9 +12,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
+	providerconfig "github.com/rave-soft/sennit/internal/providers/config"
 	"github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/providers/typeclass"
 	"github.com/rave-soft/sennit/internal/proxyhttp"
@@ -22,7 +22,7 @@ import (
 
 type Provider = state.Provider
 
-func FromConfig(c config.ProviderConfig, resolver config.VariableResolver) (Provider, error) {
+func FromConfig(c providerconfig.ProviderConfig, resolver providerconfig.VariableResolver) (Provider, error) {
 	apiKey, err := resolver.ResolveValue(c.APIKey)
 	if err != nil {
 		return Provider{}, fmt.Errorf("resolving API key for provider %s: %w", c.ID, err)
@@ -32,10 +32,10 @@ func FromConfig(c config.ProviderConfig, resolver config.VariableResolver) (Prov
 		return Provider{}, fmt.Errorf("resolving base URL for provider %s: %w", c.ID, err)
 	}
 	headers := maps.Clone(c.ExtraHeaders)
-	if err := config.ResolveProviderHeaders(headers, resolver, c.ID); err != nil {
+	if err := providerconfig.ResolveProviderHeaders(headers, resolver, c.ID); err != nil {
 		return Provider{}, err
 	}
-	proxyURL := config.ResolveOptionalProviderProxy(c.ProxyURL, resolver, c.ID)
+	proxyURL := providerconfig.ResolveOptionalProviderProxy(c.ProxyURL, resolver, c.ID)
 	p := Provider{ID: c.ID, Name: c.Name, BaseURL: baseURL, Type: c.Type, APIKey: apiKey, APIKeyTemplate: c.APIKey, OAuthToken: c.OAuthToken, ProxyURL: proxyURL, ConfiguredProxyURL: proxyURL, Account: c.Account, ExtraHeaders: headers, ExtraParams: make(map[string]string), Models: c.Models}
 	switch catwalk.InferenceProvider(c.ID) {
 	case catwalk.InferenceProviderAzure:
@@ -71,8 +71,12 @@ func ToProvider(c Provider) catwalk.Provider {
 	return catwalk.Provider{Name: c.Name, ID: catwalk.InferenceProvider(c.ID), Models: c.Models}
 }
 
-func Providers(cfg *config.Config) []catwalk.Provider {
-	if cfg.Options.DisableDefaultProviders {
+// Providers returns the built-in provider catalog, or nil when
+// disableDefaultProviders (config.Options.DisableDefaultProviders) is set.
+// Takes the bool rather than *config.Config so this package does not need
+// to import internal/config — see internal/providers/config's doc comment.
+func Providers(disableDefaultProviders bool) []catwalk.Provider {
+	if disableDefaultProviders {
 		return nil
 	}
 	return append(embedded.GetAll(), CodexProvider())
@@ -82,7 +86,7 @@ func CodexProvider() catwalk.Provider {
 	return catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName, APIEndpoint: codex.APIBaseURL, Type: catwalk.TypeOpenAI}
 }
 
-func TestConnection(c Provider, resolver config.VariableResolver) error {
+func TestConnection(ctx context.Context, c Provider, resolver providerconfig.VariableResolver) error {
 	providerID := catwalk.InferenceProvider(c.ID)
 	testURL := ""
 	headers := make(map[string]string)
@@ -147,7 +151,7 @@ func TestConnection(c Provider, resolver config.VariableResolver) error {
 		}
 		return errors.New("not a valid vercel api key")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	client := &http.Client{Timeout: 5 * time.Second}
 	if c.ProxyURL != "" {

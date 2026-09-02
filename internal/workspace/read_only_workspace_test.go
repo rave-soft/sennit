@@ -584,6 +584,11 @@ func (s *stubWorkspace) RefreshAccountLimits(ctx context.Context, providerID str
 	return nil, nil
 }
 
+func (s *stubWorkspace) VerifyProviderAPIKey(ctx context.Context, providerID, apiKey string) error {
+	s.track("VerifyProviderAPIKey")
+	return nil
+}
+
 func (s *stubWorkspace) DockerMCPAvailable() (bool, bool) {
 	s.track("DockerMCPAvailable")
 	return false, false
@@ -606,6 +611,11 @@ func (s *stubWorkspace) SkillStates() []*skills.SkillState {
 
 func (s *stubWorkspace) BuiltinSkills() []*skills.Skill {
 	s.track("BuiltinSkills")
+	return nil
+}
+
+func (s *stubWorkspace) DoctorProblems() []config.Problem {
+	s.track("DoctorProblems")
 	return nil
 }
 

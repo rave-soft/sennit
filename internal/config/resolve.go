@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/env"
+	providerconfig "github.com/rave-soft/sennit/internal/providers/config"
 	"github.com/rave-soft/sennit/internal/shell"
 )
 
@@ -14,23 +15,13 @@ import (
 // inside shell expansion (including any command substitution).
 const resolveTimeout = 5 * time.Minute
 
-type VariableResolver interface {
-	ResolveValue(value string) (string, error)
-}
+// VariableResolver and IdentityResolver live in internal/providers/config
+// now, for the same import-cycle reason as ProviderConfig (see
+// internal/config/provider.go). shellVariableResolver below satisfies
+// VariableResolver structurally and needs no change to do so.
+type VariableResolver = providerconfig.VariableResolver
 
-// identityResolver is a no-op resolver that returns values unchanged.
-// Used in client mode where variable resolution is handled server-side.
-type identityResolver struct{}
-
-func (identityResolver) ResolveValue(value string) (string, error) {
-	return value, nil
-}
-
-// IdentityResolver returns a VariableResolver that passes values through
-// unchanged.
-func IdentityResolver() VariableResolver {
-	return identityResolver{}
-}
+var IdentityResolver = providerconfig.IdentityResolver
 
 // Expander is the single-value shell expansion seam used by
 // shellVariableResolver. Production wires it to shell.ExpandValue; tests
@@ -340,24 +331,5 @@ func resolveSlice(items []string, r VariableResolver) ([]string, error) {
 // wants that (some providers reject an empty header value); LSPConfig.ResolvedEnv
 // does not (an explicit "FOO=" is a legitimate request).
 func resolveMap(m map[string]string, r VariableResolver, errKey func(key string) string, dropEmpty bool) (map[string]string, error) {
-	if len(m) == 0 {
-		return map[string]string{}, nil
-	}
-	out := make(map[string]string, len(m))
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		v, err := r.ResolveValue(m[k])
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", errKey(k), err)
-		}
-		if dropEmpty && v == "" {
-			continue
-		}
-		out[k] = v
-	}
-	return out, nil
+	return providerconfig.ResolveMap(m, r, errKey, dropEmpty)
 }
