@@ -11,9 +11,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/filepathext"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
-	historystore "github.com/rave-soft/sennit/internal/history/store"
 
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -46,16 +44,16 @@ var editDescription string
 type editContext struct {
 	ctx         context.Context
 	permissions permission.Requester
-	files       historystore.Service
-	filetracker filetracker.Service
+	files       FileHistory
+	filetracker FileTracking
 	workingDir  string
 }
 
 func NewEditTool(
 	lspManager *lsp.Manager,
 	permissions permission.Requester,
-	files historystore.Service,
-	filetracker filetracker.Service,
+	files FileHistory,
+	filetracker FileTracking,
 	workingDir string,
 ) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewAgentTool(
@@ -240,7 +238,7 @@ func requireReadCoverage(edit editContext, sessionID, filePath, oldContent, newC
 }
 
 // describeCoverage renders coverage as a phrase for the error above.
-func describeCoverage(c filetracker.Coverage) string {
+func describeCoverage(c FileCoverage) string {
 	if len(c.Ranges) == 0 {
 		return "no line range is on record"
 	}

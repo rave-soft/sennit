@@ -193,7 +193,7 @@ func (d *delegationFinalizer) runtimeInputs() runtimeToolInputs {
 		allSkills: allSkills, activeSkills: activeSkills, skillTracker: skillTracker,
 		delegationTools: delegationToolsVal, backgroundAgentsOn: backgroundAgentsOn,
 		permissions: d.permissions, questions: d.questions, lspManager: d.lspManager,
-		history: d.history, filetracker: d.filetracker, background: d.background,
+		fileHistory: newFileHistory(d.history), filetracker: newFileTracking(d.filetracker), background: d.background,
 		sessions: d.sessions, skillStates: d.skillStates(),
 	}
 	if d.cfg == nil {
@@ -1140,7 +1140,7 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 		Tools: []fantasy.AgentTool{
 			tools.NewWebFetchTool(nil, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
 			tools.NewGlobTool(tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, d.cfg.Config().Tools.Grep),
-			tools.NewReadTool(d.lspManager, d.permissions, d.filetracker, nil, tmpDir),
+			tools.NewReadTool(d.lspManager, d.permissions, newFileTracking(d.filetracker), nil, tmpDir),
 		},
 	})
 	return d.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth), cleanup, nil

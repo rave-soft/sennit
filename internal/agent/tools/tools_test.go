@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -174,22 +172,24 @@ func TestEnsureParentDir(t *testing.T) {
 // recordingHistoryService records what was versioned, in order, and can be
 // told whether the path already has history and what its stored content is.
 type recordingHistoryService struct {
-	*mockHistoryService
-	stored   string
-	hasEntry bool
-	versions []string
+	stored                          string
+	hasEntry                        bool
+	lookupErr                       error
+	versions                        []string
+	latestSessionID, latestPath     string
+	versionSessionIDs, versionPaths []string
 }
 
-func (r *recordingHistoryService) GetByPathAndSession(ctx context.Context, path, sessionID string) (history.File, error) {
-	if !r.hasEntry {
-		return history.File{}, sql.ErrNoRows
-	}
-	return history.File{Path: path, Content: r.stored}, nil
+func (r *recordingHistoryService) LatestContent(_ context.Context, sessionID, path string) (string, bool, error) {
+	r.latestSessionID, r.latestPath = sessionID, path
+	return r.stored, r.hasEntry, r.lookupErr
 }
 
-func (r *recordingHistoryService) CreateVersion(ctx context.Context, sessionID, path, content string) (history.File, error) {
+func (r *recordingHistoryService) CreateVersion(_ context.Context, sessionID, path, content string) error {
+	r.versionSessionIDs = append(r.versionSessionIDs, sessionID)
+	r.versionPaths = append(r.versionPaths, path)
 	r.versions = append(r.versions, content)
-	return history.File{}, nil
+	return nil
 }
 
 // TestRecordFileHistory covers the three shapes of a committed write. It
@@ -239,13 +239,30 @@ func TestRecordFileHistory(t *testing.T) {
 
 			files := &recordingHistoryService{hasEntry: tc.hasEntry, stored: tc.stored}
 			require.NoError(t, recordFileHistory(context.Background(), files, "session", "/w/file.txt", tc.old, "after"))
+			require.Equal(t, "session", files.latestSessionID)
+			require.Equal(t, "/w/file.txt", files.latestPath)
 			require.Equal(t, tc.want, files.versions)
+			for _, sessionID := range files.versionSessionIDs {
+				require.Equal(t, "session", sessionID)
+			}
+			for _, path := range files.versionPaths {
+				require.Equal(t, "/w/file.txt", path)
+			}
 		})
 	}
 }
 
 // TestRecordFileHistory_NoSessionIsNotAnError: a tool call outside a
 // session has nowhere to record to, and that is not a failure to report.
+func TestRecordFileHistory_LookupFailure(t *testing.T) {
+	t.Parallel()
+
+	lookupErr := errors.New("history unavailable")
+	err := recordFileHistory(context.Background(), &recordingHistoryService{lookupErr: lookupErr}, "session", "/w/file.txt", "before", "after")
+	require.ErrorIs(t, err, lookupErr)
+	require.ErrorContains(t, err, "read file history")
+}
+
 func TestRecordFileHistory_NoSessionIsNotAnError(t *testing.T) {
 	t.Parallel()
 

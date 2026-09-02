@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -259,8 +258,8 @@ func (m mockFileTracker) RecordPartialRead(ctx context.Context, sessionID, path 
 func (m mockFileTracker) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
 }
 
-func (m mockFileTracker) ReadCoverage(ctx context.Context, sessionID, path string) filetracker.Coverage {
-	return filetracker.FullCoverage
+func (m mockFileTracker) ReadCoverage(ctx context.Context, sessionID, path string) FileCoverage {
+	return FileCoverage{Full: true}
 }
 
 func newReadToolForTest(workingDir string) fantasy.AgentTool {
@@ -285,7 +284,7 @@ func runReadTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 	return resp
 }
 
-var _ filetracker.Service = mockFileTracker{}
+var _ FileTracking = mockFileTracker{}
 
 func TestReadBuiltinFile(t *testing.T) {
 	t.Parallel()

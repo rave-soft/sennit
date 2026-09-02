@@ -10,9 +10,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/rave-soft/sennit/internal/filepathext"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
-	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -46,8 +44,8 @@ type ReplaceSymbolPermissionsParams = proto.ReplaceSymbolPermissionsParams
 func NewReplaceSymbolTool(
 	lspManager *lsp.Manager,
 	permissions permission.Requester,
-	files historystore.Service,
-	filetracker filetracker.Service,
+	files FileHistory,
+	filetracker FileTracking,
 	workingDir string,
 ) fantasy.AgentTool {
 	tool := withToolParameterSchema(fantasy.NewAgentTool(

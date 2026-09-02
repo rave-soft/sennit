@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -43,41 +42,17 @@ func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-ch
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
-type mockHistoryService struct {
-	*pubsub.Broker[history.File]
-}
+type mockHistoryService struct{}
 
-func (m *mockHistoryService) CreateVersion(ctx context.Context, sessionID, path, content string) (history.File, error) {
-	return history.File{}, nil
-}
-
-func (m *mockHistoryService) GetByPathAndSession(ctx context.Context, path, sessionID string) (history.File, error) {
-	return history.File{Path: path, Content: ""}, nil
-}
-
-func (m *mockHistoryService) Get(ctx context.Context, id string) (history.File, error) {
-	return history.File{}, nil
-}
-
-func (m *mockHistoryService) ListBySession(ctx context.Context, sessionID string) ([]history.File, error) {
-	return nil, nil
-}
-
-func (m *mockHistoryService) ListBySessionTree(ctx context.Context, sessionID string) ([]history.File, error) {
-	return m.ListBySession(ctx, sessionID)
-}
-
-func (m *mockHistoryService) ListLatestSessionFiles(ctx context.Context, sessionID string) ([]history.File, error) {
-	return nil, nil
-}
-
-func (m *mockHistoryService) Delete(ctx context.Context, id string) error {
+func (*mockHistoryService) CreateVersion(context.Context, string, string, string) error {
 	return nil
 }
 
-func (m *mockHistoryService) DeleteSessionFiles(ctx context.Context, sessionID string) error {
-	return nil
+func (*mockHistoryService) LatestContent(context.Context, string, string) (string, bool, error) {
+	return "", true, nil
 }
+
+var _ FileHistory = (*mockHistoryService)(nil)
 
 func TestApplyEditToContentPartialSuccess(t *testing.T) {
 	t.Parallel()

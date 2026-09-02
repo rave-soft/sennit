@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -168,8 +167,8 @@ func (t *recordingReadTracker) RecordPartialRead(_ context.Context, _ string, pa
 	t.ranges = append(t.ranges, trackedRange{path, start, end})
 }
 func (*recordingReadTracker) RecordEdit(context.Context, string, string, int, int, int) {}
-func (*recordingReadTracker) ReadCoverage(context.Context, string, string) filetracker.Coverage {
-	return filetracker.Coverage{}
+func (*recordingReadTracker) ReadCoverage(context.Context, string, string) FileCoverage {
+	return FileCoverage{}
 }
 
 func TestMultiReadFileTrackerRecordsExactRangesAcrossPages(t *testing.T) {
@@ -277,6 +276,6 @@ func TestMultiReadRejectsUnsupportedResources(t *testing.T) {
 }
 
 var (
-	_ filetracker.Service = (*recordingReadTracker)(nil)
-	_ permission.Service  = (*denyingMultiReadPermissions)(nil)
+	_ FileTracking       = (*recordingReadTracker)(nil)
+	_ permission.Service = (*denyingMultiReadPermissions)(nil)
 )

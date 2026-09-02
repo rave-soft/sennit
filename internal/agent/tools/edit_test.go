@@ -11,14 +11,13 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/stretchr/testify/require"
 )
 
 type mockEditFileTracker struct {
 	lastRead time.Time
 	reads    []string
-	partial  filetracker.Coverage
+	partial  FileCoverage
 }
 
 func (m *mockEditFileTracker) RecordRead(ctx context.Context, sessionID, path string) {
@@ -34,19 +33,19 @@ func (m *mockEditFileTracker) ListReadFiles(ctx context.Context, sessionID strin
 }
 
 func (m *mockEditFileTracker) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
-	m.partial = m.partial.Add(filetracker.LineRange{Start: start, End: end})
+	m.partial = m.partial.Add(FileLineRange{Start: start, End: end})
 }
 
 func (m *mockEditFileTracker) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
-	m.partial = m.partial.Shift(start, end, newEnd-end).Add(filetracker.LineRange{Start: start, End: newEnd})
+	m.partial = m.partial.Shift(start, end, newEnd-end).Add(FileLineRange{Start: start, End: newEnd})
 }
 
 // ReadCoverage reports whatever coverage the test set up; the zero value
 // is "fully read", which is what every test predating range tracking
 // assumes.
-func (m *mockEditFileTracker) ReadCoverage(ctx context.Context, sessionID, path string) filetracker.Coverage {
+func (m *mockEditFileTracker) ReadCoverage(ctx context.Context, sessionID, path string) FileCoverage {
 	if m.partial.Empty() {
-		return filetracker.FullCoverage
+		return FileCoverage{Full: true}
 	}
 	return m.partial
 }

@@ -57,7 +57,7 @@ func TestAgenticFetchSubAgentView_OutsideWorkdirRequiresPermission(t *testing.T)
 	// permission.Service, with no AutoApproveSession call for the child
 	// session.
 	perms := permission.NewPermissionService(tmpDir, false, nil)
-	viewTool := tools.NewReadTool(nil, perms, fakeFileTracker{}, nil, tmpDir)
+	viewTool := tools.NewReadTool(nil, perms, newFileTracking(fakeFileTracker{}), nil, tmpDir)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "fetch-child-session")
 

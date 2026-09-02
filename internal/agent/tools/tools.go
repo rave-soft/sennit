@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"html/template"
@@ -17,9 +16,7 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
-	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/permission"
 )
 
@@ -243,34 +240,34 @@ func ensureParentDir(filePath string) error {
 // user approved and the commit is refused rather than overwritten. A
 // combined write-and-record helper used to sit here and is gone, because
 // the only way to use it was to give that check up.
-func recordFileHistory(ctx context.Context, files historystore.Service, sessionID, filePath, oldContent, newContent string) error {
+func recordFileHistory(ctx context.Context, files FileHistory, sessionID, filePath, oldContent, newContent string) error {
 	if files == nil || sessionID == "" {
 		return nil
 	}
-	file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
+	content, found, err := files.LatestContent(ctx, sessionID, filePath)
 	switch {
-	case err != nil && !errors.Is(err, sql.ErrNoRows):
+	case err != nil:
 		// A real lookup failure, not "no such row". Treating every error
 		// as "nothing recorded" wrote a fresh baseline over a history
 		// that may well exist, which is how an undo loses the version it
 		// was meant to restore. The write itself already landed, so this
 		// reports rather than pretending it did not happen.
 		return fmt.Errorf("read file history: %w", err)
-	case err != nil:
+	case !found:
 		// Nothing recorded for this path in this session yet: the content
 		// that was on disk before this write becomes the baseline. The
 		// two branches are exclusive — writing both would store
 		// oldContent twice in a row.
-		if _, err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
+		if err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
 			return fmt.Errorf("error creating file history: %w", err)
 		}
-	case file.Content != oldContent:
+	case content != oldContent:
 		// User manually changed the content; store an intermediate version.
-		if _, err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
+		if err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
 			return fmt.Errorf("create intermediate file history: %w", err)
 		}
 	}
-	if _, err := files.CreateVersion(ctx, sessionID, filePath, newContent); err != nil {
+	if err := files.CreateVersion(ctx, sessionID, filePath, newContent); err != nil {
 		return fmt.Errorf("create committed file history: %w", err)
 	}
 
@@ -281,7 +278,7 @@ func recordFileHistory(ctx context.Context, files historystore.Service, sessionI
 // for writes where the caller supplied the entire content (Write, and
 // creating a file through Edit/Multi-Edit): it saw everything it just
 // wrote.
-func recordWholeFileRead(ctx context.Context, filetracker filetracker.Service, sessionID, filePath string) {
+func recordWholeFileRead(ctx context.Context, filetracker FileTracking, sessionID, filePath string) {
 	filetracker.RecordRead(ctx, sessionID, filePath)
 }
 
@@ -294,7 +291,7 @@ func recordWholeFileRead(ctx context.Context, filetracker filetracker.Service, s
 //
 // oldContent/newContent must both be in the tool's normalized (LF) form,
 // so the span matches the line numbers the read tool reported.
-func recordEditedSpan(ctx context.Context, filetracker filetracker.Service, sessionID, filePath, oldContent, newContent string) {
+func recordEditedSpan(ctx context.Context, filetracker FileTracking, sessionID, filePath, oldContent, newContent string) {
 	start, end, ok := changedLineSpan(oldContent, newContent)
 	if !ok {
 		return

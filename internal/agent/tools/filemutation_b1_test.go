@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/filetracker"
-	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
@@ -21,8 +19,8 @@ type failingHistory struct {
 	mockHistoryService
 }
 
-func (*failingHistory) CreateVersion(context.Context, string, string, string) (history.File, error) {
-	return history.File{}, errors.New("history unavailable")
+func (*failingHistory) CreateVersion(context.Context, string, string, string) error {
+	return errors.New("history unavailable")
 }
 
 type recordingTracker struct {
@@ -34,7 +32,7 @@ func (tracker *recordingTracker) RecordRead(context.Context, string, string) {
 	tracker.reads++
 }
 
-var _ filetracker.Service = (*recordingTracker)(nil)
+var _ FileTracking = (*recordingTracker)(nil)
 
 type snapshotChangingTracker struct {
 	mockEditFileTracker
@@ -43,11 +41,11 @@ type snapshotChangingTracker struct {
 	t      *testing.T
 }
 
-func (tracker *snapshotChangingTracker) ReadCoverage(context.Context, string, string) filetracker.Coverage {
+func (tracker *snapshotChangingTracker) ReadCoverage(context.Context, string, string) FileCoverage {
 	tracker.mutate.Do(func() {
 		require.NoError(tracker.t, os.WriteFile(tracker.path, []byte("one\nexternal\nthree\n"), 0o644))
 	})
-	return filetracker.FullCoverage
+	return FileCoverage{Full: true}
 }
 
 type recordingMutationPermissions struct {

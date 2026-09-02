@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,8 +30,8 @@ func (m mockFileTrackerService) RecordPartialRead(ctx context.Context, sessionID
 func (m mockFileTrackerService) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
 }
 
-func (m mockFileTrackerService) ReadCoverage(ctx context.Context, sessionID, path string) filetracker.Coverage {
-	return filetracker.FullCoverage
+func (m mockFileTrackerService) ReadCoverage(ctx context.Context, sessionID, path string) FileCoverage {
+	return FileCoverage{Full: true}
 }
 
 func TestWriteToolWritesEmptyNewFile(t *testing.T) {

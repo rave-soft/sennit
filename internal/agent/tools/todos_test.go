@@ -3,35 +3,39 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/session"
-	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
 
-// fakeTodoSessions implements just enough of sessionstore.Service for the todos
-// tool: Get returns whatever was last written (or the seeded session), and
-// SetTodos/Save record writes.
+// fakeTodoSessions implements the narrow todo port used by the tool.
 type fakeTodoSessions struct {
-	sessionstore.Service
-	sess session.Session
+	sess      session.Session
+	getErr    error
+	setErr    error
+	setID     string
+	setCalled bool
 }
 
-func (f *fakeTodoSessions) Get(_ context.Context, id string) (session.Session, error) {
-	return f.sess, nil
-}
-
-func (f *fakeTodoSessions) Save(_ context.Context, s session.Session) (session.Session, error) {
-	f.sess = s
-	return s, nil
+func (f *fakeTodoSessions) Todos(_ context.Context, _ string) ([]session.Todo, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.sess.Todos, nil
 }
 
 // SetTodos is the narrow write the tool actually performs now: only the
 // list, so a turn saving usage on the same row cannot carry a stale copy
 // of it back over the top.
-func (f *fakeTodoSessions) SetTodos(_ context.Context, _ string, todos []session.Todo) error {
+func (f *fakeTodoSessions) SetTodos(_ context.Context, sessionID string, todos []session.Todo) error {
+	f.setCalled = true
+	f.setID = sessionID
+	if f.setErr != nil {
+		return f.setErr
+	}
 	f.sess.Todos = todos
 	return nil
 }
@@ -230,6 +234,28 @@ func TestTodosTool_RepeatedCompletedListDoesNotStartNewCycle(t *testing.T) {
 // fix: an invalid status is bad input the model supplied, so it is a normal
 // (IsError) tool result the model can see and correct, not a Go error that
 // aborts the whole tool-call batch.
+func TestTodosTool_InfrastructureErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		fake *fakeTodoSessions
+		want string
+	}{
+		{name: "load", fake: &fakeTodoSessions{getErr: errors.New("session unavailable")}, want: "failed to get session"},
+		{name: "save", fake: &fakeTodoSessions{sess: session.Session{ID: "session-1"}, setErr: errors.New("session unavailable")}, want: "failed to save todos"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tool := NewTodosTool(tc.fake)
+			input, err := json.Marshal(TodosParams{Todos: []TodoItem{{Content: "test", Status: "pending"}}})
+			require.NoError(t, err)
+			_, err = tool.Run(context.WithValue(t.Context(), SessionIDContextKey, "session-1"), fantasy.ToolCall{ID: "call-1", Input: string(input)})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
 func TestTodosTool_InvalidStatusIsTextResponseNotError(t *testing.T) {
 	t.Parallel()
 

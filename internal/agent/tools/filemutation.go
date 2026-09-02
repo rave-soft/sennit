@@ -11,7 +11,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/diff"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/permission"
 )
@@ -24,7 +23,7 @@ const (
 	fileStale
 )
 
-func checkFileFreshness(ctx context.Context, ft filetracker.Service, sessionID, filePath string, modTime time.Time) (state fileFreshness, lastRead time.Time) {
+func checkFileFreshness(ctx context.Context, ft FileTracking, sessionID, filePath string, modTime time.Time) (state fileFreshness, lastRead time.Time) {
 	if ft == nil {
 		return fileFresh, time.Time{}
 	}

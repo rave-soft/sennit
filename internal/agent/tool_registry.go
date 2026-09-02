@@ -156,18 +156,18 @@ func toolSpecs() []toolSpec {
 				tools.NewJobOutputTool(f.background),
 				tools.NewJobKillTool(f.background),
 				tools.NewDownloadTool(f.permissions, b.runtimeCfg.workingDir, nil),
-				tools.NewEditTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
-				tools.NewMultiEditTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewEditTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewMultiEditTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
 				tools.NewFetchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.toolAvailability),
 				tools.NewWebFetchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.toolAvailability),
 				tools.NewWebSearchTool(f.permissions, b.runtimeCfg.workingDir, nil, b.searchBackend, b.toolAvailability),
 				tools.NewGlobTool(b.runtimeCfg.workingDir, b.cfg.Glob()),
 				tools.NewSearchTool(b.runtimeCfg.workingDir, b.cfg.Grep()),
 				tools.NewLsTool(f.permissions, b.runtimeCfg.workingDir, b.cfg.Ls()),
-				tools.NewTodosTool(f.sessions),
+				tools.NewTodosTool(newTodoSessions(f.sessions)),
 				tools.NewReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
 				tools.NewMultiReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
-				tools.NewWriteTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewWriteTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
 			}, nil
 		}},
 
@@ -227,8 +227,8 @@ func toolSpecs() []toolSpec {
 				tools.NewHoverTool(f.lspManager, b.runtimeCfg.workingDir),
 				tools.NewDefinitionTool(f.lspManager, b.runtimeCfg.workingDir),
 				tools.NewCallHierarchyTool(f.lspManager, b.runtimeCfg.workingDir),
-				tools.NewRenameTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
-				tools.NewReplaceSymbolTool(f.lspManager, f.permissions, f.history, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewRenameTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
+				tools.NewReplaceSymbolTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
 			}, nil
 		}},
 

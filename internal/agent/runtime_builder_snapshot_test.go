@@ -62,8 +62,8 @@ func TestRuntimeForUsesCapturedPublishedConfigGeneration(t *testing.T) {
 
 	runtime, err := builder.runtimeFor(context.Background(), runtimeToolInputs{
 		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
+		fileHistory: newFileHistory(env.history),
+		filetracker: newFileTracking(*env.filetracker),
 		background:  shell.NewBackgroundShellManager(),
 		delegationToolsBuilt: map[string]fantasy.AgentTool{
 			AgentToolName:                   snapshotStubTool(AgentToolName),

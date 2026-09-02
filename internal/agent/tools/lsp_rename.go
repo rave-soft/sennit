@@ -11,8 +11,6 @@ import (
 	"charm.land/fantasy"
 
 	"github.com/rave-soft/sennit/internal/filepathext"
-	"github.com/rave-soft/sennit/internal/filetracker"
-	historystore "github.com/rave-soft/sennit/internal/history/store"
 	"github.com/rave-soft/sennit/internal/lsp"
 	lsputil "github.com/rave-soft/sennit/internal/lsp/util"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -32,8 +30,8 @@ var renameDescription string
 func NewRenameTool(
 	lspManager *lsp.Manager,
 	permissions permission.Requester,
-	files historystore.Service,
-	filetracker filetracker.Service,
+	files FileHistory,
+	filetracker FileTracking,
 	workingDir string,
 ) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewAgentTool(
@@ -110,7 +108,7 @@ func NewRenameTool(
 						slog.Warn("Failed to read file for version tracking", "path", path, "error", err)
 						continue
 					}
-					if _, err := files.CreateVersion(ctx, sessionID, path, string(content)); err != nil {
+					if err := files.CreateVersion(ctx, sessionID, path, string(content)); err != nil {
 						slog.Warn("Failed to create file version", "path", path, "error", err)
 					}
 				}

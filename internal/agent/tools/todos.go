@@ -8,7 +8,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/session"
-	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
 //go:embed todos.md
@@ -41,7 +40,14 @@ type TodosResponseMetadata struct {
 	Total         int            `json:"total"`
 }
 
-func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
+// TodoSessions provides the todo state operations used by the todos tool.
+// It deliberately excludes the rest of session storage.
+type TodoSessions interface {
+	Todos(ctx context.Context, sessionID string) ([]session.Todo, error)
+	SetTodos(ctx context.Context, sessionID string, todos []session.Todo) error
+}
+
+func NewTodosTool(sessions TodoSessions) fantasy.AgentTool {
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		TodosToolName,
 		todosDescription,
@@ -51,12 +57,12 @@ func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
 				return fantasy.ToolResponse{}, missingSessionID("managing todos")
 			}
 
-			currentSession, err := sessions.Get(ctx, sessionID)
+			currentTodos, err := sessions.Todos(ctx, sessionID)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to get session: %w", err)
 			}
 
-			startsNewCycle := len(currentSession.Todos) > 0 && !session.HasIncompleteTodos(currentSession.Todos)
+			startsNewCycle := len(currentTodos) > 0 && !session.HasIncompleteTodos(currentTodos)
 			if startsNewCycle {
 				startsNewCycle = false
 				for _, item := range params.Todos {
@@ -66,9 +72,9 @@ func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
 					}
 				}
 			}
-			isNew := len(currentSession.Todos) == 0 || startsNewCycle
+			isNew := len(currentTodos) == 0 || startsNewCycle
 			oldStatusByContent := make(map[string]session.TodoStatus)
-			for _, todo := range currentSession.Todos {
+			for _, todo := range currentTodos {
 				oldStatusByContent[todo.Content] = todo.Status
 			}
 
@@ -99,8 +105,8 @@ func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
 			// completed that the old list never had are genuinely new-cycle
 			// work and stay.
 			if startsNewCycle {
-				carried := make(map[string]bool, len(currentSession.Todos))
-				for _, old := range currentSession.Todos {
+				carried := make(map[string]bool, len(currentTodos))
+				for _, old := range currentTodos {
 					carried[normalizeTodoContent(old.Content)] = true
 				}
 				fresh := make([]TodoItem, 0, len(params.Todos))
@@ -160,7 +166,7 @@ func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
 					seen[normalizeTodoContent(t.Content)] = true
 				}
 				appended := make(map[string]bool)
-				for _, old := range currentSession.Todos {
+				for _, old := range currentTodos {
 					if old.Status != session.TodoStatusCompleted {
 						continue
 					}
@@ -179,8 +185,7 @@ func NewTodosTool(sessions sessionstore.Service) fantasy.AgentTool {
 			// full-row write carried a stale copy of what the other had
 			// just written, so a todo list could vanish the moment a step
 			// finished.
-			currentSession.Todos = todos
-			if err := sessions.SetTodos(ctx, currentSession.ID, todos); err != nil {
+			if err := sessions.SetTodos(ctx, sessionID, todos); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to save todos: %w", err)
 			}
 

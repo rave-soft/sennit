@@ -16,7 +16,6 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -92,7 +91,7 @@ const (
 	MaxLineLength    = 2000
 )
 
-func NewReadTool(lspManager *lsp.Manager, permissions permission.Requester, tracker filetracker.Service, skillTracker *skills.Tracker, workingDir string, skillsPaths ...string) fantasy.AgentTool {
+func NewReadTool(lspManager *lsp.Manager, permissions permission.Requester, tracker FileTracking, skillTracker *skills.Tracker, workingDir string, skillsPaths ...string) fantasy.AgentTool {
 	core := newReadCore(lspManager, permissions, tracker, skillTracker, workingDir, skillsPaths...)
 	tool := fantasy.NewAgentTool(ReadToolName, readDescription(), func(ctx context.Context, params ReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		// Scheme-backed skills retain their public-read behaviour; batches reject

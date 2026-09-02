@@ -283,14 +283,14 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 	allTools := []fantasy.AgentTool{
 		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.Attribution, modelName, shell.NewBackgroundShellManager()),
 		tools.NewDownloadTool(env.permissions, env.workingDir, client),
-		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
-		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
+		tools.NewEditTool(nil, env.permissions, newFileHistory(env.history), newFileTracking(*env.filetracker), env.workingDir),
+		tools.NewMultiEditTool(nil, env.permissions, newFileHistory(env.history), newFileTracking(*env.filetracker), env.workingDir),
 		tools.NewFetchTool(env.permissions, env.workingDir, client),
 		tools.NewGlobTool(env.workingDir, cfg.Config().Tools.Glob),
 		tools.NewGrepTool(env.workingDir, cfg.Config().Tools.Grep),
 		tools.NewLsTool(env.permissions, env.workingDir, cfg.Config().Tools.Ls),
-		tools.NewReadTool(nil, env.permissions, *env.filetracker, nil, env.workingDir),
-		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
+		tools.NewReadTool(nil, env.permissions, newFileTracking(*env.filetracker), nil, env.workingDir),
+		tools.NewWriteTool(nil, env.permissions, newFileHistory(env.history), newFileTracking(*env.filetracker), env.workingDir),
 	}
 
 	return testSessionAgent(env, model, systemPrompt, allTools...), nil
