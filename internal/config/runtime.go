@@ -61,44 +61,35 @@ func (c *Config) RuntimeResolver() VariableResolver {
 	return runtimeEnvironmentResolver{config: c}
 }
 
-// RuntimeEnvironment returns the resolved runtime environment computed at
-// build time (see Config.runtimeEnv and populateRuntimeEnvironment). A
-// Config assembled outside the normal buildConfig pipeline (a bare &Config{}
-// in a test, or one handed to NewStore) never had it populated; rather than
-// silently returning an empty environment, fall back to computing it here.
-// That fallback recomputes on every call, same as before this method was
-// cached, but only for Configs that opted out of the build pipeline.
+// RuntimeEnvironment returns the environment config values are resolved
+// against: the process environment, overlaid with each Env entry, overlaid
+// with the SENNIT_-prefixed process variables (stripped of that prefix).
+//
+// The process environment is re-read on every call, deliberately. A key
+// written as "$MY_KEY" is resolved through here, and the auth-error retry
+// path re-resolves it precisely because the value may have been rotated
+// since the config was built (see runtime_builder.go's
+// refreshApiKeyTemplate); freezing the process environment would make that
+// retry re-resolve the dead key forever.
+//
+// What is cached is the expensive half: resolving the Env entries
+// themselves, which may contain "$(cmd)" and so execute a command per
+// entry. Those are resolved once, at build time, against the environment
+// as it stood then — so an Env entry that interpolates a process variable
+// keeps its build-time value, while a plain process variable stays live.
 func (c *Config) RuntimeEnvironment() env.Env {
-	if c.runtimeEnv != nil {
-		return c.runtimeEnv
-	}
-	return c.computeRuntimeEnvironment()
-}
-
-// populateRuntimeEnvironment computes and stores the runtime environment on
-// c. Callers must run this once, after c.Env is finalized and before c is
-// published or handed to anything that might call RuntimeEnvironment
-// (notably RuntimeResolver/ResolveValue) — see buildConfig.
-func (c *Config) populateRuntimeEnvironment() {
-	c.runtimeEnv = c.computeRuntimeEnvironment()
-}
-
-func (c *Config) computeRuntimeEnvironment() env.Env {
 	base := os.Environ()
 	environment := env.Snapshot(base, nil)
-	keys := make([]string, 0, len(c.Env))
-	for key := range c.Env {
-		keys = append(keys, key)
+
+	overlay := c.resolvedEnv
+	if overlay == nil {
+		// A Config assembled outside buildConfig (a bare &Config{} in a
+		// test, or one handed to NewStore) never had its Env resolved;
+		// resolve it here rather than silently dropping it.
+		overlay = resolveEnvEntries(environment, c.Env)
 	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		resolved, err := NewShellVariableResolver(environment).ResolveValue(c.Env[key])
-		if err != nil {
-			slog.Warn("Skipping env var due to resolution failure.", "key", key, "value", c.Env[key], "error", err)
-			continue
-		}
-		environment = env.Overlay(environment, map[string]string{key: resolved})
-	}
+	environment = env.Overlay(environment, overlay)
+
 	overrides := make(map[string]string)
 	for _, value := range base {
 		key, value, ok := strings.Cut(value, "=")
@@ -107,6 +98,40 @@ func (c *Config) computeRuntimeEnvironment() env.Env {
 		}
 	}
 	return env.Overlay(environment, overrides)
+}
+
+// populateRuntimeEnvironment resolves c.Env once and stores the result.
+// Callers must run this after c.Env is finalized and before c is published
+// — see buildConfig.
+func (c *Config) populateRuntimeEnvironment() {
+	c.resolvedEnv = resolveEnvEntries(env.Snapshot(os.Environ(), nil), c.Env)
+}
+
+// resolveEnvEntries resolves each entry of envs against base, in sorted key
+// order so a later entry can refer to an earlier one, and returns the flat
+// result. An entry that fails to resolve is skipped with a warning rather
+// than failing the whole environment.
+func resolveEnvEntries(base env.Env, envs map[string]string) map[string]string {
+	if len(envs) == 0 {
+		return map[string]string{}
+	}
+	keys := make([]string, 0, len(envs))
+	for key := range envs {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	environment := base
+	resolved := make(map[string]string, len(keys))
+	for _, key := range keys {
+		value, err := NewShellVariableResolver(environment).ResolveValue(envs[key])
+		if err != nil {
+			slog.Warn("Skipping env var due to resolution failure.", "key", key, "value", envs[key], "error", err)
+			continue
+		}
+		resolved[key] = value
+		environment = env.Overlay(environment, map[string]string{key: value})
+	}
+	return resolved
 }
 
 func (c *Config) AddRuntimeProblem(problem Problem) {

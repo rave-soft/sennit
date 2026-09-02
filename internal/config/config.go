@@ -12,7 +12,6 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/csync"
-	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/oauth"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
@@ -581,15 +580,13 @@ type Config struct {
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
-	// runtimeEnv is the fully resolved runtime environment (process env,
-	// overlaid with each Env entry resolved in sorted key order, overlaid
-	// with SENNIT_-prefixed process vars) computed once when the Config is
-	// assembled. See RuntimeEnvironment: resolving it on every call ran
-	// every $(...) command in Env once per resolved value instead of once
-	// per config build. env.Env is an immutable value (Snapshot/Overlay
-	// never mutate in place), so sharing it across a clone or a published
-	// pointer needs no locking beyond the pointer read itself.
-	runtimeEnv env.Env
+	// resolvedEnv holds the Env entries after resolution, computed once
+	// when the Config is assembled. Only this half is cached: resolving an
+	// entry may execute a "$(cmd)", and doing that per resolved value ran
+	// the command once per value instead of once per build. The process
+	// environment itself is re-read on every RuntimeEnvironment call, so a
+	// rotated "$MY_KEY" is still picked up — see that method.
+	resolvedEnv map[string]string
 
 	// Agents holds both the built-in agents and any the user defines.
 	// SetupAgents populates this from .sennit/agents/*.md files (via
@@ -633,9 +630,9 @@ type Config struct {
 // copied too, so a mutator can rewrite one provider's credentials without
 // racing a reader iterating the old map; the remaining fields are
 // immutable after load from the mutators' standpoint and are likewise
-// shared. That includes runtimeEnv: credential and option writes never
+// shared. That includes resolvedEnv: credential and option writes never
 // touch Env, so the struct copy above sharing the already-resolved
-// environment with the clone is correct, not a shortcut.
+// entries with the clone is correct, not a shortcut.
 func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.RecentModels = slices.Clone(c.RecentModels)
@@ -692,6 +689,62 @@ func (c *Config) ThemeID() string {
 		return ""
 	}
 	return c.Options.TUI.Theme
+}
+
+// TransparentEnabled reports whether the TUI's transparent background is
+// turned on, or false when Options, TUI, or Transparent itself is unset.
+func (c *Config) TransparentEnabled() bool {
+	if c == nil || c.Options == nil || c.Options.TUI == nil || c.Options.TUI.Transparent == nil {
+		return false
+	}
+	return *c.Options.TUI.Transparent
+}
+
+// CompletionsLimits returns the configured @-mention completion depth and
+// item limits, or the zero values (meaning "no limit") when Options or TUI
+// is unset — a Config built by hand (every test) has neither.
+func (c *Config) CompletionsLimits() (depth, items int) {
+	if c == nil || c.Options == nil || c.Options.TUI == nil {
+		return 0, 0
+	}
+	return c.Options.TUI.Completions.Limits()
+}
+
+// DiffMode returns the configured TUI diff mode, or the empty string when
+// Options or TUI is unset.
+func (c *Config) DiffMode() string {
+	if c == nil || c.Options == nil || c.Options.TUI == nil {
+		return ""
+	}
+	return c.Options.TUI.DiffMode
+}
+
+// Scrollbar returns the configured chat scrollbar visibility, or the empty
+// string when Options or TUI is unset (callers fall back to
+// [ScrollbarDefault] themselves).
+func (c *Config) Scrollbar() string {
+	if c == nil || c.Options == nil || c.Options.TUI == nil {
+		return ""
+	}
+	return c.Options.TUI.Scrollbar
+}
+
+// Keybindings returns the configured per-action key overrides, or nil when
+// Options or TUI is unset.
+func (c *Config) Keybindings() map[string][]string {
+	if c == nil || c.Options == nil || c.Options.TUI == nil {
+		return nil
+	}
+	return c.Options.TUI.Keybindings
+}
+
+// CompactMode reports whether the TUI should start in compact mode, or
+// false when Options or TUI is unset.
+func (c *Config) CompactMode() bool {
+	if c == nil || c.Options == nil || c.Options.TUI == nil {
+		return false
+	}
+	return c.Options.TUI.CompactMode
 }
 
 // ensureTUI returns c.Options.TUI, allocating Options and TUI as needed so
