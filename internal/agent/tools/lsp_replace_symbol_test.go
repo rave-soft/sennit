@@ -1,6 +1,9 @@
 package tools
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -44,4 +47,39 @@ func TestSymbolRangeEndLine(t *testing.T) {
 		}
 		require.Equal(t, 5, symbolRangeEndLine(rng))
 	})
+}
+
+// TestReplaceSymbolThroughManagerRecordsOnlyTheEditedSpan is the regression
+// test for defect 1: replace_symbol used to set wholeFileRead: true, so
+// replacing one function retroactively marked the entire file as read for
+// the session — after which edit/write would accept a blind change
+// anywhere else in it. The fix records only the span replace_symbol
+// actually touched, same as edit/multiedit/write already do for a partial
+// change.
+func TestReplaceSymbolThroughManagerRecordsOnlyTheEditedSpan(t *testing.T) {
+	root := newLSPToolWorktree(t)
+	manager := newLSPToolE2EManager(t, root, "replace-symbol")
+	tracker := &mockEditFileTracker{}
+	tool := NewReplaceSymbolTool(manager, &mockPermissionService{}, &mockHistoryService{}, tracker, root)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "replace-session")
+
+	resp := runToolWith(t, tool, ctx, ReplaceSymbolToolName, ReplaceSymbolParams{
+		Symbol:      "Exact",
+		FilePath:    "a.go",
+		Replacement: `func Exact() string { return "changed" }`,
+	})
+	require.False(t, resp.IsError, resp.Content)
+
+	content, err := os.ReadFile(filepath.Join(root, "a.go"))
+	require.NoError(t, err)
+	require.Contains(t, string(content), "changed")
+
+	// The tool never asked to record a whole-file read...
+	require.Empty(t, tracker.reads)
+	coverage := tracker.ReadCoverage(ctx, "replace-session", filepath.Join(root, "a.go"))
+	require.False(t, coverage.Full, "replacing one symbol must not grant full-file coverage")
+	// ...and coverage does not reach the untouched "Other" function three
+	// lines below the one that was actually replaced.
+	require.False(t, coverage.Covers(4, 4), "coverage must not reach lines the edit never touched")
+	require.True(t, coverage.Covers(3, 3), "coverage must include the line that was actually replaced")
 }

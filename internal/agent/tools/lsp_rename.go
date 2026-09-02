@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 
 	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lsp"
 	lsputil "github.com/rave-soft/sennit/internal/lsp/util"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -73,6 +74,19 @@ func NewRenameTool(
 				return fantasy.NewTextResponse(fmt.Sprintf("No rename edits generated for symbol '%s'", params.Symbol)), nil
 			}
 
+			affectedFiles := collectAffectedFiles(edit)
+
+			// A rename is a write to every affected file, so the workspace
+			// boundary applies to each of them, same as write/edit. Checked
+			// before the permission request below, so a rename that will be
+			// refused for writing outside the workspace does not first
+			// interrupt the user with a prompt.
+			for _, path := range affectedFiles {
+				if msg, refused := confinementRefusal(permissions, path); refused {
+					return fantasy.NewTextErrorResponse(msg), nil
+				}
+			}
+
 			if permissions != nil {
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
@@ -91,24 +105,26 @@ func NewRenameTool(
 				}
 			}
 
-			affectedFiles := collectAffectedFiles(edit)
-
-			// A rename is a write to every affected file, so the workspace
-			// boundary applies to each of them, same as write/edit.
+			// Captured once, up front, so both file history and the
+			// read-coverage bookkeeping below diff against the same pre-edit
+			// content instead of each reading the file for itself.
+			preEditContent := make(map[string]string, len(affectedFiles))
 			for _, path := range affectedFiles {
-				if msg, refused := confinementRefusal(permissions, path); refused {
-					return fantasy.NewTextErrorResponse(msg), nil
+				content, err := os.ReadFile(path)
+				if err != nil {
+					slog.Warn("Failed to read file before rename", "path", path, "error", err)
+					continue
 				}
+				preEditContent[path] = string(content)
 			}
 
 			if files != nil && sessionID != "" {
 				for _, path := range affectedFiles {
-					content, err := os.ReadFile(path)
-					if err != nil {
-						slog.Warn("Failed to read file for version tracking", "path", path, "error", err)
+					content, ok := preEditContent[path]
+					if !ok {
 						continue
 					}
-					if err := files.CreateVersion(ctx, sessionID, path, string(content)); err != nil {
+					if err := files.CreateVersion(ctx, sessionID, path, content); err != nil {
 						slog.Warn("Failed to create file version", "path", path, "error", err)
 					}
 				}
@@ -119,9 +135,24 @@ func NewRenameTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to apply rename edits: %s", err)), nil
 			}
 
+			// Record only the lines the rename actually changed in each
+			// affected file, not a full read of it — see recordEditedSpan's
+			// doc comment in tools.go for why a whole-file read here would
+			// hand back the blind-edit hole read-coverage exists to close.
 			if filetracker != nil && sessionID != "" {
 				for _, path := range affectedFiles {
-					filetracker.RecordRead(ctx, sessionID, path)
+					oldContent, ok := preEditContent[path]
+					if !ok {
+						continue
+					}
+					newRaw, err := os.ReadFile(path)
+					if err != nil {
+						slog.Warn("Failed to read file for read-coverage tracking", "path", path, "error", err)
+						continue
+					}
+					normalizedOld, _ := fsext.ToUnixLineEndings(oldContent)
+					normalizedNew, _ := fsext.ToUnixLineEndings(string(newRaw))
+					recordEditedSpan(ctx, filetracker, sessionID, path, normalizedOld, normalizedNew)
 				}
 			}
 

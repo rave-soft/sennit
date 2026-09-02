@@ -130,8 +130,13 @@ func NewReplaceSymbolTool(
 					if snapshot.isCRLF {
 						writeContent, _ = fsext.ToWindowsLineEndings(newContent)
 					}
+					// wholeFileRead stays false: the model supplied a
+					// replacement for one symbol's range, not the file, so
+					// only that span counts as seen. Marking the whole file
+					// read here would let a later edit or write change any
+					// line of a file the session never opened.
 					return preparedFileMutation{
-						diffContent: newContent, writeContent: writeContent, wholeFileRead: true,
+						diffContent: newContent, writeContent: writeContent, wholeFileRead: false,
 						description:    fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
 						permParams:     ReplaceSymbolPermissionsParams{FilePath: filePath, OldContent: snapshot.content, NewContent: newContent},
 						successMessage: fmt.Sprintf("Updated symbol '%s' in %s", params.Symbol, params.FilePath),

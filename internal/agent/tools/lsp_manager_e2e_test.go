@@ -78,8 +78,10 @@ func runLSPToolHelper() {
 			switch scenario {
 			case "no-capabilities":
 				result = `{"capabilities":{}}`
-			case "rename":
+			case "rename", "rename-edit", "rename-outside":
 				result = `{"capabilities":{"definitionProvider":true,"renameProvider":true}}`
+			case "replace-symbol":
+				result = `{"capabilities":{"definitionProvider":true,"documentSymbolProvider":true}}`
 			default:
 				result = `{"capabilities":{"hoverProvider":true,"workspaceSymbolProvider":true}}`
 			}
@@ -88,9 +90,32 @@ func runLSPToolHelper() {
 			uri := "file://" + filepath.ToSlash(filepath.Join(root, "a.go"))
 			result = fmt.Sprintf(`[{"uri":%q,"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":5}}}]`, uri)
 		case "textDocument/rename":
-			// An empty edit is still a non-nil WorkspaceEdit, which drives
-			// RenameTool through its permission gate without changing fixtures.
-			result = `{"changes":{}}`
+			root := filepath.ToSlash(os.Getenv("SENNIT_LSP_TOOL_ROOT"))
+			switch scenario {
+			case "rename-edit":
+				// Two files, one changed line apiece: a real rename, not the
+				// empty-edit stand-in the default case uses. "Exact" sits at
+				// the same column in both fixtures (see
+				// newLSPToolRenameEditWorktree).
+				aURI := "file://" + filepath.ToSlash(filepath.Join(root, "a.go"))
+				bURI := "file://" + filepath.ToSlash(filepath.Join(root, "b.go"))
+				result = fmt.Sprintf(`{"changes":{%q:[{"range":{"start":{"line":2,"character":5},"end":{"line":2,"character":10}},"newText":"Renamed"}],%q:[{"range":{"start":{"line":2,"character":25},"end":{"line":2,"character":30}},"newText":"Renamed"}]}}`, aURI, bURI)
+			case "rename-outside":
+				// Names a file outside the confined root, so the confinement
+				// check has something to refuse.
+				outsideURI := "file://" + filepath.ToSlash(filepath.Join(filepath.Dir(root), "outside.go"))
+				result = fmt.Sprintf(`{"changes":{%q:[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"x"}]}}`, outsideURI)
+			default:
+				// An empty edit is still a non-nil WorkspaceEdit, which drives
+				// RenameTool through its permission gate without changing fixtures.
+				result = `{"changes":{}}`
+			}
+		case "textDocument/documentSymbol":
+			if scenario == "replace-symbol" {
+				// A single-line "Exact" function symbol at line 2 (0-based),
+				// matching newLSPToolReplaceSymbolWorktree's fixture.
+				result = `[{"name":"Exact","kind":12,"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":36}},"selectionRange":{"start":{"line":2,"character":5},"end":{"line":2,"character":10}}}]`
+			}
 		case "workspace/symbol":
 			root := filepath.ToSlash(os.Getenv("SENNIT_LSP_TOOL_ROOT"))
 			uri := "file://" + filepath.ToSlash(filepath.Join(root, "a.go"))
