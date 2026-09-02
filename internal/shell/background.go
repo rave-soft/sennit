@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -284,11 +285,33 @@ func (m *BackgroundShellManager) Get(id string) (*BackgroundShell, bool) {
 	return shell, ok
 }
 
+// ErrBackgroundShellNotFound is returned by Remove and Kill when id names no
+// job currently in the manager. For Remove specifically, this is not
+// necessarily a caller mistake: Start's admission path
+// (removeCompletedLocked) sweeps every finished job once the table is at
+// MaxBackgroundJobs, so a job can legitimately vanish from the map between a
+// caller observing it as done and that caller's own Remove call.
+var ErrBackgroundShellNotFound = errors.New("background shell not found")
+
+// ErrBackgroundShellStillRunning is returned by Remove when the job named by
+// id has not finished yet.
+var ErrBackgroundShellStillRunning = errors.New("background shell still running")
+
+// Remove drops a finished job's bookkeeping entry. It refuses to drop a job
+// that is still running: without this check, a caller that skips the
+// done-check callers elsewhere in this package rely on would delete the
+// job's map entry while its process kept running, and Kill/Cleanup/Shutdown
+// only ever look at m.shells — the process would then survive, unreachable
+// and unstoppable, until it exits on its own.
 func (m *BackgroundShellManager) Remove(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.shells[id]; !ok {
-		return fmt.Errorf("background shell not found: %s", id)
+	shell, ok := m.shells[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrBackgroundShellNotFound, id)
+	}
+	if !shell.IsDone() {
+		return fmt.Errorf("%w: %s", ErrBackgroundShellStillRunning, id)
 	}
 	delete(m.shells, id)
 	return nil

@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -89,17 +90,61 @@ func TestBackgroundShellManagerConcurrentShutdownDeadlines(t *testing.T) {
 	require.EqualError(t, err, "background shell manager is shut down")
 }
 
-func TestBackgroundShellManagerRemoveAndKillUnknown(t *testing.T) {
+func TestBackgroundShellManagerRemoveUnknown(t *testing.T) {
 	manager := NewBackgroundShellManager()
-	job, err := manager.Start(t.Context(), t.TempDir(), nil, "sleep 5", "")
-	require.NoError(t, err)
+	require.EqualError(t, manager.Remove("missing"), "background shell not found: missing")
+	require.EqualError(t, manager.Kill("missing"), "background shell not found: missing")
+}
+
+func TestBackgroundShellManagerRemoveSucceedsForFinishedJob(t *testing.T) {
+	manager := NewBackgroundShellManager()
+	job := insertBackgroundShellForTest(manager, "finished", true)
 	require.NoError(t, manager.Remove(job.ID))
 	_, found := manager.Get(job.ID)
 	require.False(t, found)
 	require.EqualError(t, manager.Remove(job.ID), "background shell not found: "+job.ID)
-	require.EqualError(t, manager.Kill("missing"), "background shell not found: missing")
-	job.cancel()
-	job.Wait()
+}
+
+// TestBackgroundShellManagerRemoveNotFoundIsARaceWithAdmissionSweep covers
+// the sequence that makes not-found reachable on a success path: a job
+// finishes, Start's admission sweep (removeCompletedLocked, triggered by the
+// table being at MaxBackgroundJobs) reaps it before the job's "owner" calls
+// Remove itself, and that later Remove must come back as
+// ErrBackgroundShellNotFound rather than some caller-visible failure.
+func TestBackgroundShellManagerRemoveNotFoundIsARaceWithAdmissionSweep(t *testing.T) {
+	manager := NewBackgroundShellManager()
+	job := insertBackgroundShellForTest(manager, "already-swept", true)
+
+	// Stand in for removeCompletedLocked already having reaped this job.
+	manager.mu.Lock()
+	delete(manager.shells, job.ID)
+	manager.mu.Unlock()
+
+	err := manager.Remove(job.ID)
+	require.ErrorIs(t, err, ErrBackgroundShellNotFound)
+	require.False(t, errors.Is(err, ErrBackgroundShellStillRunning))
+}
+
+// TestBackgroundShellManagerRemoveRefusesRunningJob is the regression test
+// for the Remove defect: dropping a running job's map entry would make it
+// unreachable from Kill/Cleanup/Shutdown, orphaning its process for the rest
+// of the process lifetime. Remove must refuse, and — the actual point of the
+// fix — the job must still be there afterward for Shutdown to find and stop.
+func TestBackgroundShellManagerRemoveRefusesRunningJob(t *testing.T) {
+	manager := NewBackgroundShellManager()
+	job := &BackgroundShell{ID: "running", done: make(chan struct{})}
+	job.cancel = func() { close(job.done) } // stands in for the real process exiting once canceled
+	manager.mu.Lock()
+	manager.shells[job.ID] = job
+	manager.mu.Unlock()
+
+	require.EqualError(t, manager.Remove(job.ID), "background shell still running: "+job.ID)
+	_, found := manager.Get(job.ID)
+	require.True(t, found, "job must still be reachable after a refused Remove")
+
+	// The point of the fix: Shutdown must still find this job and stop it.
+	require.NoError(t, manager.Shutdown(t.Context()))
+	require.True(t, job.IsDone())
 }
 
 func TestBackgroundShellManagerCleanupRetention(t *testing.T) {

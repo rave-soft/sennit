@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"path/filepath"
@@ -299,8 +300,18 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 				stdout, stderr, done, execErr := bgShell.GetOutput()
 
 				if done {
-					// Command failed or completed very quickly
-					_ = bgManager.Remove(bgShell.ID) // shell already finished; nothing to clean up on failure
+					// Command failed or completed very quickly. Not-found is a
+					// benign race with Start's own admission sweep
+					// (removeCompletedLocked can reap this same finished job
+					// once the table is at MaxBackgroundJobs), so ignore it —
+					// the entry being gone is exactly the state we wanted.
+					// done is already true here, so "still running" should
+					// never come back; if it does, that's a wiring bug, not
+					// something the model can act on, so it aborts the
+					// tool-call batch rather than becoming a text response.
+					if err := bgManager.Remove(bgShell.ID); err != nil && !errors.Is(err, shell.ErrBackgroundShellNotFound) {
+						return fantasy.ToolResponse{}, fmt.Errorf("error removing finished background shell: %w", err)
+					}
 					return finishBashRun(bgShell, params, startTime, stdout, stderr, execErr)
 				}
 
@@ -343,10 +354,20 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 			}
 
 			if done {
-				// Command completed within threshold - return synchronously
-				// Remove from background manager since we're returning directly
-				// Don't call Kill() as it cancels the context and corrupts the exit code
-				_ = bgManager.Remove(bgShell.ID) // shell already finished; nothing to clean up
+				// Command completed within threshold - return synchronously.
+				// Remove from background manager since we're returning directly.
+				// Don't call Kill() as it cancels the context and corrupts the exit code.
+				// Not-found is a benign race with Start's own admission sweep
+				// (removeCompletedLocked can reap this same finished job once
+				// the table is at MaxBackgroundJobs), so ignore it — the entry
+				// being gone is exactly the state we wanted. done is already
+				// true here, so "still running" should never come back; if it
+				// does, that's a wiring bug, not something the model can act
+				// on, so it aborts the tool-call batch rather than becoming a
+				// text response.
+				if err := bgManager.Remove(bgShell.ID); err != nil && !errors.Is(err, shell.ErrBackgroundShellNotFound) {
+					return fantasy.ToolResponse{}, fmt.Errorf("error removing finished background shell: %w", err)
+				}
 				return finishBashRun(bgShell, params, startTime, stdout, stderr, execErr)
 			}
 
