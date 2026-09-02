@@ -470,13 +470,40 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleDashboardMsg routes messages the dashboard screen cares about but
-// that are not key presses — mouse input, which the screen's toolbar,
-// filter tabs and table all respond to. Anything else is dropped, as it
-// was before the dashboard grew a mouse surface.
+// that are not key presses — mouse, wheel and paste, which the screen's
+// toolbar, filter tabs, table and create-thread dialog (open or not) all
+// respond to. Everything else is claimed by r.main before any of that
+// input handling runs.
 func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if r.dashboard == nil {
 		return r, nil
 	}
+
+	_, isMouse := msg.(tea.MouseMsg)
+	_, isWheel := msg.(common.CoalescedWheelMsg)
+	_, isPaste := msg.(tea.PasteMsg)
+	if !isMouse && !isWheel && !isPaste {
+		// Not dashboard input: a backend event (pubsub.Event[...]) or an
+		// async result from a command the main screen dispatched. It
+		// belongs to r.main regardless of whether a dashboard dialog is
+		// covering the screen — the dialog guard below exists only to stop
+		// *pointer* events from clicking through the modal, which has
+		// nothing to do with this. No thread is ever attached while the
+		// dashboard is active (leaveThread and the dashboard-entry paths in
+		// Update/handleKeyPress all detach first, or come from the main
+		// screen where nothing is attached yet), so r.main is the only *UI
+		// alive to own it; guarded on that invariant rather than assumed,
+		// so a future change that leaves a thread attached here fails safe
+		// (drops) instead of misdelivering. Dropping these used to leave
+		// permission requests unanswered and async flags like
+		// modelOperation.loading stuck, dashboard dialog open or not.
+		if r.attachment.thread == nil {
+			_, cmd := r.main.Update(msg)
+			return r, cmd
+		}
+		return r, nil
+	}
+
 	// An open dialog owns the pointer: clicking "through" a modal onto the
 	// toolbar behind it would act on a screen the user cannot see. Paste is
 	// forwarded too — the thread-create dialog's text inputs sit behind
@@ -484,14 +511,8 @@ func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// went nowhere while the main screen's dialogs kept receiving paste
 	// normally.
 	if r.dashboardDialog.HasDialogs() {
-		_, isMouse := msg.(tea.MouseMsg)
-		_, isWheel := msg.(common.CoalescedWheelMsg)
-		_, isPaste := msg.(tea.PasteMsg)
-		if isMouse || isWheel || isPaste {
-			action := r.dashboardDialog.Update(msg)
-			return r, r.handleDashboardDialogAction(action)
-		}
-		return r, nil
+		action := r.dashboardDialog.Update(msg)
+		return r, r.handleDashboardDialogAction(action)
 	}
 
 	switch msg := msg.(type) {
