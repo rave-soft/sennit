@@ -29,7 +29,10 @@ type CreateParams struct {
 	MergePolicy  MergePolicy
 	Kind         Kind
 	// ParentSessionID is the session this delegation's own session nests
-	// under; see [Delegation.ParentSessionID]. Empty means no parent.
+	// under; see [Delegation.ParentSessionID]. It is persisted, and so
+	// survives a process restart — unlike threadControl.parentSessionID,
+	// which caches the same value in memory for admission checks only.
+	// Empty means no parent.
 	ParentSessionID string
 }
 
