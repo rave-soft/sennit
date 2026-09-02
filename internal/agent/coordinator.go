@@ -21,7 +21,9 @@ import (
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
@@ -132,21 +134,23 @@ func (p *coordinatorAgentPort) current() SessionAgent  { return p.agent }
 func (p *coordinatorAgentPort) set(agent SessionAgent) { p.agent = agent }
 
 type coordinator struct {
-	cfg         *config.ConfigStore
-	credentials *credentials.Manager
-	sessions    sessionstore.Service
-	messages    MessageService
-	permissions permission.Requester
-	questions   question.Service
-	history     historystore.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
-	interactive bool
-	mcp         *mcp.Registry
-	background  *shell.BackgroundShellManager
-	latency     latency.Recorder
+	cfg           *config.ConfigStore
+	credentials   *credentials.Manager
+	sessions      sessionstore.Service
+	messages      MessageService
+	permissions   permission.Requester
+	questions     question.Service
+	history       historystore.Service
+	filetracker   filetracker.Service
+	lspManager    *lsp.Manager
+	notify        pubsub.Publisher[notify.Notification]
+	runComplete   pubsub.Publisher[notify.RunComplete]
+	interactive   bool
+	mcp           *mcp.Registry
+	background    *shell.BackgroundShellManager
+	latency       latency.Recorder
+	accountsStore accounts.Store
+	codexUsage    func(accountID string) (codex.Usage, bool)
 
 	builder    *runtimeBuilder
 	dispatcher *turnDispatcher
@@ -187,6 +191,8 @@ func (c *coordinator) newCoordinatorComponents() {
 		mcp:         c.mcp,
 		interactive: c.interactive,
 		runtime:     newRuntimeCache(),
+		accStore:    c.accountsStore,
+		codexUsage:  c.codexUsage,
 	}
 
 	c.delegation = &delegationFinalizer{
@@ -259,6 +265,20 @@ type CoordinatorOptions struct {
 	// Latency is nil-safe: when nil, the handoff waits every session
 	// agent observes are logged but not recorded. See internal/latency.
 	Latency latency.Recorder
+	// AccountsStore is the shared accounts.Store the runtime builder
+	// lists a provider's rotation candidates from (see runtimeBuilder's
+	// accStore field). Production wires it to
+	// accounts.NewFileStore(config.GlobalAccountsFile()); tests supply a
+	// fake so rotation behavior can be driven without touching disk.
+	AccountsStore accounts.Store
+	// CodexUsage resolves an account ID to its last recorded Codex usage
+	// snapshot, for threshold-rotation (see runtimeBuilder's codexUsage
+	// field and makeThresholdRotateCallback). Production wires it to
+	// codex.UsageFor. When nil, threshold-rotation for Codex-capable
+	// providers simply finds no usage snapshot - the same outcome
+	// codex.UsageFor gives for an unknown account - rather than
+	// panicking.
+	CodexUsage func(accountID string) (codex.Usage, bool)
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -280,21 +300,23 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:         opts.Config,
-		credentials: opts.Credentials,
-		sessions:    opts.Sessions,
-		messages:    opts.Messages,
-		permissions: opts.Permissions,
-		questions:   opts.Questions,
-		history:     opts.History,
-		filetracker: opts.FileTracker,
-		lspManager:  opts.LSPManager,
-		notify:      opts.Notify,
-		runComplete: opts.RunComplete,
-		interactive: opts.Interactive,
-		mcp:         opts.MCP,
-		background:  opts.BackgroundShells,
-		latency:     opts.Latency,
+		cfg:           opts.Config,
+		credentials:   opts.Credentials,
+		sessions:      opts.Sessions,
+		messages:      opts.Messages,
+		permissions:   opts.Permissions,
+		questions:     opts.Questions,
+		history:       opts.History,
+		filetracker:   opts.FileTracker,
+		lspManager:    opts.LSPManager,
+		notify:        opts.Notify,
+		runComplete:   opts.RunComplete,
+		interactive:   opts.Interactive,
+		mcp:           opts.MCP,
+		background:    opts.BackgroundShells,
+		latency:       opts.Latency,
+		accountsStore: opts.AccountsStore,
+		codexUsage:    opts.CodexUsage,
 	}
 	c.newCoordinatorComponents()
 

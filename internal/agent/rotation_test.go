@@ -461,7 +461,8 @@ func TestMakeThresholdRotateCallback_BelowThreshold_NoOp(t *testing.T) {
 
 	b := &runtimeBuilder{
 		cfg: cfg, notify: notifier, runtime: newRuntimeCache(),
-		accStore: codexAccountStore(apiKeyAccount("acct-below", "key-a"), apiKeyAccount("acct-b", "key-b")),
+		accStore:   codexAccountStore(apiKeyAccount("acct-below", "key-a"), apiKeyAccount("acct-b", "key-b")),
+		codexUsage: codex.UsageFor,
 	}
 
 	cb := b.makeThresholdRotateCallback(providerCfg, nil, runtimeOperationPort{})
@@ -492,7 +493,8 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 
 	b := &runtimeBuilder{
 		cfg: cfg, notify: notifier, runtime: newRuntimeCache(),
-		accStore: codexAccountStore(apiKeyAccount("acct-over", "key-a"), apiKeyAccount("acct-c", "key-c")),
+		accStore:   codexAccountStore(apiKeyAccount("acct-over", "key-a"), apiKeyAccount("acct-c", "key-c")),
+		codexUsage: codex.UsageFor,
 	}
 
 	cb := b.makeThresholdRotateCallback(providerCfg, nil, runtimeOperationPort{})
@@ -772,4 +774,18 @@ func TestRotateThreshold_OnlyFiresFromOnStepFinish(t *testing.T) {
 		Response: fantasy.Response{FinishReason: fantasy.FinishReasonStop},
 	}))
 	require.Equal(t, 1, rotateCalls, "RotateThreshold must fire exactly once, from onStepFinish")
+}
+
+// TestNewCoordinator_UsesInjectedAccountsStore proves the coordinator
+// wires CoordinatorOptions.AccountsStore straight into the runtime
+// builder's accStore field, rather than ever falling back to a
+// production accounts.NewFileStore(...). Without dependency injection,
+// nothing observable would distinguish an injected fake from a lazily
+// constructed file store; the injected field is the seam to assert on.
+func TestNewCoordinator_UsesInjectedAccountsStore(t *testing.T) {
+	fake := newFakeAccountStore(authProviderID)
+	co := authTestCoordinator(t, withAccountsStore(fake))
+
+	require.Same(t, fake, co.builder.accStore,
+		"the builder must hold the exact injected accounts.Store instance")
 }

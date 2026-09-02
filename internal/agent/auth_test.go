@@ -16,6 +16,8 @@ import (
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -37,6 +39,7 @@ type authCoordSettings struct {
 	globalConfigJSON string
 	globalDataJSON   string
 	providerID       string
+	accountsStore    accounts.Store
 }
 
 type authCoordOpt func(*authCoordSettings)
@@ -103,6 +106,13 @@ func withProviderID(id string) authCoordOpt {
 
 func withGlobalDataJSON(json string) authCoordOpt {
 	return func(s *authCoordSettings) { s.globalDataJSON = json }
+}
+
+// withAccountsStore installs an accounts.Store on the coordinator (e.g. a
+// fake), so a test can assert the builder holds exactly the injected
+// instance rather than a production accounts.NewFileStore.
+func withAccountsStore(store accounts.Store) authCoordOpt {
+	return func(s *authCoordSettings) { s.accountsStore = store }
 }
 
 // authTestCoordinator builds a fully production-wired *coordinator (through
@@ -179,6 +189,13 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 		Permissions:      env.permissions,
 		BackgroundShells: shell.NewBackgroundShellManager(),
 		Notify:           s.notify,
+		// Matches production wiring (see internal/app/services.go) so
+		// tests exercising the threshold-rotation path through
+		// co.builder get real Codex usage snapshots; accStore itself is
+		// left nil here since every rotation test sets it explicitly to
+		// a fake before use.
+		CodexUsage:    codex.UsageFor,
+		AccountsStore: s.accountsStore,
 	})
 	require.NoError(t, err)
 	c, ok := co.(*coordinator)

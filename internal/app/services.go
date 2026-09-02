@@ -20,7 +20,9 @@ import (
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/lsp"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
@@ -400,6 +402,8 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Latency:          app.Latency,
 		Threads:          threadTools,
 		Tasks:            taskTools,
+		AccountsStore:    accounts.NewFileStore(config.GlobalAccountsFile()),
+		CodexUsage:       codex.UsageFor,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
