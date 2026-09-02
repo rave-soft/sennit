@@ -198,3 +198,33 @@ func TestConditionalReplaceLockPath_StableAndDistinct(t *testing.T) {
 	require.NotEqual(t, conditionalReplaceLockPath(a), conditionalReplaceLockPath(b))
 	require.Equal(t, conditionalReplaceLockDir, filepath.Dir(conditionalReplaceLockPath(a)))
 }
+
+// TestConditionalReplaceLockPath_CanonicalizesSymlinks pins the fix for the
+// cross-process TOCTOU window that a raw filepath.Clean left open: two
+// processes editing the same file through different spellings — here, a
+// symlink and its target — must hash to the same lock file, or they never
+// actually contend on the flock. This fails against the old
+// filepath.Clean-only implementation, which treats the symlink and its
+// target as unrelated paths.
+func TestConditionalReplaceLockPath_CanonicalizesSymlinks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	require.NoError(t, os.WriteFile(real, []byte("content"), 0o644))
+	link := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(real, link))
+
+	require.Equal(t, conditionalReplaceLockPath(real), conditionalReplaceLockPath(link))
+}
+
+// TestConditionalReplaceLockDir_NotSharedAcrossUsers pins the fix for the
+// lock directory being a single fixed path under os.TempDir(): on a
+// multi-user machine, whichever user ran sennit first would own that
+// directory at mode 0700, and os.MkdirAll returning nil for an
+// already-existing directory (it doesn't check ownership or mode) let every
+// other user's flock attempt fail with EACCES on every edit. The directory
+// must instead be scoped to the calling user.
+func TestConditionalReplaceLockDir_NotSharedAcrossUsers(t *testing.T) {
+	t.Parallel()
+	require.NotEqual(t, filepath.Join(os.TempDir(), "sennit-fsext-locks"), conditionalReplaceLockDir)
+}
