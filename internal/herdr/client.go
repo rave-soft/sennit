@@ -379,8 +379,17 @@ func (s *unixSender) send(req reportRequest) error {
 // mutex is released before waiting on done: holding it there would
 // deadlock against a concurrent send blocked on the same mutex while
 // writeLoop is trying to drain the very request it's queuing.
+//
+// A second call is a no-op rather than a panic: an App that shares its
+// herdr client with another App (e.g. a thread's App before that sharing
+// was fixed) must be able to shut down independently without taking the
+// other App's client down with a double close of s.ch.
 func (s *unixSender) close() {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	s.closed = true
 	close(s.ch)
 	s.mu.Unlock()

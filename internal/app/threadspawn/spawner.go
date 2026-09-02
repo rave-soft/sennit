@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/herdr"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -75,8 +76,11 @@ func (s *LocalSpawner) Apps() []*app.App {
 	return out
 }
 
-// Spawn implements thread.Spawner.
-func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+// bootstrapOptions builds the app.BootstrapOptions every thread spawn
+// uses. Split out from Spawn so tests can inspect those options without
+// driving a full Bootstrap. It reads only the parent's state, not the
+// spawn path, which Bootstrap takes separately.
+func (s *LocalSpawner) bootstrapOptions() app.BootstrapOptions {
 	var inheritedAgents map[string]config.Agent
 	if s.parentAgents != nil {
 		inheritedAgents = s.parentAgents()
@@ -98,7 +102,7 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, e
 			model = &m
 		}
 	}
-	boot, err := app.Bootstrap(ctx, path, app.BootstrapOptions{
+	return app.BootstrapOptions{
 		WorkspaceLock:      true,
 		GlobalSkillsMirror: false,
 		InheritedAgents:    inheritedAgents,
@@ -106,7 +110,19 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, e
 		PreferredModel:     model,
 		YOLO:               yolo,
 		ConfineWrites:      true,
-	})
+		// A thread reports into its own workspace, not the user's pane:
+		// the pane belongs to the top-level session, and falling back to
+		// the process-wide herdr client here would make the thread's App
+		// share it with the parent's -- Release shutting the thread down
+		// would then send pane.release_agent and free the pane out from
+		// under a parent session that is still running.
+		HerdrClient: func() *herdr.Client { return nil },
+	}
+}
+
+// Spawn implements thread.Spawner.
+func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+	boot, err := app.Bootstrap(ctx, path, s.bootstrapOptions())
 	if err != nil {
 		return nil, err
 	}

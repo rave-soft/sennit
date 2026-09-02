@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -203,6 +204,31 @@ func TestUnixSender_SendDuringClose(t *testing.T) {
 	s.close()
 	close(stop)
 	wg.Wait()
+}
+
+// TestUnixSender_CloseTwiceIsNoOp guards against a regression to the old
+// unconditional close(s.ch): an App that shares a herdr client with
+// another App (a spawned thread before that sharing was fixed) can have
+// close called on the same sender from two independent shutdowns, and the
+// second call must return promptly instead of panicking on a
+// double-close of the channel.
+func TestUnixSender_CloseTwiceIsNoOp(t *testing.T) {
+	t.Parallel()
+	s := newUnixSender("/nonexistent/herdr-test.sock")
+
+	s.close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.close()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second close blocked")
+	}
 }
 
 func TestNewFromEnvInitializesWithInjectedSender(t *testing.T) {

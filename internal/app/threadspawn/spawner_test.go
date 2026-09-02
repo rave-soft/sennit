@@ -35,6 +35,32 @@ func TestWorkspaceAdaptersAreOwnershipScoped(t *testing.T) {
 	require.Same(t, first, h.Workspace(), "repeated Workspace calls must preserve identity")
 }
 
+// TestLocalSpawnerDoesNotShareProcessHerdrClient guards against a thread's
+// App attaching to the parent's herdr pane connection. app.Bootstrap falls
+// back to the process-wide herdr.Init singleton whenever
+// BootstrapOptions.HerdrClient is nil, and that singleton is shared by
+// every App in the process. If LocalSpawner ever stopped setting
+// HerdrClient (or started passing something other than a getter that
+// always yields nil), every spawned thread would report into the user's
+// pane as if it were the top-level session, and closing a thread's App
+// would close the client the parent is still using (see the herdr
+// package's unixSender.close, made idempotent for exactly this reason).
+//
+// Bootstrap itself is not driven here: doing so would require a full
+// workspace fixture just to inspect one field, and herdr.Init is a
+// process-wide sync.Once that other tests in this binary may have
+// already fired (with or without HERDR_ENV set), making its return value
+// an unreliable thing to compare against. Instead this asserts directly
+// on the BootstrapOptions LocalSpawner builds: HerdrClient must be set
+// (so Bootstrap never falls back to herdr.Init at all) and must yield
+// nil, which is what actually keeps a thread off the parent's client.
+func TestLocalSpawnerDoesNotShareProcessHerdrClient(t *testing.T) {
+	spawner := NewLocalSpawner(nil, nil, nil, nil)
+	opts := spawner.bootstrapOptions()
+	require.NotNil(t, opts.HerdrClient, "a thread must set its own herdr client getter, not leave it nil")
+	require.Nil(t, opts.HerdrClient(), "a thread's herdr client getter must yield nil, never the process-wide client")
+}
+
 func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
