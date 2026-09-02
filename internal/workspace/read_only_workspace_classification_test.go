@@ -228,7 +228,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.True(t, IsReadOnlyError(err))
 		},
 		"AgentRunStream": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, err := ro.AgentRunStream(t.Context(), "sess-1", "hello")
+			_, err := ro.AgentRunStream(t.Context(), "sess-1", "hello", AgentRunOptions{})
 			require.True(t, IsReadOnlyError(err))
 		},
 		"AgentSummarize": func(t *testing.T, ro *readOnlyWorkspace) {

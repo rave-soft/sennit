@@ -46,7 +46,7 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	require.True(t, IsReadOnlyError(err))
 	err = ro.AgentSummarize(t.Context(), "sess-1")
 	require.True(t, IsReadOnlyError(err))
-	_, err = ro.AgentRunStream(t.Context(), "sess-1", "hello")
+	_, err = ro.AgentRunStream(t.Context(), "sess-1", "hello", AgentRunOptions{})
 	require.True(t, IsReadOnlyError(err))
 	err = ro.InitCoderAgent(t.Context())
 	require.True(t, IsReadOnlyError(err))
@@ -428,7 +428,7 @@ func (s *stubWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error 
 	return nil
 }
 
-func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
+func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string, opts AgentRunOptions) (<-chan AgentRunEvent, error) {
 	s.track("AgentRunStream")
 	return nil, nil
 }

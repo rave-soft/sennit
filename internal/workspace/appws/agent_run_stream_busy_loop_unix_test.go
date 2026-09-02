@@ -21,6 +21,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,7 +82,7 @@ func TestAppWorkspace_AgentRunStream_ClosedMessageChannelDoesNotBusyLoop(t *test
 
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
-	out, err := aw.AgentRunStream(t.Context(), "S1", "hello")
+	out, err := aw.AgentRunStream(t.Context(), "S1", "hello", workspace.AgentRunOptions{AutoApprovePermissions: true})
 	require.NoError(t, err)
 	go func() {
 		for range out { //nolint:revive // drain so the producer never blocks

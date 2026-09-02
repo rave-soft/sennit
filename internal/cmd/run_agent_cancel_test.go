@@ -36,7 +36,7 @@ func (f *fakeRunWorkspace) CreateSession(context.Context, string) (session.Sessi
 	return session.Session{ID: "sess-1"}, nil
 }
 
-func (f *fakeRunWorkspace) AgentRunStream(context.Context, string, string) (<-chan workspace.AgentRunEvent, error) {
+func (f *fakeRunWorkspace) AgentRunStream(context.Context, string, string, workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
 	return f.events, nil
 }
 

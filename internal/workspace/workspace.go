@@ -245,7 +245,15 @@ type AgentController interface {
 	// completion or cancel ctx to stop it early; cancelling ctx
 	// delivers a terminal event derived from ctx.Err() unless the turn
 	// already finished on its own.
-	AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error)
+	//
+	// If opts.AutoApprovePermissions is set, every permission request the
+	// turn raises on sessionID is granted without asking, for the rest of
+	// the session's lifetime (see permission.AutoApproveSession) — there
+	// is no way to later require prompting again on that session. This
+	// exists for headless callers (see cmd/run.go) that have no UI to
+	// answer a prompt with; anything that can show one should leave it
+	// false and let permission requests surface normally.
+	AgentRunStream(ctx context.Context, sessionID, prompt string, opts AgentRunOptions) (<-chan AgentRunEvent, error)
 	// ResetAgentToolCache clears process-wide caches the agent's built-in
 	// tools keep (e.g. compiled grep/glob regexes), so a fresh session
 	// does not inherit state left over from a previous one. It is a
@@ -746,6 +754,14 @@ type UsageReporter interface {
 	// in it yields an empty snapshot, not an error, so a fresh project
 	// renders as "nothing recorded yet" rather than as a failure.
 	Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error)
+}
+
+// AgentRunOptions configures a single Workspace.AgentRunStream call.
+type AgentRunOptions struct {
+	// AutoApprovePermissions grants every permission request the turn
+	// raises without asking. See AgentRunStream's doc comment for what
+	// this costs and who should set it.
+	AutoApprovePermissions bool
 }
 
 // AgentRunEvent is one increment of a non-interactive agent turn

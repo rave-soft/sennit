@@ -296,7 +296,7 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 // stripped of everything that isn't "run the turn and hand back
 // text": no spinner, no progress bar, no stdout writer. Those stay
 // the caller's job (see cmd/run.go).
-func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan workspace.AgentRunEvent, error) {
+func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string, opts workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
 	coord := w.app.Coordinator()
 	if coord == nil {
 		return nil, errors.New("agent coordinator not initialized")
@@ -312,9 +312,13 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 		return nil, fmt.Errorf("failed to update agent models: %w", err)
 	}
 
-	// Automatically approve all permission requests for this
-	// non-interactive run.
-	w.app.Permissions().AutoApproveSession(sessionID)
+	if opts.AutoApprovePermissions {
+		// Automatically approve all permission requests for this
+		// non-interactive run. The caller opted in explicitly (see
+		// AgentRunStream's doc comment in workspace.go) because it has
+		// no UI to answer a prompt with.
+		w.app.Permissions().AutoApproveSession(sessionID)
+	}
 
 	// Report session identity to herdr. Local mode's Messages/RunComplete
 	// event bridge (see herdr.BridgeLocal in app.New) does the rest.

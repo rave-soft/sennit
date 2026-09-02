@@ -204,7 +204,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (workspace.W
 	// ui/model/root.go's attachThreadCmd. This just returns a read-only
 	// workspace bound to the main app with the thread's worktree as
 	// WorkingDir, which still shows the persisted session data.
-	return workspace.NewReadOnlyWorkspace(w, st.WorktreePath, st.SessionID, "thread is not running"), func() {}, nil
+	return workspace.NewReadOnlyWorkspace(w, st.WorktreePath, st.SessionID, "the thread could not be reactivated: thread is not running"), func() {}, nil
 }
 
 // frontendWorkspace obtains the frontend-facing view supplied by a handle's

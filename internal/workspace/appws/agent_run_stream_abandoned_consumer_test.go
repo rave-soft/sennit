@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -85,7 +86,7 @@ func TestAppWorkspace_AgentRunStream_AbandonedConsumerDoesNotLeakGoroutine(t *te
 	ctx, cancel := context.WithCancel(t.Context())
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir())))
 
-	out, err := aw.AgentRunStream(ctx, sess.ID, "hello")
+	out, err := aw.AgentRunStream(ctx, sess.ID, "hello", workspace.AgentRunOptions{AutoApprovePermissions: true})
 	require.NoError(t, err)
 
 	// Read exactly one event, then stop reading altogether — the

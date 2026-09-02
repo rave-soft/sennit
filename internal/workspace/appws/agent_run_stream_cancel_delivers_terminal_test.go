@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,7 +79,7 @@ func TestAppWorkspace_AgentRunStream_CtxCancelAlwaysDeliversTerminalEvent(t *tes
 
 		ctx, cancel := context.WithCancel(t.Context())
 
-		out, err := aw.AgentRunStream(ctx, sess.ID, "hello")
+		out, err := aw.AgentRunStream(ctx, sess.ID, "hello", workspace.AgentRunOptions{AutoApprovePermissions: true})
 		require.NoError(t, err)
 
 		select {
@@ -130,7 +131,7 @@ func TestAppWorkspace_AgentRunStream_InternalCancellationIsTerminalError(t *test
 
 	coord := &releaseGatedCoordinator{entered: make(chan struct{}), release: make(chan struct{})}
 	a.SetAgentCoordinatorForTest(coord)
-	out, err := aw.AgentRunStream(t.Context(), sess.ID, "hello")
+	out, err := aw.AgentRunStream(t.Context(), sess.ID, "hello", workspace.AgentRunOptions{AutoApprovePermissions: true})
 	require.NoError(t, err)
 	select {
 	case <-coord.entered:

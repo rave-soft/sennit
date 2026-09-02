@@ -39,7 +39,7 @@ func (e *ErrReadOnlyOperation) Error() string {
 	if e.Reason == "" {
 		return fmt.Sprintf("read-only workspace: %s is not allowed", e.Operation)
 	}
-	return fmt.Sprintf("read-only workspace: %s is not allowed: the thread could not be reactivated: %s", e.Operation, e.Reason)
+	return fmt.Sprintf("read-only workspace: %s is not allowed: %s", e.Operation, e.Reason)
 }
 
 // readOnlyWorkspace wraps an underlying Workspace and restricts all
@@ -284,7 +284,7 @@ func (w *readOnlyWorkspace) InitCoderAgentNonInteractive(ctx context.Context) er
 	return w.readOnlyError("InitCoderAgentNonInteractive")
 }
 
-func (w *readOnlyWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
+func (w *readOnlyWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string, opts AgentRunOptions) (<-chan AgentRunEvent, error) {
 	return nil, w.readOnlyError("AgentRunStream")
 }
 

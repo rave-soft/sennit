@@ -236,7 +236,7 @@ func (w *cmdDrivingWorkspace) AgentRunShellCommand(
 	return proto.ShellCommandResponse{}, nil
 }
 
-func (w *cmdDrivingWorkspace) AgentRunStream(ctx context.Context, s, p string) (<-chan workspace.AgentRunEvent, error) {
+func (w *cmdDrivingWorkspace) AgentRunStream(ctx context.Context, s, p string, opts workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
 	return nil, nil
 }
 func (w *cmdDrivingWorkspace) AgentIsSessionBusy(string) bool { return false }
