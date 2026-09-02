@@ -1,5 +1,20 @@
 package config
 
+// This file groups ConfigStore's credential and account methods for
+// readability. It is not a separable component. Credential writes are
+// config writes: every method here publishes a new *Config under the same
+// writeMu every other mutator uses (clone the live Config, mutate the
+// clone, swap it in via setConfig), and several go through
+// SetConfigFields/update/autoReload as well. Pulling them onto a type of
+// their own does not work — each method still needs writeMu, configMu,
+// Config()/setConfig(), autoReload, SetConfigFields, Resolve,
+// knownProviders and globalDataPath from the store, so the type ends up
+// taking *ConfigStore as a parameter: two receivers for one piece of
+// state, plus forwarders to keep the published API stable. Giving it a
+// lock of its own instead would let a credential write race an ordinary
+// mutator on the same *Config pointer — see
+// TestConfigStore_CredentialWritesShareWriteMuWithConfigMutators.
+
 import (
 	"context"
 	"fmt"
