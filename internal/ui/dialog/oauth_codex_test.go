@@ -2,8 +2,6 @@ package dialog
 
 import (
 	"image"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,9 +9,10 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,11 +27,13 @@ func textEndColumn(line, needle string) int {
 	return lipgloss.Width(line[:idx]) + lipgloss.Width(needle)
 }
 
-func newCodexDialog(t *testing.T) *OAuth {
+// newCodexDialogWith builds the dialog over ws, which stands in for the
+// backend the sign-in now lives behind (see workspace.OAuthController).
+func newCodexDialogWith(t *testing.T, ws *completeOAuthTestWorkspace) *OAuth {
 	t.Helper()
 	s := styles.SennitDark()
-	com := &common.Common{Styles: &s}
-	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
+	com := &common.Common{Styles: &s, Workspace: ws}
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider(CodexProviderID), Name: codexProviderName}
 	dlg, cmd := NewOAuthCodex(com, false, provider, nil, false)
 	// The proxy step prefills asynchronously (see oauthProxyPrefillMsg) so
 	// the constructor never touches disk itself; run that cmd here to
@@ -43,6 +44,11 @@ func newCodexDialog(t *testing.T) *OAuth {
 		}
 	}
 	return dlg
+}
+
+func newCodexDialog(t *testing.T) *OAuth {
+	t.Helper()
+	return newCodexDialogWith(t, &completeOAuthTestWorkspace{})
 }
 
 // TestOAuthCodexStartsOnProxyStep: Codex is unreachable without a proxy for
@@ -131,41 +137,37 @@ func TestOAuthCodexProxyStepTypes(t *testing.T) {
 	require.Equal(t, OAuthStateProxy, dlg.State)
 }
 
-// TestOAuthCodexPrefillsProxyFromCodexCLI: the value the user already gave
-// the Codex CLI is offered back rather than asked for again.
-func TestOAuthCodexPrefillsProxyFromCodexCLI(t *testing.T) {
-	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
-	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
-		[]byte("[network]\nproxy_url = \"http://127.0.0.1:8080\"\n"), 0o600))
+// TestOAuthCodexPrefillsConfiguredProxy: the value the provider already
+// uses — Sennit's own configuration, or the Codex CLI's on this machine,
+// as the backend resolves it (see AppWorkspace.OAuthConfiguredProxy and
+// its own tests) — is offered back rather than asked for again.
+func TestOAuthCodexPrefillsConfiguredProxy(t *testing.T) {
+	t.Parallel()
 
-	dlg := newCodexDialog(t)
+	dlg := newCodexDialogWith(t, &completeOAuthTestWorkspace{configuredProxy: "http://127.0.0.1:8080"})
 	require.Equal(t, "http://127.0.0.1:8080", dlg.proxyInput.Value())
 }
 
 // TestNewOAuthCodex_DoesNotReadDiskInConstructor is the regression test for
 // the proxy step's prefill: newOAuth used to call configurer.proxyURL()
-// (codex.ProxyFromDisk, a CLI config file read) directly in the
-// constructor, before it ever returned a tea.Cmd. It must instead defer
-// that read to the returned cmd, landing as oauthProxyPrefillMsg once it
-// completes, so opening the dialog never blocks Update on disk IO.
+// (a config file read, which for Codex reaches the CLI's own config on
+// disk) directly in the constructor, before it ever returned a tea.Cmd. It
+// must instead defer that read to the returned cmd, landing as
+// oauthProxyPrefillMsg once it completes, so opening the dialog never
+// blocks Update on IO.
 func TestNewOAuthCodex_DoesNotReadDiskInConstructor(t *testing.T) {
-	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
-	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
-		[]byte("[network]\nproxy_url = \"http://127.0.0.1:9090\"\n"), 0o600))
+	t.Parallel()
 
 	s := styles.SennitDark()
-	com := &common.Common{Styles: &s}
-	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
+	ws := &completeOAuthTestWorkspace{configuredProxy: "http://127.0.0.1:9090"}
+	com := &common.Common{Styles: &s, Workspace: ws}
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider(CodexProviderID), Name: codexProviderName}
 
 	dlg, cmd := NewOAuthCodex(com, false, provider, nil, false)
-	require.NotNil(t, cmd, "the disk read must be deferred to a tea.Cmd")
+	require.NotNil(t, cmd, "the read must be deferred to a tea.Cmd")
 	require.Equal(t, OAuthStateProxy, dlg.State)
 	require.Empty(t, dlg.proxyInput.Value(),
-		"the constructor must not have read the CLI config before returning")
+		"the constructor must not have read the configured proxy before returning")
 
 	msg := cmd()
 	prefill, ok := msg.(oauthProxyPrefillMsg)
@@ -215,7 +217,7 @@ func TestOAuthCodexCursorDuringOnboarding(t *testing.T) {
 
 	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
-	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider(CodexProviderID), Name: codexProviderName}
 	dlg, _ := NewOAuthCodex(com, true, provider, nil, false)
 	for _, r := range "zzproxyzz" {
 		dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
@@ -247,9 +249,8 @@ func TestOAuthCodexStartPollingSetsCancelFuncBeforeReturning(t *testing.T) {
 	provider, ok := dlg.oAuthProvider.(*OAuthCodex)
 	require.True(t, ok)
 
-	flow, err := codex.StartFlow("")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = flow.Close() })
+	flow := &stubDialogOAuthFlow{}
+	t.Cleanup(flow.Cancel)
 	provider.flow = flow
 
 	cmd := provider.startPolling("", 0)
@@ -275,4 +276,71 @@ func TestOAuthCodexHidesCursorAfterProxyStep(t *testing.T) {
 	area := image.Rect(0, 0, 100, 40)
 	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
 	require.Nil(t, dlg.Draw(scr, area))
+}
+
+// TestOAuthCodexInitiateAuthShortCircuitsOnExistingLogin: when the backend
+// reports a token it could reuse or refresh from an existing Codex CLI
+// login, there is nothing to show the user — the dialog goes straight to
+// saving.
+func TestOAuthCodexInitiateAuthShortCircuitsOnExistingLogin(t *testing.T) {
+	t.Parallel()
+
+	token := &oauth.Token{AccessToken: "from-disk"}
+	ws := &completeOAuthTestWorkspace{
+		startResult: workspace.OAuthStartResult{Token: token, ReusedExistingLogin: true},
+	}
+	dlg := newCodexDialogWith(t, ws)
+	provider, ok := dlg.oAuthProvider.(*OAuthCodex)
+	require.True(t, ok)
+
+	msg := provider.initiateAuth()
+	complete, ok := msg.(ActionCompleteOAuth)
+	require.True(t, ok, "expected ActionCompleteOAuth, got %#v", msg)
+	require.Equal(t, token, complete.Token)
+	require.Nil(t, provider.flow, "a short-circuited sign-in has no flow to wait on")
+}
+
+// TestOAuthCodexInitiateAuthCancelsFlowOnceStopped covers the esc-during-
+// Initializing race: the flow binds a fixed callback port, so one that
+// lands after the dialog is gone must be released rather than left bound
+// for the next sign-in to fail on.
+func TestOAuthCodexInitiateAuthCancelsFlowOnceStopped(t *testing.T) {
+	t.Parallel()
+
+	flow := &stubDialogOAuthFlow{}
+	ws := &completeOAuthTestWorkspace{
+		startResult: workspace.OAuthStartResult{AuthorizationURL: "https://auth.openai.com/oauth/authorize"},
+		startFlow:   flow,
+	}
+	dlg := newCodexDialogWith(t, ws)
+	provider, ok := dlg.oAuthProvider.(*OAuthCodex)
+	require.True(t, ok)
+
+	provider.stopPolling()
+	require.Nil(t, provider.initiateAuth(), "a dismissed dialog's flow result must not surface")
+	require.Equal(t, 1, flow.cancelCount(), "the late flow must be released")
+}
+
+// TestOAuthCodexInitiateAuthReportsURL is the ordinary path: the backend's
+// authorization URL is what the display state shows.
+func TestOAuthCodexInitiateAuthReportsURL(t *testing.T) {
+	t.Parallel()
+
+	flow := &stubDialogOAuthFlow{}
+	ws := &completeOAuthTestWorkspace{
+		startResult: workspace.OAuthStartResult{AuthorizationURL: "https://auth.openai.com/oauth/authorize?x=1"},
+		startFlow:   flow,
+	}
+	dlg := newCodexDialogWith(t, ws)
+	provider, ok := dlg.oAuthProvider.(*OAuthCodex)
+	require.True(t, ok)
+
+	msg := provider.initiateAuth()
+	initiate, ok := msg.(ActionInitiateOAuth)
+	require.True(t, ok, "expected ActionInitiateOAuth, got %#v", msg)
+	require.Equal(t, "https://auth.openai.com/oauth/authorize?x=1", initiate.VerificationURL)
+	require.Empty(t, initiate.UserCode, "a redirect flow has no code to type")
+
+	provider.stopPolling()
+	require.Equal(t, 1, flow.cancelCount(), "closing the dialog must release the callback port")
 }

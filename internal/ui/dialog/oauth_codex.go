@@ -9,8 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -24,7 +22,16 @@ const codexAuthTimeout = 10 * time.Minute
 // importing the vendor package: the knowledge "this id means Codex"
 // belongs next to the dialog that handles it, and internal/ui/model has no
 // other reason to reach into a package that carries an OAuth flow.
-const CodexProviderID = codex.ProviderID
+//
+// It is spelled out rather than aliased to codex.ProviderID because the
+// sign-in flow itself now lives behind the workspace (see
+// workspace.OAuthController), and this package no longer imports the
+// Codex vendor package at all. The two must stay in lockstep.
+const CodexProviderID = "codex"
+
+// codexProviderName is how the provider is shown in the dialog, matching
+// codex.ProviderName for the same reason CodexProviderID is spelled out.
+const codexProviderName = "OpenAI Codex"
 
 // NewOAuthCodex builds the Codex sign-in dialog.
 //
@@ -57,62 +64,52 @@ type OAuthCodex struct {
 	// and the next sign-in failed on it. A flow that lands after the
 	// teardown is closed immediately instead.
 	mu         sync.Mutex
-	flow       *codex.Flow
+	flow       workspace.OAuthFlow
 	cancelFunc func()
 	stopped    bool
 }
 
 var (
 	_ OAuthProvider        = (*OAuthCodex)(nil)
-	_ oauthPostSaver       = (*OAuthCodex)(nil)
 	_ oauthProxyConfigurer = (*OAuthCodex)(nil)
-	_ oauthAccountIDer     = (*OAuthCodex)(nil)
-	_ oauthAccountEmailer  = (*OAuthCodex)(nil)
+	_ oauthProxyUser       = (*OAuthCodex)(nil)
 )
 
 func (m *OAuthCodex) name() string {
-	return codex.ProviderName
+	return codexProviderName
 }
 
-// accountID implements [oauthAccountIDer]: Codex embeds the account
-// identity in the access token's JWT claims.
-func (m *OAuthCodex) accountID(token *oauth.Token) string {
-	return codex.AccountID(token.AccessToken)
+// currentProxy implements [oauthProxyUser]: the proxy this sign-in used has
+// to reach CompleteOAuth, which persists it as the provider's default and
+// routes the model-list fetch through it.
+func (m *OAuthCodex) currentProxy() string {
+	return m.proxy
 }
 
-// accountEmail implements [oauthAccountEmailer]: the same token carries
-// the signed-in address, which is what the accounts list shows instead of
-// accountID's UUID.
-func (m *OAuthCodex) accountEmail(token *oauth.Token) string {
-	return codex.Email(token.AccessToken)
-}
-
-// proxyURL prefills the step, in order of how much it is known to be what
-// the user wants: what Sennit is already configured with, then what the
-// Codex CLI on this machine uses. Someone behind a proxy has told the CLI
-// about it already, and asking again for the same fact is a worse first
-// impression than offering it back for confirmation.
+// proxyURL prefills the step with whatever the backend says the provider
+// already uses — Sennit's own configuration, falling back to the Codex
+// CLI's. Someone behind a proxy has told the CLI about it already, and
+// asking again for the same fact is a worse first impression than offering
+// it back for confirmation.
 func (m *OAuthCodex) proxyURL() string {
 	if m.proxy != "" {
 		return m.proxy
 	}
-	// Common carries no workspace in tests, and Config panics on one, so
-	// the absence of a config is a legitimate "nothing configured" here.
-	if m.com != nil && m.com.Workspace != nil {
-		if cfg := m.com.Config(); cfg != nil {
-			if pc, ok := cfg.Providers.Get(codex.ProviderID); ok && pc.ProxyURL != "" {
-				return pc.ProxyURL
-			}
-		}
+	// Common carries no workspace in tests, so its absence is a
+	// legitimate "nothing configured" here.
+	if m.com == nil || m.com.Workspace == nil {
+		return ""
 	}
-	return codex.ProxyFromDisk()
+	return m.com.Workspace.OAuthConfiguredProxy(CodexProviderID)
 }
 
 // setProxyURL validates the entered value up front: a bad proxy would
 // otherwise surface as a confusing sign-in failure a few seconds later.
 func (m *OAuthCodex) setProxyURL(proxyURL string) error {
-	if err := codex.ValidateProxy(proxyURL); err != nil {
-		return err
+	if m.com != nil && m.com.Workspace != nil {
+		if err := m.com.Workspace.OAuthValidateProxy(CodexProviderID, proxyURL); err != nil {
+			return err
+		}
 	}
 	m.proxy = proxyURL
 	return nil
@@ -122,29 +119,15 @@ func (m *OAuthCodex) setProxyURL(proxyURL string) error {
 // returning so the URL cannot be opened ahead of anything listening for the
 // redirect.
 //
-// An existing Codex CLI login short-circuits the browser entirely: its
-// refresh token is exchanged for our own pair.
+// An existing Codex CLI login short-circuits the browser entirely: the
+// backend reports the token it could reuse or refresh instead of a URL.
 func (m *OAuthCodex) initiateAuth() tea.Msg {
-	if disk, ok := codex.TokensFromDisk(); ok {
-		// Prefer the access token the CLI already holds: refreshing spends
-		// its single-use refresh token and logs it out, which is not
-		// something to do to another tool in passing.
-		if token, ok := disk.Token(); ok {
-			return ActionCompleteOAuth{Token: token}
-		}
-
-		ctx, cancel := context.WithTimeout(m.com.Context(), 30*time.Second)
-		defer cancel()
-		if token, err := codex.RefreshToken(ctx, m.proxy, disk.RefreshToken); err == nil {
-			return ActionCompleteOAuth{Token: token}
-		}
-		// A stale login on disk is not an error worth showing: the browser
-		// flow below is the fallback for exactly that.
-	}
-
-	flow, err := codex.StartFlow(m.proxy)
+	result, flow, err := m.com.Workspace.StartOAuth(m.com.Context(), CodexProviderID, m.proxy)
 	if err != nil {
 		return ActionOAuthErrored{Error: err}
+	}
+	if result.Token != nil {
+		return ActionCompleteOAuth{Token: result.Token}
 	}
 
 	m.mu.Lock()
@@ -152,14 +135,16 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 		m.mu.Unlock()
 		// Dismissed while this was binding: release the port rather than
 		// leaving it held by a dialog that is gone.
-		_ = flow.Close()
+		if flow != nil {
+			flow.Cancel()
+		}
 		return nil
 	}
 	m.flow = flow
 	m.mu.Unlock()
 
 	return ActionInitiateOAuth{
-		VerificationURL: flow.URL(),
+		VerificationURL: result.AuthorizationURL,
 		ExpiresIn:       int(codexAuthTimeout.Seconds()),
 	}
 }
@@ -205,39 +190,7 @@ func (m *OAuthCodex) stopPolling() tea.Msg {
 		cancel()
 	}
 	if flow != nil {
-		_ = flow.Close()
+		flow.Cancel()
 	}
 	return nil
-}
-
-// afterSave stores the proxy the sign-in used and the model list for the
-// account that just signed in.
-//
-// The proxy is written first and unconditionally: model requests have to go
-// the same way the sign-in did, and clearing an emptied field matters as
-// much as saving a new one.
-func (m *OAuthCodex) afterSave(ws workspace.ConfigFieldEditor, token *oauth.Token) error {
-	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
-	if m.proxy == "" {
-		if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {
-			return err
-		}
-	} else if err := ws.SetConfigField(config.ScopeGlobal, proxyKey, m.proxy); err != nil {
-		return err
-	}
-
-	// afterSave runs after the token is already good and the browser half
-	// of the flow is done — it only persists what was won. Binding this to
-	// the program's lifecycle context would mean a shutdown that lands in
-	// this narrow window silently drops a completed sign-in's model list,
-	// leaving a saved credential with no models to show for it. A fresh
-	// context lets the save finish regardless.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:forbidigo // post-auth persistence must outlive shutdown; see comment above
-	defer cancel()
-
-	models, err := codex.FetchModels(ctx, m.proxy, token.AccessToken, codex.AccountID(token.AccessToken))
-	if err != nil {
-		return fmt.Errorf("signed in, but the Codex model list could not be fetched: %w", err)
-	}
-	return ws.SetConfigField(config.ScopeGlobal, "providers."+codex.ProviderID+".models", models)
 }

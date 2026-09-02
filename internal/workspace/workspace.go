@@ -360,6 +360,95 @@ type ProviderAPIKeySetter interface {
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
 }
 
+// OAuthStartResult is what a caller must show the user to complete a
+// provider's sign-in, or the token already won without needing to.
+type OAuthStartResult struct {
+	// AuthorizationURL is set for a redirect flow (e.g. Codex): the sole
+	// URL to open. Empty for a device flow.
+	AuthorizationURL string
+
+	// DeviceCode, UserCode, VerificationURL, Interval are set for a device
+	// flow (e.g. Copilot); DeviceCode is empty for a redirect flow.
+	DeviceCode      string
+	UserCode        string
+	VerificationURL string
+	Interval        int
+
+	// ExpiresIn bounds how long the above stays valid, in seconds.
+	ExpiresIn int
+
+	// Token is set when sign-in already completed with nothing to show —
+	// Codex found a Codex CLI login on disk it could reuse or refresh.
+	// Every field above is zero when this is set, and the accompanying
+	// OAuthFlow is nil.
+	Token *oauth.Token
+
+	// ReusedExistingLogin/RefreshedExistingLogin/ExistingLoginFailure
+	// narrate how Token came to be set, or why a login found on disk was
+	// abandoned in favor of an interactive flow — purely for a CLI's
+	// console narration (see internal/cmd/login_codex.go's existing
+	// printfs); a UI ignores them.
+	ReusedExistingLogin    bool
+	RefreshedExistingLogin bool
+	ExistingLoginFailure   string
+}
+
+// OAuthFlow is a started sign-in awaiting completion.
+type OAuthFlow interface {
+	// Wait blocks until the provider completes the flow or ctx is done.
+	Wait(ctx context.Context) (*oauth.Token, error)
+	// Cancel releases whatever resource the flow holds (a loopback
+	// listener, an in-flight poll). Must be called exactly once when the
+	// flow is no longer needed, whether or not Wait was called.
+	Cancel()
+}
+
+// OAuthCompletion is what CompleteOAuth returns once the credential and
+// any provider-specific follow-up have been persisted.
+type OAuthCompletion struct {
+	Account accounts.Account
+	// ModelsFetched is the number of models fetched for a provider whose
+	// catalog is per-account (Codex); -1 for a provider with nothing to
+	// fetch.
+	ModelsFetched int
+	// ModelsError is set when fetching/saving the model list failed. The
+	// credential is already saved when this is set — callers decide for
+	// themselves whether that makes the overall sign-in a failure (the
+	// TUI dialog does; the CLI does not, see loginCodex's existing
+	// behavior on model-fetch failure).
+	ModelsError error
+	// ProxyError is set when the proxy this sign-in used could not be
+	// persisted as the provider's default. The credential is already
+	// saved when this is set, and the model fetch (if any) still runs
+	// with the proxy that was actually used, not the one that failed to
+	// save — only the provider's stored default is missing. As with
+	// ModelsError, callers decide whether that makes the sign-in a
+	// failure; unlike ModelsError, this is never set for a sign-in whose
+	// proxy already matched what was configured, since nothing is
+	// written in that case.
+	ProxyError error
+}
+
+// OAuthController starts a provider's OAuth sign-in flow and finishes it
+// once a token is won, doing whatever post-save work that provider needs
+// (recording the model list, persisting the proxy that was used) on the
+// backend side instead of in a frontend.
+type OAuthController interface {
+	// StartOAuth begins providerID's sign-in flow using proxyURL ("" for
+	// none).
+	StartOAuth(ctx context.Context, providerID, proxyURL string) (OAuthStartResult, OAuthFlow, error)
+	// CompleteOAuth persists token as a new/updated account of providerID
+	// (scope is always global, matching RecordAccount) and performs
+	// whatever the provider needs done afterward.
+	CompleteOAuth(ctx context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (OAuthCompletion, error)
+	// OAuthConfiguredProxy is the proxy providerID already uses: whatever
+	// Sennit has configured for it, falling back to a sibling CLI's own
+	// on-disk config for a provider that has one (Codex).
+	OAuthConfiguredProxy(providerID string) string
+	// OAuthValidateProxy checks proxyURL is well-formed for providerID.
+	OAuthValidateProxy(providerID, proxyURL string) error
+}
+
 // ProjectLifecycle covers first-run project initialization and skill
 // discovery/reads.
 type ProjectLifecycle interface {
@@ -565,6 +654,7 @@ type FrontendWorkspace interface {
 	AccountUpdater
 	AccountRemover
 	AccountsPurger
+	OAuthController
 	PreferredModelUpdater
 	// OverridePreferredModel applies a preferred-model override for the
 	// current process, for callers (namely `sennit run -m/--model`) that

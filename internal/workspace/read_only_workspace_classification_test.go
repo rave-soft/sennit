@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -38,6 +39,7 @@ var refusedMethods = []string{
 	"AttachThread",
 	"CancelTask",
 	"CancelThread",
+	"CompleteOAuth",
 	"CreateSession",
 	"CreateThread",
 	"DeleteSession",
@@ -75,6 +77,7 @@ var refusedMethods = []string{
 	"SetProviderAPIKey",
 	"SetProviderProxy",
 	"Shutdown",
+	"StartOAuth",
 	"Subscribe",
 	"UpdateAccount",
 	"UpdateAgentModel",
@@ -133,6 +136,8 @@ var readOnlySafeMethods = []string{
 	"MCPGetStates",
 	"MCPPendingAuth",
 	"MCPResources",
+	"OAuthConfiguredProxy",
+	"OAuthValidateProxy",
 	"ParseAgentToolSessionID",
 	"PermissionSkipRequests",
 	"ProjectNeedsInitialization",
@@ -386,6 +391,14 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"RefreshAccountLimits": func(t *testing.T, ro *readOnlyWorkspace) {
 			_, err := ro.RefreshAccountLimits(t.Context(), "provider")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"StartOAuth": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, _, err := ro.StartOAuth(t.Context(), "provider", "")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"CompleteOAuth": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, err := ro.CompleteOAuth(t.Context(), "provider", "", &oauth.Token{}, false)
 			require.True(t, IsReadOnlyError(err))
 		},
 		"Shutdown": func(_ *testing.T, ro *readOnlyWorkspace) {

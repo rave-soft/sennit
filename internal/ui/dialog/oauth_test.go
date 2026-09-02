@@ -1,17 +1,16 @@
 package dialog
 
 import (
-	"encoding/base64"
-	"encoding/json"
+	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -23,58 +22,70 @@ import (
 // on failure, for TestOAuthBrowserOpenFailure_DoesNotAbortSignIn.
 var errBrowserOpenTest = errors.New("no browser launcher available")
 
-// fakeCodexJWT builds an unsigned token carrying the chatgpt_account_id
-// claim OAuthCodex.accountID reads, mirroring
-// internal/oauth/codex/codex_test.go's fakeJWT — nothing here verifies
-// signatures, since the claims are read out of a token the authorization
-// server already issued.
-func fakeCodexJWT(t *testing.T, accountID string) string {
-	t.Helper()
-	claims := map[string]any{
-		"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": accountID},
-		"exp":                         time.Now().Add(10 * 24 * time.Hour).Unix(),
-	}
-	payload, err := json.Marshal(claims)
-	require.NoError(t, err)
-	enc := base64.RawURLEncoding.EncodeToString
-	return enc([]byte(`{"alg":"none"}`)) + "." + enc(payload) + ".sig"
-}
-
-// recordAccountTestWorkspace is a minimal [workspace.Workspace] stub that
-// records RecordAccount calls, for proving saveCredential records an
-// account rather than overwriting the single credential, and that it does
-// so off the Update loop.
-type recordAccountTestWorkspace struct {
+// completeOAuthTestWorkspace is a minimal [workspace.Workspace] stub —
+// mirroring accountsTestWorkspace's comment on why it must embed the full
+// interface — recording what saveCredential asked the backend to do.
+type completeOAuthTestWorkspace struct {
 	workspace.Workspace
 
-	recordCalls    int
-	lastScope      config.Scope
-	lastProviderID string
-	lastCred       accounts.LegacyCredential
-	recordErr      error
+	// mu guards the StartOAuth bookkeeping below: initiateAuth runs off a
+	// tea.Cmd goroutine, so a test asserting on it races the dialog
+	// otherwise.
+	mu                  sync.Mutex
+	startCalls          int
+	lastStartProviderID string
+	lastStartProxy      string
+	startResult         workspace.OAuthStartResult
+	startFlow           *stubDialogOAuthFlow
+	startErr            error
+
+	completeCalls   int
+	lastProviderID  string
+	lastProxy       string
+	lastToken       *oauth.Token
+	lastForceNew    bool
+	completion      workspace.OAuthCompletion
+	completeErr     error
+	configuredProxy string
 }
 
-func (w *recordAccountTestWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
-	w.recordCalls++
-	w.lastScope = scope
+func (w *completeOAuthTestWorkspace) CompleteOAuth(_ context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (workspace.OAuthCompletion, error) {
+	w.completeCalls++
 	w.lastProviderID = providerID
-	w.lastCred = cred
-	return accounts.Account{ID: "acct-1"}, w.recordErr
+	w.lastProxy = proxyURL
+	w.lastToken = token
+	w.lastForceNew = forceNewAccount
+	return w.completion, w.completeErr
 }
 
-// stubAccountIDProvider is a stub OAuthProvider implementing only the
-// optional oauthAccountIDer half (not oauthPostSaver), so saveCredential's
-// use of the derived account ID can be tested without triggering a real
-// provider's post-save network calls (e.g. OAuthCodex.afterSave's model
-// fetch).
-type stubAccountIDProvider struct {
+func (w *completeOAuthTestWorkspace) OAuthConfiguredProxy(string) string { return w.configuredProxy }
+
+// OAuthValidateProxy stands in for the backend's provider-neutral check
+// (proxyhttp.ValidateProxy): only the schemes it accepts pass.
+func (w *completeOAuthTestWorkspace) OAuthValidateProxy(_, proxyURL string) error {
+	if proxyURL == "" {
+		return nil
+	}
+	for _, scheme := range []string{"http://", "https://", "socks5://", "socks5h://"} {
+		if strings.HasPrefix(proxyURL, scheme) {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid proxy_url %q", proxyURL)
+}
+
+// stubProxyProvider is a stub OAuthProvider implementing the optional
+// oauthProxyUser half, so saveCredential's threading of the sign-in's
+// proxy through to CompleteOAuth can be tested without a real provider's
+// flow.
+type stubProxyProvider struct {
 	stubOAuthProvider
-	id string
+	proxy string
 }
 
-func (s *stubAccountIDProvider) accountID(*oauth.Token) string { return s.id }
+func (s *stubProxyProvider) currentProxy() string { return s.proxy }
 
-var _ oauthAccountIDer = (*stubAccountIDProvider)(nil)
+var _ oauthProxyUser = (*stubProxyProvider)(nil)
 
 // oauthSaveDoneMsgFilter matches the message saveCredential's command
 // produces once the account is recorded (and any post-save work finishes).
@@ -83,15 +94,14 @@ func oauthSaveDoneMsgFilter(msg tea.Msg) bool {
 	return ok
 }
 
-// TestOAuthSaveCredential_RecordsAccount_NoIOInHandleMsg is the
-// HandleMsg-does-no-IO regression test for saveCredential: it must record
-// the account via a [tea.Cmd], not synchronously, and — for a provider that
-// implements neither optional half of [OAuthProvider] — record with no
-// account ID and no proxy of its own.
-func TestOAuthSaveCredential_RecordsAccount_NoIOInHandleMsg(t *testing.T) {
+// TestOAuthSaveCredential_CompletesSignIn_NoIOInHandleMsg is the
+// HandleMsg-does-no-IO regression test for saveCredential: it must hand the
+// token to the workspace via a [tea.Cmd], not synchronously — and for a
+// provider with no proxy of its own, with an empty proxy.
+func TestOAuthSaveCredential_CompletesSignIn_NoIOInHandleMsg(t *testing.T) {
 	s := styles.SennitDark()
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"}
-	ws := &recordAccountTestWorkspace{}
+	ws := &completeOAuthTestWorkspace{}
 	com := &common.Common{Styles: &s, Workspace: ws}
 
 	stub := &stubOAuthProvider{}
@@ -99,7 +109,7 @@ func TestOAuthSaveCredential_RecordsAccount_NoIOInHandleMsg(t *testing.T) {
 
 	token := &oauth.Token{AccessToken: "tok-123"}
 	action := dlg.HandleMsg(ActionCompleteOAuth{Token: token})
-	require.Zero(t, ws.recordCalls, "HandleMsg must not record the account synchronously")
+	require.Zero(t, ws.completeCalls, "HandleMsg must not complete the sign-in synchronously")
 
 	cmdAction, ok := action.(ActionCmd)
 	require.True(t, ok, "expected ActionCmd carrying the async save, got %#v", action)
@@ -107,72 +117,109 @@ func TestOAuthSaveCredential_RecordsAccount_NoIOInHandleMsg(t *testing.T) {
 	msg := findMsg(t, cmdAction.Cmd, oauthSaveDoneMsgFilter)
 	require.NotNil(t, msg, "expected oauthSaveDoneMsg once saveCredential's command runs")
 
-	require.Equal(t, 1, ws.recordCalls)
-	require.Equal(t, config.ScopeGlobal, ws.lastScope)
+	require.Equal(t, 1, ws.completeCalls)
 	require.Equal(t, string(provider.ID), ws.lastProviderID)
-	require.Equal(t, token, ws.lastCred.Token)
-	require.Empty(t, ws.lastCred.AccountID, "a provider without oauthAccountIDer must record no account ID")
-	require.Empty(t, ws.lastCred.ProxyURL, "the account itself carries no proxy; see saveCredential's comment")
+	require.Equal(t, token, ws.lastToken)
+	require.Empty(t, ws.lastProxy, "a provider without oauthProxyUser completes with no proxy")
+	require.False(t, ws.lastForceNew)
 }
 
-// TestOAuthSaveCredential_UsesOptionalAccountID covers the other half: a
-// provider implementing oauthAccountIDer has its derived ID carried
-// through to the recorded [accounts.LegacyCredential].
-func TestOAuthSaveCredential_UsesOptionalAccountID(t *testing.T) {
+// TestOAuthSaveCredential_ThreadsProxy covers the optional half: a
+// provider that signed in through a proxy has that value carried into
+// CompleteOAuth, which persists it as the provider's default and routes
+// its post-save requests through it.
+func TestOAuthSaveCredential_ThreadsProxy(t *testing.T) {
 	s := styles.SennitDark()
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "Codex-like"}
-	ws := &recordAccountTestWorkspace{}
+	ws := &completeOAuthTestWorkspace{}
 	com := &common.Common{Styles: &s, Workspace: ws}
 
-	stub := &stubAccountIDProvider{id: "acct-codex-1"}
+	stub := &stubProxyProvider{proxy: "socks5://127.0.0.1:1080"}
 	dlg, _ := newOAuth(com, false, provider, nil, stub, false)
 
-	token := &oauth.Token{AccessToken: "tok-xyz"}
-	action := dlg.HandleMsg(ActionCompleteOAuth{Token: token})
+	action := dlg.HandleMsg(ActionCompleteOAuth{Token: &oauth.Token{AccessToken: "tok-xyz"}})
 	cmdAction, ok := action.(ActionCmd)
 	require.True(t, ok)
 
-	msg := findMsg(t, cmdAction.Cmd, oauthSaveDoneMsgFilter)
-	require.NotNil(t, msg)
-
-	require.Equal(t, 1, ws.recordCalls)
-	require.Equal(t, "acct-codex-1", ws.lastCred.AccountID)
+	require.NotNil(t, findMsg(t, cmdAction.Cmd, oauthSaveDoneMsgFilter))
+	require.Equal(t, "socks5://127.0.0.1:1080", ws.lastProxy)
 }
 
 // TestOAuthSaveCredential_ThreadsForceNewAccount covers a dialog session
 // started as a deliberate "Add account…" sign-in: saveCredential must
-// carry that intent through to RecordAccount as
-// accounts.LegacyCredential.ForceNewAccount, so a provider with no
+// carry that intent through to CompleteOAuth, so a provider with no
 // account identity of its own creates a new account instead of updating
 // the active one in place.
 func TestOAuthSaveCredential_ThreadsForceNewAccount(t *testing.T) {
 	s := styles.SennitDark()
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"}
-	ws := &recordAccountTestWorkspace{}
+	ws := &completeOAuthTestWorkspace{}
 	com := &common.Common{Styles: &s, Workspace: ws}
 
 	stub := &stubOAuthProvider{}
 	dlg, _ := newOAuth(com, false, provider, nil, stub, true)
 
-	token := &oauth.Token{AccessToken: "tok-force"}
-	action := dlg.HandleMsg(ActionCompleteOAuth{Token: token})
+	action := dlg.HandleMsg(ActionCompleteOAuth{Token: &oauth.Token{AccessToken: "tok-force"}})
 	cmdAction, ok := action.(ActionCmd)
 	require.True(t, ok)
 
-	msg := findMsg(t, cmdAction.Cmd, oauthSaveDoneMsgFilter)
-	require.NotNil(t, msg)
-
-	require.Equal(t, 1, ws.recordCalls)
-	require.True(t, ws.lastCred.ForceNewAccount, "an explicit add-account session must set ForceNewAccount")
+	require.NotNil(t, findMsg(t, cmdAction.Cmd, oauthSaveDoneMsgFilter))
+	require.Equal(t, 1, ws.completeCalls)
+	require.True(t, ws.lastForceNew, "an explicit add-account session must set ForceNewAccount")
 }
 
-// TestOAuthCodex_AccountIDDerivedFromToken pins OAuthCodex's half of
-// oauthAccountIDer: the account identity comes from the access token's JWT
-// claim via codex.AccountID, matching internal/oauth/codex's own tests.
-func TestOAuthCodex_AccountIDDerivedFromToken(t *testing.T) {
-	token := &oauth.Token{AccessToken: fakeCodexJWT(t, "acct-jwt-1")}
-	m := &OAuthCodex{}
-	require.Equal(t, "acct-jwt-1", m.accountID(token))
+// TestOAuthSaveCredential_ModelFetchFailureFailsTheDialog pins the
+// dialog's half of OAuthCompletion.ModelsError: the credential is saved,
+// but a sign-in that leaves nothing to select is an error here (unlike
+// the CLI, which reports it as a warning and exits successfully).
+func TestOAuthSaveCredential_ModelFetchFailureFailsTheDialog(t *testing.T) {
+	s := styles.SennitDark()
+	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"}
+	ws := &completeOAuthTestWorkspace{
+		completion: workspace.OAuthCompletion{ModelsError: errors.New("model list unavailable")},
+	}
+	com := &common.Common{Styles: &s, Workspace: ws}
+
+	dlg, _ := newOAuth(com, false, provider, nil, &stubOAuthProvider{}, false)
+
+	action := dlg.HandleMsg(ActionCompleteOAuth{Token: &oauth.Token{AccessToken: "tok"}})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok)
+
+	msg := findMsg(t, cmdAction.Cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(oauthSaveErrMsg)
+		return ok
+	})
+	require.NotNil(t, msg, "a failed model fetch must surface as a save error")
+	require.ErrorContains(t, msg.(oauthSaveErrMsg).err, "model list unavailable")
+}
+
+// TestOAuthSaveCredential_ProxyWriteFailureFailsTheDialog pins the
+// dialog's treatment of OAuthCompletion.ProxyError: like ModelsError, the
+// credential is already saved, but a proxy that could not be persisted is
+// still an error here — matching what a failed proxy write did before
+// this refactor (it aborted the save outright, before the account was
+// even recorded).
+func TestOAuthSaveCredential_ProxyWriteFailureFailsTheDialog(t *testing.T) {
+	s := styles.SennitDark()
+	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"}
+	ws := &completeOAuthTestWorkspace{
+		completion: workspace.OAuthCompletion{ProxyError: errors.New("proxy setting unavailable")},
+	}
+	com := &common.Common{Styles: &s, Workspace: ws}
+
+	dlg, _ := newOAuth(com, false, provider, nil, &stubOAuthProvider{}, false)
+
+	action := dlg.HandleMsg(ActionCompleteOAuth{Token: &oauth.Token{AccessToken: "tok"}})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok)
+
+	msg := findMsg(t, cmdAction.Cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(oauthSaveErrMsg)
+		return ok
+	})
+	require.NotNil(t, msg, "a failed proxy write must surface as a save error")
+	require.ErrorContains(t, msg.(oauthSaveErrMsg).err, "proxy setting unavailable")
 }
 
 // stubOAuthProvider is a minimal OAuthProvider that records whether
@@ -291,4 +338,62 @@ func TestOAuthBrowserOpenFailure_DoesNotAbortSignIn(t *testing.T) {
 	require.True(t, ok, "expected an inline warning message, got %#v", msg)
 	require.Equal(t, util.InfoTypeWarn, warn.Type)
 	require.Contains(t, warn.Msg, "Open the URL")
+}
+
+// stubDialogOAuthFlow stands in for a started sign-in: Wait blocks until
+// its context is done (or until a canned result is handed to it), which is
+// what a real browser/device flow does while the dialog is open.
+type stubDialogOAuthFlow struct {
+	token *oauth.Token
+	err   error
+	// ready, when non-nil, gates Wait: it returns only once ready is
+	// closed or ctx is done.
+	ready chan struct{}
+
+	mu        sync.Mutex
+	cancelled int
+}
+
+func (f *stubDialogOAuthFlow) Wait(ctx context.Context) (*oauth.Token, error) {
+	if f.ready != nil {
+		select {
+		case <-f.ready:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if f.token == nil && f.err == nil {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return f.token, f.err
+}
+
+func (f *stubDialogOAuthFlow) Cancel() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelled++
+}
+
+func (f *stubDialogOAuthFlow) cancelCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancelled
+}
+
+// StartOAuth on completeOAuthTestWorkspace hands back whatever the test
+// staged: a token won without an interactive step, or a flow to wait on.
+func (w *completeOAuthTestWorkspace) StartOAuth(_ context.Context, providerID, proxyURL string) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.startCalls++
+	w.lastStartProviderID = providerID
+	w.lastStartProxy = proxyURL
+	if w.startErr != nil {
+		return workspace.OAuthStartResult{}, nil, w.startErr
+	}
+	if w.startFlow == nil {
+		return w.startResult, nil, nil
+	}
+	return w.startResult, w.startFlow, nil
 }

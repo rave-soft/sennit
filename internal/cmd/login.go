@@ -136,6 +136,10 @@ type loginAccountWorkspace interface {
 	workspace.ConfigFieldEditor
 	workspace.AccountRecorder
 	workspace.AccountLister
+	// OAuthController is what authAddOAuth's loginCodex needs: the Codex
+	// sign-in flow itself lives behind the workspace now (see
+	// login_codex.go).
+	workspace.OAuthController
 }
 
 func recordCopilotAccount(ws workspace.AccountRecorder, token *oauth.Token, forceNewAccount bool) (accounts.Account, error) {

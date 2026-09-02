@@ -464,6 +464,29 @@ func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID
 	return nil, w.readOnlyError("RefreshAccountLimits")
 }
 
+// StartOAuth and CompleteOAuth are refused for the same reason
+// RefreshAccountLimits and VerifyProviderAPIKey are: both are live network
+// calls made — and CompleteOAuth persists a credential — in the parent
+// workspace's name, which a read-only thread view exists to avoid doing.
+func (w *readOnlyWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string) (OAuthStartResult, OAuthFlow, error) {
+	return OAuthStartResult{}, nil, w.readOnlyError("StartOAuth")
+}
+
+func (w *readOnlyWorkspace) CompleteOAuth(ctx context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (OAuthCompletion, error) {
+	return OAuthCompletion{}, w.readOnlyError("CompleteOAuth")
+}
+
+// OAuthConfiguredProxy and OAuthValidateProxy are pure reads/validation
+// with no side effect and no network call, so they pass through like the
+// rest of "-- Safe pass-through reads --" below.
+func (w *readOnlyWorkspace) OAuthConfiguredProxy(providerID string) string {
+	return w.ws.OAuthConfiguredProxy(providerID)
+}
+
+func (w *readOnlyWorkspace) OAuthValidateProxy(providerID, proxyURL string) error {
+	return w.ws.OAuthValidateProxy(providerID, proxyURL)
+}
+
 // CurrentPlanUsage is a read, so the read-only workspace answers it: an
 // attached thread shows the same plan line as the workspace it is attached
 // to.

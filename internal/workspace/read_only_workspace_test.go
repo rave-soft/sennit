@@ -589,6 +589,26 @@ func (s *stubWorkspace) VerifyProviderAPIKey(ctx context.Context, providerID, ap
 	return nil
 }
 
+func (s *stubWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string) (OAuthStartResult, OAuthFlow, error) {
+	s.track("StartOAuth")
+	return OAuthStartResult{}, nil, nil
+}
+
+func (s *stubWorkspace) CompleteOAuth(ctx context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (OAuthCompletion, error) {
+	s.track("CompleteOAuth")
+	return OAuthCompletion{}, nil
+}
+
+func (s *stubWorkspace) OAuthConfiguredProxy(providerID string) string {
+	s.track("OAuthConfiguredProxy")
+	return ""
+}
+
+func (s *stubWorkspace) OAuthValidateProxy(providerID, proxyURL string) error {
+	s.track("OAuthValidateProxy")
+	return nil
+}
+
 func (s *stubWorkspace) DockerMCPAvailable() (bool, bool) {
 	s.track("DockerMCPAvailable")
 	return false, false

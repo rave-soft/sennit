@@ -4,25 +4,20 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/csync"
-	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
-	"github.com/rave-soft/sennit/internal/skills"
+
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
-// TestOAuthCopilotStartPollingWithoutDeviceCodeReportsError is the
-// regression test for a nil-pointer panic: startPolling used to snapshot
-// m.deviceCode unconditionally and hand it straight to
-// copilot.PollForToken, which dereferences it. A late ActionInitiateOAuth
-// from an abandoned initiate (see
-// TestOAuthCopilotInitiateAuthNoopsOnceStopped) landing on a fresh dialog
-// whose own initiate has not completed yet used to reach here with
-// deviceCode still nil.
-func TestOAuthCopilotStartPollingWithoutDeviceCodeReportsError(t *testing.T) {
+// TestOAuthCopilotStartPollingWithoutFlowReportsError is the regression
+// test for a nil-pointer panic: startPolling used to snapshot the device
+// code unconditionally and hand it straight to the poll, which
+// dereferences it. A late ActionInitiateOAuth from an abandoned initiate
+// (see TestOAuthCopilotInitiateAuthNoopsOnceStopped) landing on a fresh
+// dialog whose own initiate has not completed yet used to reach here with
+// nothing started at all.
+func TestOAuthCopilotStartPollingWithoutFlowReportsError(t *testing.T) {
 	t.Parallel()
 
 	s := styles.SennitDark()
@@ -59,31 +54,8 @@ func TestOAuthCopilotInitiateAuthNoopsOnceStopped(t *testing.T) {
 	msg := m.initiateAuth()
 
 	require.Nil(t, msg, "a dismissed dialog's initiate result must not surface")
-	require.Nil(t, m.deviceCode, "a dropped result must not write the device code either")
+	require.Nil(t, m.flow, "a dropped result must not write the flow either")
 }
-
-// copilotProxyTestWorkspace is a minimal [workspace.Workspace] stub —
-// mirroring accountsTestWorkspace's comment on why it must embed the full
-// interface — exposing only the config NewOAuthCopilot reads for the
-// configured proxy.
-type copilotProxyTestWorkspace struct {
-	workspace.Workspace
-	cfg *config.Config
-}
-
-// KnownProviders mirrors what the UI used to compute for itself:
-// the embedded catalog for this fake's config.
-func (w copilotProxyTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
-}
-
-// SkillStates, BuiltinSkills: the skills panel reads these; no test
-// here has a catalog beyond what the binary ships.
-func (w copilotProxyTestWorkspace) SkillStates() []*skills.SkillState { return nil }
-func (w copilotProxyTestWorkspace) ConfigProblems() []config.Problem  { return nil }
-func (w copilotProxyTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
-
-func (w *copilotProxyTestWorkspace) Config() *config.Config { return w.cfg }
 
 // TestOAuthCopilotUsesConfiguredProxy pins B10: a proxy already set for the
 // copilot provider must be what the device flow uses, without the dialog
@@ -94,12 +66,10 @@ func TestOAuthCopilotUsesConfiguredProxy(t *testing.T) {
 	t.Parallel()
 
 	s := styles.SennitDark()
-	cfg := &config.Config{
-		Options:   &config.Options{},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+	com := &common.Common{
+		Styles:    &s,
+		Workspace: &completeOAuthTestWorkspace{configuredProxy: "socks5://127.0.0.1:1080"},
 	}
-	cfg.Providers.Set("copilot", config.ProviderConfig{ID: "copilot", ProxyURL: "socks5://127.0.0.1:1080"})
-	com := &common.Common{Styles: &s, Workspace: &copilotProxyTestWorkspace{cfg: cfg}}
 
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderCopilot, Name: "GitHub Copilot"}
 	dlg, _ := NewOAuthCopilot(com, false, provider, nil, false)

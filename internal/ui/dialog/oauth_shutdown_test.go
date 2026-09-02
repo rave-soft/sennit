@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -31,10 +30,11 @@ func TestOAuthCopilotPollStopsOnShutdown(t *testing.T) {
 	s := styles.SennitDark()
 	com := &common.Common{Styles: &s, Ctx: ctx}
 
-	m := &OAuthCopilot{
-		com:        com,
-		deviceCode: &copilot.DeviceCode{DeviceCode: "test-device-code", Interval: 3600, ExpiresIn: 3600},
-	}
+	// The stub flow blocks until its context is done, standing in for a
+	// real poll whose interval and expiry are far larger than this test's
+	// own deadline: a poll still running when the timeout below fires can
+	// only be explained by the context not being wired through.
+	m := &OAuthCopilot{com: com, flow: &stubDialogOAuthFlow{}}
 
 	pollCmd := m.startPolling("test-device-code", 3600)
 

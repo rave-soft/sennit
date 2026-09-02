@@ -16,10 +16,8 @@ import (
 	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
-	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 type OAuthProvider interface {
@@ -691,6 +689,12 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 // saveCredential returns a command that persists the OAuth token and
 // triggers the config reload (including model discovery) off the UI update
 // loop. It reports completion via oauthSaveDoneMsg or oauthSaveErrMsg.
+//
+// Everything the save actually does — recording the account, deriving the
+// account identity a provider can name, persisting the proxy this sign-in
+// used and the model list it unlocks — lives behind the workspace (see
+// workspace.OAuthController), so a sign-in performed here and one
+// performed by `sennit login codex` do the same thing.
 func (m *OAuth) saveCredential() tea.Cmd {
 	// Capture the fields the command needs so it does not race with
 	// dialog state.
@@ -700,68 +704,49 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		token           = m.token
 		forceNewAccount = m.ForceNewAccount
 	)
-	oAuthProvider := m.oAuthProvider
+	var proxy string
+	if user, ok := m.oAuthProvider.(oauthProxyUser); ok {
+		proxy = user.currentProxy()
+	}
 	return func() tea.Msg {
-		// AccountID is left to providers that can derive one from the
-		// token itself (Codex, via a JWT claim); others record with no
-		// account identity, so a re-login always adds a new account
-		// rather than being recognized as an update to an existing one.
-		// ProxyURL is left empty too: any proxy the user entered during
-		// this sign-in is the provider's default, saved separately by
-		// [oauthPostSaver.afterSave] (see OAuthCodex.afterSave and
-		// loginCodex's comment in internal/cmd/login_codex.go) — recording
-		// it directly on the account here would make it indistinguishable
-		// from an override this one account wants.
-		var accountID, email string
-		if ider, ok := oAuthProvider.(oauthAccountIDer); ok {
-			accountID = ider.accountID(token)
-		}
-		// The email is what the accounts list shows instead of an opaque
-		// id, so a provider that can name its account is asked to.
-		if namer, ok := oAuthProvider.(oauthAccountEmailer); ok {
-			email = namer.accountEmail(token)
-		}
-		if _, err := com.Workspace.RecordAccount(config.ScopeGlobal, string(provider.ID), accounts.LegacyCredential{
-			Token:           token,
-			AccountID:       accountID,
-			Email:           email,
-			ForceNewAccount: forceNewAccount,
-		}); err != nil {
+		// The dialog's own context is what bounds this: the backend owns
+		// the lifetime of the persistence work it must not drop midway
+		// (see AppWorkspace.CompleteOAuth, which runs the model fetch on a
+		// context of its own for exactly that reason), so there is nothing
+		// left for this side to protect from a shutdown.
+		completion, err := com.Workspace.CompleteOAuth(com.Context(), string(provider.ID), proxy, token, forceNewAccount)
+		if err != nil {
 			return oauthSaveErrMsg{err: fmt.Errorf("failed to save account: %w", err)}
 		}
-		// Some providers have more to store than the credential itself —
-		// Codex, whose model list is per-account and only readable once
-		// there is a token to read it with.
-		if saver, ok := oAuthProvider.(oauthPostSaver); ok {
-			if err := saver.afterSave(com.Workspace, token); err != nil {
-				return oauthSaveErrMsg{err: err}
-			}
+		// A proxy that could not be persisted as the provider's default is
+		// a failed sign-in as far as this dialog is concerned, matching
+		// what a failed proxy write did before this refactor (it aborted
+		// the save outright, before the account was even recorded) — the
+		// credential just happens to already be saved this time. Message
+		// text comes straight from AppWorkspace.CompleteOAuth: it already
+		// reads as a complete sentence, so it is not wrapped again here.
+		if completion.ProxyError != nil {
+			return oauthSaveErrMsg{err: completion.ProxyError}
+		}
+		// A model list that could not be fetched leaves a saved credential
+		// with nothing to select, which is a failed sign-in as far as this
+		// dialog is concerned (the CLI, which can tell the user to retry
+		// the fetch alone, treats it as a warning instead). Same note on
+		// not re-wrapping: completion.ModelsError already reads as a
+		// complete sentence.
+		if completion.ModelsError != nil {
+			return oauthSaveErrMsg{err: completion.ModelsError}
 		}
 		return oauthSaveDoneMsg{}
 	}
 }
 
-// oauthPostSaver is the optional half of [OAuthProvider], implemented by
-// providers that need to write more than the token once it is saved.
-type oauthPostSaver interface {
-	afterSave(ws workspace.ConfigFieldEditor, token *oauth.Token) error
-}
-
-// oauthAccountIDer is the optional half of [OAuthProvider], implemented by
-// providers whose account identity can be derived from the token itself
-// (Codex embeds it in the access token's JWT claims — see
-// OAuthCodex.accountID). A provider without this half records accounts
-// with an empty AccountID, so RecordAccount can never recognize a re-login
-// as an update to a specific existing account for it.
-type oauthAccountIDer interface {
-	accountID(token *oauth.Token) string
-}
-
-// oauthAccountEmailer is implemented by providers whose token names the
-// person who signed in. The accounts list falls back to the provider's own
-// account id when there is nothing better, which for Codex is a UUID.
-type oauthAccountEmailer interface {
-	accountEmail(token *oauth.Token) string
+// oauthProxyUser is the optional half of [OAuthProvider], implemented by
+// providers whose sign-in may go through a proxy: the value the flow used
+// has to reach CompleteOAuth, which persists it as the provider's default
+// and routes any post-save request through it.
+type oauthProxyUser interface {
+	currentProxy() string
 }
 
 // confirmAndSelectModel is invoked when the user acknowledges the success
