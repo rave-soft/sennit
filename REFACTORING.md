@@ -51,82 +51,22 @@ compile-time проверками в `root.go:780-796`) и один через
 добавляет fallback на родителя в `PermissionGrant` именно из-за этой
 маршрутизации. После фикса обход убрать.
 
-## Фаза 2. Баги в фоне и ресурсы
+## Фаза 2. Баги в фоне и ресурсы — закрыта
 
-### 2.1 [M] Док тредов респавнит целые App как побочный эффект отрисовки
+Все семь пунктов исправлены и закоммичены (`bf1501c90`..`9ed3c50a4`), каждый
+с регрессионным тестом.
 
-`internal/workspace/appws/threads.go:163-227`,
-`internal/ui/threads/dock.go:112-116,169`, `internal/thread/lifecycle.go:1314`.
+Два решения, принятые по ходу и стоящие того, чтобы их знать:
 
-`AttachThread` для треда без живого handle делает `reactivate()` → полный
-`app.Bootstrap` (lock, DB, MCP init, координатор, watchers); `detach` no-op.
-Док дёргает `AttachThread` каждые 8 с ради `MessageCount` и показывает
-idle-треды, которые после рестарта остаются idle без runtime. Итог: после
-рестарта с N idle-тредами в первые 8 с поднимаются N App.
-
-Действия:
-- Read-only нужды (док, `GetSession`) обслуживать через
-  `NewReadOnlyWorkspace`, сессии лежат в общей БД.
-- Реактивация только по явному действию пользователя (Enter в дашборде).
-
-### 2.2 [S] Генерация заголовка сессии живёт в неотслеживаемой горутине
-
-`internal/agent/run_turn.go:710`, `internal/agent/title.go:67`.
-
-`go a.generateTitle` с `WithoutCancel`, без таймаута, мимо
-`readinessLifecycle.launch`; `Coordinator.Close` её не видит. Срабатывает
-и для каждой дочерней сессии делегирования, перезаписывая заголовок из
-`CreateSubAgentSession`.
-
-Действия: контекст lifecycle + `WithTimeout(30–60s)`, запуск через
-`readinessLifecycle.launch`; пропуск для `isSubAgent` с явным title.
-
-### 2.3 [S] `abandonGrace` хуков короче эскалации SIGINT→SIGKILL
-
-`internal/hooks/runner.go:21` (1 с) vs `internal/shell/exec_unix.go:19`
-(2 с). Хук с `trap '' INT` по таймауту даёт ложный «goroutine abandoned»
-и потерянный stdout/stderr, хотя через секунду штатно завершается.
-
-Действие: вывести grace из kill-timeout shell (`DefaultKillTimeout +
-500ms`) или задать хукам kill-timeout меньше grace.
-
-### 2.4 [M] Инфраструктурные ошибки и `ctx.Err()` уходят модели как текст
-
-Нарушение правила «text response vs Go error» из AGENTS.md:
-- `tools/mcp-tools.go:169-172`, `tools/list_mcp_resources.go:76-79`:
-  `RunTool` err → текст, включая `context.Canceled`. Esc сохраняется в
-  истории как обычный tool-result «context canceled».
-- `tools/lsp_rename.go:63-64` и definition/references/call_hierarchy:
-  любая ошибка `resolveSymbol` → «Symbol not found», включая `ctx.Err()`
-  из `filepath.Walk` и EACCES.
-- `tools/sennit_logs.go:176-180`, `agent_trace.go`, `git_tools.go`
-  (`gitError`): ошибки `os.Open`/`Stat`/`CreateTemp` как текст.
-
-Действия: `if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-return ToolResponse{}, err }` перед текстовым fallback; в
-`resolveSymbolResults` отдельный sentinel «нет совпадений»; в
-logs/trace/git разделить пользовательские ошибки и `%w` ошибки ФС.
-
-### 2.5 [S] `Bootstrap` не тушит App при ошибке после `newApp`
-
-`internal/app/bootstrap.go:239-244`. Практически недостижимо, но при
-ошибке `AddFinalCleanup` остаются MCP-init, watchers, herdr-bridge.
-Действие: `appInstance.mainDBRelease = nil; appInstance.Shutdown()` по
-образцу `app.go:172-173`.
-
-### 2.6 [S] `forwardSkillsToThreads` / `forwardAgentsToThreads` живут до конца процесса
-
-`internal/app/threadspawn/attach.go:196-197` запускаются на
-`cmd.Context()`; `Skills.SubscribeEvents` после `App.Shutdown` не
-закрывается. Действие: контекст, отменяемый через `AddPreCleanupHook`, как
-у watchers в `watch.go:82-87`.
-
-### 2.7 [S] `shell.Manager.Remove` снимает работающий job с учёта
-
-`internal/shell/background.go:287-295`. После `delete(m.shells, id)`
-процесс недостижим для `Kill`/`Cleanup`/`Shutdown`. Сейчас оба вызова
-(`tools/bash.go:303,349`) делают это после `done`, поэтому это ловушка API.
-Действие: возвращать ошибку при `!shell.IsDone()`.
+- **2.1** решён не добавлением метода в `Workspace`, а тем, что реактивация
+  стала явной. `AttachThread` больше не воскрешает тред сам; это делает
+  `ActivateThread`, который уже был в контракте и не имел ни одного
+  вызова. Зовёт его только путь drill-in (`attachThreadCmd`). Тред, который
+  не удалось поднять, открывается read-only с предупреждением, а не с
+  ошибкой: для слитого треда это нормальное состояние, а не сбой.
+- **2.2** ввёл `titleTimeout` на `sessionAgent`, переопределяемый в тестах.
+  Первый вариант ждал реальные 45 секунд и раздувал набор `internal/agent`
+  с 8 до 54 секунд, под `-race` до 75.
 
 ---
 
