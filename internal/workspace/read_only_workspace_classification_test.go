@@ -70,7 +70,6 @@ var refusedMethods = []string{
 	"RemoveConfigField",
 	"RemoveThread",
 	"SaveSession",
-	"SendThread",
 	"SetCompactMode",
 	"SetConfigField",
 	"SetProviderAPIKey",
@@ -94,7 +93,6 @@ var readOnlySafeMethods = []string{
 	"AgentIsReady",
 	"AgentIsSessionBusy",
 	"AgentModel",
-	"AgentQueuedPrompts",
 	"AgentQueuedPromptsList",
 	"AgentReadyErr",
 	"BackgroundJobCounts",
@@ -346,10 +344,6 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"SaveSession": func(t *testing.T, ro *readOnlyWorkspace) {
 			_, err := ro.SaveSession(t.Context(), session.Session{ID: "sess-1"})
-			require.True(t, IsReadOnlyError(err))
-		},
-		"SendThread": func(t *testing.T, ro *readOnlyWorkspace) {
-			err := ro.SendThread(t.Context(), "id", "msg")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"SetCompactMode": func(t *testing.T, ro *readOnlyWorkspace) {

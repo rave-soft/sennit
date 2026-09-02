@@ -535,10 +535,6 @@ func (w *readOnlyWorkspace) CreateThread(ctx context.Context, req proto.CreateTh
 	return proto.Thread{}, w.readOnlyError("CreateThread")
 }
 
-func (w *readOnlyWorkspace) SendThread(ctx context.Context, id, message string) error {
-	return w.readOnlyError("SendThread")
-}
-
 func (w *readOnlyWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
 	return proto.Thread{}, w.readOnlyError("ActivateThread")
 }
@@ -627,10 +623,6 @@ func (w *readOnlyWorkspace) AgentIsSessionBusy(sessionID string) bool {
 
 func (w *readOnlyWorkspace) AgentModel() AgentModel {
 	return w.ws.AgentModel()
-}
-
-func (w *readOnlyWorkspace) AgentQueuedPrompts(sessionID string) int {
-	return w.ws.AgentQueuedPrompts(sessionID)
 }
 
 func (w *readOnlyWorkspace) AgentQueuedPromptsList(sessionID string) []string {

@@ -89,8 +89,6 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	// Thread mutations denied.
 	_, err = ro.CreateThread(t.Context(), proto.CreateThreadRequest{Name: "x"})
 	require.True(t, IsReadOnlyError(err))
-	err = ro.SendThread(t.Context(), "id", "msg")
-	require.True(t, IsReadOnlyError(err))
 	_, err = ro.MergeThread(t.Context(), "id")
 	require.True(t, IsReadOnlyError(err))
 	err = ro.RemoveThread(t.Context(), "id", proto.RemoveThreadOptions{})
@@ -174,7 +172,6 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	require.Equal(t, AgentModel{}, model)
 	require.False(t, ro.AgentIsReady())
 	require.Error(t, ro.AgentReadyErr())
-	require.Equal(t, 0, ro.AgentQueuedPrompts("sess-1"))
 	require.Nil(t, ro.AgentQueuedPromptsList("sess-1"))
 
 	// File reads pass through.
@@ -426,7 +423,6 @@ func (s *stubWorkspace) AgentIsSessionBusy(sessionID string) bool         { retu
 func (s *stubWorkspace) AgentModel() AgentModel                           { return AgentModel{} }
 func (s *stubWorkspace) AgentIsReady() bool                               { return false }
 func (s *stubWorkspace) AgentReadyErr() error                             { return ErrAgentNotInitialized }
-func (s *stubWorkspace) AgentQueuedPrompts(sessionID string) int          { return 0 }
 func (s *stubWorkspace) AgentQueuedPromptsList(sessionID string) []string { return nil }
 func (s *stubWorkspace) AgentClearQueue(sessionID string)                 { s.track("AgentClearQueue") }
 
@@ -715,11 +711,6 @@ func (s *stubWorkspace) GetThread(ctx context.Context, id string) (proto.Thread,
 func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
 	s.track("CreateThread")
 	return proto.Thread{}, nil
-}
-
-func (s *stubWorkspace) SendThread(ctx context.Context, id, message string) error {
-	s.track("SendThread")
-	return nil
 }
 
 func (s *stubWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {

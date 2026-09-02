@@ -214,7 +214,6 @@ type AgentController interface {
 	// It lets the UI show an actionable message instead of collapsing
 	// both cases into "agent offline".
 	AgentReadyErr() error
-	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
 	AgentSummarize(ctx context.Context, sessionID string) error
@@ -357,40 +356,8 @@ type PreferredModelUpdater interface {
 	UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error
 }
 
-type PreferredModelOverrider interface {
-	OverridePreferredModel(model config.SelectedModel) error
-}
-
-type CompactModeSetter interface {
-	SetCompactMode(scope config.Scope, enabled bool) error
-}
-
 type ProviderAPIKeySetter interface {
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
-}
-
-type CopilotImporter interface {
-	ImportCopilot() (*oauth.Token, bool)
-}
-
-type OAuthTokenRefresher interface {
-	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
-}
-
-type ProviderCatalog interface {
-	KnownProviders() []catwalk.Provider
-}
-
-type CustomProviderTypeLister interface {
-	CustomProviderTypes() []string
-}
-
-type AccountLimitsRefresher interface {
-	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
-}
-
-type PlanUsageReporter interface {
-	CurrentPlanUsage(providerID string) (accounts.Usage, bool)
 }
 
 // ProjectLifecycle covers first-run project initialization and skill
@@ -513,7 +480,6 @@ type ThreadController interface {
 	ListThreads(ctx context.Context) ([]proto.Thread, error)
 	GetThread(ctx context.Context, id string) (proto.Thread, error)
 	CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error)
-	SendThread(ctx context.Context, id, message string) error
 	// ActivateThread respawns id's isolated workspace without dispatching
 	// an agent run, so a thread whose run has finished can be attached to
 	// and worked in by hand instead of only viewed read-only.
@@ -566,12 +532,12 @@ type EventSubscriber interface {
 // remote. It is a composition of narrower role interfaces (SessionStore,
 // AgentController, ...) so that consumers who only need one slice of it —
 // test stubs, most dialogs — can depend on the narrow interface instead of
-// all 94 methods. Implementations are unaffected: this is purely a
+// all 110 methods. Implementations are unaffected: this is purely a
 // grouping of the same method set.
 //
-// Ninety-four is a lot, and the role interfaces are what keep that from
-// being the number every consumer depends on. A new method belongs on the
-// role it serves, not here.
+// A hundred and ten is a lot, and the role interfaces are what keep that
+// from being the number every consumer depends on. A new method belongs on
+// the role it serves, not here.
 type FrontendWorkspace interface {
 	SessionStore
 	AgentController
@@ -591,16 +557,63 @@ type FrontendWorkspace interface {
 	AccountRemover
 	AccountsPurger
 	PreferredModelUpdater
-	PreferredModelOverrider
-	CompactModeSetter
+	// OverridePreferredModel applies a preferred-model override for the
+	// current process, for callers (namely `sennit run -m/--model`) that
+	// must not surprise the user with a config-file write from a single
+	// invocation. In local mode this is purely in-memory (see
+	// config.ConfigStore.OverridePreferredModel).
+	OverridePreferredModel(model config.SelectedModel) error
+	// SetCompactMode sets whether compact mode is enabled at scope.
+	SetCompactMode(scope config.Scope, enabled bool) error
 	ProviderAPIKeySetter
-	CopilotImporter
-	OAuthTokenRefresher
-	ProviderCatalog
-	CustomProviderTypeLister
+	// ImportCopilot imports the credentials of an existing GitHub Copilot
+	// CLI login, if one is present on this machine, for use as this
+	// workspace's Copilot provider token.
+	ImportCopilot() (*oauth.Token, bool)
+	// RefreshOAuthToken refreshes providerID's stored OAuth token at scope.
+	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
+	// KnownProviders is the provider catalog this workspace was built
+	// with: the embedded list plus Codex, or nothing at all when
+	// disable_default_providers is set.
+	//
+	// It is the store's cached copy, which is the same list model
+	// resolution and credential setup use. The UI used to recompute it
+	// from the config on every call — seven call sites, some on a render
+	// path — which rebuilt the embedded catalog each time and, worse, was
+	// a second answer to a question the store already answers. A reload
+	// recomputes the store's copy; a recomputation here could disagree
+	// with the one the agent is actually using.
+	KnownProviders() []catwalk.Provider
+	// CustomProviderTypes lists the provider types a custom provider may
+	// declare beyond catwalk's own catalog — the ones this build has a
+	// discovery enricher registered for.
+	//
+	// It is on the facade because the list is derived from that registry,
+	// not written down: a hardcoded copy in the form would drift the
+	// moment an enricher is added or removed, and importing the discovery
+	// engine into a dialog to read five strings is the trade this
+	// boundary exists to refuse.
+	CustomProviderTypes() []string
 	ProviderProxySetter
-	AccountLimitsRefresher
-	PlanUsageReporter
+	// RefreshAccountLimits fetches a fresh rate-limit snapshot for every
+	// OAuth account of providerID that reports usage
+	// (accounts.CapabilitiesOf(providerID).Usage) and persists what was
+	// learned, returning the provider's accounts. A single account's
+	// fetch failing does not fail the call — see config.RefreshAccountLimits
+	// for the full contract.
+	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
+	// CurrentPlanUsage reports the rate-limit snapshot the provider quoted
+	// on its most recent response, and whether there is one. It is not the
+	// stored per-account snapshot RefreshAccountLimits persists: this one
+	// is whatever the last request came back with, which is what the
+	// sidebar shows while a turn is running.
+	//
+	// Empty for every provider that does not quote usage, and empty for
+	// one that does until it has answered once. It is on the facade
+	// because the numbers live in the vendor package that also carries
+	// that vendor's sign-in flow, and the UI has no business importing
+	// that to read a percentage.
+	CurrentPlanUsage(providerID string) (accounts.Usage, bool)
 	ProjectLifecycle
 	MCPController
 	ThreadController
