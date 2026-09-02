@@ -35,9 +35,8 @@ func (w agentSessionWorkspace) AgentIsSessionBusy(sessionID string) bool {
 	return w.busySessions[sessionID]
 }
 
-// Config satisfies the workspace.ConfigAccessor DefaultCommon needs to
-// pick a theme; returning nil is fine, DefaultCommon treats it the same
-// as "no workspace".
+// Config satisfies the config reader DefaultCommon needs to pick a theme;
+// returning nil is fine, DefaultCommon treats it the same as "no workspace".
 func (agentSessionWorkspace) Config() *config.Config {
 	return nil
 }

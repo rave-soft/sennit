@@ -19,9 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// realConfigAccessor adapts a real *config.ConfigStore to
-// workspace.ConfigAccessor, exactly the way internal/workspace's own
-// testConfigAccessor does (see internal/workspace/custom_provider_test.go).
+// realConfigAccessor adapts a real *config.ConfigStore to the focused
+// workspace capabilities each account test exercises.
 // It is duplicated here rather than exported from internal/workspace and
 // reused, because internal/workspace's copy is unexported test-only code —
 // but it must NOT grow its own copy of RecordAccount/UpdateAccount/
@@ -134,11 +133,8 @@ func (a *realConfigAccessor) RefreshOAuthToken(ctx context.Context, scope config
 	return a.credentials.RefreshOAuthToken(ctx, scope, providerID)
 }
 
-var _ workspace.ConfigAccessor = (*realConfigAccessor)(nil)
-
-// newRealConfigAccessor builds a real *config.ConfigStore-backed
-// ConfigAccessor rooted in throwaway directories, mirroring
-// internal/workspace's newTestConfigAccessor.
+// newRealConfigAccessor builds a real *config.ConfigStore-backed test
+// adapter rooted in throwaway directories.
 func newRealConfigAccessor(t *testing.T) *realConfigAccessor {
 	t.Helper()
 	globalConfigDir := t.TempDir()

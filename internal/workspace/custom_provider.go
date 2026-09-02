@@ -19,15 +19,21 @@ type ConfigureCustomProviderParams struct {
 	APIKey  string
 }
 
+type customProviderConfigurer interface {
+	ConfigResolver
+	ConfigFieldEditor
+	ProviderAPIKeySetter
+}
+
 // ConfigureCustomProvider persists a custom provider's configuration and
 // runs model discovery against it, reusing the same discover.DiscoverModels
 // / discover.GetEnricher core that `sennit models refresh` uses (see
 // internal/cmd/models.go's refreshCmd) so the two entry points share
 // identical discovery behavior without duplicating it.
 //
-// It takes a [ConfigAccessor] rather than the full [Workspace] interface so
-// it works against any [Workspace] implementation without depending on the
-// rest of that interface.
+// It takes only the resolver and config-writing capabilities it needs rather
+// than the full [Workspace] interface, so it works against any implementation
+// without depending on unrelated workspace operations.
 //
 // Discovery runs first, against params directly, before anything is
 // persisted. The result then decides how fields are ordered: the config
@@ -45,7 +51,7 @@ type ConfigureCustomProviderParams struct {
 // returns nothing — callers should treat a zero-model result as "not yet
 // usable" rather than deleted, since the user may fix the URL and retry via
 // `sennit models refresh <id>` or this same flow again.
-func ConfigureCustomProvider(ctx context.Context, ws ConfigAccessor, scope config.Scope, params ConfigureCustomProviderParams) ([]catwalk.Model, error) {
+func ConfigureCustomProvider(ctx context.Context, ws customProviderConfigurer, scope config.Scope, params ConfigureCustomProviderParams) ([]catwalk.Model, error) {
 	if params.ID == "" || params.BaseURL == "" {
 		return nil, fmt.Errorf("provider ID and base URL are required")
 	}

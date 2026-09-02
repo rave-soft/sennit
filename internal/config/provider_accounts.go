@@ -343,8 +343,8 @@ func RefreshAccountLimits(ctx context.Context, store *ConfigStore, accStore acco
 // and again in a test double standing in for it — because a hand-copied
 // second implementation of these rules is exactly the failure mode that
 // bit this feature once already: an earlier revision of AppWorkspace's
-// RemoveAccount and the workspace package's test-only ConfigAccessor each
-// carried their own copy of "refuse the last account, activate a
+// RemoveAccount and the workspace package's test-only adapter each carried
+// their own copy of "refuse the last account, activate a
 // replacement before deleting," and the tests exercised only the copy in
 // the test double. Breaking the real implementation left every test green.
 // A single free function both call means there is only one place these

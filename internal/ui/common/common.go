@@ -72,7 +72,7 @@ func DefaultCommon(ctx context.Context, ws Workspace) *Common {
 // ThemeID returns the theme configured for the workspace, or the empty
 // string when there is no workspace or no config yet — both of which
 // styles.Theme maps onto the default palette.
-func ThemeID(ws workspace.ConfigAccessor) string {
+func ThemeID(ws workspace.ConfigReader) string {
 	if ws == nil {
 		return ""
 	}
@@ -83,7 +83,7 @@ func ThemeID(ws workspace.ConfigAccessor) string {
 // workspace, defaulting when there is no workspace or no config yet. An
 // unrecognised value resolves to the default here and is reported as a
 // config problem by the doctor, not by refusing to render.
-func SpinnerMode(ws workspace.ConfigAccessor) spin.Mode {
+func SpinnerMode(ws workspace.ConfigReader) spin.Mode {
 	if ws == nil {
 		return spin.ModeScramble
 	}

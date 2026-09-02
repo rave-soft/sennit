@@ -24,7 +24,7 @@ import (
 // importCopilotResult's follow-up in update_settings.go — they differ only
 // in what happens next on success (some also call UpdateAgentModel) and in
 // which message type carries the result, both of which onResult captures.
-func updatePreferredModelCmd(ws workspace.ConfigAccessor, model config.SelectedModel, onResult func(err error) tea.Msg) tea.Cmd {
+func updatePreferredModelCmd(ws workspace.PreferredModelUpdater, model config.SelectedModel, onResult func(err error) tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		return onResult(ws.UpdatePreferredModel(config.ScopeGlobal, model))
 	}

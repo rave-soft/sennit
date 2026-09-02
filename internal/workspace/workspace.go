@@ -349,116 +349,47 @@ type AccountsPurger interface {
 	PurgeAccounts(scope config.Scope, providerID string) error
 }
 
-// ConfigAccessor reads the resolved configuration and applies mutations to
-// it (proxied to the server in client mode).
-type ConfigAccessor interface {
-	ConfigReader
-	WorkingDirectory
-	ConfigFieldEditor
-	AccountRecorder
-	AccountLister
-	AccountActivator
-	AccountUpdater
-	AccountRemover
-	AccountsPurger
-
-	WorkingDir() string
+type ConfigResolver interface {
 	Resolver() config.VariableResolver
+}
 
+type PreferredModelUpdater interface {
 	UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error
-	// OverridePreferredModel applies a preferred-model override for the
-	// current process, for callers (namely `sennit run -m/--model`) that
-	// must not surprise the user with a config-file write from a
-	// single invocation. In local mode this is purely in-memory (see
-	// config.ConfigStore.OverridePreferredModel). Client/server mode has
-	// no equivalent ephemeral primitive on the server, so it falls back
-	// to a persisted UpdatePreferredModel at ScopeWorkspace — matching
-	// sennit run -m's pre-existing behavior in that mode.
+}
+
+type PreferredModelOverrider interface {
 	OverridePreferredModel(model config.SelectedModel) error
+}
+
+type CompactModeSetter interface {
 	SetCompactMode(scope config.Scope, enabled bool) error
+}
+
+type ProviderAPIKeySetter interface {
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
-	SetConfigField(scope config.Scope, key string, value any) error
-	RemoveConfigField(scope config.Scope, key string) error
+}
+
+type CopilotImporter interface {
 	ImportCopilot() (*oauth.Token, bool)
+}
+
+type OAuthTokenRefresher interface {
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
-	// RecordAccount stores cred as an account for providerID and makes it
-	// active, migrating any pre-existing single credential first; see
-	// config.RecordAccount. Unlike SetProviderAPIKey, a second call for
-	// the same provider adds an account instead of overwriting the first.
-	// Not supported in read-only views (accounts.Store is process-local
-	// file state with no client/server equivalent yet).
-	RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error)
-	// ListAccounts returns the accounts stored for providerID.
-	ListAccounts(providerID string) ([]accounts.Account, error)
-	// ActivateAccount makes accountID the provider's active account.
-	ActivateAccount(scope config.Scope, providerID, accountID string) error
-	// UpdateAccount saves user-editable fields of an existing account
-	// (Label, ProxyURL, Disabled). If account is the provider's currently
-	// active one, its credentials and effective proxy are republished to
-	// the running config too, exactly as ActivateAccount would — otherwise
-	// an edited proxy would sit unused until the next restart.
-	UpdateAccount(providerID string, account accounts.Account) error
-	// RemoveAccount deletes an account. Removing a provider's last
-	// account is refused (that's what `sennit logout` is for). Removing
-	// the active account first activates a replacement, so the provider
-	// never ends up pointing at a deleted account.
-	RemoveAccount(scope config.Scope, providerID, accountID string) error
-	// PurgeAccounts deletes every account stored for providerID and
-	// clears the active-account pointer. It is what RemoveAccount's
-	// last-account refusal defers to: `sennit logout` is the one caller
-	// that is meant to leave a provider with no credential at all, and
-	// without this it could not — it removed the api_key/oauth fields
-	// while the account store kept the token, so `accounts use` handed
-	// the login straight back with no re-authentication.
-	PurgeAccounts(scope config.Scope, providerID string) error
-	// KnownProviders is the provider catalog this workspace was built
-	// with: the embedded list plus Codex, or nothing at all when
-	// disable_default_providers is set.
-	//
-	// It is the store's cached copy, which is the same list model
-	// resolution and credential setup use. The UI used to recompute it
-	// from the config on every call — seven call sites, some on a render
-	// path — which rebuilt the embedded catalog each time and, worse, was
-	// a second answer to a question the store already answers. A reload
-	// recomputes the store's copy; a recomputation here could disagree
-	// with the one the agent is actually using.
+}
+
+type ProviderCatalog interface {
 	KnownProviders() []catwalk.Provider
-	// CustomProviderTypes lists the provider types a custom provider may
-	// declare beyond catwalk's own catalog — the ones this build has a
-	// discovery enricher registered for.
-	//
-	// It is on the facade because the list is derived from that registry,
-	// not written down: a hardcoded copy in the form would drift the
-	// moment an enricher is added or removed, and importing the discovery
-	// engine into a dialog to read five strings is the trade this
-	// boundary exists to refuse.
+}
+
+type CustomProviderTypeLister interface {
 	CustomProviderTypes() []string
-	// SetProviderProxy sets providerID's provider-level proxy (the base
-	// UpdateAccount/ActivateAccount resolve an account's effective proxy
-	// against, see accounts.ResolveProxy) and republishes the active
-	// account's effective proxy so the change is live immediately. An
-	// empty proxy clears the provider-level override entirely. Global
-	// scope only — providers are a global-only config key (see
-	// internal/config/globalonly.go).
-	SetProviderProxy(providerID, proxy string) error
-	// RefreshAccountLimits fetches a fresh rate-limit snapshot for every
-	// OAuth account of providerID that reports usage
-	// (accounts.CapabilitiesOf(providerID).Usage) and persists what was
-	// learned, returning the provider's accounts. A single account's
-	// fetch failing does not fail the call — see config.RefreshAccountLimits
-	// for the full contract.
+}
+
+type AccountLimitsRefresher interface {
 	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
-	// CurrentPlanUsage reports the rate-limit snapshot the provider quoted
-	// on its most recent response, and whether there is one. It is not the
-	// stored per-account snapshot RefreshAccountLimits persists: this one
-	// is whatever the last request came back with, which is what the
-	// sidebar shows while a turn is running.
-	//
-	// Empty for every provider that does not quote usage, and empty for
-	// one that does until it has answered once. It is on the facade
-	// because the numbers live in the vendor package that also carries
-	// that vendor's sign-in flow, and the UI has no business importing
-	// that to read a percentage.
+}
+
+type PlanUsageReporter interface {
 	CurrentPlanUsage(providerID string) (accounts.Usage, bool)
 }
 
@@ -649,7 +580,27 @@ type FrontendWorkspace interface {
 	QuestionResponder
 	FileServices
 	LSPController
-	ConfigAccessor
+	ConfigReader
+	WorkingDirectory
+	ConfigResolver
+	ConfigFieldEditor
+	AccountRecorder
+	AccountLister
+	AccountActivator
+	AccountUpdater
+	AccountRemover
+	AccountsPurger
+	PreferredModelUpdater
+	PreferredModelOverrider
+	CompactModeSetter
+	ProviderAPIKeySetter
+	CopilotImporter
+	OAuthTokenRefresher
+	ProviderCatalog
+	CustomProviderTypeLister
+	ProviderProxySetter
+	AccountLimitsRefresher
+	PlanUsageReporter
 	ProjectLifecycle
 	MCPController
 	ThreadController

@@ -20,13 +20,14 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// testConfigAccessor adapts a *config.ConfigStore to the ConfigAccessor
-// interface. ConfigStore.OverridePreferredModel has no error return (an
-// in-memory-only operation), so it needs the same thin wrapper AppWorkspace
-// uses in production. credentials is this accessor's own Manager, built
-// over the same store — fine for a test double even though production
-// requires exactly one Manager per process (see credentials.Manager's doc
-// comment), since each test constructs its own isolated store.
+// testConfigAccessor adapts a *config.ConfigStore to the focused workspace
+// capabilities exercised by this package's account and custom-provider tests.
+// ConfigStore.OverridePreferredModel has no error return (an in-memory-only
+// operation), so it needs the same thin wrapper AppWorkspace uses in
+// production. credentials is this accessor's own Manager, built over the same
+// store — fine for a test double even though production requires exactly one
+// Manager per process (see credentials.Manager's doc comment), since each test
+// constructs its own isolated store.
 type testConfigAccessor struct {
 	store       *config.ConfigStore
 	credentials *credentials.Manager
@@ -144,11 +145,11 @@ func (a *testConfigAccessor) RefreshOAuthToken(ctx context.Context, scope config
 	return a.credentials.RefreshOAuthToken(ctx, scope, providerID)
 }
 
-var _ ConfigAccessor = (*testConfigAccessor)(nil)
+var _ customProviderConfigurer = (*testConfigAccessor)(nil)
 
 // newTestConfigAccessor builds a real *config.ConfigStore-backed
-// ConfigAccessor rooted at four distinct directories (global config,
-// global data, working dir, workspace data dir). They must stay distinct:
+// test adapter rooted at four distinct directories (global config, global
+// data, working dir, workspace data dir). They must stay distinct:
 // internal/config/load.go's Load merges the global-config path and the
 // global-data path as two independent layers (and separately merges a
 // third "workspace config" layer from the workspace data dir), and its

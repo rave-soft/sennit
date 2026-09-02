@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubConfigAccessor is a minimal workspace.ConfigAccessor fake for
-// exercising the logoutXxx helpers without a real config store. Only
-// RemoveConfigField is meaningful; every other method is unused by the
-// helpers under test and just returns a zero value.
+// stubConfigAccessor is a minimal test fake for exercising the logoutXxx
+// helpers without a real config store. Only RemoveConfigField and
+// PurgeAccounts are meaningful; every other method is used by other command
+// tests and just returns a zero value.
 type stubConfigAccessor struct {
 	// removed records every key passed to RemoveConfigField, in call
 	// order, so tests can assert every field was attempted even when an
