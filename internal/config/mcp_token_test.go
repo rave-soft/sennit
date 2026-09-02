@@ -201,3 +201,50 @@ func TestApplyWorkspaceConfig_TokenOnlyOverlayMergesWithoutBogusServer(t *testin
 	require.NotNil(t, merged.OAuthToken)
 	require.Equal(t, "overlay-token", merged.OAuthToken.AccessToken)
 }
+
+// TestSetMCPToken_IgnoresOwnWrite is mutateMCPToken's analogue of
+// TestUpdateLocked_TypedMutatorIgnoresOwnWrite. mutateMCPToken used to
+// refresh the staleness snapshot with CaptureStalenessSnapshot(loadedPaths +
+// path) — narrower than the full candidate set Load tracks — and only after
+// setConfig, well after the token had already landed on disk. Persisting an
+// MCP OAuth token therefore both shrank the tracked set and left a race
+// window open, so the very next watcher poll could report an external
+// change and reinitialize every MCP server right after the user finished
+// authenticating one. This asserts both effects are gone: no false-positive
+// detection right after the token write, and no shrinkage of the tracked
+// set.
+func TestSetMCPToken_IgnoresOwnWrite(t *testing.T) {
+	globalDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
+
+	workingDir := t.TempDir()
+	globalSeed := `{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true}}}`
+	dataConfigPath := GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
+	require.NoError(t, os.WriteFile(dataConfigPath, []byte(globalSeed), 0o644))
+
+	store, err := LoadData(workingDir, "", false)
+	require.NoError(t, err)
+
+	before := store.trackedConfigPathSet()
+	require.NotEmpty(t, before, "a loaded store should already be tracking its candidate config paths")
+
+	mcp, ok := store.Config().MCP["server"]
+	require.True(t, ok)
+	reservation, ok := store.ReserveMCPTokenMutation("server", mcp)
+	require.True(t, ok)
+	token := &oauth.Token{AccessToken: "global-token"}
+	changed, err := store.SetMCPToken(&reservation, token)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	require.False(t, store.externalChangeDetected(),
+		"SetMCPToken's own write must not be mistaken for an external change:%s",
+		describeExternalChange(t, store))
+
+	after := store.trackedConfigPathSet()
+	require.Equal(t, before, after,
+		"SetMCPToken must not narrow the tracked path set down to loadedPaths+its own path")
+}

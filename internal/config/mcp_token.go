@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"reflect"
-	"slices"
 
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/tidwall/gjson"
@@ -102,6 +101,19 @@ func (s *ConfigStore) mutateMCPToken(ctx context.Context, reservation *MCPTokenM
 
 	mutated := false
 	skipReason := ""
+	// The write and the staleness-snapshot refresh happen under one
+	// fileStaleness mutex section, exactly as SetConfigFields and
+	// updateLockedErr do, so a concurrent ConfigStaleness()/watcher poll can
+	// never land between the on-disk write and the refresh and mistake this
+	// process's own token write for an external change. Before this fix the
+	// refresh ran after setConfig below, using
+	// CaptureStalenessSnapshot(loadedPaths+path) — narrowing the tracked set
+	// to only the files that loaded, and doing so well after the write had
+	// already landed on disk, wide open to that race. addAndRefreshLocked
+	// instead restats every path Load/reloadFromDisk already tracked
+	// (including global layers absent on disk) and only adds the scope's own
+	// path if it is somehow not already a member.
+	s.staleness.mu.Lock()
 	err := s.atomicWriteContext(ctx, scope, func(data []byte) ([]byte, error) {
 		if scope == ScopeGlobal {
 			// The full declaration is expected to live in this file, so the
@@ -153,6 +165,14 @@ func (s *ConfigStore) mutateMCPToken(ctx context.Context, reservation *MCPTokenM
 		}
 		return sjson.SetBytes(data, tokenKey, token)
 	})
+	if err == nil && mutated {
+		path, pathErr := s.ConfigPath(scope)
+		if pathErr != nil {
+			path = ""
+		}
+		s.staleness.addAndRefreshLocked(path)
+	}
+	s.staleness.mu.Unlock()
 	if err != nil || !mutated {
 		if err == nil {
 			slog.Warn("Skipped persisting MCP OAuth token", "server", reservation.name, "scope", scope, "reason", skipReason)
@@ -166,9 +186,6 @@ func (s *ConfigStore) mutateMCPToken(ctx context.Context, reservation *MCPTokenM
 	next.MCP[reservation.name] = mcp
 	reservation.expectedToken = token
 	s.setConfig(next)
-	if path, pathErr := s.ConfigPath(scope); pathErr == nil {
-		s.CaptureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
-	}
 	return true, nil
 }
 

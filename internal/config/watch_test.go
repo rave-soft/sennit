@@ -276,6 +276,96 @@ func TestWatchForExternalChanges_IgnoresOwnRuntimeConfigWrites(t *testing.T) {
 	require.Zero(t, notifications)
 }
 
+// TestUpdateLocked_TypedMutatorIgnoresOwnWrite is the typed-mutator analogue
+// of TestWatchForExternalChanges_IgnoresOwnWrites. updateLocked used to
+// refresh the staleness snapshot with CaptureStalenessSnapshot(loadedPaths +
+// path) — a set built only from the files that actually loaded, which is
+// narrower than the full candidate set Load tracks (lookupConfigs also
+// returns global layers absent on disk, such as a system-wide config or a
+// sibling sennitrc). A typed mutator like SetCompactMode therefore shrank
+// the tracked set on every call, and the next poll saw candidates it no
+// longer knew about and reported them as external changes — triggering a
+// full ReloadFromDisk (with provider discovery) and OnExternalChange (which
+// reinitializes every MCP server) for something as small as toggling compact
+// mode. This asserts both effects: no false-positive detection right after
+// the mutator, and no shrinkage of the tracked set.
+func TestUpdateLocked_TypedMutatorIgnoresOwnWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{}`), 0o600))
+
+	store, err := loadRuntimeForTest(dir, "", false)
+	require.NoError(t, err)
+
+	before := store.trackedConfigPathSet()
+	require.NotEmpty(t, before, "a loaded store should already be tracking its candidate config paths")
+
+	require.NoError(t, store.SetCompactMode(ScopeGlobal, true))
+
+	require.False(t, store.externalChangeDetected(),
+		"SetCompactMode's own write must not be mistaken for an external change:%s",
+		describeExternalChange(t, store))
+
+	after := store.trackedConfigPathSet()
+	require.Equal(t, before, after,
+		"SetCompactMode must not narrow the tracked path set down to loadedPaths+its own path")
+}
+
+// TestExternalChangeDetected_DetectsEditAfterTypedMutator verifies that
+// detection of a genuine external edit still works after a typed mutator
+// has run — updateLocked's staleness refresh must not drop any tracked
+// file from the set it restats.
+func TestExternalChangeDetected_DetectsEditAfterTypedMutator(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	configPath := filepath.Join(dir, "sennit.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+
+	store, err := loadRuntimeForTest(dir, "", false)
+	require.NoError(t, err)
+
+	require.NoError(t, store.SetCompactMode(ScopeGlobal, true))
+	require.False(t, store.externalChangeDetected())
+
+	time.Sleep(10 * time.Millisecond) // ensure a distinct mtime
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"mcp":{"added-by-agent":{"command":"echo"}}}`), 0o600))
+
+	require.True(t, store.externalChangeDetected(),
+		"an edit to a tracked file must still be detected after a typed mutator has run:%s",
+		describeExternalChange(t, store))
+}
+
+// TestExternalChangeDetected_NewCandidateFileAfterTypedMutator is
+// TestExternalChangeDetected_NewCandidateFile's scenario after a typed
+// mutator has run: a tracked-but-absent candidate (a project's first
+// .sennit/sennit.json) appearing on disk must still be detected, proving
+// updateLocked's refresh keeps candidates that don't exist yet rather than
+// dropping them from the tracked set.
+func TestExternalChangeDetected_NewCandidateFileAfterTypedMutator(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	store, err := loadRuntimeForTest(dir, "", false)
+	require.NoError(t, err)
+
+	require.NoError(t, store.SetCompactMode(ScopeGlobal, true))
+	require.False(t, store.externalChangeDetected(),
+		"a freshly toggled store reports an external change before anything changed:%s",
+		describeExternalChange(t, store))
+
+	sennitDir := filepath.Join(dir, ".sennit")
+	require.NoError(t, os.MkdirAll(sennitDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sennitDir, "sennit.json"), []byte(`{}`), 0o600))
+
+	require.True(t, store.externalChangeDetected(),
+		"a freshly-created .sennit/sennit.json should be detected even after a typed mutator has run")
+}
+
 // describeExternalChange reports why externalChangeDetected() is true, so a
 // failure on a platform we cannot run locally arrives with the answer
 // attached instead of sending us back for another CI round. Three rounds of

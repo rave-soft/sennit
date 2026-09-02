@@ -89,6 +89,28 @@ func (f *fileStaleness) refreshLocked(preRead map[string]fileSnapshot) {
 	}
 }
 
+// addAndRefreshLocked ensures path is a member of the tracked set — without
+// dropping any existing member, unlike capture — then refreshes every
+// tracked path's snapshot. Caller must hold f.mu.
+//
+// Used by typed mutators (updateLocked): the scope's own path is normally
+// already tracked (Load/reloadFromDisk seed the set from every candidate
+// lookupConfigs returns, including global layers absent on disk), but this
+// guards the case of a store whose tracked set was built some other way.
+func (f *fileStaleness) addAndRefreshLocked(path string) {
+	if path != "" {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			abs = path
+		}
+		if !slices.Contains(f.tracked, abs) {
+			f.tracked = append(f.tracked, abs)
+			slices.Sort(f.tracked)
+		}
+	}
+	f.refreshLocked(nil)
+}
+
 func (f *fileStaleness) capture(paths, requiredPaths []string, preRead map[string]fileSnapshot) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

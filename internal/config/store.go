@@ -581,14 +581,31 @@ func (s *ConfigStore) updateLockedErr(scope Scope, mutate func(*Config) (map[str
 		s.setConfig(nc)
 		return nil
 	}
-	if err := s.writeConfigFields(scope, fields); err != nil {
-		return err
+	// The write and the staleness-snapshot refresh happen under one
+	// fileStaleness mutex section, exactly as SetConfigFields does, so a
+	// concurrent ConfigStaleness()/watcher poll can never land between the
+	// write and the refresh and mistake this process's own write for an
+	// external change. See SetConfigFields for the full rationale.
+	//
+	// Unlike the old CaptureStalenessSnapshot(loadedPaths + path) this used
+	// to call, addAndRefreshLocked never narrows the tracked set to just
+	// the paths that happened to load: it restats every path Load/
+	// reloadFromDisk already tracked (including global layers absent on
+	// disk, so a global config appearing for the first time still counts
+	// as an external change) and only adds the scope's own path if it is
+	// somehow not already a member.
+	s.staleness.mu.Lock()
+	err = s.writeConfigFields(scope, fields)
+	if err == nil {
+		path, pathErr := s.ConfigPath(scope)
+		if pathErr != nil {
+			path = ""
+		}
+		s.staleness.addAndRefreshLocked(path)
 	}
-	// Refresh the staleness snapshot so the file watcher does not treat
-	// our own write as an external change. Safe to touch the snapshot map
-	// here because we hold writeMu.
-	if path, err := s.ConfigPath(scope); err == nil {
-		s.CaptureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
+	s.staleness.mu.Unlock()
+	if err != nil {
+		return err
 	}
 	s.setConfig(nc)
 	return nil
