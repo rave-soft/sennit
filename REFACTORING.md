@@ -70,78 +70,18 @@ compile-time проверками в `root.go:780-796`) и один через
 
 ---
 
-## Фаза 3. `ConfigStore`: три источника правды
+## Фаза 3. `ConfigStore`
 
-Баги 3.1–3.3 внесены коммитами 9f367e6a7 и bdc47daab и имеют общую
-причину: `Providers`, `RuntimeProviders` и диск обновляются по отдельности.
-Сначала точечные фиксы, потом 3.5.
+Пункты 3.1-3.4 закрыты (`056addc33`, `49ae3f1c2`, `b65f967b4`, `7c24a457f`).
+Остаются структурные 3.5-3.7.
 
-### 3.1 [M] Обновление кредов не доходит до `ProviderConfig`
-
-`internal/config/store_credentials.go:147-164` (`UpdateProviderAccount`),
-`:470` (`PersistRefreshedToken`) пишут только в runtime-провайдер.
-Читатели старого поля: `config/credentials/credentials.go:164-171`,
-`agent/runtime_builder.go:626-631,1093`.
-
-Сценарий: после refresh `ProviderConfig.OAuthToken` в памяти остаётся
-просроченным → refresh повторяется каждый ход, `credentialVersion`
-бампится, runtime пересобирается; `refreshApiKeyTemplate` затирает свежий
-runtime-токен устаревшим. Если запись на диск не удалась, следующий ход
-обменяет уже потраченный refresh token.
-
-Действие: в `UpdateProviderAccount` синхронно обновлять
-`cfg.Providers[id].APIKey/OAuthToken/Account`. `ProxyURL` и
-`APIKeyTemplate` не зеркалить: они существуют только в памяти, никогда не
-являются значением с диска, и reload переносит их отдельно (см. комментарий
-`reload.go:151-164`).
-
-Альтернатива — перевести всех читателей на `cfg.RuntimeProvider(id)` —
-отклонена: `Providers.Get` вызывается в 46 местах, и большинство читают
-дисковые поля (имя, «сконфигурирован ли провайдер», прокси для показа).
-Сужение владения живыми кредами до одной карты — отдельная работа, см.
-3.7 ниже.
-
-### 3.2 [M] Reload при конкурентном refresh копирует runtime всех провайдеров
-
-`internal/config/reload.go:504-513`. До 9f367e6a7 копировались только
-провайдеры, чьи креды изменились между `startConfig` и `current`.
-Подтверждено тестом: правка `base_url` на диске во время refresh даёт
-`Providers["mock"].BaseURL` новый, `RuntimeProvider("mock").BaseURL`
-старый.
-
-Действие: снимать `startRuntime` в начале reload и переносить только id,
-у которых `current` отличается по `APIKey/OAuthToken/Account/ProxyURL/
-APIKeyTemplate`. Тест из аудита добавить в пакет.
-
-### 3.3 [M] Typed-мутатор делает следующий тик watcher'а «внешним изменением»
-
-`internal/config/store.go:590-591` (`updateLocked`) сужает tracked-набор
-до загруженных файлов, тогда как `Load`/`reloadFromDisk` трекают все
-`configPaths` (`load.go:124`, `reload.go:566`), включая несуществующие
-глобальные слои. `hasUntrackedCandidate` (`watch.go:278-292`) считает их
-новыми. Подтверждено тестом: после `SetCompactMode` набор сжимается с 4 до
-2 путей, `externalChangeDetected()==true`. В проде `UpdatePreferredModel`,
-`SetCompactMode`, `PersistRefreshedToken`, `SetProviderAPIKey` вызывают
-полный `ReloadFromDisk` с discovery и `OnExternalChange` →
-реинициализацию MCP (`app/watch.go:40-47`). Запись и refresh снапшота в
-`updateLocked` не под одним `staleness.mu`.
-
-Действие: `updateLocked` делать через ту же хореографию, что
-`SetConfigFields` (`store.go:455-486`), без пересборки tracked-набора.
-Тест-аналог `IgnoresOwnWrites` для typed-мутатора.
-
-### 3.4 [M] `runtimeEnvironmentResolver` пересобирает окружение на каждый `ResolveValue`
-
-`internal/config/runtime.go:76-112`: `os.Environ()` плюс выполнение всех
-`Env[key]` (включая `$(cmd)`) на каждое разрешаемое значение. Резолвер
-уходит в MCP init, discovery, `ActivateAccount`, `SetProviderAPIKey`.
-Дополнительно `RuntimeSnapshot()` (`store.go:177`) и `Resolver()`
-(`store.go:199-203`) отдают два разных резолвера, `StoreOptions.Resolver`
-игнорируется.
-
-Действие: вычислять окружение один раз при сборке config, держать
-готовый `shellVariableResolver` в `s.resolver`, `RuntimeSnapshot` отдаёт
-его же.
+**Осторожно с кешированием окружения.** Первый вариант 3.4 кешировал
+окружение целиком и сломал повтор после ошибки авторизации: ключ вида
+`$MY_KEY`, повёрнутый во внешнем окружении, переставал подхватываться, и
+retry вечно переразрешал мёртвый ключ (`delegation_finalizer_auth_test.go`).
+Исправлено в `7c24a457f` разделением: записи `env` резолвятся один раз при
+сборке (там и живут `$(cmd)`), процессное окружение читается на каждый
+вызов. Не сливайте эти две половины обратно.
 
 ### 3.5 [L] Разбор `ConfigStore`
 
@@ -215,16 +155,10 @@ APIKeyTemplate`. Тест из аудита добавить в пакет.
 
 ## Фаза 4. `internal/agent`
 
-### 4.1 [S] Мёртвая память именованных агентов
-
-`AgentID` выставляется только в `delegation_finalizer.go:1011`
-(`TaskCreateArgs`), но `subAgentTaskRun` (`:851-859`) его не протягивает,
-и `carryOverMessages` (`:887-889`) всегда выходит на `agentID == ""`.
-`subagent_memory.go` (576 строк) достижим только из тестов.
-
-Действия: протянуть `agentID` через `subAgentTaskRun`; тест через
-`runNamedAgent`, а не через прямой `runSubAgent`. Если carry-over не нужен,
-удалить `subagent_memory.go` целиком.
+Пункт 4.1 закрыт (`919bab433`): память именованных агентов включена.
+Это включает ранее не работавшую функцию, которая тратит входные токены
+на каждое делегирование к именованному агенту; бюджет ограничен
+`subagent_memory.go`.
 
 ### 4.2 [M] Откат дубля `FileCoverage` из коммита 09a6d8a3d
 
@@ -297,6 +231,10 @@ config.GlobalAccountsFile())`; `:904` читает `codex.UsageFor`; ротац�
 
 ## Фаза 5. UI за `Workspace`
 
+Пункты 5.5-5.7 закрыты (`8fb2275e9`): вместо россыпи nil-guard'ов
+добавлены nil-безопасные аксессоры на `Config`, дублирующиеся обработчики
+диалогов сведены к двум хелперам, тестовые символы убраны из продакшн-кода.
+
 ### 5.1 [L] Codex/Copilot OAuth из диалога в Workspace
 
 `ui/dialog/oauth_codex.go:127-167` (`initiateAuth`) читает токены Codex
@@ -348,36 +286,6 @@ RecordAccount и post-save. `cmd/login_codex.go` использует те же 
 `ProviderCapabilities`); `Workspace.KnownProvider(id) (catwalk.Provider,
 bool)` вместо `ToProvider`. `permission.PermissionRequest` в UI остаётся,
 это задокументированный компромисс через alias-идентичность.
-
-### 5.5 [S] Копипаста в `dialog_actions.go` и выборе модели
-
-- `ActionToggleThinking` (`:99-131`) и `ActionSelectReasoningEffort`
-  (`:170-215`): ~35 одинаковых строк. Хелпер
-  `m.updateCoderModel(mutate func(*config.SelectedModel), info string)
-  tea.Cmd`.
-- `ActionSelectNotificationStyle` (`:72-90`) и
-  `ActionToggleTransparentBackground` (`:133-160`): хелпер
-  `m.setGlobalOptionGuarded(state, key, v, mk)`.
-- `handleSelectModel` (`ui.go:947-999`) и `importCopilotResult`
-  (`update_settings.go:266-296`): одна `m.continueModelSelection(
-  providerID, model, onboarding, gen)`.
-
-### 5.6 [S] Инвариант `Config().Options.TUI`
-
-Без guard: `model/dialogs.go:492`, `ui.go:419`, `keypress.go:435`,
-`onboarding.go:87`; с guard: `dialog_actions.go:146`, `ui.go:312`.
-`config/defaults.go:45-49` гарантирует non-nil в проде, но
-`stubWorkspace.Config()` в `workspace/read_only_workspace_test.go:526`
-возвращает `&config.Config{}`. Выбрать одно: accessor'ы на `Config` (как
-`ThemeID()`/`SpinnerMode()`) или убрать guard'ы.
-
-### 5.7 [S] Символы, достижимые только из тестов
-
-`deadcode ./...`: `model/keys.go:81 DefaultKeyMap`, `ui.go:258 withGOOS`,
-`permission_response_state.go:54 isLoading`, `bang_mode_state.go:24
-isEmpty`, `editor_placeholder_state.go:44`, `diffview/diffview.go:131-189`
-(5 геттеров), `diffview/style.go:27 DefaultLightStyle`. Перенести в
-`_test.go` или удалить.
 
 ---
 
@@ -438,34 +346,11 @@ isEmpty`, `editor_placeholder_state.go:44`, `diffview/diffview.go:131-189`
   него только ради no-op `event.Error` в `RecoverPanic`. Убрать импорт из
   `log`; пакет удалить или оставить заглушку `NewSessionTelemetry` для
   `sessionstore.TelemetrySink`.
-- [S] `pubsub/events.go:401-427`: `PayloadType`, `PayloadType*`,
-  `Payload` без ссылок. Удалить.
-- [M] `history/store/service.go:38-78`: интерфейсы
-  `fileVersionStore`/`fileVersionTransaction` живут ради тест-сима
-  `serializedVersionStore`; `CreateVersion` (`:104-134`) не переведён на
-  `db.InTx`, хотя `db/tx.go:9-13` его для этого перечисляет. Методы
-  `Get`, `ListBySession`, `ListLatestSessionFiles`, `Delete`,
-  `DeleteSessionFiles` (`:29-35`) без вызовов вне пакета; три одинаковых
-  цикла `fromDBItem` (`:155-191`). Перевести на `db.InTx`, интерфейсы и
-  мёртвые методы удалить; sqlc-запрос `DeleteSessionFiles` оставить
-  (`gc/gc.go:349`).
-- [S] `skills/skills.go:81-85,103-116`, `manager.go:159-186`: глобальный
-  `broker` без подписчиков, `SetLatestStates`/`GetLatestStates` ради
-  единственного `appws/app_workspace_project.go:63`, хотя
-  `Manager.States()` уже используется. `appws` читает `Manager.States()`;
-  удалить глобальные `broker`, `latestStates`, `WithGlobalMirror`.
 - [S] `session/store/service.go:72-74,556-574`:
   `CreateAgentToolSessionID`/`ParseAgentToolSessionID` не трогают БД,
   `IsAgentToolSession` без production-вызовов. Перенести функциями в
   `session`, из интерфейса убрать; `read_only_workspace.go:652,728`
   перестаёт их проксировать.
-- [S] `db/read_files_atomic.go:122,131`: SQL руками, дубль
-  `RecordFileRead`/`GetFileRead` из `sql/read_files.sql`. В
-  `updateFileReadIn` использовать `New(db).GetFileRead` /
-  `RecordFileRead`.
-- [S] `lsp/client.go:110` и `lifecycle.go:581`: `registerHandlers`
-  дважды за один `Initialize`. Оставить один вызов.
-
 ---
 
 ## Что проверено и оставлено как есть
