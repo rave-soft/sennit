@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
@@ -218,4 +219,29 @@ func TestRootDeliversYoloToggleResultAwayFromTheOtherUI(t *testing.T) {
 
 	r.Update(mainCmd())
 	require.False(t, r.main.yolo.loading, "the main screen's own result must reach it too")
+}
+
+// TestOwnResultWrapsDelayedClickMsg pins chatlist.DelayedClickMsg's presence
+// in ownedResultTypes. It was found late — during the audit for inverting
+// Root's default fallback, not by the earlier construction-site sweep —
+// because it isn't dialog-sourced: it's Chat's own self-scheduled tea.Tick
+// follow-up to a mouse-down (see mouse.go's HandleMouseDown site). Unlike
+// ScrollbarHideMsg/WarmMsg (also chatlist timers, but broadcast — see
+// Root.Update), DelayedClickMsg carries no Owner field, only a small
+// per-instance ClickID int that two independent Chat instances (main's and
+// a thread's) can easily collide on. Left untagged, the fallback inversion
+// would have routed every delayed click to r.main unconditionally instead
+// of the rare pre-inversion race it replaces, and a coincidental ClickID
+// match would have made that a silent wrong-screen click, not a dropped
+// one.
+func TestOwnResultWrapsDelayedClickMsg(t *testing.T) {
+	ws := &countingWorkspace{ready: true}
+	owner := newBusyUI(ws)
+
+	wrapped := ownResult(owner, chatlist.DelayedClickMsg{ClickID: 7})
+
+	env, ok := wrapped.(ownedMsg)
+	require.True(t, ok, "chatlist.DelayedClickMsg must be wrapped, not passed through")
+	require.Equal(t, owner, env.ownerUI())
+	require.Equal(t, chatlist.DelayedClickMsg{ClickID: 7}, env.inner)
 }

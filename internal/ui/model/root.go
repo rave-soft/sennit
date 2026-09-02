@@ -415,19 +415,32 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, tea.Batch(cmds...)
 		}
-		switch r.active {
-		case screenThread:
-			if r.attachment.thread != nil {
-				_, cmd := r.attachment.thread.ui.Update(msg)
-				return r, cmd
+		// Everything left is not an owned result, a MainScreenMsg, or an
+		// animation tick — raw terminal input (mouse, wheel, paste; key
+		// presses are handled above by handleKeyPress) is the only kind of
+		// message that legitimately depends on which screen is on top, so
+		// that is the only thing routed by r.active from here on.
+		switch msg.(type) {
+		case tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg, tea.PasteMsg:
+			switch r.active {
+			case screenThread:
+				if r.attachment.thread != nil {
+					_, cmd := r.attachment.thread.ui.Update(msg)
+					return r, cmd
+				}
+				return r, nil
+			case screenDashboard:
+				return r.handleDashboardMsg(msg)
 			}
-			return r, nil
-		case screenDashboard:
-			return r.handleDashboardMsg(msg)
-		default:
-			_, cmd := r.main.Update(msg)
-			return r, cmd
 		}
+		// Not input, and not claimed by anything above: a backend event
+		// with no owner of its own (see the uiOwnedMsg doc's "no owner"
+		// case), or a message type nothing here recognizes. Belongs to
+		// the main screen regardless of which screen is on top — routing
+		// it by active screen instead is the original bug this whole
+		// mechanism exists to fix.
+		_, cmd := r.main.Update(msg)
+		return r, cmd
 	}
 }
 
@@ -495,38 +508,15 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleDashboardMsg routes messages the dashboard screen cares about but
-// that are not key presses — mouse, wheel and paste, which the screen's
-// toolbar, filter tabs, table and create-thread dialog (open or not) all
-// respond to. Everything else is claimed by r.main before any of that
-// input handling runs.
+// handleDashboardMsg routes the dashboard screen's own input: mouse, wheel
+// and paste, which the screen's toolbar, filter tabs, table and
+// create-thread dialog (open or not) all respond to. Root.Update's
+// fallback now routes by active screen only for these message types —
+// everything else (a backend event, an owned async result) already went
+// to r.main before handleDashboardMsg is ever called, so this no longer
+// classifies input itself.
 func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if r.dashboard == nil {
-		return r, nil
-	}
-
-	_, isMouse := msg.(tea.MouseMsg)
-	_, isWheel := msg.(common.CoalescedWheelMsg)
-	_, isPaste := msg.(tea.PasteMsg)
-	if !isMouse && !isWheel && !isPaste {
-		// Not dashboard input: a backend event (pubsub.Event[...]) or an
-		// async result from a command the main screen dispatched. It
-		// belongs to r.main regardless of whether a dashboard dialog is
-		// covering the screen — the dialog guard below exists only to stop
-		// *pointer* events from clicking through the modal, which has
-		// nothing to do with this. No thread is ever attached while the
-		// dashboard is active (leaveThread and the dashboard-entry paths in
-		// Update/handleKeyPress all detach first, or come from the main
-		// screen where nothing is attached yet), so r.main is the only *UI
-		// alive to own it; guarded on that invariant rather than assumed,
-		// so a future change that leaves a thread attached here fails safe
-		// (drops) instead of misdelivering. Dropping these used to leave
-		// permission requests unanswered and async flags like
-		// modelOperation.loading stuck, dashboard dialog open or not.
-		if r.attachment.thread == nil {
-			_, cmd := r.main.Update(msg)
-			return r, cmd
-		}
 		return r, nil
 	}
 
@@ -926,10 +916,28 @@ func ownCmd(owner *UI, cmd tea.Cmd) tea.Cmd {
 // HandleMsg returns ActionCmd wrapping a new outside-model type and it
 // needs to reach the UI that opened the dialog while another screen is on
 // top, add that type's reflect.Type here.
+//
+// chatlist.DelayedClickMsg is not dialog-sourced — it's Chat's own
+// self-scheduled tea.Tick follow-up to a mouse-down (see HandleMouseDown),
+// wrapped where mouse.go appends that cmd. It belongs on this list for the
+// same reason as the others: chatlist cannot import model, so it cannot
+// embed uiOwned, and the type-switch fallback inversion below would
+// otherwise route it to r.main unconditionally. That would have been worse
+// than the pre-inversion misroute it replaces: Chat.HandleDelayedClick
+// guards on a ClickID matching the receiving Chat's own pendingClickID,
+// but that counter is a small per-instance int (0, 1, 2, ...) — two
+// independent Chat instances (main's and a thread's) collide on it often,
+// so a delayed click misrouted to the wrong screen's chat does not
+// reliably no-op; it can coincidentally match and toggle expansion or
+// navigate into a child session on a screen the user never clicked.
+// Discovered while auditing this fallback for the inversion, before it
+// shipped — not a bug this inversion introduced, but one it would have
+// made unconditional instead of a rare screen-switch-mid-delay race.
 var ownedResultTypes = map[reflect.Type]bool{
 	reflect.TypeFor[util.ClearStatusMsg]():                  true,
 	reflect.TypeFor[completions.CompletionItemsLoadedMsg](): true,
 	reflect.TypeFor[fimage.PreviewPreparedMsg]():            true,
+	reflect.TypeFor[chatlist.DelayedClickMsg]():             true,
 }
 
 // ownResult wraps a single command result for ownCmd, expanding one level

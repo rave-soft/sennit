@@ -316,7 +316,12 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 		if sub == nil {
 			continue
 		}
-		if msg := sub(); msg != nil {
+		// The delayed-click tick's result arrives wrapped in ownedMsg (see
+		// root.go): chatlist.DelayedClickMsg is defined outside model and
+		// cannot embed uiOwned, so mouse.go tags it via ownCmd instead.
+		// Root unwraps that in production; this test drives *UI directly,
+		// so it must unwrap it too, the same way runCmdTree does.
+		if msg := unwrapOwnedOne(sub()); msg != nil {
 			if _, isDelayed := msg.(chatlist.DelayedClickMsg); isDelayed {
 				delayedMsg = msg
 				break

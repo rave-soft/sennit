@@ -568,11 +568,25 @@ func isCommandSliceWrapper(msg tea.Msg) ([]tea.Cmd, bool) {
 	return cmds, true
 }
 
+// unwrapOwnedOne unwraps a single ownedMsg envelope (see root.go) to the
+// message it carries, or returns msg unchanged if it isn't one. Test
+// helpers that drive a bare *UI need this because ownCmd-wrapped results
+// (cross-package types like chatlist.DelayedClickMsg that cannot embed
+// uiOwned themselves) are only unwrapped by Root, which these helpers
+// deliberately bypass — without it, *UI.Update receives an envelope type
+// its own switch has no case for, and the real message never arrives.
+func unwrapOwnedOne(msg tea.Msg) tea.Msg {
+	if env, ok := msg.(ownedMsg); ok {
+		return env.inner
+	}
+	return msg
+}
+
 // driveCmdStep executes one leaf-producing command and immediately routes its
 // message through Update. It deliberately does not execute Update's returned
 // command, allowing tests to inspect state at asynchronous boundaries.
 func driveCmdStep(m *UI, cmd tea.Cmd) (tea.Msg, tea.Cmd) {
-	msg := cmd()
+	msg := unwrapOwnedOne(cmd())
 	_, next := m.Update(msg)
 	return msg, next
 }
@@ -607,7 +621,7 @@ func runCmdTree(m *UI, cmd tea.Cmd, afterUpdate func(tea.Msg, tea.Cmd)) []tea.Ms
 	for len(stack) > 0 {
 		cmd := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		msg := cmd()
+		msg := unwrapOwnedOne(cmd())
 		if cmds, ok := isCommandSliceWrapper(msg); ok {
 			for i := len(cmds) - 1; i >= 0; i-- {
 				stack = append(stack, cmds[i])

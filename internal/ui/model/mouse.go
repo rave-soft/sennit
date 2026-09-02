@@ -177,7 +177,11 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				} else if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 					m.lastClickTime = time.Now()
 					if cmd != nil {
-						cmds = append(cmds, cmd)
+						// chatlist.DelayedClickMsg is defined outside model
+						// and cannot embed uiOwned itself — wrapped via
+						// ownCmd instead (see ownedResultTypes' doc on why
+						// this one specifically must not be left untagged).
+						cmds = append(cmds, ownCmd(m, cmd))
 					}
 				}
 			}
