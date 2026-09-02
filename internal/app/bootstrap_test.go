@@ -90,9 +90,6 @@ func TestBootstrap_Success(t *testing.T) {
 	require.True(t, result.Config.Overrides().SkipPermissionRequests)
 }
 
-// TestBootstrap_GlobalSkillsMirror confirms the GlobalSkillsMirror option
-// is actually threaded into the skills manager: with it set, discovery
-// updates the package-level globals; without it, they are left alone.
 func TestBootstrap_ProjectRuntimeActivationRequiresTrust(t *testing.T) {
 	setBootstrapTestEnv(t)
 	cwd := t.TempDir()
@@ -133,26 +130,6 @@ func TestBootstrap_ProjectRuntimeActivationRequiresTrust(t *testing.T) {
 	_, err = runner.Run(t.Context(), hooks.EventPreToolUse, "session", "read", `{}`)
 	require.NoError(t, err)
 	require.FileExists(t, sideEffect)
-}
-
-func TestBootstrap_GlobalSkillsMirror(t *testing.T) {
-	setBootstrapTestEnv(t)
-
-	cwd := t.TempDir()
-
-	// Poison the global cache first so a genuine mirror write is
-	// distinguishable from state left over by other tests.
-	skills.SetLatestStates(nil)
-
-	result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{
-		DataDir:            t.TempDir(),
-		GlobalSkillsMirror: true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(result.App.Shutdown)
-
-	require.NotNil(t, skills.GetLatestStates(),
-		"global mirror should have been written to when GlobalSkillsMirror is set")
 }
 
 func TestBootstrap_InheritsParentAgents(t *testing.T) {

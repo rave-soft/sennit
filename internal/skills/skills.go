@@ -15,7 +15,6 @@ import (
 
 	"github.com/charlievieth/fastwalk"
 	"github.com/rave-soft/sennit/internal/frontmatter"
-	"github.com/rave-soft/sennit/internal/pubsub"
 	"gopkg.in/yaml.v3"
 )
 
@@ -29,9 +28,6 @@ const (
 var (
 	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
-
-	latestStates   []*SkillState
-	latestStatesMu sync.RWMutex
 )
 
 // Skill represents a parsed SKILL.md file.
@@ -78,13 +74,6 @@ type Event struct {
 	States []*SkillState
 }
 
-var broker = pubsub.NewBroker[Event]()
-
-// PublishStates publishes a skill discovery event with the given states.
-func PublishStates(states []*SkillState) {
-	broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
-}
-
 // cloneStates returns a deep copy of the given state slice so callers cannot
 // accidentally mutate the source.
 func cloneStates(states []*SkillState) []*SkillState {
@@ -97,22 +86,6 @@ func cloneStates(states []*SkillState) []*SkillState {
 		result[i] = &clone
 	}
 	return result
-}
-
-// GetLatestStates returns the latest discovery states.
-func GetLatestStates() []*SkillState {
-	latestStatesMu.RLock()
-	defer latestStatesMu.RUnlock()
-	return cloneStates(latestStates)
-}
-
-// SetLatestStates stores the given states in the package-level cache so that
-// GetLatestStates can return them synchronously before the first pubsub event
-// arrives.
-func SetLatestStates(states []*SkillState) {
-	latestStatesMu.Lock()
-	latestStates = cloneStates(states)
-	latestStatesMu.Unlock()
 }
 
 // Validate checks if the skill meets spec requirements.

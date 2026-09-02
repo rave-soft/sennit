@@ -62,13 +62,6 @@ type BootstrapOptions struct {
 	// workspaces lock their data directory.
 	WorkspaceLock bool
 
-	// GlobalSkillsMirror enables skills.WithGlobalMirror. The top-level
-	// workspace sets this so the package-level globals the TUI reads
-	// stay in sync; a spawned thread's workspace runs concurrently
-	// alongside it in the same process and leaves it off to avoid
-	// last-writer-wins cross-talk between them.
-	GlobalSkillsMirror bool
-
 	// PostDataDir, if set, runs after the .sennit data directory has
 	// been created and before the DB connection is opened. The
 	// top-level workspace uses this to register the project with the
@@ -186,9 +179,6 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 		skills.WithInheritedSkills(opts.InheritedSkills),
-	}
-	if opts.GlobalSkillsMirror {
-		skillOpts = append([]skills.ManagerOption{skills.WithGlobalMirror()}, skillOpts...)
 	}
 	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates, skillOpts...)
 

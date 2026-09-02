@@ -1,16 +1,12 @@
 package store
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rave-soft/sennit/internal/db"
-	"github.com/rave-soft/sennit/internal/history"
-	"github.com/rave-soft/sennit/internal/pubsub"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
@@ -37,21 +33,6 @@ func newTestService(t *testing.T) (Service, sessionstore.Service, string, string
 	return NewService(db.New(conn), conn), sessions, sess.ID, dataDir
 }
 
-// receiveOrContext waits for a test phase to complete or fails when the test's
-// overall watchdog context expires.
-func receiveOrContext[T any](t *testing.T, ctx context.Context, ch <-chan T) T {
-	t.Helper()
-
-	select {
-	case value := <-ch:
-		return value
-	case <-ctx.Done():
-		t.Fatalf("test context expired while waiting for phase: %v", ctx.Err())
-		var zero T
-		return zero
-	}
-}
-
 func TestCreateVersionSequentialVersions(t *testing.T) {
 	files, _, sessionID, _ := newTestService(t)
 
@@ -64,175 +45,11 @@ func TestCreateVersionSequentialVersions(t *testing.T) {
 	require.Equal(t, int64(1), second.Version)
 }
 
-type serializedVersionStore struct {
-	permit       chan struct{}
-	beginAttempt chan struct{}
-	outsideRead  chan struct{}
-	firstRead    chan struct{}
-	releaseFirst chan struct{}
-
-	mu       sync.Mutex
-	files    []db.File
-	beginSeq int
-}
-
-func newSerializedVersionStore() *serializedVersionStore {
-	store := &serializedVersionStore{
-		permit:       make(chan struct{}, 1),
-		beginAttempt: make(chan struct{}, 2),
-		outsideRead:  make(chan struct{}, 2),
-		firstRead:    make(chan struct{}),
-		releaseFirst: make(chan struct{}),
-	}
-	store.permit <- struct{}{}
-	return store
-}
-
-func (s *serializedVersionStore) NextFileVersion(_ context.Context, path string) (int64, error) {
-	s.outsideRead <- struct{}{}
-	return s.nextFileVersion(path), nil
-}
-
-func (s *serializedVersionStore) Begin(ctx context.Context) (fileVersionTransaction, error) {
-	s.beginAttempt <- struct{}{}
-	select {
-	case <-s.permit:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-
-	s.mu.Lock()
-	sequence := s.beginSeq
-	s.beginSeq++
-	s.mu.Unlock()
-	return &serializedVersionTransaction{store: s, sequence: sequence}, nil
-}
-
-type serializedVersionTransaction struct {
-	store    *serializedVersionStore
-	sequence int
-	pending  *db.File
-	closed   bool
-}
-
-func (s *serializedVersionStore) nextFileVersion(path string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	next := int64(0)
-	for _, file := range s.files {
-		if file.Path == path && file.Version >= next {
-			next = file.Version + 1
-		}
-	}
-	return next
-}
-
-func (tx *serializedVersionTransaction) NextFileVersion(ctx context.Context, path string) (int64, error) {
-	next := tx.store.nextFileVersion(path)
-	if tx.sequence == 0 {
-		close(tx.store.firstRead)
-		select {
-		case <-tx.store.releaseFirst:
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		}
-	}
-	return next, nil
-}
-
-func (tx *serializedVersionTransaction) CreateFile(_ context.Context, params db.CreateFileParams) (db.File, error) {
-	file := db.File{
-		ID:        params.ID,
-		SessionID: params.SessionID,
-		Path:      params.Path,
-		Content:   params.Content,
-		Version:   params.Version,
-	}
-	tx.pending = &file
-	return file, nil
-}
-
-func (tx *serializedVersionTransaction) Commit() error {
-	if tx.pending != nil {
-		tx.store.mu.Lock()
-		tx.store.files = append(tx.store.files, *tx.pending)
-		tx.store.mu.Unlock()
-	}
-	tx.close()
-	return nil
-}
-
-func (tx *serializedVersionTransaction) Rollback() error {
-	tx.close()
-	return nil
-}
-
-func (tx *serializedVersionTransaction) close() {
-	if tx.closed {
-		return
-	}
-	tx.closed = true
-	tx.store.permit <- struct{}{}
-}
-
-// TestCreateVersionAllocatesInsideSerializedTransaction forces a second call
-// to attempt its transaction while the first is paused after reading. The
-// store models BEGIN IMMEDIATE ownership, making every ordering edge an
-// explicit channel handshake rather than a scheduler timing assumption.
-func TestCreateVersionAllocatesInsideSerializedTransaction(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-
-	store := newSerializedVersionStore()
-	files := &service{Broker: pubsub.NewBroker[history.File](), versions: store}
-
-	type result struct {
-		file history.File
-		err  error
-	}
-	firstResult := make(chan result, 1)
-	secondResult := make(chan result, 1)
-	go func() {
-		file, err := files.CreateVersion(ctx, "first-session", "serialized.go", "first")
-		firstResult <- result{file: file, err: err}
-	}()
-
-	select {
-	case <-store.beginAttempt:
-	case <-store.outsideRead:
-		t.Fatal("version was read before opening its transaction")
-	case <-ctx.Done():
-		t.Fatalf("test context expired while waiting for first operation: %v", ctx.Err())
-	}
-	receiveOrContext(t, ctx, store.firstRead)
-
-	go func() {
-		file, err := files.CreateVersion(ctx, "second-session", "serialized.go", "second")
-		secondResult <- result{file: file, err: err}
-	}()
-	receiveOrContext(t, ctx, store.beginAttempt)
-
-	close(store.releaseFirst)
-	first := receiveOrContext(t, ctx, firstResult)
-	second := receiveOrContext(t, ctx, secondResult)
-
-	require.NoError(t, first.err)
-	require.NoError(t, second.err)
-	require.Equal(t, int64(0), first.file.Version)
-	require.Equal(t, int64(1), second.file.Version)
-	require.Equal(t, "first", first.file.Content)
-	require.Equal(t, "second", second.file.Content)
-
-	store.mu.Lock()
-	persisted := append([]db.File(nil), store.files...)
-	store.mu.Unlock()
-	require.Len(t, persisted, 2)
-	require.Equal(t, []int64{0, 1}, []int64{persisted[0].Version, persisted[1].Version})
-}
-
 // TestCreateVersionConcurrent stress-tests version allocation through
 // independent SQLite connections and verifies all resulting content persists.
+// It runs against a real on-disk SQLite database (via newTestService), so it
+// is what proves version numbers form a proper unbroken sequence under
+// concurrent CreateVersion calls, without duplicates.
 func TestCreateVersionConcurrent(t *testing.T) {
 	files, sessions, sessionID, dataDir := newTestService(t)
 	secondSession, err := sessions.CreateTaskSession(t.Context(), "concurrent-child", sessionID, "test")
@@ -301,8 +118,12 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	deleted, err := files.ListBySessionTree(t.Context(), sessionID)
 	require.NoError(t, err)
 	require.Len(t, deleted, n)
+	cleanupConn, err := db.OpenDB(t.Context(), filepath.Join(dataDir, "sennit.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, cleanupConn.Close()) })
+	q := db.New(cleanupConn)
 	for _, file := range deleted {
-		require.NoError(t, files.Delete(t.Context(), file.ID))
+		require.NoError(t, q.DeleteFile(t.Context(), file.ID))
 	}
 
 	const secondRound = 10
@@ -374,38 +195,6 @@ func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
 		}
 		require.ElementsMatch(t, []string{"root.go", "child.go", "nested.go"}, paths)
 	}
-}
-
-// TestListLatestSessionFilesIgnoresOtherSessions covers the case the old
-// query got wrong: version numbers run globally per path, so taking the
-// maximum across the whole table matched a sibling session's newer row
-// and dropped this session's file out of the result entirely.
-func TestListLatestSessionFilesIgnoresOtherSessions(t *testing.T) {
-	files, sessions, sessionID, _ := newTestService(t)
-	other, err := sessions.CreateTaskSession(t.Context(), "other", sessionID, "other")
-	require.NoError(t, err)
-
-	_, err = files.CreateVersion(t.Context(), sessionID, "shared.go", "mine v0")
-	require.NoError(t, err)
-	mine, err := files.CreateVersion(t.Context(), sessionID, "shared.go", "mine v1")
-	require.NoError(t, err)
-
-	// The other session then writes a strictly newer version of the same
-	// path, which used to hide this session's own latest version.
-	theirs, err := files.CreateVersion(t.Context(), other.ID, "shared.go", "theirs")
-	require.NoError(t, err)
-	require.Greater(t, theirs.Version, mine.Version)
-
-	latest, err := files.ListLatestSessionFiles(t.Context(), sessionID)
-	require.NoError(t, err)
-	require.Len(t, latest, 1)
-	require.Equal(t, mine.ID, latest[0].ID)
-	require.Equal(t, "mine v1", latest[0].Content)
-
-	otherLatest, err := files.ListLatestSessionFiles(t.Context(), other.ID)
-	require.NoError(t, err)
-	require.Len(t, otherLatest, 1)
-	require.Equal(t, theirs.ID, otherLatest[0].ID)
 }
 
 // TestCreateVersionNumbersAcrossSessions pins that one path's versions

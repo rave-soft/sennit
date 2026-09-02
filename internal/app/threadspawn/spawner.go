@@ -25,9 +25,8 @@ func (h *localHandle) Workspace() thread.Workspace { return h.workspace }
 
 // LocalSpawner spawns thread workspaces by bootstrapping a plain
 // in-process app.App directly, for the single-process CLI. Each spawned
-// app joins the repository workspace lock (WorkspaceLock) but does not mirror
-// its skills into the process-wide globals (GlobalSkillsMirror is off), since
-// it runs concurrently alongside the top-level workspace's app in the same
+// app joins the repository workspace lock (WorkspaceLock), running
+// concurrently alongside the top-level workspace's app in the same
 // process.
 type LocalSpawner struct {
 	apps         *csync.Map[string, *app.App]
@@ -103,13 +102,12 @@ func (s *LocalSpawner) bootstrapOptions() app.BootstrapOptions {
 		}
 	}
 	return app.BootstrapOptions{
-		WorkspaceLock:      true,
-		GlobalSkillsMirror: false,
-		InheritedAgents:    inheritedAgents,
-		InheritedSkills:    inheritedSkills,
-		PreferredModel:     model,
-		YOLO:               yolo,
-		ConfineWrites:      true,
+		WorkspaceLock:   true,
+		InheritedAgents: inheritedAgents,
+		InheritedSkills: inheritedSkills,
+		PreferredModel:  model,
+		YOLO:            yolo,
+		ConfineWrites:   true,
 		// A thread reports into its own workspace, not the user's pane:
 		// the pane belongs to the top-level session, and falling back to
 		// the process-wide herdr client here would make the thread's App

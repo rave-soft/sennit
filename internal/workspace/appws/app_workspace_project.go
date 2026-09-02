@@ -60,7 +60,7 @@ func (w *AppWorkspace) ConfigProblems() []config.Problem {
 
 // SkillStates implements Workspace.
 func (w *AppWorkspace) SkillStates() []*skills.SkillState {
-	return skills.GetLatestStates()
+	return w.app.Skills.States()
 }
 
 // BuiltinSkills implements Workspace.
