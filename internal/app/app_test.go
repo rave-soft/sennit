@@ -277,6 +277,38 @@ func TestApp_Shutdown_HooksRunBeforeCleanups(t *testing.T) {
 	require.Equal(t, []string{"hook-1", "cleanup-1", "cleanup-2"}, order)
 }
 
+// TestApp_Shutdown_PreCleanupHooksRunBeforeShutdownHooks pins the relative
+// order of Shutdown's first two hook queues: pre-cleanup hooks must finish
+// before shutdown hooks start, since a watcher a pre-cleanup hook stops can
+// otherwise still initiate work a shutdown hook depends on.
+func TestApp_Shutdown_PreCleanupHooksRunBeforeShutdownHooks(t *testing.T) {
+	t.Parallel()
+
+	var order []string
+	mu := sync.Mutex{}
+	addOrder := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, s)
+	}
+
+	a := NewForTest(t.Context())
+	require.NoError(t, a.AddPreCleanupHook(func(context.Context) error {
+		addOrder("pre-cleanup-hook")
+		return nil
+	}))
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error {
+		addOrder("shutdown-hook")
+		return nil
+	}))
+
+	a.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"pre-cleanup-hook", "shutdown-hook"}, order)
+}
+
 // TestApp_Shutdown_AddAfterStartRejects verifies that AddCleanup and
 // AddShutdownHook return ErrAppShutdownBlocked after shutdown begins.
 func TestApp_Shutdown_AddAfterStartRejects(t *testing.T) {

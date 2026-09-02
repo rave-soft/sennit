@@ -105,6 +105,23 @@ func (p *shutdownPhases) runShutdownCallback(fn func(context.Context) error) err
 	}
 }
 
+// runHookList runs every non-nil callback in fns via runShutdownCallback,
+// logging msg (with the error) for each one that fails, and reports whether
+// every callback in fns succeeded. It is the shared body behind Shutdown's
+// five ordered hook/cleanup queues.
+func (p *shutdownPhases) runHookList(fns []func(context.Context) error, msg string) bool {
+	succeeded := true
+	for _, fn := range fns {
+		if fn != nil {
+			if err := p.runShutdownCallback(fn); err != nil {
+				succeeded = false
+				slog.Error(msg, "error", err)
+			}
+		}
+	}
+	return succeeded
+}
+
 // addHook is the shared body behind every Add* registration method below:
 // append fn to *queue unless shutdown has already started, in which case
 // it returns ErrAppShutdownBlocked and leaves fn unregistered.
@@ -226,29 +243,13 @@ func (p *shutdownPhases) Shutdown() {
 
 	// 1. Stop and join watchers before MCP closes. A failed watcher hook means
 	// it may still initiate MCP work, so MCP cannot safely be closed.
-	preCleanupHooksSucceeded := true
-	for _, hook := range preCleanupHooks {
-		if hook != nil {
-			if err := p.runShutdownCallback(hook); err != nil {
-				preCleanupHooksSucceeded = false
-				slog.Error("Failed to run pre-cleanup hook", "error", err)
-			}
-		}
-	}
+	preCleanupHooksSucceeded := p.runHookList(preCleanupHooks, "Failed to run pre-cleanup hook")
 
 	// Stop dependent subsystems before cancelling or releasing shared resources.
 	// A hook that does not finish is treated as a failure: its dependent
 	// cleanup (notably the thread DB release) must not run while it can still
 	// access that resource.
-	hooksSucceeded := true
-	for _, hook := range hooks {
-		if hook != nil {
-			if err := p.runShutdownCallback(hook); err != nil {
-				hooksSucceeded = false
-				slog.Error("Failed to run shutdown hook", "error", err)
-			}
-		}
-	}
+	hooksSucceeded := p.runHookList(hooks, "Failed to run shutdown hook")
 
 	// 2. Stop agent-owned work before closing MCP or database resources it may
 	// still use. CancelAll bounds its own wait; retain dependencies when active
@@ -337,23 +338,11 @@ func (p *shutdownPhases) Shutdown() {
 	}
 
 	// General cleanups do not determine the ordering of production resources.
-	for _, cleanup := range cleanups {
-		if cleanup != nil {
-			if err := p.runShutdownCallback(cleanup); err != nil {
-				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
-			}
-		}
-	}
+	p.runHookList(cleanups, "Failed to cleanup app properly on shutdown")
 
 	// 5. Never release a thread DB used by a hook that failed to finish.
 	if hooksSucceeded {
-		for _, cleanup := range criticalCleanups {
-			if cleanup != nil {
-				if err := p.runShutdownCallback(cleanup); err != nil {
-					slog.Error("Failed to run critical app cleanup on shutdown", "error", err)
-				}
-			}
-		}
+		p.runHookList(criticalCleanups, "Failed to run critical app cleanup on shutdown")
 	}
 	if dependenciesStopped && p.mainDBRelease != nil {
 		if err := p.runShutdownCallback(p.mainDBRelease); err != nil {
@@ -404,13 +393,7 @@ func (p *shutdownPhases) Shutdown() {
 
 	wg.Wait()
 	if hooksSucceeded && dependenciesStopped && repoUsersStopped.Load() {
-		for _, cleanup := range finalCleanups {
-			if cleanup != nil {
-				if err := p.runShutdownCallback(cleanup); err != nil {
-					slog.Error("Failed to run final app cleanup on shutdown", "error", err)
-				}
-			}
-		}
+		p.runHookList(finalCleanups, "Failed to run final app cleanup on shutdown")
 	} else if len(finalCleanups) > 0 {
 		slog.Error("Retaining final resources because repository-dependent subsystems did not stop", "hooksSucceeded", hooksSucceeded, "dependenciesStopped", dependenciesStopped, "repoUsersStopped", repoUsersStopped.Load())
 	}
