@@ -59,6 +59,7 @@ func runFakeLSPServer() {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
+			Error  json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal(body, &envelope); err != nil {
 			continue
@@ -118,6 +119,34 @@ func runFakeLSPServer() {
 			// is initialized but never usable.
 			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "crash-after-init" && initialized {
 				os.Exit(1)
+			}
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "request-during-init" {
+				// Mirrors a real server (e.g. typescript-language-server)
+				// issuing a request of its own before answering
+				// "initialize" itself. Send it now, mid-handshake, and
+				// read the client's reply before this case falls through
+				// to answer "initialize" below.
+				writeLSPFrame(os.Stdout, []byte(`{"jsonrpc":"2.0","id":"fake-wdp","method":"window/workDoneProgress/create","params":{"token":"init-scenario"}}`))
+				reply, err := readLSPFrame(r)
+				status := "ok"
+				if err != nil {
+					status = "read-error:" + err.Error()
+				} else {
+					var replyEnvelope struct {
+						Error json.RawMessage `json:"error"`
+					}
+					if err := json.Unmarshal(reply, &replyEnvelope); err != nil {
+						status = "unmarshal-error:" + err.Error()
+					} else if len(replyEnvelope.Error) > 0 {
+						status = "handler-error:" + string(replyEnvelope.Error)
+					}
+				}
+				if logPath := os.Getenv("SENNIT_LSP_FAKE_LOG"); logPath != "" {
+					if file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+						_, _ = fmt.Fprintln(file, "workDoneProgress-during-init "+status)
+						_ = file.Close()
+					}
+				}
 			}
 			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "bad-init" {
 				// A syntactically valid response whose result is not an

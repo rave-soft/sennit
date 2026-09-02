@@ -212,6 +212,49 @@ func TestClient_Restart_SkipsAFileDeletedSinceItWasOpened(t *testing.T) {
 	require.False(t, client.IsFileOpen(deleted), "the deleted file should be dropped, not reported open")
 }
 
+// TestClient_Initialize_HandlersRegisteredBeforeHandshakeCompletes pins
+// registerHandlers running before gen.client.Initialize's response is
+// processed: the fake server sends a window/workDoneProgress/create
+// request of its own mid-handshake (as typescript-language-server does
+// while loading a project), and the client must already have a handler
+// registered to answer it — an answer carrying a JSON-RPC error means
+// registration happened too late.
+//
+// Deliberately not t.Parallel(): LSP tests are sized for serial execution.
+func TestClient_Initialize_HandlersRegisteredBeforeHandshakeCompletes(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "fake.log")
+
+	cfg := config.LSPConfig{
+		Command:   exe,
+		FileTypes: []string{"go"},
+		Env: map[string]string{
+			fakeLSPServerEnv:           "1",
+			"SENNIT_LSP_FAKE_SCENARIO": "request-during-init",
+			"SENNIT_LSP_FAKE_LOG":      logPath,
+		},
+	}
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
+
+	client, err := New("test-init-handlers", cfg, resolver, dir, false)
+	require.NoError(t, err)
+	t.Cleanup(client.Kill)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+
+	logged, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	require.Contains(t, string(logged), "workDoneProgress-during-init ok",
+		"the client must have a handler registered for a request the server sends during the handshake")
+}
+
 // TestClient_ConcurrentVersionBumpsDoNotRace exercises NotifyChange and
 // RefreshOpenFiles bumping the same open file's version concurrently (e.g.
 // a debounced edit notification racing a workspace-wide refresh). Both read

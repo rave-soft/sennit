@@ -102,13 +102,8 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	c.runtime.mu.Lock()
 	defer c.runtime.mu.Unlock()
 	gen := c.runtime.currentGeneration()
-	// Register handlers for requests the server may send during the
-	// initialize handshake itself (e.g. typescript-language-server issuing
-	// window/workDoneProgress/create while loading the project, before
-	// initialize has returned). Registering after client.Initialize() is too
-	// late for those — the server treats an unhandled response as fatal.
-	c.runtime.registerHandlers(gen)
-
+	// Handler registration happens inside runtime.initialize, before it
+	// calls gen.client.Initialize — see that method's doc comment.
 	return c.runtime.initialize(ctx, gen)
 }
 

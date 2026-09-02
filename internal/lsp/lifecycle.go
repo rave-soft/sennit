@@ -178,8 +178,12 @@ func (r *runtime) currentGeneration() *clientGeneration {
 
 // initialize performs the LSP initialize handshake on the given
 // generation. Callers must hold r.mu; the handler registration is part of
-// the same critical section as the handshake because servers can send
-// requests during the handshake itself.
+// the same critical section as the handshake, and happens before
+// gen.client.Initialize() runs, because servers can send requests during
+// the handshake itself (e.g. typescript-language-server issuing
+// window/workDoneProgress/create while loading the project, before
+// Initialize has returned) — registering afterward is too late, since the
+// server treats an unhandled request as fatal.
 func (r *runtime) initialize(ctx context.Context, gen *clientGeneration) (*protocol.InitializeResult, error) {
 	r.registerHandlers(gen)
 

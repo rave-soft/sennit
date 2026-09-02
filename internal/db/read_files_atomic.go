@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 // UpdateFileRead read-modify-writes a file's recorded read ranges under
@@ -38,15 +39,20 @@ func (q *Queries) UpdateFileRead(ctx context.Context, sessionID, path string, up
 // updateFileReadIn performs the read-modify-write against whichever handle
 // is providing atomicity — this Queries' own transaction, or the caller's.
 func updateFileReadIn(ctx context.Context, db DBTX, sessionID, path string, update func(string) string) error {
-	row := db.QueryRowContext(ctx, `SELECT read_ranges FROM read_files WHERE session_id = ? AND path = ?`, sessionID, path)
+	q := New(db)
 	var ranges string
-	switch err := row.Scan(&ranges); err {
-	case sql.ErrNoRows:
+	file, err := q.GetFileRead(ctx, GetFileReadParams{SessionID: sessionID, Path: path})
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		ranges = ""
-	case nil:
-	default:
+	case err != nil:
 		return err
+	default:
+		ranges = file.ReadRanges
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO read_files (session_id, path, read_at, read_ranges) VALUES (?, ?, strftime('%s', 'now'), ?) ON CONFLICT(path, session_id) DO UPDATE SET read_at = excluded.read_at, read_ranges = excluded.read_ranges`, sessionID, path, update(ranges))
-	return err
+	return q.RecordFileRead(ctx, RecordFileReadParams{
+		SessionID:  sessionID,
+		Path:       path,
+		ReadRanges: update(ranges),
+	})
 }
