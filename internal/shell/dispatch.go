@@ -27,8 +27,22 @@ import (
 // hooks invoke many scripts.
 const probeWindow = 128
 
+// maxShebangLine caps the second, larger read used only when the first
+// probeWindow bytes are a shebang with no line ending in sight (see
+// shebangHead). 256 matches Linux's BINPRM_BUF_SIZE, the kernel's own
+// limit on how much of a shebang line it reads before giving up; macOS's
+// limit is larger, but a shebang past 256 bytes is already outside what a
+// Linux target accepts, so refusing there rather than guessing keeps us
+// honest about what we support. This second read only happens for the
+// shebang case, so it doesn't touch the "cheap for many scripts" budget
+// probeWindow above is sized for.
+const maxShebangLine = 256
+
 // scriptDispatchHandler returns middleware that intercepts exec of a
-// path-prefixed argv[0] (e.g. ./foo.sh, /opt/bin/tool, C:\foo\bar.exe) and
+// path-prefixed argv[0] (e.g. ./foo.sh, /opt/bin/tool, C:\foo\bar.exe).
+// It first checks the file's mode against the current user the way the OS
+// would (see isExecutableByUser) and refuses a non-executable file with
+// the same "permission denied" outcome a shell gives; otherwise it
 // dispatches based on the file's contents:
 //
 //  1. Shebang line (#!...) → exec the named interpreter via os/exec. The
@@ -57,8 +71,30 @@ func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
 			// the process cwd — hook commands are authored with the hook
 			// Runner's cwd in mind and sub-shells can cd before an exec.
 			scriptPath := filepathext.SmartJoin(interp.HandlerCtx(ctx).Dir, args[0])
+
+			// Decide execute permission the way the OS would, from the mode
+			// bits, before looking at contents at all. A 0644 file must be
+			// refused like a shell refuses it — clearing the execute bit is
+			// the standard way to disarm a script — not run as shell source
+			// just because probeFile can still read it. Skipped when stat
+			// itself fails (missing file, symlink loop, ...); probeFile
+			// below reports that.
+			if fi, statErr := os.Stat(scriptPath); statErr == nil && !fi.IsDir() && !isExecutableByUser(fi) {
+				hc := interp.HandlerCtx(ctx)
+				fmt.Fprintf(hc.Stderr, brand.Slug+": %s: permission denied\n", args[0])
+				return interp.ExitStatus(126)
+			}
+
 			probe, err := probeFile(scriptPath)
 			if err != nil {
+				if errors.Is(err, fs.ErrPermission) {
+					// Executable but unreadable (e.g. 0711 with no read
+					// bit): we can't probe the contents, but a real shell
+					// doesn't need to either — it hands the exec straight
+					// to the OS. Do the same instead of failing on our own
+					// read.
+					return next(ctx, args)
+				}
 				// Shell semantics: report on stderr and exit non-zero,
 				// so the rest of the command line still runs. Returning
 				// the raw *PathError instead made mvdan/sh abort the
@@ -181,6 +217,35 @@ func isBinary(probe []byte) bool {
 	return false
 }
 
+// shebangHead returns enough of path's head to contain a complete shebang
+// line. probe already qualifies if it holds a newline, or if the file is
+// shorter than probeWindow (EOF terminates the line just as well). Only
+// when probe is exactly probeWindow bytes with no newline in it — a
+// shebang that might run past the initial probe — do we go back and read
+// again, up to maxShebangLine bytes. That keeps the common case (short
+// shebangs, or files that aren't shebangs at all) down to the one cheap
+// probeWindow read; only long shebang lines pay for a second one.
+func shebangHead(path string, probe []byte) ([]byte, error) {
+	if len(probe) < probeWindow || bytes.IndexByte(probe, '\n') >= 0 {
+		return probe, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	// Read one byte past maxShebangLine: getting that extra byte back is
+	// what tells parseShebang the line truly runs past the cap, rather
+	// than the file simply ending at exactly maxShebangLine bytes with no
+	// trailing newline.
+	buf := make([]byte, maxShebangLine+1)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
 // dispatchShebang parses probe's shebang line and hands the resolved
 // interpreter invocation back to the handler chain, which is what gives it
 // the same treatment every other command gets: the block list still sees
@@ -192,7 +257,14 @@ func isBinary(probe []byte) bool {
 // they still held, so a cancelled turn hung until they exited on their
 // own.
 func dispatchShebang(ctx context.Context, next interp.ExecHandlerFunc, scriptPath string, probe []byte, args []string) error {
-	sb, err := parseShebang(probe)
+	head, err := shebangHead(scriptPath, probe)
+	if err != nil {
+		hc := interp.HandlerCtx(ctx)
+		fmt.Fprintf(hc.Stderr, brand.Slug+": %s: %s\n", scriptPath, unwrapPathError(err))
+		return interp.ExitStatus(126)
+	}
+
+	sb, err := parseShebang(head)
 	if err != nil {
 		hc := interp.HandlerCtx(ctx)
 		fmt.Fprintf(hc.Stderr, brand.Slug+": %s: %s\n", scriptPath, err)
@@ -271,9 +343,20 @@ func parseShebang(probe []byte) (*shebang, error) {
 		return nil, errors.New("not a shebang")
 	}
 	line := probe[2:]
-	// Take up to the first newline.
-	if idx := bytes.IndexByte(line, '\n'); idx >= 0 {
+	// Take up to the first newline. Finding none only after a
+	// maxShebangLine-sized read means the line genuinely runs past what
+	// we're willing to read — report that instead of acting on a
+	// fragment (a cut interpreter path, or an argument split mid-word).
+	idx := bytes.IndexByte(line, '\n')
+	switch {
+	case idx >= 0:
 		line = line[:idx]
+	case len(probe) > maxShebangLine:
+		// shebangHead only returns more than maxShebangLine bytes when
+		// there was still more file after the cap and no newline seen
+		// yet — a genuinely oversized line, not one that just happens
+		// to end there.
+		return nil, fmt.Errorf("shebang line exceeds %d bytes", maxShebangLine)
 	}
 	// Strip trailing CR (CRLF-authored scripts).
 	line = bytes.TrimRight(line, "\r")

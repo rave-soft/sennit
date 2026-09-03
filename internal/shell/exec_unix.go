@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -119,6 +120,63 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 
 		return exitStatusFromError(ctx, hc.Stderr, err)
 	}
+}
+
+// isExecutableByUser reports whether the current process could exec fi's
+// file, matching what execve(2) checks from the permission bits: the
+// owner bit when the caller's uid owns the file, the group bit when the
+// file's gid is the caller's effective gid or among its supplementary
+// groups (os.Getgroups() — a share owned by a group the user belongs to
+// only via that list, e.g. 0750 group-owned by "developers", must still
+// be treated as executable), and the other bit otherwise; root bypasses
+// the check entirely. Not modeled: the file mode is a stat() snapshot and
+// can be stale by the time exec actually runs — a TOCTOU window this does
+// not try to close, mirroring os/exec itself. Ordinary cases are what
+// this needs to get right: an owned 0644 file is never executable, an
+// owned 0755 file always is.
+func isExecutableByUser(fi os.FileInfo) bool {
+	mode := fi.Mode()
+	if mode&0o111 == 0 {
+		return false
+	}
+	if os.Geteuid() == 0 {
+		// Root's exec bypasses the permission bits entirely.
+		return true
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		// No ownership info to check against (unexpected on a real OS
+		// stat) — fall back to "any exec bit set".
+		return true
+	}
+	switch {
+	case uint32(os.Geteuid()) == st.Uid:
+		return mode&0o100 != 0
+	case inGroup(st.Gid):
+		return mode&0o010 != 0
+	default:
+		return mode&0o001 != 0
+	}
+}
+
+// inGroup reports whether gid is the caller's effective gid or one of its
+// supplementary groups. os.Getgroups() can fail (e.g. under a restricted
+// container runtime); when it does, we fall back to comparing against the
+// effective gid alone rather than treating the lookup as a match.
+func inGroup(gid uint32) bool {
+	if uint32(os.Getegid()) == gid {
+		return true
+	}
+	groups, err := os.Getgroups()
+	if err != nil {
+		return false
+	}
+	for _, g := range groups {
+		if uint32(g) == gid {
+			return true
+		}
+	}
+	return false
 }
 
 // exitStatusFromError translates an exec error into an interp exit status,

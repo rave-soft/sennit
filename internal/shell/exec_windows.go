@@ -3,11 +3,21 @@
 package shell
 
 import (
+	"os"
 	"os/exec"
 	"time"
 
 	"mvdan.cc/sh/v3/interp"
 )
+
+// isExecutableByUser always reports true on Windows. Windows does not have
+// a Unix-style execute permission bit — "can this run" comes from the file
+// extension and ACLs, neither of which this models — so dispatch keeps
+// deciding what to do from file contents here, same as before this check
+// existed on other platforms.
+func isExecutableByUser(_ os.FileInfo) bool {
+	return true
+}
 
 // KillTimeout matches mvdan's DefaultExecHandler default. Exported so
 // callers outside this package can derive their own timing from it — see

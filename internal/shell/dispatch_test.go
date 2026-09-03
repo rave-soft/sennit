@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // writeScript is a small helper that drops a file with the given contents
@@ -626,5 +628,235 @@ func TestDispatch_MissingScriptDoesNotAbortTheRestOfTheLine(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "missing.sh") {
 		t.Fatalf("the missing script must be reported, stderr: %q", stderr.String())
+	}
+}
+
+// TestIsExecutableByUser pins the ordinary cases the mode-bit check must
+// get right: an owned 0644 file is never executable, an owned 0755 file
+// always is, and an execute-only 0711 file still counts even though it
+// can't be read.
+func TestIsExecutableByUser(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission model")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file mode permission checks")
+	}
+	dir := t.TempDir()
+	cases := []struct {
+		name string
+		mode os.FileMode
+		want bool
+	}{
+		{"0644", 0o644, false},
+		{"0755", 0o755, true},
+		{"0711", 0o711, true},
+		{"0000", 0o000, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(dir, "f-"+c.name)
+			if err := os.WriteFile(path, []byte("echo hi\n"), c.mode); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			fi, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("stat: %v", err)
+			}
+			if got := isExecutableByUser(fi); got != c.want {
+				t.Errorf("isExecutableByUser(mode=%v) = %v, want %v", c.mode, got, c.want)
+			}
+		})
+	}
+}
+
+// TestDispatch_NonExecutableFileRefused confirms defect A's fix: a 0644
+// file is refused with the shell's status the way a real shell refuses
+// it, instead of being read as shell source just because probeFile can
+// still open it for reading. Clearing the execute bit is the standard way
+// to disarm a script; that has to actually work.
+func TestDispatch_NonExecutableFileRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission model")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file mode permission checks")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "notes.sh")
+	if err := os.WriteFile(script, []byte("echo should-not-run\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: script,
+		Cwd:     dir,
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	if err == nil {
+		t.Fatal("expected a non-zero status for a non-executable file, got nil")
+	}
+	if strings.Contains(stdout.String(), "should-not-run") {
+		t.Fatalf("a file lacking the execute bit must not be run as shell source, stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "permission") {
+		t.Fatalf("expected 'permission' on stderr, got: %q", stderr.String())
+	}
+}
+
+// TestDispatch_ExecutableFileRuns is the mirror of
+// TestDispatch_NonExecutableFileRefused: a 0755 file still runs.
+func TestDispatch_ExecutableFileRuns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission model")
+	}
+	dir := t.TempDir()
+	script := writeScript(t, dir, "run.sh", "echo executed\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: script,
+		Cwd:     dir,
+		Stdout:  &stdout,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if got := stdout.String(); got != "executed\n" {
+		t.Fatalf("stdout = %q, want %q", got, "executed\n")
+	}
+}
+
+// TestDispatch_ExecutableUnreadableReachesExecPath confirms the mirror
+// case of defect A: a file that's executable but not readable (0711, no
+// read bit) must not be refused by our own content probe — it has to
+// reach the normal exec path, same as a real shell would hand it straight
+// to the OS. We copy a real binary (rather than a shebang script, which
+// the kernel itself needs read access to interpret) so the only thing
+// standing between "executable" and "running" is our own probe.
+func TestDispatch_ExecutableUnreadableReachesExecPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on a Unix-style PATH binary and POSIX permission model")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file mode permission checks")
+	}
+	src, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("no `true` binary on PATH: %v", err)
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+	dir := t.TempDir()
+	dst := filepath.Join(dir, filepath.Base(src))
+	if err := os.WriteFile(dst, data, 0o755); err != nil {
+		t.Fatalf("write %s: %v", dst, err)
+	}
+	if err := os.Chmod(dst, 0o111); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	var stderr bytes.Buffer
+	runErr := Run(t.Context(), RunOptions{
+		Command: dst,
+		Cwd:     dir,
+		Env:     os.Environ(),
+		Stderr:  &stderr,
+	})
+	// Our own "permission denied" message (emitted by the mode check or
+	// by the probe-EACCES branch) would mean dispatch never reached the
+	// exec path at all — that's the bug this guards against, regardless
+	// of whether the kernel on this system is willing to exec an
+	// execute-only file.
+	if strings.Contains(stderr.String(), brand.Slug+": "+dst+": permission denied") {
+		t.Fatalf("dispatch refused the file itself instead of handing it to exec, stderr: %q", stderr.String())
+	}
+	if runErr != nil {
+		t.Skipf("kernel declined to exec an execute-only file on this platform/filesystem: %v (stderr=%q)", runErr, stderr.String())
+	}
+}
+
+// TestDispatch_LongShebangLineWithinCap confirms defect B's fix: a
+// shebang line past the old 128-byte probe window, but within the new
+// cap, resolves to the real interpreter instead of a byte-truncated
+// fragment. We copy `sh` into a deliberately long-named directory so the
+// interpreter path alone pushes the line past probeWindow.
+func TestDispatch_LongShebangLineWithinCap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on a Unix-style PATH binary")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("no `sh` binary on PATH: %v", err)
+	}
+	data, err := os.ReadFile(sh)
+	if err != nil {
+		t.Fatalf("read %s: %v", sh, err)
+	}
+	dir := t.TempDir()
+	padded := filepath.Join(dir, strings.Repeat("a", 180))
+	if err := os.MkdirAll(padded, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	longInterp := filepath.Join(padded, "sh")
+	if err := os.WriteFile(longInterp, data, 0o755); err != nil {
+		t.Fatalf("write %s: %v", longInterp, err)
+	}
+
+	line := "#!" + longInterp + "\n"
+	if len(line) <= probeWindow {
+		t.Fatalf("test setup: shebang line is %d bytes, want > probeWindow (%d)", len(line), probeWindow)
+	}
+	if len(line) > maxShebangLine {
+		t.Fatalf("test setup: shebang line is %d bytes, want <= maxShebangLine (%d)", len(line), maxShebangLine)
+	}
+	script := writeScript(t, dir, "long.sh", line+"echo longshebangok\n")
+
+	var stdout, stderr bytes.Buffer
+	err = Run(t.Context(), RunOptions{
+		Command: script,
+		Cwd:     dir,
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Env:     os.Environ(),
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v (stderr=%q)", err, stderr.String())
+	}
+	if got := stdout.String(); got != "longshebangok\n" {
+		t.Fatalf("stdout = %q, want %q", got, "longshebangok\n")
+	}
+}
+
+// TestDispatch_ShebangLineExceedsCapIsReported confirms that a shebang
+// line longer than maxShebangLine is reported rather than silently
+// truncated and acted on as a mangled fragment.
+func TestDispatch_ShebangLineExceedsCapIsReported(t *testing.T) {
+	dir := t.TempDir()
+	interpPath := "/" + strings.Repeat("y", maxShebangLine+64)
+	script := writeScript(t, dir, "toolong.sh", "#!"+interpPath+"\necho nope\n")
+
+	var stdout, stderr bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: script,
+		Cwd:     dir,
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	if err == nil {
+		t.Fatal("expected a non-zero status for an oversized shebang line, got nil")
+	}
+	if strings.Contains(stdout.String(), "nope") {
+		t.Fatalf("script body must not run when the shebang line can't be parsed, stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "exceeds") {
+		t.Fatalf("expected 'exceeds' on stderr, got: %q", stderr.String())
 	}
 }
