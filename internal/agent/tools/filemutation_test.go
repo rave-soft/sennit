@@ -115,6 +115,54 @@ func TestWriteTool_StaleFileRejectsOverwrite(t *testing.T) {
 	require.Equal(t, "original\n", string(onDisk), "the stale write must not land")
 }
 
+// TestCheckFileFreshness_SubSecondWriteIsStale guards the resolution fix:
+// read_at is now millisecond precision, so a write landing later in the
+// same wall-clock second as the read must still be caught as stale.
+func TestCheckFileFreshness_SubSecondWriteIsStale(t *testing.T) {
+	t.Parallel()
+
+	lastRead := time.Date(2026, 9, 3, 12, 0, 0, 100_000_000, time.UTC)
+	modTime := lastRead.Add(400 * time.Millisecond) // same second, later.
+	tracker := staleFileTracker{lastRead: lastRead}
+
+	state, got := checkFileFreshness(context.Background(), tracker, "session", "file.txt", modTime)
+	require.Equal(t, fileStale, state)
+	require.Equal(t, lastRead, got)
+}
+
+// TestCheckFileFreshness_ReadThenImmediateEditNotStale is the regression
+// guard for the common "read, then edit" flow: the edit's own write lands
+// at or before the recorded read time (they can share a timestamp when
+// both happen within the same tool call), so it must not be flagged stale.
+func TestCheckFileFreshness_ReadThenImmediateEditNotStale(t *testing.T) {
+	t.Parallel()
+
+	lastRead := time.Date(2026, 9, 3, 12, 0, 0, 500_000_000, time.UTC)
+	modTime := lastRead // the edit's mtime is not after the read time.
+	tracker := staleFileTracker{lastRead: lastRead}
+
+	state, _ := checkFileFreshness(context.Background(), tracker, "session", "file.txt", modTime)
+	require.Equal(t, fileFresh, state)
+}
+
+// TestCheckFileFreshness_SameMillisecondWriteNotStale guards the other
+// direction of the resolution fix: read_at is stored millisecond-aligned,
+// so a write numerically after it but inside the same millisecond — the
+// agent's own write landing right after the read/edit row update — must
+// still read as fresh, not stale. Without truncating modTime to
+// milliseconds before the comparison, this would misreport the agent's
+// own follow-up edit as an external change.
+func TestCheckFileFreshness_SameMillisecondWriteNotStale(t *testing.T) {
+	t.Parallel()
+
+	lastRead := time.Date(2026, 9, 3, 12, 0, 0, 100_000_000, time.UTC) // ms-aligned, as read_at is stored.
+	modTime := lastRead.Add(400 * time.Microsecond)                    // numerically later, same millisecond.
+	tracker := staleFileTracker{lastRead: lastRead}
+
+	state, _ := checkFileFreshness(context.Background(), tracker, "session", "file.txt", modTime)
+	require.Equal(t, fileFresh, state)
+}
+
 // (b) — a confined workspace refusing a write outside itself even though
 // permission would grant it — is already covered by
 // TestWriteTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside in

@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -92,9 +93,44 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 
 // CaptureResult holds the combined output and exit code from a
 // captured shell execution.
+// CaptureResult distinguishes the three outcomes a captured shell run can
+// have, in order of precedence:
+//
+//   - StartErr is non-nil: the command never ran at all — a parse failure
+//     or the interpreter could not start it. Output and ExitCode are the
+//     zero value; there is no command output to show, so callers must
+//     surface StartErr's message to the user directly instead.
+//   - Canceled is true: ctx was canceled, or its deadline passed, while
+//     the command was running. ExitCode is 130, matching a process killed
+//     by SIGINT, and Output holds whatever the command produced before it
+//     was stopped.
+//   - Otherwise: the command ran to completion and ExitCode is its real
+//     exit status (0 for success).
 type CaptureResult struct {
 	Output   string
 	ExitCode int
+	Canceled bool
+	StartErr error
+}
+
+// classifyCaptureErr turns Run's returned error into the fields
+// [CaptureResult] distinguishes. A signaled child whose ctx is already
+// done surfaces as context.Canceled or context.DeadlineExceeded (see
+// exitStatusFromError in exec_unix.go), which IsInterrupt recognizes; a
+// bare interp.ExitStatus is a normal exit; anything else — a parse
+// failure, a bad Cwd, or newInterp failing to start — means the command
+// never ran.
+func classifyCaptureErr(err error) (exitCode int, canceled bool, startErr error) {
+	if err == nil {
+		return 0, false, nil
+	}
+	if status, ok := errors.AsType[interp.ExitStatus](err); ok {
+		return int(status), false, nil
+	}
+	if IsInterrupt(err) {
+		return 130, true, nil
+	}
+	return 0, false, err
 }
 
 // PersistFunc is a callback that persists a shell command result.
@@ -124,7 +160,10 @@ func RunAndPersist(ctx context.Context, opts RunOptions, persist PersistFunc) (C
 // current process environment when opts.Env is nil.
 func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) {
 	if opts.Env == nil {
-		opts.Env = os.Environ()
+		// Strip herdr pane-ownership vars, same as [Shell]: a subprocess
+		// started from an inherited environment must not attach to the
+		// parent pane's agent authority (see [WithoutHerdrEnv]).
+		opts.Env = WithoutHerdrEnv(os.Environ())
 	}
 
 	// interp does not wait for background jobs (`cmd &`) started inside
@@ -177,7 +216,7 @@ var ptyColorEnvVars = []string{
 // replaced by the portable interpreter + env-var approach.
 func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, error) {
 	if opts.Env == nil {
-		opts.Env = os.Environ()
+		opts.Env = WithoutHerdrEnv(os.Environ())
 	}
 	opts.Env = append(opts.Env, ptyColorEnvVars...)
 	return RunAndCapture(ctx, opts)

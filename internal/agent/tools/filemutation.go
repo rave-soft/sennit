@@ -32,7 +32,20 @@ func checkFileFreshness(ctx context.Context, ft FileTracking, sessionID, filePat
 	switch {
 	case lastRead.IsZero():
 		return fileNeverRead, lastRead
-	case modTime.Truncate(time.Second).After(lastRead):
+	// read_at is millisecond precision, so modTime is truncated to
+	// milliseconds before comparing: without it, a write the agent itself
+	// just made — landing in the same millisecond as, but numerically
+	// after, the row update that recorded the read — would report stale
+	// and block the agent's own follow-up edit. Truncating to the
+	// column's own resolution keeps read-then-edit within a millisecond
+	// fresh; the cost is that a write inside that same millisecond is not
+	// caught either, the millisecond-scale echo of the whole-second window
+	// this resolution replaced. This works on filesystems with sub-second
+	// mtime resolution (ext4, btrfs, APFS, NTFS); on a filesystem that
+	// floors mtime to the second, a sub-second external write within the
+	// same second as the read is still invisible here, because the
+	// file's own recorded mtime cannot express it.
+	case modTime.Truncate(time.Millisecond).After(lastRead):
 		return fileStale, lastRead
 	default:
 		return fileFresh, lastRead

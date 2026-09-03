@@ -103,7 +103,7 @@ INSERT INTO read_files (
 ) VALUES (
     ?,
     ?,
-    strftime('%s', 'now'),
+    CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
     ?
 ) ON CONFLICT(path, session_id) DO UPDATE SET
     read_at = excluded.read_at,

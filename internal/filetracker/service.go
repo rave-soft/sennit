@@ -121,7 +121,7 @@ func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time
 		return time.Time{}
 	}
 
-	return time.Unix(readFile.ReadAt, 0)
+	return time.UnixMilli(readFile.ReadAt)
 }
 
 func (s *service) relpath(path string) string {

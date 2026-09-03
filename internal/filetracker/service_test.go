@@ -200,6 +200,26 @@ func TestService_RecordRead_DifferentPaths(t *testing.T) {
 	require.True(t, lastRead2.IsZero(), "path2 should not be recorded")
 }
 
+// TestService_ListReadFiles_OrdersMostRecentFirst guards read_at's
+// millisecond resolution: two reads landing in the same wall-clock second
+// but different milliseconds must still come back most-recent-first. The
+// database's own clock is real wall time (SQLite's julianday('now')), so
+// this sleeps for real rather than using synctest's fake clock.
+func TestService_ListReadFiles_OrdersMostRecentFirst(t *testing.T) {
+	env := setupTest(t)
+	sessionID := "order-session"
+	env.createSession(t, sessionID)
+	path1, path2 := "/path/to/file1.go", "/path/to/file2.go"
+
+	env.svc.RecordRead(env.ctx, sessionID, path1)
+	time.Sleep(20 * time.Millisecond)
+	env.svc.RecordRead(env.ctx, sessionID, path2)
+
+	files, err := env.svc.ListReadFiles(env.ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, []string{path2, path1}, files, "the more recently read file should sort first")
+}
+
 // TestService_UsesInjectedWorkingDir_NotProcessCwd guards against a
 // regression where paths were resolved against the process's os.Getwd()
 // instead of the workspace's working directory. In server mode the
