@@ -70,7 +70,6 @@ func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// IsRepo reports whether dir is inside a git working tree (or repo dir).
 // isNotRepository recognizes git's stable fatal diagnostic for rev-parse.
 // Git emits this only after successfully running and examining dir; all other
 // errors remain operational failures. The C locale set by runRaw keeps this
@@ -80,9 +79,23 @@ func isNotRepository(err error, stderr string) bool {
 	return errors.As(err, &exitErr) && strings.Contains(stderr, "not a git repository")
 }
 
-func IsRepo(ctx context.Context, dir string) bool {
+// IsRepo reports whether dir is inside a git working tree (or repo dir).
+// err is non-nil when that could not be determined — a command, context,
+// or permission failure — and callers must not read a false return
+// alongside a non-nil err as "this is not a repository".
+// Note one case no wrapper can separate: an unreadable .git directory
+// makes git report the same "not a git repository" diagnostic a plain
+// directory does, so it is reported here as "no", not as an error. Git
+// itself cannot tell the two apart.
+func IsRepo(ctx context.Context, dir string) (bool, error) {
 	out, err := run(ctx, dir, "rev-parse", "--is-inside-work-tree")
-	return err == nil && out == "true"
+	if err != nil {
+		if errors.Is(err, ErrNotRepository) {
+			return false, nil
+		}
+		return false, err
+	}
+	return out == "true", nil
 }
 
 // CommonDir returns the canonical absolute path to the git directory shared by
@@ -164,7 +177,11 @@ var ErrNotARepo = errors.New("git: not a repository")
 // UncommittedFiles returns staged, unstaged, and untracked files in dir's
 // repository. A directory outside a Git repository returns ErrNotARepo.
 func UncommittedFiles(ctx context.Context, dir string) ([]FileChange, error) {
-	if !IsRepo(ctx, dir) {
+	isRepo, err := IsRepo(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if !isRepo {
 		return nil, ErrNotARepo
 	}
 

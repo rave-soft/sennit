@@ -56,8 +56,29 @@ func TestIsRepo(t *testing.T) {
 	repo := initRepo(t)
 	ctx := context.Background()
 
-	require.True(t, IsRepo(ctx, repo))
-	require.False(t, IsRepo(ctx, t.TempDir()))
+	ok, err := IsRepo(ctx, repo)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = IsRepo(ctx, t.TempDir())
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// TestIsRepo_OperationalFailure verifies that a failure git can't attribute
+// to "not a repository" — git missing from PATH, here — comes back as a
+// non-nil error rather than being collapsed into a false result.
+func TestIsRepo_OperationalFailure(t *testing.T) {
+	oldCommandContext := commandContext
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, filepath.Join(t.TempDir(), "missing-git"), args...)
+	}
+	t.Cleanup(func() { commandContext = oldCommandContext })
+
+	ok, err := IsRepo(context.Background(), t.TempDir())
+	require.Error(t, err)
+	require.False(t, ok)
+	require.NotErrorIs(t, err, ErrNotRepository)
 }
 
 func TestCanonicalCommonDir_Relative(t *testing.T) {
@@ -234,6 +255,24 @@ func TestUncommittedFiles_UnbornHEAD(t *testing.T) {
 func TestUncommittedFilesOutsideRepo(t *testing.T) {
 	files, err := UncommittedFiles(t.Context(), t.TempDir())
 	require.ErrorIs(t, err, ErrNotARepo)
+	require.Nil(t, files)
+}
+
+// TestUncommittedFiles_OperationalFailure guards against relabeling an
+// operational failure (here, git missing from PATH) as ErrNotARepo: a
+// caller that special-cases ErrNotARepo, as
+// workspace.PrepareSessionChangesUsing does, must see this as a real error
+// to log rather than the ordinary case.
+func TestUncommittedFiles_OperationalFailure(t *testing.T) {
+	oldCommandContext := commandContext
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, filepath.Join(t.TempDir(), "missing-git"), args...)
+	}
+	t.Cleanup(func() { commandContext = oldCommandContext })
+
+	files, err := UncommittedFiles(t.Context(), t.TempDir())
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrNotARepo)
 	require.Nil(t, files)
 }
 
