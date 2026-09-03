@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -183,6 +184,25 @@ func (b *syncLogBuffer) String() string {
 	return b.buf.String()
 }
 
+// Lines returns the captured lines that contain needle, in capture order.
+// The handler is process-global (see logCaptureMu), so a test must select
+// its own lines by an identifier it generated - a session id, run id, or
+// similar - rather than asserting over the whole buffer, which can also
+// hold a concurrently running non-capturing test's output. Passing a
+// trailing delimiter (e.g. "session_id=aws-session ") in needle guards
+// against one id being a prefix of another.
+func (b *syncLogBuffer) Lines(needle string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(b.buf.String()), "\n") {
+		if line != "" && strings.Contains(line, needle) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 // logCaptureMu serializes every captureLogs/captureJSONLogs call across
 // this package's whole test binary. slog.SetDefault is process-global:
 // two t.Parallel() tests each installing their own handler would race —
@@ -199,6 +219,13 @@ var logCaptureMu sync.Mutex
 // duration of the test, restoring the previous default handler via
 // t.Cleanup. See logCaptureMu
 // for why this serializes against every other capture in the package.
+//
+// The installed handler is still the process default once the test's own
+// goroutines return, so a parallel non-capturing test can write into this
+// buffer for as long as the capture is held. An assertion over the buffer
+// must therefore select its line(s) by an identifier this test generated
+// (see Lines), not by message text alone - text another test can plausibly
+// emit proves nothing about which test emitted it.
 func captureLogs(t *testing.T) *syncLogBuffer {
 	t.Helper()
 	logCaptureMu.Lock()

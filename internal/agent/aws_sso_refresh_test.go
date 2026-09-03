@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
@@ -78,10 +79,20 @@ func TestRefreshAWSCredentials_Success_PublishesURLAndRetries(t *testing.T) {
 	ctx := WithRunID(context.WithValue(t.Context(), tools.SessionIDContextKey, "aws-session"), "aws-run")
 	err := co.builder.refreshAWSCredentials(ctx, providerCfg, runtimeOperationPort{})
 	require.NoError(t, err)
-	require.Contains(t, logs.String(), "event=invalidate")
-	require.Contains(t, logs.String(), "reason=aws_auth_refresh")
-	require.Contains(t, logs.String(), "session_id=aws-session")
-	require.Contains(t, logs.String(), "run_id=aws-run")
+
+	// Select this test's own invalidate line by its session id rather than
+	// matching each field against the whole buffer: "event=invalidate" is a
+	// generic label other invalidations in this package also log, and the
+	// buffer can hold their lines too since the handler is process-global.
+	var lines []string
+	for _, line := range logs.Lines("session_id=aws-session ") {
+		if strings.Contains(line, "event=invalidate") {
+			lines = append(lines, line)
+		}
+	}
+	require.Len(t, lines, 1, "expected exactly one invalidate line for this test's session")
+	require.Contains(t, lines[0], "reason=aws_auth_refresh")
+	require.Contains(t, lines[0], "run_id=aws-run")
 
 	dialogs := notifier.ofType(notify.TypeAWSSSOAuth)
 	require.GreaterOrEqual(t, len(dialogs), 2, "expected the initial dialog-open plus a follow-up carrying the URL")
