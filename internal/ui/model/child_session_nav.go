@@ -351,10 +351,9 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 }
 
 // handleChildSessionUpdate propagates a child agent-tool session's running
-// token count and todo list up to the parent delegation's block. Best-
-// effort: it's a no-op when the session isn't an agent-tool child session,
-// or the parent item can't be found (e.g. scrolled out of the loaded
-// window).
+// token count up to the parent delegation's block. Best-effort: it's a
+// no-op when the session isn't an agent-tool child session, or the parent
+// item can't be found (e.g. scrolled out of the loaded window).
 func (w *widgets) handleChildSessionUpdate(payload session.Session) {
 	_, toolCallID, ok := session.ParseAgentToolSessionID(payload.ID)
 	if !ok {
@@ -366,9 +365,6 @@ func (w *widgets) handleChildSessionUpdate(payload session.Session) {
 	}
 	if tracker, ok := container.(chat.ChildSessionTokenTracker); ok {
 		tracker.SetChildSessionTokens(payload.PromptTokens, payload.CompletionTokens)
-	}
-	if tracker, ok := container.(chat.ChildSessionTodoTracker); ok {
-		tracker.SetChildSessionTodos(payload.Todos)
 	}
 }
 

@@ -311,12 +311,11 @@ func DockGoalHeadline(name, goal string) string {
 
 // DockStatusLine builds the dock's per-thread status text: the step
 // count plus what the thread is doing right now — its in-progress todo
-// when there is one (a todo says more about intent than a raw tool name,
-// matching renderPanelStatusLine's priority), else its last tool call —
-// falling back to the thread's own status word when there's no activity
-// at all, always suffixed with the elapsed time. Doesn't add the leading
-// spinner/arrow — that's a rendering concern for the drawing step to
-// prepend.
+// when there is one (a todo says more about intent than a raw tool name),
+// else its last tool call — falling back to the thread's own status word
+// when there's no activity at all, always suffixed with the elapsed time.
+// Doesn't add the leading spinner/arrow — that's a rendering concern for
+// the drawing step to prepend.
 func DockStatusLine(status proto.ThreadStatus, activity DockActivity, elapsed time.Duration) string {
 	var parts []string
 	if activity.MessageCount > 0 {

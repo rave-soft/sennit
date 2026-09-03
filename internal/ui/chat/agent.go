@@ -3,7 +3,6 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -13,7 +12,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -27,7 +25,6 @@ import (
 type NestedToolContainer interface {
 	NestedTools() []ToolMessageItem
 	SetNestedTools(tools []ToolMessageItem)
-	AddNestedTool(tool ToolMessageItem)
 }
 
 // ChildSessionTokenTracker lets the live-update path
@@ -37,15 +34,6 @@ type NestedToolContainer interface {
 // [AgentToolMessageItem] and [AgenticFetchToolMessageItem].
 type ChildSessionTokenTracker interface {
 	SetChildSessionTokens(prompt, completion int64)
-}
-
-// ChildSessionTodoTracker mirrors [ChildSessionTokenTracker] for a running
-// delegation's todo list: it lets handleChildSessionUpdate push the child
-// session's current todos onto the block without this package depending on
-// session.Session's storage details. Implemented by [AgentToolMessageItem]
-// and [AgenticFetchToolMessageItem].
-type ChildSessionTodoTracker interface {
-	SetChildSessionTodos(todos []session.Todo)
 }
 
 // delegationToolMessageItem holds the state and behavior shared by every
@@ -70,12 +58,6 @@ type delegationToolMessageItem struct {
 	startTime        time.Time
 	promptTokens     int64
 	completionTokens int64
-
-	// todos mirrors the child session's current todo list (see
-	// ChildSessionTodoTracker) — rendered under a still-running
-	// delegation only; a finished delegation collapses to a summary and
-	// never shows todos (see ToggleExpanded).
-	todos []session.Todo
 
 	// unopenable marks a delegation whose child session does not exist
 	// yet — the model pushes it (see SetDelegationsUnopenable and
@@ -110,18 +92,6 @@ func (a *delegationToolMessageItem) SetChildSessionTokens(prompt, completion int
 	}
 	a.promptTokens = prompt
 	a.completionTokens = completion
-	a.clearCache()
-	a.Bump()
-}
-
-// SetChildSessionTodos implements [ChildSessionTodoTracker]. Dedupes like
-// SetChildSessionTokens: the live-update path re-delivers the full todo
-// list on every session save, not just on real changes.
-func (a *delegationToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
-	if slices.Equal(a.todos, todos) {
-		return
-	}
-	a.todos = todos
 	a.clearCache()
 	a.Bump()
 }
@@ -304,11 +274,6 @@ func (a *delegationToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
-// PanelStatusLine implements [PanelLiveActivityProvider].
-func (a *delegationToolMessageItem) PanelStatusLine(sty *styles.Styles, width int) string {
-	return renderPanelStatusLine(sty, width, a.startTime, a.nestedTools, a.todos, a.promptTokens, a.completionTokens)
-}
-
 // AgentToolMessageItem is a message item that represents an agent tool call.
 type AgentToolMessageItem struct {
 	*delegationToolMessageItem
@@ -338,7 +303,6 @@ var (
 	_ ToolMessageItem          = (*AgentToolMessageItem)(nil)
 	_ NestedToolContainer      = (*AgentToolMessageItem)(nil)
 	_ ChildSessionTokenTracker = (*AgentToolMessageItem)(nil)
-	_ ChildSessionTodoTracker  = (*AgentToolMessageItem)(nil)
 )
 
 // NewAgentToolMessageItem creates a new [AgentToolMessageItem]. cfg resolves
@@ -475,21 +439,6 @@ func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort stri
 	return a.displayName, a.model, a.effort, a.startTime, a.duration
 }
 
-// PanelLiveActivityProvider is implemented by running-delegation tool items
-// ([AgentToolMessageItem], [AgenticFetchToolMessageItem]) to expose a
-// ready-to-draw status line for the session panel's delegation block (see
-// internal/ui/model/session_panel.go). It's the exact same styled text
-// renderAgentStatusLine already produces for the (now-retired) inline
-// pending render — elapsed time, step count, last tool call, token count —
-// reused here so the panel never needs its own copy of that formatting, and
-// needs no extra IO: everything is already pushed into the item live via
-// ChildSessionTokenTracker/AddNestedTool.
-type PanelLiveActivityProvider interface {
-	PanelStatusLine(sty *styles.Styles, width int) string
-}
-
-var _ PanelLiveActivityProvider = (*AgentToolMessageItem)(nil)
-
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
@@ -540,12 +489,11 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	pending := delegationStillRunning(opts)
 	if pending {
 		// The session panel owns a running delegation's full live detail
-		// (todos, subtitle — see internal/ui/model/session_panel.go and
-		// PanelStatusLine below). The chat transcript shows the pending
-		// stub (name + spinner) plus one status line underneath with the
-		// current activity — elapsed time, step count, last child tool
-		// call — so what the task is doing is visible without opening
-		// the panel.
+		// (subtitle — see internal/ui/model/session_panel.go). The chat
+		// transcript shows the pending stub (name + spinner) plus one
+		// status line underneath with the current activity — elapsed
+		// time, step count, last child tool call — so what the task is
+		// doing is visible without opening the panel.
 		content := pendingDelegation(sty, r.agent.displayName, opts, width,
 			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
 		return clickableItemHover(sty, content, width, opts.Hovered)
@@ -571,10 +519,9 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// A finished (or canceled) top-level delegation collapses to a compact
 	// summary — the full result is only reachable by drilling into the
 	// child session (click, or alt+down), never by expanding this block
-	// inline. See ToggleExpanded above. Todos are deliberately dropped here
-	// (see the todos field doc) — only the model/effort subtitle carries
-	// over, since it describes the delegation's configuration rather than
-	// its runtime progress.
+	// inline. See ToggleExpanded above. Only the model/effort subtitle
+	// carries over, since it describes the delegation's configuration
+	// rather than its runtime progress.
 	//
 	// pending is always false here (the early return above already handled
 	// it), so this is really just "!opts.Compact": a nested (compact)
@@ -608,7 +555,6 @@ var (
 	_ ToolMessageItem          = (*AgenticFetchToolMessageItem)(nil)
 	_ NestedToolContainer      = (*AgenticFetchToolMessageItem)(nil)
 	_ ChildSessionTokenTracker = (*AgenticFetchToolMessageItem)(nil)
-	_ ChildSessionTodoTracker  = (*AgenticFetchToolMessageItem)(nil)
 	_ DelegationInfoProvider   = (*AgenticFetchToolMessageItem)(nil)
 )
 
@@ -624,8 +570,6 @@ const agenticFetchDisplayName = "fetch"
 func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration) {
 	return agenticFetchDisplayName, "", "", r.startTime, r.duration
 }
-
-var _ PanelLiveActivityProvider = (*AgenticFetchToolMessageItem)(nil)
 
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].
 func NewAgenticFetchToolMessageItem(
@@ -914,49 +858,6 @@ func renderAgentStatusLine(sty *styles.Styles, width int, startTime time.Time, n
 	}
 
 	return sty.Tool.TodoStatusNote.Render(presentation.JoinStatusParts(parts, width))
-}
-
-// renderPanelStatusLine is renderAgentStatusLine's counterpart for the
-// session panel's delegation block (see PanelLiveActivityProvider): same
-// elapsed/step/tokens shape, but the "current activity" segment prefers the
-// child session's in-progress todo (its ActiveForm, falling back to
-// Content) over the last nested tool call, matching
-// childSessionCurrentActivity's own priority in internal/ui/model — a todo
-// says more about what's actually happening than a raw tool name.
-func renderPanelStatusLine(sty *styles.Styles, width int, startTime time.Time, nestedTools []ToolMessageItem, todos []session.Todo, promptTokens, completionTokens int64) string {
-	if width <= 0 {
-		return ""
-	}
-
-	parts := []string{presentation.FormatElapsed(time.Since(startTime)), fmt.Sprintf("step %d", len(nestedTools))}
-	switch {
-	case currentTodoActivity(todos) != "":
-		parts = append(parts, "→ "+currentTodoActivity(todos))
-	case len(nestedTools) > 0:
-		if summary := LastToolSummary(nestedTools[len(nestedTools)-1].ToolCall()); summary != "" {
-			parts = append(parts, "→ "+summary)
-		}
-	}
-	if total := promptTokens + completionTokens; total > 0 {
-		parts = append(parts, presentation.FormatTokenCount(total)+" tok")
-	}
-
-	return sty.Tool.TodoStatusNote.Render(presentation.JoinStatusParts(parts, width))
-}
-
-// currentTodoActivity returns the in-progress todo's ActiveForm (falling
-// back to Content), or "" if none of todos is in progress.
-func currentTodoActivity(todos []session.Todo) string {
-	for _, t := range todos {
-		if t.Status != session.TodoStatusInProgress {
-			continue
-		}
-		if t.ActiveForm != "" {
-			return t.ActiveForm
-		}
-		return t.Content
-	}
-	return ""
 }
 
 // -----------------------------------------------------------------------------

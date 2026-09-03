@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -147,38 +146,6 @@ func TestRenderAgentStatusLine_Content(t *testing.T) {
 	tokIdx := strings.Index(plain, "1.5k tok")
 	require.True(t, elapsedIdx < stepIdx && stepIdx < toolIdx && toolIdx < tokIdx,
 		"status line fields must render in elapsed -> step -> last-tool -> tokens order, got: %s", plain)
-}
-
-// TestPanelStatusLine_MatchesUnderlyingStatusLine covers the new
-// PanelLiveActivityProvider accessor the session panel's delegations
-// section (internal/ui/model/session_panel.go) uses: it must reuse the
-// exact same renderAgentStatusLine formatting/data (elapsed, step count,
-// last tool, tokens) the old inline pending render used, for both
-// AgentToolMessageItem and AgenticFetchToolMessageItem, with no extra IO —
-// everything comes from fields already pushed in via AddNestedTool /
-// SetChildSessionTokens.
-func TestPanelStatusLine_MatchesUnderlyingStatusLine(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.SennitDark()
-
-	agentItem := NewAgentToolMessageItem(&sty, message.ToolCall{ID: "a1", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
-	agentItem.startTime = time.Now().Add(-30 * time.Second)
-	agentItem.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "bash", `{"command":"echo hi"}`))
-	agentItem.SetChildSessionTokens(100, 50)
-
-	var provider PanelLiveActivityProvider = agentItem
-	line := ansi.Strip(provider.PanelStatusLine(&sty, 200))
-	require.Contains(t, line, "30s")
-	require.Contains(t, line, "step 1")
-	require.Contains(t, line, "150 tok")
-
-	fetchItem := NewAgenticFetchToolMessageItem(&sty, message.ToolCall{ID: "f1", Name: "agentic_fetch", Input: `{}`, Finished: false}, nil, false)
-	fetchItem.startTime = time.Now().Add(-5 * time.Second)
-	var fetchProvider PanelLiveActivityProvider = fetchItem
-	fline := ansi.Strip(fetchProvider.PanelStatusLine(&sty, 200))
-	require.Contains(t, fline, "5s")
-	require.Contains(t, fline, "step 0")
 }
 
 // TestRenderAgentStatusLine_NoNestedTools covers the very first seconds
@@ -321,7 +288,7 @@ func TestAgentToolRenderPending_ManyNestedToolsStayOneStatusLine(t *testing.T) {
 		id := "tool-" + string(rune('0'+i))
 		item.AddNestedTool(mkNestedToolCall(t, &sty, id, "bash", `{"command":"echo `+id+`"}`))
 	}
-	require.Len(t, item.NestedTools(), 6, "the underlying slice is still tracked, for PanelStatusLine/the panel block")
+	require.Len(t, item.NestedTools(), 6, "the underlying slice is still tracked, even though the render shows only the latest call")
 
 	out := ansi.Strip(item.Render(120))
 	require.NotContains(t, out, "earlier steps")
@@ -727,95 +694,6 @@ func TestAgentToolRender_NoConfigOverrideShowsNoSubtitle(t *testing.T) {
 
 	out := ansi.Strip(item.Render(120))
 	require.NotContains(t, out, "effort")
-}
-
-// TestAgentToolMessageItem_SetChildSessionTodosBumpsVersion is the todos
-// counterpart of TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion:
-// pushing a new todo list must invalidate the cached render, and a
-// repeated identical update must not bump.
-func TestAgentToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.SennitDark()
-	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
-
-	todos := []session.Todo{{Content: "Do X", Status: session.TodoStatusInProgress, ActiveForm: "Doing X"}}
-
-	requireBump(t, "SetChildSessionTodos[first update]", item, func() {
-		item.SetChildSessionTodos(todos)
-	})
-
-	before := item.Version()
-	item.SetChildSessionTodos(todos)
-	require.Equal(t, before, item.Version(), "identical todo list must not bump the version")
-
-	requireBump(t, "SetChildSessionTodos[changed]", item, func() {
-		item.SetChildSessionTodos([]session.Todo{{Content: "Do Y", Status: session.TodoStatusPending}})
-	})
-}
-
-// TestAgenticFetchToolMessageItem_SetChildSessionTodosBumpsVersion is the
-// agentic-fetch counterpart of the todos bump test above.
-func TestAgenticFetchToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.SennitDark()
-	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
-	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
-
-	todos := []session.Todo{{Content: "Do X", Status: session.TodoStatusInProgress}}
-	requireBump(t, "SetChildSessionTodos[first update]", item, func() {
-		item.SetChildSessionTodos(todos)
-	})
-}
-
-// TestAgentToolRender_RunningHidesTodosFromTranscript covers the flip side
-// of TestAgentToolRender_FinishedHidesTodos: a *running* delegation's
-// child-session todos must not render in the chat transcript either — the
-// panel is the only place a running delegation's live todos show now (via
-// PanelStatusLine's caller in internal/ui/model), matching the pending
-// stub's "just the header" behavior.
-func TestAgentToolRender_RunningHidesTodosFromTranscript(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.SennitDark()
-	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
-	item.SetChildSessionTodos([]session.Todo{
-		{Content: "Read the file", Status: session.TodoStatusCompleted},
-		{Content: "Fix the bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing the bug"},
-		{Content: "Write a test", Status: session.TodoStatusPending},
-	})
-
-	out := ansi.Strip(item.Render(120))
-	require.NotContains(t, out, "Fixing the bug")
-	require.NotContains(t, out, "Write a test")
-	require.NotContains(t, out, "Read the file")
-}
-
-// TestAgentToolRender_FinishedHidesTodos covers requirement 5: once a
-// delegation finishes and collapses to its compact summary, its todos
-// must not render — only reachable by drilling into the child session.
-func TestAgentToolRender_FinishedHidesTodos(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.SennitDark()
-	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
-	item.SetChildSessionTodos([]session.Todo{
-		{Content: "Fix the bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing the bug"},
-	})
-
-	// Finish the delegation the same way the live update path does:
-	// SetToolCall(Finished: true) then SetResult.
-	finishedTC := parent
-	finishedTC.Finished = true
-	item.SetToolCall(finishedTC)
-	item.SetResult(&message.ToolResult{ToolCallID: parent.ID, Content: "done"})
-
-	out := ansi.Strip(item.Render(120))
-	require.NotContains(t, out, "Fixing the bug", "a finished delegation must not render its child-session todos")
 }
 
 // TestDelegationItemsKeepTheirRestylableAndAnimatableContracts pins the

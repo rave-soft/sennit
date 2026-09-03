@@ -142,12 +142,10 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 	childID := session.CreateAgentToolSessionID("parent-msg", "tc-agent")
 	u.handleChildSessionUpdate(session.Session{ID: childID, PromptTokens: 500, CompletionTokens: 120})
 
-	// A pending delegation's chat transcript render is now just the bare
-	// stub (see TestAgentToolMessageItem_PendingRendersBareStub in
-	// chat/agent_test.go) — the token total now surfaces on the session
-	// panel's delegation block instead, via PanelLiveActivityProvider.
-	line := ansi.Strip(item.PanelStatusLine(u.com.Styles, 120))
-	require.Contains(t, line, "620 tok", "child session token totals must surface on the panel's status line")
+	// The token total surfaces on the pending delegation's live status
+	// line in the chat transcript.
+	line := ansi.Strip(item.Render(120))
+	require.Contains(t, line, "620 tok", "child session token totals must surface on the delegation's status line")
 
 	// A session ID that isn't an agent-tool child session (the top-level
 	// session's own updates, for instance) must be ignored rather than
@@ -155,36 +153,6 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 	require.NotPanics(t, func() {
 		u.handleChildSessionUpdate(session.Session{ID: "top-level-session", PromptTokens: 1})
 	})
-}
-
-// TestHandleChildSessionUpdate_Todos is the todos counterpart of
-// TestHandleChildSessionUpdate: a session.Session update for a child
-// agent-tool session must reach the parent AgentToolMessageItem's todo
-// list and show up on re-render — the todos tool (domain/agent/tools/todos.go)
-// saves the child session with Todos set, publishing the same
-// pubsub.Event[session.Session] this handler already consumes for tokens.
-func TestHandleChildSessionUpdate_Todos(t *testing.T) {
-	t.Parallel()
-
-	u := newChildSessionTestUI(t)
-	item := chat.NewAgentToolMessageItem(u.com.Styles,
-		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
-	u.chat.AppendMessages(item)
-
-	childID := session.CreateAgentToolSessionID("parent-msg", "tc-agent")
-	u.handleChildSessionUpdate(session.Session{
-		ID: childID,
-		Todos: []session.Todo{
-			{Content: "Fix the bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing the bug"},
-		},
-	})
-
-	// See TestHandleChildSessionUpdate: a pending delegation's chat render
-	// is just the bare stub now, so the in-progress todo's ActiveForm must
-	// surface on the panel's status line instead (renderPanelStatusLine
-	// prefers it over the last tool call — see currentTodoActivity).
-	line := ansi.Strip(item.PanelStatusLine(u.com.Styles, 120))
-	require.Contains(t, line, "Fixing the bug", "child session todos must surface on the panel's status line")
 }
 
 // TestHandleChildSessionUpdate_Depth2 is the live-update counterpart of
@@ -207,11 +175,11 @@ func TestHandleChildSessionUpdate_Depth2(t *testing.T) {
 	innerChildID := session.CreateAgentToolSessionID("outer-child-msg", "tc-inner")
 	u.handleChildSessionUpdate(session.Session{ID: innerChildID, PromptTokens: 300, CompletionTokens: 40})
 
-	innerLine := ansi.Strip(inner.PanelStatusLine(u.com.Styles, 120))
+	innerLine := ansi.Strip(inner.Render(120))
 	require.Contains(t, innerLine, "340 tok",
 		"a depth-2 delegation's live token totals must reach its own status line")
 
-	outerLine := ansi.Strip(outer.PanelStatusLine(u.com.Styles, 120))
+	outerLine := ansi.Strip(outer.Render(120))
 	require.NotContains(t, outerLine, "340 tok",
 		"the update must land on the inner delegation, not bleed onto the outer one")
 }
