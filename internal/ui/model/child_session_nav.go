@@ -256,11 +256,11 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	m.focus = uiFocusMain
 	m.editor.textarea.Blur()
 
-	// Orientation ("main › agent1 (2/3)", model/effort, tokens, state) now
-	// lives entirely in drawChildSessionPanel, which replaces the editor —
-	// this used to also post a status-bar breadcrumb, but InfoTypeInfo is
-	// styled identically to InfoTypeSuccess (see quickstyle.go), so it
-	// rendered as a full-width green bar under the panel. Redundant with
+	// Orientation ("main › agent1 (2/3)", model/effort, tokens, state)
+	// lives entirely in drawChildSessionPanel, which replaces the editor.
+	// Unlike also posting a status-bar breadcrumb, this doesn't render as
+	// a full-width green bar under the panel (InfoTypeInfo is styled
+	// identically to InfoTypeSuccess, see quickstyle.go) — redundant with
 	// the panel and visually loud for what's just a location cue.
 
 	return m.requestSessionLoad(childID)

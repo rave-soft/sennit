@@ -367,11 +367,10 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.AccountRemoveConfirmID)
 		cmds = append(cmds, removeAccountCmd(m.com, msg.ProviderID, msg.AccountID), refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionAccountActivated:
-		// See ActionAccountActivated's doc comment: this used to be a
-		// bare ActionClose{} handled by applyChromeDialogAction's default
-		// case below. It is intercepted here instead so a switch to a
-		// different account also refreshes the sidebar's cached label
-		// for the newly active one (see account_label.go).
+		// Intercepted here rather than falling through to
+		// applyChromeDialogAction's default ActionClose{} handling, so a
+		// switch to a different account also refreshes the sidebar's
+		// cached label for the newly active one (see account_label.go).
 		m.dialog.CloseDialog(dialog.AccountsID)
 		cmds = append(cmds, refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionOpenProviderSettings:

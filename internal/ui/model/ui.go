@@ -528,13 +528,11 @@ func (m *UI) loadInitialSession() tea.Cmd {
 		// Nothing to load until the workspace is set up: those two states
 		// own the screen and end by moving to one of the states below.
 		//
-		// This used to read "only in uiLanding", which was the same test
-		// while landing was the only other state a UI could start in. It
-		// stopped being the same test once a thread's embedded chat began
-		// opening straight into uiChat when it knows its session
-		// (see New): the load it was opening *for* was then refused here,
-		// so the frame it opened into stayed empty forever. Drilling into
-		// a thread showed a blank screen.
+		// Both onboarding and initialize must be excluded here, not just
+		// uiLanding: a thread's embedded chat can open straight into
+		// uiChat when it already knows its session (see New), and a
+		// narrower check would refuse the load it was opening for,
+		// leaving the frame it opened into blank forever.
 		return nil
 	case m.sess.initialSessionID != "":
 		return m.requestSessionLoad(m.sess.initialSessionID)
@@ -567,11 +565,10 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 
 // loadCustomCommands loads the custom commands asynchronously.
 //
-// The palette used to walk the config directories itself and then merge in
-// the skill catalog. Both are discovery, and where a command comes from is
-// not the palette's business — it asks the workspace for the list and
-// renders it. Whatever could be read is still returned when part of it
-// failed, so a broken commands directory costs the skills nothing.
+// Discovery — walking config directories, merging in the skill catalog —
+// is the workspace's job, not the palette's: this just asks for the list
+// and renders it. Whatever could be read is still returned when part of
+// it failed, so a broken commands directory costs the skills nothing.
 func loadCustomCommands(com *common.Common, owner *UI) tea.Cmd {
 	ws := com.Workspace
 	ctx := com.Context()
@@ -603,8 +600,8 @@ type updateGroupFn func(m *UI, msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool)
 var updateGroups = buildUpdateGroups()
 
 // buildUpdateGroups constructs updateGroups once at package init. Each
-// group lists exactly the message types Update's switch used to name in
-// one case clause for that handler.
+// group lists exactly the message types routed to that handler, rather
+// than matched in Update's remaining bespoke switch.
 func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 	g := make(map[reflect.Type]updateGroupFn, 64)
 	register := func(fn updateGroupFn, types ...reflect.Type) {
@@ -784,10 +781,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // childSessionRef identifies a sub-agent delegation (agent / agentic_fetch
 // tool call) that can be entered as its own child session, via
-// session.CreateAgentToolSessionID(messageID, toolCallID).
-// childSessionRef identifies one delegation in a parent chat, together
-// with the display data captured from its chat item at the moment the
-// sibling list was built (see Chat.NestedToolContainerRefs). Carrying that
+// session.CreateAgentToolSessionID(messageID, toolCallID), together with
+// the display data captured from its chat item at the moment the sibling
+// list was built (see Chat.NestedToolContainerRefs). Carrying that
 // snapshot is what lets alt+left/alt+right cycle between siblings without
 // the parent's chat items, which are no longer loaded once navigation has
 // descended into a child session.

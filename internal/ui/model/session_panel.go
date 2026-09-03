@@ -48,12 +48,11 @@ func threadDockStatusText(t proto.Thread, activity threads.DockActivity) string 
 }
 
 // panelSpinnerWanted reports whether the panel currently shows any live
-// work worth animating: an in-progress todo while the local agent is busy
-// (the original todo-spinner condition), an active background thread, or a
-// running delegation of this session. The spinner used to belong to the
-// todos list alone; the thread and agent blocks now share it, so it must
-// keep ticking even when the local agent is idle and only delegated work is
-// moving.
+// work worth animating: an in-progress todo while the local agent is busy,
+// an active background thread, or a running delegation of this session.
+// The spinner is shared by the todos, thread, and agent blocks, so it must
+// keep ticking even when the local agent is idle and only delegated work
+// is moving.
 func (m *UI) panelSpinnerWanted() bool {
 	if !m.hasSession() {
 		return false
@@ -536,9 +535,9 @@ type sessionPanelPlan struct {
 // content in priority order when the natural size doesn't fit: active
 // threads and delegations are never shrunk except as an absolute last
 // resort, and — critically — completed/pending todo *data* is never
-// dropped once the section is expanded (m.panel.expanded). What used to be
-// "drop completed rows, then collapse the list" is now "hand the expanded
-// todos section a smaller viewport and let it scroll": todosInProgress,
+// dropped once the section is expanded (m.panel.expanded): rather than
+// dropping completed rows and collapsing the list, the expanded todos
+// section gets a smaller viewport and scrolls. todosInProgress,
 // todosPending, and todosDone always hold the full lists; todosViewportRows
 // is the (possibly smaller) number of those rows the budget actually grants
 // for painting this frame, and todosScrollable signals drawSessionPanel to
@@ -676,9 +675,9 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	}
 	if o := over(); o > 0 {
 		// Shed whole blocks, not rows. A thread block is two rows, so
-		// subtracting an odd count used to leave half a block painted —
+		// subtracting an odd count would leave half a block painted —
 		// a name with no status line under it — and the hidden threads
-		// vanished silently, with the "…and N more" footer still
+		// would vanish silently, with the "…and N more" footer still
 		// reporting only what the visible cap had dropped.
 		plan.threads, plan.threadsMore, plan.threadsRows = shedPanelBlocks(plan.threads, plan.threadsMore, o)
 	}
@@ -1156,9 +1155,8 @@ const sessionPanelHeightReasonableTerminalHeight = 40
 
 // autoExpandTodosIfReasonable expands the todos section if the terminal has
 // enough vertical space to show the expanded list comfortably and there are
-// incomplete todos. Unlike the old autoExpandPillsIfReasonable, the queue is
-// unconditionally always visible now, so it's no longer a reason to expand
-// anything.
+// incomplete todos. The queue is unconditionally always visible, so it
+// plays no part in this decision.
 //
 //nolint:unparam // always nil today, but keeps the tea.Cmd signature shared with the other panel handlers callers check for a non-nil cmd
 func (m *UI) autoExpandTodosIfReasonable() tea.Cmd {

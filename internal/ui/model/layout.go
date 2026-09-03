@@ -85,8 +85,8 @@ const sessionDetailsMaxHeight = 20
 
 // sidebarColumnWidth is the sidebar's column width in the non-compact chat
 // layout, including its one-column left padding. generateLayout, drawView,
-// and editorContentWidth must all agree on this figure — they used to drift
-// (32 / 31 / 30), which clipped the inline QuestionForm by a column or two.
+// and editorContentWidth must all agree on this figure — letting them drift
+// (32 / 31 / 30) clips the inline QuestionForm by a column or two.
 const sidebarColumnWidth = 32
 
 // editorAttachmentsRowHeight is the extra row the editor reserves above the

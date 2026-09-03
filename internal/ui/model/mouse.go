@@ -287,12 +287,12 @@ func (m *UI) applyMouseMotion(msg tea.MouseMotionMsg, cmds []tea.Cmd) ([]tea.Cmd
 		}
 
 		// Edge auto-scroll belongs to a selection drag, and works in
-		// the chat's own coordinates: y, not the absolute msg.Y the
-		// comparison below used to make against a chat-relative
-		// height. Ungated, every pointer movement over the lower part
-		// of the window scrolled the chat and snapped it to the
-		// selection; measured absolutely, the bottom trigger fired
-		// while the pointer was still well inside the chat.
+		// the chat's own coordinates: y, not the absolute msg.Y.
+		// Ungated, every pointer movement over the lower part of the
+		// window scrolls the chat and snaps it to the selection; and
+		// comparing msg.Y absolutely against a chat-relative height
+		// fires the bottom trigger while the pointer is still well
+		// inside the chat.
 		if !m.chat.Dragging() {
 			m.chat.HandleMouseDrag(x, y)
 			m.chat.HandleMouseHover(x, y)
