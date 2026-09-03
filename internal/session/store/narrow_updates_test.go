@@ -50,6 +50,107 @@ func TestNarrowUpdatesReportMissingSession(t *testing.T) {
 	}
 }
 
+// TestRenamePreservesUpdatedAt pins the guarantee Rename's doc comment
+// makes. Renaming does not count as work on a session: updated_at orders
+// ListSessions, decides what GetLastSession resumes, ages sessions out
+// under gc, and feeds the time ProjectStatsSince reports, and a rename
+// should move a session in none of those.
+func TestRenamePreservesUpdatedAt(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	created, err := sessions.Create(t.Context(), "old session")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, created.ID, 10)
+
+	require.NoError(t, sessions.Rename(t.Context(), created.ID, "renamed"))
+
+	got, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(10), got.UpdatedAt, "a title-only write must not bump updated_at")
+	require.Equal(t, "renamed", got.Title)
+}
+
+// TestSaveStillBumpsUpdatedAt is the other half of the pair: narrowing the
+// trigger to a column list must not stop a real write from bumping.
+func TestSaveStillBumpsUpdatedAt(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	created, err := sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, created.ID, 10)
+
+	created.Cost = 1.5
+	_, err = sessions.Save(t.Context(), created)
+	require.NoError(t, err)
+
+	got, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, int64(10), got.UpdatedAt, "a usage write must still bump updated_at")
+}
+
+// TestSessionUpdatedAtTriggerCoversEveryWorkColumn guards the column list
+// in 20260904000000_rename_does_not_bump_session_updated_at against the
+// one way it can rot: a column added to sessions and not to the trigger
+// would quietly stop bumping updated_at when written, and nothing else
+// would notice. Two columns are excluded by design - title, which is what
+// someone typed rather than work, and updated_at, whose explicit writers
+// the trigger's WHEN guard already protects.
+func TestSessionUpdatedAtTriggerCoversEveryWorkColumn(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	var triggerSQL string
+	require.NoError(t, conn.QueryRowContext(t.Context(),
+		`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'update_sessions_updated_at'`,
+	).Scan(&triggerSQL))
+
+	rows, err := conn.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('sessions')`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	excluded := map[string]bool{"title": true, "updated_at": true}
+	var columns []string
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		columns = append(columns, name)
+	}
+	require.NoError(t, rows.Err())
+	require.NotEmpty(t, columns)
+
+	for _, name := range columns {
+		if excluded[name] {
+			require.NotRegexp(t, `(?m)^\s*`+name+`,?\s*$`, triggerSQL,
+				"%q is excluded by design but appears in the trigger's column list", name)
+			continue
+		}
+		require.Regexp(t, `(?m)^\s*`+name+`,?\s*$`, triggerSQL,
+			"column %q is missing from update_sessions_updated_at: writes to it would not bump updated_at", name)
+	}
+}
+
 // TestGetLastBreaksUpdatedAtTiesByID makes the query's deterministic ordering
 // explicit. UUID-like IDs are strings, so descending ID is the stable winner.
 func TestGetLastBreaksUpdatedAtTiesByID(t *testing.T) {

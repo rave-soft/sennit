@@ -238,10 +238,10 @@ func (s *Session) confirmRenameSession() Action {
 	if newTitle == "" {
 		return nil
 	}
-	session := sessionItem.Session
-	session.Title = newTitle
-	s.updateSession(session)
-	return ActionCmd{s.updateSessionCmd(session)}
+	sess := sessionItem.Session
+	sess.Title = newTitle
+	s.updateSession(sess)
+	return ActionCmd{s.renameSessionCmd(sess.ID, newTitle)}
 }
 
 func (s *Session) updateSession(session session.Session) {
@@ -253,10 +253,16 @@ func (s *Session) updateSession(session session.Session) {
 	}
 }
 
-func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
+// renameSessionCmd persists only the title through RenameSession, not the
+// dialog's cached session row: that row is a ListSessions snapshot taken
+// when the dialog opened, and the dialog never subscribes to session
+// updates, so it can be arbitrarily stale by the time the user confirms a
+// rename. Writing it back whole (SaveSession) would clobber cost, todos and
+// summary_message_id changed by other writers (usage saves, the todo tool,
+// auto-summarization) while the dialog sat open.
+func (s *Session) renameSessionCmd(id, title string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := s.com.Workspace.SaveSession(s.com.Context(), session)
-		if err != nil {
+		if err := s.com.Workspace.RenameSession(s.com.Context(), id, title); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return nil

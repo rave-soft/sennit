@@ -37,14 +37,18 @@ type Service interface {
 	List(ctx context.Context) ([]session.Session, error)
 	ValidateSessionIDsInTree(ctx context.Context, rootSessionID string, sessionIDs []string) ([]string, error)
 	Save(ctx context.Context, sess session.Session) (session.Session, error)
-	// SaveUsage persists sess's title/token/summary/todo fields the way
-	// Save does, but ignores sess.Cost: costDelta is accumulated onto the
-	// session's existing cost with a single atomic UPDATE (cost = cost +
-	// costDelta) instead of writing back a whole total. Use this over
-	// Save when the caller's read of sess happened long enough ago that
-	// another writer (e.g. an async title-generation save landing
+	// SaveUsage persists sess's token/summary/todo fields the way Save
+	// does, but ignores sess.Cost and sess.Title: costDelta is
+	// accumulated onto the session's existing cost with a single atomic
+	// UPDATE (cost = cost + costDelta) instead of writing back a whole
+	// total, and the title column is left untouched entirely. Use this
+	// over Save when the caller's read of sess happened long enough ago
+	// that another writer (e.g. an async title-generation save landing
 	// against this same session) could plausibly have landed in between —
-	// summarize's provider stream is the case this exists for.
+	// summarize's provider stream is the case this exists for. Title is
+	// excluded rather than raced the same way cost is because nothing
+	// that calls SaveUsage means to rename the session; Save and Rename
+	// are for that.
 	SaveUsage(ctx context.Context, sess session.Session, costDelta float64) (session.Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
@@ -268,7 +272,6 @@ func (s *service) SaveUsage(ctx context.Context, sess session.Session, costDelta
 
 	dbSession, err := s.q.UpdateSessionUsage(ctx, db.UpdateSessionUsageParams{
 		ID:               sess.ID,
-		Title:            sess.Title,
 		PromptTokens:     sess.PromptTokens,
 		CompletionTokens: sess.CompletionTokens,
 		SummaryMessageID: sql.NullString{
@@ -333,8 +336,16 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 	return nil
 }
 
-// Rename updates only the title of a session without touching updated_at or
-// usage fields.
+// Rename writes only the title column, and only that column: since
+// 20260904000000_rename_does_not_bump_session_updated_at the auto-bump
+// trigger names the columns it reacts to and title is not among them, so
+// a rename leaves updated_at where it was. That matters because
+// updated_at is what orders ListSessions, what GetLastSession resumes,
+// what ages a session out under `sennit gc`, and what ProjectStatsSince
+// subtracts created_at from to report time worked - renaming a year-old
+// session should move it in none of those. Usage fields (cost, tokens,
+// todos, summary_message_id) are untouched too, which is the guarantee
+// this method exists to make.
 func (s *service) Rename(ctx context.Context, id string, title string) error {
 	rows, err := s.q.RenameSession(ctx, db.RenameSessionParams{
 		ID:    id,

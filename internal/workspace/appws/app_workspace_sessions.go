@@ -25,8 +25,8 @@ func (w *AppWorkspace) GetLastSession(ctx context.Context) (session.Session, err
 	return w.app.Sessions().GetLast(ctx)
 }
 
-func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
-	return w.app.Sessions().Save(ctx, sess)
+func (w *AppWorkspace) RenameSession(ctx context.Context, sessionID string, title string) error {
+	return w.app.Sessions().Rename(ctx, sessionID, title)
 }
 
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {

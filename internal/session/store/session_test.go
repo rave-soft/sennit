@@ -58,6 +58,48 @@ func TestSaveUsageAccumulatesConcurrentCost(t *testing.T) {
 	require.InDelta(t, 8.0, final.Cost, 0.0001)
 }
 
+// TestSaveUsageDoesNotClobberConcurrentTitle reproduces G18: SaveUsage's
+// caller (summarize) reads its session snapshot before the provider
+// stream starts, and generateTitle's async rename can land in that same
+// window. If SaveUsage wrote sess.Title back the way it writes prompt and
+// completion tokens, it would overwrite that freshly generated title with
+// whatever "New Session" placeholder was in the stale snapshot -
+// permanently, since generateTitle never runs a second time once the
+// session has user text (run_turn.go). SaveUsage must leave title alone.
+func TestSaveUsageDoesNotClobberConcurrentTitle(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	created, err := sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	// The snapshot summarize's SaveUsage call was built from, taken
+	// before the async title generator's rename below lands.
+	stale := created
+
+	// generateTitle's rename lands while the provider stream (the gap
+	// before SaveUsage below) is still in flight.
+	err = sessions.Rename(t.Context(), created.ID, "a generated title")
+	require.NoError(t, err)
+
+	// SaveUsage runs after the concurrent rename, but from the stale
+	// snapshot whose Title is still the placeholder.
+	_, err = sessions.SaveUsage(t.Context(), stale, 1)
+	require.NoError(t, err)
+
+	final, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "a generated title", final.Title)
+}
+
 // TestDescendantCostSumsTreeExcludingRoot builds a root session with a
 // child delegation and a grandchild delegation under that, each with its
 // own cost, and checks DescendantCost sums the descendants without

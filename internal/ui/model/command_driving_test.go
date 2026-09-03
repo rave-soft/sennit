@@ -296,10 +296,6 @@ func (w *cmdDrivingWorkspace) ListAllUserMessages(_ context.Context) ([]message.
 	return nil, nil
 }
 
-func (w *cmdDrivingWorkspace) SaveSession(_ context.Context, s session.Session) (session.Session, error) {
-	return s, nil
-}
-
 func (w *cmdDrivingWorkspace) DeleteSession(_ context.Context, _ string) error {
 	return nil
 }

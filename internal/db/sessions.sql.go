@@ -536,7 +536,6 @@ func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSess
 const updateSessionUsage = `-- name: UpdateSessionUsage :one
 UPDATE sessions
 SET
-    title = ?,
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
@@ -547,7 +546,6 @@ RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion
 `
 
 type UpdateSessionUsageParams struct {
-	Title            string         `json:"title"`
 	PromptTokens     int64          `json:"prompt_tokens"`
 	CompletionTokens int64          `json:"completion_tokens"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
@@ -556,17 +554,21 @@ type UpdateSessionUsageParams struct {
 	ID               string         `json:"id"`
 }
 
-// Same fields as UpdateSession, except cost: this accumulates a delta
-// onto the existing value (cost = cost + ?) instead of overwriting it
-// with the caller's whole running total. Used by a writer whose
-// read-to-write window spans an entire provider stream (summarize):
+// Same fields as UpdateSession, minus title, and except cost: this
+// accumulates a delta onto the existing value (cost = cost + ?) instead of
+// overwriting it with the caller's whole running total. Used by a writer
+// whose read-to-write window spans an entire provider stream (summarize):
 // writing back a total computed at the start of that window would
 // silently discard a concurrent cost write (e.g. an async
 // title-generation save against this same session) that landed while
-// the stream was still in flight.
+// the stream was still in flight. title is left out for the same reason:
+// the caller's copy was read before that stream started, so writing it
+// back here would overwrite a title async generation (title.go) set in
+// the meantime, permanently, since that generator never runs a second
+// time once a session has user text. No SaveUsage caller renames a
+// session - that is Save's and Rename's job.
 func (q *Queries) UpdateSessionUsage(ctx context.Context, arg UpdateSessionUsageParams) (Session, error) {
 	row := q.db.QueryRowContext(ctx, updateSessionUsage,
-		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,
 		arg.SummaryMessageID,

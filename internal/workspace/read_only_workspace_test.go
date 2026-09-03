@@ -36,7 +36,7 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	require.True(t, IsReadOnlyError(err))
 	err = ro.DeleteSession(t.Context(), "sess-1")
 	require.True(t, IsReadOnlyError(err))
-	_, err = ro.SaveSession(t.Context(), session.Session{ID: "sess-1"})
+	err = ro.RenameSession(t.Context(), "sess-1", "new title")
 	require.True(t, IsReadOnlyError(err))
 
 	// Agent mutations denied.
@@ -352,9 +352,9 @@ func (s *stubWorkspace) GetLastSession(ctx context.Context) (session.Session, er
 	return session.Session{ID: "sess-1"}, nil
 }
 
-func (s *stubWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
-	s.track("SaveSession")
-	return sess, nil
+func (s *stubWorkspace) RenameSession(ctx context.Context, sessionID string, title string) error {
+	s.track("RenameSession")
+	return nil
 }
 
 func (s *stubWorkspace) DeleteSession(ctx context.Context, sessionID string) error {

@@ -443,8 +443,8 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	require.NotPanics(t, detach)
 
 	// Read-only fallback: AttachThread must not spawn anything on its own.
-	_, saveErr := attached.SaveSession(t.Context(), session.Session{})
-	require.True(t, workspace.IsReadOnlyError(saveErr), "AttachThread must not reactivate a non-live thread")
+	renameErr := attached.RenameSession(t.Context(), "sess-1", "renamed")
+	require.True(t, workspace.IsReadOnlyError(renameErr), "AttachThread must not reactivate a non-live thread")
 	require.Nil(t, mgr.Handle(created.ID), "AttachThread must not install a runtime")
 	spawner.mu.Lock()
 	spawnCount := len(spawner.byPath)
@@ -601,8 +601,8 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	// readOnlyWorkspace's concrete type is unexported to internal/workspace,
 	// so its read-only-ness is asserted through behavior instead of a type
 	// check: a mutating call must be refused as a read-only operation.
-	_, saveErr := attached.SaveSession(t.Context(), session.Session{})
-	require.True(t, workspace.IsReadOnlyError(saveErr), "a non-live thread must not be reactivated by AttachThread")
+	renameErr := attached.RenameSession(t.Context(), "sess-1", "renamed")
+	require.True(t, workspace.IsReadOnlyError(renameErr), "a non-live thread must not be reactivated by AttachThread")
 	require.Nil(t, mgr.Handle(created.ID), "AttachThread must not spawn a workspace")
 
 	// The attached workspace can read the persisted session from the

@@ -10,7 +10,6 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
-	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +72,7 @@ var refusedMethods = []string{
 	"RemoveAccount",
 	"RemoveConfigField",
 	"RemoveThread",
-	"SaveSession",
+	"RenameSession",
 	"SetCompactMode",
 	"SetConfigField",
 	"SetProviderAPIKey",
@@ -355,8 +354,8 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			err := ro.RemoveThread(t.Context(), "id", proto.RemoveThreadOptions{})
 			require.True(t, IsReadOnlyError(err))
 		},
-		"SaveSession": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, err := ro.SaveSession(t.Context(), session.Session{ID: "sess-1"})
+		"RenameSession": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.RenameSession(t.Context(), "sess-1", "new title")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"SetCompactMode": func(t *testing.T, ro *readOnlyWorkspace) {

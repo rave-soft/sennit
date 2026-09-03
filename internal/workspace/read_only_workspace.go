@@ -188,8 +188,8 @@ func (w *readOnlyWorkspace) GetLastSession(ctx context.Context) (session.Session
 	return w.GetSession(ctx, w.sessionID)
 }
 
-func (w *readOnlyWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
-	return session.Session{}, w.readOnlyError("SaveSession")
+func (w *readOnlyWorkspace) RenameSession(ctx context.Context, sessionID string, title string) error {
+	return w.readOnlyError("RenameSession")
 }
 
 func (w *readOnlyWorkspace) DeleteSession(ctx context.Context, sessionID string) error {

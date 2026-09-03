@@ -71,12 +71,14 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 }
 
 func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]workspace.MCPPrompt, error) {
-	prompts, err := commands.LoadMCPPrompts(w.app.MCP)
+	prompts, err := commands.LoadMCPPrompts(w.app.MCP.Prompts())
 	return toWorkspaceMCPPrompts(prompts), err
 }
 
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	return commands.GetMCPPrompt(w.app.MCP, w.store, clientID, promptID, args)
+	return commands.GetMCPPrompt(func(ctx context.Context, clientID, promptID string, args map[string]string) ([]string, error) {
+		return w.app.MCP.GetPromptMessages(ctx, w.store, clientID, promptID, args)
+	}, clientID, promptID, args)
 }
 
 func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {

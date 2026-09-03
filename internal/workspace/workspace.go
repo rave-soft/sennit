@@ -173,7 +173,16 @@ type SessionStore interface {
 	// (no child or agent-tool sessions). It reports an error when there
 	// is none — see [ResolveSession]'s useLast branch, its only caller.
 	GetLastSession(ctx context.Context) (session.Session, error)
-	SaveSession(ctx context.Context, sess session.Session) (session.Session, error)
+	// RenameSession writes only sessionID's title. There is deliberately
+	// no whole-row counterpart on this contract: a caller that only wants
+	// to change the title (e.g. the sessions dialog, which never
+	// subscribes to session updates) would otherwise write back its whole
+	// stale snapshot, clobbering cost, todos and summary_message_id that
+	// other writers (usage saves, the todo tool, auto-summarization)
+	// changed while the snapshot was sitting in the UI. Whoever needs to
+	// write another field adds a narrow method for that field rather than
+	// bringing the row write back.
+	RenameSession(ctx context.Context, sessionID string, title string) error
 	DeleteSession(ctx context.Context, sessionID string) error
 	// SetCurrentSession reports the session this client is currently
 	// viewing. Empty sessionID clears the entry (e.g. landing screen).
