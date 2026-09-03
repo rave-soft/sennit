@@ -49,11 +49,13 @@ func applyOmlxMeta(models []catwalk.Model, statusResp omlxModelsStatusResponse) 
 		metaByID[m.ID] = m
 	}
 
+	// The server is outside our control; a non-positive size isn't a
+	// usable value, so only positive numbers overwrite the field.
 	return applyModelMeta(models, metaByID, func(model *catwalk.Model, meta omlxModelStatus) {
-		if model.ContextWindow == 0 && meta.MaxContextWindow != nil {
+		if model.ContextWindow == 0 && meta.MaxContextWindow != nil && *meta.MaxContextWindow > 0 {
 			model.ContextWindow = *meta.MaxContextWindow
 		}
-		if model.DefaultMaxTokens == 0 && meta.MaxTokens != nil {
+		if model.DefaultMaxTokens == 0 && meta.MaxTokens != nil && *meta.MaxTokens > 0 {
 			model.DefaultMaxTokens = *meta.MaxTokens
 		}
 	})

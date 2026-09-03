@@ -105,6 +105,43 @@ func TestLitellmEnricher(t *testing.T) {
 		require.Equal(t, "GPT-4o Custom", result[0].Name)
 	})
 
+	t.Run("ignores non-positive server-reported values", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"data": [{
+					"model_name": "gpt-4o",
+					"model_info": {
+						"max_input_tokens": -1,
+						"max_output_tokens": 0,
+						"input_cost_per_token": -2.5e-06,
+						"output_cost_per_token": 0
+					}
+				}]
+			}`))
+		}))
+		defer srv.Close()
+
+		cfg := Config{
+			ID:      "test-litellm",
+			BaseURL: srv.URL,
+		}
+		models := []catwalk.Model{
+			{ID: "gpt-4o", Name: "gpt-4o"},
+		}
+
+		e := &litellmEnricher{}
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+
+		// A negative or zero server value isn't usable, so the model's
+		// fields stay at their zero defaults instead of being set.
+		require.Equal(t, int64(0), result[0].ContextWindow)
+		require.Equal(t, int64(0), result[0].DefaultMaxTokens)
+		require.Equal(t, float64(0), result[0].CostPer1MIn)
+		require.Equal(t, float64(0), result[0].CostPer1MOut)
+	})
+
 	t.Run("returns models unchanged on HTTP error", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -70,6 +70,32 @@ func TestOmlxEnricher(t *testing.T) {
 		require.Equal(t, int64(8192), result[0].DefaultMaxTokens)
 	})
 
+	t.Run("ignores non-positive server-reported values", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(omlxModelsStatusResponse{
+				Models: []omlxModelStatus{
+					{ID: "m1", MaxContextWindow: ptr(int64(-1)), MaxTokens: ptr(int64(0))},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-omlx", BaseURL: srv.URL}
+		models := []catwalk.Model{
+			{ID: "m1"},
+		}
+
+		e := &omlxEnricher{}
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+
+		// A negative or zero server value isn't usable, so the model's
+		// fields stay at their zero defaults instead of being set.
+		require.Equal(t, int64(0), result[0].ContextWindow)
+		require.Equal(t, int64(0), result[0].DefaultMaxTokens)
+	})
+
 	t.Run("returns models unchanged on HTTP error", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
