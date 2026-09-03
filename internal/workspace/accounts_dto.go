@@ -1,17 +1,18 @@
 package workspace
 
-import (
-	"github.com/rave-soft/sennit/internal/providers/accounts"
-	"github.com/rave-soft/sennit/internal/shell"
-)
+import "github.com/rave-soft/sennit/internal/providers/accounts"
 
 // This file holds the contract's own names for backend values the TUI
-// renders, so internal/ui does not import internal/shell or
+// renders, so internal/ui does not directly import internal/shell or
 // internal/providers/accounts just to spell a type. Same reasoning as
 // LSPClientInfo and MCPPrompt: what crosses this boundary is data, and the
-// packages that produce it should not be in the UI's dependency graph.
-// See TestDomainPackageDoesNotDependOnAgentTransitively for the guard that
-// enforces the shape of that graph.
+// packages that produce it should not be a direct dependency of the UI.
+// This says nothing about the transitive graph: internal/config, which
+// this package does import for good reason, already pulls in
+// internal/shell via internal/shellconfig and internal/hooks, so
+// internal/shell is in the UI's transitive closure regardless of anything
+// in this file. See TestDomainPackageDoesNotDependOnAgentTransitively for
+// the guard that covers the closure that actually matters (internal/agent).
 
 // BackgroundJobCounts summarizes the background shell jobs a workspace is
 // running. Mirrors shell.BackgroundJobCounts.
@@ -20,8 +21,17 @@ type BackgroundJobCounts struct {
 	Completed int
 }
 
-// MaxBackgroundJobs is the cap the sidebar renders against.
-const MaxBackgroundJobs = shell.MaxBackgroundJobs
+// MaxBackgroundJobs is the cap the sidebar renders against. It is a
+// duplicate of shell.MaxBackgroundJobs, not an alias: the contract names
+// its own limit instead of reaching into a backend package to spell it,
+// which is a coupling concern, not a linking one — internal/shell stays in
+// this package's transitive closure regardless, because internal/config
+// already pulls it in through internal/shellconfig and internal/hooks, and
+// config is load-bearing here. So this duplicate sheds nothing from the
+// UI's dependency graph today; it would matter only if config's own path
+// to shell ever went away. Keep the two values in step by hand —
+// TestMaxBackgroundJobsMatchesShell fails loudly if they drift.
+const MaxBackgroundJobs = 50
 
 // Usage and UsageWindow are the provider's rate-limit snapshot. These are
 // true aliases rather than copies: CurrentPlanUsage already returns
