@@ -2,9 +2,11 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -155,10 +157,43 @@ func TestGrepTool_InsidePathDoesNotPrompt(t *testing.T) {
 // for rg's JSON output protocol) that reports one match in dir, so the
 // granted/no-prompt cases can assert a real result without depending on rg
 // being installed.
+//
+// It re-execs the test binary itself into
+// TestSearchConfinementRipgrepStubHelper below, the same convention
+// TestRipgrepFixtureHelper in pagination_e2e_test.go already uses, rather
+// than shelling out through `sh -c`: `sh` is not guaranteed to be on PATH
+// on the Windows CI runner, and a `sh -c` stub silently produces no rg
+// output there — which is exactly what made
+// TestRipgrepTool_InsidePathDoesNotPrompt fail on windows-latest ("No
+// files found" instead of a hit): the stub was never a working
+// replacement for rg on that platform, not a gap in the confinement gate
+// itself.
 func ripgrepStubCommand(dir string) func(ctx context.Context, pattern, path, include string, caseInsensitive bool) *exec.Cmd {
 	return func(ctx context.Context, pattern, path, include string, caseInsensitive bool) *exec.Cmd {
-		return exec.CommandContext(ctx, "sh", "-c", `printf '%s\n' '{"type":"match","data":{"path":{"text":"`+filepath.Join(dir, "hit.go")+`"},"lines":{"text":"const Hit = 1\n"},"line_number":1,"submatches":[{"start":0}]}}'`)
+		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSearchConfinementRipgrepStubHelper$", "--", filepath.Join(dir, "hit.go"))
 	}
+}
+
+// TestSearchConfinementRipgrepStubHelper is not a real test: it is the
+// re-exec target ripgrepStubCommand launches to stand in for rg, and does
+// nothing when run as an ordinary test (no "--" argument present).
+func TestSearchConfinementRipgrepStubHelper(t *testing.T) {
+	separator := slices.Index(os.Args, "--")
+	if separator < 0 {
+		return
+	}
+	require.Len(t, os.Args[separator+1:], 1)
+	path := os.Args[separator+1]
+
+	record := ripgrepMatch{Type: "match"}
+	record.Data.Path.Text = path
+	record.Data.Lines.Text = "const Hit = 1\n"
+	record.Data.LineNumber = 1
+	record.Data.Submatches = append(record.Data.Submatches, struct {
+		Start int `json:"start"`
+	}{Start: 0})
+	require.NoError(t, json.NewEncoder(os.Stdout).Encode(record))
+	os.Exit(0)
 }
 
 // TestRipgrepTool_OutsideWorkingDirPromptsAndRefusesOnDenial confirms
