@@ -370,20 +370,26 @@ var projectSkillSubdirs = []string{
 // will look for skills. In addition to the working directory, it also
 // checks the git working tree root so that monorepo-level skills are
 // discovered when the user is inside a subdirectory.
-// Working-directory paths come first so local skills take precedence
-// over monorepo-level ones.
+//
+// The git-root paths come first and the working-directory paths come last:
+// skills.DiscoverWithStates walks paths in this order and skills.Deduplicate
+// keeps the last occurrence of a name, so the last path here is the one
+// that wins. That makes local skills take precedence over monorepo-level
+// ones of the same name.
 func ProjectSkillsDir(workingDir string) []string {
 	dirs := make([]string, 0, len(projectSkillSubdirs)*2)
-	for _, sub := range projectSkillSubdirs {
-		dirs = append(dirs, filepath.Join(workingDir, sub))
-	}
 
 	// When the working directory is inside a git repository, also look at
-	// the repository root so monorepo-level .agents/skills are found.
+	// the repository root so monorepo-level .agents/skills are found. This
+	// goes first so the working-directory entries appended below win ties.
 	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
 		for _, sub := range projectSkillSubdirs {
 			dirs = append(dirs, filepath.Join(root, sub))
 		}
+	}
+
+	for _, sub := range projectSkillSubdirs {
+		dirs = append(dirs, filepath.Join(workingDir, sub))
 	}
 
 	return dirs

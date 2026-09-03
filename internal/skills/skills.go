@@ -200,6 +200,11 @@ func Discover(paths []string) []*Skill {
 // for diagnostics and UI reporting.
 func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	var skills []*Skill
+	// bases parallels skills, recording which entry of paths produced each
+	// skill, so the sort below can restore determinism within a path
+	// without disturbing precedence across paths (see the sort below and
+	// Deduplicate, which keeps the last occurrence).
+	var bases []string
 	var states []*SkillState
 	var mu sync.Mutex
 	seen := make(map[string]bool)
@@ -241,6 +246,7 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 		slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
 		mu.Lock()
 		skills = append(skills, skill)
+		bases = append(bases, base)
 		mu.Unlock()
 		addState(skill.Name, path, StateNormal, nil)
 		return nil
@@ -248,14 +254,29 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 		slog.Warn("Failed to walk skills path", "path", base, "error", err)
 	})
 
-	// fastwalk traversal order is non-deterministic, so sort for stable output.
-	// Sort by path first, then alphabetically by name within each path.
-	slices.SortStableFunc(skills, func(a, b *Skill) int {
-		if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
-			return c
+	// walkSkillFiles walks paths in order, one at a time, so skills is
+	// already grouped into contiguous runs by which entry of paths found
+	// them. fastwalk's traversal within a single base is concurrent and so
+	// non-deterministic, which is what needs sorting — but sorting must stay
+	// inside each run: a caller's path order is precedence (Deduplicate
+	// keeps the last occurrence), and comparing across runs would erase it.
+	// So each run is sorted in place, by path then alphabetically by name,
+	// leaving run boundaries untouched.
+	start := 0
+	for start < len(skills) {
+		end := start + 1
+		for end < len(skills) && bases[end] == bases[start] {
+			end++
 		}
-		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
-	})
+		run := skills[start:end]
+		slices.SortStableFunc(run, func(a, b *Skill) int {
+			if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
+				return c
+			}
+			return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		})
+		start = end
+	}
 
 	return skills, states
 }

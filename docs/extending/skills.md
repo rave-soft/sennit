@@ -50,8 +50,9 @@ agent sees when deciding.
 | `<git worktree root>/.sennit/skills/` | the whole repo, when you are in a subdirectory |
 | `~/.config/sennit/skills/` | every project |
 
-Working-directory paths come first, so a local skill takes precedence over a
-monorepo-level one of the same name.
+A local skill takes precedence over a monorepo-level one of the same name,
+and a project skill takes precedence over a global one of the same name —
+regardless of where either directory sits on disk.
 
 Add more:
 

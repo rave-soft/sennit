@@ -39,6 +39,52 @@ func TestWorktreeRoot_PicksUpGitInitMidSession(t *testing.T) {
 	}
 }
 
+// TestProjectSkillsDir_WorkingDirLast pins ProjectSkillsDir's order: the git
+// worktree root's skills directory must come before the working directory's,
+// so the working directory — the last entry — wins a same-named conflict
+// under skills.Deduplicate's last-occurrence rule (see DiscoverWithStates
+// and Deduplicate in internal/skills). workingDir is nested under a
+// subdirectory name that sorts before the repo root's own name, so a
+// lexicographic sort would put it first and get this backwards.
+func TestProjectSkillsDir_WorkingDirLast(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	root := t.TempDir()
+	cmd := exec.CommandContext(t.Context(), "git", "init")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	workingDir := filepath.Join(root, "aaa-subdir")
+	if err := os.MkdirAll(workingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs := ProjectSkillsDir(workingDir)
+
+	gitRootSkills := filepath.Join(root, ".sennit", "skills")
+	workingDirSkills := filepath.Join(workingDir, ".sennit", "skills")
+
+	gitRootIdx, workingDirIdx := -1, -1
+	for i, d := range dirs {
+		switch d {
+		case gitRootSkills:
+			gitRootIdx = i
+		case workingDirSkills:
+			workingDirIdx = i
+		}
+	}
+	if gitRootIdx == -1 || workingDirIdx == -1 {
+		t.Fatalf("ProjectSkillsDir(%q) = %v, want both %q and %q", workingDir, dirs, gitRootSkills, workingDirSkills)
+	}
+	if workingDirIdx < gitRootIdx {
+		t.Fatalf("ProjectSkillsDir(%q) = %v, want working-directory entry (%q) after git-root entry (%q)", workingDir, dirs, workingDirSkills, gitRootSkills)
+	}
+}
+
 // TestWorktreeRoot_NonGitDirSkipsGitSubprocess pins the cheap path: a
 // directory with no .git anywhere up the chain must resolve via findGitEntry
 // alone and never shell out to git. worktreeRoot's negative case is

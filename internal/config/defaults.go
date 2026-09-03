@@ -101,14 +101,23 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
-	// Add the default skills directories if not already present.
+	// Add the default skills directories if not already present. At this
+	// point c.Options.SkillsPaths holds whatever `option skill-path`
+	// entries the loaded config files contributed, in the order those
+	// files were merged; the defaults appended below go after them.
+	// skills.DiscoverWithStates walks SkillsPaths in this order and
+	// skills.Deduplicate keeps the last occurrence of a same-named skill,
+	// so position in this slice is precedence, last wins.
 	for _, dir := range GlobalSkillsDirs() {
 		if !slices.Contains(c.Options.SkillsPaths, dir) {
 			c.Options.SkillsPaths = append(c.Options.SkillsPaths, dir)
 		}
 	}
 
-	// Project specific skills dirs.
+	// Project specific skills dirs go last, so a project skill overrides a
+	// same-named global one regardless of where either directory sits on
+	// disk (see ProjectSkillsDir for the working-directory-vs-git-root
+	// ordering within this call).
 	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
 
 	if str, ok := os.LookupEnv(brand.EnvPrefix + "DISABLE_DEFAULT_PROVIDERS"); ok {

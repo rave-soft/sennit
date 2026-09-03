@@ -128,6 +128,130 @@ func TestDiscoverFromConfig(t *testing.T) {
 	require.True(t, foundCustom, "states slice should include the custom skill")
 }
 
+// writeTestSkill writes a minimal SKILL.md for name under dir/name/SKILL.md,
+// using description to distinguish same-named skills written to different
+// directories in a precedence test.
+func writeTestSkill(t *testing.T, dir, name, description string) {
+	t.Helper()
+	skillDir := filepath.Join(dir, name)
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: "+name+"\ndescription: "+description+"\n---\nbody\n"),
+		0o644,
+	))
+}
+
+// TestDiscoverFromConfig_LastPathWinsRegardlessOfSort guards the precedence
+// rule DiscoverFromConfig relies on: the *last* entry of SkillsPaths wins a
+// same-named conflict, independent of how the directory names sort. The two
+// directories are named so a lexicographic comparison would pick the wrong
+// one — "a-first" sorts before "z-second" — to prove the win comes from
+// SkillsPaths order and not from string comparison.
+func TestDiscoverFromConfig_LastPathWinsRegardlessOfSort(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	firstDir := filepath.Join(tmp, "z-first")
+	secondDir := filepath.Join(tmp, "a-second")
+	writeTestSkill(t, firstDir, "shared-skill", "from the first path.")
+	writeTestSkill(t, secondDir, "shared-skill", "from the second path.")
+
+	allSkills, _, _ := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths: []string{firstDir, secondDir},
+	})
+
+	var winner *Skill
+	for _, s := range allSkills {
+		if s.Name == "shared-skill" {
+			winner = s
+		}
+	}
+	require.NotNil(t, winner)
+	require.Equal(t, "from the second path.", winner.Description,
+		"the later SkillsPaths entry must win regardless of directory name sort order")
+}
+
+// TestDiscoverFromConfig_ProjectOverridesGlobalRegardlessOfCheckoutPath
+// mirrors how defaults.go orders SkillsPaths: global directories first,
+// project directories last. The project directory here sorts before the
+// global one lexicographically, which is exactly the case that broke under
+// the old cross-path sort (see config.ProjectSkillsDir's doc comment).
+func TestDiscoverFromConfig_ProjectOverridesGlobalRegardlessOfCheckoutPath(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	globalDir := filepath.Join(tmp, "zzz-home-config-skills")
+	projectDir := filepath.Join(tmp, "aaa-project-skills")
+	writeTestSkill(t, globalDir, "release-notes", "the global version.")
+	writeTestSkill(t, projectDir, "release-notes", "the project version.")
+
+	allSkills, _, _ := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths: []string{globalDir, projectDir},
+	})
+
+	var winner *Skill
+	for _, s := range allSkills {
+		if s.Name == "release-notes" {
+			winner = s
+		}
+	}
+	require.NotNil(t, winner)
+	require.Equal(t, "the project version.", winner.Description)
+}
+
+// TestDiscoverFromConfig_WorkingDirOverridesGitRoot mirrors
+// config.ProjectSkillsDir's own order: the git worktree root path first,
+// the working directory path last. The working directory here sorts before
+// the git root lexicographically, so this fails under a cross-path sort.
+func TestDiscoverFromConfig_WorkingDirOverridesGitRoot(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	gitRootDir := filepath.Join(tmp, "zzz-git-root", ".sennit", "skills")
+	workingDir := filepath.Join(tmp, "aaa-working-dir", ".sennit", "skills")
+	writeTestSkill(t, gitRootDir, "shared-skill", "from the git root.")
+	writeTestSkill(t, workingDir, "shared-skill", "from the working directory.")
+
+	allSkills, _, _ := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths: []string{gitRootDir, workingDir},
+	})
+
+	var winner *Skill
+	for _, s := range allSkills {
+		if s.Name == "shared-skill" {
+			winner = s
+		}
+	}
+	require.NotNil(t, winner)
+	require.Equal(t, "from the working directory.", winner.Description)
+}
+
+// TestDiscoverFromConfig_UserSkillOverridesBuiltin confirms a user skill
+// still wins over a builtin of the same name after the discovery-order fix:
+// builtins are discovered first and SkillsPaths entries are discovered
+// after them, so Deduplicate's last-occurrence rule keeps the user one.
+func TestDiscoverFromConfig_UserSkillOverridesBuiltin(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	writeTestSkill(t, tmp, "jq", "the user's own jq skill.")
+
+	allSkills, _, _ := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths: []string{tmp},
+	})
+
+	var winner *Skill
+	for _, s := range allSkills {
+		if s.Name == "jq" {
+			winner = s
+		}
+	}
+	require.NotNil(t, winner)
+	require.Equal(t, "the user's own jq skill.", winner.Description)
+	require.False(t, winner.Builtin)
+}
+
 func TestDiscoverFromConfig_DisabledFiltered(t *testing.T) {
 	t.Parallel()
 
