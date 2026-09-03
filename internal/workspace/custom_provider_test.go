@@ -234,6 +234,54 @@ func TestConfigureCustomProviderUsing_NoModelsFoundKeepsFieldsPersisted(t *testi
 	require.Equal(t, string(catwalk.TypeOpenAICompat), gjson.GetBytes(raw, "providers.empty-provider.type").String())
 }
 
+// TestConfigureCustomProviderUsing_DiscoveryErrorKeepsFieldsPersisted pins
+// what happens when discoverModels itself fails (a network error, an
+// unreachable endpoint, a malformed response) rather than merely returning
+// zero models. ConfigureCustomProviderUsing's doc comment says fields land
+// on disk "even when discovery fails or returns nothing" — this is that
+// same partial-write behavior, deliberate rather than a bug: type, name,
+// base_url and the API key are written regardless of discErr, only the
+// models field is skipped (there is nothing to write), and discErr itself
+// is what the caller sees back, not a generic "no models" error. The user
+// can fix the URL and retry via `sennit models refresh <id>` without
+// reconfiguring the provider from scratch.
+func TestConfigureCustomProviderUsing_DiscoveryErrorKeepsFieldsPersisted(t *testing.T) {
+	ws, configPath := newTestConfigAccessor(t)
+
+	params := ConfigureCustomProviderParams{
+		ID:      "unreachable-provider",
+		Name:    "Unreachable Provider",
+		BaseURL: "https://example.invalid/v1",
+		Type:    string(catwalk.TypeOpenAICompat),
+		APIKey:  "test-key",
+	}
+	discErr := fmt.Errorf("dial tcp: lookup example.invalid: no such host")
+
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(nil, discErr))
+	require.ErrorIs(t, err, discErr)
+	require.Nil(t, models)
+
+	// A provider with zero models — discovery failed outright here, same
+	// as returning an empty list — is dropped from the in-memory catalog
+	// by the config loader (see discoverCustomProviderModels /
+	// validateCustomProviders in internal/config/load.go), exactly like
+	// TestConfigureCustomProviderUsing_NoModelsFoundKeepsFieldsPersisted.
+	// What matters is that every field ConfigureCustomProviderUsing wrote
+	// before the failure — type, name, base_url, api_key — is still on
+	// disk, and that no models field was written at all.
+	_, ok := ws.Config().Providers.Get("unreachable-provider")
+	require.False(t, ok, "a provider with zero models is dropped from the in-memory catalog")
+
+	raw, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.invalid/v1", gjson.GetBytes(raw, "providers.unreachable-provider.base_url").String())
+	require.Equal(t, string(catwalk.TypeOpenAICompat), gjson.GetBytes(raw, "providers.unreachable-provider.type").String())
+	require.Equal(t, "Unreachable Provider", gjson.GetBytes(raw, "providers.unreachable-provider.name").String())
+	require.Equal(t, "test-key", gjson.GetBytes(raw, "providers.unreachable-provider.api_key").String())
+	require.False(t, gjson.GetBytes(raw, "providers.unreachable-provider.models").Exists(),
+		"a failed discovery must not write an empty/placeholder models field")
+}
+
 func TestConfigureCustomProviderUsing_RequiresIDAndBaseURL(t *testing.T) {
 	ws, _ := newTestConfigAccessor(t)
 	failIfCalled := func(context.Context, ConfigureCustomProviderParams, config.VariableResolver) ([]catwalk.Model, error) {
