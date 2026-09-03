@@ -18,7 +18,6 @@ import (
 type Service interface {
 	pubsub.Subscriber[session.Session]
 	Create(ctx context.Context, title string) (session.Session, error)
-	CreateTitleSession(ctx context.Context, parentSessionID string) (session.Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (session.Session, error)
 	// CreateSubAgentSession creates a delegation's child session and
 	// stamps it with the delegating agent's id, which is what later
@@ -154,21 +153,6 @@ func (s *service) ListSubAgentSessions(ctx context.Context, parentSessionID, age
 		s.applyEstimatedUsageState(&sessions[i])
 	}
 	return sessions, nil
-}
-
-func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string) (session.Session, error) {
-	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:              "title-" + parentSessionID,
-		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
-		Title:           "Generate a title",
-		ProjectPath:     s.projectPath,
-	})
-	if err != nil {
-		return session.Session{}, err
-	}
-	sess := s.fromDBItem(dbSession)
-	s.Publish(pubsub.CreatedEvent, sess)
-	return sess, nil
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {

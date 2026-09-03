@@ -237,7 +237,7 @@ func TestDeleteRemovesDescendantSessions(t *testing.T) {
 	require.NoError(t, err)
 	grandchild, err := sessions.CreateTaskSession(t.Context(), "child-2", child.ID, "nested delegation")
 	require.NoError(t, err)
-	title, err := sessions.CreateTitleSession(t.Context(), parent.ID)
+	sibling, err := sessions.CreateTaskSession(t.Context(), "child-3", parent.ID, "another delegation")
 	require.NoError(t, err)
 
 	// A message on the grandchild proves the cascade reaches child rows
@@ -253,7 +253,7 @@ func TestDeleteRemovesDescendantSessions(t *testing.T) {
 
 	require.NoError(t, sessions.Delete(t.Context(), parent.ID))
 
-	for _, id := range []string{parent.ID, child.ID, grandchild.ID, title.ID} {
+	for _, id := range []string{parent.ID, child.ID, grandchild.ID, sibling.ID} {
 		_, err = sessions.Get(t.Context(), id)
 		require.Error(t, err, "session %s should have been deleted with the tree", id)
 	}
@@ -428,10 +428,9 @@ func TestGetLastReturnsNewestTopLevelSession(t *testing.T) {
 	require.Equal(t, newest.ID, last.ID)
 }
 
-// TestGetLastExcludesChildSessions covers the filtering the old scan did
-// client-side: agent-tool sub-sessions and title-generation sessions carry
-// a non-null parent_session_id and must never win, even when they are the
-// most recently updated row in the table.
+// TestGetLastExcludesChildSessions pins that a session carrying a
+// non-null parent_session_id never wins, even when it is the most
+// recently updated row in the table.
 func TestGetLastExcludesChildSessions(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
@@ -453,13 +452,13 @@ func TestGetLastExcludesChildSessions(t *testing.T) {
 	require.NoError(t, err)
 	setUpdatedAt(t, conn, childID, 100)
 
-	titleSess, err := sessions.CreateTitleSession(t.Context(), parent.ID)
+	otherChild, err := sessions.CreateTaskSession(t.Context(), "tc-2", parent.ID, "another delegation")
 	require.NoError(t, err)
-	setUpdatedAt(t, conn, titleSess.ID, 90)
+	setUpdatedAt(t, conn, otherChild.ID, 90)
 
 	last, err := sessions.GetLast(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, parent.ID, last.ID, "child/title sessions must not win even when most recently updated")
+	require.Equal(t, parent.ID, last.ID, "a delegation must not win even when most recently updated")
 }
 
 // TestGetLastReportsErrorWhenNoSessions covers the empty case: the old
