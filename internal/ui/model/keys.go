@@ -83,45 +83,94 @@ func configuredKeyMap(goos string, overrides map[string][]string) KeyMap {
 }
 
 func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
-	km := KeyMap{
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
-		),
-		Help: key.NewBinding(
-			key.WithKeys("ctrl+g"),
-			key.WithHelp("ctrl+g", "more"),
-		),
-		Commands: key.NewBinding(
-			key.WithKeys("ctrl+p"),
-			key.WithHelp("ctrl+p", "commands"),
-		),
-		Models: key.NewBinding(
-			key.WithKeys("ctrl+m", "ctrl+l"),
-			key.WithHelp("ctrl+l", "models"),
-		),
-		Suspend: key.NewBinding(
-			key.WithKeys("ctrl+z"),
-			key.WithHelp("ctrl+z", "suspend"),
-		),
-		Sessions: key.NewBinding(
-			key.WithKeys("ctrl+s"),
-			key.WithHelp("ctrl+s", "sessions"),
-		),
-		Tab: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", ""),
-		),
-		ToggleYolo: key.NewBinding(
-			key.WithKeys("ctrl+y"),
-			key.WithHelp("ctrl+y", "toggle yolo"),
-		),
-		Threads: key.NewBinding(
-			key.WithKeys("ctrl+e"),
-			key.WithHelp("ctrl+e", "threads"),
-		),
+	var km KeyMap
+	setGlobalKeys(&km)
+	setEditorKeys(&km)
+	setChatKeys(&km)
+	setInitializeKeys(&km)
+
+	bindings := km.bindings()
+	if goos == "darwin" {
+		for action, binding := range bindings {
+			if darwinRewriteExclusions[action] {
+				continue
+			}
+			keys := binding.Keys()
+			for i, value := range keys {
+				keys[i] = strings.Replace(value, "ctrl+", "super+", 1)
+			}
+			binding.SetKeys(uniqueStrings(keys)...)
+			help := binding.Help()
+			binding.SetHelp(strings.ReplaceAll(help.Key, "ctrl+", "super+"), help.Desc)
+		}
+	}
+	for action, keys := range overrides {
+		binding := bindings[action]
+		if binding == nil || len(keys) == 0 {
+			continue
+		}
+		keys = uniqueStrings(keys)
+		binding.SetKeys(keys...)
+		help := binding.Help()
+		binding.SetHelp(formatShortcut(keys[0]), help.Desc)
+	}
+	deleteModeKey := bindingKey(km.Editor.AttachmentDeleteMode)
+	if deleteModeKey != "" {
+		help := km.Editor.AttachmentDeleteMode.Help()
+		km.Editor.AttachmentDeleteMode.SetHelp(deleteModeKey+"+{i}", help.Desc)
+		if deleteAllKey := bindingKey(km.Editor.DeleteAllAttachments); deleteAllKey != "" {
+			help = km.Editor.DeleteAllAttachments.Help()
+			km.Editor.DeleteAllAttachments.SetHelp(deleteModeKey+"+"+deleteAllKey, help.Desc)
+		}
 	}
 
+	return km
+}
+
+// setGlobalKeys fills in the bindings that apply outside any single
+// component (quitting, opening dialogs, suspending, etc).
+func setGlobalKeys(km *KeyMap) {
+	km.Quit = key.NewBinding(
+		key.WithKeys("ctrl+c"),
+		key.WithHelp("ctrl+c", "quit"),
+	)
+	km.Help = key.NewBinding(
+		key.WithKeys("ctrl+g"),
+		key.WithHelp("ctrl+g", "more"),
+	)
+	km.Commands = key.NewBinding(
+		key.WithKeys("ctrl+p"),
+		key.WithHelp("ctrl+p", "commands"),
+	)
+	km.Models = key.NewBinding(
+		key.WithKeys("ctrl+m", "ctrl+l"),
+		key.WithHelp("ctrl+l", "models"),
+	)
+	km.Suspend = key.NewBinding(
+		key.WithKeys("ctrl+z"),
+		key.WithHelp("ctrl+z", "suspend"),
+	)
+	km.Sessions = key.NewBinding(
+		key.WithKeys("ctrl+s"),
+		key.WithHelp("ctrl+s", "sessions"),
+	)
+	km.Tab = key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", ""),
+	)
+	km.ToggleYolo = key.NewBinding(
+		key.WithKeys("ctrl+y"),
+		key.WithHelp("ctrl+y", "toggle yolo"),
+	)
+	km.Threads = key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "threads"),
+	)
+}
+
+// setEditorKeys fills in the bindings scoped to the message editor and its
+// attachment/history sub-modes.
+func setEditorKeys(km *KeyMap) {
 	km.Editor.SendMessage = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "send"),
@@ -182,7 +231,11 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 		key.WithKeys("pgdown"),
 		key.WithHelp("pgdn", "page down"),
 	)
+}
 
+// setChatKeys fills in the bindings scoped to the chat/message list,
+// including scrolling, selection, and sub-agent session navigation.
+func setChatKeys(km *KeyMap) {
 	km.Chat.NewSession = key.NewBinding(
 		key.WithKeys("ctrl+n"),
 		key.WithHelp("ctrl+n", "new session"),
@@ -278,7 +331,11 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 		key.WithKeys("ctrl+right", "alt+right"),
 		key.WithHelp("ctrl+→", "next subagent"),
 	)
+}
 
+// setInitializeKeys fills in the bindings for the initialize (AGENTS.md
+// setup) prompt.
+func setInitializeKeys(km *KeyMap) {
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),
 		key.WithHelp("y", "yes"),
@@ -295,43 +352,6 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "select"),
 	)
-
-	bindings := km.bindings()
-	if goos == "darwin" {
-		for action, binding := range bindings {
-			if darwinRewriteExclusions[action] {
-				continue
-			}
-			keys := binding.Keys()
-			for i, value := range keys {
-				keys[i] = strings.Replace(value, "ctrl+", "super+", 1)
-			}
-			binding.SetKeys(uniqueStrings(keys)...)
-			help := binding.Help()
-			binding.SetHelp(strings.ReplaceAll(help.Key, "ctrl+", "super+"), help.Desc)
-		}
-	}
-	for action, keys := range overrides {
-		binding := bindings[action]
-		if binding == nil || len(keys) == 0 {
-			continue
-		}
-		keys = uniqueStrings(keys)
-		binding.SetKeys(keys...)
-		help := binding.Help()
-		binding.SetHelp(formatShortcut(keys[0]), help.Desc)
-	}
-	deleteModeKey := bindingKey(km.Editor.AttachmentDeleteMode)
-	if deleteModeKey != "" {
-		help := km.Editor.AttachmentDeleteMode.Help()
-		km.Editor.AttachmentDeleteMode.SetHelp(deleteModeKey+"+{i}", help.Desc)
-		if deleteAllKey := bindingKey(km.Editor.DeleteAllAttachments); deleteAllKey != "" {
-			help = km.Editor.DeleteAllAttachments.Help()
-			km.Editor.DeleteAllAttachments.SetHelp(deleteModeKey+"+"+deleteAllKey, help.Desc)
-		}
-	}
-
-	return km
 }
 
 // darwinRewriteExclusions lists the actions the darwin ctrl+->super+ rewrite
