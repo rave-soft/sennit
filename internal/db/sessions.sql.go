@@ -163,7 +163,7 @@ WITH RECURSIVE tree(id) AS (
     SELECT sessions.id
     FROM sessions
     WHERE sessions.id = ?1
-    UNION ALL
+    UNION
     SELECT sessions.id
     FROM sessions
     JOIN tree ON sessions.parent_session_id = tree.id
@@ -417,6 +417,33 @@ func (q *Queries) SetSessionTodos(ctx context.Context, arg SetSessionTodosParams
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const sumDescendantSessionCost = `-- name: SumDescendantSessionCost :one
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id
+    FROM sessions
+    WHERE sessions.id = ?1
+    UNION ALL
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.id
+)
+SELECT CAST(COALESCE(SUM(sessions.cost), 0) AS REAL) AS cost
+FROM sessions
+JOIN tree ON tree.id = sessions.id
+WHERE sessions.id != ?1
+`
+
+// The cost of every session nested under a session, at any depth,
+// excluding the root's own row.
+// Cost is written once per session, never rolled up onto a parent, so a
+// tree total is always a sum computed here rather than a stored column.
+func (q *Queries) SumDescendantSessionCost(ctx context.Context, sessionID string) (float64, error) {
+	row := q.db.QueryRowContext(ctx, sumDescendantSessionCost, sessionID)
+	var cost float64
+	err := row.Scan(&cost)
+	return cost, err
 }
 
 const updateSession = `-- name: UpdateSession :one

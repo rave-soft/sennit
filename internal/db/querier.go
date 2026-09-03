@@ -225,6 +225,11 @@ type Querier interface {
 	// turn's own usage saves; a full-row write from either side carried a
 	// stale copy of what the other had just written.
 	SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) (int64, error)
+	// The cost of every session nested under a session, at any depth,
+	// excluding the root's own row.
+	// Cost is written once per session, never rolled up onto a parent, so a
+	// tree total is always a sum computed here rather than a stored column.
+	SumDescendantSessionCost(ctx context.Context, sessionID string) (float64, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) (int64, error)

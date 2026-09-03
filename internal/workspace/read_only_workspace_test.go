@@ -371,6 +371,10 @@ func (s *stubWorkspace) SetCurrentSessionGeneration(_ context.Context, sessionID
 	return nil
 }
 
+func (s *stubWorkspace) SessionDescendantCost(context.Context, string) (float64, error) {
+	return 0, nil
+}
+
 // Messages
 func (s *stubWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
 	return []message.Message{{ID: "msg-1"}}, nil

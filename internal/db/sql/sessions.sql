@@ -146,12 +146,31 @@ WITH RECURSIVE tree(id) AS (
     SELECT sessions.id
     FROM sessions
     WHERE sessions.id = sqlc.arg(session_id)
-    UNION ALL
+    UNION
     SELECT sessions.id
     FROM sessions
     JOIN tree ON sessions.parent_session_id = tree.id
 )
 SELECT tree.id FROM tree;
+
+-- name: SumDescendantSessionCost :one
+-- The cost of every session nested under a session, at any depth,
+-- excluding the root's own row.
+-- Cost is written once per session, never rolled up onto a parent, so a
+-- tree total is always a sum computed here rather than a stored column.
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id
+    FROM sessions
+    WHERE sessions.id = sqlc.arg(session_id)
+    UNION ALL
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.id
+)
+SELECT CAST(COALESCE(SUM(sessions.cost), 0) AS REAL) AS cost
+FROM sessions
+JOIN tree ON tree.id = sessions.id
+WHERE sessions.id != sqlc.arg(session_id);
 
 -- name: ListSessionsForGC :many
 -- Every session across every project, trimmed to the columns `sennit gc`

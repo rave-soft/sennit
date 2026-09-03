@@ -67,6 +67,10 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = m.applySendPendingQueue(cmds)
 	case bangSessionCreatedMsg:
 		cmds = m.applyBangSessionCreated(msg, cmds)
+	case sessionDescendantCostMsg:
+		if m.sess.current != nil && msg.sessionID == m.sess.current.ID {
+			m.sess.descendantCost = msg.cost
+		}
 	}
 	return cmds, false
 }
@@ -169,6 +173,11 @@ func (m *UI) applyLoadSession(msg loadSessionMsg, cmds []tea.Cmd) []tea.Cmd {
 	m.setState(uiChat, m.focus)
 	m.sess.current = msg.session
 	m.sess.modelUsed = msg.modelUsed
+	// A different session is now current; its delegation total starts
+	// at zero rather than carrying over the session just left, and the
+	// real figure follows once the fetch below returns.
+	m.sess.descendantCost = 0
+	cmds = append(cmds, m.refreshDescendantCost(msg.sessionID))
 	// The chat is about to be replaced wholesale; placeholders belong
 	// to the list that is going away.
 	m.queued.clear(m.chat)
@@ -237,6 +246,10 @@ func (m *UI) applyCreateSession(msg createSessionMsg, cmds []tea.Cmd) ([]tea.Cmd
 		m.lay.isCompact = true
 	}
 	m.sess.current = &msg.session
+	// The load requested below re-fetches this once the new session is
+	// current; zero it now so the outgoing session's figure doesn't
+	// flash on screen for the moment in between.
+	m.sess.descendantCost = 0
 	m.setState(uiChat, m.focus)
 	// Request loading the chat for the new session, then dispatch
 	// sendMessage once the session is loaded.
@@ -291,6 +304,11 @@ func (m *UI) applySessionEvent(msg pubsub.Event[session.Session], cmds []tea.Cmd
 			if cmd := m.newSession(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+		} else if m.sess.current != nil && msg.Payload.ParentSessionID != "" {
+			// A deleted delegation's cost drops out of the tree total;
+			// same broad, over-fetching trigger as the update branch
+			// below.
+			cmds = append(cmds, m.refreshDescendantCost(m.sess.current.ID))
 		}
 		return cmds
 	}
@@ -305,6 +323,7 @@ func (m *UI) applySessionEvent(msg pubsub.Event[session.Session], cmds []tea.Cmd
 		available := m.lay.layout.main.Dy() + m.lay.layout.panel.Dy()
 		prevPanelHeight := m.sessionPanelHeight(available)
 		m.sess.current = &msg.Payload
+		cmds = append(cmds, m.refreshDescendantCost(msg.Payload.ID))
 		// syncPanelSpinner is idempotent and self-guarding — no need
 		// to pre-compute the in-progress edge here.
 		if cmd := m.syncPanelSpinner(); cmd != nil {
@@ -347,6 +366,16 @@ func (m *UI) applySessionEvent(msg pubsub.Event[session.Session], cmds []tea.Cmd
 		// child session, updated as its own turns complete. Surface
 		// its running token count on the parent's status line.
 		m.handleChildSessionUpdate(msg.Payload)
+		// A non-empty ParentSessionID means this event came from
+		// somewhere in a delegation tree, though not necessarily this
+		// one — telling whether it belongs to the tree the current
+		// session roots would need a lookup of its own, and refreshing
+		// on a delegation from an unrelated tree only costs one small
+		// indexed query, so the broad trigger is cheaper than being
+		// precise about it.
+		if m.sess.current != nil && msg.Payload.ParentSessionID != "" {
+			cmds = append(cmds, m.refreshDescendantCost(m.sess.current.ID))
+		}
 	}
 	return cmds
 }
@@ -466,6 +495,9 @@ func (m *UI) applyBangSessionCreated(msg bangSessionCreatedMsg, cmds []tea.Cmd) 
 		isFirstMessage: msg.isFirstMessage,
 	})
 	m.sess.current = &msg.session
+	// See applyCreateSession: the load requested below re-fetches this
+	// once the new session is current.
+	m.sess.descendantCost = 0
 	m.setState(uiChat, m.focus)
 	return append(cmds, m.requestSessionLoad(msg.session.ID))
 }

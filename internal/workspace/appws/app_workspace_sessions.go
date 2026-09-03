@@ -46,6 +46,10 @@ func (w *AppWorkspace) SetCurrentSessionGeneration(_ context.Context, sessionID 
 	return nil
 }
 
+func (w *AppWorkspace) SessionDescendantCost(ctx context.Context, sessionID string) (float64, error) {
+	return w.app.Sessions().DescendantCost(ctx, sessionID)
+}
+
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

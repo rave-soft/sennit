@@ -170,6 +170,10 @@ func (w *countingWorkspace) SetCurrentSessionGeneration(_ context.Context, _ str
 	return nil
 }
 
+func (w *countingWorkspace) SessionDescendantCost(context.Context, string) (float64, error) {
+	return 0, nil
+}
+
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
 }

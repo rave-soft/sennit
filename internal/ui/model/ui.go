@@ -1337,6 +1337,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.sess.loadGen++
 	m.sess.loadExpectedID = ""
 	m.sess.current = nil
+	m.sess.descendantCost = 0
 	m.clearChildSessionNav()
 	m.sidebar.offset = 0
 	m.sess.files = nil

@@ -146,6 +146,7 @@ var readOnlySafeMethods = []string{
 	"ReadSkill",
 	"ResetAgentToolCache",
 	"Resolver",
+	"SessionDescendantCost",
 	"SetCurrentSession",
 	"SetCurrentSessionGeneration",
 	"Stats",

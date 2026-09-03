@@ -58,6 +58,49 @@ func TestSaveUsageAccumulatesConcurrentCost(t *testing.T) {
 	require.InDelta(t, 8.0, final.Cost, 0.0001)
 }
 
+// TestDescendantCostSumsTreeExcludingRoot builds a root session with a
+// child delegation and a grandchild delegation under that, each with its
+// own cost, and checks DescendantCost sums the descendants without
+// folding in the root's own spend.
+func TestDescendantCostSumsTreeExcludingRoot(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	root, err := sessions.Create(t.Context(), "root")
+	require.NoError(t, err)
+	root.Cost = 1
+	_, err = sessions.Save(t.Context(), root)
+	require.NoError(t, err)
+
+	child, err := sessions.CreateSubAgentSession(t.Context(), "child", root.ID, "child", "coder")
+	require.NoError(t, err)
+	child.Cost = 2
+	_, err = sessions.Save(t.Context(), child)
+	require.NoError(t, err)
+
+	grandchild, err := sessions.CreateSubAgentSession(t.Context(), "grandchild", child.ID, "grandchild", "coder")
+	require.NoError(t, err)
+	grandchild.Cost = 4
+	_, err = sessions.Save(t.Context(), grandchild)
+	require.NoError(t, err)
+
+	total, err := sessions.DescendantCost(t.Context(), root.ID)
+	require.NoError(t, err)
+	require.InDelta(t, 6.0, total, 0.0001)
+
+	leaf, err := sessions.DescendantCost(t.Context(), grandchild.ID)
+	require.NoError(t, err)
+	require.Zero(t, leaf)
+}
+
 func TestEstimatedUsageStateSurvivesFetchModifySave(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(func() {

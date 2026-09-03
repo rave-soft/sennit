@@ -64,6 +64,11 @@ type Service interface {
 	// just wrote.
 	SetTodos(ctx context.Context, sessionID string, todos []session.Todo) error
 	Delete(ctx context.Context, id string) error
+	// DescendantCost sums cost over every session nested under
+	// sessionID, at any depth, excluding sessionID's own row. A session
+	// with no delegations legitimately sums to 0, not
+	// [session.ErrNotFound].
+	DescendantCost(ctx context.Context, sessionID string) (float64, error)
 }
 
 // TelemetrySink is the narrow seam the session service reports its
@@ -389,6 +394,12 @@ func (s *service) ValidateSessionIDsInTree(ctx context.Context, rootSessionID st
 		RootSessionID:  rootSessionID,
 		ProjectPath:    s.projectPath,
 	})
+}
+
+// DescendantCost sums cost over sessionID's delegations. See the
+// interface.
+func (s *service) DescendantCost(ctx context.Context, sessionID string) (float64, error) {
+	return s.q.SumDescendantSessionCost(ctx, sessionID)
 }
 
 func (s *service) List(ctx context.Context) ([]session.Session, error) {

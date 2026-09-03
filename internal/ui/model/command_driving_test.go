@@ -314,6 +314,10 @@ func (w *cmdDrivingWorkspace) SetCurrentSessionGeneration(_ context.Context, ses
 	return nil
 }
 
+func (w *cmdDrivingWorkspace) SessionDescendantCost(context.Context, string) (float64, error) {
+	return 0, nil
+}
+
 func (w *cmdDrivingWorkspace) SupportsThreads() bool { return w.supportsThreads }
 func (w *cmdDrivingWorkspace) ListThreads(_ context.Context) ([]proto.Thread, error) {
 	w.listThreadsCalls++

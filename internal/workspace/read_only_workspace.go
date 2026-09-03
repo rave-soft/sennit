@@ -214,6 +214,17 @@ func (w *readOnlyWorkspace) SetCurrentSessionGeneration(ctx context.Context, ses
 	return nil
 }
 
+func (w *readOnlyWorkspace) SessionDescendantCost(ctx context.Context, sessionID string) (float64, error) {
+	allowed, err := w.allowsSession(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	if !allowed {
+		return 0, w.scopeError(sessionID)
+	}
+	return w.ws.SessionDescendantCost(ctx, sessionID)
+}
+
 // -- Messages --
 
 func (w *readOnlyWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

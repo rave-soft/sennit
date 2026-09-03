@@ -180,6 +180,10 @@ type SessionStore interface {
 	// For AppWorkspace this is a no-op.
 	SetCurrentSession(ctx context.Context, sessionID string) error
 	SetCurrentSessionGeneration(ctx context.Context, sessionID string, generation uint64) error
+	// SessionDescendantCost sums cost over every session nested under
+	// sessionID, at any depth, excluding sessionID's own row. A session
+	// with no delegations legitimately sums to 0.
+	SessionDescendantCost(ctx context.Context, sessionID string) (float64, error)
 
 	ListMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error)

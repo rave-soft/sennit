@@ -43,6 +43,15 @@ type sessionState struct {
 
 	lastUserMessageTime int64
 
+	// descendantCost is the summed cost of every session nested under
+	// current, at any depth. It is fetched asynchronously and refreshed on session
+	// events rather than folded into current.Cost — current.Cost updates
+	// instantly with the session event that carries it, and making that
+	// wait on descendantCost's own database round trip would slow down
+	// the figure the user's own turn moves first. The sidebar adds the
+	// two together at render time; see sidebar.go's modelInfo.
+	descendantCost float64
+
 	// modelUsed is the model the loaded session's own assistant messages
 	// were produced by — which is not the selected model for a sub-agent's
 	// session or one opened from history. See viewedModel.
@@ -282,6 +291,42 @@ func (s *sessionState) reportCurrentSession(com *common.Common, sessionID string
 			slog.Debug("Failed to report current session", "session_id", sessionID, "error", err)
 		}
 		return nil
+	}
+}
+
+// sessionDescendantCostMsg carries the summed cost of sessionID's
+// delegations, as fetched by refreshDescendantCost. sessionID guards
+// against a reply landing after the user has switched to a different
+// session, the same way sessionFilesUpdatesMsg's does.
+//
+// uiOwned for the same reason as sessionFilesUpdatesMsg: dropped on the
+// active screen instead, a fetch started while viewing one screen and
+// landing on another would apply to the wrong sessionState.
+type sessionDescendantCostMsg struct {
+	uiOwned
+
+	sessionID string
+	cost      float64
+}
+
+// refreshDescendantCost fetches the summed cost of sessionID's
+// delegations off-thread and delivers it as a sessionDescendantCostMsg.
+// Nil for an empty sessionID: there is no session to attribute the total
+// to.
+func (m *UI) refreshDescendantCost(sessionID string) tea.Cmd {
+	if sessionID == "" {
+		return nil
+	}
+	ctx := m.com.Context()
+	ws := m.com.Workspace
+	owner := m
+	return func() tea.Msg {
+		cost, err := ws.SessionDescendantCost(ctx, sessionID)
+		if err != nil {
+			slog.Debug("Failed to refresh delegation cost", "session_id", sessionID, "error", err)
+			return nil
+		}
+		return sessionDescendantCostMsg{uiOwned: uiOwned{owner: owner}, sessionID: sessionID, cost: cost}
 	}
 }
 

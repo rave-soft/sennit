@@ -210,9 +210,13 @@ func (m *UI) modelInfo(width int) string {
 
 	var modelContext *common.ModelContextInfo
 	if model != nil && m.sess.current != nil {
+		// Cost lives only on its own session's row, never rolled up onto
+		// a parent, so the figure shown here is the session's own spend
+		// plus its delegations' — summed here rather than stored
+		// together anywhere.
 		modelContext = &common.ModelContextInfo{
 			ContextUsed:    m.sess.current.CompletionTokens + m.sess.current.PromptTokens,
-			Cost:           m.sess.current.Cost,
+			Cost:           m.sess.current.Cost + m.sess.descendantCost,
 			ModelContext:   model.CatalogCfg.ContextWindow,
 			EstimatedUsage: m.sess.current.EstimatedUsage,
 		}
