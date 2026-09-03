@@ -230,3 +230,79 @@ func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
 	require.Equal(t, thread.StatusIdle, got.Status,
 		"a live workspace with nothing in flight is idle, not running")
 }
+
+// TestManager_ParkedThreadSurvivesCancelledFollowUp is the regression test
+// for a parked delegation losing its terminal completion (and, for an
+// auto-merge thread, its merge) when a person cancels a follow-up sent
+// while it was parked.
+//
+// A thread whose own turn finishes while its children are still running
+// parks: its row is deliberately left at StatusRunning (see
+// lifecycle.parkIfAwaitingDelegations) until its own delegations settle.
+// If a person attaches to that still-"running" thread, sends a follow-up,
+// and cancels it before it dispatches, the cancelled-on-entry path used to
+// rest the entity at StatusIdle unconditionally — exactly like the
+// ordinary case above. For a parked thread that clobber is fatal:
+// finalizeRunComplete only reacts to a completion while the row still
+// reads StatusRunning, so the real completion arriving later is silently
+// dropped, and an auto-merge thread never merges.
+func TestManager_ParkedThreadSurvivesCancelledFollowUp(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
+
+	parent, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:            "parent",
+		Goal:            "coordinate",
+		ParentSessionID: "parent-sess",
+	})
+	require.NoError(t, err)
+	require.Equal(t, thread.MergeAuto, parent.MergePolicy)
+
+	child, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:            "child",
+		Goal:            "a piece of it",
+		MergePolicy:     thread.MergeManual,
+		ParentSessionID: parent.SessionID,
+	})
+	require.NoError(t, err)
+
+	// The parent's own goal run finishes while the child is still running:
+	// it must park rather than finalize.
+	writeFile(t, parent.WorktreePath, "output.txt", "auto merged\n")
+	publishSuccess(t, spawner.appFor(parent.WorktreePath), parent.SessionID)
+	require.Eventually(t, func() bool {
+		got, err := mgr.Get(t.Context(), parent.ID)
+		return err == nil && got.Status == thread.StatusRunning
+	}, eventuallyTimeout, eventuallyTick, "a parked thread's row stays running")
+	require.NotNil(t, mgr.Handle(parent.ID), "a parked entity's workspace stays live")
+
+	// A person attaches to what still reads as running and sends a
+	// follow-up, then cancels it before it dispatches — the race
+	// TestManager_SendFromPersonCancelledOnEntryRestsAtIdle covers for the
+	// ordinary, non-parked case.
+	coord := spawner.coordFor(parent.WorktreePath)
+	coord.setQueue(false, 0)
+	coord.setCancelOnEntry(true)
+	disp, err := mgr.SendFromPerson(t.Context(), parent.ID, "never mind")
+	require.NoError(t, err, "a cancelled dispatch is an outcome, not a failure")
+	require.False(t, disp.Steered)
+
+	got, err := mgr.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status,
+		"a cancelled follow-up must not clobber a parked entity's status")
+
+	// The child settles, and the parent's real completion finally arrives.
+	require.NoError(t, mgr.Cancel(t.Context(), child.ID, "no longer needed"))
+	publishSuccess(t, spawner.appFor(parent.WorktreePath), parent.SessionID)
+
+	require.Eventually(t, func() bool {
+		got, err := mgr.Get(t.Context(), parent.ID)
+		return err == nil && got.Status == thread.StatusMerged
+	}, eventuallyTimeout, eventuallyTick,
+		"the thread must reach a terminal status once its own delegations settle")
+
+	parentCoord := parentApp.Coordinator().(*fakeCoordinator)
+	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick,
+		"its completion must be delivered")
+}

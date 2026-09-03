@@ -513,7 +513,7 @@ func (l *lifecycle) steerApplyDecision(bgCtx context.Context, c *threadControl, 
 		// owed an owner. The caller already moved the delegation to
 		// running before dispatching, and no run exists to move it back,
 		// so rest it here instead.
-		l.restIdleAfterPersonTurn(bgCtx, id, RunComplete{SessionID: sessionID})
+		l.restIdleAfterPersonTurn(bgCtx, c, rt, id, RunComplete{SessionID: sessionID})
 		return SendDisposition{}, nil
 	}
 	// It became the active turn and owns the workspace from here. Still
@@ -551,7 +551,7 @@ func (l *lifecycle) steerAwait(bgCtx context.Context, c *threadControl, rt *runt
 			// No run exists to move the delegation back to idle, so
 			// without this it sits at running for the rest of the
 			// process — same reason the cancelled branch rests it.
-			l.restIdleAfterPersonTurn(bgCtx, id, RunComplete{SessionID: sessionID})
+			l.restIdleAfterPersonTurn(bgCtx, c, rt, id, RunComplete{SessionID: sessionID})
 			return SendDisposition{}, err
 		}
 		// Returned cleanly without reporting a decision — not a state any
@@ -874,7 +874,7 @@ func (l *lifecycle) matchRunComplete(ctx context.Context, c *threadControl, id s
 		rt.runID = ""
 		rt.person = false
 		c.mu.Unlock()
-		l.restIdleAfterPersonTurn(ctx, id, rc)
+		l.restIdleAfterPersonTurn(ctx, c, rt, id, rc)
 		return nil, false
 	}
 	c.mu.Unlock()
@@ -977,7 +977,19 @@ func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *thr
 // clearing a stale failure). ResultSummary and CompletedAt are preserved
 // — they describe the delegation's own goal run, not this turn. Nothing
 // is delivered to the parent; it already has the goal's outcome.
-func (l *lifecycle) restIdleAfterPersonTurn(ctx context.Context, id string, rc RunComplete) {
+//
+// A parked entity (rt.awaitingDelegations) is left alone: its row is
+// deliberately still StatusRunning while its own delegations are
+// outstanding, and moving it to idle here would strand it there once its
+// own completion finally arrives — finalizeRunComplete only reacts while
+// the row still reads StatusRunning.
+func (l *lifecycle) restIdleAfterPersonTurn(ctx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) {
+	c.mu.Lock()
+	parked := rt.awaitingDelegations
+	c.mu.Unlock()
+	if parked {
+		return
+	}
 	st, err := l.store.Get(ctx, id)
 	if err != nil {
 		return
