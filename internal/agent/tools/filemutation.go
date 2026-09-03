@@ -172,8 +172,25 @@ func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
 		return fantasy.ToolResponse{}, err
 	}
 	diffText, additions, removals := diff.GenerateDiff(snapshot.content, prepared.diffContent, strings.TrimPrefix(req.filePath, req.workingDir))
+	// The persistent-grant key is built from the symlink-resolved forms of
+	// both the file and workingDir, not the plain ones PathOrPrefix would
+	// otherwise compare: req.filePath can reach outside workingDir through
+	// an ancestor directory symlink (writePath above only follows a
+	// symlink at the leaf, so it does not catch this), and a grant keyed
+	// on the unresolved path would survive that link being repointed to a
+	// different destination. Resolving workingDir the same way keeps an
+	// ordinary in-workdir write's key collapsed to workingDir exactly as
+	// before whenever neither path involves a symlink.
+	resolvedFilePath, err := resolveExistingAncestorSymlinks(req.filePath)
+	if err != nil {
+		resolvedFilePath = req.filePath
+	}
+	resolvedWorkingDir, err := resolveExistingAncestorSymlinks(req.workingDir)
+	if err != nil {
+		resolvedWorkingDir = req.workingDir
+	}
 	resp, denied, err := requirePermission(req.ctx, req.permissions, permission.CreatePermissionRequest{
-		SessionID: req.sessionID, Path: fsext.PathOrPrefix(req.filePath, req.workingDir), ToolCallID: req.call.ID,
+		SessionID: req.sessionID, Path: fsext.PathOrPrefix(resolvedFilePath, resolvedWorkingDir), ToolCallID: req.call.ID,
 		ToolName: req.toolName, Action: "write", Description: prepared.description, Params: prepared.permParams,
 	})
 	if err != nil {

@@ -37,7 +37,7 @@ func newReadCore(permissions permission.Requester, tracker FileTracking, working
 			return readCoreResult{errText: "multi_read does not support skill resources; use read"}, nil
 		}
 		path := filepathext.SmartJoin(workingDir, p.FilePath)
-		abs, outside, err := resolveWithinWorkdir(workingDir, path)
+		abs, resolvedAbs, outside, err := resolveWithinWorkdir(workingDir, path)
 		if err != nil {
 			return readCoreResult{}, err
 		}
@@ -50,7 +50,8 @@ func newReadCore(permissions permission.Requester, tracker FileTracking, working
 			return readCoreResult{}, missingSessionID("accessing files outside working directory")
 		}
 		if outside && !isSkill {
-			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{SessionID: sessionID, Path: abs, ToolCallID: call.ID, ToolName: toolName, Action: "read", Description: fmt.Sprintf("Read file outside working directory: %s", abs), Params: ReadPermissionsParams(p)})
+			path, description := outsideWorkdirNotice("Read file outside working directory", abs, resolvedAbs)
+			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{SessionID: sessionID, Path: path, ToolCallID: call.ID, ToolName: toolName, Action: "read", Description: description, Params: ReadPermissionsParams(p)})
 			if err != nil {
 				return readCoreResult{}, err
 			}

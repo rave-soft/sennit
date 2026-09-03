@@ -93,7 +93,7 @@ func NewLsTool(permissions permission.Requester, workingDir string, lsConfig con
 			searchPath = filepathext.SmartJoin(workingDir, searchPath)
 
 			// Check if directory is outside working directory and request permission if needed
-			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
+			absSearchPath, resolvedSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
 			if err != nil {
 				// Resolving a path is infrastructure, not something the
 				// model can act on by rewording its call, so it is a Go
@@ -107,13 +107,14 @@ func NewLsTool(permissions permission.Requester, workingDir string, lsConfig con
 					return fantasy.ToolResponse{}, missingSessionID("accessing directories outside working directory")
 				}
 
+				path, description := outsideWorkdirNotice("List directory outside working directory", absSearchPath, resolvedSearchPath)
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        absSearchPath,
+					Path:        path,
 					ToolCallID:  call.ID,
 					ToolName:    LSToolName,
 					Action:      "list",
-					Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
+					Description: description,
 					Params:      LSPermissionsParams(params),
 				})
 				if err != nil {

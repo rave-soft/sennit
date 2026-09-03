@@ -113,7 +113,7 @@ func NewRipgrepTool(permissions permission.Requester, workingDir string, cfg con
 			}
 			searchPath := filepathext.SmartJoin(workingDir, params.Path)
 
-			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
+			absSearchPath, resolvedSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
 			}
@@ -123,13 +123,14 @@ func NewRipgrepTool(permissions permission.Requester, workingDir string, cfg con
 					return fantasy.ToolResponse{}, missingSessionID("searching file contents outside working directory")
 				}
 
+				path, description := outsideWorkdirNotice("Search file contents outside working directory", absSearchPath, resolvedSearchPath)
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        absSearchPath,
+					Path:        path,
 					ToolCallID:  call.ID,
 					ToolName:    RipgrepToolName,
 					Action:      "search",
-					Description: fmt.Sprintf("Search file contents outside working directory: %s", absSearchPath),
+					Description: description,
 					Params:      RipgrepPermissionsParams(params),
 				})
 				if err != nil {

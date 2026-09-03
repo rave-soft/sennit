@@ -307,7 +307,7 @@ func literalAbsPathOutside(w *syntax.Word, boundary string) (path string, found 
 	if lit == "/dev/null" {
 		return "", false
 	}
-	_, outside, err := resolveWithinWorkdir(boundary, lit)
+	_, _, outside, err := resolveWithinWorkdir(boundary, lit)
 	if err != nil || !outside {
 		return "", false
 	}

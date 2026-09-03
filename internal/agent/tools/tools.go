@@ -148,7 +148,13 @@ func requirePermission(ctx context.Context, perms permission.Requester, req perm
 // request. err is non-nil only when workingDir or path cannot be resolved to
 // an absolute path (e.g. an unreadable cwd); the returned absPath is the
 // plain (symlink-unaware) absolute form, so callers still open exactly the
-// path they asked for.
+// path they asked for. resolvedPath is the symlink-followed form the
+// outside test itself is computed from — the actual destination, which a
+// permission request must show and key on rather than absPath: a directory
+// symlink lexically inside workingDir makes absPath and resolvedPath
+// diverge, and absPath alone would let the dialog claim a location the
+// request is not really about. resolvedPath equals absPath whenever no
+// symlink is involved, the common case.
 //
 // The outside test itself resolves symlinks first: without that, a
 // directory symlink lexically inside workingDir (e.g. "up" -> "../..",
@@ -159,31 +165,49 @@ func requirePermission(ctx context.Context, perms permission.Requester, req perm
 // than "the path doesn't exist yet" (permission denied, a symlink loop, ...)
 // is treated as outside rather than surfaced as err, so a confinement check
 // fails closed instead of either erroring out or, worse, treating an
-// unresolvable path as safe.
-func resolveWithinWorkdir(workingDir, path string) (absPath string, outside bool, err error) {
+// unresolvable path as safe; resolvedPath falls back to absPath in that
+// case, since no better destination is known.
+func resolveWithinWorkdir(workingDir, path string) (absPath, resolvedPath string, outside bool, err error) {
 	absWorkingDir, err := filepath.Abs(workingDir)
 	if err != nil {
-		return "", false, fmt.Errorf("resolving working directory: %w", err)
+		return "", "", false, fmt.Errorf("resolving working directory: %w", err)
 	}
 	absPath, err = filepath.Abs(path)
 	if err != nil {
-		return "", false, fmt.Errorf("resolving path: %w", err)
+		return "", "", false, fmt.Errorf("resolving path: %w", err)
 	}
 
 	resolvedWorkingDir, err := resolveExistingAncestorSymlinks(absWorkingDir)
 	if err != nil {
-		return absPath, true, nil
+		return absPath, absPath, true, nil
 	}
-	resolvedPath, err := resolveExistingAncestorSymlinks(absPath)
+	resolvedPath, err = resolveExistingAncestorSymlinks(absPath)
 	if err != nil {
-		return absPath, true, nil
+		return absPath, absPath, true, nil
 	}
 
 	// fsext.HasPrefix treats a sibling like "..foo" as inside workingDir,
 	// unlike a bare strings.HasPrefix(relPath, "..") check, which would
 	// mistake it for an escape via "..".
 	outside = !fsext.HasPrefix(resolvedPath, resolvedWorkingDir)
-	return absPath, outside, nil
+	return absPath, resolvedPath, outside, nil
+}
+
+// outsideWorkdirNotice builds the Path and Description a permission request
+// raises for a path resolveWithinWorkdir reported outside — always keyed
+// and displayed on resolvedAbs, the real destination, so a persistent grant
+// cannot outlive a symlink being repointed and the dialog cannot show a
+// location the request is not actually about. requestedAbs is folded into
+// the description only when it differs from resolvedAbs — a symlink hop
+// happened — since that is the one case where the plain path a user typed
+// or the model asked for would otherwise be missing from the prompt
+// entirely. When the two are equal, the description is byte-identical to
+// the unresolved form it replaces.
+func outsideWorkdirNotice(verb, requestedAbs, resolvedAbs string) (path, description string) {
+	if resolvedAbs == requestedAbs {
+		return resolvedAbs, fmt.Sprintf("%s: %s", verb, resolvedAbs)
+	}
+	return resolvedAbs, fmt.Sprintf("%s: %s (requested as %s)", verb, resolvedAbs, requestedAbs)
 }
 
 // resolveExistingAncestorSymlinks resolves symlinks in the longest existing
@@ -483,7 +507,7 @@ func confinementRefusal(permissions permission.Requester, filePath string) (mess
 	if dir == "" {
 		return "", false
 	}
-	abs, outside, err := resolveWithinWorkdir(dir, filePath)
+	abs, _, outside, err := resolveWithinWorkdir(dir, filePath)
 	if err != nil {
 		// A path that cannot be resolved cannot be shown to be inside the
 		// boundary; a confinement check has to fail closed.

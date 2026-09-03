@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,24 +72,27 @@ func TestRequirePermissionServiceError(t *testing.T) {
 func TestResolveWithinWorkdir(t *testing.T) {
 	workingDir := t.TempDir()
 
-	absPath, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "sub", "file.txt"))
+	absPath, resolvedPath, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "sub", "file.txt"))
 	require.NoError(t, err)
 	require.False(t, outside)
 	require.True(t, filepath.IsAbs(absPath))
+	require.Equal(t, absPath, resolvedPath, "no symlink is involved, so the resolved form must match the plain one")
 
-	absPath, outside, err = resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "..", "elsewhere.txt"))
+	absPath, resolvedPath, outside, err = resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "..", "elsewhere.txt"))
 	require.NoError(t, err)
 	require.True(t, outside)
 	require.True(t, filepath.IsAbs(absPath))
+	require.Equal(t, absPath, resolvedPath, "an ordinary outside path (no symlink) resolves to itself")
 
 	// A sibling name that merely starts with ".." (e.g. "..foo") must not
 	// be mistaken for an escape via "..": a bare
 	// strings.HasPrefix(relPath, "..") check (the old bug) flags it as
 	// outside workingDir even though it resolves to a file inside it.
-	absPath, outside, err = resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "..foo"))
+	absPath, resolvedPath, outside, err = resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "..foo"))
 	require.NoError(t, err)
 	require.False(t, outside, "..foo is a sibling name inside workingDir, not an escape")
 	require.True(t, filepath.IsAbs(absPath))
+	require.Equal(t, absPath, resolvedPath)
 }
 
 // TestResolveWithinWorkdir_DirectorySymlinkEscape pins DEFECT 1: a directory
@@ -105,7 +109,7 @@ func TestResolveWithinWorkdir_DirectorySymlinkEscape(t *testing.T) {
 	// it.
 	require.NoError(t, os.Symlink(filepath.Join("..", ".."), filepath.Join(workingDir, "up")))
 
-	_, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "up", "outside.txt"))
+	_, _, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "up", "outside.txt"))
 	require.NoError(t, err)
 	require.True(t, outside, "a directory symlink must not defeat the workingDir boundary")
 }
@@ -121,7 +125,7 @@ func TestResolveWithinWorkdir_WorkdirReachedThroughSymlink(t *testing.T) {
 	linked := filepath.Join(root, "linked")
 	require.NoError(t, os.Symlink(real, linked))
 
-	_, outside, err := resolveWithinWorkdir(linked, filepath.Join(linked, "sub", "file.txt"))
+	_, _, outside, err := resolveWithinWorkdir(linked, filepath.Join(linked, "sub", "file.txt"))
 	require.NoError(t, err)
 	require.False(t, outside)
 }
@@ -140,7 +144,7 @@ func TestResolveWithinWorkdir_DanglingSymlinkEscape(t *testing.T) {
 
 	require.NoError(t, os.Symlink(filepath.Join("..", "..", "evil"), filepath.Join(workingDir, "up")))
 
-	_, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "up", "foo.txt"))
+	_, _, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "up", "foo.txt"))
 	require.NoError(t, err)
 	require.True(t, outside, "a dangling symlink must not be treated as a not-yet-existing path component")
 }
@@ -153,9 +157,124 @@ func TestResolveWithinWorkdir_DanglingSymlinkEscape(t *testing.T) {
 func TestResolveWithinWorkdir_GenuinelyMissingNestedPath(t *testing.T) {
 	workingDir := t.TempDir()
 
-	_, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "newdir", "sub", "file.txt"))
+	_, _, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "newdir", "sub", "file.txt"))
 	require.NoError(t, err)
 	require.False(t, outside)
+}
+
+// TestResolveWithinWorkdir_SymlinkedOutsidePathResolves pins the second
+// half of the outside-dialog fix: when a directory symlink lexically
+// inside workingDir actually lands outside it, resolvedPath must be the
+// real destination reached through the link, not the lexical form of the
+// path the model asked for — that lexical form (absPath) is what the old
+// dialog showed, and it names a location inside workingDir even though the
+// request is about somewhere else entirely.
+func TestResolveWithinWorkdir_SymlinkedOutsidePathResolves(t *testing.T) {
+	root := t.TempDir()
+	workingDir := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+	target := filepath.Join(root, "elsewhere")
+	require.NoError(t, os.MkdirAll(target, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "secret"), []byte("x"), 0o644))
+
+	require.NoError(t, os.Symlink(target, filepath.Join(workingDir, "cache")))
+
+	absPath, resolvedPath, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "cache", "secret"))
+	require.NoError(t, err)
+	require.True(t, outside)
+	require.Equal(t, filepath.Join(workingDir, "cache", "secret"), absPath,
+		"absPath stays the lexical form, so callers still open exactly what was asked for")
+	require.Equal(t, filepath.Join(target, "secret"), resolvedPath,
+		"resolvedPath must name the real destination reached through the symlink")
+	require.NotEqual(t, absPath, resolvedPath)
+}
+
+func TestOutsideWorkdirNotice(t *testing.T) {
+	t.Run("identical path renders exactly as the unresolved form did", func(t *testing.T) {
+		path, description := outsideWorkdirNotice("Read file outside working directory", "/w/proj/a.txt", "/w/proj/a.txt")
+		require.Equal(t, "/w/proj/a.txt", path)
+		require.Equal(t, "Read file outside working directory: /w/proj/a.txt", description)
+	})
+
+	t.Run("a symlinked path shows the resolved destination and names what was asked for", func(t *testing.T) {
+		path, description := outsideWorkdirNotice("Read file outside working directory", "/w/proj/cache/id_rsa", "/home/u/.ssh/id_rsa")
+		require.Equal(t, "/home/u/.ssh/id_rsa", path, "the grant key and header must be the real destination")
+		require.Equal(t, "Read file outside working directory: /home/u/.ssh/id_rsa (requested as /w/proj/cache/id_rsa)", description)
+	})
+}
+
+// TestResolveWithinWorkdir_SymlinkRepointInvalidatesPersistentGrant covers
+// the other aggravating detail of the outside-dialog fix: a persistent
+// grant is stored under permission.Path, which callers now build from
+// resolveWithinWorkdir's resolved path. Repointing the symlink a request
+// went through must change that resolved path, and so the grant recorded
+// for the old destination must not cover the new one.
+func TestResolveWithinWorkdir_SymlinkRepointInvalidatesPersistentGrant(t *testing.T) {
+	root := t.TempDir()
+	workingDir := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+	targetA := filepath.Join(root, "a")
+	targetB := filepath.Join(root, "b")
+	require.NoError(t, os.MkdirAll(targetA, 0o755))
+	require.NoError(t, os.MkdirAll(targetB, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(targetA, "secret"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(targetB, "secret"), []byte("y"), 0o644))
+
+	link := filepath.Join(workingDir, "cache")
+	require.NoError(t, os.Symlink(targetA, link))
+
+	_, resolvedA, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(link, "secret"))
+	require.NoError(t, err)
+	require.True(t, outside)
+
+	service := permission.NewPermissionService(workingDir, false, nil)
+	events := service.Subscribe(t.Context())
+
+	// Grant persistently for the symlink's current destination.
+	var wg sync.WaitGroup
+	var granted bool
+	wg.Go(func() {
+		granted, _ = service.Request(t.Context(), permission.CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-1", ToolName: "read", Action: "read", Path: resolvedA,
+		})
+	})
+	var pending permission.PermissionRequest
+	select {
+	case ev := <-events:
+		pending = ev.Payload
+	case <-time.After(2 * time.Second):
+		t.Fatal("request was never published")
+	}
+	require.True(t, service.GrantPersistent(pending))
+	wg.Wait()
+	require.True(t, granted, "the granting request itself must be granted")
+
+	// Repoint the link to a different destination.
+	require.NoError(t, os.Remove(link))
+	require.NoError(t, os.Symlink(targetB, link))
+
+	_, resolvedB, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(link, "secret"))
+	require.NoError(t, err)
+	require.True(t, outside)
+	require.NotEqual(t, resolvedA, resolvedB, "repointing the symlink must change the resolved destination")
+
+	// The old grant must not cover the new destination: this request has
+	// to be re-prompted, not auto-approved.
+	var wg2 sync.WaitGroup
+	var granted2 bool
+	wg2.Go(func() {
+		granted2, _ = service.Request(t.Context(), permission.CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "read", Action: "read", Path: resolvedB,
+		})
+	})
+	select {
+	case ev := <-events:
+		require.True(t, service.Deny(ev.Payload))
+	case <-time.After(2 * time.Second):
+		t.Fatal("follow-up request was auto-approved after the symlink was repointed")
+	}
+	wg2.Wait()
+	require.False(t, granted2, "a grant for the old destination must not survive the link pointing elsewhere")
 }
 
 func TestEnsureParentDir(t *testing.T) {

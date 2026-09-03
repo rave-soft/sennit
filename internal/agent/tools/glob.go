@@ -73,7 +73,7 @@ func NewGlobTool(permissions permission.Requester, workingDir string, cfg config
 			// rather than the worktree the agent is working in.
 			searchPath := filepathext.SmartJoin(workingDir, params.Path)
 
-			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
+			absSearchPath, resolvedSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
 			}
@@ -83,13 +83,14 @@ func NewGlobTool(permissions permission.Requester, workingDir string, cfg config
 					return fantasy.ToolResponse{}, missingSessionID("searching for files outside working directory")
 				}
 
+				path, description := outsideWorkdirNotice("List files outside working directory", absSearchPath, resolvedSearchPath)
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        absSearchPath,
+					Path:        path,
 					ToolCallID:  call.ID,
 					ToolName:    GlobToolName,
 					Action:      "list",
-					Description: fmt.Sprintf("List files outside working directory: %s", absSearchPath),
+					Description: description,
 					Params:      GlobPermissionsParams(params),
 				})
 				if err != nil {
