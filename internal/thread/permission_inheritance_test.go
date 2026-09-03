@@ -10,6 +10,93 @@ import (
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
+// TestManager_CreateInheritsAutoApprovalFromApprovedParent is the thread
+// analogue of TestTaskManager_CreateInheritsAutoApprovalFromApprovedParent
+// above. A thread's isolated workspace (see ManagerOptions.ParentApp) has
+// a permission.Service wholly separate from its parent's — fakeSpawner
+// spawns a real app.NewForTest App per thread, distinct from parentApp —
+// so before this propagation existed, a thread dispatched from a
+// headless run's auto-approved session ran its goal against a fresh
+// service nobody had granted anything, and its first permission request
+// blocked forever with no UI to answer it.
+func TestManager_CreateInheritsAutoApprovalFromApprovedParent(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
+
+	parentApp.Permissions().AutoApproveSession("parent-sess")
+
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:            "alpha",
+		Goal:            "do the thing",
+		MergePolicy:     thread.MergeManual,
+		ParentSessionID: "parent-sess",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, st.SessionID)
+
+	threadPerms := spawner.appFor(st.WorktreePath).Permissions()
+	allowed, err := threadPerms.Request(t.Context(), permission.CreatePermissionRequest{
+		SessionID:  st.SessionID,
+		ToolCallID: "call-1",
+		ToolName:   "bash",
+		Action:     "execute",
+		Path:       t.TempDir(),
+	})
+	require.NoError(t, err)
+	require.True(t, allowed, "a thread dispatched under an auto-approved parent session must have its requests granted without a prompt")
+}
+
+// TestManager_CreateDoesNotInheritAutoApprovalFromOrdinaryParent pins the
+// other half: a thread dispatched from a session that was never
+// auto-approved must still raise a real prompt against its own,
+// independent permission service — nothing here widens that service's
+// own SkipRequests or otherwise grants it anything beyond the one
+// session-scoped grant under test.
+func TestManager_CreateDoesNotInheritAutoApprovalFromOrdinaryParent(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner, _ := newTestManagerWithParentApp(t, repo)
+
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:            "alpha",
+		Goal:            "do the thing",
+		MergePolicy:     thread.MergeManual,
+		ParentSessionID: "ordinary-parent-sess",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, st.SessionID)
+
+	threadPerms := spawner.appFor(st.WorktreePath).Permissions()
+	events := threadPerms.Subscribe(t.Context())
+	granted := make(chan bool, 1)
+	go func() {
+		ok, _ := threadPerms.Request(t.Context(), permission.CreatePermissionRequest{
+			SessionID:  st.SessionID,
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       t.TempDir(),
+		})
+		granted <- ok
+	}()
+
+	var req permission.PermissionRequest
+	select {
+	case evt := <-events:
+		req = evt.Payload
+	case <-time.After(5 * time.Second):
+		t.Fatal("the thread's permission request never reached its own service")
+	}
+	require.Equal(t, st.SessionID, req.SessionID)
+
+	require.True(t, threadPerms.Deny(req))
+	select {
+	case ok := <-granted:
+		require.False(t, ok, "a thread under an ordinary parent session must still be denyable, never auto-granted")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the thread's request never resolved")
+	}
+}
+
 // TestTaskManager_CreateInheritsAutoApprovalFromApprovedParent is the
 // regression test for the headless-delegation deadlock: a non-interactive
 // run auto-approves its own session (permission.Service.AutoApproveSession),

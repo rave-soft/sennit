@@ -340,6 +340,27 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
 
+	// A thread's own workspace carries a permission service wholly
+	// separate from its parent's — see ManagerOptions.ParentApp — so the
+	// blanket grant a headless run gives its own session (see
+	// permission.Service.AutoApproveSession) does not reach a thread it
+	// dispatches; without this, the thread's first permission request
+	// blocks forever with no UI subscribed to answer it, the same
+	// deadlock TaskManager.Create closes for a task delegation (see
+	// permission_inheritance_test.go). Extending the grant here, keyed on
+	// the parent already holding it, is the thread analogue of that same
+	// fix: both sides of the propagation are session-scoped, not
+	// directory-scoped, so crossing from the parent's service to the
+	// thread's own is granting the same thing the thread's own service
+	// would otherwise be asked to prompt for.
+	if args.ParentSessionID != "" && m.parentApp != nil {
+		if parentPerms := m.parentApp.Permissions(); parentPerms != nil && parentPerms.IsAutoApproveSession(args.ParentSessionID) {
+			if perms := handle.Workspace().Permissions(); perms != nil {
+				perms.AutoApproveSession(sess.ID)
+			}
+		}
+	}
+
 	newSt, err := m.store.SetSession(ctx, st.ID, sess.ID)
 	if err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
