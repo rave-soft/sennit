@@ -1331,9 +1331,15 @@ func TestTrimToBudgetLogsCorrelationIDs(t *testing.T) {
 	kept := trimToBudget(msgs, len("tail")+5, trimCorr(sessionID, runID))
 	assert.LessOrEqual(t, messagesTextLen(kept), len("tail")+5)
 
-	// Find the trim line scoped to this session and assert it carries BOTH
-	// correlation ids (the chain's anchor predicate is the exact message, and
-	// the chain's session_id/run_id filter is what makes it findable).
+	// Find the trim line scoped to THIS session, not just the first line
+	// with a matching msg: even with logCaptureMu serializing captures
+	// against each other, a concurrent non-capturing test can still call
+	// trimToBudget without correlation ids and log through the same
+	// process-global default while this test holds the capture, so a
+	// msg-only match can pick up someone else's line. sawTrimLine keeps
+	// "never emitted" distinguishable from "emitted, but not with our
+	// ids" - the latter is the exact regression this test guards against.
+	var sawTrimLine bool
 	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
 		if line == "" {
 			continue
@@ -1345,9 +1351,20 @@ func TestTrimToBudgetLogsCorrelationIDs(t *testing.T) {
 		if decoded["msg"] != "Trimmed the carried sub-agent session to the budget" {
 			continue
 		}
-		require.Equal(t, sessionID, decoded["session_id"], "the real trim line must carry the session id for the chain")
+		sawTrimLine = true
+		// Selecting on session_id is what makes this our line; asserting
+		// it again below would be a tautology, so only run_id is checked
+		// here. A line for this session that lacks run_id is the
+		// regression, and sawTrimLine covers the "ours never carried the
+		// session id at all" case.
+		if decoded["session_id"] != sessionID {
+			continue
+		}
 		require.Equal(t, runID, decoded["run_id"], "the real trim line must carry the run id for the chain")
 		return
+	}
+	if sawTrimLine {
+		t.Fatal("a trim log line was emitted, but none carried this test's session id")
 	}
 	t.Fatal("the trim log line was not emitted")
 }
