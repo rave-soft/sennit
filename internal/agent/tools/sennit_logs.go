@@ -605,7 +605,6 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 		if _, err := io.ReadFull(f, chunk); err != nil {
 			return backwardScanResult{}
 		}
-		pos = chunkStart
 		bytesScanned += int64(chunkLen)
 
 		// remainder is the head of a line whose tail was already read (it belongs
