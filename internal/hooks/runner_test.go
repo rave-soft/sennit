@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -123,6 +124,18 @@ func TestRunner_BackgroundedJobDoesNotRaceOnOutputBuffers(t *testing.T) {
 // This must run the real shell.Run so the SIGINT-then-SIGKILL sequence
 // actually happens; a stubbed runShell can't exercise the signal path.
 func TestRunner_IgnoredSIGINTIsNotAbandoned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The SIGINT-then-SIGKILL escalation this test pins is POSIX-only:
+		// mvdan's DefaultExecHandler (which internal/shell's Windows exec
+		// handler uses unmodified, see exec_windows.go) sends the kill
+		// signal immediately on Windows because Go cannot deliver
+		// os.Interrupt to an arbitrary process there, so there is no
+		// interrupt-then-wait window for the runner to time out on. A
+		// cancelled hook simply dies at once, well under abandonGrace, so
+		// the >= 3s bound this test asserts can never hold on this
+		// platform.
+		t.Skip("SIGINT-then-SIGKILL escalation has no Windows equivalent")
+	}
 	t.Parallel()
 
 	var mu sync.Mutex
