@@ -598,7 +598,16 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 // The returned [SendDisposition] reports which branch was taken; only
 // Steered is decided by the coordinator, and queue depth is read before
 // dispatch, describing the queue being joined rather than already joined.
-func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string, from Sender, attachments []Attachment) (SendDisposition, error) {
+//
+// beforeDispatch, if non-nil, runs right before the run is dispatched — in
+// both branches: on the live handle when the workspace is already up, and
+// on the freshly spawned one after a respawn. Placed before dispatch, not
+// after send returns, so whatever it installs (Manager.Send uses it to
+// re-register the parent link and its auto-approval grant — see
+// registerThreadParent) is in place before the dispatched turn can raise
+// its first permission request. TaskManager.Send passes nil: a task has
+// its own scheme for both concerns, closed at TaskManager.Create.
+func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string, from Sender, attachments []Attachment, beforeDispatch func(handle Handle)) (SendDisposition, error) {
 	// Tag bgCtx so coordinator.run persists this dispatch's message with
 	// Origin agent.OriginAgent, not the default message.OriginPerson — a
 	// thread_send/task_send follow-up wasn't typed by the person, though
@@ -641,6 +650,9 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 			// in a worker goroutine takes the process with it.
 			slog.Error("Queued agent run has no coordinator to dispatch to", "component", "thread", "session_id", sessionID)
 			return SendDisposition{}, errors.New("thread: workspace has no agent coordinator")
+		}
+		if beforeDispatch != nil {
+			beforeDispatch(rt.handle)
 		}
 		var disp SendDisposition
 		if busy, ahead := coord.SessionQueue(sessionID); busy {
@@ -696,6 +708,9 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 
 	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
 		return SendDisposition{}, err
+	}
+	if beforeDispatch != nil {
+		beforeDispatch(handle)
 	}
 	l.startRun(bgCtx, handle, spawner, id, sessionID, msg)
 	rb.commit()

@@ -340,27 +340,6 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
 
-	// A thread's own workspace carries a permission service wholly
-	// separate from its parent's — see ManagerOptions.ParentApp — so the
-	// blanket grant a headless run gives its own session (see
-	// permission.Service.AutoApproveSession) does not reach a thread it
-	// dispatches; without this, the thread's first permission request
-	// blocks forever with no UI subscribed to answer it, the same
-	// deadlock TaskManager.Create closes for a task delegation (see
-	// permission_inheritance_test.go). Extending the grant here, keyed on
-	// the parent already holding it, is the thread analogue of that same
-	// fix: both sides of the propagation are session-scoped, not
-	// directory-scoped, so crossing from the parent's service to the
-	// thread's own is granting the same thing the thread's own service
-	// would otherwise be asked to prompt for.
-	if args.ParentSessionID != "" && m.parentApp != nil {
-		if parentPerms := m.parentApp.Permissions(); parentPerms != nil && parentPerms.IsAutoApproveSession(args.ParentSessionID) {
-			if perms := handle.Workspace().Permissions(); perms != nil {
-				perms.AutoApproveSession(sess.ID)
-			}
-		}
-	}
-
 	newSt, err := m.store.SetSession(ctx, st.ID, sess.ID)
 	if err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
@@ -770,30 +749,33 @@ func (m *Manager) send(ctx context.Context, idOrName, message string, from Sende
 	if st.Kind != KindThread {
 		return SendDisposition{}, fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
+	// Checked before either branch below, not inside the respawn one:
+	// a thread whose worktree is gone has nowhere to do the work being
+	// sent, whether or not its App still happens to be up. lifecycle.send
+	// can't host this check, since TaskManager.Send shares that code with
+	// an empty spawnPath. Without it, a failed thread whose worktree the
+	// unwinder already removed (failCreate) resurrects through
+	// Bootstrap's deliberately permissive MkdirAll and starts running
+	// detached from git, in a directory that shouldn't exist. See
+	// Activate's identical check.
+	if _, err := os.Stat(st.WorktreePath); err != nil {
+		return SendDisposition{}, fmt.Errorf("thread: worktree for %q is unavailable: %w", idOrName, err)
+	}
 	// The "queue into a live runtime" / "respawn from spawnPath, then
 	// dispatch" logic itself has nothing thread-specific in it — see
 	// lifecycle.send's doc comment — so it lives there, shared with
-	// TaskManager.Send.
-	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message, from, attachments)
+	// TaskManager.Send. beforeDispatch re-registers the parent link (and,
+	// via registerThreadParent, the auto-approval grant) on whichever
+	// handle ends up dispatching — the live one or a freshly respawned
+	// one — right before the run is actually dispatched, so a headless
+	// follow-up's first permission request never races a grant that
+	// hasn't landed yet. TaskManager.Send passes nil: a task has its own
+	// scheme, closed at TaskManager.Create.
+	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message, from, attachments, func(handle Handle) {
+		m.registerThreadParent(handle, st)
+	})
 	if err != nil {
 		return SendDisposition{}, err
-	}
-	// l.send does not hand the (possibly freshly respawned) handle back to
-	// its caller, so re-register from here instead, reading the
-	// now-installed runtime off the entity's control — see Activate's
-	// identical re-registration for why this has to happen on every resume,
-	// not just at Create. Runs on every Send, including when the workspace
-	// was already live (never actually restarted): that is fine, it is an
-	// idempotent Set, not a spawn.
-	if m.parentApp != nil {
-		if c := m.lc.existingControl(st.ID); c != nil {
-			c.mu.Lock()
-			rt := c.runtime
-			c.mu.Unlock()
-			if rt != nil {
-				m.registerThreadParent(rt.handle, st)
-			}
-		}
 	}
 	return disp, nil
 }
@@ -880,6 +862,23 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 			return fmt.Errorf("thread: %q has unmerged, uncommitted changes; use force to remove", st.Name)
 		}
 	}
+	// Checked here, before anything below tears down the live workspace:
+	// this reads only m.repoRoot and st's own Branch/BaseBranch, so it
+	// costs nothing to ask first, and a refusal here must leave the
+	// runtime — and the screen attached to it — untouched. Asking after
+	// the teardown below made a refusal here indistinguishable from
+	// success to the person still looking at that screen: the row stayed
+	// idle (workspace is live, per the type's own contract) while the App
+	// backing it was already dead, so the screen stopped updating and the
+	// next input would have spawned a new App whose events it could never
+	// see.
+	if deleteBranch && !force {
+		if merged, err := git.IsAncestor(ctx, m.repoRoot, st.Branch, st.BaseBranch); err != nil {
+			return fmt.Errorf("thread: check branch merge state: %w", err)
+		} else if !merged {
+			return fmt.Errorf("thread: delete branch: %q is not merged into %q; use force to remove", st.Branch, st.BaseBranch)
+		}
+	}
 
 	c := m.lc.control(st.ID)
 	c.opMu.Lock()
@@ -913,17 +912,9 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 		return err
 	}
 
-	// An unforced branch deletion rejects unmerged work. Check that condition
-	// before tearing down its checkout; force deletion must still remove the
-	// worktree first because git cannot delete a branch currently checked out
-	// by one.
-	if deleteBranch && !force {
-		if merged, err := git.IsAncestor(ctx, m.repoRoot, st.Branch, st.BaseBranch); err != nil {
-			return abort(fmt.Errorf("thread: check branch merge state: %w", err))
-		} else if !merged {
-			return abort(fmt.Errorf("thread: delete branch: %q is not merged into %q; use force to remove", st.Branch, st.BaseBranch))
-		}
-	}
+	// Branch-merge state was already checked above, before teardown; force
+	// deletion still removes the worktree first because git cannot delete a
+	// branch currently checked out by one.
 	if err := git.WorktreeRemove(ctx, m.repoRoot, st.WorktreePath, force); err != nil {
 		return abort(fmt.Errorf("thread: remove worktree: %w", err))
 	}
@@ -1274,6 +1265,32 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 // from st, and depth is always 0 here: the cascade limiter this stamps for
 // a resumed entity only ever matters for tasks created through the "agent"
 // tool, never for a thread.
+//
+// It also carries the auto-approval grant across, for the same reason it
+// registers the parent link at all: this is the one place every path that
+// installs a runtime for a thread — Create, Activate, and lifecycle.send's
+// beforeDispatch hook (covering both the live-runtime and the
+// respawn-after-Spawn branches) — funnels through. A thread's own
+// workspace carries a permission service wholly separate from its
+// parent's — see ManagerOptions.ParentApp — so the blanket grant a
+// headless run gives its own session (see
+// permission.Service.AutoApproveSession) does not reach a thread it
+// dispatches; without this, the thread's first permission request blocks
+// forever with no UI subscribed to answer it, the same deadlock
+// TaskManager.Create closes for a task delegation (see
+// permission_inheritance_test.go). Extending the grant here, keyed on the
+// parent already holding it, is the thread analogue of that same fix:
+// both sides of the propagation are session-scoped, not
+// directory-scoped, so crossing from the parent's service to the
+// thread's own is granting the same thing the thread's own service would
+// otherwise be asked to prompt for. Granting on every install (not just
+// the first) is what makes the grant survive a runtime release: the
+// thread's App — and the permission service living in it — is rebuilt
+// from scratch each time (finalizeRunComplete → releaseRuntime →
+// LocalSpawner.Release → App.Shutdown), so nothing about the previous
+// App's grant carries forward on its own; AutoApproveSession is
+// idempotent, so re-granting here on an already-approved session is
+// harmless.
 func (m *Manager) registerThreadParent(handle Handle, st Thread) {
 	if m.parentApp == nil {
 		return
@@ -1291,6 +1308,14 @@ func (m *Manager) registerThreadParent(handle Handle, st Thread) {
 	// entirely.
 	if coord != nil {
 		coord.SetLiveSession(st.SessionID)
+	}
+
+	if st.ParentSessionID != "" {
+		if parentPerms := m.parentApp.Permissions(); parentPerms != nil && parentPerms.IsAutoApproveSession(st.ParentSessionID) {
+			if perms := handle.Workspace().Permissions(); perms != nil {
+				perms.AutoApproveSession(st.SessionID)
+			}
+		}
 	}
 }
 
