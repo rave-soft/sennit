@@ -1061,6 +1061,34 @@ func TestList_RemoveItem_ResetsOffsetLineWhenItemAtOffsetIsRemoved(t *testing.T)
 	require.Contains(t, l.Render(), "c:0", "c must still render instead of the viewport going blank")
 }
 
+// TestList_ShrinkingOffsetItem_ClampsOffsetLine covers the second
+// path into the same failure RemoveItem's fix closed: the item at
+// offsetIdx keeps its identity but gets shorter, e.g. a streaming
+// update that bumps its version and shrinks its rendered output. A
+// stale offsetLine left pointing past the item's new end sends
+// Render down the "offset starts inside the gap" branch and drops
+// the item entirely, same as the removal case.
+func TestList_ShrinkingOffsetItem_ClampsOffsetLine(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 1)
+	b := newMultiLineItem("b", 10)
+	l := NewList(a, b)
+	l.SetSize(20, 5)
+
+	// Scroll deep into b, well past where b will shrink to.
+	l.offsetIdx = 1
+	l.offsetLine = 8
+
+	// Simulate a streaming update that shrinks b's rendered output
+	// without changing its identity or index.
+	b.height = 3
+	b.Bump()
+
+	require.Contains(t, l.Render(), "b:2", "b's new last line must still render instead of the viewport going blank")
+	require.Equal(t, 2, l.offsetLine, "offsetLine must clamp to b's new last line")
+}
+
 // TestList_SetItems_ClampsSelectionAndOffset covers SetItems
 // shrinking the item set below the current selection/offset indices:
 // both must clamp into range rather than leaving stale out-of-bounds

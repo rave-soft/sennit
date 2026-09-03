@@ -164,9 +164,10 @@ func (l *List) AtBottom() bool {
 	}
 
 	// Calculate the height from offsetIdx to the end.
+	offsetLine := l.currentOffsetLine()
 	var totalHeight int
 	for idx := l.offsetIdx; idx < len(l.items); idx++ {
-		if totalHeight-l.offsetLine > l.height {
+		if totalHeight-offsetLine > l.height {
 			// No need to calculate further, we're already past the viewport height
 			return false
 		}
@@ -178,7 +179,7 @@ func (l *List) AtBottom() bool {
 		totalHeight += itemHeight
 	}
 
-	return totalHeight-l.offsetLine <= l.height
+	return totalHeight-offsetLine <= l.height
 }
 
 // SetReverse shows the list in reverse order.
@@ -283,6 +284,36 @@ func (l *List) Overflows(height int) bool {
 	return false
 }
 
+// primeOffset forces the item at offsetIdx through renderItemEntry so
+// that the offsetLine clamp in renderItemEntry (see its comment) runs
+// before offsetLine is read. That clamp is a side effect of actually
+// rendering the item, not of setting offsetIdx/offsetLine, so reading
+// the raw field before this has run can observe a stale value.
+// currentOffsetLine wraps this into the accessor everything but the
+// writers should use; call this directly only where priming and the
+// read cannot be one expression (see ScrollBy).
+func (l *List) primeOffset() {
+	if l.offsetIdx >= 0 && l.offsetIdx < len(l.items) {
+		l.renderItemEntry(l.offsetIdx)
+	}
+}
+
+// currentOffsetLine returns offsetLine after ensuring it is valid for
+// whichever item currently sits at offsetIdx. offsetLine only becomes
+// invalid through that item shrinking (see renderItemEntry's clamp),
+// and that is discovered lazily, on render, not at the point
+// offsetIdx/offsetLine were last set -- so every reader of offsetLine
+// other than the code that writes it (ScrollBy's walk, which mutates
+// the field as it goes; renderItemEntry's own clamp; and the flat
+// resets to 0 or a freshly computed value scattered through this
+// file) must go through this accessor instead of the raw field, or it
+// risks observing a stale value from before the item at offsetIdx was
+// last rendered.
+func (l *List) currentOffsetLine() int {
+	l.primeOffset()
+	return l.offsetLine
+}
+
 // Offset returns the current scroll offset in lines from the top.
 func (l *List) Offset() int {
 	offset := 0
@@ -293,7 +324,7 @@ func (l *List) Offset() int {
 			offset += l.gapAt(idx)
 		}
 	}
-	offset += l.offsetLine
+	offset += l.currentOffsetLine()
 	return offset
 }
 
@@ -421,6 +452,31 @@ func (l *List) renderItemEntry(idx int) *listCacheEntry {
 	entry.content = rendered
 	entry.lines = lines
 	entry.height = height
+
+	// offsetLine is a line count measured against the specific item at
+	// offsetIdx (see RemoveItem's comment on this field for the first
+	// half of the invariant). That same item can also get shorter
+	// without changing identity -- Invalidate, InvalidateAll, a width
+	// change via SetSize, or a version bump from a streaming update
+	// all end up here, recomputing height for whatever idx is current.
+	//
+	// An offsetLine that now lands past this item's content and gap
+	// (offsetLine >= height+gap) is only a problem when idx is the
+	// last item: Render's own walk already recovers from it for any
+	// earlier item by moving on to the next item at line 0 once this
+	// one contributes nothing, which is exactly how a deliberate
+	// offsetLine == height+gap boundary (see
+	// TestList_F7_OffsetLineAtItemBoundary) is meant to behave, and
+	// must not be disturbed here. For the last item there is no next
+	// item to fall through to, so Render would emit nothing at all --
+	// the same failure RemoveItem's fix closed, reached here by
+	// shrinking instead of removal. Clamp to the item's new last
+	// line, the least surprising place to land.
+	if idx == l.offsetIdx && idx == len(l.items)-1 {
+		if gap := l.gapAt(idx); l.offsetLine >= height+gap {
+			l.offsetLine = max(height-1, 0)
+		}
+	}
 	return entry
 }
 
@@ -537,6 +593,13 @@ func (l *List) ScrollBy(lines int) {
 	if len(l.items) == 0 || lines == 0 {
 		return
 	}
+	// Prime before the walk below starts mutating offsetLine itself.
+	// The rest of this method reads and writes the raw field directly
+	// rather than through currentOffsetLine: it is both reader and
+	// writer here, walking forward or backward across items and
+	// folding each item's height into offsetLine as it goes, so there
+	// is no single "read" to route through an accessor.
+	l.primeOffset()
 
 	if l.reverse {
 		lines = -lines
@@ -608,7 +671,7 @@ func (l *List) VisibleItemIndices() (startIdx, endIdx int) {
 
 	startIdx = l.offsetIdx
 	currentIdx := startIdx
-	visibleHeight := -l.offsetLine
+	visibleHeight := -l.currentOffsetLine()
 
 	for currentIdx < len(l.items) {
 		item := l.getItem(currentIdx)
@@ -646,7 +709,7 @@ func (l *List) Render() string {
 	budget := max(l.height, 0)
 	lines := make([]string, 0, budget)
 	currentIdx := l.offsetIdx
-	currentOffset := l.offsetLine
+	currentOffset := l.currentOffsetLine()
 
 	for currentIdx < len(l.items) {
 		remaining := budget - len(lines)
@@ -774,7 +837,11 @@ func (l *List) RemoveItem(idx int) {
 	// against the specific item at offsetIdx, so whenever the item
 	// occupying that slot changes identity, offsetLine must be reset:
 	// it no longer describes how far into the new item the viewport
-	// has scrolled.
+	// has scrolled. The other half of this invariant -- the item
+	// keeping its identity but getting shorter (Invalidate,
+	// InvalidateAll, a width change, a streaming version bump) -- is
+	// handled where that shrinkage is discovered, in
+	// renderItemEntry's offsetLine clamp.
 	if l.offsetIdx > idx {
 		l.offsetIdx--
 	} else if l.offsetIdx == idx {
@@ -1023,7 +1090,7 @@ func (l *List) findItemAtY(_, y int) (itemIdx int, itemY int) {
 
 	// Walk through visible items to find which one contains this y
 	currentIdx := l.offsetIdx
-	currentLine := -l.offsetLine // Negative because offsetLine is how many lines are hidden
+	currentLine := -l.currentOffsetLine() // Negative because offsetLine is how many lines are hidden
 
 	for currentIdx < len(l.items) && currentLine < l.height {
 		item := l.getItem(currentIdx)
