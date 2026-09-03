@@ -207,6 +207,14 @@ type Observer interface {
 // entirely, and confining a workspace to its working directory.
 type Controller interface {
 	AutoApproveSession(sessionID string)
+	// IsAutoApproveSession reports whether sessionID was auto-approved by
+	// AutoApproveSession. A delegation's launch site uses this to decide
+	// whether its child session inherits the grant: a child started under
+	// an auto-approved parent gets nothing a plain AutoApproveSession(child)
+	// wouldn't already give it, since the parent already approves
+	// everything; a child started under an ordinary session must still
+	// prompt.
+	IsAutoApproveSession(sessionID string) bool
 	SetSkipRequests(skip bool)
 	// ConfineToWorkingDir marks this workspace as one that may not write
 	// outside its working directory at all. See Requester.ConfinedDir.
@@ -622,6 +630,12 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Lock()
 	s.autoApproveSessions[sessionID] = true
 	s.autoApproveSessionsMu.Unlock()
+}
+
+func (s *permissionService) IsAutoApproveSession(sessionID string) bool {
+	s.autoApproveSessionsMu.RLock()
+	defer s.autoApproveSessionsMu.RUnlock()
+	return s.autoApproveSessions[sessionID]
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {

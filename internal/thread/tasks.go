@@ -196,6 +196,19 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
 
+	// A task's child session inherits auto-approval from args.ParentSessionID,
+	// and only when the parent already carries it: the parent already
+	// approves everything a turn asks for, so the child is granted nothing
+	// new. A task under an ordinary session still prompts. This is the one
+	// place every delegation kind (the agent tool, a named agent, agentic
+	// fetch, and any nested delegation reached the same way) creates its
+	// child session, so propagating here covers all of them, including a
+	// chain more than one level deep — the second-level child's own parent
+	// is the first-level child, whose auto-approval was granted right here.
+	if perms := handle.Workspace().Permissions(); perms != nil && perms.IsAutoApproveSession(args.ParentSessionID) {
+		perms.AutoApproveSession(sess.ID)
+	}
+
 	newSt, err := t.store.SetSession(ctx, st.ID, sess.ID)
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)

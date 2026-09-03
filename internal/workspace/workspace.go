@@ -253,10 +253,15 @@ type AgentController interface {
 	// If opts.AutoApprovePermissions is set, every permission request the
 	// turn raises on sessionID is granted without asking, for the rest of
 	// the session's lifetime (see permission.AutoApproveSession) — there
-	// is no way to later require prompting again on that session. This
-	// exists for headless callers (see cmd/run.go) that have no UI to
-	// answer a prompt with; anything that can show one should leave it
-	// false and let permission requests surface normally.
+	// is no way to later require prompting again on that session. A
+	// delegation started from sessionID (the agent tool, a named agent,
+	// agentic fetch, or a chain of those nested any number of levels
+	// deep) inherits the same grant on its own child session, since the
+	// child's requests would otherwise block forever with nothing able to
+	// answer them (see thread.TaskManager.Create). This exists for
+	// headless callers (see cmd/run.go) that have no UI to answer a
+	// prompt with; anything that can show one should leave it false and
+	// let permission requests surface normally.
 	AgentRunStream(ctx context.Context, sessionID, prompt string, opts AgentRunOptions) (<-chan AgentRunEvent, error)
 	// ResetAgentToolCache clears process-wide caches the agent's built-in
 	// tools keep (e.g. compiled grep/glob regexes), so a fresh session

@@ -208,9 +208,10 @@ func runAgent(
 	}
 	defer stopSpinner()
 
-	// Headless: there is no UI to answer a permission prompt with, so this
-	// run must auto-approve everything the turn asks for (see
-	// AgentRunStream's doc comment).
+	// Headless: there is no UI to answer a permission prompt with, so
+	// this run must auto-approve everything the turn asks for, including
+	// what any delegation it starts asks for (see AgentRunStream's doc
+	// comment).
 	events, err := ws.AgentRunStream(ctx, sess.ID, prompt, workspace.AgentRunOptions{AutoApprovePermissions: true})
 	if err != nil {
 		stopSpinner()

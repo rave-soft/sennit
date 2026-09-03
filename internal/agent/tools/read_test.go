@@ -230,6 +230,8 @@ func (m *mockReadPermissionService) GrantPersistent(req permission.PermissionReq
 
 func (m *mockReadPermissionService) AutoApproveSession(sessionID string) {}
 
+func (m *mockReadPermissionService) IsAutoApproveSession(sessionID string) bool { return false }
+
 func (m *mockReadPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockReadPermissionService) SkipRequests() bool {
