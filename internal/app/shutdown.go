@@ -7,7 +7,34 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 )
+
+// logFlushFailure reports a [messagestore.Service.Close] error from
+// shutdown phase 3. Close's own retry mechanism is a no-op by the time
+// this runs -- see [messagestore.Service.Close]'s doc comment -- so a
+// write failure here is unrecoverable and the only thing left to do is
+// name what was lost: which message, in which session, out of how many.
+func logFlushFailure(err error) {
+	failures := messagestore.FlushFailures(err)
+	if len(failures) == 0 {
+		slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+		return
+	}
+	messageIDs := make([]string, len(failures))
+	sessionIDs := make([]string, 0, len(failures))
+	seen := make(map[string]bool, len(failures))
+	for i, f := range failures {
+		messageIDs[i] = f.MessageID
+		if !seen[f.SessionID] {
+			seen[f.SessionID] = true
+			sessionIDs = append(sessionIDs, f.SessionID)
+		}
+	}
+	slog.Error("Failed to flush pending message updates on shutdown",
+		"error", err, "failed_count", len(failures), "message_ids", messageIDs, "session_ids", sessionIDs)
+}
 
 // coordinatorCloser is implemented by the production agent.Coordinator
 // (*agent's unexported coordinator type) to bound its background
@@ -321,7 +348,7 @@ func (p *shutdownPhases) Shutdown() {
 	if app.messages != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), p.shutdownTimeout)
 		if err := app.messages.Close(ctx); err != nil {
-			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+			logFlushFailure(err)
 		}
 		cancel()
 	}

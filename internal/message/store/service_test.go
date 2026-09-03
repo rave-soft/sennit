@@ -361,6 +361,40 @@ func TestFlush_WriteErrorRetainsPendingStateForRetry(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestClose_WriteFailureNamesTheAffectedMessage pins what shutdown needs
+// from a flush error: Close's own retry path is a permanent no-op (see
+// rearmFlushTimer's closed check), so a write failure reaching Close is
+// the operator's only signal that a message's tail was lost. The error
+// must therefore say which message and which session, not just that a
+// flush failed.
+func TestClose_WriteFailureNamesTheAffectedMessage(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := sessionstore.NewService(q, conn, "/test/project")
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+	failing := &failingUpdateQuerier{Querier: q}
+	svc := NewService(failing, WithDebounce(time.Hour))
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AppendContent("buffered")
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	failing.fail.Store(true)
+	closeErr := svc.Close(t.Context())
+	require.Error(t, closeErr)
+
+	failures := FlushFailures(closeErr)
+	require.Len(t, failures, 1, "the error must name exactly the message that failed to flush")
+	require.Equal(t, msg.ID, failures[0].MessageID)
+	require.Equal(t, sess.ID, failures[0].SessionID)
+}
+
 func TestUpdate_ConcurrentFinalDeltaIsNotLostDuringFinalWrite(t *testing.T) {
 	t.Parallel()
 

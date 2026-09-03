@@ -25,6 +25,55 @@ const defaultUpdateDebounce = 33 * time.Millisecond
 
 var ErrClosed = errors.New("message store is closed")
 
+// FlushFailure names the message and session behind a failed SQL write
+// during [Service.Flush], [Service.FlushAll], or [Service.Close]. Its
+// only purpose is legibility: a caller logging a flush error can name
+// what was lost instead of reporting only that something was.
+type FlushFailure struct {
+	MessageID string
+	SessionID string
+	Err       error
+}
+
+func (f *FlushFailure) Error() string {
+	return fmt.Sprintf("flush message %s (session %s): %v", f.MessageID, f.SessionID, f.Err)
+}
+
+func (f *FlushFailure) Unwrap() error {
+	return f.Err
+}
+
+// FlushFailures collects every [FlushFailure] within err, unwrapping the
+// [errors.Join] tree [Service.FlushAll] builds from per-message
+// failures. Returns nil if err is nil or carries no FlushFailure.
+func FlushFailures(err error) []*FlushFailure {
+	if err == nil {
+		return nil
+	}
+	var failures []*FlushFailure
+	var walk func(error)
+	walk = func(e error) {
+		// errors.As rather than a type assertion: a FlushFailure that a
+		// caller wrapped on its way up is still the failure this reports.
+		var ff *FlushFailure
+		if errors.As(e, &ff) {
+			failures = append(failures, ff)
+			return
+		}
+		if joined, ok := e.(interface{ Unwrap() []error }); ok {
+			for _, sub := range joined.Unwrap() {
+				walk(sub)
+			}
+			return
+		}
+		if wrapped := errors.Unwrap(e); wrapped != nil {
+			walk(wrapped)
+		}
+	}
+	walk(err)
+	return failures
+}
+
 // Service is the public interface to the message store.
 //
 // [Service.Update] is eventually consistent: it accepts new state into
@@ -401,13 +450,17 @@ func (s *service) FlushAll(ctx context.Context) error {
 		}
 	}
 	s.mu.Unlock()
-	var firstErr error
+	var errs []error
 	for _, id := range ids {
-		if err := s.flushOne(ctx, id, true); err != nil && firstErr == nil {
-			firstErr = err
+		if err := s.flushOne(ctx, id, true); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return firstErr
+	// errors.Join drops nils and returns nil for an empty slice, so a
+	// clean drain still reports no error. A caller that wants to name
+	// what failed -- shutdown does -- reads it back with
+	// [FlushFailures] rather than losing every failure but the first.
+	return errors.Join(errs...)
 }
 
 // Close implements [Service.Close].
@@ -535,7 +588,9 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			// until something unrelated touched the message. Give the
 			// retry a timer of its own.
 			s.rearmFlushTimer(id, p)
-			return err
+			// Named so a caller further up -- shutdown, in particular --
+			// can log what was lost instead of just that something was.
+			return &FlushFailure{MessageID: id, SessionID: snap.SessionID, Err: err}
 		}
 
 		// Terminal events — message finished, tool call added or
