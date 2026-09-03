@@ -223,3 +223,66 @@ func TestService_UsesInjectedWorkingDir_NotProcessCwd(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{path}, files, "path should resolve against the injected workspace dir, not process cwd")
 }
+
+// TestService_RecordPartialRead_NoPriorRow guards against treating a file
+// this session has never touched as fully read. Before the update
+// callback distinguished "no row" from "row holding the empty string",
+// the first partial read on a fresh file computed coverage from
+// FullCoverage and stored "" — marking the whole file read from a single
+// windowed read.
+func TestService_RecordPartialRead_NoPriorRow(t *testing.T) {
+	env := setupTest(t)
+	env.createSession(t, "s1")
+
+	env.svc.RecordPartialRead(env.ctx, "s1", "/f.go", 1, 500)
+
+	cov := env.svc.ReadCoverage(env.ctx, "s1", "/f.go")
+	require.False(t, cov.Full, "a windowed read of a fresh file must not mark it fully covered")
+	require.True(t, cov.Covers(1, 500), "the served window must be covered")
+	require.False(t, cov.Covers(2800, 2800), "lines outside the served window must not be covered")
+}
+
+// TestService_RecordEdit_NoPriorRow mirrors the partial-read case for
+// edits: internal/agent/tools/lsp_replace_symbol.go relies on RecordEdit
+// not widening coverage to the whole file when there is no row yet.
+func TestService_RecordEdit_NoPriorRow(t *testing.T) {
+	env := setupTest(t)
+	env.createSession(t, "s2")
+
+	env.svc.RecordEdit(env.ctx, "s2", "/g.go", 10, 12, 14)
+
+	cov := env.svc.ReadCoverage(env.ctx, "s2", "/g.go")
+	require.False(t, cov.Full, "an edit on a fresh file must not mark it fully covered")
+	require.True(t, cov.Covers(10, 14), "the edited span must be covered")
+}
+
+// TestService_LegacyEmptyRangesRow_ReadsAsFullCoverage guards the other
+// half of the encoding: a row that already holds read_ranges = "" — as
+// every row written before range tracking existed does — must still read
+// back as fully covered.
+func TestService_LegacyEmptyRangesRow_ReadsAsFullCoverage(t *testing.T) {
+	env := setupTest(t)
+	env.createSession(t, "s3")
+
+	require.NoError(t, env.q.RecordFileRead(env.ctx, db.RecordFileReadParams{
+		SessionID:  "s3",
+		Path:       "legacy.go",
+		ReadRanges: "",
+	}))
+
+	cov := env.svc.ReadCoverage(env.ctx, "s3", "/legacy.go")
+	require.True(t, cov.Full, "a pre-existing row with read_ranges = \"\" must read back as fully covered")
+}
+
+// TestService_RecordRead_YieldsFullCoverage is the genuine whole-file
+// read counterpart to the two "no prior row" cases above: it must still
+// produce full coverage.
+func TestService_RecordRead_YieldsFullCoverage(t *testing.T) {
+	env := setupTest(t)
+	env.createSession(t, "s4")
+
+	env.svc.RecordRead(env.ctx, "s4", "/h.go")
+
+	cov := env.svc.ReadCoverage(env.ctx, "s4", "/h.go")
+	require.True(t, cov.Full, "RecordRead must yield full coverage")
+}

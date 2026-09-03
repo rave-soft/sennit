@@ -66,8 +66,8 @@ func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
 // whatever this session had already seen.
 func (s *service) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
 	path = s.relpath(path)
-	s.update(ctx, sessionID, path, func(encoded string) string {
-		return encodeRanges(decodeRanges(encoded).Add(LineRange{Start: start, End: end}))
+	s.update(ctx, sessionID, path, func(encoded string, exists bool) string {
+		return encodeRanges(decodeCoverage(encoded, exists).Add(LineRange{Start: start, End: end}))
 	})
 }
 
@@ -75,8 +75,8 @@ func (s *service) RecordPartialRead(ctx context.Context, sessionID, path string,
 // below it.
 func (s *service) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
 	path = s.relpath(path)
-	s.update(ctx, sessionID, path, func(encoded string) string {
-		coverage := decodeRanges(encoded)
+	s.update(ctx, sessionID, path, func(encoded string, exists bool) string {
+		coverage := decodeCoverage(encoded, exists)
 		coverage = coverage.Shift(start, end, newEnd-end).Add(LineRange{Start: start, End: newEnd})
 		return encodeRanges(coverage)
 	})
@@ -94,7 +94,7 @@ func (s *service) ReadCoverage(ctx context.Context, sessionID, path string) Cove
 	return decodeRanges(readFile.ReadRanges)
 }
 
-func (s *service) update(ctx context.Context, sessionID, path string, update func(string) string) {
+func (s *service) update(ctx context.Context, sessionID, path string, update func(ranges string, exists bool) string) {
 	if err := s.q.UpdateFileRead(ctx, sessionID, path, update); err != nil {
 		slog.Error("Error recording file read", "error", err, "file", path)
 	}

@@ -29,7 +29,7 @@ func TestUpdateFileRead_WorksOnATxBoundQueries(t *testing.T) {
 	defer tx.Rollback() //nolint:errcheck
 
 	q := New(tx)
-	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(string) string { return "1-5" }),
+	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(string, bool) string { return "1-5" }),
 		"a tx-bound Queries must use the caller's transaction, not report a closed connection")
 
 	// Still uncommitted: the caller owns the commit.
@@ -53,11 +53,13 @@ func TestUpdateFileRead_ReadModifyWriteAccumulates(t *testing.T) {
 	require.NoError(t, err)
 
 	q := New(conn)
-	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(prev string) string {
+	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(prev string, exists bool) string {
+		require.False(t, exists, "no row yet")
 		require.Empty(t, prev, "no row yet")
 		return "1-5"
 	}))
-	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(prev string) string {
+	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(prev string, exists bool) string {
+		require.True(t, exists, "the second call must observe the first")
 		require.Equal(t, "1-5", prev, "the second call must observe the first")
 		return prev + ",9-12"
 	}))
@@ -82,8 +84,9 @@ func TestUpdateFileRead_DistinctPathsDoNotClobber(t *testing.T) {
 	require.NoError(t, err)
 
 	q := New(conn)
-	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(string) string { return "1-5" }))
-	require.NoError(t, q.UpdateFileRead(ctx, "s1", "b.go", func(prev string) string {
+	require.NoError(t, q.UpdateFileRead(ctx, "s1", "a.go", func(string, bool) string { return "1-5" }))
+	require.NoError(t, q.UpdateFileRead(ctx, "s1", "b.go", func(prev string, exists bool) string {
+		require.False(t, exists, "b.go must not see a.go's ranges")
 		require.Empty(t, prev, "b.go must not see a.go's ranges")
 		return "9-12"
 	}))

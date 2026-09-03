@@ -39,6 +39,18 @@ func encodeRanges(c Coverage) string {
 	return string(encoded)
 }
 
+// decodeCoverage decodes the stored ranges for a read-modify-write that
+// knows whether a row exists yet. A row holding "" means the file was
+// read end to end; no row at all means nothing has been read, which is
+// empty coverage, not full — encodeRanges/decodeRanges alone cannot tell
+// these apart because both encode to "".
+func decodeCoverage(encoded string, exists bool) Coverage {
+	if !exists {
+		return Coverage{}
+	}
+	return decodeRanges(encoded)
+}
+
 // decodeRanges is encodeRanges' inverse. Anything unparseable is treated
 // as a full read: the column is an optimization over "the file was read",
 // and failing open matches the behavior before ranges were tracked.

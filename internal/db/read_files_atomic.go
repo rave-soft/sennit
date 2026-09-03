@@ -7,7 +7,10 @@ import (
 )
 
 // UpdateFileRead read-modify-writes a file's recorded read ranges under
-// the session/path key.
+// the session/path key. update receives the row's current read_ranges
+// value and whether a row exists at all — a file with no row yet has no
+// recorded coverage, which is not the same thing as the empty string a
+// fully-read file's row holds.
 //
 // The read and the write have to be atomic with respect to each other, so
 // when this Queries owns a *sql.DB it opens its own transaction. When it
@@ -16,7 +19,7 @@ import (
 // closed", which is neither true nor actionable — even though the ambient
 // transaction gives exactly the atomicity this needs. It now runs the
 // statements directly on the caller's handle and lets them commit it.
-func (q *Queries) UpdateFileRead(ctx context.Context, sessionID, path string, update func(string) string) error {
+func (q *Queries) UpdateFileRead(ctx context.Context, sessionID, path string, update func(ranges string, exists bool) string) error {
 	beginner, ok := q.db.(interface {
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
@@ -38,21 +41,23 @@ func (q *Queries) UpdateFileRead(ctx context.Context, sessionID, path string, up
 
 // updateFileReadIn performs the read-modify-write against whichever handle
 // is providing atomicity — this Queries' own transaction, or the caller's.
-func updateFileReadIn(ctx context.Context, db DBTX, sessionID, path string, update func(string) string) error {
+func updateFileReadIn(ctx context.Context, db DBTX, sessionID, path string, update func(ranges string, exists bool) string) error {
 	q := New(db)
 	var ranges string
+	var exists bool
 	file, err := q.GetFileRead(ctx, GetFileReadParams{SessionID: sessionID, Path: path})
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		ranges = ""
+		// No row: leave ranges/exists at their zero values.
 	case err != nil:
 		return err
 	default:
 		ranges = file.ReadRanges
+		exists = true
 	}
 	return q.RecordFileRead(ctx, RecordFileReadParams{
 		SessionID:  sessionID,
 		Path:       path,
-		ReadRanges: update(ranges),
+		ReadRanges: update(ranges, exists),
 	})
 }
