@@ -181,6 +181,7 @@ func (q *Queries) ListAllSessionsSince(ctx context.Context, createdAt int64) ([]
 }
 
 const listAssistantMessagesSince = `-- name: ListAssistantMessagesSince :many
+
 SELECT
     messages.session_id,
     COALESCE(messages.model, 'unknown') as model,
@@ -208,6 +209,11 @@ type ListAssistantMessagesSinceRow struct {
 	FinishedAt int64  `json:"finished_at"`
 }
 
+// The queries below back `sennit stat`, a terminal-table
+// breakdown by model/agent/project/skill. They intentionally return raw
+// rows for a time window rather than pre-aggregating, since the
+// model/agent grouping requires Go-side logic (proportional token
+// attribution for multi-model sessions, see internal/cmd/stat.go).
 func (q *Queries) ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAssistantMessagesSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
@@ -420,76 +426,6 @@ func (q *Queries) ListSessionTreeSince(ctx context.Context, id string) ([]ListSe
 			&i.ParentSessionID,
 			&i.Title,
 			&i.AgentID,
-			&i.PromptTokens,
-			&i.CompletionTokens,
-			&i.Cost,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSessionsSince = `-- name: ListSessionsSince :many
-
-SELECT
-    id,
-    parent_session_id,
-    title,
-    prompt_tokens,
-    completion_tokens,
-    cost,
-    created_at,
-    updated_at
-FROM sessions
-WHERE created_at >= ?
-  AND project_path = ?
-ORDER BY created_at ASC
-`
-
-type ListSessionsSinceParams struct {
-	CreatedAt   int64  `json:"created_at"`
-	ProjectPath string `json:"project_path"`
-}
-
-type ListSessionsSinceRow struct {
-	ID               string         `json:"id"`
-	ParentSessionID  sql.NullString `json:"parent_session_id"`
-	Title            string         `json:"title"`
-	PromptTokens     int64          `json:"prompt_tokens"`
-	CompletionTokens int64          `json:"completion_tokens"`
-	Cost             float64        `json:"cost"`
-	CreatedAt        int64          `json:"created_at"`
-	UpdatedAt        int64          `json:"updated_at"`
-}
-
-// The queries below back `sennit stat`, a terminal-table
-// breakdown by model/agent/project/skill. They intentionally return raw
-// rows for a time window rather than pre-aggregating, since the
-// model/agent grouping requires Go-side logic (proportional token
-// attribution for multi-model sessions, see internal/cmd/stat.go).
-func (q *Queries) ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error) {
-	rows, err := q.db.QueryContext(ctx, listSessionsSince, arg.CreatedAt, arg.ProjectPath)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListSessionsSinceRow{}
-	for rows.Next() {
-		var i ListSessionsSinceRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.ParentSessionID,
-			&i.Title,
 			&i.PromptTokens,
 			&i.CompletionTokens,
 			&i.Cost,

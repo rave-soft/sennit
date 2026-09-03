@@ -122,9 +122,8 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, cleanupConn.Close()) })
 	q := db.New(cleanupConn)
-	for _, file := range deleted {
-		require.NoError(t, q.DeleteFile(t.Context(), file.ID))
-	}
+	require.NoError(t, q.DeleteSessionFiles(t.Context(), sessionID))
+	require.NoError(t, q.DeleteSessionFiles(t.Context(), secondSession.ID))
 
 	const secondRound = 10
 	var wg2 sync.WaitGroup

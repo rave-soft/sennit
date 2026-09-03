@@ -28,18 +28,6 @@ func (q *Queries) CountFilesForSessionIDs(ctx context.Context, sessionIdsJson st
 	return count, err
 }
 
-const countSessionFiles = `-- name: CountSessionFiles :one
-SELECT COUNT(*) FROM files
-WHERE session_id = ?
-`
-
-func (q *Queries) CountSessionFiles(ctx context.Context, sessionID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countSessionFiles, sessionID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createFile = `-- name: CreateFile :one
 INSERT INTO files (
     id,
@@ -84,16 +72,6 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 	return i, err
 }
 
-const deleteFile = `-- name: DeleteFile :exec
-DELETE FROM files
-WHERE id = ?
-`
-
-func (q *Queries) DeleteFile(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteFile, id)
-	return err
-}
-
 const deleteSessionFiles = `-- name: DeleteSessionFiles :exec
 DELETE FROM files
 WHERE session_id = ?
@@ -102,27 +80,6 @@ WHERE session_id = ?
 func (q *Queries) DeleteSessionFiles(ctx context.Context, sessionID string) error {
 	_, err := q.db.ExecContext(ctx, deleteSessionFiles, sessionID)
 	return err
-}
-
-const getFile = `-- name: GetFile :one
-SELECT id, session_id, path, content, version, created_at, updated_at
-FROM files
-WHERE id = ? LIMIT 1
-`
-
-func (q *Queries) GetFile(ctx context.Context, id string) (File, error) {
-	row := q.db.QueryRowContext(ctx, getFile, id)
-	var i File
-	err := row.Scan(
-		&i.ID,
-		&i.SessionID,
-		&i.Path,
-		&i.Content,
-		&i.Version,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const getFileByPathAndSession = `-- name: GetFileByPathAndSession :one
@@ -151,44 +108,6 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const listFilesBySession = `-- name: ListFilesBySession :many
-SELECT id, session_id, path, content, version, created_at, updated_at
-FROM files
-WHERE session_id = ?
-ORDER BY version ASC, created_at ASC
-`
-
-func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]File, error) {
-	rows, err := q.db.QueryContext(ctx, listFilesBySession, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listFilesBySessionTree = `-- name: ListFilesBySessionTree :many
@@ -223,55 +142,6 @@ ORDER BY files.version ASC, files.created_at ASC
 
 func (q *Queries) ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error) {
 	rows, err := q.db.QueryContext(ctx, listFilesBySessionTree, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLatestSessionFiles = `-- name: ListLatestSessionFiles :many
-SELECT f.id, f.session_id, f.path, f.content, f.version, f.created_at, f.updated_at
-FROM files f
-WHERE f.session_id = ?1
-  AND f.version = (
-      SELECT MAX(f2.version)
-      FROM files f2
-      WHERE f2.path = f.path
-        AND f2.session_id = f.session_id
-  )
-ORDER BY f.path
-`
-
-// The latest version of each path *within this session*. The maximum has
-// to be taken over the session's own rows: versions are numbered per
-// path across all sessions, so a global MAX(version) matches a sibling
-// session's newer row and this session's files drop out of the result
-// entirely.
-func (q *Queries) ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error) {
-	rows, err := q.db.QueryContext(ctx, listLatestSessionFiles, sessionID)
 	if err != nil {
 		return nil, err
 	}

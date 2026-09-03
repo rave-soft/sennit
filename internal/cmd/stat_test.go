@@ -336,31 +336,27 @@ func TestComputeSkillStats_MatchesDoubleJSONExtract(t *testing.T) {
 	require.NotEmpty(t, skills[0].FirstUsedAt)
 }
 
-func TestComputeSessionStats_SinceFiltersOutOldSessions(t *testing.T) {
-	dataDir := statFixture(t, "", testProjectPath)
-	conn, err := sennitdb.Connect(t.Context(), dataDir)
-	require.NoError(t, err)
-	q := sennitdb.New(conn)
+// statSince maps the --since flag onto the lower bound every stats query
+// filters by, so each accepted spelling and the rejection of anything else
+// are pinned here rather than inferred from a query's results.
+func TestStatSince_ResolvesEveryAcceptedWindow(t *testing.T) {
+	before := time.Now()
 
-	sinceAll, err := statSince("all")
+	all, err := statSince("all")
 	require.NoError(t, err)
-	allSessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: sinceAll, ProjectPath: testProjectPath})
-	require.NoError(t, err)
-	require.Contains(t, titlesOf(allSessions), "ancient session")
+	require.Zero(t, all, "\"all\" is the epoch, which predates any real data")
 
-	since7d, err := statSince("7d")
+	week, err := statSince("7d")
 	require.NoError(t, err)
-	recentSessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: since7d, ProjectPath: testProjectPath})
-	require.NoError(t, err)
-	require.NotContains(t, titlesOf(recentSessions), "ancient session")
-}
+	require.InDelta(t, before.Add(-7*24*time.Hour).Unix(), week, 5)
 
-func titlesOf(sessions []sennitdb.ListSessionsSinceRow) []string {
-	titles := make([]string, len(sessions))
-	for i, s := range sessions {
-		titles[i] = s.Title
-	}
-	return titles
+	month, err := statSince("30d")
+	require.NoError(t, err)
+	require.InDelta(t, before.Add(-30*24*time.Hour).Unix(), month, 5)
+	require.Less(t, month, week, "a wider window starts earlier")
+
+	_, err = statSince("1y")
+	require.Error(t, err, "an unrecognized window is rejected rather than silently widened")
 }
 
 func TestStatCmd_JSONOutput(t *testing.T) {

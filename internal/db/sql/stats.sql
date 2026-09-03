@@ -4,21 +4,6 @@
 -- model/agent grouping requires Go-side logic (proportional token
 -- attribution for multi-model sessions, see internal/cmd/stat.go).
 
--- name: ListSessionsSince :many
-SELECT
-    id,
-    parent_session_id,
-    title,
-    prompt_tokens,
-    completion_tokens,
-    cost,
-    created_at,
-    updated_at
-FROM sessions
-WHERE created_at >= ?
-  AND project_path = ?
-ORDER BY created_at ASC;
-
 -- name: ListAssistantMessagesSince :many
 SELECT
     messages.session_id,

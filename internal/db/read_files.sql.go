@@ -28,18 +28,6 @@ func (q *Queries) CountReadFilesForSessionIDs(ctx context.Context, sessionIdsJso
 	return count, err
 }
 
-const countSessionReadFiles = `-- name: CountSessionReadFiles :one
-SELECT COUNT(*) FROM read_files
-WHERE session_id = ?
-`
-
-func (q *Queries) CountSessionReadFiles(ctx context.Context, sessionID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countSessionReadFiles, sessionID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const deleteSessionReadFiles = `-- name: DeleteSessionReadFiles :exec
 DELETE FROM read_files
 WHERE session_id = ?

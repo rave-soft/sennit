@@ -24,9 +24,6 @@ type Querier interface {
 	// gc's dependent-row count for a batch of sessions it is about to delete;
 	// see CountMessagesForSessionIDs for why json_each replaces an IN-list.
 	CountReadFilesForSessionIDs(ctx context.Context, sessionIdsJson string) (int64, error)
-	CountSessionFiles(ctx context.Context, sessionID string) (int64, error)
-	CountSessionMessages(ctx context.Context, sessionID string) (int64, error)
-	CountSessionReadFiles(ctx context.Context, sessionID string) (int64, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
@@ -39,7 +36,6 @@ type Querier interface {
 	// clear_thread_session_refs_on_session_delete, which drops the reference
 	// rather than letting it point at a deleted session's project.
 	CreateThread(ctx context.Context, arg CreateThreadParams) (Thread, error)
-	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
@@ -49,7 +45,6 @@ type Querier interface {
 	// This follows AttributeTaskCostOnce in one transaction, so terminal state,
 	// attribution and the durable completion outbox become visible together.
 	FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thread, error)
-	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
 	// The most recently updated top-level session in a project: same scope as
@@ -80,6 +75,11 @@ type Querier interface {
 	// Prompt-history source: only messages a human typed. Sub-agent child sessions
 	// and thread sessions carry machine-generated prompts as user-role messages.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	// The queries below back `sennit stat`, a terminal-table
+	// breakdown by model/agent/project/skill. They intentionally return raw
+	// rows for a time window rather than pre-aggregating, since the
+	// model/agent grouping requires Go-side logic (proportional token
+	// attribution for multi-model sessions, see internal/cmd/stat.go).
 	ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error)
 	// Reports how each background delegation (a task or a thread) ended,
 	// joined to the session that ran it so the outcome can be attributed to
@@ -88,19 +88,12 @@ type Querier interface {
 	// this work land" as the database gets: whether a reviewer approved the
 	// change is not something this process records.
 	ListDelegationOutcomesSince(ctx context.Context, arg ListDelegationOutcomesSinceParams) ([]ListDelegationOutcomesSinceRow, error)
-	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error)
 	// Scoped by joining sessions rather than by a project_path column of its
 	// own: the scope of a latency event is the scope of the session that
 	// produced it, and duplicating the path would let the two disagree after
 	// a session moves.
 	ListLatencyEventsSince(ctx context.Context, arg ListLatencyEventsSinceParams) ([]ListLatencyEventsSinceRow, error)
-	// The latest version of each path *within this session*. The maximum has
-	// to be taken over the session's own rows: versions are numbered per
-	// path across all sessions, so a global MAX(version) matches a sibling
-	// session's newer row and this session's files drop out of the result
-	// entirely.
-	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error)
 	ListPendingTaskCompletions(ctx context.Context, projectPath string) ([]Thread, error)
@@ -123,12 +116,6 @@ type Querier interface {
 	// expansion) without pulling message/file bodies into memory. Unscoped by
 	// project_path; the caller filters by project in Go for --project.
 	ListSessionsForGC(ctx context.Context) ([]ListSessionsForGCRow, error)
-	// The queries below back `sennit stat`, a terminal-table
-	// breakdown by model/agent/project/skill. They intentionally return raw
-	// rows for a time window rather than pre-aggregating, since the
-	// model/agent grouping requires Go-side logic (proportional token
-	// attribution for multi-model sessions, see internal/cmd/stat.go).
-	ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error)
 	ListSessionsSinceWithAgent(ctx context.Context, arg ListSessionsSinceWithAgentParams) ([]ListSessionsSinceWithAgentRow, error)
 	// Counts skill loads by matching the `view` tool's result metadata. Both
 	// JSON layers are guarded with json_valid before being extracted: a

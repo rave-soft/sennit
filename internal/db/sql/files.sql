@@ -1,20 +1,9 @@
--- name: GetFile :one
-SELECT *
-FROM files
-WHERE id = ? LIMIT 1;
-
 -- name: GetFileByPathAndSession :one
 SELECT *
 FROM files
 WHERE path = ? AND session_id = ?
 ORDER BY version DESC, created_at DESC
 LIMIT 1;
-
--- name: ListFilesBySession :many
-SELECT *
-FROM files
-WHERE session_id = ?
-ORDER BY version ASC, created_at ASC;
 
 -- name: ListFilesBySessionTree :many
 WITH RECURSIVE
@@ -69,16 +58,8 @@ INSERT INTO files (
 )
 RETURNING *;
 
--- name: DeleteFile :exec
-DELETE FROM files
-WHERE id = ?;
-
 -- name: DeleteSessionFiles :exec
 DELETE FROM files
-WHERE session_id = ?;
-
--- name: CountSessionFiles :one
-SELECT COUNT(*) FROM files
 WHERE session_id = ?;
 
 -- name: CountFilesForSessionIDs :one
@@ -92,19 +73,3 @@ WHERE files.session_id IN (
     SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
 );
 
--- name: ListLatestSessionFiles :many
--- The latest version of each path *within this session*. The maximum has
--- to be taken over the session's own rows: versions are numbered per
--- path across all sessions, so a global MAX(version) matches a sibling
--- session's newer row and this session's files drop out of the result
--- entirely.
-SELECT f.*
-FROM files f
-WHERE f.session_id = sqlc.arg(session_id)
-  AND f.version = (
-      SELECT MAX(f2.version)
-      FROM files f2
-      WHERE f2.path = f.path
-        AND f2.session_id = f.session_id
-  )
-ORDER BY f.path;

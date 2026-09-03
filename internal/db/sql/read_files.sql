@@ -22,10 +22,6 @@ SELECT * FROM read_files
 WHERE session_id = ?
 ORDER BY read_at DESC;
 
--- name: CountSessionReadFiles :one
-SELECT COUNT(*) FROM read_files
-WHERE session_id = ?;
-
 -- name: CountReadFilesForSessionIDs :one
 -- gc's dependent-row count for a batch of sessions it is about to delete;
 -- see CountMessagesForSessionIDs for why json_each replaces an IN-list.

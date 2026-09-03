@@ -258,9 +258,9 @@ func TestDeleteRemovesDescendantSessions(t *testing.T) {
 		require.Error(t, err, "session %s should have been deleted with the tree", id)
 	}
 
-	remaining, err := queries.CountSessionMessages(t.Context(), grandchild.ID)
+	remaining, err := queries.ListMessagesBySession(t.Context(), grandchild.ID)
 	require.NoError(t, err)
-	require.Zero(t, remaining, "messages should cascade from a transitively deleted session")
+	require.Empty(t, remaining, "messages should cascade from a transitively deleted session")
 
 	survivor, err := sessions.Get(t.Context(), bystander.ID)
 	require.NoError(t, err)

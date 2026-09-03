@@ -45,10 +45,6 @@ WHERE id = ?;
 DELETE FROM messages
 WHERE session_id = ?;
 
--- name: CountSessionMessages :one
-SELECT COUNT(*) FROM messages
-WHERE session_id = ?;
-
 -- name: CountMessagesForSessionIDs :one
 -- gc's dependent-row count for a batch of sessions it is about to delete.
 -- One aggregate query via json_each rather than an IN-list, so the bound

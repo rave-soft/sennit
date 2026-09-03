@@ -283,9 +283,9 @@ func TestGC_AllProjects_DeletesOldAndCascades(t *testing.T) {
 	require.NoError(t, err)
 	defer sennitdb.Release(dataDir) //nolint:errcheck
 	q := sennitdb.New(conn)
-	n, err := q.CountSessionMessages(t.Context(), ids.OldParent)
+	messages, err := q.ListMessagesBySession(t.Context(), ids.OldParent)
 	require.NoError(t, err)
-	require.Zero(t, n)
+	require.Empty(t, messages)
 
 	// Threads: only the old, finished thread is gone; the old-but-running
 	// and the recent-but-finished threads both survive.
@@ -520,9 +520,9 @@ func TestGC_DeleteRollbackRestoresAllRows(t *testing.T) {
 	})
 	require.ErrorIs(t, err, errInjected)
 	require.True(t, sessionExists(t, dataDir, ids.OldParent))
-	n, err := q.CountSessionMessages(t.Context(), ids.OldParent)
+	messages, err := q.ListMessagesBySession(t.Context(), ids.OldParent)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, n)
+	require.Len(t, messages, 1)
 	require.True(t, threadExists(t, dataDir, ids.ThreadOldDone))
 }
 
