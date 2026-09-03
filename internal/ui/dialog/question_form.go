@@ -496,250 +496,278 @@ func (f *QuestionForm) getQuestionText(idx int) string {
 // without tab chrome.
 func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentY := area.Min.Y
-
 	if f.showTabs {
-		const tabPadX = 1
-		tabHeight := 3
-
-		// Compute display labels.
-		labels := make([]string, len(f.labels))
-		copy(labels, f.labels)
-
-		// Truncate if tabs exceed width. Distribute the available
-		// space fairly: short labels keep their natural width and
-		// the deficit is shared proportionally among longer ones,
-		// with remainder cells distributed left-to-right so the
-		// layout resizes smoothly pixel-by-pixel.
-		tabWidths := make([]int, len(labels))
-		naturalWidths := make([]int, len(labels))
-		totalWidth := 0
-		for i, l := range labels {
-			w := ansi.StringWidth(l) + tabPadX*2 + 2
-			tabWidths[i] = w
-			naturalWidths[i] = w
-			totalWidth += w
-		}
-		avail := area.Dx()
-		if totalWidth > avail && len(labels) > 0 {
-			const minLabelW = 1
-			minTabW := minLabelW + tabPadX*2 + 2
-			n := len(labels)
-
-			// Check if there's enough room to show all tabs with
-			// at least a useful label. If each tab can't fit at
-			// least 5 cells of label, switch to single-tab mode
-			// with a "N of M" counter.
-			usefulMinTabW := 5 + tabPadX*2 + 2
-			if avail/n < usefulMinTabW {
-				// Single-tab mode: show only the active tab
-				// label plus a counter.
-				counter := fmt.Sprintf("%d/%d", f.activeIdx+1, n)
-				activeLabel := labels[f.activeIdx]
-				combined := activeLabel + " · " + counter
-				maxLabel := avail - tabPadX*2 - 2
-				if maxLabel < 3 {
-					maxLabel = 3
-				}
-				if ansi.StringWidth(combined) > maxLabel {
-					// Truncate the label part to fit.
-					counterPart := " · " + counter
-					labelBudget := maxLabel - ansi.StringWidth(counterPart)
-					if labelBudget < 1 {
-						labelBudget = 1
-					}
-					combined = ansi.Truncate(activeLabel, labelBudget, "…") + counterPart
-				}
-				for i := range labels {
-					if i == f.activeIdx {
-						labels[i] = combined
-					} else {
-						labels[i] = ""
-					}
-				}
-				// Recalculate widths for single visible tab.
-				totalWidth = 0
-				for i := range labels {
-					if labels[i] == "" {
-						tabWidths[i] = 0
-					} else {
-						w := ansi.StringWidth(labels[i]) + tabPadX*2 + 2
-						tabWidths[i] = w
-						totalWidth += w
-					}
-				}
-			} else {
-				// Normal truncation: distribute space fairly.
-				capped := make([]bool, n)
-				for {
-					freeCount := 0
-					freeTotal := 0
-					for i := range n {
-						if capped[i] {
-							continue
-						}
-						freeCount++
-						freeTotal += naturalWidths[i]
-					}
-					if freeCount == 0 {
-						break
-					}
-					budget := avail
-					for i := range n {
-						if capped[i] {
-							budget -= tabWidths[i]
-						}
-					}
-					share := budget / freeCount
-					changed := false
-					for i := range n {
-						if !capped[i] && naturalWidths[i] <= share {
-							capped[i] = true
-							tabWidths[i] = naturalWidths[i]
-							changed = true
-						}
-					}
-					if !changed {
-						for i := range n {
-							if !capped[i] {
-								tabWidths[i] = max(share, minTabW)
-							}
-						}
-						remainder := budget - share*freeCount
-						for i := range n {
-							if remainder <= 0 {
-								break
-							}
-							if !capped[i] && tabWidths[i] < naturalWidths[i] {
-								tabWidths[i]++
-								remainder--
-							}
-						}
-						break
-					}
-				}
-
-				// Apply truncation based on final widths.
-				for i, l := range labels {
-					labelAvail := max(tabWidths[i]-tabPadX*2-2, minLabelW)
-					if ansi.StringWidth(l) > labelAvail {
-						labels[i] = ansi.Truncate(l, labelAvail, "…")
-					}
-				}
-			}
-		}
-
-		// Build tab layers for click hit detection.
-		var layers []*lipgloss.Layer
-		x := area.Min.X
-
-		// Determine hovered tab via simple bounds check.
-		hoveredTab := -1
-		if f.hoverY >= area.Min.Y && f.hoverY < area.Min.Y+tabHeight {
-			tx := area.Min.X
-			for i := range labels {
-				tw := tabWidths[i]
-				if f.hoverX >= tx && f.hoverX < tx+tw {
-					hoveredTab = i
-					break
-				}
-				tx += tw
-			}
-		}
-
-		firstVisible := -1
-		for i := range labels {
-			if tabWidths[i] > 0 {
-				firstVisible = i
-				break
-			}
-		}
-
-		for i, label := range labels {
-			// Skip hidden tabs (single-tab mode).
-			if tabWidths[i] == 0 {
-				continue
-			}
-			isActive := i == f.activeIdx
-			isHovered := i == hoveredTab && !isActive
-			labelWidth := ansi.StringWidth(label)
-			tabWidth := tabWidths[i]
-
-			tabArea := image.Rect(x, area.Min.Y, x+tabWidth, area.Min.Y+tabHeight)
-
-			border := f.Styles.Tab.InactiveBorder
-			textStyle := f.Styles.Tab.InactiveStyle
-			if !f.focused {
-				border = f.Styles.Tab.InactiveBorderBlurred
-			}
-			if isActive {
-				border = f.Styles.Tab.ActiveBorder
-				textStyle = f.Styles.Tab.ActiveStyle
-				if !f.focused {
-					border = f.Styles.Tab.ActiveBorderBlurred
-				}
-			} else if i < f.numQuestions && f.isAnswered(i) {
-				textStyle = f.Styles.Tab.ActiveStyle
-			}
-			if isHovered {
-				hovered := textStyle
-				hovered.Attrs |= uv.AttrBold
-				textStyle = hovered
-			}
-
-			if i == firstVisible {
-				if isActive {
-					border.BottomLeft = uv.Side{Content: "┘", Style: border.BottomLeft.Style}
-				} else {
-					border.BottomLeft = uv.Side{Content: "┴", Style: border.BottomLeft.Style}
-				}
-			}
-
-			border.Draw(scr, tabArea)
-
-			innerWidth := tabWidth - 2
-			xOff := (innerWidth - labelWidth) / 2
-			innerArea := image.Rect(
-				tabArea.Min.X+1+xOff, tabArea.Min.Y+1,
-				tabArea.Max.X-1, tabArea.Max.Y-1,
-			)
-			uv.NewStyledString(textStyle.Styled(label)).Draw(scr, innerArea)
-
-			// Create an invisible hit layer for this tab.
-			hitStr := strings.Repeat(strings.Repeat(" ", tabWidth)+"\n", tabHeight-1) + strings.Repeat(" ", tabWidth)
-			layers = append(layers, lipgloss.NewLayer(hitStr).X(x).Y(area.Min.Y).ID(fmt.Sprintf("tab_%d", i)))
-
-			x += tabWidth
-		}
-
-		f.compositor = lipgloss.NewCompositor(layers...)
-
-		lineY := area.Min.Y + tabHeight - 1
-		lineSide := f.Styles.Tab.InactiveBorder.Bottom
-		if !f.focused {
-			lineSide = f.Styles.Tab.InactiveBorderBlurred.Bottom
-		}
-		for lx := x; lx < area.Max.X; lx++ {
-			c := uv.NewCell(scr.WidthMethod(), lineSide.Content)
-			if c != nil {
-				c.Style = lineSide.Style
-			}
-			scr.SetCell(lx, lineY, c)
-		}
-
-		contentY = area.Min.Y + tabHeight + 1
+		contentY = f.drawTabBar(scr, area)
 	} else {
 		f.compositor = nil
 	}
-
 	contentArea := image.Rect(area.Min.X, contentY, area.Max.X, area.Max.Y)
+	return f.drawActiveContent(scr, contentArea, contentY-area.Min.Y)
+}
 
+// drawTabBar paints the bordered tab row across the top of area —
+// each tab's border and label plus the trailing separator line — and
+// rebuilds f.compositor for tab click hit-testing. It returns the y
+// coordinate where tab content should start.
+func (f *QuestionForm) drawTabBar(scr uv.Screen, area uv.Rectangle) int {
+	const tabPadX = 1
+	tabHeight := 3
+
+	labels, tabWidths := f.layoutTabLabels(area, tabPadX)
+	layers, x := f.drawTabs(scr, area, tabHeight, labels, tabWidths)
+	f.compositor = lipgloss.NewCompositor(layers...)
+
+	lineY := area.Min.Y + tabHeight - 1
+	lineSide := f.Styles.Tab.InactiveBorder.Bottom
+	if !f.focused {
+		lineSide = f.Styles.Tab.InactiveBorderBlurred.Bottom
+	}
+	for lx := x; lx < area.Max.X; lx++ {
+		c := uv.NewCell(scr.WidthMethod(), lineSide.Content)
+		if c != nil {
+			c.Style = lineSide.Style
+		}
+		scr.SetCell(lx, lineY, c)
+	}
+
+	return area.Min.Y + tabHeight + 1
+}
+
+// layoutTabLabels computes the display label and column width for each
+// tab within area. When the tabs' natural widths exceed the available
+// space it truncates and redistributes width fairly: short labels keep
+// their natural width and the deficit is shared proportionally among
+// longer ones, with remainder cells distributed left-to-right so the
+// layout resizes smoothly pixel-by-pixel. If even minimal labels don't
+// fit, it falls back to single-tab mode showing only the active tab's
+// label plus an "N of M" counter (other labels become "", which
+// drawTabs treats as hidden).
+func (f *QuestionForm) layoutTabLabels(area uv.Rectangle, tabPadX int) (labels []string, tabWidths []int) {
+	labels = make([]string, len(f.labels))
+	copy(labels, f.labels)
+
+	tabWidths = make([]int, len(labels))
+	naturalWidths := make([]int, len(labels))
+	totalWidth := 0
+	for i, l := range labels {
+		w := ansi.StringWidth(l) + tabPadX*2 + 2
+		tabWidths[i] = w
+		naturalWidths[i] = w
+		totalWidth += w
+	}
+	avail := area.Dx()
+	if totalWidth > avail && len(labels) > 0 {
+		const minLabelW = 1
+		minTabW := minLabelW + tabPadX*2 + 2
+		n := len(labels)
+
+		// Check if there's enough room to show all tabs with
+		// at least a useful label. If each tab can't fit at
+		// least 5 cells of label, switch to single-tab mode
+		// with a "N of M" counter.
+		usefulMinTabW := 5 + tabPadX*2 + 2
+		if avail/n < usefulMinTabW {
+			// Single-tab mode: show only the active tab
+			// label plus a counter.
+			counter := fmt.Sprintf("%d/%d", f.activeIdx+1, n)
+			activeLabel := labels[f.activeIdx]
+			combined := activeLabel + " · " + counter
+			maxLabel := avail - tabPadX*2 - 2
+			if maxLabel < 3 {
+				maxLabel = 3
+			}
+			if ansi.StringWidth(combined) > maxLabel {
+				// Truncate the label part to fit.
+				counterPart := " · " + counter
+				labelBudget := maxLabel - ansi.StringWidth(counterPart)
+				if labelBudget < 1 {
+					labelBudget = 1
+				}
+				combined = ansi.Truncate(activeLabel, labelBudget, "…") + counterPart
+			}
+			for i := range labels {
+				if i == f.activeIdx {
+					labels[i] = combined
+				} else {
+					labels[i] = ""
+				}
+			}
+			// Recalculate widths for single visible tab.
+			totalWidth = 0
+			for i := range labels {
+				if labels[i] == "" {
+					tabWidths[i] = 0
+				} else {
+					w := ansi.StringWidth(labels[i]) + tabPadX*2 + 2
+					tabWidths[i] = w
+					totalWidth += w
+				}
+			}
+		} else {
+			// Normal truncation: distribute space fairly.
+			capped := make([]bool, n)
+			for {
+				freeCount := 0
+				freeTotal := 0
+				for i := range n {
+					if capped[i] {
+						continue
+					}
+					freeCount++
+					freeTotal += naturalWidths[i]
+				}
+				if freeCount == 0 {
+					break
+				}
+				budget := avail
+				for i := range n {
+					if capped[i] {
+						budget -= tabWidths[i]
+					}
+				}
+				share := budget / freeCount
+				changed := false
+				for i := range n {
+					if !capped[i] && naturalWidths[i] <= share {
+						capped[i] = true
+						tabWidths[i] = naturalWidths[i]
+						changed = true
+					}
+				}
+				if !changed {
+					for i := range n {
+						if !capped[i] {
+							tabWidths[i] = max(share, minTabW)
+						}
+					}
+					remainder := budget - share*freeCount
+					for i := range n {
+						if remainder <= 0 {
+							break
+						}
+						if !capped[i] && tabWidths[i] < naturalWidths[i] {
+							tabWidths[i]++
+							remainder--
+						}
+					}
+					break
+				}
+			}
+
+			// Apply truncation based on final widths.
+			for i, l := range labels {
+				labelAvail := max(tabWidths[i]-tabPadX*2-2, minLabelW)
+				if ansi.StringWidth(l) > labelAvail {
+					labels[i] = ansi.Truncate(l, labelAvail, "…")
+				}
+			}
+		}
+	}
+	return labels, tabWidths
+}
+
+// drawTabs paints each visible tab's border and centered label at
+// area's top, in order, and returns the invisible click-hit layers
+// built for the compositor along with the x coordinate just past the
+// last tab — where drawTabBar continues the trailing separator line.
+func (f *QuestionForm) drawTabs(scr uv.Screen, area uv.Rectangle, tabHeight int, labels []string, tabWidths []int) ([]*lipgloss.Layer, int) {
+	var layers []*lipgloss.Layer
+	x := area.Min.X
+
+	// Determine hovered tab via simple bounds check.
+	hoveredTab := -1
+	if f.hoverY >= area.Min.Y && f.hoverY < area.Min.Y+tabHeight {
+		tx := area.Min.X
+		for i := range labels {
+			tw := tabWidths[i]
+			if f.hoverX >= tx && f.hoverX < tx+tw {
+				hoveredTab = i
+				break
+			}
+			tx += tw
+		}
+	}
+
+	firstVisible := -1
+	for i := range labels {
+		if tabWidths[i] > 0 {
+			firstVisible = i
+			break
+		}
+	}
+
+	for i, label := range labels {
+		// Skip hidden tabs (single-tab mode).
+		if tabWidths[i] == 0 {
+			continue
+		}
+		isActive := i == f.activeIdx
+		isHovered := i == hoveredTab && !isActive
+		labelWidth := ansi.StringWidth(label)
+		tabWidth := tabWidths[i]
+
+		tabArea := image.Rect(x, area.Min.Y, x+tabWidth, area.Min.Y+tabHeight)
+
+		border := f.Styles.Tab.InactiveBorder
+		textStyle := f.Styles.Tab.InactiveStyle
+		if !f.focused {
+			border = f.Styles.Tab.InactiveBorderBlurred
+		}
+		if isActive {
+			border = f.Styles.Tab.ActiveBorder
+			textStyle = f.Styles.Tab.ActiveStyle
+			if !f.focused {
+				border = f.Styles.Tab.ActiveBorderBlurred
+			}
+		} else if i < f.numQuestions && f.isAnswered(i) {
+			textStyle = f.Styles.Tab.ActiveStyle
+		}
+		if isHovered {
+			hovered := textStyle
+			hovered.Attrs |= uv.AttrBold
+			textStyle = hovered
+		}
+
+		if i == firstVisible {
+			if isActive {
+				border.BottomLeft = uv.Side{Content: "┘", Style: border.BottomLeft.Style}
+			} else {
+				border.BottomLeft = uv.Side{Content: "┴", Style: border.BottomLeft.Style}
+			}
+		}
+
+		border.Draw(scr, tabArea)
+
+		innerWidth := tabWidth - 2
+		xOff := (innerWidth - labelWidth) / 2
+		innerArea := image.Rect(
+			tabArea.Min.X+1+xOff, tabArea.Min.Y+1,
+			tabArea.Max.X-1, tabArea.Max.Y-1,
+		)
+		uv.NewStyledString(textStyle.Styled(label)).Draw(scr, innerArea)
+
+		// Create an invisible hit layer for this tab.
+		hitStr := strings.Repeat(strings.Repeat(" ", tabWidth)+"\n", tabHeight-1) + strings.Repeat(" ", tabWidth)
+		layers = append(layers, lipgloss.NewLayer(hitStr).X(x).Y(area.Min.Y).ID(fmt.Sprintf("tab_%d", i)))
+
+		x += tabWidth
+	}
+
+	return layers, x
+}
+
+// drawActiveContent paints the active tab's body — the confirm
+// summary or the active question — into contentArea and returns its
+// cursor, shifting the cursor's y by yOffset (the tab bar's height,
+// or 0 when no tab bar was drawn).
+func (f *QuestionForm) drawActiveContent(scr uv.Screen, contentArea uv.Rectangle, yOffset int) *tea.Cursor {
 	if f.isConfirmTab() {
 		return f.confirmComp.Draw(scr, contentArea)
 	}
 	if f.activeIdx < f.numQuestions {
 		cur := f.questions[f.activeIdx].Draw(scr, contentArea)
 		if cur != nil {
-			cur.Y += contentY - area.Min.Y
+			cur.Y += yOffset
 		}
 		return cur
 	}
