@@ -83,10 +83,8 @@ type AccountCredential struct {
 	// Token is the OAuth credential, nil for an API-key account.
 	Token *oauth.Token
 	// ProxyURL is the account's own proxy override; nil means "don't
-	// touch the provider's effective proxy route", matching
-	// UpdateProviderAccount's accountProxy parameter before this type
-	// existed — see UpdateProviderAccount's doc comment for the full
-	// resolution rule.
+	// touch the provider's effective proxy route" — see
+	// UpdateProviderAccount's doc comment for the full resolution rule.
 	ProxyURL *string
 	// ActiveAccountID is the account STORE's own ID for the account being
 	// activated (accounts.Account.ID) — not to be confused with
@@ -119,10 +117,10 @@ type AccountCredential struct {
 // A provider with no config entry yet is not an error here: it is the
 // ordinary state of a catalog provider (Codex, Copilot, ...) before its
 // first sign-in — sennit.json has nothing for it until credentials are
-// actually saved. This used to be a hard failure ("provider %s not
-// found"), which broke a brand-new install's very first `sennit login
-// codex`, since ActivateAccount (RecordAccount's caller) has no other
-// path to create the entry. providerConfigFromCatalogLocked fabricates it
+// actually saved. A hard failure here ("provider %s not found") would
+// break a brand-new install's very first `sennit login codex`, since
+// ActivateAccount (RecordAccount's caller) has no other path to create
+// the entry. providerConfigFromCatalogLocked fabricates it
 // from the embedded catalog exactly as SetProviderAPIKey's !exists branch
 // already did — see that function's doc comment for why the two must
 // share one implementation. A providerID that is not catalog-known
@@ -173,14 +171,12 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 
 	// cfg.Providers (the disk-shaped view) is deliberately left untouched
 	// here: RuntimeProviders is the only view live credentials publish to.
-	// Every reader that needs APIKey/OAuthToken/Account now reads
-	// RuntimeProvider(id) instead of Providers.Get(id) — see the
-	// credential-classification work this mutator's mirroring used to
-	// paper over. ProxyURL and APIKeyTemplate were never mirrored either,
-	// for the reasons that used to be documented here: ProviderConfig has
-	// no APIKeyTemplate field at all, and its ProxyURL means the
-	// provider's own configured proxy, not the account-resolved effective
-	// route published above.
+	// Every reader that needs APIKey/OAuthToken/Account reads
+	// RuntimeProvider(id) instead of Providers.Get(id). ProxyURL and
+	// APIKeyTemplate are never mirrored onto cfg.Providers either:
+	// ProviderConfig has no APIKeyTemplate field at all, and its ProxyURL
+	// means the provider's own configured proxy, not the account-resolved
+	// effective route published above.
 
 	s.credentialVersion.Add(1)
 	s.setConfig(cfg)
@@ -194,8 +190,8 @@ func (s *ConfigStore) UpdateProviderAccount(providerID string, cred AccountCrede
 //
 // Disk goes first, deliberately, because SetConfigFields's own reload
 // rebuilds in-memory ProviderConfig from whatever is on disk at the time
-// it runs. If the in-memory publish happened first (as this used to do),
-// that reload — which knows nothing about the account switch, only
+// it runs. If the in-memory publish happened first, that reload — which
+// knows nothing about the account switch, only
 // about the file — would immediately overwrite the freshly-published
 // credentials with whatever was on disk before this call, silently
 // reverting the switch while the "account" pointer on disk kept pointing
@@ -322,9 +318,9 @@ func (s *ConfigStore) providerConfigFromCatalog(providerID string) (ProviderConf
 //
 // Validation and the full providerConfig are assembled entirely in memory
 // before anything is written to disk, so an unknown provider ID leaves no
-// trace on disk (previously the api_key/oauth write for the string/token
-// case happened first, and only then did the provider lookup that could
-// fail).
+// trace on disk — writing the api_key/oauth fields before the provider
+// lookup, which can fail, would otherwise leave a partial write behind for
+// an unknown provider.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	cfg := s.Config()
 	providerConfig, exists := cfg.Providers.Get(providerID)
@@ -345,11 +341,11 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		// Mirror ActivateAccount: v may be a "$VAR"/"$(cmd)" template, not
 		// a literal secret, so it must be resolved before it becomes the
 		// live APIKey a request actually sends. Writing v straight to
-		// APIKey (the old behavior) published the raw template as the
-		// bearer token — TestConnection would resolve it and go green,
-		// but every real request until the next reload sent the literal
-		// "$VAR" string, and the 401 retry path re-resolved the OLD
-		// template since APIKeyTemplate was never updated to v either.
+		// APIKey would publish the raw template as the bearer token —
+		// TestConnection would resolve it and go green, but every real
+		// request until the next reload would send the literal "$VAR"
+		// string, and the 401 retry path would re-resolve the same stale
+		// template since APIKeyTemplate is never updated to v either.
 		resolved, err := s.Resolve(v)
 		if err != nil {
 			return fmt.Errorf("resolving api key for provider %s: %w", providerID, err)

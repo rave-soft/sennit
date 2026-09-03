@@ -136,9 +136,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 // powernapDefaults caches the powernap default LSP server catalog. The
 // catalog is static and immutable for the life of the process, but
-// building it (NewManager + LoadDefaults) is expensive and was previously
-// repeated on every config reload. We load it once and only ever read from
-// it via GetServer, so a shared instance is safe.
+// building it (NewManager + LoadDefaults) is expensive enough to matter on
+// every config reload, so it is loaded once and only ever read from via
+// GetServer, making a shared instance safe.
 var (
 	powernapDefaultsOnce sync.Once
 	powernapDefaults     *powernapConfig.Manager
@@ -158,8 +158,6 @@ func lspDefaultsManager() *powernapConfig.Manager {
 
 // applyLSPDefaults applies default values from powernap to LSP configurations
 func (c *Config) applyLSPDefaults() {
-	// Reuse the process-wide default catalog; building it per reload was a
-	// significant chunk of reload latency.
 	configManager := lspDefaultsManager()
 
 	// Apply defaults to each LSP configuration

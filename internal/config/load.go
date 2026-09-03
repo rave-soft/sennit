@@ -97,11 +97,11 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 	// Pin the model this instance started with, so a reload cannot swap it
 	// for one a sibling instance chose. Several instances share the global
 	// config file, and any of them writing to it (a model switch, an OAuth
-	// refresh, a provider being added) reloads it in all the others — which
-	// used to hand every running session whichever model was selected last,
-	// somewhere else. Worse, that model may name a provider this instance
-	// has no idea about, and the session breaks mid-run over a change made
-	// in another project.
+	// refresh, a provider being added) reloads it in all the others —
+	// which without this pin would hand every running session whichever
+	// model was selected last, somewhere else. Worse, that model may name
+	// a provider this instance has no idea about, and the session breaks
+	// mid-run over a change made in another project.
 	//
 	// Pinning at startup rather than at first selection keeps the other
 	// half of the contract working: the file is read fresh here, so a new

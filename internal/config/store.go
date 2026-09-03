@@ -462,10 +462,10 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	// The write and the staleness-snapshot refresh happen under one
 	// fileStaleness.withWrite section; see its doc comment for why the lock
-	// must span both halves (this used to be two separate steps, and a poll
-	// landing between them misread this process's own write as an external
-	// change — see TestWatchForExternalChanges_IgnoresOwnWrites and
-	// *_TightPoll).
+	// must span both halves: splitting them lets a poll land between the
+	// write and the snapshot refresh and misread this process's own write
+	// as an external change — see TestWatchForExternalChanges_IgnoresOwnWrites
+	// and *_TightPoll.
 	//
 	// The cost of closing the window this way: ConfigStaleness() now
 	// waits behind a config write, including its cross-process flock.
@@ -578,13 +578,12 @@ func (s *ConfigStore) updateLockedErr(scope Scope, mutate func(*Config) (map[str
 	// fileStaleness.withWriteAddPath section, exactly as SetConfigFields'
 	// withWrite does; see fileStaleness.withWrite for the full rationale.
 	//
-	// Unlike the old CaptureStalenessSnapshot(loadedPaths + path) this used
-	// to call, addAndRefreshLocked never narrows the tracked set to just
-	// the paths that happened to load: it restats every path Load/
-	// reloadFromDisk already tracked (including global layers absent on
-	// disk, so a global config appearing for the first time still counts
-	// as an external change) and only adds the scope's own path if it is
-	// somehow not already a member.
+	// addAndRefreshLocked never narrows the tracked set to just the paths
+	// that happened to load: it restats every path Load/reloadFromDisk
+	// already tracked (including global layers absent on disk, so a global
+	// config appearing for the first time still counts as an external
+	// change) and only adds the scope's own path if it is somehow not
+	// already a member.
 	path, pathErr := s.ConfigPath(scope)
 	if pathErr != nil {
 		path = ""

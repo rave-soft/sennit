@@ -65,14 +65,14 @@ func RecordAccount(store *ConfigStore, accStore accounts.Store, scope Scope, pro
 		// back through this same login flow. Treating every such
 		// re-login as a brand new account would silently grow the list
 		// by one entry per forced re-auth, which is strictly worse than
-		// the pre-accounts behavior (a re-login used to just overwrite
-		// the one credential there was). So when there's an active
-		// account already and no identity to tell logins apart, assume
-		// this is that same account being refreshed and update it in
-		// place. A deliberate second account for such a provider is
-		// still possible — that's what "Add account…" is for, and it
-		// sets cred.ForceNewAccount to skip this branch, since it can't
-		// otherwise be told apart from a re-login.
+		// simply overwriting the one credential there was. So when
+		// there's an active account already and no identity to tell
+		// logins apart, assume this is that same account being
+		// refreshed and update it in place. A deliberate second account
+		// for such a provider is still possible — that's what "Add
+		// account…" is for, and it sets cred.ForceNewAccount to skip
+		// this branch, since it can't otherwise be told apart from a
+		// re-login.
 		if id := activeAccountID(store, providerID); id != "" {
 			a, isUpdate = findByID(existing, id)
 		}
@@ -341,14 +341,11 @@ func RefreshAccountLimits(ctx context.Context, store *ConfigStore, accStore acco
 //
 // This lives here — not duplicated in internal/workspace's AppWorkspace
 // and again in a test double standing in for it — because a hand-copied
-// second implementation of these rules is exactly the failure mode that
-// bit this feature once already: an earlier revision of AppWorkspace's
-// RemoveAccount and the workspace package's test-only adapter each carried
-// their own copy of "refuse the last account, activate a
-// replacement before deleting," and the tests exercised only the copy in
-// the test double. Breaking the real implementation left every test green.
-// A single free function both call means there is only one place these
-// rules can live, and a test against a real ConfigStore (see
+// second implementation of "refuse the last account, activate a
+// replacement before deleting" risks drifting unnoticed: tests that only
+// exercise the double's copy stay green even if the real implementation
+// breaks. A single free function both call means there is only one place
+// these rules can live, and a test against a real ConfigStore (see
 // internal/config's own test for this) actually exercises what production
 // runs.
 func RemoveAccount(store *ConfigStore, accStore accounts.Store, scope Scope, providerID, accountID string) error {

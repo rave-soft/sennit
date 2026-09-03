@@ -33,13 +33,12 @@ const lockDeadline = 5 * time.Second
 
 // ModelCacheMigrationThreshold is the minimum array length BloatedModelCache
 // treats as "probably an old discovery dump" rather than a hand-written
-// list. A user typing out models by hand rarely lists more than a handful;
-// the incident that prompted this threshold (see BloatedModelCache) was a
-// 3-entry manual list on a llama.cpp provider getting swept up as if it
-// were bloat and handed to a refresh that then replaced it with junk.
-// Erring on the side of leaving a small list alone is cheap: it just means
-// the data-dir file keeps a few extra lines, not that a real router
-// provider's thousands of models stay in sennit.json.
+// list. A user typing out models by hand rarely lists more than a handful,
+// and mistaking a short hand-written list for bloat would hand it to a
+// refresh that replaces it with junk. Erring on the side of leaving a small
+// list alone is cheap: it just means the data-dir file keeps a few extra
+// lines, not that a real router provider's thousands of models stay in
+// sennit.json.
 const ModelCacheMigrationThreshold = 50
 
 // DropIncompatibleRecentModels drops a pre-refactor "recent_models" value

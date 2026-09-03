@@ -1,9 +1,9 @@
 package config
 
-// This file is the project-bootstrap half of what used to be init.go: an
-// on-disk flag (InitFlagFilename, inside the workspace data dir) marking
-// whether a project has already been through the "/init" onboarding flow.
-// It has nothing to do with loading config — see Load in load.go for that
+// This file is the project-bootstrap half of config handling: an on-disk
+// flag (InitFlagFilename, inside the workspace data dir) marking whether a
+// project has already been through the "/init" onboarding flow. It has
+// nothing to do with loading config — see Load in load.go for that
 // pipeline — it only reads an already-loaded *ConfigStore's paths.
 
 import (

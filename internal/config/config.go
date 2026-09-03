@@ -596,7 +596,7 @@ type Config struct {
 	// Problems accumulates config problems noticed while loading and
 	// setting up agents (a provider dropped for a missing api key, an
 	// agent model that fell back, ...). It is populated by addProblem at
-	// the same sites that used to only slog.Warn, and read back by
+	// the sites where such problems are detected, and read back by
 	// Doctor. Not persisted to disk.
 	Problems []Problem `json:"-"`
 

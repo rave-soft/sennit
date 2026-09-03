@@ -90,15 +90,11 @@ func GlobalLogDir() string {
 // GlobalLogFile returns the path to *this process's own* log file,
 // ~/.config/sennit/logs/sennit-<pid>.log by default.
 //
-// It used to be one file shared by every sennit on the machine, which
-// reads fine until two of them are running — and several usually are,
-// since a sennit works in one session and a person works on more than
-// one thing. Ten processes started in a single day once wrote to one
-// file, and the result was unreadable in a specific and expensive way:
-// three unrelated top-level sessions appeared to be dispatching
-// delegations at the same time, which is exactly the shape of the bug
-// the wake path had just been fixed for. Half an hour went into proving
-// it was three sennits and not one.
+// A single shared log file interleaves entries from every sennit running on
+// the machine — and several usually are, since a sennit works in one
+// session while a person works on more than one thing — so unrelated
+// top-level sessions can read as one process dispatching concurrent
+// delegations to itself.
 //
 // A file per process makes that question unaskable. Both the writer
 // (log.Setup) and the in-process readers (the sennit_logs and

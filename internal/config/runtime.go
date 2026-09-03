@@ -16,20 +16,15 @@ import (
 )
 
 // RuntimeProcessor runs the provider-catalog/discovery pipeline that turns
-// cfg.Providers into RuntimeInput.KnownProviders/RuntimeProviders. It used
-// to also carry CompileProvider and ApplyProviderCredentials, forwarders
-// that existed only so ConfigStore could reach
-// internal/providers/runtime.FromConfig/ApplyPostCredentialSetup without
-// internal/config importing that package directly (it used to import
-// internal/config, so the reverse import would have cycled). Now that
-// internal/providers/runtime depends on internal/providers/config instead
-// (see that package), ConfigStore calls FromConfig/ApplyPostCredentialSetup
-// directly — see applyProviderCredentials below and store_credentials.go —
-// leaving Process as the one real injection seam: it does substantial,
-// non-trivial work (catalog merge, model discovery, credential validation)
-// that config's own tests substitute fakes for (see runtime_test.go's
-// testRuntimeProcessor) to stay fast and deterministic rather than hitting
-// the network or the embedded catalog on every test.
+// cfg.Providers into RuntimeInput.KnownProviders/RuntimeProviders. ConfigStore
+// calls internal/providers/runtime.FromConfig/ApplyPostCredentialSetup
+// directly for the smaller, single-provider calls — see
+// applyProviderCredentials below and credential_store.go — leaving Process
+// as the one real injection seam: it does substantial, non-trivial work
+// (catalog merge, model discovery, credential validation) that config's own
+// tests substitute fakes for (see runtime_test.go's testRuntimeProcessor) to
+// stay fast and deterministic rather than hitting the network or the
+// embedded catalog on every test.
 type RuntimeProcessor interface {
 	Process(context.Context, RuntimeInput) (RuntimeResult, error)
 }

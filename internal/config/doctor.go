@@ -45,9 +45,9 @@ type Problem struct {
 }
 
 // addProblem records a Problem found while loading or setting up the
-// config. It is called from the same sites that used to only slog.Warn, so
-// the user-facing text and the doctor's list stay in sync by construction
-// instead of drifting apart as two separate descriptions of the same check.
+// config, so the user-facing text and the doctor's list stay in sync by
+// construction instead of drifting apart as two separate descriptions of
+// the same check.
 func (c *Config) addProblem(p Problem) {
 	c.Problems = append(c.Problems, p)
 }

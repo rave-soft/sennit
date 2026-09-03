@@ -107,14 +107,12 @@ func (s *ConfigStore) mutateMCPToken(ctx context.Context, reservation *MCPTokenM
 	}
 	// The write and the staleness-snapshot refresh happen under one
 	// fileStaleness.withWriteAddPath section, exactly as updateLockedErr's
-	// does; see fileStaleness.withWrite for why. Before this fix the refresh
-	// ran after setConfig below, using CaptureStalenessSnapshot(loadedPaths+
-	// path) — narrowing the tracked set to only the files that loaded, and
-	// doing so well after the write had already landed on disk, wide open to
-	// that race. addAndRefreshLocked instead restats every path Load/
-	// reloadFromDisk already tracked (including global layers absent on
-	// disk) and only adds the scope's own path if it is somehow not already
-	// a member.
+	// does; see fileStaleness.withWrite for why. A refresh recaptured only
+	// after setConfig, narrowed to the files that loaded, would race the
+	// write that already landed on disk. addAndRefreshLocked instead
+	// restats every path Load/reloadFromDisk already tracked (including
+	// global layers absent on disk) and only adds the scope's own path if
+	// it is somehow not already a member.
 	//
 	// mutated (not err == nil) is what gates the refresh: atomicWrite
 	// returns nil for the errAtomicWriteNoop skips below too, and refreshing

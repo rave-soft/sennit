@@ -72,10 +72,6 @@ func (t ToolGlob) GetTimeout() time.Duration {
 // disabled_tools/allowed_tools and (from internal/ui and internal/agent's
 // tests) to verify every tool has a rendering path and a permission
 // classification.
-//
-// There used to be an unexported twin that production called while the
-// exported one served only tests, which made the exported name look
-// unused and split one answer across two functions.
 func AllToolNames() []string {
 	return toolmeta.DefaultNames()
 }

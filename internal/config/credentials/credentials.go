@@ -3,8 +3,8 @@
 // in-process single-flighting), signalling interactive re-authentication
 // completion, and importing a GitHub Copilot token found on disk.
 //
-// It was split out of config.ConfigStore, which had grown to own four
-// unrelated contexts at once.
+// This package is split out from config.ConfigStore to isolate OAuth token
+// lifecycle concerns from the store's other, unrelated responsibilities.
 // The dependency runs one way: credentials imports config, not the other
 // way around. Manager reaches back into ConfigStore only through the
 // narrow Store interface below, so config never has to import
@@ -310,8 +310,8 @@ func (m *Manager) SignalAuthComplete(providerID string) {
 		case <-ch:
 			// Already closed by a previous signal, with no
 			// WaitForTokenChange having consumed it yet — leave it in
-			// the map. Deleting it here (the old behavior) would drop
-			// the pre-signal on the floor: a second SignalAuthComplete
+			// the map. Deleting it here would drop the pre-signal on
+			// the floor: a second SignalAuthComplete
 			// call with no waiter in between would find this already-
 			// closed channel, delete it, and do nothing else, so the
 			// next WaitForTokenChange would register a brand new (open)
