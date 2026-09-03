@@ -129,6 +129,57 @@ func TestUpdateState_ErrorClosesSessionAndClearsTools(t *testing.T) {
 	require.Equal(t, StateError, info.State)
 }
 
+// TestUpdateState_NeedsAuthClosesSessionAndClearsTools pins the same cleanup
+// TestUpdateState_ErrorClosesSessionAndClearsTools pins for StateError, but
+// for StateNeedsAuth: a server that was connected and then falls out of
+// authentication used to leave its old session and tool catalog live, so the
+// model kept calling tools on a server the UI reported as unauthenticated
+// (GetStates said "needs auth, 0 tools" while Tools() still advertised the
+// stale catalog and RunTool still succeeded against the orphaned session).
+func TestUpdateState_NeedsAuthClosesSessionAndClearsTools(t *testing.T) {
+	r := NewRegistry()
+	const name = "test-needsauth-cleanup"
+	t.Cleanup(func() {
+		r.sessions.Del(name)
+		r.allTools.Del(name)
+		r.states.Del(name)
+	})
+
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	sess, sessCtx := liveSession(t, "do_thing")
+	r.publishMu.Lock()
+	r.sessions.Set(name, sess)
+	r.sessionOwners[name] = owner
+	r.publishMu.Unlock()
+	r.allTools.Set(name, []*Tool{{Name: "do_thing"}})
+	r.updateState(name, StateConnected, nil, sess, Counts{Tools: 1})
+
+	// Preconditions: a connected server advertising the tool to the model.
+	_, ok := r.allTools.Get(name)
+	require.True(t, ok)
+	require.NoError(t, sessCtx.Err(), "session context must be live before the transition")
+
+	r.updateStateFor(name, owner, StateNeedsAuth, nil)
+
+	// The stale session is removed from the map...
+	_, ok = r.sessions.Get(name)
+	require.False(t, ok, "session must be removed once a server needs auth")
+
+	// ...actually closed (its context is cancelled, not merely dropped)...
+	require.ErrorIs(t, sessCtx.Err(), context.Canceled, "session must be closed, not just dropped from the map")
+
+	// ...and its tools cleared from the registry the agent sends to the LLM,
+	// so the model is not advertised tools for a server the UI says needs
+	// authentication.
+	_, ok = r.allTools.Get(name)
+	require.False(t, ok, "needs-auth server's tools must be cleared from the registry")
+
+	info, ok := r.GetState(name)
+	require.True(t, ok)
+	require.Equal(t, StateNeedsAuth, info.State)
+}
+
 // TestUpdateState_ConfigBookkeeping pins the config snapshot reconcile relies
 // on: StateConnected records the config now in effect and clears any pending
 // attempt, StateStarting records the config the in-flight attempt is using,
@@ -631,6 +682,67 @@ func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
 	require.True(t, ok, "tools must be restored after the session is renewed")
 	require.Len(t, got, 1)
 	require.Equal(t, "send_message", got[0].Name)
+}
+
+// TestNeedsAuthThenReauth_RestoresTools pins that the interactive auth flow
+// (AuthenticateMCP) still works end to end after the StateNeedsAuth cleanup
+// fix: a server that falls out of authentication, loses its session and
+// catalog, and is then re-authenticated must come back to StateConnected
+// with its tools restored. AuthenticateMCP itself drives a real network
+// connection, so this exercises the same registry-level mechanism it relies
+// on internally (beginAttempt -> connectAndRegister -> publishSession),
+// mirroring how TestSessionErrorThenRenew_RestoresTools pins the analogous
+// StateError recovery without requiring a live OAuth-capable server.
+func TestNeedsAuthThenReauth_RestoresTools(t *testing.T) {
+	r := NewRegistry()
+	const name = "test-needsauth-then-reauth"
+	t.Cleanup(func() {
+		if s, ok := r.sessions.Take(name); ok {
+			_ = s.Close()
+		}
+		r.allTools.Del(name)
+		r.states.Del(name)
+	})
+
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio, OAuth: true}}})
+
+	// 1. Initial connect registers the tool.
+	sess1, _ := liveSession(t, "send_message")
+	owner1, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	err = r.publishSession(context.Background(), name, cfg.Config().MCP[name], owner1, sess1)
+	require.NoError(t, err)
+	_, ok := r.allTools.Get(name)
+	require.True(t, ok, "tool should be registered after the initial connect")
+
+	// 2. The cached token stops working -> StateNeedsAuth, same as
+	// setAuthTerminal does for connection.go's isOAuthInitErr branches. This
+	// must clear the tools and close the stale session, same as StateError.
+	r.updateStateFor(name, owner1, StateNeedsAuth, nil)
+	_, ok = r.allTools.Get(name)
+	require.False(t, ok, "tools must be cleared while the server needs auth")
+	_, ok = r.sessions.Get(name)
+	require.False(t, ok, "stale session must be removed from the map")
+
+	// 3. The user re-authenticates. AuthenticateMCP's own flow is
+	// beginAttempt -> updateStateFor(StateStarting) -> connectAndRegister,
+	// which ends in publishSession on success; drive that same sequence and
+	// confirm the tools come back and the server settles in StateConnected.
+	owner2, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.updateStateFor(name, owner2, StateStarting, nil)
+	sess2, _ := liveSession(t, "send_message")
+	err = r.publishSession(context.Background(), name, cfg.Config().MCP[name], owner2, sess2)
+	require.NoError(t, err)
+
+	got, ok := r.allTools.Get(name)
+	require.True(t, ok, "tools must be restored once re-authentication succeeds")
+	require.Len(t, got, 1)
+	require.Equal(t, "send_message", got[0].Name)
+
+	info, ok := r.GetState(name)
+	require.True(t, ok)
+	require.Equal(t, StateConnected, info.State)
 }
 
 // TestGetOrRenewClient_RestoresPromptsAndResources pins that a renewal

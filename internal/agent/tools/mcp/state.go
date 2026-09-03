@@ -207,18 +207,20 @@ func (r *Registry) updateStateLocked(name string, state State, err error, client
 	case StateDisabled:
 		info.Config = config.MCPConfig{}
 		info.PendingConfig = nil
-	case StateError:
-		// StateError is terminal for the publishing attempt. Detach its side-
-		// effect ownership together with the session and catalogs so late work
-		// cannot republish after the transition.
+	case StateError, StateNeedsAuth:
+		// Both states are terminal for the publishing attempt: StateError
+		// gives up, StateNeedsAuth waits on the user. Either way detach the
+		// side-effect ownership together with the session and catalogs so
+		// late work cannot republish after the transition.
 		delete(r.owners, name)
-		// A session that has errored is dead to us. Atomically remove it and
-		// close it so the child process and its stdio pipes are released — the
-		// bare map delete this used to do leaked both. Clearing the tool
-		// registry keeps the agent from advertising tools it can no longer
-		// call: without it, sennit_info / the `/mcp` menu and the tool list
-		// handed to the LLM diverge, so a server still reads "connected, N
-		// tools" while every call fails with "tool not found".
+		// A session that errored or fell out of authentication is dead to
+		// us. Atomically remove it and close it so the child process and
+		// its stdio pipes are released — the bare map delete this used to
+		// do leaked both. Clearing the tool registry keeps the agent from
+		// advertising tools it can no longer call: without it, sennit_info
+		// / the `/mcp` menu and the tool list handed to the LLM diverge, so
+		// a server still reads "connected, N tools" (or "needs auth") while
+		// every call still succeeds against the orphaned session.
 		if old, ok := r.sessions.Take(name); ok {
 			delete(r.sessionOwners, name)
 			cleanup.session = old

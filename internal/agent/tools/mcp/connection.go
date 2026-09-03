@@ -327,8 +327,10 @@ func (cm *connectionManager) initClient(ctx context.Context, cfg ConfigProvider,
 		if m.OAuthToken != nil {
 			cm.reg.clearOAuthToken(cfg, name, owner, m.OAuthToken)
 		}
+		// updateStateFor clears the catalog and any live session for us on
+		// StateNeedsAuth, and the deferred detachAuth above releases the
+		// auth handler; no separate clearMCPDataFor call is needed here.
 		cm.reg.updateStateFor(name, owner, StateNeedsAuth, nil)
-		cm.reg.clearMCPDataFor(name, owner)
 		slog.Info("MCP server requires OAuth authentication", "name", name)
 		return nil
 	}
