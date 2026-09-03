@@ -222,8 +222,22 @@ func NewHandler(
 	// Restore a saved token as the initial token source so the SDK uses
 	// it directly (and refreshes it) instead of triggering the browser
 	// flow. Seed the saver with the restored token so only a genuine
-	// refresh writes to disk; a plain restart causes no token churn.
-	if hasRefreshableToken(savedToken) {
+	// refresh writes to disk; a plain restart causes no token churn. A
+	// token that is neither refreshable nor currently valid is left out
+	// entirely (InitialTokenSource stays nil) so the request goes out
+	// unauthenticated, draws a 401, and runs the normal browser flow
+	// instead of failing before any request is sent.
+	if hasInstallableToken(savedToken) {
+		// ExpiresAt == 0 means SetExpiresAt found no expiry information at
+		// all, and restoring it as the epoch is what keeps that method's
+		// "force a refresh" intent: oauth2 sees the token as already
+		// expired and refreshes it immediately rather than trusting a
+		// fabricated lifetime. That is only safe because a token reaching
+		// here with ExpiresAt == 0 always carries a refresh token to
+		// refresh with — hasInstallableToken admits a token without one
+		// only when its expiry is in the future. See
+		// TestHandler_RestoreZeroExpiresAtWithoutRefreshTokenIsNeverInstalled,
+		// which holds that gate in place.
 		restored := &oauth2.Token{
 			AccessToken:  savedToken.AccessToken,
 			RefreshToken: savedToken.RefreshToken,
@@ -262,11 +276,23 @@ func NewHandler(
 	return h, nil
 }
 
-// hasRefreshableToken reports whether a saved token carries enough state
-// to be used and refreshed without re-authorizing: an access token plus
-// the token endpoint captured previously.
-func hasRefreshableToken(t *oauth.Token) bool {
-	return t != nil && t.AccessToken != "" && t.Client != nil && t.Client.TokenURL != ""
+// hasInstallableToken reports whether a saved token is worth installing as
+// the handler's initial token source: either it carries a refresh token
+// and the token endpoint needed to use it, or its access token has not
+// expired and can be used as-is even with no way to refresh it later. A
+// token with neither is left uninstalled, so it never reads as installing
+// an already-dead credential.
+func hasInstallableToken(t *oauth.Token) bool {
+	if t == nil || t.AccessToken == "" || t.Client == nil {
+		return false
+	}
+	return canRefreshToken(t) || t.ExpiresAt > time.Now().Unix()
+}
+
+// canRefreshToken reports whether t carries a refresh token and the token
+// endpoint needed to use it. t.Client must be non-nil.
+func canRefreshToken(t *oauth.Token) bool {
+	return t.RefreshToken != "" && t.Client.TokenURL != ""
 }
 
 // AuthURL returns the last authorization URL opened in the browser.

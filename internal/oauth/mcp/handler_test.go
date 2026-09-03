@@ -270,6 +270,118 @@ func TestHandler_RestoreSkipsBrowser(t *testing.T) {
 	require.Equal(t, "restored-access", tok.AccessToken)
 }
 
+// TestHandler_RestoreUsesUnexpiredTokenWithoutRefreshToken proves a saved
+// token with no refresh token is still restored and used as-is as long as
+// its access token has not expired: the request can go out authenticated
+// even though the token can never be refreshed later.
+func TestHandler_RestoreUsesUnexpiredTokenWithoutRefreshToken(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "saved-client"})
+
+	saved := &oauth.Token{
+		AccessToken: "bearer-only-access",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+		Client: &oauth.OAuthClient{
+			ClientID: "saved-client",
+			AuthURL:  base + "/authorize",
+			TokenURL: base + "/token",
+		},
+	}
+
+	h, err := NewHandler("test", mcpURL, saved, nil, func(*oauth.Token) {}, false, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	h.openURL = func(string) error {
+		t.Error("browser must not open when a valid token is restored")
+		return nil
+	}
+
+	ts, err := h.TokenSource(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, ts)
+	tok, err := ts.Token()
+	require.NoError(t, err)
+	require.Equal(t, "bearer-only-access", tok.AccessToken)
+}
+
+// TestHandler_RestoreDoesNotInstallDeadToken proves a saved token with no
+// refresh token and no usable expiry is left out of the handler entirely
+// (InitialTokenSource stays nil) rather than restored as already expired.
+// That lets the request go out unauthenticated, draw a 401, and run the
+// normal browser flow instead of failing before any request is sent.
+func TestHandler_RestoreDoesNotInstallDeadToken(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "saved-client"})
+
+	saved := &oauth.Token{
+		AccessToken: "dead-access",
+		Client: &oauth.OAuthClient{
+			ClientID: "saved-client",
+			AuthURL:  base + "/authorize",
+			TokenURL: base + "/token",
+		},
+	}
+
+	h, err := NewHandler("test", mcpURL, saved, nil, func(*oauth.Token) {}, false, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	require.Nil(t, h.Token(), "an unusable saved token must not be installed")
+}
+
+// TestHandler_RestoreZeroExpiresAtWithRefreshTokenForcesRefresh pins the
+// rule for a refreshable token with no stated expiry: ExpiresAt == 0
+// restores as the epoch, not oauth2's zero-value "no known expiry". That
+// keeps SetExpiresAt's "force a refresh" intent — oauth2 treats an epoch
+// Expiry as already expired and refreshes right away instead of trusting a
+// fabricated lifetime, which is safe here because a refresh token exists
+// to do it with.
+func TestHandler_RestoreZeroExpiresAtWithRefreshTokenForcesRefresh(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "saved-client"})
+
+	saved := &oauth.Token{
+		AccessToken:  "stale-access",
+		RefreshToken: "old-refresh",
+		// ExpiresAt left at zero on purpose.
+		Client: &oauth.OAuthClient{
+			ClientID: "saved-client",
+			AuthURL:  base + "/authorize",
+			TokenURL: base + "/token",
+		},
+	}
+
+	h, err := NewHandler("test", mcpURL, saved, nil, func(*oauth.Token) {}, false, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	require.NotNil(t, h.Token())
+	require.True(t, h.Token().Expiry.Equal(time.Unix(0, 0)),
+		"ExpiresAt == 0 with a refresh token must restore as the epoch to force a proactive refresh")
+}
+
+// TestHandler_RestoreZeroExpiresAtWithoutRefreshTokenIsNeverInstalled
+// covers the other half of the same rule: without a refresh token,
+// ExpiresAt == 0 never reaches the epoch-vs-zero-time choice at all,
+// because hasInstallableToken already refuses to install a token with no
+// refresh token and no proof it is still valid (see
+// TestHandler_RestoreDoesNotInstallDeadToken). An epoch Expiry would make
+// such a token permanently unusable, which is exactly the dead end this
+// fix removes by not installing it in the first place.
+func TestHandler_RestoreZeroExpiresAtWithoutRefreshTokenIsNeverInstalled(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "saved-client"})
+
+	saved := &oauth.Token{
+		AccessToken: "bearer-only-access",
+		// No RefreshToken, ExpiresAt left at zero on purpose.
+		Client: &oauth.OAuthClient{
+			ClientID: "saved-client",
+			AuthURL:  base + "/authorize",
+			TokenURL: base + "/token",
+		},
+	}
+
+	h, err := NewHandler("test", mcpURL, saved, nil, func(*oauth.Token) {}, false, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	require.Nil(t, h.Token(), "no refresh token and no usable expiry must not be installed")
+}
+
 // TestHandler_RefreshPersists proves an expired restored token is refreshed
 // via the stored token endpoint and the new token is persisted, all without a
 // browser.
@@ -319,9 +431,8 @@ func TestHandler_RefreshPersists(t *testing.T) {
 	require.Equal(t, "refreshed-access", saver.AccessToken)
 }
 
-func TestHasRefreshableToken(t *testing.T) {
+func TestHasInstallableToken(t *testing.T) {
 	t.Parallel()
-	full := &oauth.Token{AccessToken: "a", Client: &oauth.OAuthClient{TokenURL: "https://x/token"}}
 	tests := []struct {
 		name string
 		tok  *oauth.Token
@@ -330,13 +441,37 @@ func TestHasRefreshableToken(t *testing.T) {
 		{"nil", nil, false},
 		{"no access token", &oauth.Token{Client: &oauth.OAuthClient{TokenURL: "x"}}, false},
 		{"no client", &oauth.Token{AccessToken: "a"}, false},
-		{"no token url", &oauth.Token{AccessToken: "a", Client: &oauth.OAuthClient{}}, false},
-		{"complete", full, true},
+		{
+			"refresh token but no token url: not refreshable, no known expiry either",
+			&oauth.Token{AccessToken: "a", RefreshToken: "r", Client: &oauth.OAuthClient{}},
+			false,
+		},
+		{
+			"refresh token and token url: refreshable regardless of expiry",
+			&oauth.Token{AccessToken: "a", RefreshToken: "r", Client: &oauth.OAuthClient{TokenURL: "https://x/token"}},
+			true,
+		},
+		{
+			"no refresh token, unexpired access token: usable as-is",
+			&oauth.Token{AccessToken: "a", Client: &oauth.OAuthClient{TokenURL: "https://x/token"}, ExpiresAt: time.Now().Add(time.Hour).Unix()},
+			true,
+		},
+		{
+			// This is the defect this fix closes: an access token with
+			// neither a refresh token nor any expiry information was
+			// previously installed as if it could be used and refreshed
+			// indefinitely. ExpiresAt == 0 here means SetExpiresAt found
+			// no expiry info at all (its "treat as expired" convention),
+			// and with no refresh token there is no way to renew it.
+			"no refresh token, no usable expiry: not installed",
+			&oauth.Token{AccessToken: "a", Client: &oauth.OAuthClient{TokenURL: "https://x/token"}},
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, hasRefreshableToken(tt.tok))
+			require.Equal(t, tt.want, hasInstallableToken(tt.tok))
 		})
 	}
 }

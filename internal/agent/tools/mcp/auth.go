@@ -78,6 +78,12 @@ func hasUsableToken(tok *oauth.Token) bool {
 //   - invalid_client: deleted or deactivated client registrations
 //   - "no token available": the handler had no cached token to use
 //   - interactive authorization was required but withheld during startup
+//   - "refresh token is not set": oauth2's tokenRefresher refuses to
+//     refresh an expired token that was restored with no refresh token
+//     (e.g. a bearer-only token whose validity ran out); matching on this
+//     substring rather than the full "oauth2: token expired and ..."
+//     string tolerates a reworded prefix without silently falling back to
+//     StateError
 func isOAuthInitErr(err error) bool {
 	if errors.Is(err, mcpoauth.ErrInteractiveAuthRequired) {
 		return true
@@ -89,5 +95,6 @@ func isOAuthInitErr(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "invalid_grant") ||
 		strings.Contains(msg, "invalid_client") ||
-		strings.Contains(msg, "no token available")
+		strings.Contains(msg, "no token available") ||
+		strings.Contains(msg, "refresh token is not set")
 }
