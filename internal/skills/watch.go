@@ -17,6 +17,25 @@ import (
 // shorten it.
 var ChangePollInterval = 2 * time.Second
 
+// watchStartedKey is the context key WatchForChanges checks for a test
+// hook to call once its first snapshot has been taken, before it starts
+// waiting on the ticker. Threading it through ctx (rather than a package
+// var like ChangePollInterval) keeps it scoped to a single call, since
+// several watch tests run in parallel, each with its own goroutine, and a
+// shared var would race between them.
+type watchStartedKey struct{}
+
+// withWatchStartedHook returns a context that makes WatchForChanges invoke
+// hook right after taking its first snapshot. Tests use this to know the
+// initial scan has actually happened before writing a file, instead of
+// sleeping a guessed duration and hoping the goroutine got scheduled in
+// time — a race that a loaded CI runner can lose, leaving the write folded
+// into that very first snapshot and its change undetectable by any later
+// poll.
+func withWatchStartedHook(ctx context.Context, hook func()) context.Context {
+	return context.WithValue(ctx, watchStartedKey{}, hook)
+}
+
 // skillFileSnapshot is the size+mtime pair WatchForChanges diffs between
 // polls, at the same granularity config.fileSnapshot uses for config files.
 type skillFileSnapshot struct {
@@ -107,6 +126,9 @@ func WatchForChanges(ctx context.Context, cfg func() DiscoveryConfig, mgr *Manag
 	}
 
 	last := scanSkillFiles(resolvePathsCached(cfg()))
+	if hook, ok := ctx.Value(watchStartedKey{}).(func()); ok && hook != nil {
+		hook()
+	}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

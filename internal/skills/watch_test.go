@@ -30,8 +30,10 @@ func TestWatchForChanges_DetectsAddEditRemove(t *testing.T) {
 	mgr := NewManager(nil, nil, nil)
 
 	notified := make(chan struct{}, 8)
+	started := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = withWatchStartedHook(ctx, func() { close(started) })
 	go WatchForChanges(ctx, func() DiscoveryConfig { return cfg }, mgr, testPollInterval, func() {
 		select {
 		case notified <- struct{}{}:
@@ -48,18 +50,35 @@ func TestWatchForChanges_DetectsAddEditRemove(t *testing.T) {
 		}
 	}
 
-	// Give the watcher goroutine time to take its first snapshot before
+	// Wait for the watcher's first snapshot to actually complete before
 	// any file exists, so the write below is seen as a genuine diff
-	// rather than possibly being included in that very first scan.
-	time.Sleep(5 * testPollInterval)
+	// rather than racing to land inside that very first scan (which
+	// would fold it into the baseline and make it undetectable).
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watcher did not take its first snapshot in time")
+	}
 
 	skillDir := filepath.Join(root, "my-skill")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	skillPath := filepath.Join(skillDir, SkillFileName)
 
+	// writeSkill writes skillPath the way the real Write/Edit tool does
+	// (see fsext.AtomicCreateFile): to a temp file, then renamed into
+	// place. A plain os.WriteFile truncates the target before writing its
+	// new content, so a poll landing in that window sees a momentarily
+	// empty file — a torn read the watcher would never see from an actual
+	// external edit, and reproducible often enough under -race plus CPU
+	// load to be the real source of this test's CI flakiness.
 	writeSkill := func(description string) {
 		content := "---\nname: my-skill\ndescription: " + description + "\n---\nInstructions body.\n"
-		require.NoError(t, os.WriteFile(skillPath, []byte(content), 0o600))
+		tmp, err := os.CreateTemp(skillDir, "SKILL.*.tmp")
+		require.NoError(t, err)
+		_, err = tmp.Write([]byte(content))
+		require.NoError(t, err)
+		require.NoError(t, tmp.Close())
+		require.NoError(t, os.Rename(tmp.Name(), skillPath))
 	}
 
 	// Adding a new skill file.
