@@ -208,7 +208,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		}
 		return nil
 	}
-	prevYolo := m.yoloModeCached()
+	prevYolo := m.wsCache.yoloModeCached()
 	m.wsCache.agentBusyCache.Set(msg.agentBusy)
 	m.wsCache.yoloCache.Set(msg.yolo)
 	m.wsCache.agentCache.Set(agentReadyModel{ready: msg.ready, model: msg.model})
@@ -235,7 +235,7 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	if m.promptQueue.inFlight() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
-	if !m.hasSession() {
+	if !m.sess.hasSession() {
 		hadItems := m.promptQueue.count() != 0
 		// Bump the generation so any in-flight fetch scoped to the
 		// now-departed session is discarded rather than repopulating the
@@ -305,7 +305,7 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if m.hasSession() && !m.promptQueue.fresh(promptQueueTTL) {
+	if m.sess.hasSession() && !m.promptQueue.fresh(promptQueueTTL) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -363,7 +363,7 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 // invalidates it (see agentListCache.staleRefreshCmd), so a session that
 // never delegates anything costs a single round trip in total.
 func (m *UI) agentViewsRefreshCmds() []tea.Cmd {
-	if !m.panelSurfacesThreads() || m.state != uiChat || !m.hasSession() {
+	if !m.panelSurfacesThreads() || m.state != uiChat || !m.sess.hasSession() {
 		return nil
 	}
 	if cmd := m.agentList.staleRefreshCmd(m.com, m, true); cmd != nil {
@@ -377,7 +377,7 @@ func (m *UI) toggleYoloMode() tea.Cmd {
 	if !started {
 		return util.ReportWarn("Yolo mode is already being updated")
 	}
-	desired := !m.yoloModeCached()
+	desired := !m.wsCache.yoloModeCached()
 	workspace := m.com.Workspace
 	return func() tea.Msg {
 		workspace.PermissionSetSkipRequests(desired)
@@ -388,6 +388,6 @@ func (m *UI) toggleYoloMode() tea.Cmd {
 // yoloModeCached reports the memoized permission-skip ("yolo") mode. Toggles
 // write through the cache; the Update-tail backstop keeps it bounded-stale
 // otherwise.
-func (m *UI) yoloModeCached() bool {
-	return m.wsCache.yoloCache.Value
+func (c *workspaceCacheState) yoloModeCached() bool {
+	return c.yoloCache.Value
 }

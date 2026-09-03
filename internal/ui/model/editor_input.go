@@ -221,7 +221,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 	// Snapshot session state up front: fileCmd's closure runs on the cmd
 	// goroutine and must not read or write m.sess off the Update loop.
-	hasSession := m.hasSession()
+	hasSession := m.sess.hasSession()
 	var sessionID string
 	if hasSession {
 		sessionID = m.sess.current.ID
@@ -332,7 +332,7 @@ func mimeOf(content []byte) string {
 // the cursor, mirroring the keypress bang-mode entry logic.
 func (m *UI) checkBangModeAfterPaste() {
 	if m.editor.bang.enterFromLeadingPrefix(&m.editor.textarea, "", m.editor.textarea.Column()) {
-		m.setEditorPrompt(m.yoloModeCached())
+		m.setEditorPrompt(m.wsCache.yoloModeCached())
 	}
 }
 

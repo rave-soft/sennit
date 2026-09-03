@@ -86,7 +86,7 @@ func (m *UI) viewedModel() *workspace.AgentModel {
 			return model
 		}
 	}
-	return m.selectedModel()
+	return m.wsCache.selectedModel()
 }
 
 // recordedModel names the model a delegation ran on, for the frame the UI

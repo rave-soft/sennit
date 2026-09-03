@@ -69,7 +69,7 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 	// rows are hidden to whether the panel is currently showing this
 	// session's todos, same as the pubsub session-update handler does for
 	// already-loaded items.
-	if m.hasSession() {
+	if m.sess.hasSession() {
 		m.chat.SetTodosHidden(hasIncompleteTodos(m.sess.current.Todos))
 		m.refreshDelegationBlocks()
 	}

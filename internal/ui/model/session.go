@@ -115,7 +115,7 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	// both enterChildSession and exitChildSession adjust the nav stack
 	// before asking for the load, so this is already the depth the load is
 	// for. See sessionLoadResolver.resumable.
-	resumable := !m.viewingChildSession()
+	resumable := !m.sess.viewingChildSession()
 	owner := m
 	return func() tea.Msg {
 		loader := sessionLoadResolver{

@@ -43,7 +43,7 @@ type notificationSentMsg struct{ uiOwned }
 // All I/O (AgentReadyErr, CreateSession, AgentRun) runs inside a tea.Cmd
 // so that the Update goroutine is never blocked.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
-	if m.viewingChildSession() {
+	if m.sess.viewingChildSession() {
 		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
 	if m.sess.current != nil && m.sess.loadExpectedID != "" && m.sess.loadExpectedID != m.sess.current.ID {
@@ -142,7 +142,7 @@ func cancelTimerCmd(owner *UI) tea.Cmd {
 // confirmation and starts a timer. The second press (before the timer
 // expires) actually cancels the agent.
 func (m *UI) cancelAgent() tea.Cmd {
-	if !m.hasSession() {
+	if !m.sess.hasSession() {
 		return nil
 	}
 

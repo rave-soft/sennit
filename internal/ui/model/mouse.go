@@ -148,7 +148,7 @@ func (m *UI) applyMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) ([]tea.Cmd, 
 	// updateLayoutAndSize runs synchronously inside Update in response
 	// to a session/todos event), which would leave the cached rects
 	// stale or zero and silently swallow the click.
-	if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
+	if msg.Button == tea.MouseLeft && m.state == uiChat && m.sess.hasSession() {
 		hit := m.panelHitTest(image.Pt(msg.X, msg.Y))
 		if hit.inTodosHeader {
 			if cmd := m.toggleTodosExpanded(); cmd != nil {
@@ -394,7 +394,7 @@ func (m *UI) applyMouseWheel(msg common.CoalescedWheelMsg, cmds []tea.Cmd) ([]te
 		// same rationale as the click hit-test above: a wheel event
 		// can arrive before drawSessionPanel has painted the current
 		// layout.
-		if m.hasSession() {
+		if m.sess.hasSession() {
 			hit := m.panelHitTest(image.Pt(msg.Mouse.X, msg.Mouse.Y))
 			if hit.plan.todosScrollable && hit.inTodosList {
 				lines := int(msg.DeltaY)

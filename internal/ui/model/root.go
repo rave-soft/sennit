@@ -484,7 +484,7 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			r.attachment.pendingID = ""
 			r.dashboard.SetActive(false)
 			return r, nil
-		case r.active == screenThread && key.Matches(msg, r.main.KeyMap().Chat.ExitChildSession) && !r.attachment.thread.ui.viewingChildSession():
+		case r.active == screenThread && key.Matches(msg, r.main.KeyMap().Chat.ExitChildSession) && !r.attachment.thread.ui.sess.viewingChildSession():
 			// alt+up at the top of a drilled-in thread (no child session of
 			// its own to step out of first) returns straight to the main
 			// screen, not the dashboard — mirrors leaveThread's teardown but
@@ -793,7 +793,7 @@ func (r *Root) createThreadCmd(name, goal string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	parentSessionID := ""
-	if r.main != nil && r.main.hasSession() {
+	if r.main != nil && r.main.sess.hasSession() {
 		parentSessionID = r.main.sess.current.ID
 	}
 	return func() tea.Msg {

@@ -290,7 +290,7 @@ func (m *UI) surfacesThreads() bool {
 // transcript is being read and losing the only sign of that would hide
 // live state rather than tidy it away.
 func (m *UI) panelSurfacesThreads() bool {
-	return m.surfacesThreads() && !m.viewingChildSession()
+	return m.surfacesThreads() && !m.sess.viewingChildSession()
 }
 
 // New creates a new instance of the [UI] model.
@@ -760,11 +760,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.textarea.Placeholder = m.editor.placeholder.selectPlaceholder(editorPlaceholderContext{
 			current:                  m.editor.textarea.Placeholder,
 			editorFocused:            true,
-			viewingChildSession:      m.viewingChildSession(),
+			viewingChildSession:      m.sess.viewingChildSession(),
 			exitChildSessionShortcut: m.exitChildSessionShortcut(),
 			bangActive:               m.editor.bang.isActive(),
 			busy:                     m.isAgentBusy(),
-			yolo:                     m.yoloModeCached(),
+			yolo:                     m.wsCache.yoloModeCached(),
 		})
 	}
 
@@ -1074,15 +1074,15 @@ func (m *UI) isAgentBusy() bool {
 // memoized value: it is a lookup in the dispatcher's active-request map, and
 // it runs on session load rather than per message.
 func (m *UI) isCurrentSessionBusy() bool {
-	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
+	if !m.sess.hasSession() || m.com == nil || m.com.Workspace == nil {
 		return false
 	}
 	return m.com.Workspace.AgentIsSessionBusy(m.sess.current.ID)
 }
 
 // hasSession returns true if there is an active session with a valid ID.
-func (m *UI) hasSession() bool {
-	return m.sess.current != nil && m.sess.current.ID != ""
+func (s *sessionState) hasSession() bool {
+	return s.current != nil && s.current.ID != ""
 }
 
 // applyTheme switches the live palette and persists the choice. The swap is
@@ -1330,7 +1330,7 @@ func (m *UI) startNewSessionGuarded(cmds []tea.Cmd) (out []tea.Cmd, started bool
 // The actual session creation happens when the user sends their first message.
 // Returns a command to reload prompt history.
 func (m *UI) newSession() tea.Cmd {
-	if !m.hasSession() {
+	if !m.sess.hasSession() {
 		return nil
 	}
 

@@ -80,7 +80,7 @@ func TestSessionLoad_LeavingAChildSessionRestoresThePinAgain(t *testing.T) {
 		label:           "subagent",
 	})
 	cmd := m.exitChildSession()
-	require.False(t, m.viewingChildSession())
+	require.False(t, m.sess.viewingChildSession())
 	runCmdTree(m, cmd, nil)
 
 	require.Equal(t, 1, ws.applySessionModelCalls,

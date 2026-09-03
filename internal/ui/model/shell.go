@@ -145,7 +145,7 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 // runShellCommand executes a shell command server-side without triggering
 // the LLM. The result is displayed as a tool-style item in the chat.
 func (m *UI) runShellCommand(command string) tea.Cmd {
-	if m.viewingChildSession() {
+	if m.sess.viewingChildSession() {
 		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
 	if m.sess.current != nil {
@@ -165,7 +165,7 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 // in a newly created session, which triggers title generation.
 func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cmd {
 	var cmds []tea.Cmd
-	if !m.hasSession() {
+	if !m.sess.hasSession() {
 		if m.editor.pendingSend.loadingNow() {
 			m.editor.pendingSend.enqueue(sendQueueItem{content: command, generation: m.editor.pendingSend.generationNow(), bang: true})
 			return nil

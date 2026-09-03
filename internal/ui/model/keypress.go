@@ -181,7 +181,7 @@ func (m *UI) handleGlobalKeys(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cmd, b
 		m.updateLayoutAndSize()
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Chat.TogglePills):
-		if m.state == uiChat && m.hasSession() {
+		if m.state == uiChat && m.sess.hasSession() {
 			if cmd := m.toggleTodosExpanded(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -308,7 +308,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 
 		if m.editor.bang.isActive() && value != "" {
 			m.editor.bang.exit()
-			m.setEditorPrompt(m.yoloModeCached())
+			m.setEditorPrompt(m.wsCache.yoloModeCached())
 			m.editor.placeholder.randomize()
 			m.editor.historyReset()
 			return cmds, tea.Batch(m.runShellCommand(value)), true
@@ -325,7 +325,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 
 		return cmds, tea.Batch(m.sendMessage(value, attachments...), m.sess.loadPromptHistory(m.com, m)), true
 	case key.Matches(msg, m.keyMap.Chat.NewSession):
-		if !m.hasSession() {
+		if !m.sess.hasSession() {
 			break
 		}
 		cmds, _ = m.startNewSessionGuarded(cmds)
@@ -414,7 +414,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 
 	// Bang mode: backspace on already-empty prompt exits.
 	if msg.Code == tea.KeyBackspace && m.editor.bang.exitOnEmptyBackspace() {
-		m.setEditorPrompt(m.yoloModeCached())
+		m.setEditorPrompt(m.wsCache.yoloModeCached())
 		return cmds
 	}
 
@@ -466,7 +466,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 
 	newVal := m.editor.textarea.Value()
 	if m.editor.bang.enterFromLeadingPrefix(&m.editor.textarea, curValue, m.editor.textarea.Column()) {
-		m.setEditorPrompt(m.yoloModeCached())
+		m.setEditorPrompt(m.wsCache.yoloModeCached())
 	} else {
 		m.editor.bang.updateEmpty(curValue, newVal)
 	}
@@ -491,7 +491,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 // viewport. It's the editor-focused counterpart of the Chat.PageUp/PageDown
 // branches in handleMainKeyPress, so the page keys work while typing.
 func (m *UI) scrollChatPage(dir int) tea.Cmd {
-	if m.state != uiChat || !m.hasSession() {
+	if m.state != uiChat || !m.sess.hasSession() {
 		return nil
 	}
 	cmd := m.chat.ScrollByAndAnimate(dir * m.chat.Height())
@@ -509,7 +509,7 @@ func (m *UI) scrollChatPage(dir int) tea.Cmd {
 func (m *UI) handleMainKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cmd {
 	switch {
 	case key.Matches(msg, m.keyMap.Chat.NewSession):
-		if !m.hasSession() {
+		if !m.sess.hasSession() {
 			break
 		}
 		var started bool
@@ -518,21 +518,21 @@ func (m *UI) handleMainKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cmd {
 		}
 	case key.Matches(msg, m.keyMap.Chat.Expand):
 		m.chat.ToggleExpandedSelectedItem()
-	case key.Matches(msg, m.keyMap.Chat.EnterChildSession) && m.state == uiChat && m.hasSession():
+	case key.Matches(msg, m.keyMap.Chat.EnterChildSession) && m.state == uiChat && m.sess.hasSession():
 		if messageID, toolCallID, ok := m.chat.SelectedNestedToolContainer(); ok {
 			if cmd := m.enterChildSession(messageID, toolCallID); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
-	case key.Matches(msg, m.keyMap.Chat.ExitChildSession) && m.state == uiChat && m.hasSession():
+	case key.Matches(msg, m.keyMap.Chat.ExitChildSession) && m.state == uiChat && m.sess.hasSession():
 		if cmd := m.exitChildSession(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case key.Matches(msg, m.keyMap.Chat.PrevChildSession) && m.state == uiChat && m.hasSession():
+	case key.Matches(msg, m.keyMap.Chat.PrevChildSession) && m.state == uiChat && m.sess.hasSession():
 		if cmd := m.cycleChildSession(-1); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case key.Matches(msg, m.keyMap.Chat.NextChildSession) && m.state == uiChat && m.hasSession():
+	case key.Matches(msg, m.keyMap.Chat.NextChildSession) && m.state == uiChat && m.sess.hasSession():
 		if cmd := m.cycleChildSession(1); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

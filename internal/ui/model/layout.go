@@ -143,7 +143,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.updateSize()
 	}
 
-	if m.state == uiChat && m.hasSession() && !m.lay.isCompact {
+	if m.state == uiChat && m.sess.hasSession() && !m.lay.isCompact {
 		m.updateSidebarScrollState()
 	}
 
@@ -182,7 +182,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			m.drawSessionPanel(scr, layout.panel)
 		}
 
-		if m.viewingChildSession() {
+		if m.sess.viewingChildSession() {
 			// The child-session info panel replaces the editor entirely
 			// while a sub-agent session is being viewed — no textarea, no
 			// ghost text, no cursor (see uiFocusState: focus is forced to
@@ -307,7 +307,7 @@ func (m *UI) View() tea.View {
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = brand.Slug + " " + home.Short(m.com.Workspace.WorkingDir())
-	if m.hasSession() && m.sess.current.Title != "" {
+	if m.sess.hasSession() && m.sess.current.Title != "" {
 		v.WindowTitle += " — " + m.sess.current.Title
 	}
 
@@ -433,7 +433,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		} else {
 			editorHeight = m.activeInline.Height(editorWidth)
 		}
-	} else if m.viewingChildSession() {
+	} else if m.sess.viewingChildSession() {
 		// The child-session info panel (drawChildSessionPanel) replaces the
 		// textarea entirely while viewing a sub-agent session — it has its
 		// own fixed, compact height instead of the textarea's.

@@ -323,7 +323,7 @@ func TestReadsNeverProbeWorkspace(t *testing.T) {
 
 	for range 10 {
 		m.isAgentBusy()
-		m.yoloModeCached()
+		m.wsCache.yoloModeCached()
 	}
 	require.Zero(t, ws.syncProbes(), "cache reads must never probe the workspace")
 }
@@ -471,17 +471,17 @@ func TestToggleYoloWritesThroughCache(t *testing.T) {
 
 	msg := m.toggleYoloMode()().(yoloToggledMsg)
 	_, _ = m.Update(msg)
-	require.True(t, m.yoloModeCached())
+	require.True(t, m.wsCache.yoloModeCached())
 	require.Equal(t, 1, ws.permSetCalls)
 	readsAfterToggle := ws.permCalls
 
 	require.True(t, m.wsCache.yoloCache.Fresh(busyCacheTTL), "write-through must stamp the cache fresh")
-	m.yoloModeCached()
+	m.wsCache.yoloModeCached()
 	require.Equal(t, readsAfterToggle, ws.permCalls, "reads after the toggle must not re-probe")
 
 	msg = m.toggleYoloMode()().(yoloToggledMsg)
 	_, _ = m.Update(msg)
-	require.False(t, m.yoloModeCached())
+	require.False(t, m.wsCache.yoloModeCached())
 }
 
 // TestLocalYoloToggleSupersedesInFlightProbe pins the generation bump in
@@ -503,12 +503,12 @@ func TestLocalYoloToggleSupersedesInFlightProbe(t *testing.T) {
 	_, _ = m.Update(msg)
 	require.NotEqual(t, staleGen, m.wsCache.busyFetchGen,
 		"toggle must advance the busy generation to supersede in-flight probes")
-	require.True(t, m.yoloModeCached(), "toggle must write the new value through the cache")
+	require.True(t, m.wsCache.yoloModeCached(), "toggle must write the new value through the cache")
 
 	// The stale probe (old generation, old yolo=false) lands.
 	m.wsCache.busyFetchInFlight = true
 	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, yolo: false})
-	require.True(t, m.yoloModeCached(),
+	require.True(t, m.wsCache.yoloModeCached(),
 		"stale probe must not overwrite the freshly toggled value")
 	require.NotEmpty(t, cmds, "stale probe must re-dispatch an authoritative refresh")
 	require.True(t, m.wsCache.busyFetchInFlight, "re-dispatched refresh must be in flight")
@@ -783,7 +783,7 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	}
 
 	for range 10 {
-		require.NotNil(t, m.selectedModel())
+		require.NotNil(t, m.wsCache.selectedModel())
 		m.lsp.lspInfo(m.com, 40, 5, true)
 		require.Equal(t, 3, m.lspErrorCount())
 	}
@@ -809,13 +809,13 @@ func TestBusyRefreshCarriesReadyAndModel(t *testing.T) {
 		model: workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "test-model", Provider: "prov"}},
 	}
 	m := newBusyUI(ws)
-	require.Nil(t, m.selectedModel(), "before any probe the model is unknown")
+	require.Nil(t, m.wsCache.selectedModel(), "before any probe the model is unknown")
 
 	_, cmd := m.Update(plainMsg{}) // stale caches: the backstop dispatches
 	runCmds(m, cmd)
 
 	require.True(t, m.wsCache.agentCache.Value.ready, "the probe must land readiness in the cache")
-	sel := m.selectedModel()
+	sel := m.wsCache.selectedModel()
 	require.NotNil(t, sel)
 	require.Equal(t, "test-model", sel.ModelCfg.Model, "the probe must land the model in the cache")
 }
@@ -935,7 +935,7 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 
 	// A remote toggle flips yolo on; delivered via an off-thread refresh.
 	m.applyBusyState(busyStateMsg{gen: m.wsCache.busyFetchGen, yolo: true})
-	require.True(t, m.yoloModeCached(), "the refresh must write the new yolo value through the cache")
+	require.True(t, m.wsCache.yoloModeCached(), "the refresh must write the new yolo value through the cache")
 	yoloPrompt := ansi.Strip(m.editor.textarea.View())
 	require.NotEqual(t, normalPrompt, yoloPrompt,
 		"a remote yolo toggle must change the rendered editor prompt")
@@ -944,7 +944,7 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 
 	// Flipping back off must restore the normal prompt.
 	m.applyBusyState(busyStateMsg{gen: m.wsCache.busyFetchGen, yolo: false})
-	require.False(t, m.yoloModeCached())
+	require.False(t, m.wsCache.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.editor.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
 }

@@ -14,9 +14,9 @@ import (
 // agent isn't ready. It must never probe the workspace: it is called on
 // every frame, and workspace calls are treated as IO that must not run
 // synchronously in Update or View (see workspace_cache.go).
-func (m *UI) selectedModel() *workspace.AgentModel {
-	if m.wsCache.agentCache.Value.ready {
-		model := m.wsCache.agentCache.Value.model
+func (c *workspaceCacheState) selectedModel() *workspace.AgentModel {
+	if c.agentCache.Value.ready {
+		model := c.agentCache.Value.model
 		return &model
 	}
 	return nil

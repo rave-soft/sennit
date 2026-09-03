@@ -135,7 +135,7 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 // the visible text always reflects the correct state.
 func (m *UI) syncBangModeFromTextarea() {
 	m.editor.bang.syncFromTextarea(&m.editor.textarea)
-	m.setEditorPrompt(m.yoloModeCached())
+	m.setEditorPrompt(m.wsCache.yoloModeCached())
 }
 
 // historyPrev changes the text area content to the previous message in the history

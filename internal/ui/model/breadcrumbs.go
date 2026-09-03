@@ -86,7 +86,7 @@ func (m *UI) breadcrumbButtonLabel() string {
 // time: out of the deepest sub-agent session first, and only once none are
 // left, out of the thread itself. Nil when there is nowhere to go.
 func (m *UI) breadcrumbBack() tea.Cmd {
-	if m.viewingChildSession() {
+	if m.sess.viewingChildSession() {
 		return m.exitChildSession()
 	}
 	if m.embedded {

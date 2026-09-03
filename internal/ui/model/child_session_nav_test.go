@@ -238,7 +238,7 @@ func TestNewSessionClearsChildSessionNav(t *testing.T) {
 	cmd := u.newSession()
 
 	require.NotNil(t, cmd)
-	require.False(t, u.viewingChildSession(), "newSession must drop a stale nav stack")
+	require.False(t, u.sess.viewingChildSession(), "newSession must drop a stale nav stack")
 	require.Equal(t, uiFocusEditor, u.focus)
 }
 
@@ -259,6 +259,6 @@ func TestSelectSessionClearsChildSessionNav(t *testing.T) {
 
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	require.False(t, u.viewingChildSession(), "selecting a session must drop a stale nav stack")
+	require.False(t, u.sess.viewingChildSession(), "selecting a session must drop a stale nav stack")
 	require.Equal(t, uiFocusEditor, u.focus)
 }

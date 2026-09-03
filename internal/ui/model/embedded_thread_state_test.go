@@ -25,7 +25,7 @@ func TestNewEmbedded_WithSessionOpensInChat(t *testing.T) {
 	ui := New(common.DefaultCommon(context.Background(), ws), "sess", false, WithEmbedded())
 
 	require.Equal(t, uiChat, ui.state, "a thread being opened must not flash the landing screen")
-	require.False(t, ui.hasSession(), "the session has not loaded yet; the frame just waits for it")
+	require.False(t, ui.sess.hasSession(), "the session has not loaded yet; the frame just waits for it")
 }
 
 // With no session to open, landing is still the right destination: there

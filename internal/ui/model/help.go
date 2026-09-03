@@ -36,7 +36,7 @@ func (m *UI) ShortHelp() []key.Binding {
 
 		// Show child-session navigation regardless of focus: the point is
 		// discoverability of how to get back to the parent.
-		if m.viewingChildSession() {
+		if m.sess.viewingChildSession() {
 			binds = append(binds, k.Chat.ExitChildSession)
 			if m.sess.childSessionSiblingCount() > 1 {
 				binds = append(binds, k.Chat.PrevChildSession, k.Chat.NextChildSession)
@@ -101,7 +101,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	help := k.Help
 	help.SetHelp(bindingShortcut(k.Help), "less")
 	hasAttachments := len(m.editor.attachments.List()) > 0
-	hasSession := m.hasSession()
+	hasSession := m.sess.hasSession()
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.editor.textarea.Value() == "" {
 		commands.SetHelp("/ or "+bindingShortcut(k.Commands), "commands")
@@ -141,7 +141,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 		// Show child-session navigation regardless of focus: the point is
 		// discoverability of how to get back to the parent.
-		if m.viewingChildSession() {
+		if m.sess.viewingChildSession() {
 			childBinds := []key.Binding{k.Chat.ExitChildSession}
 			if m.sess.childSessionSiblingCount() > 1 {
 				childBinds = append(childBinds, k.Chat.PrevChildSession, k.Chat.NextChildSession)

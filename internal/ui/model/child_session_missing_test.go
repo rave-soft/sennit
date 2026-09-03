@@ -63,7 +63,7 @@ func TestOpeningAnUnstartedDelegationDoesNotStrandTheUI(t *testing.T) {
 	u := newChildNavUI()
 	enterMissingChild(t, u)
 
-	require.False(t, u.viewingChildSession(),
+	require.False(t, u.sess.viewingChildSession(),
 		"a child session that could not be loaded must not be left on the nav stack")
 	require.Equal(t, uiFocusEditor, u.focus,
 		"focus must return to the editor once the child view is abandoned")
@@ -113,7 +113,7 @@ func TestChildSessionLoadFailureStillReportsRealErrors(t *testing.T) {
 	var infos []util.InfoMsg
 	collectInfoMsgs(cmd, &infos)
 
-	require.False(t, u.viewingChildSession(), "a failed entry rolls back whatever the cause")
+	require.False(t, u.sess.viewingChildSession(), "a failed entry rolls back whatever the cause")
 	require.Len(t, infos, 1)
 	require.Equal(t, util.InfoTypeError, infos[0].Type)
 	require.Contains(t, infos[0].Msg, "database is locked")
@@ -155,7 +155,7 @@ func TestAbandonOnlyPopsTheFrameItWasAskedAbout(t *testing.T) {
 	abandoned, refocus := u.abandonChildSessionEntry("parent$$call_other")
 	require.False(t, abandoned)
 	require.Nil(t, refocus, "nothing was abandoned, so nothing is refocused")
-	require.True(t, u.viewingChildSession(), "the current frame must survive")
+	require.True(t, u.sess.viewingChildSession(), "the current frame must survive")
 }
 
 // TestAbandonedEntryHandsFocusBackToTheEditor is the regression for the

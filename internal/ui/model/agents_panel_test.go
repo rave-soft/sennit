@@ -210,7 +210,7 @@ func TestMouseClick_AgentBlockOpensItsTranscript(t *testing.T) {
 	rect := agentRects[0]
 	u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
 
-	require.True(t, u.viewingChildSession(), "the click must push a child-session nav frame")
+	require.True(t, u.sess.viewingChildSession(), "the click must push a child-session nav frame")
 	require.Equal(t, "msg-7$$call-1", u.sess.navStack[len(u.sess.navStack)-1].childSessionID)
 }
 

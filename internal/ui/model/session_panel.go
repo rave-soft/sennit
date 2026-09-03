@@ -54,7 +54,7 @@ func threadDockStatusText(t proto.Thread, activity threads.DockActivity) string 
 // keep ticking even when the local agent is idle and only delegated work
 // is moving.
 func (m *UI) panelSpinnerWanted() bool {
-	if !m.hasSession() {
+	if !m.sess.hasSession() {
 		return false
 	}
 	if m.isAgentBusy() && hasInProgressTodo(m.sess.current.Todos) {
@@ -88,7 +88,7 @@ func (m *UI) panelSpinnerWanted() bool {
 // since sessionDelegations keeps only live ones — which is exactly when the
 // transcript has a finished block to show.
 func (m *UI) panelledDelegations() map[string]bool {
-	if !m.hasSession() || !m.panelSurfacesThreads() || m.com == nil || m.com.Workspace == nil {
+	if !m.sess.hasSession() || !m.panelSurfacesThreads() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
 	live := sessionDelegations(m.agentList.cache.Value, m.sess.current.ID)
@@ -562,7 +562,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	budget = max(0, budget)
 
 	var plan sessionPanelPlan
-	if !m.hasSession() || m.activeInline != nil {
+	if !m.sess.hasSession() || m.activeInline != nil {
 		return plan
 	}
 
@@ -1160,7 +1160,7 @@ const sessionPanelHeightReasonableTerminalHeight = 40
 //
 //nolint:unparam // always nil today, but keeps the tea.Cmd signature shared with the other panel handlers callers check for a non-nil cmd
 func (m *UI) autoExpandTodosIfReasonable() tea.Cmd {
-	if !m.hasSession() {
+	if !m.sess.hasSession() {
 		return nil
 	}
 	if m.activeInline != nil {
@@ -1189,7 +1189,7 @@ func (m *UI) autoExpandTodosIfReasonable() tea.Cmd {
 //
 //nolint:unparam // always nil today, but keeps the tea.Cmd signature shared with the other panel handlers callers check for a non-nil cmd
 func (m *UI) toggleTodosExpanded() tea.Cmd {
-	if !m.hasSession() || !hasIncompleteTodos(m.sess.current.Todos) {
+	if !m.sess.hasSession() || !hasIncompleteTodos(m.sess.current.Todos) {
 		return nil
 	}
 	m.panel.expanded = !m.panel.expanded

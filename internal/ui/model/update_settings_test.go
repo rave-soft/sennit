@@ -606,7 +606,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 		require.False(t, done)
 		require.Empty(t, cmds)
 		require.True(t, m.yolo.isLoading())
-		require.False(t, m.yoloModeCached(), "stale result must not change the cached mode")
+		require.False(t, m.wsCache.yoloModeCached(), "stale result must not change the cached mode")
 		require.Equal(t, busyGeneration, m.wsCache.busyFetchGen, "stale result must not supersede workspace probes")
 	})
 
@@ -621,7 +621,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 		cmds, _ := m.updateSettings(yoloToggledMsg{Err: errors.New("nope"), Enabled: true, generation: generation}, nil)
 
 		require.False(t, m.yolo.isLoading())
-		require.False(t, m.yoloModeCached(), "errors must not change the cached mode")
+		require.False(t, m.wsCache.yoloModeCached(), "errors must not change the cached mode")
 		require.Equal(t, busyGeneration, m.wsCache.busyFetchGen, "errors must not supersede workspace probes")
 		require.Len(t, cmds, 1)
 	})

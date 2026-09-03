@@ -17,8 +17,8 @@ import (
 // sub-agent's session (i.e. the nav stack is non-empty). Used to make child
 // sessions read-only and to keep the editor from stealing focus while one
 // is being viewed.
-func (m *UI) viewingChildSession() bool {
-	return len(m.sess.navStack) > 0
+func (s *sessionState) viewingChildSession() bool {
+	return len(s.navStack) > 0
 }
 
 // clearChildSessionNav drops the child-session navigation stack outright,
