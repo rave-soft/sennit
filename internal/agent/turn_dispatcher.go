@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -286,17 +285,16 @@ func (d *turnDispatcher) run(ctx context.Context, accept *AcceptedRun, sessionID
 	runID := RunIDFromContext(ctx)
 	promptOrigin := PromptOriginFromContext(ctx)
 	// A steering dispatch (agent.WithSteering) asks for this prompt to
-	// reach a turn already in flight rather than queue behind it. The
-	// decision hook is wrapped in a Once because the auth-retry chain
-	// below may call run twice: the retry's dispatch decision is not a
-	// second event to report - the first attempt already reached one, and
-	// an auth failure happens while streaming, long past it.
+	// reach a turn already in flight rather than queue behind it. run()
+	// below is called exactly once: d.run has no auth-retry loop of its
+	// own - a mid-stream auth failure is retried inside
+	// sessionAgent.Run's own Stream call via OnAuthRefresh, never by
+	// calling run() again here. dispatchDecision already guards its own
+	// call to onDispatch with a sync.Once (see dispatchOutcome's
+	// "dispatched" closure in run_turn.go), so wrapping it a second time
+	// here was redundant - removed rather than left as defensive
+	// duplication that suggested a second call site which does not exist.
 	onDispatch, steering := SteeringFromContext(ctx)
-	if onDispatch != nil {
-		var once sync.Once
-		hook := onDispatch
-		onDispatch = func(outcome SteerOutcome) { once.Do(func() { hook(outcome) }) }
-	}
 	run := func() (*fantasy.AgentResult, error) {
 		return d.agentPort.current().Run(ctx, d.makeRunCall(SessionAgentCall{
 			Runtime:       runtime,

@@ -108,13 +108,23 @@ func TestRunTurn_StreamErrorStillDrainsQueue(t *testing.T) {
 	})
 	require.NoError(t, runErr, "the outer turn must not fail just because a queued follow-up came after a failed Stream call")
 
-	// AgentFinished must still fire for the turn whose Stream call failed.
+	// TypeAgentFinished must NOT fire for "first": its Stream call
+	// genuinely failed (err != nil), and AgentDispatcher.run (a layer
+	// above sessionAgent, not exercised here) is what announces a failed
+	// run via TypeAgentError - see completeTurn's err == nil guard.
+	// Publishing AgentFinished here too would show "Task finished"
+	// immediately alongside "Task failed" for the very same turn.
+	//
+	// The first notification observed is instead the queue's own
+	// change: completeTurn's drainNext hand-off dequeues "queued" to
+	// become the next turn, and only that turn's later success (below)
+	// earns an AgentFinished of its own.
 	select {
 	case evt := <-notifications:
-		require.Equal(t, notify.TypeAgentFinished, evt.Payload.Type)
+		require.Equal(t, notify.TypeQueueChanged, evt.Payload.Type)
 		require.Equal(t, sess.ID, evt.Payload.SessionID)
 	case <-ctx.Done():
-		t.Fatal("timed out waiting for AgentFinished after a failed Stream call")
+		t.Fatal("timed out waiting for the queue-changed notification from the hand-off")
 	}
 
 	// "first"'s own terminal RunComplete must report the Stream failure.
@@ -134,5 +144,16 @@ func TestRunTurn_StreamErrorStillDrainsQueue(t *testing.T) {
 		require.Empty(t, evt.Payload.Error)
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for the queued prompt's RunComplete - it hung behind the failed Stream call")
+	}
+
+	// And its own turn finishes cleanly, so AgentFinished does fire once
+	// for this session - just for the successful hand-off, not the
+	// failed turn it followed.
+	select {
+	case evt := <-notifications:
+		require.Equal(t, notify.TypeAgentFinished, evt.Payload.Type)
+		require.Equal(t, sess.ID, evt.Payload.SessionID)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for AgentFinished after the queued turn's own success")
 	}
 }

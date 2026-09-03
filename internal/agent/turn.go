@@ -95,6 +95,16 @@ type runTurn struct {
 
 	sanitizedToolCalls map[string]bool
 	shouldSummarize    bool
+	// haltedByTool records that this step's finish reason was rewritten
+	// from ToolUse to EndTurn because a tool result carried StopTurn (a
+	// hook Halt, a permission denial, a pending question - see
+	// onStepFinish). fantasy's own StopWhen conditions (stopOnContextWindow
+	// included) are evaluated regardless of a halt already in progress, so
+	// a halted step can still trip shouldSummarize; finishTurn reads this
+	// to skip requeueContinuation on that step; a halt is documented (see
+	// hooked_tool.go) to end the whole turn, not resume it with a fabricated
+	// "session was interrupted" prompt the halting tool never asked for.
+	haltedByTool bool
 	// historyTokens is the part of the prompt a summary would replace:
 	// this session's own history as it stood when the run started,
 	// excluding everything a summary cannot touch (system prompt, skills,
@@ -776,6 +786,7 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 		for _, tr := range stepResult.Content.ToolResults() {
 			if tr.StopTurn {
 				finishReason = message.FinishReasonEndTurn
+				t.haltedByTool = true
 				break
 			}
 		}
@@ -852,9 +863,15 @@ func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
 	// window measured in hundreds of thousands of tokens is a bill, not a
 	// budget. See summarizePolicy.window.
 	cw := t.summarize.window(t.model.CatalogCfg.ContextWindow)
-	// If context window is unknown (0), skip auto-summarize
-	// to avoid immediately truncating custom/local models.
-	if cw == 0 {
+	// If context window is unknown (0) or, per summarizePolicy.window's
+	// own "unknown" test, negative (only reachable via a user config that
+	// bypassed shellconfig's own validation - see model.go's
+	// --context-window flag), skip auto-summarize to avoid immediately
+	// truncating custom/local models. A negative cw left unguarded here
+	// used to make summarizeBuffer's cw/2 negative too, so remaining
+	// (which only grows negative as tokens accumulate) was always below
+	// it - shouldSummarize returned true on every step, forever.
+	if cw <= 0 {
 		return false
 	}
 	tokens := t.currentSession.CompletionTokens + t.currentSession.PromptTokens

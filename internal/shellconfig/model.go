@@ -63,7 +63,17 @@ func splitProviderModel(s string) (provider, id string, ok bool) {
 // modelAddFlags is the declarative flag surface for `model add`.
 var modelAddFlags = []flagSpec{
 	{name: "--name", jsonKey: "name", kind: flagString, op: opSet},
-	{name: "--context-window", jsonKey: "context_window", kind: flagInt, op: opSet},
+	{name: "--context-window", jsonKey: "context_window", kind: flagInt, op: opSet, validate: func(v any) error {
+		// A negative window is not "unknown" the way 0 is - it makes
+		// stopOnContextWindow's summarizeBuffer arithmetic go negative,
+		// so remaining tokens read as permanently below threshold and a
+		// session summarizes on every single step. Reject it here
+		// rather than let a typo (e.g. a stray "-1") reach that code.
+		if n := v.(int64); n < 0 {
+			return fmt.Errorf("--context-window must not be negative, got %d", n)
+		}
+		return nil
+	}},
 	{name: "--default-max-tokens", jsonKey: "default_max_tokens", kind: flagInt, op: opSet},
 	{name: "--can-reason", jsonKey: "can_reason", kind: flagBool, op: opSet},
 	{name: "--supports-images", jsonKey: "supports_attachments", kind: flagBool, op: opSet},

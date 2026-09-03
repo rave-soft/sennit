@@ -427,8 +427,20 @@ func (a *sessionAgent) finishTurn(
 			// turn's own RunComplete instead.
 			slog.Error("Failed to summarize session after turn", "session_id", call.SessionID, "error", summarizeErr)
 			summarizeFailed = summarizeErr
-		} else if len(t.currentAssistant.ToolCalls()) > 0 {
+		} else if len(t.currentAssistant.ToolCalls()) > 0 && !t.haltedByTool {
 			// If the agent wasn't done...
+			//
+			// t.haltedByTool excludes the step a hook Halt, a permission
+			// denial, or a pending question stopped: fantasy's own
+			// StopWhen conditions run regardless of that halt (see
+			// third_party/fantasy/agent.go), so shouldSummarize can still
+			// trip on the very step that was told to stop - and
+			// hooked_tool.go documents Halt as ending the whole turn, not
+			// pausing it. Summarizing still happens above (freeing the
+			// context is worth doing either way); only the requeue -
+			// which would silently resume a turn the halt meant to end,
+			// with a fabricated "session was interrupted" prompt nobody
+			// asked for - is skipped.
 			//
 			// A continuation's prompt is not a prompt: it is the
 			// placeholder its own step 0 verifies and strips (see
@@ -490,9 +502,21 @@ func (a *sessionAgent) completeTurn(
 	a.clearActiveIfMatch(call.SessionID, ac)
 	cancel()
 
+	// summarizeFailed's context.Canceled case is a user Escape landing
+	// mid-auto-summarize (summarize's own genCtx is derived from this
+	// turn's genCtx - see finishTurn), not a failure this turn should
+	// report as one. AgentDispatcher.run's TypeAgentError path (fired on
+	// err != nil, see completeTurn's other caller in run_turn.go) already
+	// owns the failure case, so publishing TypeAgentFinished here too
+	// would double up "Task finished" with "Task failed" for the same
+	// turn - see internal/app/agent_dispatch.go's run and
+	// internal/ui/model/notifications.go's handleAgentNotification.
+	summarizeCancelled := errors.Is(summarizeFailed, context.Canceled)
+
 	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions).
-	if !call.NonInteractive && a.notify != nil {
+	// nested/non-interactive sessions, a failed Stream, or a
+	// summarize the user canceled).
+	if !call.NonInteractive && a.notify != nil && err == nil && !summarizeCancelled {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: t.currentSession.Title,
@@ -518,9 +542,19 @@ func (a *sessionAgent) completeTurn(
 		// fallback publisher takes care of the normal case.
 		if summarizeFailed != nil {
 			complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID, Error: summarizeFailed.Error()}
+			complete.Cancelled = summarizeCancelled
+			// Mirror the outerOwesRunComplete branch below: a cancel
+			// (Escape) that lands mid-auto-summarize surfaces here as
+			// summarizeFailed wrapping context.Canceled, and without
+			// Cancelled set the caller (see thread/lifecycle.go) reads
+			// a non-empty Error as StatusFailed instead of a plain
+			// cancellation.
 			if t.currentAssistant != nil {
 				complete.MessageID = t.currentAssistant.ID
 				complete.Text = t.currentAssistant.Content().String()
+			}
+			if ctx.Err() != nil {
+				complete.Cancelled = true
 			}
 			reporter.publish(ctx, complete)
 		}
@@ -812,17 +846,37 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	})
 	if err != nil {
 		streamResult, streamErr := t.handleStreamError(err)
-		// t.currentAssistant == nil means PrepareStep failed before step 0's
-		// assistant message existed - handleStreamError's own "before
-		// assistant" branch. The one PrepareStep failure that reaches here
-		// today is foldSteering's own persist failure (turn.go): it re-queues
-		// the unpersisted remainder of THIS call's own folded follow-ups
-		// itself before returning its error, so that queue already holds this
-		// same failure's own rollback. Draining it here would hand off to
-		// that rollback and swallow this call's own error return - its only
-		// completion channel when call.RunID is empty - so this returns
-		// without draining regardless of err.
+		// t.currentAssistant == nil means PrepareStep failed, or never ran,
+		// before step 0's assistant message existed -
+		// handleStreamError's own "before assistant" branch
+		// (handleStreamErrorBeforeAssistant). Two distinct paths land
+		// here, and errors.Is(err, context.Canceled) tells them apart:
+		//
+		//   - A genuine cancel in the window between dispatchDecision
+		//     registering the active run and PrepareStep creating the
+		//     assistant message: all of runTurn's setup up to Stream
+		//     (session.Get, createUserMessage, ...) runs on ctx, not
+		//     genCtx, so an Escape landing there surfaces here rather
+		//     than in the cancel branch below. A prompt typed right
+		//     after that Escape still queues behind this turn like any
+		//     other - and nothing else will ever look at this session's
+		//     queue once Stream returns, since wakeFromInboxIfIdle does
+		//     not consult it - so it must be drained here too.
+		//   - foldSteering's own PrepareStep rollback (turn.go): a
+		//     non-cancel persist failure, which re-queues the
+		//     unpersisted remainder of THIS call's own folded
+		//     follow-ups itself before returning its error, so that
+		//     queue already holds this same failure's own rollback.
+		//     Draining it here would hand off to that rollback and
+		//     swallow this call's own error return - its only
+		//     completion channel when call.RunID is empty - so this
+		//     path returns without draining.
 		if t.currentAssistant == nil {
+			if errors.Is(err, context.Canceled) {
+				_, next, canceledRunIDDrops := a.drainNext(call.SessionID)
+				a.publishCanceledQueueDrops(canceledRunIDDrops)
+				return SteerRan, streamResult, next, streamErr
+			}
 			return SteerRan, streamResult, nil, streamErr
 		}
 		// dispatcher.Cancel only clears what was queued at the instant it

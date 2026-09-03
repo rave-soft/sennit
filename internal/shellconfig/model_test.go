@@ -63,6 +63,21 @@ model add anthropic/claude-x --price-input 3 --price-output 15 --price-cache-cre
 	require.Equal(t, 0.3, model["cost_per_1m_out_cached"])
 }
 
+// TestModelAddRejectsNegativeContextWindow guards against a negative
+// --context-window reaching config: stopOnContextWindow (internal/agent)
+// only special-cased 0 ("unknown window") until this fix, so a negative
+// value made summarizeBuffer's arithmetic go negative and a session
+// summarize on every single step forever.
+func TestModelAddRejectsNegativeContextWindow(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`provider add openai --api-key k
+model add openai/gpt-x --context-window -1`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must not be negative")
+}
+
 func TestModelAddRejectsLegacyPricingFlags(t *testing.T) {
 	t.Parallel()
 

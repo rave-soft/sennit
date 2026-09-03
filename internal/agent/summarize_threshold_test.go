@@ -174,3 +174,20 @@ func TestStopOnContextWindow_UnknownContextWindowNeverSummarizes(t *testing.T) {
 	turn := newThresholdTurn(0, 10_000_000, 0, 5_000_000)
 	require.False(t, turn.stopOnContextWindow(nil))
 }
+
+// TestStopOnContextWindow_NegativeContextWindowNeverSummarizes is the
+// regression test for a session that summarized on every single step.
+//
+// A negative window only reaches here via a user config that bypasses
+// shellconfig's own `--context-window` validation (see model.go). Before
+// this fix stopOnContextWindow only special-cased cw == 0; a negative cw
+// made summarizeBuffer's cw/2 negative too, so "remaining > threshold" was
+// always false and shouldSummarize returned true on every step, forever
+// re-triggering summarize and requeueContinuation in a loop.
+func TestStopOnContextWindow_NegativeContextWindowNeverSummarizes(t *testing.T) {
+	t.Parallel()
+
+	turn := newThresholdTurn(-1, 10_000, 0, 5_000)
+	require.False(t, turn.stopOnContextWindow(nil))
+	require.False(t, turn.shouldSummarize)
+}
