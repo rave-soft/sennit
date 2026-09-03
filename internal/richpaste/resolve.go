@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -24,6 +27,24 @@ import (
 
 // fetchConcurrency bounds how many images are downloaded at once.
 const fetchConcurrency = 4
+
+// maxImagePixels bounds the pixel count Sennit will decode a pasted image
+// into before checking its re-encoded size. A well-compressed file can
+// declare a canvas far larger than its byte size suggests, so this must be
+// checked from the header alone (image.DecodeConfig), before image.Decode
+// allocates a bitmap sized off that declaration. A 6K high-DPI screenshot
+// (6016x3384) is ~20 million pixels; 64 million comfortably covers wider
+// multi-monitor or pixel-doubled captures while still refusing a small
+// file that declares a canvas sized only to exhaust memory.
+const maxImagePixels = 64_000_000
+
+// errBlockedNetworkAddress explains why an image source was refused for
+// resolving to a network address Sennit will not fetch from — loopback,
+// private, link-local, or unspecified. Pasted markup is attacker-controlled
+// (it can be copied from any web page), so it must not be able to make
+// this process reach its own host or local network, including by
+// redirecting a request there after the initial URL looked fine.
+var errBlockedNetworkAddress = errors.New("refusing to fetch from a private, loopback, or link-local address")
 
 // whitespace strips the line breaks markup inserts into base64 payloads.
 var whitespace = strings.NewReplacer("\n", "", "\r", "", "\t", "", " ", "")
@@ -49,7 +70,14 @@ type Options struct {
 // undecodable, or a failed request).
 func Resolve(ctx context.Context, srcs []string, opts Options) (images []Image, skipped int) {
 	if opts.Client == nil {
-		opts.Client = http.DefaultClient
+		// The default client gets both layers of protection: a dialer that
+		// refuses to connect to a blocked address at all, and a redirect
+		// check. A caller-supplied client (tests, mainly) only gets the
+		// redirect check layered on top of whatever transport it already
+		// has — see withRedirectGuard.
+		opts.Client = defaultRichPasteClient()
+	} else {
+		opts.Client = withRedirectGuard(opts.Client)
 	}
 
 	resolved := make([]*Image, len(srcs))
@@ -129,6 +157,106 @@ func decodeDataURI(src string, maxBytes int64) ([]byte, error) {
 	return decoded, nil
 }
 
+// defaultRichPasteClient is what Resolve uses when the caller (in practice,
+// the editor's rich-paste path) supplies no client of its own. It is the
+// client that ever sees an unconfirmed URL pulled straight out of pasted
+// markup, so it is the one that must not be tricked into reaching an
+// internal address.
+func defaultRichPasteClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = blockedAddrDialContext(&net.Dialer{Timeout: 10 * time.Second})
+	return &http.Client{
+		Transport:     transport,
+		CheckRedirect: checkRedirectHost,
+	}
+}
+
+// withRedirectGuard adds the redirect check to a caller-supplied client
+// without touching its transport, so tests that hand Resolve an
+// httptest.Server's client keep dialing loopback the way they always have.
+// It leaves an already-set CheckRedirect alone rather than overriding it.
+func withRedirectGuard(client *http.Client) *http.Client {
+	if client.CheckRedirect != nil {
+		return client
+	}
+	guarded := *client
+	guarded.CheckRedirect = checkRedirectHost
+	return &guarded
+}
+
+// checkRedirectHost is installed as a download client's CheckRedirect.
+// Go's http.Client never calls CheckRedirect for the first request, only
+// for each hop after a redirect — so blocking the initial URL is not
+// enough on its own; this is what stops a URL that looked fine from
+// redirecting the request to a loopback or private address afterward.
+func checkRedirectHost(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
+	return checkHostAllowed(req.Context(), req.URL.Hostname())
+}
+
+// blockedAddrDialContext wraps dialer so every connection it makes —
+// including one following a redirect, since http.Transport dials again for
+// each new host — is refused if it resolves to a blocked address. The
+// resolved address is what gets dialed (rather than the hostname a second
+// time), so a DNS answer that changes between the check and the connect
+// cannot slip an unchecked address past the guard.
+func blockedAddrDialContext(dialer *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ip, err := resolveAllowed(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+	}
+}
+
+// checkHostAllowed resolves host and reports an error if any address it
+// resolves to is blocked.
+func checkHostAllowed(ctx context.Context, host string) error {
+	_, err := resolveAllowed(ctx, host)
+	return err
+}
+
+// resolveAllowed resolves host and returns one of its addresses, refusing
+// the whole host if any resolved address is blocked — a hostname that
+// resolves to both a public decoy and an internal address must not be let
+// through on the strength of the decoy alone.
+func resolveAllowed(ctx context.Context, host string) (net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedAddr(ip) {
+			return nil, fmt.Errorf("%w: %s", errBlockedNetworkAddress, host)
+		}
+		return ip, nil
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no addresses found for %s", host)
+	}
+	for _, addr := range addrs {
+		if isBlockedAddr(addr.IP) {
+			return nil, fmt.Errorf("%w: %s", errBlockedNetworkAddress, host)
+		}
+	}
+	return addrs[0].IP, nil
+}
+
+// isBlockedAddr reports whether ip is one pasted markup could use to reach
+// this process's own host or its local network rather than a real remote
+// image.
+func isBlockedAddr(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
 // download fetches an http(s) source, refusing anything past MaxBytes rather
 // than buffering it. Relative URLs are unusable: the clipboard carries no
 // base to resolve them against.
@@ -180,6 +308,19 @@ func normalize(content []byte, maxBytes int64) (*Image, error) {
 			return nil, fmt.Errorf("image is too big")
 		}
 		return &Image{Content: content, MimeType: mimeType}, nil
+	}
+
+	// Read the declared dimensions before decoding: image.DecodeConfig only
+	// parses the header, while image.Decode below allocates a bitmap sized
+	// from it. A small, well-compressed file can declare a canvas bounded
+	// only by the format's own limits, so the size check below (which runs
+	// on the re-encoded PNG) is too late to stop that allocation.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(content))
+	if err != nil {
+		return nil, err
+	}
+	if pixels := int64(cfg.Width) * int64(cfg.Height); pixels > maxImagePixels {
+		return nil, fmt.Errorf("image declares %dx%d pixels, over the %d-pixel limit", cfg.Width, cfg.Height, maxImagePixels)
 	}
 
 	decoded, _, err := image.Decode(bytes.NewReader(content))
