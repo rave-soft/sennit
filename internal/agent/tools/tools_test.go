@@ -69,8 +69,20 @@ func TestRequirePermissionServiceError(t *testing.T) {
 	require.False(t, denied)
 }
 
+// resolvedTempDir returns t.TempDir() with symlinks resolved. Every
+// assertion about resolveWithinWorkdir's resolved form needs this: macOS
+// hands out temp directories under /var, which is itself a symlink to
+// /private/var, so a path built from the raw t.TempDir() names the same
+// directory by a spelling the resolved form never uses.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return dir
+}
+
 func TestResolveWithinWorkdir(t *testing.T) {
-	workingDir := t.TempDir()
+	workingDir := resolvedTempDir(t)
 
 	absPath, resolvedPath, outside, err := resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "sub", "file.txt"))
 	require.NoError(t, err)
@@ -170,7 +182,7 @@ func TestResolveWithinWorkdir_GenuinelyMissingNestedPath(t *testing.T) {
 // dialog showed, and it names a location inside workingDir even though the
 // request is about somewhere else entirely.
 func TestResolveWithinWorkdir_SymlinkedOutsidePathResolves(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	workingDir := filepath.Join(root, "work")
 	require.NoError(t, os.MkdirAll(workingDir, 0o755))
 	target := filepath.Join(root, "elsewhere")
