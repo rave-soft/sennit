@@ -719,12 +719,10 @@ func (m *OAuth) saveCredential() tea.Cmd {
 			return oauthSaveErrMsg{err: fmt.Errorf("failed to save account: %w", err)}
 		}
 		// A proxy that could not be persisted as the provider's default is
-		// a failed sign-in as far as this dialog is concerned, matching
-		// what a failed proxy write did before this refactor (it aborted
-		// the save outright, before the account was even recorded) — the
-		// credential just happens to already be saved this time. Message
-		// text comes straight from AppWorkspace.CompleteOAuth: it already
-		// reads as a complete sentence, so it is not wrapped again here.
+		// a failed sign-in as far as this dialog is concerned, even though
+		// the credential is already saved. Message text comes straight from
+		// AppWorkspace.CompleteOAuth: it already reads as a complete
+		// sentence, so it is not wrapped again here.
 		if completion.ProxyError != nil {
 			return oauthSaveErrMsg{err: completion.ProxyError}
 		}

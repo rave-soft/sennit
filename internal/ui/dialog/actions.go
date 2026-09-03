@@ -220,9 +220,9 @@ type (
 		APIKey  string
 	}
 	// ActionProviderConfigured is sent once a provider (catalog or custom)
-	// has been successfully configured and verified. Portion 1 only closes
-	// the open dialogs; portion 2 will add auto-selecting a model for this
-	// provider and transitioning into chat.
+	// has been successfully configured and verified. It closes the open
+	// provider dialogs, and during onboarding also auto-selects a model
+	// for this provider and transitions into chat.
 	ActionProviderConfigured struct {
 		ProviderID string
 	}
@@ -289,9 +289,7 @@ type (
 	// account from the list) succeeds. It carries ProviderID so the
 	// caller can refresh anything cached that depends on which account
 	// is now active (the sidebar's account-label cache — see
-	// model/account_label.go) alongside closing the dialog, the way a
-	// bare ActionClose used to do before there was a reason to
-	// distinguish this from any other dialog dismissal.
+	// model/account_label.go) in addition to closing the dialog.
 	ActionAccountActivated struct {
 		ProviderID string
 	}

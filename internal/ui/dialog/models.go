@@ -246,8 +246,7 @@ func (m *Models) isSelectedConfigured() bool {
 // removed or disabled since a "recently used" entry was recorded leave that
 // entry stale; setProviderItems filters those out of the rendered list and
 // returns a [tea.Cmd] that persists the pruned list, so the write happens
-// off the Update goroutine instead of inline here (this used to save
-// synchronously during dialog construction — see the FIXME this replaced).
+// off the Update goroutine instead of inline here.
 func (m *Models) setProviderItems() tea.Cmd {
 	t := m.com.Styles
 	cfg := m.com.Config()

@@ -630,10 +630,6 @@ func (c *choiceList) buildChoiceCompositor(lines []contentLine, area uv.Rectangl
 	}
 }
 
-// clampScroll keeps the cursor item visible using a sliding
-// window: the cursor moves freely within the visible region and
-// only pushes the window when it reaches an edge. Going down pushes
-// the bottom; going up pushes the top until the start (header and
 // HandleWheel scrolls the choice list vertically. Satisfies
 // WheelScrollableEditor so the form can delegate wheel events.
 func (c *choiceList) HandleWheel(deltaX, deltaY float64) {

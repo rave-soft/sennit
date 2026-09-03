@@ -450,8 +450,8 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// contentViewportHeight), so its final width is known without
 	// rendering anything first. Go straight to it instead of pre-rendering
 	// at contentWidth only to discard that render a few lines down — for
-	// diffs that pre-render used to cost a full reformat every dirty
-	// frame for a value contentViewportHeight never even reads.
+	// diffs, that discarded pre-render would cost a full reformat every
+	// dirty frame for a value contentViewportHeight never even reads.
 	var renderedContent string
 	var contentHeight int
 	viewportWidth := contentWidth

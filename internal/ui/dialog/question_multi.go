@@ -195,9 +195,9 @@ func (d *MultiChoice) HandleMouseClick(x, y int) (bool, bool) {
 
 // choiceItemContent renders a choice's checkbox and label. Shared
 // by Draw and Height so the two never disagree on how many lines a
-// wrapped label takes — Height used to count a fixed single line
-// per choice regardless of width, understating the dialog's height
-// for long labels that wrap.
+// wrapped label takes — a Height that instead counted a fixed
+// single line per choice regardless of width would understate the
+// dialog's height for long labels that wrap.
 func (d *MultiChoice) choiceItemContent(i int, ch question.Choice, active bool, innerWidth int) string {
 	style := d.Styles.Editor.QuestionUnselected
 	if active {

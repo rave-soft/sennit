@@ -223,8 +223,8 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// literal text needs them as characters — ctrl+left/ctrl+right (the
 	// other keys bound to the same actions) stay live either way. That is
 	// not only FreeText: a choice question's fill-in row and its note
-	// editor are textareas too, and typing a bracket in one of them used
-	// to switch tabs out from under the person mid-word.
+	// editor are textareas too, and typing a bracket in one of them would
+	// otherwise switch tabs out from under the person mid-word.
 	bracketsAreLiteral := f.activeIdx < f.numQuestions && isBracketKey(msg) && f.activeTakesText()
 
 	// Tab navigation works on all tabs including confirm.
@@ -262,9 +262,9 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			}
 			// A choice question's fill-in or note editor handles esc
 			// itself, by leaving the field. Cancelling the whole batch
-			// on the first esc threw away everything typed on every tab
-			// — the same reason FreeText gets the two-esc treatment
-			// above.
+			// on the first esc would throw away everything typed on
+			// every tab — the same reason FreeText gets the two-esc
+			// treatment above.
 			if f.activeTakesText() {
 				done, cmd := f.questions[f.activeIdx].HandleKey(msg)
 				if done {

@@ -128,10 +128,9 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			case MCPAuthStateSuccess:
 				return m.advance()
 			case MCPAuthStateError:
-				// A failure on one server used to end the whole queue:
-				// esc was the only binding offered, and it closed the
-				// dialog with every server behind this one unvisited.
-				// Enter moves on to the next instead.
+				// Enter moves on to the next server rather than closing
+				// the dialog, so a failure on one server does not strand
+				// every server behind it unvisited.
 				return m.advance()
 			}
 		case key.Matches(msg, m.keyMap.Copy):
@@ -217,9 +216,9 @@ func (m *MCPAuth) advance() Action {
 //
 // Off-thread because browser.OpenURL execs a helper and waits for it,
 // which on a machine with no browser configured blocks the whole UI for
-// as long as that takes. And reported because it used to be stored in
-// m.err and never rendered from this state, so a browser that would not
-// open looked exactly like one that had.
+// as long as that takes. Reported via a message rather than a silently
+// stored error field, so a browser that failed to open doesn't look
+// exactly like one that succeeded.
 func (m *MCPAuth) openAuthURL() Action {
 	u := m.authURL()
 	if u == "" {

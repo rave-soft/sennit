@@ -59,10 +59,10 @@ type OAuthCodex struct {
 	// their own.
 	//
 	// stopped is what makes an esc during "Initializing" safe: the flow
-	// binds a fixed callback port, and a teardown that ran before the
-	// bind finished used to find nothing to close — the port stayed bound
-	// and the next sign-in failed on it. A flow that lands after the
-	// teardown is closed immediately instead.
+	// binds a fixed callback port, and a teardown that runs before the
+	// bind finishes would otherwise find nothing to close — the port
+	// would stay bound and the next sign-in would fail on it. A flow
+	// that lands after the teardown is closed immediately instead.
 	mu         sync.Mutex
 	flow       workspace.OAuthFlow
 	cancelFunc func()

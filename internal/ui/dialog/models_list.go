@@ -196,10 +196,10 @@ func (f *ModelsList) VisibleItems() []list.Item {
 
 	// Build one search corpus for every item across every group, each
 	// prefixed with its own group's title, and run fuzzy.Find over it
-	// once. The previous version called fuzzy.Find per group over the
-	// full item set (with every other group's items re-prefixed and
-	// then discarded), so rendering N groups meant N full scans of all
-	// items; this makes it a single scan regardless of group count.
+	// once — a single scan regardless of group count. Calling
+	// fuzzy.Find per group instead, over the full item set with every
+	// other group's items re-prefixed and discarded, would cost N full
+	// scans for N groups.
 	type itemInfo struct {
 		item      *ModelItem
 		groupIdx  int

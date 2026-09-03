@@ -58,14 +58,13 @@ type OAuthCopilot struct {
 	// clears all of it) rather than from Update, so they need a lock of
 	// their own — mirrors OAuthCodex's mu/stopped.
 	//
-	// stopped is what makes esc during "Initializing" safe: previously the
-	// device-code request ran on its own uncancellable 30s context and
-	// wrote the device code from that goroutine regardless of whether the
-	// dialog was still open, so a late result after the dialog was
-	// dismissed and reopened landed in the new instance (ActionInitiateOAuth
-	// is addressed by the constant OAuthID, not by dialog instance) and
-	// could start a poll with a stale or, if the timing flipped, an
-	// altogether absent device code.
+	// stopped is what makes esc during "Initializing" safe. Without it, the
+	// device-code request's own goroutine would write the device code
+	// regardless of whether the dialog is still open, so a late result
+	// after the dialog is dismissed and reopened would land in the new
+	// instance (ActionInitiateOAuth is addressed by the constant OAuthID,
+	// not by dialog instance) and could start a poll with a stale or, if
+	// the timing flips, an altogether absent device code.
 	mu             sync.Mutex
 	flow           workspace.OAuthFlow
 	initiateCancel func()

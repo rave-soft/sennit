@@ -32,10 +32,8 @@ type Providers struct {
 var _ Dialog = (*Providers)(nil)
 
 // NewProviders creates a new providers configuration dialog. isOnboarding
-// switches the title to onboarding copy; no caller passes true in this
-// portion (the dialog is reachable only from the command palette), but it
-// follows the same forward-compatible shape as [NewModels] for when
-// onboarding wires it up.
+// switches the title to onboarding copy — it is the onboarding entry point
+// (see model.UI's Init) as well as reachable from the command palette.
 func NewProviders(com *common.Common, isOnboarding bool) (*Providers, error) {
 	title := "Set up a provider"
 	if isOnboarding {

@@ -187,9 +187,9 @@ func (d *SingleChoice) HandleMouseClick(x, y int) (bool, bool) {
 
 // choiceItemContent renders a choice's label. Shared by Draw and
 // Height so the two never disagree on how many lines a wrapped
-// label takes — Height used to count a fixed single line per
-// choice regardless of width, understating the dialog's height
-// for long labels that wrap.
+// label takes — a Height that instead counted a fixed single line
+// per choice regardless of width would understate the dialog's
+// height for long labels that wrap.
 func (d *SingleChoice) choiceItemContent(i int, ch question.Choice, active bool, innerWidth int) string {
 	isSelected := false
 	if len(d.lastResponse.SelectedIDs) > 0 {

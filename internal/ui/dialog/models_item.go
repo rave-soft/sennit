@@ -39,9 +39,9 @@ func (m *ModelGroup) AppendItems(items ...*ModelItem) {
 
 // Render implements [list.Item].
 func (m *ModelGroup) Render(width int) string {
-	// This dialog now only ever lists configured providers, so there is no
-	// "Configured" badge to render here anymore (see providers.go's
-	// ProviderItem for that concern in the provider-setup dialog).
+	// This dialog only ever lists configured providers, so there is no
+	// "Configured" badge to render here (see providers.go's ProviderItem
+	// for that concern in the provider-setup dialog).
 	title := " " + m.Title + " "
 	title = ansi.Truncate(title, max(0, width-1), "…")
 

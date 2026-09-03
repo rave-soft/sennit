@@ -185,7 +185,7 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return cur
 }
 
-// HeightChanged always returns false — Height is now pure.
+// HeightChanged always returns false — Height is a pure function of width.
 func (d *YesNo) HeightChanged() bool { return false }
 
 // SetFocused updates the icon style based on whether the editor

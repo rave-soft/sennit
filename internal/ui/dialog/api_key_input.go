@@ -133,8 +133,8 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
 			// Checked before the "verifying absorbs everything" case below
-			// so esc still gets the person out mid-verify — previously the
-			// only way out of a stuck verify was to restart.
+			// so esc still gets the person out mid-verify, rather than
+			// leaving restart as the only way out of a stuck verify.
 			switch m.state {
 			case APIKeyInputStateVerified:
 				return ActionCmd{m.saveAPIKeyCmd()}
@@ -305,10 +305,9 @@ func (m *APIKeyInput) ShortHelp() []key.Binding {
 // agent would actually construct this provider (proxy, extra headers,
 // account rotation, catalog base URL), and a dialog-built stand-in could
 // pass while the real provider would fail, or vice versa. There is no
-// artificial minimum duration here (the previous version slept in the
-// command to hold the spinner visible for 750ms): the workspace call is a
-// real network round trip, so the spinner already has something to show
-// for the time it's up.
+// artificial minimum duration here: the workspace call is a real network
+// round trip, so the spinner already has something to show for the time
+// it's up.
 func (m *APIKeyInput) verifyAPIKeyCmd() tea.Cmd {
 	ws := m.com.Workspace
 	ctx := m.com.Context()
