@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/brand"
+	sennitenv "github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/version"
 	"mvdan.cc/sh/v3/interp"
@@ -48,8 +49,11 @@ func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, erro
 	cwd := filepath.Dir(path)
 
 	// Expose the running Sennit version so scripts can feature-detect, e.g.
-	// [[ "$SENNIT_VERSION" == "devel" ]] or branch on the release.
-	env := append(os.Environ(), brand.EnvPrefix+"VERSION="+version.Version)
+	// [[ "$SENNIT_VERSION" == "devel" ]] or branch on the release. Strip
+	// herdr pane-ownership vars first, same as the bash tool and hooks: a
+	// sennitrc script that starts a nested sennit must not attach to the
+	// parent pane's agent authority (see env.WithoutHerdrEnv).
+	env := append(sennitenv.WithoutHerdrEnv(os.Environ()), brand.EnvPrefix+"VERSION="+version.Version)
 
 	err := shell.Run(runCtx, shell.RunOptions{
 		Command: string(src),

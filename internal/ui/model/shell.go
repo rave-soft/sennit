@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -235,16 +234,18 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 			sessionID:  sessionID,
 			generation: loadGeneration,
 		}
-		if errors.Is(err, context.Canceled) {
-			result.Canceled = true
-			result.ExitCode = 130
-			return result
-		}
+		// err is non-nil only when the command never ran at all (a parse
+		// failure, or the interpreter couldn't start it) — see
+		// AgentRunShellCommand. A cancelled or timed-out command is not
+		// an error here: it ran and produced resp.Output, so it is
+		// reported through resp.Canceled instead, same as any other
+		// completed run.
 		if err != nil {
 			result.Err = err
 			result.ExitCode = 1
 			return result
 		}
+		result.Canceled = resp.Canceled
 		result.ExitCode = resp.ExitCode
 		return result
 	})

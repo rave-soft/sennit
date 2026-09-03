@@ -91,7 +91,11 @@ func (c *Config) RuntimeResolver() VariableResolver {
 // attempt has to keep variable interpolation live while avoiding the
 // repeated command substitution, and must satisfy both tests named here.
 func (c *Config) RuntimeEnvironment() env.Env {
-	base := os.Environ()
+	// Strip herdr pane-ownership vars: resolving an Env entry can run a
+	// real subprocess via $(cmd) substitution, which must not be able to
+	// attach to the parent pane's agent authority (see
+	// env.WithoutHerdrEnv).
+	base := env.WithoutHerdrEnv(os.Environ())
 	environment := env.Snapshot(base, nil)
 	keys := make([]string, 0, len(c.Env))
 	for key := range c.Env {

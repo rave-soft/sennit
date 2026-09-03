@@ -22,6 +22,7 @@ import (
 
 	"github.com/charmbracelet/x/exp/slice"
 	"github.com/rave-soft/sennit/internal/brand"
+	sennitenv "github.com/rave-soft/sennit/internal/env"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -98,7 +99,7 @@ func NewShell(opts *Options) *Shell {
 	// Strip herdr pane-ownership vars so subprocesses (including test
 	// binaries and nested sennit instances) can't attach to or release
 	// the parent pane's agent authority.
-	env = WithoutHerdrEnv(env)
+	env = sennitenv.WithoutHerdrEnv(env)
 
 	// Allow tools to detect execution by Sennit.
 	env = append(env, SennitEnvMarkers()...)

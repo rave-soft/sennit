@@ -18,8 +18,12 @@ func (o *osEnv) Get(key string) string {
 	return os.Getenv(key)
 }
 
+// Env returns the process environment with herdr pane-ownership vars
+// stripped: command substitution in a resolved config value ($(cmd)) runs
+// a real subprocess, which must not be able to attach to the parent
+// pane's agent authority (see [WithoutHerdrEnv]).
 func (o *osEnv) Env() []string {
-	return os.Environ()
+	return WithoutHerdrEnv(os.Environ())
 }
 
 func New() Env {

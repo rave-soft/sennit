@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/brand"
+	sennitenv "github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/tidwall/gjson"
 )
@@ -56,7 +57,7 @@ func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON str
 	// Strip herdr pane-ownership vars, same as the bash tool does: a hook
 	// that runs a nested sennit must not attach to the parent pane, or a
 	// buffered "working" report could be delivered after release.
-	env = shell.WithoutHerdrEnv(env)
+	env = sennitenv.WithoutHerdrEnv(env)
 	env = append(env, shell.SennitEnvMarkers()...)
 	env = append(
 		env,

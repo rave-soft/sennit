@@ -564,21 +564,25 @@ option metrics false`
 	require.Equal(t, true, opts["disable_metrics"])
 }
 
-// TestConfigBuilder_NoBuilderInContext verifies that builtins are no-ops
-// when no ConfigBuilder is on the context (normal bash tool execution).
+// TestConfigBuilder_NoBuilderInContext verifies that config builtins do not
+// intercept their name when no ConfigBuilder is on the context (normal
+// bash tool execution): "provider" falls through to the real exec path
+// instead of being swallowed as a silent success, so with no "provider"
+// program on PATH the command fails the ordinary "command not found" way.
+// Shadowing it — reporting success without running anything — is exactly
+// the bug this pins against; see TestConfigBuiltins_FallThroughWithoutConfigBuilder
+// in register_test.go for the fall-through-to-a-real-program case.
 func TestConfigBuilder_NoBuilderInContext(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 
-	// "provider" without a ConfigBuilder should be a no-op (return nil),
-	// not an error. The builtins check for the builder and silently skip.
 	err := shell.Run(t.Context(), shell.RunOptions{
 		Command: `provider add openai --api-key "test"`,
 		Cwd:     dir,
 		Env:     os.Environ(),
 	})
-	require.NoError(t, err)
+	require.Error(t, err, "provider must not silently succeed without a ConfigBuilder on the context")
 }
 
 // TestLoadShellConfig_TrailingNonZeroStatusKeepsConfig verifies that a
@@ -652,4 +656,27 @@ func TestLoadShellConfig_RespectsContextCancellation(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("LoadShellConfig did not return after context cancellation")
 	}
+}
+
+// TestLoadShellConfig_StripsHerdrEnv pins the same guarantee the bash tool
+// and hooks give: a sennitrc script must not see the process's HERDR_*
+// vars, or a nested sennit it starts could attach to the parent pane's
+// agent authority.
+func TestLoadShellConfig_StripsHerdrEnv(t *testing.T) {
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+	t.Setenv("HERDR_PANE_ID", "wA:p1")
+
+	dir := t.TempDir()
+	script := `provider add openai --api-key "[$HERDR_SOCKET_PATH][$HERDR_PANE_ID]"`
+	path := filepath.Join(dir, "sennitrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	providers := result["providers"].(map[string]any)
+	openai := providers["openai"].(map[string]any)
+	require.Equal(t, "[][]", openai["api_key"], "herdr vars leaked into the sennitrc script env")
 }

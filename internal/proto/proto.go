@@ -18,7 +18,11 @@ type QuestionChoice struct {
 }
 
 // ShellCommandResponse represents the result of a direct shell command.
+// Canceled reports whether the command was interrupted (Esc, or a
+// deadline) rather than running to completion; ExitCode is 130 in that
+// case, matching a process killed by SIGINT.
 type ShellCommandResponse struct {
 	Output   string `json:"output"`
 	ExitCode int    `json:"exit_code"`
+	Canceled bool   `json:"canceled"`
 }

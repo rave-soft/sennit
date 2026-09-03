@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/fsext"
 )
 
@@ -54,8 +55,11 @@ func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := commandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	// Force a C locale so error-message matching (see FastForward) doesn't
-	// depend on the user's system locale.
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	// depend on the user's system locale. Strip herdr pane-ownership vars
+	// too: git can run repo-configured hooks, which must not be able to
+	// attach to the parent pane's agent authority (see
+	// env.WithoutHerdrEnv).
+	cmd.Env = append(env.WithoutHerdrEnv(os.Environ()), "LC_ALL=C", "LANG=C")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

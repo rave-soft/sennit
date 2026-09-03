@@ -88,6 +88,15 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 		return proto.ShellCommandResponse{}, err
 	}
 
+	// StartErr means the command never ran at all (a parse failure, or
+	// the interpreter couldn't start it) rather than running and exiting
+	// non-zero. There is nothing to persist under this command's name,
+	// same as the err != nil case above; the message is the only thing
+	// the caller has to show.
+	if result.StartErr != nil {
+		return proto.ShellCommandResponse{}, result.StartErr
+	}
+
 	// Persist if we used the streaming path (persist wasn't called by RunAndPersist).
 	if onProgress != nil && persist != nil {
 		if persistErr := persist(command, result.Output, result.ExitCode); persistErr != nil {
@@ -106,6 +115,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	return proto.ShellCommandResponse{
 		Output:   result.Output,
 		ExitCode: result.ExitCode,
+		Canceled: result.Canceled,
 	}, nil
 }
 

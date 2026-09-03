@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	sennitenv "github.com/rave-soft/sennit/internal/env"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -91,8 +92,6 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 	return runner.Run(ctx, line)
 }
 
-// CaptureResult holds the combined output and exit code from a
-// captured shell execution.
 // CaptureResult distinguishes the three outcomes a captured shell run can
 // have, in order of precedence:
 //
@@ -146,7 +145,9 @@ func RunAndPersist(ctx context.Context, opts RunOptions, persist PersistFunc) (C
 		return CaptureResult{}, err
 	}
 
-	if persist != nil {
+	// A command that never started produced no output to persist under
+	// its name — matching the skip-on-error convention above.
+	if persist != nil && result.StartErr == nil {
 		if persistErr := persist(opts.Command, result.Output, result.ExitCode); persistErr != nil {
 			slog.Error("Failed to persist shell command output", "error", persistErr, "command", opts.Command)
 		}
@@ -162,8 +163,8 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 	if opts.Env == nil {
 		// Strip herdr pane-ownership vars, same as [Shell]: a subprocess
 		// started from an inherited environment must not attach to the
-		// parent pane's agent authority (see [WithoutHerdrEnv]).
-		opts.Env = WithoutHerdrEnv(os.Environ())
+		// parent pane's agent authority (see [env.WithoutHerdrEnv]).
+		opts.Env = sennitenv.WithoutHerdrEnv(os.Environ())
 	}
 
 	// interp does not wait for background jobs (`cmd &`) started inside
@@ -177,9 +178,9 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 
 	runErr := Run(ctx, opts)
 
-	exitCode := 0
-	if runErr != nil {
-		exitCode = ExitCode(runErr)
+	exitCode, canceled, startErr := classifyCaptureErr(runErr)
+	if startErr != nil {
+		return CaptureResult{StartErr: startErr}, nil
 	}
 
 	output := stdout.String()
@@ -193,6 +194,7 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 	return CaptureResult{
 		Output:   output,
 		ExitCode: exitCode,
+		Canceled: canceled,
 	}, nil
 }
 
@@ -216,7 +218,7 @@ var ptyColorEnvVars = []string{
 // replaced by the portable interpreter + env-var approach.
 func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, error) {
 	if opts.Env == nil {
-		opts.Env = WithoutHerdrEnv(os.Environ())
+		opts.Env = sennitenv.WithoutHerdrEnv(os.Environ())
 	}
 	opts.Env = append(opts.Env, ptyColorEnvVars...)
 	return RunAndCapture(ctx, opts)
@@ -297,38 +299,6 @@ func withNonInteractiveEnv(env []string) []string {
 	return append(result, nonInteractiveEnvVars...)
 }
 
-// herdrEnvVars are the environment variables herdr injects into panes
-// so agents can report state over its Unix socket API. Subprocesses
-// must not inherit these: a child process that calls herdr.Init()
-// would attach to the parent's pane and, on exit, release its agent
-// authority — making the status vanish. Stripping them here closes
-// that gap for every command the bash tool runs.
-var herdrEnvVars = []string{
-	"HERDR_ENV",
-	"HERDR_SOCKET_PATH",
-	"HERDR_PANE_ID",
-}
-
-// WithoutHerdrEnv returns env with all HERDR_* variables removed. The
-// returned slice is a new allocation safe to use concurrently with the
-// input. Exported so other packages that build their own subprocess
-// environment (e.g. the hook runner) can apply the same stripping the bash
-// tool does.
-func WithoutHerdrEnv(env []string) []string {
-	strip := make(map[string]bool, len(herdrEnvVars))
-	for _, k := range herdrEnvVars {
-		strip[k] = true
-	}
-	result := make([]string, 0, len(env))
-	for _, e := range env {
-		if key, _, ok := strings.Cut(e, "="); ok && strip[key] {
-			continue
-		}
-		result = append(result, e)
-	}
-	return result
-}
-
 // execMiddleware wraps a base [interp.ExecHandlerFunc], composing like HTTP
 // middleware: each layer either handles a command itself or delegates to the
 // next handler in the chain.
@@ -336,7 +306,9 @@ type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 
 // standardHandlers returns the exec-handler middleware chain used by both
 // [Run] and [Shell]. Order matters:
-//  1. builtins first (so Sennit's in-process jq wins over any PATH binary);
+//  1. builtins first (so Sennit's in-process jq wins over any PATH binary;
+//     a config builtin only wins the same way while it is active — see
+//     builtinHandler — and otherwise falls through to the real program);
 //  2. script dispatch (shebang / binary / shell-source for path-prefixed
 //     argv[0], no-op for bare commands) — runs before the block list so
 //     that deny rules see the already-resolved argv of anything the
@@ -356,18 +328,23 @@ func standardHandlers(blockFuncs []BlockFunc) []execMiddleware {
 }
 
 // builtinHandler returns middleware that dispatches recognized Sennit
-// builtins to their in-process Go implementations. All builtins (jq plus the
-// config builtins registered by shellconfig) live in the builtins map; config
-// builtins are no-ops without a ConfigBuilder on the context.
+// builtins to their in-process Go implementations. All builtins (jq plus
+// the config builtins registered by shellconfig) live in the builtins map,
+// each with its own active condition (see [builtinEntry]): jq always
+// intercepts its name, while a config builtin does so only while its
+// ConfigBuilder is on ctx (a sennitrc load in progress). Inactive builtins
+// fall through to next, so a real program of the same name on PATH — the
+// `mcp` CLI, say — runs during ordinary bash-tool or hook execution
+// instead of being silently swallowed.
 func builtinHandler() execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 {
 				return next(ctx, args)
 			}
-			if h, ok := builtins[args[0]]; ok {
+			if e, ok := builtins[args[0]]; ok && e.active(ctx) {
 				hc := interp.HandlerCtx(ctx)
-				return h(ctx, args, hc.Stdin, hc.Stdout, hc.Stderr)
+				return e.handler(ctx, args, hc.Stdin, hc.Stdout, hc.Stderr)
 			}
 			return next(ctx, args)
 		}

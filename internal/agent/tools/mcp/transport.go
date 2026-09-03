@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/home"
 	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 )
@@ -65,7 +66,11 @@ func (r *Registry) createTransportFor(ctx context.Context, cfg ConfigProvider, n
 			return nil, nil, err
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), args...)
-		cmd.Env = append(os.Environ(), envs...)
+		// Strip herdr pane-ownership vars: a user-configured stdio MCP
+		// server is an arbitrary subprocess and must not be able to
+		// attach to the parent pane's agent authority (see
+		// env.WithoutHerdrEnv).
+		cmd.Env = append(env.WithoutHerdrEnv(os.Environ()), envs...)
 		// Run the child in its own process group and kill the whole group when
 		// the session context is cancelled. A stdio server often spawns its own
 		// children (signal-mcp launches signal-cli); os/exec's default

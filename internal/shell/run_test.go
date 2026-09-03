@@ -309,49 +309,6 @@ func TestWithNonInteractiveEnv_SliceIndependence(t *testing.T) {
 	}
 }
 
-func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
-	t.Parallel()
-	env := []string{
-		"HERDR_ENV=1",
-		"HERDR_SOCKET_PATH=/tmp/herdr.sock",
-		"HERDR_PANE_ID=wA:p1",
-		"PATH=/usr/bin",
-		"HOME=/home/user",
-	}
-	result := WithoutHerdrEnv(env)
-	for _, e := range result {
-		if strings.HasPrefix(e, "HERDR_") {
-			t.Errorf("herdr var not stripped: %s", e)
-		}
-	}
-	if !slices.Contains(result, "PATH=/usr/bin") {
-		t.Error("non-herdr var PATH was incorrectly removed")
-	}
-	if !slices.Contains(result, "HOME=/home/user") {
-		t.Error("non-herdr var HOME was incorrectly removed")
-	}
-}
-
-func TestWithoutHerdrEnv_EmptyInput(t *testing.T) {
-	t.Parallel()
-	result := WithoutHerdrEnv(nil)
-	if len(result) != 0 {
-		t.Errorf("expected empty result for nil input, got %v", result)
-	}
-}
-
-func TestWithoutHerdrEnv_SliceIndependence(t *testing.T) {
-	t.Parallel()
-	env := []string{"HERDR_ENV=1", "FOO=bar"}
-	result := WithoutHerdrEnv(env)
-	env[1] = "FOO=baz"
-	for _, e := range result {
-		if e == "FOO=baz" {
-			t.Error("result shares backing array with input")
-		}
-	}
-}
-
 // TestRunAndCapture_BackgroundJobRace exercises a `cmd &` background job:
 // interp does not wait for bgProcs before Run returns, so the spawned
 // goroutine can still be writing to the output buffer after RunAndCapture
@@ -373,6 +330,77 @@ func TestRunAndCapture_BackgroundJobRace(t *testing.T) {
 	// already returned and read the buffer, so a race detector sees the
 	// unsynchronized write.
 	time.Sleep(150 * time.Millisecond)
+}
+
+// TestRunAndCapture_StripsHerdrEnv pins the same guarantee [Shell] gives:
+// leaving opts.Env nil must not hand a captured command the process's
+// HERDR_* vars, or a nested sennit started this way could attach to the
+// parent pane's agent authority.
+func TestRunAndCapture_StripsHerdrEnv(t *testing.T) {
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+	t.Setenv("HERDR_PANE_ID", "wA:p1")
+
+	result, err := RunAndCapture(t.Context(), RunOptions{
+		Command: "echo \"[$HERDR_SOCKET_PATH][$HERDR_PANE_ID]\"",
+		Cwd:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("RunAndCapture returned error: %v", err)
+	}
+	if got := strings.TrimSpace(result.Output); got != "[][]" {
+		t.Fatalf("herdr vars leaked into captured command env: output = %q", got)
+	}
+}
+
+// TestRunAndCapture_Canceled pins the distinction CaptureResult makes
+// between a cancelled run and one that merely exited non-zero: a command
+// killed by ctx cancellation reports Canceled with exit 130 (matching
+// SIGINT), not a bare exit code of 1.
+func TestRunAndCapture_Canceled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	t.Cleanup(cancel)
+
+	result, err := RunAndCapture(ctx, RunOptions{
+		Command: "sleep 30",
+		Cwd:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("RunAndCapture returned error: %v (want nil — cancellation is reported via CaptureResult)", err)
+	}
+	if !result.Canceled {
+		t.Fatal("expected result.Canceled = true")
+	}
+	if result.ExitCode != 130 {
+		t.Fatalf("ExitCode = %d, want 130", result.ExitCode)
+	}
+	if result.StartErr != nil {
+		t.Fatalf("StartErr = %v, want nil — the command started and ran", result.StartErr)
+	}
+}
+
+// TestRunAndCapture_ParseErrorSurfaces pins the third CaptureResult
+// outcome: a command that never ran (here, a parse failure) carries its
+// message in StartErr instead of vanishing into a bare exit code of 1.
+func TestRunAndCapture_ParseErrorSurfaces(t *testing.T) {
+	result, err := RunAndCapture(t.Context(), RunOptions{
+		Command: `echo "unterminated`,
+		Cwd:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("RunAndCapture returned error: %v (want nil — start failures are reported via CaptureResult)", err)
+	}
+	if result.StartErr == nil {
+		t.Fatal("expected result.StartErr to be set for a parse failure")
+	}
+	if !strings.Contains(result.StartErr.Error(), "parse") {
+		t.Fatalf("StartErr should mention parse: %v", result.StartErr)
+	}
+	if result.Canceled {
+		t.Fatal("a parse failure is not a cancellation")
+	}
+	if result.ExitCode != 0 || result.Output != "" {
+		t.Fatalf("expected zero-value ExitCode/Output on a start failure, got %+v", result)
+	}
 }
 
 func TestRun_DiscardsNilWriters(t *testing.T) {

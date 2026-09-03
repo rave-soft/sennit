@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"sync"
+
+	sennitenv "github.com/rave-soft/sennit/internal/env"
 )
 
 // progressWriter wraps an io.Writer and calls onProgress with each write.
@@ -44,7 +46,10 @@ func (w *progressWriter) String() string {
 // to onProgress as they arrive. Returns the complete output and exit code.
 func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(string)) (CaptureResult, error) {
 	if opts.Env == nil {
-		opts.Env = os.Environ()
+		// Strip herdr pane-ownership vars, same as [Shell]: a nested
+		// sennit started from bang mode must not attach to the parent
+		// pane's agent authority (see [env.WithoutHerdrEnv]).
+		opts.Env = sennitenv.WithoutHerdrEnv(os.Environ())
 	}
 	opts.Env = append(opts.Env, ptyColorEnvVars...)
 
@@ -54,13 +59,14 @@ func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(s
 
 	runErr := Run(ctx, opts)
 
-	exitCode := 0
-	if runErr != nil {
-		exitCode = ExitCode(runErr)
+	exitCode, canceled, startErr := classifyCaptureErr(runErr)
+	if startErr != nil {
+		return CaptureResult{StartErr: startErr}, nil
 	}
 
 	return CaptureResult{
 		Output:   buf.String(),
 		ExitCode: exitCode,
+		Canceled: canceled,
 	}, nil
 }

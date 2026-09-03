@@ -65,6 +65,30 @@ func TestIsRepo(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestRunRaw_StripsHerdrEnv pins the same guarantee every other
+// subprocess-env builder in the tree gives: a git invocation must not see
+// the process's HERDR_* vars, since git can run repo-configured hooks that
+// must not be able to attach to the parent pane's agent authority. The
+// fake commandContext swaps in a shell command in place of git so the
+// test can observe what runRaw actually put in cmd.Env — runRaw
+// overwrites Env unconditionally after commandContext returns, so the
+// substituted command still runs under the real env this test is
+// checking.
+func TestRunRaw_StripsHerdrEnv(t *testing.T) {
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+	t.Setenv("HERDR_PANE_ID", "wA:p1")
+
+	oldCommandContext := commandContext
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `echo "[$HERDR_SOCKET_PATH][$HERDR_PANE_ID]"`)
+	}
+	t.Cleanup(func() { commandContext = oldCommandContext })
+
+	out, err := run(t.Context(), t.TempDir(), "status")
+	require.NoError(t, err)
+	require.Equal(t, "[][]", out, "herdr vars leaked into the git subprocess env")
+}
+
 // TestIsRepo_OperationalFailure verifies that a failure git can't attribute
 // to "not a repository" — git missing from PATH, here — comes back as a
 // non-nil error rather than being collapsed into a false result.

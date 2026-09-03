@@ -1,97 +1,98 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
-// TestRegisterBuiltin_DispatchedThroughRun verifies that a handler registered
-// via RegisterBuiltin is dispatched through the stateless Run path, receiving
-// the full args slice and the I/O streams from the interpreter context.
-func TestRegisterBuiltin_DispatchedThroughRun(t *testing.T) {
-	RegisterBuiltin("sennittest-echo", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-		_, _ = io.WriteString(stdout, "builtin:"+args[1])
+type conditionalBuiltinCtxKey struct{}
+
+// TestConditionalBuiltin_FallsThroughWhenInactive pins the Defect C fix: a
+// builtin registered via RegisterConditionalBuiltin must not intercept its
+// name when its active condition reports false — the real program on PATH
+// has to run instead of the handler silently reporting success. This is
+// the mechanism shellconfig's config builtins (mcp, model, ...) rely on to
+// stay out of the way of same-named PATH binaries outside a sennitrc load.
+func TestConditionalBuiltin_FallsThroughWhenInactive(t *testing.T) {
+	const name = "sennit_test_conditional_builtin"
+
+	called := false
+	RegisterConditionalBuiltin(name, func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+		called = true
 		return nil
+	}, func(ctx context.Context) bool {
+		return ctx.Value(conditionalBuiltinCtxKey{}) != nil
 	})
-	t.Cleanup(func() { delete(builtins, "sennittest-echo") })
 
-	var stdout bytes.Buffer
-	err := Run(t.Context(), RunOptions{
-		Command: "sennittest-echo hello",
-		Cwd:     t.TempDir(),
-		Stdout:  &stdout,
-	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-	if got := stdout.String(); got != "builtin:hello" {
-		t.Fatalf("stdout = %q, want %q", got, "builtin:hello")
-	}
-}
-
-// TestRegisterBuiltin_OverridesPATHBinary verifies that a registered builtin
-// takes precedence over an executable of the same name found on PATH. This is
-// the stated design intent of builtinHandler sitting ahead of the exec layer.
-func TestRegisterBuiltin_OverridesPATHBinary(t *testing.T) {
-	dir := t.TempDir()
-	// Put a fake "sennittest-shadowed" binary on PATH that would print
-	// "from-path" if it ran.
-	binDir := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := filepath.Join(binDir, "sennittest-shadowed")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho from-path\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	binDir := t.TempDir()
+	writeFakeExecutable(t, binDir, name, "real program ran")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	RegisterBuiltin("sennittest-shadowed", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-		_, _ = io.WriteString(stdout, "from-builtin")
-		return nil
-	})
-	t.Cleanup(func() { delete(builtins, "sennittest-shadowed") })
-
-	var stdout bytes.Buffer
+	var stdout strings.Builder
 	err := Run(t.Context(), RunOptions{
-		Command: "sennittest-shadowed",
-		Cwd:     dir,
+		Command: name,
+		Cwd:     t.TempDir(),
 		Env:     os.Environ(),
 		Stdout:  &stdout,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if got := stdout.String(); got != "from-builtin" {
-		t.Fatalf("builtin did not shadow PATH binary: stdout = %q, want %q", got, "from-builtin")
+	if called {
+		t.Fatal("inactive builtin handler was called instead of falling through")
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "real program ran" {
+		t.Fatalf("stdout = %q, want the real program's output", got)
 	}
 }
 
-// TestBuiltinHandler_UnknownFallsThrough verifies that an unregistered command
-// name is passed to the underlying exec layer rather than being swallowed.
-func TestBuiltinHandler_UnknownFallsThrough(t *testing.T) {
-	var stdout bytes.Buffer
-	err := Run(t.Context(), RunOptions{
-		Command: "echo fallthrough",
+// TestConditionalBuiltin_InterceptsWhenActive is the companion case: the
+// same registration intercepts its name once active(ctx) is true, exactly
+// as config builtins do during a sennitrc load.
+func TestConditionalBuiltin_InterceptsWhenActive(t *testing.T) {
+	const name = "sennit_test_conditional_builtin_active"
+
+	called := false
+	RegisterConditionalBuiltin(name, func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+		called = true
+		return nil
+	}, func(ctx context.Context) bool {
+		return ctx.Value(conditionalBuiltinCtxKey{}) != nil
+	})
+
+	binDir := t.TempDir()
+	writeFakeExecutable(t, binDir, name, "real program ran")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.WithValue(t.Context(), conditionalBuiltinCtxKey{}, true)
+	err := Run(ctx, RunOptions{
+		Command: name,
 		Cwd:     t.TempDir(),
-		Stdout:  &stdout,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if got := stdout.String(); got != "fallthrough\n" {
-		t.Fatalf("stdout = %q, want %q", got, "fallthrough\n")
+	if !called {
+		t.Fatal("active builtin handler was not called")
 	}
 }
 
-// TestRegisterBuiltin_JQRegistered verifies that jq is registered through the
-// same registry as every other builtin (no special-cased dispatch path).
-func TestRegisterBuiltin_JQRegistered(t *testing.T) {
-	if _, ok := builtins["jq"]; !ok {
-		t.Fatal("jq is not registered in the builtins map")
+// writeFakeExecutable writes a shell script named name into dir that
+// prints output and makes it executable, so realCommandName-style PATH
+// lookups find a real program to fall through to.
+func writeFakeExecutable(t *testing.T, dir, name, output string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH-based fake executable setup targets POSIX shells")
+	}
+	path := filepath.Join(dir, name)
+	script := "#!/bin/sh\necho " + output + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake executable: %v", err)
 	}
 }

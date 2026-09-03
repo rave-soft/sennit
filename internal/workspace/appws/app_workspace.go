@@ -10,8 +10,9 @@ import (
 // runAndCaptureStream and runAndPersist are indirected through package
 // vars, rather than called directly on shell.*, so a test can substitute
 // a failing stand-in without needing a shell command that actually fails
-// to start (RunAndCaptureStream folds every real failure into
-// CaptureResult.ExitCode and never itself returns a non-nil error).
+// to start (RunAndCaptureStream folds every real outcome — a normal
+// exit, a cancellation, or a command that never ran — into CaptureResult
+// and never itself returns a non-nil error).
 var (
 	runAndCaptureStream = shell.RunAndCaptureStream
 	runAndPersist       = shell.RunAndPersist

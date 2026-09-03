@@ -22,6 +22,22 @@ func TestOsEnv_Env(t *testing.T) {
 	}
 }
 
+// TestOsEnv_Env_StripsHerdrVars pins the same guarantee WithoutHerdrEnv
+// gives everywhere else a subprocess env is built from the process
+// environment: a value resolved through this Env (command substitution
+// included) must not see HERDR_* vars, or the subprocess it runs could
+// attach to the parent pane's agent authority.
+func TestOsEnv_Env_StripsHerdrVars(t *testing.T) {
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+	t.Setenv("HERDR_PANE_ID", "wA:p1")
+
+	for _, envVar := range (&osEnv{}).Env() {
+		if len(envVar) >= 6 && envVar[:6] == "HERDR_" {
+			t.Fatalf("herdr var not stripped: %s", envVar)
+		}
+	}
+}
+
 func TestSnapshot_MergesAndCopiesValues(t *testing.T) {
 	overrides := map[string]string{"SHARED": "override", "ONLY_OVERRIDE": "value"}
 	environment := Snapshot([]string{"BASE=value", "SHARED=base"}, overrides)

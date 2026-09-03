@@ -42,6 +42,23 @@ func TestRuntimeEnvironment_AppliesBareOverridesAfterConfigEnv(t *testing.T) {
 	require.Equal(t, "process", os.Getenv("RUNTIME_ENVIRONMENT_OVERRIDE"))
 }
 
+// TestRuntimeEnvironment_StripsHerdrVars pins the same guarantee every
+// other subprocess-env builder in the tree gives: resolving a config
+// value's $(cmd) substitution must not hand that subprocess the process's
+// HERDR_* vars, or it could attach to the parent pane's agent authority.
+func TestRuntimeEnvironment_StripsHerdrVars(t *testing.T) {
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+	t.Setenv("HERDR_PANE_ID", "wA:p1")
+
+	environment := (&Config{}).RuntimeEnvironment()
+
+	require.Empty(t, environment.Get("HERDR_SOCKET_PATH"))
+	require.Empty(t, environment.Get("HERDR_PANE_ID"))
+	for _, e := range environment.Env() {
+		require.NotContains(t, e, "HERDR_")
+	}
+}
+
 func TestRuntimeEnvironment_ConcurrentWorkspacesDoNotMutateProcessEnvironment(t *testing.T) {
 	t.Setenv("RUNTIME_ENVIRONMENT_CONCURRENT", "process")
 
