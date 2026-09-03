@@ -90,12 +90,23 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 	startLine := int(edit.Range.Start.Line)
 	endLine := int(edit.Range.End.Line)
 
-	// Validate positions before accessing lines.
+	// Validate positions before accessing lines. An end line past the last
+	// line is refused, exactly like an out-of-range start: clamping it to
+	// the last line instead would let a stale edit — one whose file has
+	// since lost lines — splice a prefix from the intended start line onto
+	// a suffix from an unrelated last line, deleting everything between
+	// them and still reporting success.
+	//
+	// No legitimate "append at EOF" idiom needs endLine >= len(lines):
+	// strings.Split leaves a trailing empty entry for a file ending in a
+	// newline, and the LSP spec's own end-of-document position lands on the
+	// last existing line at character len(lastLine). Both already fall
+	// within len(lines); an oversized character offset is clamped below.
 	if startLine < 0 || startLine >= len(lines) {
 		return nil, fmt.Errorf("invalid start line: %d", startLine)
 	}
 	if endLine < 0 || endLine >= len(lines) {
-		endLine = len(lines) - 1
+		return nil, fmt.Errorf("invalid end line: %d", endLine)
 	}
 
 	// startLineContent/endLineContent are the two line slices every branch

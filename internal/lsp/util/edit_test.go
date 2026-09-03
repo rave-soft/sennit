@@ -330,6 +330,73 @@ func TestApplyTextEdit_UTF8(t *testing.T) {
 	}
 }
 
+func TestApplyTextEdit_StaleEndLineRejected(t *testing.T) {
+	t.Parallel()
+
+	// A server that computed this edit against a longer version of the
+	// file — before a concurrent edit shrank it — sends an end line past
+	// what actually exists. Clamping it used to splice the start line's
+	// prefix onto the last line's suffix, silently deleting everything in
+	// between. It must be refused instead.
+	lines := []string{"one", "two"}
+	edit := protocol.TextEdit{
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 0},
+			End:   protocol.Position{Line: 5, Character: 0},
+		},
+		NewText: "replacement",
+	}
+
+	_, err := applyTextEdit(lines, edit, powernap.UTF16)
+	require.Error(t, err, "an end line past the last line must be refused, not clamped")
+}
+
+func TestApplyTextEdit_EndLineAtLastLineStillWorks(t *testing.T) {
+	t.Parallel()
+
+	// The legitimate "replace to end of file" case: the end position sits
+	// on the actual last line, at or past its last character. This must
+	// keep working — only an end line that doesn't exist at all is an
+	// error.
+	lines := []string{"one", "two"}
+	edit := protocol.TextEdit{
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 1, Character: 0},
+			End:   protocol.Position{Line: 1, Character: 999},
+		},
+		NewText: "TWO",
+	}
+
+	result, err := applyTextEdit(lines, edit, powernap.UTF16)
+	require.NoError(t, err)
+	require.Equal(t, []string{"one", "TWO"}, result)
+}
+
+func TestApplyTextEdits_StaleEndLineLeavesFileUntouched(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "file.txt")
+	original := "one\ntwo\n"
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o644))
+
+	edits := []protocol.TextEdit{
+		{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 0},
+				End:   protocol.Position{Line: 5, Character: 0},
+			},
+			NewText: "replacement",
+		},
+	}
+
+	err := applyTextEdits(protocol.URIFromPath(path), edits, powernap.UTF16)
+	require.Error(t, err)
+
+	content, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	require.Equal(t, original, string(content), "a refused edit must not modify the file on disk")
+}
+
 func TestApplyDocumentChange_CreateFile(t *testing.T) {
 	t.Parallel()
 
