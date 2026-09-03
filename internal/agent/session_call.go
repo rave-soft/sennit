@@ -101,7 +101,7 @@ type SessionAgentCall struct {
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
 	// OnRateLimit, when non-nil, is called by fantasy when a stream fails
 	// with a 429 (rate limit) response, mirroring OnAuthRefresh but for
-	// the reactive rotation trigger (plan §5.5, "все остальные"): the
+	// the reactive rotation trigger: the
 	// callback marks the exhausted account cooling down, picks another
 	// via the provider's Rotator, and applies it. Returning nil retries
 	// immediately with the new account's credentials; returning an error
@@ -111,8 +111,8 @@ type SessionAgentCall struct {
 	// provider), this stays nil and fantasy never engages the hook.
 	OnRateLimit func(ctx context.Context, err *fantasy.ProviderError) error
 	// RotateThreshold, when non-nil, is called once per finished step
-	// (runTurn.onStepFinish) for the proactive rotation trigger (plan
-	// §5.5, Codex): it checks the active account's usage snapshot and
+	// (runTurn.onStepFinish) for the proactive rotation trigger (Codex
+	// today): it checks the active account's usage snapshot and
 	// switches to another account if it has crossed the configured
 	// threshold. It never fails the turn - errors are logged and
 	// swallowed internally, exactly like today's no-rotation behavior

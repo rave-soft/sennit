@@ -49,8 +49,8 @@ const (
 )
 
 // orphanRepairDropped / orphanRepairInjected are the running counters of
-// repairs by cause (T4's "счётчик repairs по причинам"). They are process
-// totals, not per-session: each repair line logs its cause's running total so
+// repairs by cause. They are process totals, not per-session: each repair
+// line logs its cause's running total so
 // a single line carries the cumulative count for that cause without a second
 // aggregation pass. They are atomics because preparePrompt runs on many
 // session goroutines at once.

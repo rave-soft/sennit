@@ -266,12 +266,12 @@ func (t *runTurn) foldCompletions(ctx context.Context, messages []fantasy.Messag
 		// deepest completion in the batch, minus one.
 		//
 		// This is the whole difference between bounding nesting and
-		// bounding iteration. Deepening here made a session's *n*th round
-		// of delegate-and-react run at depth n, so an ordinary iterative
-		// plan — implement, review, implement again — ran out of depth
-		// after three rounds and could never delegate again, while a
-		// genuinely nested chain of delegations was not counted at all
-		// (a delegation's own turn ran at depth 0).
+		// bounding iteration. Deepening here would make a session's *n*th
+		// round of delegate-and-react run at depth n, so an ordinary
+		// iterative plan — implement, review, implement again — would run
+		// out of depth after three rounds and could never delegate again,
+		// while a genuinely nested chain of delegations would go
+		// uncounted (a delegation's own turn always runs at depth 0).
 		depth := 0
 		for _, c := range completions {
 			if c.Depth > depth {
@@ -608,7 +608,7 @@ func (t *runTurn) onAuthRefresh(ctx context.Context, err *fantasy.ProviderError)
 }
 
 // onRateLimit wraps the call's OnRateLimit (the coordinator's account
-// rotation, plan §5.5) so a *successful* rotation labels the retried
+// rotation) so a *successful* rotation labels the retried
 // attempt and resets streamed content before it, mirroring onAuthRefresh.
 //
 // The reset matters specifically here: fantasy's OnRateLimit contract says
@@ -645,11 +645,11 @@ func (t *runTurn) modelProvider() fantasy.LanguageModel {
 		}
 	}
 	// This is fantasy's runtime ModelProvider callback - it fires once per
-	// stream attempt. It used to be the Info "ModelProvider called" line the
-	// audit flagged as noise (mistaken for the request count, carrying no
-	// session/run id or reason); it now goes to Debug. The line that *is*
-	// the request count is the "Provider request started" the instrumented
-	// model logs, one per real Stream attempt.
+	// stream attempt. Logged at Debug, not Info: it carries no session/run
+	// id or reason, so at Info it reads as noise and can be mistaken for
+	// the request count. The line that *is* the request count is the
+	// "Provider request started" the instrumented model logs, one per
+	// real Stream attempt.
 	slog.Debug("ModelProvider called",
 		"session_id", t.call.SessionID,
 		"run_id", t.call.RunID,
@@ -822,7 +822,7 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 		return err
 	}
 	t.acknowledgePendingCompletions()
-	// Threshold rotation (plan §5.5, Codex): fires here and only here -
+	// Threshold rotation (Codex today): fires here and only here -
 	// onStepFinish runs strictly after processStepStream has fully
 	// drained the step's stream and strictly before the next step's
 	// stream is created (see fantasy's agent.go Stream loop), so this is
@@ -923,7 +923,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 	// INFO: we use the cleanup context here because the genCtx has been cancelled.
 	//
 	// A failure to read the session back must not abandon the rest of this
-	// cleanup. Bailing out here used to skip both the Finished flags below and
+	// cleanup. Bailing out here would skip both the Finished flags below and
 	// the AddFinish further down, leaving a persisted assistant message with
 	// neither — a state the chat UI reads as "still running" for the rest of
 	// that session's life, every time it is reloaded. Without the list we

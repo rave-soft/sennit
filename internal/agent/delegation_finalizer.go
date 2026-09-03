@@ -133,9 +133,9 @@ type skillsState struct {
 
 // fetchClient lazily builds and caches the *http.Client the agentic-fetch
 // tool falls back to when no caller-supplied client is given. Built once
-// and reused: cloning a transport per call (as agenticFetchTool used to)
-// leaks that clone's idle-connection pool forever and starts every fetch
-// cold instead of reusing warm connections from a shared pool.
+// and reused: cloning a transport per call would leak that clone's
+// idle-connection pool forever and start every fetch cold instead of
+// reusing warm connections from a shared pool.
 type fetchClient struct {
 	once   sync.Once
 	client *http.Client
@@ -900,11 +900,10 @@ func (d *delegationFinalizer) carryOverMessages(ctx context.Context, in carryOve
 // agentTool builds the built-in "agent" delegation tool: every call opens
 // a durable background task (see runBackgroundAgent), so the tool is only
 // available when the workspace owns a task manager and background
-// delegation is enabled.
-// agentTool builds the one delegation tool. allowNamedAgents is false for
-// a sub-agent's own build: a delegation could never start a named agent
-// (their tools were registered for the top-level agent only), and folding
-// them into one tool must not quietly widen that.
+// delegation is enabled. allowNamedAgents is false for a sub-agent's own
+// build: a delegation could never start a named agent (their tools were
+// registered for the top-level agent only), and folding them into one
+// tool must not quietly widen that.
 func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allowNamedAgents bool) (fantasy.AgentTool, error) {
 	if _, ok := cfg.Agents()[config.AgentTask]; !ok {
 		return nil, errors.New("task agent not configured")

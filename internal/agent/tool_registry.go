@@ -103,9 +103,9 @@ func one(fn func(b *buildToolsCtx) fantasy.AgentTool) func(context.Context, *run
 // per-MCP-server tools (tools.GetMCPTools), gated by AllowedMCP rather
 // than AllowedTools and dynamic in name and count.
 //
-// User-defined agents used to be the other exception, one row-less tool
-// per .sennit/agents entry. They are the "agent" row's subagent_type
-// parameter now, so the registry is the whole built-in tool list again.
+// User-defined agents are unified under the "agent" row's subagent_type
+// parameter (see AgentParams), not registered as their own rows, so this
+// is the whole built-in tool list.
 func coreToolNames() []string {
 	names := []string{"bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "agent_trace", "job_output", "job_kill", "download", "edit", "multiedit", "fetch", "web_fetch", "web_search", "glob"}
 	if tools.HasRipgrep() {

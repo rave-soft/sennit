@@ -90,9 +90,8 @@ func (d *turnDispatcher) runUpdateModels(ctx context.Context, agent SessionAgent
 // provider and, if that refresh landed a new generation, re-resolves
 // runtime so the caller proceeds on it instead of the one it already
 // compiled. A refresh failure is logged under logMsg rather than
-// returned: every call site proceeds with the existing token exactly as
-// it did before this was extracted, only a re-resolve failure is
-// reported to the caller.
+// returned: every call site proceeds with the existing token regardless,
+// and only a re-resolve failure is reported to the caller.
 func (d *turnDispatcher) refreshRuntimeToken(ctx context.Context, runtime *compiledRuntime, logMsg string) (*compiledRuntime, error) {
 	if err := d.builder.refreshTokenIfExpired(ctx, runtime.providerCfg, runtime.providerCredentials, d.delegation.operationPort()); err != nil {
 		slog.Error(logMsg, "error", err)
@@ -159,14 +158,13 @@ func (d *turnDispatcher) GenerateTitle(ctx context.Context, sessionID, prompt st
 // an expired OAuth token refreshed first, and the model's own call
 // options carried onto the call.
 //
-// It exists because the wake path used to go straight to
-// sessionAgent.Run with nothing but the session id and a placeholder
-// prompt: no Runtime, so no thinking options and no output-token budget;
-// no OnAuthRefresh, so an OAuth token that expired while a delegation ran
-// produced a 401 with no retry; and no MCP wait, so a continuation that
-// woke early could be built without the tools it needed. Every one of
-// those is most likely precisely when a continuation fires — long after
-// the turn that started the delegation.
+// It exists because dispatching straight to sessionAgent.Run with
+// nothing but the session id and a placeholder prompt would carry no
+// Runtime (no thinking options, no output-token budget), no
+// OnAuthRefresh (an OAuth token expired while a delegation ran would 401
+// with no retry), and no MCP wait (a continuation could wake without the
+// tools it needed). Every one of those is most likely precisely when a
+// continuation fires — long after the turn that started the delegation.
 func (d *turnDispatcher) runContinuation(ctx context.Context, sessionID string) error {
 	d.markActivity(sessionID)
 	defer d.markActivity(sessionID)
@@ -213,7 +211,7 @@ func (d *turnDispatcher) makeRunCall(call SessionAgentCall) SessionAgentCall {
 	call.PresencePenalty = runtime.presencePenalty
 	port := d.delegation.operationPort()
 	call.OnAuthRefresh = d.builder.makeAuthRefreshCallback(runtime.providerCfg, runtime.providerCredentials, call.ActiveRuntime, port)
-	// Both rotation triggers (plan §5.5) are wired here, at the primary
+	// Both rotation triggers are wired here, at the primary
 	// per-turn call site: an interactive turn hitting a 429 mid-conversation,
 	// or crossing its usage threshold between steps, is exactly the case
 	// rotation exists for. Each returns nil when rotation is disabled or

@@ -19,12 +19,11 @@ import (
 const mediaLoadFailedPlaceholder = "[Image data could not be loaded]"
 
 // toAIMessage converts a persisted message.Message into the fantasy.Message
-// form a provider request actually carries. This conversion lives here
-// (rather than on message.Message, where it used to be) because it is the
-// one place message depended on provider SDK types; internal/agent is the
-// layer that talks to providers, so the dependency belongs here instead.
-// See message.Message.Origin's doc comment: Origin never affects this
-// output.
+// form a provider request actually carries. This conversion lives in
+// internal/agent rather than on message.Message because it is the layer
+// that talks to providers; message must not depend on provider SDK
+// types. See message.Message.Origin's doc comment: Origin never affects
+// this output.
 func toAIMessage(m *message.Message) []fantasy.Message {
 	var messages []fantasy.Message
 	switch m.Role {

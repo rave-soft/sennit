@@ -90,12 +90,12 @@ func delegatedAgentPrompt(definition string) string {
 // Delegations are always asynchronous; a tool call is only an
 // acknowledgement of launch.
 //
-// SubagentType is what unified the delegation surface: user-defined
-// agents used to be registered as one tool each, named after the agent,
-// so the tool list grew with every file in .sennit/agents and a caller
-// had to be told separately which of those names were agents at all.
-// They are now this one field, and the tool's own description carries
-// the roster.
+// SubagentType keeps user-defined agents off the tool list: registering
+// one tool per agent would grow the tool list with every file in
+// .sennit/agents and require callers to be told separately which of
+// those names were agents at all. Instead every agent is reached
+// through this one field, and the tool's own description carries the
+// roster.
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
 	// SubagentType names a user-defined agent (.sennit/agents, config

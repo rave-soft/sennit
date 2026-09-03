@@ -245,7 +245,8 @@ func cloneJSONSchema(input map[string]any) map[string]any {
 //
 // Errors are reported to the caller rather than swallowed, but the
 // caller treats them as "no carried history": losing continuity degrades
-// a delegation, failing it outright would break work that used to run.
+// a delegation, while failing it outright would break a delegation that
+// would otherwise succeed.
 //
 // in carries the model and the concrete runtime byte sizes used to size the
 // carry-over budget (see carryOverBudget). The runtime byte sizes are read

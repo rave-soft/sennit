@@ -191,12 +191,11 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		title = cmp.Or(fallback, DefaultSessionName)
 	}
 
-	// Calculate usage and cost, through the same helpers the per-turn
-	// path uses: this used to carry its own copy of both the cost formula
-	// and the token accounting, and the token halves had drifted — the
-	// turn path counts cache *reads* as prompt tokens and this counted
-	// cache *creations*, so a session's totals depended on which of the
-	// two wrote last.
+	// Calculate usage and cost through the same helpers the per-turn path
+	// uses, not a separate copy: the turn path counts cache *reads* as
+	// prompt tokens, so any duplicate accounting must match that rather
+	// than counting cache *creations*, or a session's totals would depend
+	// on whichever path wrote last.
 	cost := catalogCost(model, resp.TotalUsage)
 	if openrouterCost := a.openrouterTotal(resp.Steps); openrouterCost != nil {
 		cost = *openrouterCost

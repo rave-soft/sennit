@@ -16,9 +16,7 @@ import (
 // sessionState is one session's accept/queue/cancel dispatch state: its
 // queued follow-up calls, the active run's cancel handle, its completion
 // inbox, and the bookkeeping dispatchDecision and Cancel serialize
-// against each other. It replaces what used to be seven parallel maps
-// (messageQueue, activeRequests, dispatchMu, completionInbox,
-// cancelledSessions, acceptedRuns, cancelMark) keyed by session id.
+// against each other.
 //
 // mu is the per-session "dispatch mutex" dispatchDecision and Cancel
 // serialize the accept -> (cancel-on-entry | queued | active) transition
@@ -34,17 +32,16 @@ import (
 //
 // Instances are refcounted and created/removed lazily by
 // dispatcher.session/release — see those for the removal invariant that
-// fixes the mutex-map's old leak (dispatch.go used to never remove an
-// entry once created).
+// keeps an idle session's entry from lingering forever.
 type sessionState struct {
 	mu sync.Mutex
 
 	messageQueue    []SessionAgentCall
 	active          *activeCancel
 	completionInbox []TaskCompletion
-	// cancelled mirrors the old cancelledSessions map: "the user
-	// explicitly canceled this session" until the next turn actually
-	// starts (dispatchDecision's idle branch clears it). It exists
+	// cancelled records "the user explicitly canceled this session" until
+	// the next turn actually starts (dispatchDecision's idle branch
+	// clears it). It exists
 	// solely to gate auto-waking a continuation from the completion
 	// inbox — see wakeEligibleLocked.
 	cancelled bool
@@ -455,8 +452,8 @@ var _ CompletionDeliverer = Coordinator(nil)
 
 // DelegationParent describes where a running delegation should send an
 // ask, and how to attribute it. Registered once, at delegation-create
-// time, by internal/thread (a later change - not part of this step),
-// keyed by the delegation's own (child) session id.
+// time, by internal/thread, keyed by the delegation's own (child) session
+// id.
 type DelegationParent struct {
 	// Parent owns the parent session's completion inbox. For a task
 	// this is the delegation's own Coordinator (a task shares its
@@ -714,9 +711,8 @@ func (d *dispatcher) drainQueueForStep(sessionID string) (fold, canceledWithRunI
 // if any survive, reserves a fresh accept for the first and pops it off the
 // queue. It is the single implementation of "hand off to the next queued
 // prompt", shared by Run's end-of-turn handoff and Summarize's
-// post-completion handoff — closing the gap where the Summarize path used
-// to skip the cancel-mark check entirely (a prompt queued during
-// summarization and canceled would run anyway).
+// post-completion handoff, so a prompt queued during summarization and
+// then canceled cannot run anyway.
 //
 // queued is the filtered queue as it stood before popping (callers need
 // RunID membership to decide whether they still owe their own
@@ -957,9 +953,7 @@ func (d *dispatcher) clearQueue(sessionID string) []SessionAgentCall {
 // still holds ac. This is the compare-and-clear guard a finishing run's
 // deferred cleanup needs: it must only remove its own entry, never a
 // newer run's entry that was installed in the window between an earlier
-// explicit clear and this deferred one. It replaces what used to be a
-// csync.CompareAndDelete on a standalone activeRequests map, now
-// expressed under the session's own mutex instead of the map's.
+// explicit clear and this deferred one.
 func (d *dispatcher) clearActiveIfMatch(sessionID string, ac *activeCancel) {
 	s, release := d.session(sessionID)
 	defer release()
@@ -1054,8 +1048,7 @@ func (d *dispatcher) QueuedPromptsList(sessionID string) []string {
 }
 
 // --- the methods below carry real sessionAgent-level logic (persistence,
-// pubsub) that used to live in queue.go as thin pass-throughs onto the
-// methods above. They stay on *sessionAgent, not *dispatcher: dispatcher
+// pubsub). They stay on *sessionAgent, not *dispatcher: dispatcher
 // itself must stay free of any dependency on pubsub or message
 // persistence (see its own doc comment). Every dispatcher method that is
 // a pure pass-through (BeginAccepted, IsBusy, IsSessionBusy,

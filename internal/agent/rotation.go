@@ -103,9 +103,9 @@ func worstKnownRemainingPercent(u accounts.Usage) int {
 // applyRotationPick activates picked as providerID's active account and,
 // when active is non-nil, rebuilds and stores the runtime so the next
 // request actually uses the new credentials - the same two steps
-// makeAuthRefreshCallback takes after a successful credential refresh
-// (plan §5.2: activation is projected into the live ProviderConfig, never
-// touching the provider build path itself).
+// makeAuthRefreshCallback takes after a successful credential refresh:
+// activation is projected into the live ProviderConfig, never touching
+// the provider build path itself.
 func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID string, picked accounts.Account, active *activeRuntime, inputs runtimeToolInputs) error {
 	if err := b.cfg.ActivateAccount(config.ScopeGlobal, providerID, picked); err != nil {
 		return fmt.Errorf("activating rotated account %s for provider %s: %w", picked.ID, providerID, err)
@@ -121,8 +121,8 @@ func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID strin
 	return nil
 }
 
-// makeThresholdRotateCallback returns the RotateThreshold hook (plan
-// §5.5's proactive trigger, Codex today): called once per finished step,
+// makeThresholdRotateCallback returns the RotateThreshold hook (the
+// proactive rotation trigger, Codex today): called once per finished step,
 // it checks the active account's last usage snapshot and, if
 // accounts.Rotator.ShouldRotate says the account is over threshold,
 // switches to the next usable one.
@@ -214,10 +214,10 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 }
 
 // makeRateLimitCallback returns the fantasy OnRateLimitFunc for the
-// reactive rotation trigger (plan §5.5, every RotateRateLimit provider):
-// on a 429, it marks the active account cooling down, picks the next
-// usable one via the provider's Rotator, and applies it exactly like
-// makeThresholdRotateCallback (§5.2 projection + runtime rebuild).
+// reactive rotation trigger (every RotateRateLimit provider): on a 429,
+// it marks the active account cooling down, picks the next usable one
+// via the provider's Rotator, and applies it exactly like
+// makeThresholdRotateCallback.
 //
 // Returns nil when rotation is disabled for providerCfg or the provider
 // isn't a RotateRateLimit one, mirroring makeAuthRefreshCallback's own
@@ -304,8 +304,8 @@ func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig
 // deliberately duplicates the couple of lines third_party/fantasy/retry.go's
 // unexported getRetryDelayInMs already does (retry-after-ms, then
 // Retry-After as seconds or an HTTP date) rather than exporting that
-// helper across the vendor boundary for one small caller - see plan §9
-// risk 6 on keeping the fork's surface area minimal.
+// helper across the vendor boundary for one small caller, keeping the
+// fork's surface area minimal.
 func retryAfterFromHeaders(err *fantasy.ProviderError) time.Duration {
 	if err == nil || err.ResponseHeaders == nil {
 		return 0

@@ -279,10 +279,9 @@ func (d *dispatcher) wakeEligible(sessionID string) bool {
 // delegation waits for them). A cancelled delegation is finished for
 // good - no person will ever type into it, and nothing will ever start
 // another turn there - so a report left in its inbox is a report thrown
-// away. That is not theoretical either: the night this was written, a
-// grandchild delegation worked for nine minutes after its parent had
-// been cancelled, then filed its report into that parent's dead inbox,
-// and the session actually waiting for the work sat idle until morning.
+// away: a grandchild delegation can go on working well after its parent
+// was cancelled, and its report must not vanish into that dead inbox
+// while the session actually waiting for the work sits idle.
 //
 // So the report goes to whoever started the cancelled delegation, which
 // is the nearest thing to an interested party still standing. Not
@@ -331,14 +330,13 @@ func (d *dispatcher) liveSession() string {
 // on the command line, or created new - and that session is the only
 // conversation anyone is having here. Everything else in the database is
 // a conversation that was left, and one that restarted itself would
-// spend tokens and edit files with nobody watching: the day this gate
-// was missing, a restart recovered the interrupted delegations of four
-// sessions from days earlier and every one of them woke at once, each
-// re-running a pipeline whose work was long since committed. Nothing is
-// lost by refusing them - the completion waits in that session's inbox
-// and is folded into the top of its next turn (see
-// drainCompletionsForStep), the first moment it is being worked in
-// again.
+// spend tokens and edit files with nobody watching: without this gate, a
+// restart that recovers several sessions' interrupted delegations would
+// wake every one of them at once, each re-running a pipeline whose work
+// may be long since committed. Nothing is lost by refusing them - the
+// completion waits in that session's inbox and is folded into the top of
+// its next turn (see drainCompletionsForStep), the first moment it is
+// being worked in again.
 //
 // The walk up delegationParents is what makes it the session's whole
 // tree rather than the session alone: a delegation that started
@@ -402,9 +400,9 @@ func (d *dispatcher) wakeEligibleLocked(s *sessionState) bool {
 // message, plainly labeled as a system-generated report rather than
 // something the user typed.
 //
-// This was originally a system-role message (fantasy.NewSystemMessage),
-// which is wrong: a fantasy.Prompt can carry at most one *effective*
-// system block on Anthropic and Google - both adapters group consecutive
+// It must not be a system-role message (fantasy.NewSystemMessage): a
+// fantasy.Prompt can carry at most one *effective* system block on
+// Anthropic and Google - both adapters group consecutive
 // system messages into a block, then silently drop (continue, no
 // warning) any later block once a user/assistant message has
 // interrupted it (providers/anthropic/anthropic.go and
@@ -417,13 +415,12 @@ func (d *dispatcher) wakeEligibleLocked(s *sessionState) bool {
 // independently regardless of position. A mechanism that only some
 // providers implement correctly is worse than a uniformly plain one.
 //
-// A user-role message has no such trap: the provider-ordering spike
-// established, for steering, that fantasy accepts (and on
-// Anthropic, merges) a user message appended after other turns - the
-// same path this rides now. The plan's constraint was that a completion
-// must not be *queued as a user prompt* or attributed to the user in
-// history - not that fantasy.MessageRoleUser can never carry it on the
-// wire. This never goes through createUserMessage/message store (it is
+// A user-role message has no such trap: fantasy accepts (and on
+// Anthropic, merges) a user message appended after other turns - the same
+// path steering already rides. The constraint that matters is that a
+// completion must not be *queued as a user prompt* or attributed to the
+// user in history - not that fantasy.MessageRoleUser can never carry it
+// on the wire. This never goes through createUserMessage/message store (it is
 // folded directly into prepared.Messages, not persisted) whether it is
 // reached from the mid-turn fold or from a continuation's own step 0
 // (runTurn.prepareStep's Continuation branch calls this exact function

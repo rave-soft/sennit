@@ -49,7 +49,7 @@ const (
 	// a plain retry, which is a re-attempt of a transiently-failed request).
 	reasonAuthRefresh = "auth_refresh"
 	// reasonAccountRotated is a re-attempt made after a 429 was resolved
-	// by a successful OnRateLimit account rotation (plan §5.5). Like
+	// by a successful OnRateLimit account rotation. Like
 	// reasonAuthRefresh, it labels the immediate retry the rotation hook
 	// triggers, distinct from a plain backoff retry.
 	reasonAccountRotated = "account_rotated"
@@ -114,7 +114,8 @@ func (c providerCorrelation) fields() []any {
 // fantasy step number; attempt is the 1-based network attempt within the step
 // (first attempt is 1, the first retry is 2, ...); reason is the
 // request_reason token above. Field names are fixed here and reused by every
-// site, so they cannot drift the way "session" vs "session_id" used to.
+// site, so they cannot drift into inconsistent spellings like "session"
+// vs "session_id" across call sites.
 func providerRequestLogFields(sessionID, runID, turnID string, step, attempt int, reason string) []any {
 	return []any{
 		"session_id", sessionID,
@@ -313,9 +314,9 @@ func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fant
 // unit-testable without a log capture. The precedence is deliberate:
 //
 //  0. the stall watchdog ended the attempt -> stalled. First, because a stall
-//     reaches here disguised: the cancellation it used to break the silence
-//     would otherwise classify as canceled, hiding the one outcome that says
-//     the provider stopped talking on its own.
+//     reaches here disguised: the cancellation the watchdog uses to break
+//     the silence would otherwise classify as canceled, hiding the one
+//     outcome that says the provider stopped talking on its own.
 //  1. an explicit cancellation error part -> canceled (no category),
 //  2. another explicit error part -> error + its category (a provider failure
 //     is the most specific outcome),

@@ -54,12 +54,11 @@ const (
 // person's, so the sweep does see a task or thread session, and does pick
 // one up: a parked delegation waiting on children of its own is idle by
 // definition and, being deep in a conversation with its own child, is
-// often over the token threshold too. That used to be a problem - a
-// completion arriving mid-summarize had nothing to wake it once the
-// summary finished - but summarize's own deferred teardown now calls
-// wakeFromInboxIfIdle (see usage.go), so a parked session compressed here
-// picks its completion up the moment the summary is done rather than
-// waiting on the watchdog.
+// often over the token threshold too. A completion arriving mid-summarize
+// would have nothing to wake it once the summary finished, but
+// summarize's own deferred teardown calls wakeFromInboxIfIdle (see
+// usage.go), so a parked session compressed here picks its completion up
+// the moment the summary is done rather than waiting on the watchdog.
 func (d *turnDispatcher) markActivity(sessionID string) {
 	// A dispatcher built without the map (the bare struct literals a few
 	// tests use) simply has no idle pass; nothing else in a turn depends

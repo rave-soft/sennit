@@ -90,7 +90,7 @@ type Coordinator interface {
 	// RegisterDelegationParent records where sessionID (a running
 	// delegation's own child session) should deliver a mid-run ask via
 	// SendToParent. internal/thread calls this once, at delegation-
-	// create time (a later change - not part of this step).
+	// create time.
 	RegisterDelegationParent(sessionID string, parent DelegationParent)
 	// SendToParent delivers a mid-run ask from sessionID to its
 	// registered parent. See SessionAgent.SendToParent.
@@ -282,9 +282,8 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 
 	// Skills are pre-discovered by the caller (see app.Bootstrap) and
-	// passed in via the manager. If no
-	// manager was provided (legacy callers), fall back to an in-line
-	// discovery so the coordinator still works.
+	// passed in via the manager. If no manager was provided, fall back to
+	// an in-line discovery so the coordinator still works.
 	var allSkills, activeSkills []*skills.Skill
 	if opts.Skills != nil {
 		allSkills = opts.Skills.AllSkills()

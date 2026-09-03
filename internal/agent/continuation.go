@@ -22,11 +22,11 @@ import (
 // It bounds nesting only. A session reacting to its own delegation's
 // result is the same session at the same level, however many times it
 // does so, which is what an iterative plan looks like: implement, review,
-// implement again. Counting those rounds as depth (as this once did) shut
-// delegation off after three rounds of perfectly ordinary work, while
-// leaving real nesting unbounded — a delegation's own turn ran at depth 0
-// and could start another at depth 0 forever. How many such rounds a
-// session runs is not bounded here or anywhere else.
+// implement again. Counting those rounds as depth would shut delegation
+// off after three rounds of perfectly ordinary work, while leaving real
+// nesting unbounded — a delegation's own turn would run at depth 0 and
+// could start another at depth 0 forever. How many such rounds a session
+// runs is not bounded here or anywhere else.
 //
 // This is a hard constant, not configuration: the failure mode it guards
 // against (agents hiring agents further and further from the person who

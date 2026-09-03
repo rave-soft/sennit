@@ -87,12 +87,12 @@ func (b *runtimeBuilder) buildAnthropicProvider(baseURL, apiKey string, headers 
 		// setting X-Api-Key from it, duplicating (or contradicting) the
 		// Bearer token. option.WithAPIKey("") is not a fix: WithHeader uses
 		// Header.Set, so it would send an empty X-Api-Key rather than omit
-		// it. This used to be worked around with
-		// os.Setenv("ANTHROPIC_API_KEY", ""), which corrupted the key for
-		// every other provider built afterwards and every subprocess
-		// Sennit spawns. Stripping the header at the transport, the same
-		// seam azureAPIVersionTransport uses in providers.go, is local and
-		// leaves the environment untouched.
+		// it. Stripping the header at the transport, the same seam
+		// azureAPIVersionTransport uses in providers.go, is local and
+		// leaves the environment untouched — unlike setting
+		// $ANTHROPIC_API_KEY to "", which would corrupt the key for every
+		// other provider built afterwards and every subprocess Sennit
+		// spawns.
 		if httpClient == nil {
 			httpClient = &http.Client{}
 		}
@@ -427,8 +427,7 @@ func (b *runtimeBuilder) buildProviderForSnapshot(providerCfg config.ProviderCon
 	// exits non-zero) leaves the value empty, and the provider then fails
 	// on an empty key or URL with nothing pointing at the cause. Log it
 	// here rather than dropping it: the call still proceeds on what it
-	// has, which is what it did before, but the reason is now on the
-	// record.
+	// has, but the reason is now on the record.
 	apiKey := effective.APIKey
 	baseURL := effective.BaseURL
 

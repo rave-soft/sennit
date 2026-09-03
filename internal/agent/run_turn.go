@@ -370,8 +370,9 @@ func (a *sessionAgent) recordSessionModel(ctx context.Context, call SessionAgent
 // and hands off to the next queued call, if any.
 //
 // It is runTurn's only source of a non-nil next call, which is what lets
-// run's loop replace the old tail recursion: runTurn returns next unchanged
-// to its caller, which loops instead of calling itself.
+// run hand off to it with a loop instead of tail recursion: runTurn
+// returns next unchanged to its caller, which loops instead of calling
+// itself.
 //
 // reporter is the single owner of this call's terminal RunComplete: every
 // return path here either lets runTurn's streaming defer publish naturally
@@ -418,10 +419,10 @@ func (a *sessionAgent) finishTurn(
 			// through to the same release/notify/drain teardown every
 			// other turn gets - mirroring how handleStreamError treats a
 			// failed synthetic-tool-result write as non-fatal to reaching
-			// its own finish handling. Returning early here used to skip
+			// its own finish handling. Returning early here would skip
 			// both the AgentFinished notification and the drainNext
-			// handoff, so a queued RunID-bearing prompt behind this
-			// session sat forever and its caller blocked on RunComplete
+			// handoff, leaving a queued RunID-bearing prompt behind this
+			// session stuck forever and its caller blocked on RunComplete
 			// indefinitely. summarizeFailed is reported below via this
 			// turn's own RunComplete instead.
 			slog.Error("Failed to summarize session after turn", "session_id", call.SessionID, "error", summarizeErr)
@@ -431,14 +432,13 @@ func (a *sessionAgent) finishTurn(
 			//
 			// A continuation's prompt is not a prompt: it is the
 			// placeholder its own step 0 verifies and strips (see
-			// continuationPromptPlaceholder). Rewriting it broke that
-			// invariant — the resumed turn, still flagged Continuation,
-			// failed at step 0 with "does not match the expected
-			// placeholder text", which is how summarizing came to stop
-			// the agent outright. It would also have told the model its
-			// "initial user request" was a placeholder string. A
-			// continuation resumes on the summary, which is what it was
-			// going to read anyway.
+			// continuationPromptPlaceholder). Rewriting it would break
+			// that invariant — the resumed turn, still flagged
+			// Continuation, would fail at step 0 with "does not match
+			// the expected placeholder text", stopping the agent
+			// outright, and would tell the model its "initial user
+			// request" was a placeholder string. A continuation resumes
+			// on the summary, which is what it was going to read anyway.
 			if !call.Continuation {
 				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
 			}
@@ -457,8 +457,8 @@ func (a *sessionAgent) finishTurn(
 // RunComplete that would otherwise never come.
 //
 // finishTurn (the Stream-success path) and runTurn's Stream-error path (a
-// non-cancel error never reached finishTurn before this was extracted) both
-// funnel through here for exactly that reason - see
+// non-cancel error never reaches finishTurn at all) both funnel through
+// here for exactly that reason - see
 // TestRunTurn_StreamErrorStillDrainsQueue.
 //
 // summarizeFailed, when non-nil, is folded into this turn's own terminal
@@ -600,9 +600,9 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	// no stamp of its own, since it runs on the same model that put it
 	// here.
 	//
-	// Best-effort on purpose: a session whose model failed to persist runs
-	// exactly as it did before this was recorded at all, and failing a
-	// turn over its bookkeeping would be the worse trade.
+	// Best-effort on purpose: a session whose model fails to persist still
+	// runs the turn normally - failing it over this bookkeeping would be
+	// the worse trade.
 	a.recordSessionModel(ctx, call)
 
 	// reporter is this turn's single owner of the terminal RunComplete
@@ -610,9 +610,9 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	// constructed here, the moment this call has genuinely become the
 	// active run, rather than after the fallible session/message setup
 	// below - a session.Get, getSessionMessages, or createUserMessage
-	// failure used to return before any reporter existed at all, which
-	// silently discarded the prompt: nothing persisted, and no terminal
-	// event for a caller waiting on one. See the fallback defer below.
+	// failure returning before any reporter exists would silently
+	// discard the prompt: nothing persisted, and no terminal event for a
+	// caller waiting on one. See the fallback defer below.
 	reporter := newCompletionReporter(a, call)
 	// t stays nil until newRunTurn runs, after createUserMessage
 	// succeeds; the deferred publish below tolerates that - a failure
@@ -653,9 +653,9 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	// Registered here, immediately once this call has genuinely become
 	// the active run, rather than after the fallible session/message
 	// setup below (session.Get, getSessionMessages, createUserMessage):
-	// a failure in any of those used to return before any such defer
-	// existed at all, silently discarding the prompt - nothing
-	// persisted, and no terminal event for a caller waiting on one.
+	// a failure in any of those returning before any such defer exists
+	// would silently discard the prompt - nothing persisted, and no
+	// terminal event for a caller waiting on one.
 	defer func() {
 		// Use a context detached from the run context: workspace
 		// shutdown cancels ctx before this goroutine returns, but the
@@ -842,13 +842,12 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 			return SteerRan, streamResult, next, streamErr
 		}
 		// A non-cancel Stream error (a genuinely failed request, not a
-		// user cancellation) used to return here directly, skipping the
-		// release/notify/drain tail entirely - the only drainNext call in
-		// the turn path lived inside finishTurn, which this path never
-		// reached. A prompt queued behind the failed turn (including a
-		// RunID-bearing `sennit run` caller) sat in the queue with no
-		// hand-off until its own timeout. completeTurn is the same tail
-		// finishTurn's Stream-success path runs.
+		// user cancellation) must not return here directly: skipping the
+		// release/notify/drain tail would leave a prompt queued behind
+		// the failed turn (including a RunID-bearing `sennit run` caller)
+		// stuck in the queue with no hand-off until its own timeout.
+		// completeTurn is the same tail finishTurn's Stream-success path
+		// runs.
 		result, next, retErr = a.completeTurn(ctx, call, ac, cancel, t, reporter, streamResult, streamErr, nil)
 		return SteerRan, result, next, retErr
 	}
@@ -863,16 +862,15 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 // per-session lock discipline guarding it. Run discards outcome; Steer
 // reports it. See SteerOutcome.
 //
-// The loop replaces what used to be tail recursion — runTurn's finishTurn
-// tail handing off to a queued call by calling run again. Literal recursion
-// here had two problems: the recursive call's return values landed in this
-// function's own named returns before the deferred publish ran (worked
-// around by completionReporter's Once, not by the return values being
-// right), and an arbitrarily long queue behind a busy session grew the
-// goroutine stack by one frame per hop. Looping removes both: each call to
-// runTurn is a self-contained function invocation with its own named
-// returns and its own defers, so there is nothing left for a later hop to
-// clobber, and the stack no longer grows with the queue's length.
+// A loop, not tail recursion, hands a queued call off to the next
+// runTurn: recursion would land the recursive call's return values in
+// this function's own named returns before the deferred publish ran
+// (needing completionReporter's Once to paper over it), and an
+// arbitrarily long queue behind a busy session would grow the goroutine
+// stack by one frame per hop. Looping avoids both: each call to runTurn
+// is a self-contained function invocation with its own named returns and
+// its own defers, so there is nothing left for a later hop to clobber,
+// and the stack does not grow with the queue's length.
 func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error) {
 	for {
 		if err := ValidateCall(call); err != nil {
