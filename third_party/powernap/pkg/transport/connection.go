@@ -9,9 +9,16 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/sourcegraph/jsonrpc2"
 )
+
+// disconnectWait bounds how long Close waits for jsonrpc2's own read loop
+// to notice the closed stream and tear itself down (see the comment on
+// Close). It only guards against an unexpected hang; the stream close it
+// waits on already has its own bound (processCloser's 5s kill timeout).
+const disconnectWait = 10 * time.Second
 
 // Connection represents a managed connection to a language server.
 type Connection struct {
@@ -19,6 +26,15 @@ type Connection struct {
 	transport *Transport
 	router    *Router
 	logger    *slog.Logger
+
+	// stream is the raw process stream jsonrpc2 reads from. Close closes
+	// it directly rather than going through conn - see Close.
+	stream io.Closer
+	// disconnect is closed by jsonrpc2 once its read loop has torn the
+	// connection down, whether that happens on its own (a read error) or
+	// via conn.Close(). Close waits on it instead of calling conn.Close()
+	// itself.
+	disconnect <-chan struct{}
 
 	// State management
 	closed   atomic.Bool
@@ -36,6 +52,7 @@ func NewConnection(ctx context.Context, stream io.ReadWriteCloser, logger *slog.
 		router:   NewRouter(),
 		logger:   logger,
 		requests: make(map[jsonrpc2.ID]chan *Message),
+		stream:   stream,
 	}
 
 	// Suppress or redirect jsonrpc2 log messages to our logger.
@@ -55,6 +72,7 @@ func NewConnection(ctx context.Context, stream io.ReadWriteCloser, logger *slog.
 	)
 
 	c.conn = conn
+	c.disconnect = conn.DisconnectNotify()
 	c.transport = NewWithConn(conn)
 
 	return c, nil
@@ -98,6 +116,23 @@ func (c *Connection) RegisterNotificationHandler(method string, handler Notifica
 }
 
 // Close closes the connection.
+//
+// Sennit-local change: sourcegraph/jsonrpc2 v0.2.1's Conn.close() clears
+// every pending call's done channel without deleting it from c.pending,
+// and its read loop delivers a response by deleting the pending entry and
+// then writing to, and closing, that same done channel - all outside any
+// lock. Calling conn.Close() from here, concurrently with the read loop
+// mid-delivery, can make both touch the same channel and panic on a
+// double close. That race only exists because close() would be invoked
+// from a goroutine other than the read loop; when the read loop closes
+// itself (its Read fails), there is no concurrent goroutine to race.
+//
+// So instead of closing the jsonrpc2 conn directly, close the raw process
+// stream first: that fails the read loop's next Read, and the read loop
+// calls Conn.close() itself, never racing its own delivery. Only if the
+// read loop doesn't notice within disconnectWait does this fall back to
+// closing the conn directly, which reopens the race in that (unexpected)
+// case but is still better than leaking the connection.
 func (c *Connection) Close() error {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
@@ -108,9 +143,27 @@ func (c *Connection) Close() error {
 
 	c.closed.Store(true)
 
-	// Close the JSON-RPC connection
-	if c.conn != nil {
+	var streamErr error
+	if c.stream != nil {
+		streamErr = c.stream.Close()
+	}
+
+	switch {
+	case c.disconnect != nil:
+		select {
+		case <-c.disconnect:
+			// The read loop saw the stream close and tore itself down.
+		case <-time.After(disconnectWait):
+			if c.conn != nil {
+				c.closeErr = c.conn.Close()
+			}
+		}
+	case c.conn != nil:
 		c.closeErr = c.conn.Close()
+	}
+
+	if c.closeErr == nil {
+		c.closeErr = streamErr
 	}
 
 	// Close any pending requests

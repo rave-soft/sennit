@@ -166,6 +166,15 @@ func runFakeLSPServer() {
 			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "symbols" {
 				result = `{"contents":{"kind":"markdown","value":"` + "`Alpha() string`" + `"}}`
 			}
+		case "shutdown":
+			// A server that never answers "shutdown": the runtime's
+			// closeProcessLocked has a timeout for exactly this, and
+			// falls back to Kill(). That path used to race jsonrpc2's
+			// own read loop closing the connection out from under it;
+			// see TestClient_CloseTimeoutFallsBackToKillWithoutPanic.
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "hang-on-shutdown" {
+				continue
+			}
 		}
 		resp := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":%s}`, envelope.ID, result))
 		writeLSPFrame(os.Stdout, resp)
