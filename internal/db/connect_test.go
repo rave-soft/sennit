@@ -2,13 +2,16 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pressly/goose/v3"
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/workspacelock"
 	"github.com/stretchr/testify/require"
 )
@@ -131,6 +134,106 @@ func TestRelease_ClosesHandleWhenRefcountHitsZeroEvenForNonReleasingHolder(t *te
 	// TECHDEBT.md entry this whole file is pinning the fix for — and is
 	// now reported misuse instead; see TestRelease_PastZeroIsReportedMisuse.
 	require.Error(t, Release(dataDir), "release past zero is reported, not swallowed")
+}
+
+// TestConnect_WaiterFailsWhenEntryDiscardedWhileOpening drives the exact
+// interleaving from the audit behind this fix: goroutine A is the opener
+// and is still inside openAndMigrate; goroutine B has found A's entry,
+// incremented its refCount, and is blocked in entry.wait(); an over-release
+// lands in that window and drains refCount to zero while the entry is still
+// not ready, setting discard (see Release's not-ready branch). A's open
+// then succeeds. Before this fix, B's wait() returned (conn, nil) — the
+// same *sql.DB the opener was about to close — because the opener only
+// ever told itself about the discard, never the entries's ready channel.
+// B must instead see the failure.
+//
+// openAndMigrate is swapped for a wrapper that blocks until this test lets
+// it through, which is what makes the interleaving deterministic instead
+// of racing against however fast a real migration happens to run.
+func TestConnect_WaiterFailsWhenEntryDiscardedWhileOpening(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
+
+	absPath := filepath.Join(fsext.Canonical(dataDir), brand.DBFile)
+
+	proceed := make(chan struct{})
+	realOpenAndMigrate := openAndMigrate
+	openAndMigrate = func(ctx context.Context, dataDir, dbPath string) (*sql.DB, error) {
+		<-proceed
+		return realOpenAndMigrate(ctx, dataDir, dbPath)
+	}
+	t.Cleanup(func() { openAndMigrate = realOpenAndMigrate })
+
+	// Goroutine A: becomes the opener, publishes its entry, then blocks
+	// inside the wrapper above until proceed is closed.
+	type connectResult struct {
+		conn *sql.DB
+		err  error
+	}
+	aDone := make(chan connectResult, 1)
+	go func() {
+		conn, err := Connect(context.Background(), dataDir)
+		aDone <- connectResult{conn, err}
+	}()
+
+	// Goroutine B: waits for A to publish the entry, then finds it, takes a
+	// reference, and blocks in entry.wait().
+	require.Eventually(t, func() bool {
+		poolMu.Lock()
+		defer poolMu.Unlock()
+		_, ok := pool[absPath]
+		return ok
+	}, time.Second, time.Millisecond, "A must publish its entry before opening")
+
+	bDone := make(chan connectResult, 1)
+	go func() {
+		conn, err := Connect(context.Background(), dataDir)
+		bDone <- connectResult{conn, err}
+	}()
+
+	// Wait for B to have taken its reference (refCount 1 -> 2) before the
+	// over-release below, so the over-release lands in the same window B is
+	// blocked in, not before B ever gets there.
+	require.Eventually(t, func() bool {
+		poolMu.Lock()
+		defer poolMu.Unlock()
+		entry, ok := pool[absPath]
+		return ok && entry.refCount == 2
+	}, time.Second, time.Millisecond, "B must take its reference before the over-release")
+
+	// The over-release: two unpaired Releases drain refCount 2 -> 1 -> 0
+	// while the entry is still not ready, discarding it (audit step 3).
+	require.NoError(t, Release(dataDir))
+	require.NoError(t, Release(dataDir))
+
+	poolMu.Lock()
+	_, stillPooled := pool[absPath]
+	poolMu.Unlock()
+	require.False(t, stillPooled, "the over-release must have discarded and removed the entry")
+
+	// Let A's open finish (audit step 4), then collect both results.
+	close(proceed)
+
+	aResult := <-aDone
+	bResult := <-bDone
+
+	require.Error(t, aResult.err, "the opener itself was told about the discard even before this fix")
+	require.Nil(t, aResult.conn)
+
+	require.Error(t, bResult.err, "a waiter must not be told Connect succeeded when its entry was discarded while opening")
+	require.Nil(t, bResult.conn)
+
+	// Ledger stays honest: nothing is left in the pool for a leaked
+	// reference to drain later, and a fresh Connect works normally.
+	poolMu.Lock()
+	_, ok := pool[absPath]
+	poolMu.Unlock()
+	require.False(t, ok)
+
+	conn, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	require.NoError(t, conn.PingContext(context.Background()))
+	require.NoError(t, Release(dataDir))
 }
 
 // TestRelease_PastZeroIsReportedMisuse covers Release called again after

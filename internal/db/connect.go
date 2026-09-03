@@ -127,6 +127,15 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	poolMu.Lock()
 	entry.db, entry.err = conn, err
 	discard := entry.discard
+	if discard && err == nil {
+		// The open succeeded, but every reference was released while it
+		// was still in flight (see connEntry.discard). Overwrite entry.err
+		// so wait() reports the failure to every waiter, not just this
+		// goroutine: without this, a waiter's wait() returns (conn, nil)
+		// below and hands out a *sql.DB this goroutine is about to close
+		// out from under it.
+		entry.err = fmt.Errorf("db: the connection to %q was released while it was still opening", dataDir)
+	}
 	if err != nil || discard {
 		// A failed open is not a pool entry: the next Connect must get a
 		// fresh attempt rather than the cached failure. Same for an entry
@@ -143,7 +152,7 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	}
 	if discard {
 		conn.Close()
-		return nil, fmt.Errorf("db: the connection to %q was released while it was still opening", dataDir)
+		return nil, entry.err
 	}
 	return conn, nil
 }
@@ -151,7 +160,11 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 // openAndMigrate opens the database at dbPath and brings its schema up to
 // date. It runs with poolMu released (see connEntry), so two callers
 // opening two different databases do their migrations concurrently.
-func openAndMigrate(ctx context.Context, dataDir, dbPath string) (*sql.DB, error) {
+//
+// It is a var, not a plain func, purely so tests can wrap it to pause an
+// opener mid-flight and force a deterministic interleaving with a waiter
+// and a discard (see connect_test.go); production code never reassigns it.
+var openAndMigrate = func(ctx context.Context, dataDir, dbPath string) (*sql.DB, error) {
 	// Ensuring the data directory exists is required before SQLite can
 	// create the database file inside it.
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
