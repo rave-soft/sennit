@@ -396,12 +396,11 @@ agent` копирует поштучно, и транскрипт молча п�
 
 Аудит отработан. Ниже — только то, что осознанно не сделано, с причиной.
 
-**5.3, сетевой вызов в контракте.** `discover.DiscoverModels` ходит по
-HTTP из `internal/workspace/custom_provider.go`. Заблокировано формой:
-`ConfigureCustomProvider` зовут из `ui/model/dialog_actions.go` с `ws`
-типа `workspace.Workspace`, поэтому инъекция потребовала бы нового
-метода в самом контракте — расширить его ради сужения. Развязывается
-только вместе с тем, как UI добирается до этой операции.
+**5.3, сетевой вызов в контракте — закрыт, см. аудит 11.** Запись
+ниже устарела: `internal/workspace/custom_provider.go` больше не
+импортирует `discover`, обнаружение инжектировано через
+`ModelDiscoverer` (`custom_provider.go:42`), HTTP живёт в
+`appws/custom_provider.go:24-38`.
 
 **5.4, рендер Docker MCP.** Зонд и кеш вынесены; отрисовка размазана по
 `ui/chat`, `ui/dialog`, `ui/model`. Отдельный пакет под неё имеет смысл
@@ -749,7 +748,8 @@ shell-пути так же, как в JSON (`load.go:239-243` против `254-
 
 # Состояние на 2026-09-03, `546ece221`
 
-Подтверждённых дефектов в открытом состоянии нет. Всё, что ниже, — не
+Устарело после аудита 11: открытых дефектов 25, см. фазу 1 ниже.
+Записи этого блока про B1, 5.4, 2.2 и `NewStore` остаются в силе. Всё, что ниже, — не
 «руки не дошли», а решения с причиной; каждое стоит пересматривать
 только при наступлении названного условия.
 
@@ -757,9 +757,9 @@ shell-пути так же, как в JSON (`load.go:239-243` против `254-
 Написать код под платформу, на которой его негде выполнить, и пометить
 пункт закрытым — хуже, чем оставить пробел задокументированным.
 
-**5.3, сетевой вызов в контракте `workspace`.** Развязывается только
-вместе с тем, как UI добирается до `ConfigureCustomProvider`; сейчас
-инъекция потребовала бы расширить контракт ради его же сужения.
+**5.3, сетевой вызов в контракте `workspace` — закрыт** (аудит 11
+нашёл, что документ держал открытым уже решённое: `go list -deps
+./internal/workspace | grep discover` пуст).
 
 **5.4, рендер Docker MCP.** Отдельный пакет оправдан при появлении
 второго такого вендора, не раньше.
@@ -1046,3 +1046,536 @@ sqlc, восемь — мёртвые SQL-запросы, три — осиро�
 без `_test.go`. Важно брать точную форму вызова: подстрочный поиск даёт
 ложные срабатывания там, где имена образуют семейство (`GetFile` против
 `GetFileRead`, `GetFileByPathAndSession`, `GetFileDiagnostics`).
+
+---
+
+# Аудит 11 (2026-09-04, `main`, 3ca268637)
+
+Семь областей, которых не касался ни один из десяти предыдущих аудитов:
+жизненный цикл тредов (`thread`, `threadspawn`, `ui/threads`), MCP-клиент
+и учётные данные (`tools/mcp`, `providerload`, `providers/accounts`,
+`oauth/*`), хранилища (`message/store`, `session/store`, `gc`, `db`),
+ядро хода (`agent` без `tools/`), мутирующие и LSP-инструменты, листовые
+пакеты (`log`, `home`, `commands`, `proxyhttp`, `migrate` и другие),
+UI-диалоги и вложения. Каждая область читалась по потребителям с тем же
+стандартом приёмки: сценарий, путь с `file:line`, последствие. Сверх того
+— граф импортов `internal/ui` (чист: ни `db`, ни `agent`, ни `app`), 515
+методов интерфейсов на отсутствие вызывающих вне тестов (один), и
+детектор клонов по продакшн-коду.
+
+Итог: 25 дефектов, 4 нарушения границ, 5 пунктов DRY/мёртвого кода.
+Ни одна находка не выведена из метрики; метрики (детектор клонов,
+подсчёт вызывающих) использованы только как указатель, куда читать, и
+каждая подтверждена чтением потребителей или репродукцией. Всё открыто.
+
+## Фаза 1. Баги
+
+По убыванию тяжести. Первые три — потеря данных или зависание, чинить
+до всего остального.
+
+### G1 [M] Безголовое разрешение теряется при респауне треда
+
+`df020bef1` (F1/F7) пробрасывает грант только в `Manager.Create`
+(`thread/manager.go:356-362`). Грант живёт в `permission.Service`
+App'а треда, а этот App уничтожается при каждом освобождении рантайма:
+`finalizeRunComplete` → `releaseRuntime` (`lifecycle.go:921`) →
+`LocalSpawner.Release` → `a.Shutdown()` (`threadspawn/spawner.go:147`).
+
+Сценарий на штатных инструментах `sennit run`: `thread_create` → ран
+завершился с `conflict` → документированный путь «resolve via Send and
+Merge again» (`merge.go:36-38`) → `agent_send` → `lifecycle.send` при
+`rt == nil` делает `Spawn` (`lifecycle.go:675`) → новый `Service` без
+гранта. Ни `Manager.send` (`manager.go:760-799`), ни `Activate`
+(`manager.go:619`) не зовут `AutoApproveSession`. Первый `edit` блокируется
+на канале ответа; сторож обходит только `KindTask` (`tasks.go:352-364`,
+`watchdog.go:83`) и по замыслу не трогает ожидание разрешения. Процесс
+виснет без вывода.
+
+Правка: выдавать грант на общем пути установки рантайма.
+`registerThreadParent` уже вызывается на всех трёх путях, но в `send`
+идёт после `startRun` — ставить до диспетча. Тест: копия
+`TestManager_CreateInheritsAutoApprovalFromApprovedParent` с завершением
+рана и последующим `Send`.
+
+### G2 [M] `lsp_replace_symbol` режет файл по устаревшим границам
+
+`lsp_replace_symbol.go:88-99`: `DocumentSymbols` → сразу
+`applyFileMutation`, без `checkFileFreshness` и `requireReadCoverage`,
+которые есть у `edit.go:301-320`, `write.go:66-89`, `multiedit.go:183`.
+Диапазоны приходят из overlay LSP: `OpenFileOnDemand`
+(`lsp/client.go:284-295`) возвращается сразу, если файл открыт, повторный
+`read` `didChange` не шлёт, `bash` не зовёт `notifyLSPs` вовсе (вызовы
+только в `filemutation.go:259`, `lsp_rename.go:162`, `diagnostics.go:37`).
+`readFileSnapshot` (`filemutation.go:152`) читает диск. После `gofmt -w`
+или правки в редакторе `lines[start:end+1]` вырезает не ту функцию; при
+`delete` теряется чужой код; под yolo диалог с неверным diff никто не
+видит. `TestReplaceSymbolThroughManagerRecordsOnlyTheEditedSpan`
+закрепляет работу без единого `read`, а `lsp_replace_symbol.md` говорит
+«Prefer this over edit».
+
+Одной проверки свежести мало: после `gofmt` `edit` откажет, модель
+перечитает файл, а LSP останется на старой версии. Правка: перед
+`DocumentSymbols` — `OpenFileOnDemand` + `NotifyChange`
+(`filesync.go:105-118` перечитывает диск целиком), плюс тот же switch по
+`checkFileFreshness`, что в `write.go`.
+
+### G3 [M] Переименование сессии из TUI пишет всю строку из снимка
+
+`ui/dialog/sessions.go:242,258` берёт сессию из снимка `ListSessions`
+(`dialogs.go:433`, pubsub-обновлений диалог не получает) и зовёт
+`SaveSession` → `sessionstore.Save` (`service.go:229`) → `UpdateSession`
+(`sessions.sql:64`), который пишет `title, prompt_tokens,
+completion_tokens, summary_message_id, cost, todos` целиком. Пока диалог
+открыт, ход завершается (`cost = cost + ?`), todo пишет список, или
+проходит суммаризация (`usage.go:424`). Подтверждение стирает стоимость
+(навсегда — других писателей `cost` нет), откатывает todo и возвращает
+`summary_message_id` к старому: `trimToSummary` (`usage.go:467`) отдаёт
+несжатую историю, следующий ход суммаризирует заново за деньги.
+
+Хранилище само описывает этот класс у `SetTodos` (`service.go:60-63`).
+Узкий `Rename` (`service.go:338`) есть, но им пользуется только CLI
+(`cmd/session.go:279`). Правка: `Workspace.RenameSession` → `Rename`;
+`SaveSession` после этого без вызывающих вне тестов — удалить.
+
+### G4 [S] Отмена во время авто-суммаризации публикуется как ошибка
+
+`run_turn.go:519-527`: ветка «ничего не в очереди» кладёт
+`summarizeFailed.Error()` в `RunComplete` без `Cancelled`, тогда как
+соседняя `:561-573` выставляет его по `errors.Is(err, context.Canceled) ||
+ctx.Err() != nil`. `thread/lifecycle.go:947-949` по `Error != ""` даёт
+`StatusFailed`, тред финализируется как «failed: context canceled» и так
+сообщается родителю; в TUI — «Task finished» на Escape, без
+`FinishReasonCanceled` в транскрипте. Правка: то же правило в первой
+ветке; `AgentFinished` при отменённой суммаризации не публиковать.
+
+### G5 [M] Браузерный вход в MCP ограничен таймаутом запуска сервера
+
+`tools/mcp/connection.go:121-122`: `mcpCtx` получает `AfterFunc(timeout,
+cancel)`; под ним `client.Connect` → 401 → `transport.go:191`
+`Authorize(req.Context(), …)` → `oauth/mcp/handler.go` `await` ждёт
+`ctx.Done()`. Вход через SSO с 2FA дольше 30 с (или пользовательского
+`timeout 10`) обрывается; `context deadline exceeded` не `Canceled` и не
+`isOAuthInitErr` → `setAuthTerminal` (`authcoordinator.go:41-45`) →
+`StateError` с сырым текстом вместо «нужен вход». `docs/extending/mcp.md:73`
+обещает, что `timeout` ограничивает только старт сервера;
+`transport.go:254-257` — «generous default» для браузера. Правка:
+`Authorize` под `context.WithoutCancel` + собственный интерактивный лимит,
+привязанный к `flow.cancel`.
+
+### G6 [S] grep-фоллбэк на симлинке-каталоге возвращает пусто
+
+`grep.go:430` `filepath.Walk(rootPath)` делает `lstat` корня. F5 закрыл
+это для `ls` (`fsext/ls.go:262-271`), `glob` через `fastwalk` stat-ит
+корень, `rg` получает путь явно — pure-Go `grep`, регистрируемый без `rg`
+(`tool_registry.go:112-114`), единственный отстал. Воспроизведено:
+`current -> releases/v1`, `searchFilesWithRegex(link)` = 0 совпадений,
+по цели = 1. Там же `grep.go:435` `return nil // Skip errors` — класс
+аудита 5: `ls`/`glob` получили `Incomplete`, `grep` молчит. Правка: тот
+же резолв корня, что в `VisitDirectory`, и флаг неполноты в метаданных.
+
+### G7 [S] Два запуска без файлового лога
+
+Один инвариант, две поверхности (класс 7).
+
+`cmd/run.go:95`: `--verbose` делает `slog.SetDefault(charm log)` **после**
+`sennitlog.Setup` — файловый handler выброшен, `sennit logs` для такого
+запуска пуст. При этом `log.Setup(path, debug, ws ...io.Writer)`
+(`log/log.go:29`) умеет «текст на терминал, JSON в файл» — и не имеет ни
+одного вызывающего с writers (`root.go:259` без них). Мёртвый механизм с
+живым описанием, переизобретённый снаружи с потерей.
+
+`doctor`, `stat`, `models`, `logs`, `session`, `gc`, `import` идут через
+`initConfig` (`cmdutil.go:39`) без `Setup`/`Replay`: `EarlyHandler`
+копит записи в память до выхода. `migrate.go:88` «Config key deprecated»
+и `DropIncompatibleRecentModels` — предупреждения, ради которых существует
+`doctor`, — не видны нигде.
+
+Правка: `Setup(path, debug, os.Stderr)` при `verbose`, `run.go:95`
+удалить; `Setup`+`Replay` вынести в helper и звать из `initConfig`.
+Проверить выбор файла в `logs.go` — иначе «самый новый лог» окажется от
+`sennit stat`.
+
+### G8 [S] `@`-вставка файла без лимита размера и типа
+
+`ui/model/editor_input.go:249-262` `insertFileCompletion`: `os.ReadFile`
+без `MaxAttachmentSize`; остальные пять путей (`:357,477,531,579,630`,
+`dialog/actions.go:347`) проверяют 5 МБ. Список — `fsext.ListDirectory`,
+там `.sqlite`, `.pack`, `.mp4`. Блоб уходит в `BinaryContent`
+(`agent/session_call.go:235`), в SQLite и в каждый следующий запрос как
+`application/octet-stream` (`message_convert.go:57-66`). Правка: `Stat` +
+лимит + для не-текста и не-картинки — только путь в тексте.
+
+### G9 [S] Превью в file picker декодирует без лимита пикселей
+
+`ui/dialog/filepicker.go:208-219`: `MaxPreviewSize` (2 МБ) по байтам,
+затем `image.Decode`. PNG 20000×20000 однотонной заливки — 1.5 МБ на
+диске и 1.6 ГБ RGBA в памяти; срабатывает на подсветке, не на выборе
+(`:165-167`). `DecodeConfig` в UI не используется. Правка: `DecodeConfig`
+→ отказ выше порога → `Seek(0)` → `Decode`.
+
+### G10 [S] `Remove` рушит живой воркспейс раньше проверки, которая может отказать
+
+`thread/manager.go:888-901`: `c.removed = true`, `runtime = nil`,
+`releaseRuntime` → `App.Shutdown()` — и только на `:920-926`
+`deleteBranch && !force → IsAncestor`, который для idle-треда отказывает
+«not merged; use force». Строка остаётся `idle` (контракт «workspace is
+live», `types.go:16-22`), а App, к которому привязан экран человека
+(`ui/model/root.go:611-618`), уже мёртв: экран перестаёт обновляться,
+следующий ввод спавнит новый App, событий которого экран не видит.
+Класс 4. Правка: поднять проверку выше `:888` — она читает только
+`repoRoot`.
+
+### G11 [S] `Send` возобновляет тред без ворктри
+
+`Activate` проверяет `os.Stat(st.WorktreePath)` (`manager.go:615`);
+`Manager.send` (`:777`) и `lifecycle.send` (`:675`) — нет. После
+`failCreate` + `unwinder` (`:311-318`) строка `failed` видна в
+`agent_list`; `agent_send` → `Bootstrap` намеренно принимает
+несуществующий путь (`bootstrap.go:258-262`) и делает `MkdirAll`
+(`:281`) → `running` в пустом каталоге вне git → `merge_blocked` с
+git-ошибкой; `Remove` потом не проходит. Правка: тот же `Stat` в
+`Manager.send` (не в `lifecycle.send` — он общий с задачами, у которых
+`spawnPath == ""`).
+
+### G12 [S] MCP `EmbeddedResource`/`ResourceLink` уходят модели как дамп указателя
+
+`tools/mcp/tools.go:87-88` `default: fmt.Sprintf("%v", v)` для
+`*mcp.EmbeddedResource` (`Resource *ResourceContents`) печатает
+`&{map[] <nil> 0xc000…}`. Сервер отвечает на `get_file`
+embedded-ресурсом — модель видит адрес памяти при `IsError=false`.
+Правка: ветки на оба типа (`Resource.Text`/`Blob` по MIME; `URI`+`Name`).
+
+### G13 [S] `read_mcp_resource`: бинарный blob без лимита и MIME
+
+`read_mcp_resource.go:85-87` `string(content.Blob)` — сырые байты, без
+кэпа ни здесь, ни в `Registry.ReadResource` (`resources.go:52-62`).
+`fetch` режет 5 MiB, `read` — 2000 строк. PDF на 20 МБ → невалидный
+UTF-8 в SQLite и в каждый ход. Правка: по `MIMEType` (текст / картинка
+через `NewImageResponse` / отказ с размером), байтовый лимит с
+`truncated`; ту же границу — текстовому результату `RunTool`.
+
+### G14 [S] Halt хука не останавливает ход у порога окна контекста
+
+fantasy считает `StopWhen` независимо от `stopTurnRequested`
+(`third_party/fantasy/agent.go:577,616-618`), `onStepFinish` пишет
+`EndTurn` (`turn.go:775-782`), но `finishTurn` смотрит только
+`len(ToolCalls()) > 0` (`run_turn.go:430-446`) и делает
+`requeueContinuation` с «The previous session was interrupted…».
+`hooked_tool.go:65-71` обещает «Halt ends the whole turn»; у порога окна
+halt/deny превращается в «суммаризировать и продолжить». Правка:
+`t.haltedByTool` в `onStepFinish`, без requeue при нём.
+
+### G15 [S] Отрицательное окно контекста проходит в арифметику
+
+Хвост D2. `summarizePolicy.window` считает «нет окна» при `<= 0`
+(`usage.go:46-51`), `stopOnContextWindow` — только `cw == 0`
+(`turn.go:855-859`). При `cw < 0`: `cw/2`, `remaining < threshold`
+всегда → `shouldSummarize` на каждом шаге, summarize + requeue по кругу.
+Источник после D2 — только конфиг: `model --context-window -1`
+(`shellconfig/model.go:66`, `flags.go:136` знак не проверяет). Правка:
+`cw <= 0` и отказ отрицательного в `shellconfig`.
+
+### G16 [S] На ошибке провайдера UI получает и «finished», и «failed»
+
+`completeTurn` публикует `TypeAgentFinished` и при `err != nil`
+(`run_turn.go:495-501`, из error-path `:851`); `AgentDispatcher.run`
+затем публикует `TypeAgentError` (`app/agent_dispatch.go:170-176`).
+`ui/model/notifications.go:219-244` шлёт оба уведомления. Правка:
+`AgentFinished` только при `err == nil`.
+
+### G17 [S] Отмена до создания assistant-сообщения не дренирует очередь
+
+`run_turn.go:825-827` при `currentAssistant == nil` возвращается без
+`drainNext`, комментарий обещает, что сюда ведёт только откат
+`foldSteering`. Но `handleStreamErrorBeforeAssistant` (`turn.go:959-966`)
+ведёт сюда же: подготовка до `Stream` (`sessions.Get`, `List`, два
+`preparePrompt`) идёт на `ctx`, и `Cancel` в это окно даёт этот путь.
+Промпт, набранный после Escape, остаётся в очереди — `wakeFromInboxIfIdle`
+её не смотрит, UI показывает «1 queued» на простаивающей сессии.
+Правка: дренировать на cancel-пути; откат `foldSteering` отличим по
+`!isCancelErr`.
+
+### G18 [S] `UpdateSessionUsage` пишет `title` из снимка
+
+Комментарий у `SaveUsage` (`service.go:40-48`) называет конкурента —
+асинхронный заголовок (`title.go:212`) — и защищает `cost` через
+`cost = cost + ?`, но `sessions.sql:87` ставит `title = ?` из
+`currentSession`, прочитанного в `summarizeMessages` (`usage.go:214`) до
+потока провайдера. Суммаризация сразу после первого хода (большие
+вложения) ложится поверх заголовка; `generateTitle` больше не запускается
+(`run_turn.go:715`) — «New Session» навсегда. Правка: убрать `title` из
+запроса; никто из вызывающих `SaveUsage` не переименовывает.
+
+### G19 [S] `Rename` обещает не трогать `updated_at`, триггер трогает
+
+`service.go:336` против триггера из
+`20260811000001_preserve_explicit_session_updated_at.sql:10-14`: условие
+`NEW.updated_at = OLD.updated_at` не отличает «не задан» от «задан тем
+же». Проверено в sqlite3. `sennit session rename` старой сессии делает её
+«последней» для `GetLastSession`, сбрасывает возраст для `gc` и раздувает
+`time_seconds = updated_at - created_at` в `ProjectStatsSince`. Правка:
+убрать триггер, явный `updated_at` у писателей, которым он нужен
+(`UpdateSession`, `UpdateSessionUsage`, `AttributeTaskCostOnce`,
+`SetSessionModel`). Дешёвая альтернатива — переписать комментарий.
+
+### G20 [S] Запись через висячий симлинк: диалог подписан путём ссылки
+
+`filemutation.go:158-167`: `resolveExistingAncestorSymlinks` на висячей
+ссылке падает (намеренно, `tools.go:243-247`), ошибка гасится в
+`resolvedFilePath = req.filePath`, `Path` схлопывается в `workingDir`,
+описание «Create …/latest.log». Запись идёт в `writePath` из
+`ResolveWriteTarget` (`:148`) с `MkdirAll` у цели (`:179`) —
+`/var/app/current.log`. Класс F4. Грант точечный (JSON с содержимым в
+ключе), остаётся ложная подпись. Правка: при ошибке резолва брать
+`writePath` и «(resolves to …)», как `outsideWorkdirNotice`.
+
+### G21 [S] `download` не резолвит симлинки-предки в ключе разрешения
+
+`download.go:106-115` `Path: filePath` без `resolveWithinWorkdir` и
+`outsideWorkdirNotice`, которыми F4 закрыт для `read_core.go:44-48` и
+`applyFileMutation`. Сценарий из `tools.go:227-231`: `ln -s ../.. up` →
+`download <url> up/x` → диалог «to …/up/x», файл на два уровня выше.
+
+### G22 [S] Потеря владения MCP-сессией обрывает батч
+
+`tools/mcp/init.go:33,61,66,70` и `resources.go:37` возвращают
+`context.Canceled` вместо `errLostOwnership`; `mcp-tools.go:185` по
+`errors.Is(err, context.Canceled)` отдаёт Go-ошибку — батч обрывается
+при `ctx.Err() == nil` (ленивый реконнект упавшего stdio-сервера
+совпал с правкой `sennitrc`). Две ветки для одного смысла. Правка:
+единый `errLostOwnership`; `connection.go:526` учитывать его.
+
+### G23 [S] `home.Long` склеивает `~user/…` с чужим домом
+
+`home/home.go:60` проверяет `HasPrefix(p, "~")`, не `"~/"`:
+`~alice/bin/server` → `/home/bobalice/bin/server`. Вызывающие — команды
+MCP (`transport.go:68`), LSP (`lsp/lifecycle.go:97`), скиллы
+(`skills/manager.go:290`), контекстные файлы (`prompt.go:160`),
+`fsext/ls.go:82`. Правка: расширять только `~` и `~/`.
+
+### G24 [S] `ErrAllExhausted.ResetsAt` считает выключенные аккаунты
+
+`providers/accounts/rotator.go:260-270` берёт `earliestResetFor` и для
+`Disabled`; уведомление «resets at 15:04» указывает на момент, когда
+ничего не изменится. Правка: пропускать `a.Disabled`.
+
+### G25 [S] `fetch` валидирует `timeout` после диалога разрешения
+
+`fetch.go:87-104` — диалог показан, одобрен, затем «timeout must be
+between 0 and 120»; `download.go:85-87` проверяет до. Перенести выше.
+
+## Фаза 2. Границы контекстов
+
+### B1 [M] `internal/commands` импортирует `internal/agent/tools/mcp`
+
+`commands/commands.go:13`; `LoadMCPPrompts(*mcp.Registry)` (`:93`) и
+`GetMCPPrompt(*mcp.Registry, mcp.ConfigProvider, …)` (`:250`).
+Единственный потребитель — `appws/app_workspace_mcp.go:74,79`, у которого
+уже есть `w.app.MCP` и `w.store`. Пакет, читающий `.md` из каталогов,
+тянет реестр MCP-клиентов с транспортом и процессами. Инверсия без
+цикла: `mcp.Prompt` — alias SDK-типа (`tools/mcp/prompts.go:11`), так что
+`LoadMCPPrompts` может принимать `iter.Seq2[string, []*sdkmcp.Prompt]`, а
+`GetMCPPrompt` — замыкание; appws передаёт `w.app.MCP.Prompts()`.
+
+### B2 [S] Первое нативное уведомление пишет иконку на диск в `Update`
+
+`ui/notification/native.go` `Send`: `resolvedIcon()` → `CacheIcon`
+(`icon_cache.go:27-34`: `ReadFile`, `MkdirAll`, `WriteFile`) выполняется
+синхронно до возврата `tea.Cmd`; вызывается из `UI.sendNotification`
+(`model/notifications.go:44`) внутри `Update`. Один раз за процесс, но
+это ровно то IO, которое `ui/AGENTS.md:9` запрещает. Правка: перенести
+внутрь замыкания.
+
+### B3 [L, не делать наспех] Продолжение припаркованной делегации выполняет агент-кодер
+
+Задача делит App родителя; пробуждение припаркованной сессии идёт
+`Coordinator.DeliverTaskCompletion` → `agentPort.current()` →
+`turnDispatcher.runContinuation` (`turn_dispatcher.go:168-196`):
+`runtimeFor` собирает рантайм верхнего агента и запускает
+`d.agentPort.current().Run`. У той же сессии между первым и вторым
+раундом меняются: системный промпт (`coder.md.tpl` вместо
+`task.md.tpl`), набор инструментов (`agent` с ростером именованных
+агентов, что `delegation_finalizer.go:908-914` прямо запрещает делегату;
+`question`; `thread_*`), PreToolUse-хуки (вопреки `hooked_tool.go:32-34`
+«sub-agents never fire hooks»), `NonInteractive` (уведомление «Task
+finished: <делегация>» на каждый раунд), todo-reminder в промпте.
+Тестов на то, *кем* выполняется продолжение, нет; `beea7376a`
+закрепляет только *что* оно финализирует парковку.
+
+Правка — хранить у делегации её `SessionAgent` и запускать его с
+`NonInteractive: true`. Риск: sub-agent пересобирается при инвалидации
+рантайма — нужны `waitReady` и защита от устаревшего экземпляра. Сначала
+тест, фиксирующий текущее поведение как дефект, потом правка.
+
+### B4 [design] Делегации, суммаризация и заголовок не участвуют в ротации аккаунтов
+
+`OnRateLimit`/`RotateThreshold` подключаются только в `makeRunCall`
+(`turn_dispatcher.go:214-221`); `buildSubAgentCall`
+(`delegation_finalizer.go:786-804`) и `Summarize` (`:131`) дают лишь
+`OnAuthRefresh`. С запасным аккаунтом 429 в делегации падает исходным
+429, родительский ход переключился бы. Документация
+`SessionAgentCall.OnRateLimit` перечисляет причины `nil` без «это
+делегация». Решить: подключать или задокументировать.
+
+## Фаза 3. DRY, KISS, мёртвые механизмы
+
+### D1 [S] Шлюз «вне рабочей папки» скопирован в пять читающих инструментов
+
+`glob.go:80-102`, `grep.go:173-195`, `ripgrep.go:120-142`, `ls.go:104-126`,
+`read_core.go:50-60` — одинаковы вплоть до обработки ошибок, различаются
+именем инструмента, действием, текстом и `Params`. Цена показана, не
+предположена: `99efb4886` (F4) правил все пять одним и тем же diff'ом по
+семь строк. Хелпер `requireOutsideWorkdirPermission(ctx, perms, call,
+toolName, action, verb, abs, resolved, params)`; `web_fetch.go:46-67` и
+`web_search.go:99-120` — тот же блок без резолва пути, можно тем же
+хелпером с пустым `resolved`.
+
+### D2 [S] `matchedRanges` и `bytePosToVisibleCharPos` продублированы между UI-пакетами
+
+`ui/completions/item.go:312-355` и `ui/dialog/sessions_item.go:236-278` —
+43 строки побайтово, uniseg-логика ширины графем. Место — `ui/util` или
+`ui/common`, оба уже в графе обоих пакетов.
+
+### D3 [S] `RuntimeStore.WriteRuntimeConfigFields` — без вызывающих вне тестов
+
+`config/runtime.go:57`, реализация `store.go:406` с doc-комментарием;
+потребители — `watch_test.go:268` и заглушка
+`providerload/loader_test.go:25`. `providerload` пользуется только
+`RemoveRuntimeConfigField` (`loader.go:113`). Пятый мёртвый механизм с
+живым описанием, найден тем же вопросом «есть ли вызывающий вне
+тестов» (единственный из 515 методов интерфейсов, кроме sqlc-шного
+`PrepareContext`). Удалить метод из интерфейса; реализацию — если
+`watch_test` не проверяет ею что-то, что нельзя проверить иначе.
+
+### D4 [S] Мёртвое описание в `turnDispatcher.run`
+
+`turn_dispatcher.go:263-299` описывает «coalesce per-attempt RunComplete»
+и «the auth-retry chain may call run twice», ради чего `onDispatch`
+обёрнут в `sync.Once`. `run()` вызывается один раз (`:317`); retry живёт
+внутри fantasy. Механизм безвреден, описание вводит в заблуждение —
+класс 2. Убрать `Once` и абзац.
+
+### D5 [S] Отмена в четырёх LSP-инструментах уходит модели текстом
+
+`lsp_replace_symbol.go:93-95`, `lsp_symbols.go:45-47`, `lsp_hover.go:74-76`,
+`lsp_call_hierarchy.go:52,66,81` заворачивают любой `err`, включая
+`context.Canceled`, в `NewTextErrorResponse`; `lsp_definition.go:51`,
+`references.go:48`, `lsp_rename.go:62` через `isGenuineSymbolMiss`
+делают правильно, и `lsp_helpers.go:25-35` формулирует это как правило.
+Класс E7: по Esc в транскрипте «failed to get document symbols: context
+canceled» как ошибка инструмента. Правка: `if ctx.Err() != nil { return
+…, ctx.Err() }` перед текстовым ответом.
+
+## Проверено и чисто
+
+Записано, чтобы не читать второй раз.
+
+- **Граф импортов.** Замыкание `internal/ui` не содержит `db`, `agent`,
+  `app`, `shell`, `lsp`, `hooks`. Листовые пакеты (`proto`, `message`,
+  `session`, `skills`, `stats`, `permission`, `question`, `csync`,
+  `pubsub`, `env`, `home`, `fsext`, `git`, `diff`, `log`, `spin`,
+  `latency`, `toolmeta`, `clipboard`, `filetracker`, `history`, `oauth`)
+  не импортируют оркестрацию. Единственное нарушение — B1.
+- **Треды.** Реле разрешений (`forwardPermissions` на `watchCtx`,
+  `PermissionsFor`+`answerPermission` пробуют оба сервиса); все воркеры
+  через `goWorker`, `Shutdown` отменяет `m.ctx` до `wait()`; `unwinder` в
+  Create/Activate/send; `toProto` переносит всё, кроме outbox-полей задач,
+  у которых нет читателей в UI. Внутри треда делегаций нет — все три
+  гейта false.
+- **MCP.** `publishMu`-дисциплина, `beginRenewal`, `teardown` ждёт записи
+  токена; `tokenwrite` без двойного refresh; `channel.go` и `schema.go`
+  с лимитами; секреты не попадают в лог. `credentials.Manager`:
+  singleflight + межпроцессный lock, адопция свежего токена с диска.
+  `codex`/`copilot`/`callback`: PKCE, `state` до `error`, device flow с
+  `slow_down`, `html/template`.
+- **Хранилища.** Мёртвых SQL-запросов ноль — восьмёрка из аудита 9 уже
+  удалена, у каждого из 60+ методов `querier.go` есть вызывающий вне
+  тестов. JSON частей сообщения симметричен по всем восьми типам.
+  `read_at` в миллисекундах согласован у единственного писателя и всех
+  читателей. Миграции аддитивные. GC защищает нетерминальные делегации и
+  идёт BFS по `parent_session_id`. Буфер сообщений: «сначала стоп, потом
+  дренаж». sqlc не течёт в доменные пакеты; единственное касание —
+  `appws/persist_message.go` через `db.IsForeignKeyConstraintError`, без
+  показанной цены.
+- **Ядро хода.** Ledger очереди, `drainNext`/`requeueDrained` по seq;
+  осиротевшие tool calls закрываются `closeUnfinishedToolCalls` и чинятся
+  `preparePrompt` с обеих сторон; `trimToSummary` не переупорядочивает;
+  `runtime_cache.getOrBuild` не усыновляет чужой cancel; ротация без
+  цикла на `ErrAllExhausted`; хуки накладываются после MCP-инструментов;
+  `completion_inbox` at-most-once с ограничением хопов.
+- **Инструменты.** Все четыре мутатора пишут через `ResolveWriteTarget`
+  (цель, не ссылка); ключ `filetracker` через `fsext.Canonical`; E1/E5/F2
+  держатся для `write` и `multiedit`; ранняя граница рабочего каталога у
+  всех мутаторов; SSRF C1 — единственный HTTP-клиент с
+  `checkFetchRedirect` и восстановленным лимитом редиректов; фоновые
+  задания: `Cleanup` только завершённых старше 8 ч, `SyncBuffer` 512 KiB.
+- **Листовые.** Ротация лога (10 МБ, 30 дней, sweep пропускает `-panic-`
+  и свой файл); `EarlyHandler` под одним мьютексом;
+  `HTTPRoundTripLogger` редактирует `Authorization`, `x-api-key`,
+  `access_token`; `clipboard` без OSC52, `Init` до первого `WriteText`;
+  `proxyhttp` — пустой прокси уважает `NO_PROXY`, ошибка парсинга не
+  превращается в «без прокси»; `dns` мутирует `DefaultResolver` в одном
+  месте по `TERMUX_VERSION`; `migrate` идемпотентна; `spin` без паник по
+  индексу при смене длины label.
+- **UI.** Незарегистрированный инструмент в реестре разрешений идёт в
+  `renderDefaultContent` — JSON-дамп, не пустой экран; ложное `ok` в
+  type assertion невозможно по транспорту. Остальные пять путей вложений
+  капируют 5 МБ, stat/stat без симлинк-асимметрии. `loadFiles` только
+  внутри `Open`-cmd. Очереди уведомлений нет. `listcache` со stale
+  generation корректен.
+
+## Отклонено при перепроверке
+
+Гипотезы, не пережившие чтение потребителей; записаны, чтобы не
+поднимать снова.
+
+- `stdioCheck` перезапускает stdio-команду с побочными эффектами — 5 с,
+  `stdin=/dev/null`, группа убивается; вреда не показано.
+- `isOAuthInitErr` матчит подстроки — нужен сервер с `invalid_grant` в
+  теле 5xx, не показано.
+- `mergeCatalogProviders` удаляет `providers.anthropic` при `oauth` —
+  намеренная миграция с тестом.
+- `Delete` во время таймерного флаша публикует `Updated` после `Deleted`
+  — UI для неизвестного ID элемент не создаёт.
+- Порядок сообщений при равном `created_at` — обход индекса отдаёт
+  порядок вставки.
+- Steering в чужую сессию после делегации — очередь ключуется
+  `call.SessionID`.
+- `registerThreadParent` после `startRun` в `Manager.send` — окно есть,
+  доставка идёт по персистентной колонке; не воспроизводимо.
+- `Cancel` на idle-треде — человек нажал сам; отказа нет.
+- Гранты переиспользуются на висячей ссылке — нет, ключ содержит
+  `NewContent`.
+- `lsp_rename` пишет историю до `ApplyWorkspaceEdit` — лишняя версия
+  равна диску, undo не страдает.
+- `modelcache.Load` false на ошибке затирает метаданные — требует
+  `SQLITE_BUSY` при `busy_timeout=30s` и одном соединении.
+- `sweepStaleLogs` удалит активный лог соседа — только при 30 днях без
+  записи.
+- `OAuthCodex.currentProxy` читает диск в `HandleMsg` — нет, уже вынесено
+  в cmd.
+- `QuestionAnswer` выбрасывает bool — любая `question.Notification`
+  закрывает форму.
+- Клоны из детектора, которые **не** DRY: per-vendor построители
+  провайдеров (`providers_build.go:161-189`, разные типы `Option`),
+  `shellconfig/permissions.go:48-84` (два builtin'а по 15 строк),
+  палитры тем.
+
+## Что дал этот аудит методически
+
+**Правка одного пути из трёх — не правка.** G1 (грант только в `Create`),
+G7 (логгер только в `setupLocalWorkspace`), G11 (`Stat` только в
+`Activate`), G21 (`outsideWorkdirNotice` не в `download`), D5 (три
+LSP-инструмента из семи) — один и тот же дефект: инвариант закрыт на
+одной поверхности запуска и не закрыт на соседних. Перед закрытием
+находки перечислять **все** пути, ведущие к тому же состоянию, и
+проверять каждый. F1/F7 вчера закрыли `Create`; респаун — тот же вход.
+
+**Документ — тоже механизм с живым описанием.** 5.3 стоял открытым,
+хотя код уже был исправлен. Проверять статус «открытых с причиной»
+пунктов тем же грепом, что и код.
+
+**Детектор клонов полезен как указатель, не как находка.** Из
+шестнадцати пар только две стали D1 и D2 — те, где цена показана
+коммитом или где копия уже живёт в двух пакетах с общим соседом.
+Остальные — законная параллельная структура.
