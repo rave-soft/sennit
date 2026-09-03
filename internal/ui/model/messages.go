@@ -337,24 +337,56 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-// findNestedToolContainer looks up the top-level tool item in the chat
-// whose tool call ID matches toolCallID and that can hold nested
-// child-session tool calls (agent / agentic_fetch / custom-agent
+// maxNestedToolLookupDepth bounds findNestedToolContainer's descent into a
+// delegation's nested-tool tree. Real delegation nesting is a tree capped
+// by the agent runtime's maxTaskCascadeDepth (internal/agent/continuation.go),
+// far shallower than this; the cap exists only so malformed or cyclic data
+// can never make the lookup loop forever.
+const maxNestedToolLookupDepth = 16
+
+// findNestedToolContainer looks up the tool item in the chat — at any
+// nesting depth — whose tool call ID matches toolCallID and that can hold
+// nested child-session tool calls (agent / agentic_fetch / custom-agent
 // delegations — all three construct an AgentToolMessageItem, see
-// chat.NewToolMessageItem). Returns nil if the item is missing or isn't a
-// nested-tool container, e.g. a plain (non-delegating) tool call.
+// chat.NewToolMessageItem). w.chat.MessageItem resolves toolCallID to its
+// top-level row (chatlist.registerNestedIDs maps every descendant ID back
+// to it, regardless of depth); a delegation nested inside another
+// delegation isn't that row itself, so this then walks down the row's
+// NestedTools() tree to find the container that actually owns toolCallID.
+// Returns nil if the item is missing, or nothing in its tree is a
+// nested-tool container with that ID, e.g. a plain (non-delegating) tool
+// call.
 func (w *widgets) findNestedToolContainer(toolCallID string) chat.NestedToolContainer {
 	item := w.chat.MessageItem(toolCallID)
 	if item == nil {
 		return nil
 	}
-	toolMessageItem, ok := item.(chat.ToolMessageItem)
-	if !ok || toolMessageItem.ToolCall().ID != toolCallID {
+	return findNestedToolContainerIn(item, toolCallID, 0)
+}
+
+func findNestedToolContainerIn(item chat.MessageItem, toolCallID string, depth int) chat.NestedToolContainer {
+	if depth >= maxNestedToolLookupDepth {
 		return nil
+	}
+	toolMessageItem, ok := item.(chat.ToolMessageItem)
+	if !ok {
+		return nil
+	}
+	if toolMessageItem.ToolCall().ID == toolCallID {
+		container, ok := item.(chat.NestedToolContainer)
+		if !ok {
+			return nil
+		}
+		return container
 	}
 	container, ok := item.(chat.NestedToolContainer)
 	if !ok {
 		return nil
 	}
-	return container
+	for _, nested := range container.NestedTools() {
+		if found := findNestedToolContainerIn(nested, toolCallID, depth+1); found != nil {
+			return found
+		}
+	}
+	return nil
 }

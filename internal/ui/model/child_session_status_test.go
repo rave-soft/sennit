@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
@@ -35,10 +36,13 @@ func (w agentSessionWorkspace) AgentIsSessionBusy(sessionID string) bool {
 	return w.busySessions[sessionID]
 }
 
-// Config satisfies the config reader DefaultCommon needs to pick a theme;
-// returning nil is fine, DefaultCommon treats it the same as "no workspace".
+// Config satisfies the config reader DefaultCommon needs to pick a theme.
+// An empty, non-nil Config (rather than nil) is required so
+// handleChildSessionMessage's NewToolMessageItem call can probe it for
+// custom-agent tool names (config.Config.AgentOverride) without a nil
+// pointer dereference.
 func (agentSessionWorkspace) Config() *config.Config {
-	return nil
+	return &config.Config{}
 }
 
 func (agentSessionWorkspace) SupportsThreads() bool { return false }
@@ -95,6 +99,30 @@ func TestFindNestedToolContainer(t *testing.T) {
 	require.Same(t, agentItem, u.findNestedToolContainer("tc-agent"))
 	require.Nil(t, u.findNestedToolContainer("tc-bash"),
 		"a tool item that isn't a NestedToolContainer must not be returned")
+	require.Nil(t, u.findNestedToolContainer("does-not-exist"))
+}
+
+// TestFindNestedToolContainer_Nested is the regression case for a
+// delegation nested inside another delegation (depth 2): idInxMap only
+// maps a top-level row's own ID directly, so looking up the inner
+// container's tool-call ID must resolve the outer row first and then
+// descend into its NestedTools() to find the inner one — see
+// registerNestedIDs in internal/ui/chatlist/chat.go and
+// findNestedToolContainerIn above.
+func TestFindNestedToolContainer_Nested(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionTestUI(t)
+	innerItem := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-inner", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	outerItem := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-outer", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	outerItem.SetNestedTools([]chat.ToolMessageItem{innerItem})
+	u.chat.AppendMessages(outerItem)
+
+	require.Same(t, outerItem, u.findNestedToolContainer("tc-outer"))
+	require.Same(t, innerItem, u.findNestedToolContainer("tc-inner"),
+		"a delegation nested inside another delegation must still be found by its own tool-call ID")
 	require.Nil(t, u.findNestedToolContainer("does-not-exist"))
 }
 
@@ -157,4 +185,72 @@ func TestHandleChildSessionUpdate_Todos(t *testing.T) {
 	// prefers it over the last tool call — see currentTodoActivity).
 	line := ansi.Strip(item.PanelStatusLine(u.com.Styles, 120))
 	require.Contains(t, line, "Fixing the bug", "child session todos must surface on the panel's status line")
+}
+
+// TestHandleChildSessionUpdate_Depth2 is the live-update counterpart of
+// TestFindNestedToolContainer_Nested: a session.Session update for a
+// delegation nested two levels deep (a delegation inside a delegation)
+// must reach that inner delegation's own token counters, not silently
+// drop (or land on the outer one) because only the outer row's ID is
+// directly registered in idInxMap.
+func TestHandleChildSessionUpdate_Depth2(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionTestUI(t)
+	inner := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-inner", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	outer := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-outer", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	outer.SetNestedTools([]chat.ToolMessageItem{inner})
+	u.chat.AppendMessages(outer)
+
+	innerChildID := session.CreateAgentToolSessionID("outer-child-msg", "tc-inner")
+	u.handleChildSessionUpdate(session.Session{ID: innerChildID, PromptTokens: 300, CompletionTokens: 40})
+
+	innerLine := ansi.Strip(inner.PanelStatusLine(u.com.Styles, 120))
+	require.Contains(t, innerLine, "340 tok",
+		"a depth-2 delegation's live token totals must reach its own status line")
+
+	outerLine := ansi.Strip(outer.PanelStatusLine(u.com.Styles, 120))
+	require.NotContains(t, outerLine, "340 tok",
+		"the update must land on the inner delegation, not bleed onto the outer one")
+}
+
+// TestHandleChildSessionMessage_Depth2 mirrors
+// TestHandleChildSessionUpdate_Depth2 for the transcript live-update path:
+// a tool-call/result event whose session ID names a delegation nested
+// inside another delegation must populate that inner delegation's own
+// nested tools, not be dropped by findNestedToolContainer resolving only
+// the outer row and rejecting it as a non-match.
+func TestHandleChildSessionMessage_Depth2(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionTestUI(t)
+	inner := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-inner", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	outer := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-outer", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	outer.SetNestedTools([]chat.ToolMessageItem{inner})
+	u.chat.AppendMessages(outer)
+
+	innerChildID := session.CreateAgentToolSessionID("outer-child-msg", "tc-inner")
+	grandchildToolCall := message.ToolCall{ID: "tc-grandchild", Name: "bash", Input: `{}`, Finished: true}
+	event := pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{
+			ID:        "grandchild-msg",
+			SessionID: innerChildID,
+			Parts:     []message.ContentPart{grandchildToolCall},
+		},
+	}
+
+	u.handleChildSessionMessage(u.com, event)
+
+	require.Len(t, inner.NestedTools(), 1,
+		"the depth-3 tool call must be attached to the depth-2 delegation that actually owns it")
+	require.Equal(t, "tc-grandchild", inner.NestedTools()[0].ToolCall().ID)
+	require.Len(t, outer.NestedTools(), 1,
+		"the outer delegation's own nested tools (just inner) must be untouched")
+	require.Same(t, chat.ToolMessageItem(inner), outer.NestedTools()[0],
+		"the depth-3 tool call must not be attached to the outer delegation")
 }

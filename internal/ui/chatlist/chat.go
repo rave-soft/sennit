@@ -457,6 +457,37 @@ func (m *Chat) MessageItems() []chat.MessageItem {
 	return items
 }
 
+// maxNestedToolRegistrationDepth bounds registerNestedIDs' walk down a
+// delegation's nested-tool tree. Real nesting is a tree shaped by the
+// agent runtime's maxTaskCascadeDepth (internal/agent/continuation.go),
+// far shallower than this; the cap exists only so malformed or cyclic
+// data can never make registration loop forever.
+const maxNestedToolRegistrationDepth = 16
+
+// registerNestedIDs maps every tool-call ID reachable from item's nested
+// tool tree, at any depth, to idx — the index of item's own top-level row
+// in the list. Every other idInxMap consumer (MessageItem, Animate,
+// RemoveMessage, ...) treats a mapped value as "which top-level row holds
+// this ID", so a deeply nested delegation's tool calls must resolve back
+// to the same top-level row as their shallower siblings.
+func registerNestedIDs(idInxMap map[string]int, item chat.MessageItem, idx int) {
+	registerNestedIDsAt(idInxMap, item, idx, 0)
+}
+
+func registerNestedIDsAt(idInxMap map[string]int, item chat.MessageItem, idx, depth int) {
+	if depth >= maxNestedToolRegistrationDepth {
+		return
+	}
+	container, ok := item.(chat.NestedToolContainer)
+	if !ok {
+		return
+	}
+	for _, nested := range container.NestedTools() {
+		idInxMap[nested.ID()] = idx
+		registerNestedIDsAt(idInxMap, nested, idx, depth+1)
+	}
+}
+
 // SetMessages sets the chat messages to the provided list of message items.
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.idInxMap = make(map[string]int)
@@ -471,12 +502,7 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	items := make([]list.Item, len(msgs))
 	for i, msg := range msgs {
 		m.idInxMap[msg.ID()] = i
-		// Register nested tool IDs for tools that contain nested tools.
-		if container, ok := msg.(chat.NestedToolContainer); ok {
-			for _, nested := range container.NestedTools() {
-				m.idInxMap[nested.ID()] = i
-			}
-		}
+		registerNestedIDs(m.idInxMap, msg, i)
 		items[i] = msg
 	}
 	m.list.SetItems(items...)
@@ -490,19 +516,19 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 	indexOffset := m.list.Len()
 	for i, msg := range msgs {
 		m.idInxMap[msg.ID()] = indexOffset + i
-		// Register nested tool IDs for tools that contain nested tools.
-		if container, ok := msg.(chat.NestedToolContainer); ok {
-			for _, nested := range container.NestedTools() {
-				m.idInxMap[nested.ID()] = indexOffset + i
-			}
-		}
+		registerNestedIDs(m.idInxMap, msg, indexOffset+i)
 		items[i] = msg
 	}
 	m.list.AppendItems(items...)
 }
 
-// UpdateNestedToolIDs updates the ID map for nested tools within a container.
-// Call this after modifying nested tools to ensure animations work correctly.
+// UpdateNestedToolIDs updates the ID map for nested tools within a
+// container, at every depth beneath it — call this after modifying nested
+// tools (directly, or several levels down) to ensure animations and live
+// updates keep resolving correctly. containerID may itself be a nested
+// container's own ID; idInxMap already maps that back to its top-level
+// row (see registerNestedIDs), so idx below is always the top-level index
+// regardless of how deep containerID actually sits.
 func (m *Chat) UpdateNestedToolIDs(containerID string) {
 	idx, ok := m.idInxMap[containerID]
 	if !ok {
@@ -514,15 +540,7 @@ func (m *Chat) UpdateNestedToolIDs(containerID string) {
 		return
 	}
 
-	container, ok := item.(chat.NestedToolContainer)
-	if !ok {
-		return
-	}
-
-	// Register all nested tool IDs to point to the container's index.
-	for _, nested := range container.NestedTools() {
-		m.idInxMap[nested.ID()] = idx
-	}
+	registerNestedIDs(m.idInxMap, item, idx)
 }
 
 // Animate animates items in the chat list. Only propagates animation messages
@@ -897,11 +915,7 @@ func (m *Chat) RemoveMessage(id string) {
 			continue
 		}
 		m.idInxMap[item.ID()] = i
-		if container, ok := item.(chat.NestedToolContainer); ok {
-			for _, nested := range container.NestedTools() {
-				m.idInxMap[nested.ID()] = i
-			}
-		}
+		registerNestedIDs(m.idInxMap, item, i)
 	}
 
 	// Clean up any paused animations for this message
