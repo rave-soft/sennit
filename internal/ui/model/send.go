@@ -39,7 +39,6 @@ type sendPendingQueueMsg struct{ uiOwned }
 
 type notificationSentMsg struct{ uiOwned }
 
-// sendQueueItem holds one pending-send entry with generation tracking.
 // sendMessage sends a message with the given content and attachments.
 // All I/O (AgentReadyErr, CreateSession, AgentRun) runs inside a tea.Cmd
 // so that the Update goroutine is never blocked.

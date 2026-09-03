@@ -166,7 +166,6 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
-		// message already exists, skip
 		return nil
 	}
 

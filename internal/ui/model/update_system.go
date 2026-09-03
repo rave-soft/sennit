@@ -142,7 +142,6 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	case spinner.TickMsg:
 		if m.dialog.HasDialogs() {
-			// route to dialog
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
 			}

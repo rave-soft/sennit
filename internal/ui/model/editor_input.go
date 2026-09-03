@@ -322,7 +322,6 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	return tea.Batch(heightCmd, resourceCmd)
 }
 
-// mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
 	return http.DetectContentType(content[:mimeBufferSize])
@@ -337,7 +336,6 @@ func (m *UI) checkBangModeAfterPaste() {
 	}
 }
 
-// handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Normalize \r\n before the textarea sanitizer sees it.
 	msg.Content = strings.ReplaceAll(msg.Content, "\r\n", "\n")
@@ -467,7 +465,6 @@ func hasPasteExceededThreshold(msg tea.PasteMsg) bool {
 	return false
 }
 
-// handleFilePathPaste handles a pasted file path.
 func handleFilePathPaste(path string) tea.Cmd {
 	return func() tea.Msg {
 		fileInfo, err := os.Stat(path)

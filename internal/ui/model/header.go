@@ -32,7 +32,6 @@ type header struct {
 	compact bool
 }
 
-// newHeader creates a new header model.
 func newHeader(com *common.Common) *header {
 	h := &header{
 		com: com,
@@ -54,9 +53,9 @@ func (h *header) refresh() {
 	h.logo = ""
 }
 
-// drawHeader draws the header for the given session. lspErrorCount comes
-// from the UI's memoized LSP state: drawing runs on every frame and must not
-// probe the workspace (treated as IO — see workspace_cache.go).
+// drawHeader's lspErrorCount comes from the UI's memoized LSP state: drawing
+// runs on every frame and must not probe the workspace (treated as IO — see
+// workspace_cache.go).
 func (h *header) drawHeader(
 	scr uv.Screen,
 	area uv.Rectangle,
@@ -121,7 +120,6 @@ func (h *header) drawHeader(
 	view.Draw(scr, area)
 }
 
-// renderHeaderDetails renders the details section of the header.
 func renderHeaderDetails(
 	com *common.Common,
 	session *session.Session,
@@ -142,8 +140,7 @@ func renderHeaderDetails(
 	// activeThreads counts pending/running/merging threads (see
 	// threads.ActiveCount in threads_cache.go); shown so a "ctrl+e" glance
 	// from the main chat confirms background threads are still alive
-	// without switching screens. Zero threads (the common case) renders
-	// nothing.
+	// without switching screens.
 	if activeThreads > 0 {
 		parts = append(parts, t.Status.InfoMessage.Render(fmt.Sprintf("⋈ %d", activeThreads)))
 	}

@@ -746,7 +746,6 @@ func (r *Root) leaveThreadToMain() tea.Cmd {
 	return cmd
 }
 
-// mergeThreadCmd calls MergeThread off-thread.
 func (r *Root) mergeThreadCmd(id string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
@@ -756,7 +755,6 @@ func (r *Root) mergeThreadCmd(id string) tea.Cmd {
 	}
 }
 
-// removeThreadCmd calls RemoveThread off-thread.
 func (r *Root) removeThreadCmd(id string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace

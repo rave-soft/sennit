@@ -211,7 +211,6 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		}
 	}
 
-	// Reader cmd: drains streamCh into shellStreamMsg until closed.
 	cmds = append(cmds, func() tea.Msg {
 		chunk, ok := <-streamCh
 		if !ok {

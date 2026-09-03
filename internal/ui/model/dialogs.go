@@ -64,7 +64,6 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 	return cmd
 }
 
-// openDialog opens a dialog by its ID.
 func (m *UI) openDialog(id string) tea.Cmd {
 	var cmds []tea.Cmd
 	switch id {
@@ -120,7 +119,6 @@ func (m *UI) openDialog(id string) tea.Cmd {
 // openQuitDialog opens the quit confirmation dialog.
 func (w *widgets) openQuitDialog(com *common.Common) {
 	if w.dialog.ContainsDialog(dialog.QuitID) {
-		// Bring to front
 		w.dialog.BringToFront(dialog.QuitID)
 		return
 	}
@@ -132,7 +130,6 @@ func (w *widgets) openQuitDialog(com *common.Common) {
 // openModelsDialog opens the models dialog.
 func (w *widgets) openModelsDialog(com *common.Common) tea.Cmd {
 	if w.dialog.ContainsDialog(dialog.ModelsID) {
-		// Bring to front
 		w.dialog.BringToFront(dialog.ModelsID)
 		return nil
 	}
@@ -153,7 +150,6 @@ func (w *widgets) openModelsDialog(com *common.Common) tea.Cmd {
 // draw from the same command list via dialog.BuildCommandItems.
 func (m *UI) openCommandsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.CommandsID) {
-		// Bring to front
 		m.dialog.BringToFront(dialog.CommandsID)
 		return nil
 	}
@@ -387,7 +383,6 @@ func (m *UI) openStatsDialog() tea.Cmd {
 
 	// No session yet is an ordinary state — the screen opens on the
 	// project tab and its Session tab says there is nothing to report.
-	// m.sess.current is a pointer that is nil until one is loaded.
 	var sessionID string
 	if m.sess.current != nil {
 		sessionID = m.sess.current.ID
@@ -415,7 +410,6 @@ func (w *widgets) openDoctorDialog(com *common.Common) tea.Cmd {
 // the dialog once sessionsLoadedMsg lands; see applySessionsLoaded.
 func (m *UI) openSessionsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
-		// Bring to front
 		m.dialog.BringToFront(dialog.SessionsID)
 		return nil
 	}
@@ -450,7 +444,6 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 // openFilesDialog opens the file picker dialog.
 func (m *UI) openFilesDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.FilePickerID) {
-		// Bring to front
 		m.dialog.BringToFront(dialog.FilePickerID)
 		return nil
 	}
@@ -491,10 +484,8 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	if _, opened := m.permissionResponse.open(perm.ID, m.dialog.Dialog(dialog.PermissionsID) != nil); !opened {
 		return nil
 	}
-	// Close any existing permissions dialog first.
 	m.dialog.CloseDialog(dialog.PermissionsID)
 
-	// Get diff mode from config.
 	var opts []dialog.PermissionsOption
 	if diffMode := m.com.Config().DiffMode(); diffMode != "" {
 		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))

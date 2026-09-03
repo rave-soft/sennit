@@ -105,7 +105,6 @@ func notificationBodyQuestions(count int) string {
 // function that should be called once during initialization or when capabilities
 // change.
 func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
-	// Check for explicit user preference first.
 	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
 		switch cfg.Options.Notifications {
 		case "native":
@@ -131,7 +130,6 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 		}
 	}
 
-	// Auto-detect based on environment and capabilities.
 	_, isSSH := caps.Env.LookupEnv("SSH_TTY")
 
 	// SSH sessions use terminal-based notifications (OSC 99 or 777).

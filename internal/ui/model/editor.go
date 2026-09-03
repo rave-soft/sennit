@@ -43,7 +43,6 @@ type editorState struct {
 	escape editorEscapeState
 }
 
-// textareaWord returns the current word at the cursor position.
 func (e *editorState) textareaWord() string {
 	return e.textarea.Word()
 }
@@ -69,7 +68,6 @@ func (e *editorState) textareaCursorOffset() int {
 	return offset + len(string(row[:col]))
 }
 
-// isAtEditorStart returns true if we are at the 0 line and 0 col in the textarea.
 func (e *editorState) isAtEditorStart() bool {
 	return e.textarea.Line() == 0 && e.textarea.LineInfo().ColumnOffset == 0
 }
@@ -87,7 +85,6 @@ func (e *editorState) isAtEditorEnd() bool {
 	return info.CharOffset >= info.CharWidth-1 || info.CharWidth == 0
 }
 
-// updateHistoryDraft updates history state when text is modified.
 func (e *editorState) updateHistoryDraft(oldValue string) {
 	if e.textarea.Value() != oldValue {
 		e.promptHistory.recordDraft(oldValue, e.draftValue())

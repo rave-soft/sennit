@@ -295,7 +295,6 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 			break
 		}
 
-		// Otherwise, send the message
 		m.editor.textarea.Reset()
 		if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -457,7 +456,6 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 		)
 	}
 
-	// remove the details if they are open when user starts typing
 	if m.lay.detailsOpen {
 		m.lay.detailsOpen = false
 		m.updateLayoutAndSize()
@@ -592,7 +590,6 @@ func (m *UI) handleMainKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cmd {
 	return cmds
 }
 
-// isWhitespace returns true if the byte is a whitespace character.
 func isWhitespace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }

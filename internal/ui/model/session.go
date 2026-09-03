@@ -378,12 +378,10 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 	filesShown := 0
 
 	for _, f := range filesWithChanges {
-		// Skip files with no changes
 		if filesShown >= showLimit {
 			break
 		}
 
-		// Build stats string with colors
 		var statusParts []string
 		if f.Additions > 0 {
 			statusParts = append(statusParts, t.Files.Additions.Render(fmt.Sprintf("+%d", f.Additions)))
@@ -393,7 +391,6 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 		}
 		extraContent := strings.Join(statusParts, " ")
 
-		// Format file path
 		filePath := f.FirstVersion.Path
 		if rel, err := filepath.Rel(cwd, filePath); err == nil {
 			filePath = rel
@@ -425,7 +422,6 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 	return lipgloss.JoinVertical(lipgloss.Left, renderedFiles...)
 }
 
-// startLSPs starts LSP servers for the given file paths.
 func startLSPs(com *common.Common, paths []string) tea.Cmd {
 	if len(paths) == 0 {
 		return nil

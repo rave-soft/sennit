@@ -199,7 +199,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 	default:
 		if m.sess.current == nil {
-			// no session selected
 			binds = append(
 				binds,
 				[]key.Binding{

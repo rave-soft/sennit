@@ -91,7 +91,6 @@ func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	// Let textarea handle normal cursor movement.
 	return m.updateTextarea(msg)
 }
 
@@ -113,7 +112,6 @@ func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
 		return m.updateTextarea(nil)
 	}
 
-	// Let textarea handle normal cursor movement.
 	return m.updateTextarea(msg)
 }
 
@@ -128,7 +126,6 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 		return m.updateTextareaWithPrevHeight(nil, prevHeight)
 	}
 
-	// Let textarea handle escape normally.
 	return m.updateTextarea(msg)
 }
 

@@ -14,7 +14,6 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
-// markProjectInitializedCmd marks the current project as initialized in the config.
 func markProjectInitializedCmd(com *common.Common) tea.Cmd {
 	ws := com.Workspace
 	return func() tea.Msg {
@@ -50,7 +49,6 @@ func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 
 // initializeProject starts project initialization and transitions to the landing view.
 func (m *UI) initializeProject() tea.Cmd {
-	// clear the session
 	var cmds []tea.Cmd
 	if cmd := m.newSession(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -66,7 +64,6 @@ func (m *UI) initializeProject() tea.Cmd {
 		}
 		return sendMessageMsg{uiOwned: uiOwned{owner: m}, Content: initPrompt}
 	}
-	// Mark the project as initialized
 	cmds = append(cmds, initialize, markProjectInitializedCmd(m.com))
 
 	return tea.Sequence(cmds...)
@@ -76,7 +73,6 @@ func (m *UI) initializeProject() tea.Cmd {
 func (m *UI) skipInitializeProject() tea.Cmd {
 	// TODO: initialize the project
 	m.setState(uiLanding, uiFocusEditor)
-	// mark the project as initialized
 	return markProjectInitializedCmd(m.com)
 }
 

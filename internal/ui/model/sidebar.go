@@ -102,9 +102,6 @@ type sidebarSig struct {
 	theme string
 }
 
-// computeSidebarSig reads the current values of everything
-// updateSidebarScrollState's render depends on. It must stay cheap: it runs
-// every frame regardless of whether the cache hits.
 // sidebarScrollbarHideMsg is sent to hide the sidebar scrollbar after
 // timeout. It lived in chat.go next to the chat's own version of the same
 // timer, which is the only thing chat.go knew about *UI — an accident of
@@ -178,7 +175,6 @@ func (s *sidebarState) scrollByWheel(lines int) int {
 	return s.scrollbarSeq
 }
 
-// hideScrollbar hides the sidebar scrollbar.
 func (s *sidebarState) hideScrollbar() {
 	s.scrollbarVisible = false
 }
@@ -191,15 +187,13 @@ func (m *UI) modelInfo(width int) string {
 	providerName := ""
 
 	if model != nil {
-		// Get provider name first
 		providerConfig, ok := m.com.Config().Providers.Get(model.ModelCfg.Provider)
 		if ok {
 			providerName = providerConfig.Name
 
-			// Only check reasoning if model can reason. The effort line
-			// shows only an explicitly configured effort — when unset, the
-			// model just runs on its default and the line is omitted
-			// entirely rather than echoing that default back.
+			// The effort line shows only an explicitly configured effort —
+			// when unset, the model just runs on its default and the line
+			// is omitted entirely rather than echoing that default back.
 			if model.CatalogCfg.CanReason {
 				if len(model.CatalogCfg.ReasoningLevels) == 0 {
 					if model.ModelCfg.Think {
@@ -329,7 +323,6 @@ func (m *UI) updateSidebarScrollState() {
 	skillsSection := m.skillsInfo(m.com, contentWidth, len(m.skillStatusItems(m.com)), true)
 	filesSection := m.sess.filesInfo(m.com, m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sess.files), true)
 
-	// Build the scrollable content.
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
@@ -358,7 +351,6 @@ func (m *UI) updateSidebarScrollState() {
 	m.sidebar.scrollable = totalLines > contentHeight
 	m.sidebar.maxOffset = max(0, totalLines-contentHeight)
 
-	// Clamp sidebarOffset.
 	if m.sidebar.offset > m.sidebar.maxOffset {
 		m.sidebar.offset = m.sidebar.maxOffset
 	}
@@ -383,7 +375,6 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		layout.Fill(1),
 	).Split(area).Assign(&logoRect, &contentRect)
 
-	// Slice visible lines.
 	end := min(m.sidebar.offset+contentHeight, totalLines)
 	lines := strings.Split(m.sidebar.content, "\n")
 	visibleLines := lines[m.sidebar.offset:end]
@@ -394,7 +385,6 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	// longer hold keyboard focus, so hover/wheel is the only trigger.
 	scrollbarVisible := totalLines > contentHeight && m.sidebar.scrollbarVisible
 
-	// Draw the fixed logo.
 	uv.NewStyledString(
 		lipgloss.NewStyle().
 			MaxWidth(contentWidth).
@@ -402,7 +392,6 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 			Render(sidebarLogo),
 	).Draw(scr, logoRect)
 
-	// Draw the visible content in the scrollable area.
 	uv.NewStyledString(
 		lipgloss.NewStyle().
 			MaxWidth(contentWidth).
@@ -410,7 +399,6 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 			Render(visibleStr),
 	).Draw(scr, contentRect)
 
-	// Draw scrollbar in the reserved column.
 	if scrollbarVisible {
 		scrollbar := common.Scrollbar(m.com.Styles, contentHeight, totalLines, contentHeight, m.sidebar.offset)
 		if scrollbar != "" {

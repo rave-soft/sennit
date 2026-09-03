@@ -26,7 +26,6 @@ type Status struct {
 	messageSeq int
 }
 
-// NewStatus creates a new status bar and help model.
 func NewStatus(com *common.Common, km help.KeyMap) *Status {
 	s := new(Status)
 	s.com = com
@@ -71,12 +70,10 @@ func (s *Status) SetWidth(width int) {
 	s.help.SetWidth(width - horizontalPadding)
 }
 
-// ShowingAll returns whether the full help view is shown.
 func (s *Status) ShowingAll() bool {
 	return s.help.ShowAll
 }
 
-// ToggleHelp toggles the full help view.
 func (s *Status) ToggleHelp() {
 	s.help.ShowAll = !s.help.ShowAll
 }
@@ -129,7 +126,6 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	uv.NewStyledString(ind+info).Draw(scr, area)
 }
 
-// statusTTL replaces a non-positive message TTL with the status default.
 func statusTTL(ttl time.Duration) time.Duration {
 	if ttl <= 0 {
 		return DefaultStatusTTL
@@ -137,8 +133,6 @@ func statusTTL(ttl time.Duration) time.Duration {
 	return ttl
 }
 
-// clearInfoMsgCmd returns a command that clears the info message after the
-// given TTL.
 func clearInfoMsgCmd(ttl time.Duration, seq int) tea.Cmd {
 	return tea.Tick(ttl, func(time.Time) tea.Msg {
 		return util.ClearStatusMsg{Seq: seq}

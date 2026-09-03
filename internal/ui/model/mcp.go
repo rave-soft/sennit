@@ -61,7 +61,6 @@ func mcpList(t *styles.Styles, mcps []mcp.MCPClientInfo, width, maxItems int) st
 	for _, m := range mcps {
 		var icon string
 		title := m.Name
-		// Show "Docker MCP" instead of the config name for Docker MCP.
 		if m.Name == config.DockerMCPName {
 			title = "Docker MCP"
 		}
