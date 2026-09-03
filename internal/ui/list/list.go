@@ -770,12 +770,22 @@ func (l *List) RemoveItem(idx int) {
 		l.selectedIdx--
 	}
 
-	// Adjust offset if needed
+	// Adjust offset if needed. offsetLine is a line count measured
+	// against the specific item at offsetIdx, so whenever the item
+	// occupying that slot changes identity, offsetLine must be reset:
+	// it no longer describes how far into the new item the viewport
+	// has scrolled.
 	if l.offsetIdx > idx {
 		l.offsetIdx--
-	} else if l.offsetIdx == idx && l.offsetIdx >= len(l.items) {
-		l.offsetIdx = max(0, len(l.items)-1)
+	} else if l.offsetIdx == idx {
+		// A different item (or none) now occupies this slot. Scroll to
+		// its top rather than dropping lines from it, which keeps the
+		// viewport closest to where it was and matches the other
+		// resets in this file (SetItems, ScrollToTop, ScrollToIndex).
 		l.offsetLine = 0
+		if l.offsetIdx >= len(l.items) {
+			l.offsetIdx = max(0, len(l.items)-1)
+		}
 	}
 	l.totalHeightValid = false
 }

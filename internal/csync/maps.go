@@ -61,9 +61,10 @@ func (m *Map[K, V]) Del(key K) {
 	delete(m.inner, key)
 }
 
-// Freeze marks the map read-only: every subsequent Set, Del, Reset or Take
-// panics instead of mutating it. It is idempotent — freezing an
-// already-frozen map is a no-op, not an error.
+// Freeze marks the map read-only: every subsequent mutation — Set, Del,
+// Reset, Take, GetOrSet installing a missing key, CompareAndDelete
+// removing one, or UnmarshalJSON — panics instead of changing it. It is
+// idempotent: freezing an already-frozen map is a no-op, not an error.
 //
 // This exists for published, supposedly-immutable snapshots (e.g.
 // config.Config.Providers) that are reached through a plain exported field
@@ -108,6 +109,7 @@ func CompareAndDelete[K comparable, V comparable](m *Map[K, V], key K, expected 
 	if current != expected {
 		return false
 	}
+	m.panicIfFrozenLocked()
 	delete(m.inner, key)
 	return true
 }
@@ -143,6 +145,7 @@ func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
 	if got, ok := m.inner[key]; ok {
 		return got
 	}
+	m.panicIfFrozenLocked()
 	value := fn()
 	m.inner[key] = value
 	return value

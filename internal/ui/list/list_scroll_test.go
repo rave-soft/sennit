@@ -1034,6 +1034,33 @@ func TestList_RemoveItem_AdjustsOffsetPastEnd(t *testing.T) {
 	require.Equal(t, 0, l.offsetLine)
 }
 
+// TestList_RemoveItem_ResetsOffsetLineWhenItemAtOffsetIsRemoved covers
+// removing the item the viewport is scrolled into, when items remain
+// after it. offsetLine is a line count measured against the specific
+// item that used to sit at offsetIdx; once that item is gone, a
+// different item takes its slot and the stale offsetLine can point
+// past that item's height, dropping its content from Render entirely.
+func TestList_RemoveItem_ResetsOffsetLineWhenItemAtOffsetIsRemoved(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 1)
+	b := newMultiLineItem("b", 3)
+	c := newMultiLineItem("c", 1)
+	l := NewList(a, b, c)
+	l.SetSize(20, 5)
+
+	// Scroll one line into b, so offsetIdx points at b with a nonzero
+	// offsetLine.
+	l.offsetIdx = 1
+	l.offsetLine = 1
+
+	l.RemoveItem(1) // remove b; c now occupies index 1
+	require.Equal(t, 1, l.offsetIdx)
+	require.Equal(t, 0, l.offsetLine, "offsetLine must not survive the item it was measured against")
+
+	require.Contains(t, l.Render(), "c:0", "c must still render instead of the viewport going blank")
+}
+
 // TestList_SetItems_ClampsSelectionAndOffset covers SetItems
 // shrinking the item set below the current selection/offset indices:
 // both must clamp into range rather than leaving stale out-of-bounds
