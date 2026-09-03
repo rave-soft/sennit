@@ -2,6 +2,7 @@ package mcpoauth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -642,6 +643,41 @@ func TestCallbackReceiver_IgnoresNonCallbackPaths(t *testing.T) {
 	require.NoError(t, flight.err)
 	require.Equal(t, "abc", flight.result.Code)
 	require.Equal(t, "xyz", flight.result.State)
+}
+
+// TestCallbackReceiver_CloseUnblocksPendingAwait is the regression test for
+// half of G5: tools/mcp's oauthRoundTripper now runs Authorize on a context
+// detached from the connecting attempt's own deadline (interactiveAuthTimeout
+// instead), so a hung browser login is no longer bounded by ctx at all. The
+// mechanism that still lets a user cancel it is this one: abortAuthFlow
+// (tools/mcp/authcoordinator.go) and Registry.teardown both call
+// Handler.Close, which reaches down to here. await must return as soon as
+// close runs, even though the context it was given (context.Background(),
+// standing in for a context with no deadline of its own) never fires.
+func TestCallbackReceiver_CloseUnblocksPendingAwait(t *testing.T) {
+	t.Parallel()
+
+	r := &callbackReceiver{serverName: "linear"}
+	flight, owned, err := r.begin("xyz")
+	require.NoError(t, err)
+	require.True(t, owned)
+
+	done := make(chan struct{})
+	var awaitErr error
+	go func() {
+		_, awaitErr = r.await(context.Background(), flight, true)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("await returned before close, with no context deadline to explain it")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	r.close()
+	<-done
+	require.Error(t, awaitErr, "close must unblock a pending await even without ctx cancellation")
 }
 
 // TestCallbackReceiver_RendersFailurePage proves a denied authorization

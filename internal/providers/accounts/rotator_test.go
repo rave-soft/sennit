@@ -214,6 +214,37 @@ func TestRotator_Pick_ExhaustedReturnsEarliestReset(t *testing.T) {
 		"want earliest reset %s, got %s", base.Add(30*time.Minute), exhausted.ResetsAt)
 }
 
+// TestRotator_Pick_ExhaustedIgnoresDisabledAccountReset is the regression
+// test for G24: a disabled account's reset time used to be counted toward
+// ErrAllExhausted.ResetsAt even though it can never be picked (usableLocked
+// rejects Disabled unconditionally). A user who disabled an account would
+// see "resets at 15:04" for a moment nothing actually changes at, while the
+// account that will genuinely become usable resets later.
+func TestRotator_Pick_ExhaustedIgnoresDisabledAccountReset(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	r := NewRotator(RotationPolicy{})
+
+	// a1 is disabled and would reset first, but must never be reflected in
+	// ResetsAt - it stays exhausted forever regardless of the clock.
+	a1 := acct("a1")
+	a1.Disabled = true
+	a1.Usage = Usage{Primary: UsageWindow{UsedPercent: 95, WindowMinutes: 60, ResetsAt: base.Add(15 * time.Minute)}}
+	// a2 is merely rate-limited and resets later; its reset is the only one
+	// that matters, since it is the account that will actually become
+	// pickable again.
+	a2 := acct("a2")
+	a2.Usage = Usage{Primary: UsageWindow{UsedPercent: 95, WindowMinutes: 60, ResetsAt: base.Add(2 * time.Hour)}}
+
+	_, err := r.Pick("prov", "a1", []Account{a1, a2})
+	require.Error(t, err)
+	var exhausted *ErrAllExhausted
+	require.True(t, errors.As(err, &exhausted))
+	require.True(t, exhausted.ResetsAt.Equal(base.Add(2*time.Hour)),
+		"want the enabled account's reset %s, got %s (the disabled account's earlier reset must be ignored)",
+		base.Add(2*time.Hour), exhausted.ResetsAt)
+}
+
 // TestRotator_Pick_ExhaustedZeroResetWhenUnknown: when no candidate
 // carries a known reset time, ResetsAt must stay the zero time rather
 // than fabricating one.

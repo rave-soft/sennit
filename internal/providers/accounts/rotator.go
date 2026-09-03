@@ -262,6 +262,13 @@ func (r *Rotator) Pick(providerID, currentID string, candidates []Account) (Acco
 			usable = append(usable, a)
 			continue
 		}
+		// A disabled account will never be picked no matter when its usage
+		// window resets - counting it here used to surface a ResetsAt the
+		// user could never benefit from ("resets at 15:04" for an account
+		// that stays exhausted, by the user's own choice, forever).
+		if a.Disabled {
+			continue
+		}
 		if reset := earliestResetFor(a, r.cooldowns); !reset.IsZero() {
 			if earliestReset.IsZero() || reset.Before(earliestReset) {
 				earliestReset = reset
