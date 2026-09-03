@@ -116,15 +116,23 @@ func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
 // second stat of every match. A file whose info cannot be read is still
 // visited, with a zero time: the caller wanted to know the path exists, and
 // an unreadable mtime is a worse reason to hide it than to sort it last.
-func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, visit func(path string, modTime time.Time)) error {
+//
+// incomplete reports whether any path was skipped because it could not be
+// read — a removed directory, ReadDir failing on a wide tree (EMFILE/ENFILE),
+// a transient I/O error on a network mount, not only a permissions denial.
+// The skipped subtree is simply absent from what visit is called with, so
+// the caller must surface incomplete itself or a partial match set reads as
+// an exhaustive one.
+func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, visit func(path string, modTime time.Time)) (incomplete bool, err error) {
 	pattern = filepath.ToSlash(pattern)
 	walker := NewFastGlobWalker(searchPath)
 	conf := fastwalk.Config{Follow: false, ToSlash: fastwalk.DefaultToSlash(), Sort: fastwalk.SortFilesFirst}
-	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+	walkErr := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		if err != nil {
+			incomplete = true
 			return nil
 		}
 		// A directory is both a candidate match and something to descend
@@ -157,10 +165,10 @@ func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, vi
 		}
 		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("fastwalk error: %w", err)
+	if walkErr != nil {
+		return incomplete, fmt.Errorf("fastwalk error: %w", walkErr)
 	}
-	return nil
+	return incomplete, nil
 }
 
 func ShouldExcludeFile(rootPath, filePath string) bool {

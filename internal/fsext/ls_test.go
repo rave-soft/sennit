@@ -123,7 +123,9 @@ func TestDirectoryListerDoesNotRetainWideTreeState(t *testing.T) {
 	}
 	dl := NewDirectoryLister(tmp)
 	var count atomic.Int64
-	require.NoError(t, VisitDirectory(tmp, nil, 2, func(string) { count.Add(1) }))
+	incomplete, err := VisitDirectory(tmp, nil, 2, func(string) { count.Add(1) })
+	require.NoError(t, err)
+	require.False(t, incomplete)
 	require.EqualValues(t, 4000, count.Load())
 	value := reflect.ValueOf(dl).Elem()
 	for i := range value.NumField() {
@@ -216,9 +218,12 @@ func TestListDirectory_RootNamedLikeFastIgnoreDir(t *testing.T) {
 			// VisitDirectory (directoryVisitState.shouldIgnore) rooted the
 			// same way must also see the entry.
 			var visited []string
-			require.NoError(t, VisitDirectory(target, nil, -1, func(p string) {
+			var incomplete bool
+			incomplete, err = VisitDirectory(target, nil, -1, func(p string) {
 				visited = append(visited, p)
-			}))
+			})
+			require.NoError(t, err)
+			require.False(t, incomplete)
 			require.Equal(t, []string{filepath.Join(target, "file.txt")}, visited)
 
 			// Recursively listing from the parent must still omit the
@@ -229,6 +234,97 @@ func TestListDirectory_RootNamedLikeFastIgnoreDir(t *testing.T) {
 			require.Empty(t, parentFiles)
 		})
 	}
+}
+
+// chmodUnreadableDir creates a subdirectory under tmp that cannot be read,
+// alongside a sibling file, and restores its permissions on cleanup so
+// t.TempDir() can remove it. It skips on Windows (chmod does not restrict
+// directory access there) and when running as root (root ignores the mode
+// bit and would read the directory anyway).
+func chmodUnreadableDir(t *testing.T, tmp string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not restrict directory access on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permission bits")
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "visible.txt"), []byte("x"), 0o644))
+	locked := filepath.Join(tmp, "locked")
+	require.NoError(t, os.Mkdir(locked, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(locked, "secret.txt"), []byte("x"), 0o644))
+	require.NoError(t, os.Chmod(locked, 0o000))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(locked, 0o755)) })
+}
+
+// TestListDirectory_UnreadableSubdirReportsIncomplete pins the fix for a
+// directory listing reporting a partially-read tree as complete: fastwalk
+// reports a ReadDir failure on "locked" as an error to the walk callback,
+// which used to be swallowed with no trace. It must now surface as
+// truncated=true, not as a clean, merely short listing.
+func TestListDirectory_UnreadableSubdirReportsIncomplete(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	chmodUnreadableDir(t, tmp)
+
+	files, truncated, err := ListDirectory(tmp, nil, -1, -1)
+	require.NoError(t, err)
+	require.True(t, truncated, "an unreadable subdirectory must make the listing report incompleteness")
+	require.ElementsMatch(t, []string{"visible.txt", "locked"}, relPaths(t, files, tmp))
+}
+
+// TestListDirectory_FullyReadableTreeReportsComplete is the companion case:
+// the ordinary, fully-readable tree must still report complete, unchanged
+// from before the fix.
+func TestListDirectory_FullyReadableTreeReportsComplete(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmp, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "sub", "file.txt"), []byte("x"), 0o644))
+
+	files, truncated, err := ListDirectory(tmp, nil, -1, -1)
+	require.NoError(t, err)
+	require.False(t, truncated)
+	require.ElementsMatch(t, []string{"sub", "sub/file.txt"}, relPaths(t, files, tmp))
+}
+
+// TestVisitDirectory_UnreadableSubdirReportsIncomplete is VisitDirectory's
+// counterpart to TestListDirectory_UnreadableSubdirReportsIncomplete: it
+// backs the ls tool (internal/agent/tools/ls.go), which surfaces the signal
+// this asserts on to the model as LSResponseMetadata.Incomplete.
+//
+// VisitDirectory is built on filepath.Walk (unlike ListDirectory's
+// fastwalk), which — for a directory it cannot read — calls the walk
+// callback exactly once, with the ReadDir error and no entry for the
+// directory itself, rather than fastwalk's "visit, then report the error
+// separately" ordering. So "locked" itself is not among visited; the
+// assertion that matters is that the walk still reports incompleteness
+// instead of silently treating the subtree as empty.
+func TestVisitDirectory_UnreadableSubdirReportsIncomplete(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	chmodUnreadableDir(t, tmp)
+
+	var visited []string
+	incomplete, err := VisitDirectory(tmp, nil, -1, func(p string) { visited = append(visited, p) })
+	require.NoError(t, err)
+	require.True(t, incomplete, "an unreadable subdirectory must make the visit report incompleteness")
+	require.ElementsMatch(t, []string{"visible.txt"}, relPaths(t, visited, tmp))
+}
+
+// TestVisitDirectory_FullyReadableTreeReportsComplete is the companion case
+// for VisitDirectory.
+func TestVisitDirectory_FullyReadableTreeReportsComplete(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmp, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "sub", "file.txt"), []byte("x"), 0o644))
+
+	var visited []string
+	incomplete, err := VisitDirectory(tmp, nil, -1, func(p string) { visited = append(visited, p) })
+	require.NoError(t, err)
+	require.False(t, incomplete)
+	require.ElementsMatch(t, []string{"sub", "sub/file.txt"}, relPaths(t, visited, tmp))
 }
 
 func relPaths(tb testing.TB, in []string, base string) []string {

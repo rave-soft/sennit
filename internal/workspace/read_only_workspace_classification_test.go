@@ -41,6 +41,7 @@ var refusedMethods = []string{
 	"CancelTask",
 	"CancelThread",
 	"CompleteOAuth",
+	"ConfigureCustomProvider",
 	"CreateSession",
 	"CreateThread",
 	"DeleteSession",
@@ -251,6 +252,10 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"CancelThread": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.CancelThread(t.Context(), "id", "reason")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"ConfigureCustomProvider": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, err := ro.ConfigureCustomProvider(t.Context(), config.ScopeGlobal, ConfigureCustomProviderParams{ID: "x", BaseURL: "http://example.com"})
 			require.True(t, IsReadOnlyError(err))
 		},
 		"CreateSession": func(t *testing.T, ro *readOnlyWorkspace) {

@@ -46,10 +46,16 @@ type GlobParams = proto.GlobParams
 type GlobPermissionsParams = proto.GlobPermissionsParams
 
 type GlobResponseMetadata struct {
-	NumberOfFiles int    `json:"number_of_files"`
-	TotalFiles    int    `json:"total_files"`
-	Truncated     bool   `json:"truncated"`
-	Cursor        string `json:"cursor,omitempty"`
+	NumberOfFiles int  `json:"number_of_files"`
+	TotalFiles    int  `json:"total_files"`
+	Truncated     bool `json:"truncated"`
+	// Incomplete is true when part of the search tree could not be read
+	// and was silently left out of the match set. It is reported
+	// separately from Truncated, which means the result limit cut the
+	// matches short — a different fact from part of the tree never
+	// having been read at all.
+	Incomplete bool   `json:"incomplete,omitempty"`
+	Cursor     string `json:"cursor,omitempty"`
 }
 
 func NewGlobTool(permissions permission.Requester, workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
@@ -113,7 +119,7 @@ func NewGlobTool(permissions permission.Requester, workingDir string, cfg config
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			scan := newPageScan[string](continuation.Last, limit)
-			err = visitGlobFiles(searchCtx, params.Pattern, searchPath, func(path string, modTime time.Time) {
+			incomplete, err := visitGlobFiles(searchCtx, params.Pattern, searchPath, func(path string, modTime time.Time) {
 				scan.Add(globPageKey(path, modTime), path)
 			})
 			if err != nil {
@@ -131,11 +137,19 @@ func NewGlobTool(permissions permission.Requester, workingDir string, cfg config
 			if truncated {
 				output += "\n\n(Results are truncated. Consider using a more specific path or pattern.)"
 			}
+			if incomplete {
+				// A model-recoverable condition, not a Go error (AGENTS.md):
+				// part of the tree could not be read (removed mid-walk,
+				// permissions, EMFILE/ENFILE, a network mount hiccup), so
+				// matches may be missing from a subtree that was never
+				// read, separate from the result-limit truncation above.
+				output += "\n\n(Part of the search tree could not be read, so some matches may be missing. Retry or narrow the path to confirm.)"
+			}
 			cursor := ""
 			if truncated {
 				cursor = makePageKeyCursor("glob", query, generation, last)
 			}
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GlobResponseMetadata{NumberOfFiles: len(files), TotalFiles: total, Truncated: truncated, Cursor: cursor}), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GlobResponseMetadata{NumberOfFiles: len(files), TotalFiles: total, Truncated: truncated, Incomplete: incomplete, Cursor: cursor}), nil
 		},
 	)
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{
@@ -174,7 +188,7 @@ func globPageKey(path string, modTime time.Time) string {
 	return fmt.Sprintf("%019d\x00%s", math.MaxInt64-nanos, path)
 }
 
-func visitGlobFiles(ctx context.Context, pattern, searchPath string, visit func(path string, modTime time.Time)) error {
+func visitGlobFiles(ctx context.Context, pattern, searchPath string, visit func(path string, modTime time.Time)) (incomplete bool, err error) {
 	prefix, rest := filepathext.SplitGlobPrefix(pattern)
 	walkRoot, walkPattern := searchPath, pattern
 	if prefix != "" {

@@ -451,6 +451,15 @@ func (w *readOnlyWorkspace) VerifyProviderAPIKey(ctx context.Context, providerID
 	return w.readOnlyError("VerifyProviderAPIKey")
 }
 
+// ConfigureCustomProvider is refused rather than passed through, for the
+// same reason VerifyProviderAPIKey above is: it makes a live network call
+// (model discovery) and writes config, both in the parent workspace's
+// name, and a read-only thread view exists to let a completed/interrupted
+// thread be inspected without acting as the workspace it is attached to.
+func (w *readOnlyWorkspace) ConfigureCustomProvider(ctx context.Context, scope config.Scope, params ConfigureCustomProviderParams) ([]catwalk.Model, error) {
+	return nil, w.readOnlyError("ConfigureCustomProvider")
+}
+
 func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
 	return accounts.Account{}, w.readOnlyError("RecordAccount")
 }

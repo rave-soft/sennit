@@ -44,10 +44,17 @@ type TreeNode struct {
 }
 
 type LSResponseMetadata struct {
-	NumberOfFiles int    `json:"number_of_files"`
-	TotalFiles    int    `json:"total_files"`
-	Truncated     bool   `json:"truncated"`
-	Cursor        string `json:"cursor,omitempty"`
+	NumberOfFiles int  `json:"number_of_files"`
+	TotalFiles    int  `json:"total_files"`
+	Truncated     bool `json:"truncated"`
+	// Incomplete is true when part of the tree could not be read (a
+	// directory removed mid-walk, a permissions denial, EMFILE/ENFILE on a
+	// wide tree, ...) and was silently left out of the results. It is
+	// reported separately from Truncated: that flag means the result
+	// limit or depth cut the listing short, which is a different fact
+	// from part of the tree never having been read at all.
+	Incomplete bool   `json:"incomplete,omitempty"`
+	Cursor     string `json:"cursor,omitempty"`
 }
 
 const (
@@ -144,7 +151,7 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 		return "", LSResponseMetadata{}, err
 	}
 	scan := newPageScan[string](continuation.Last, maxFiles)
-	err = fsext.VisitDirectory(searchPath, params.Ignore, effectiveDepth, func(path string) { scan.Add(path, path) })
+	incomplete, err := fsext.VisitDirectory(searchPath, params.Ignore, effectiveDepth, func(path string) { scan.Add(path, path) })
 	if err != nil {
 		return "", LSResponseMetadata{}, fmt.Errorf("error listing directory: %w", err)
 	}
@@ -152,7 +159,7 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 	if err := finishPageKeyCursor(continuation, generation); err != nil {
 		return "", LSResponseMetadata{}, err
 	}
-	metadata := LSResponseMetadata{NumberOfFiles: len(page), TotalFiles: total, Truncated: truncated}
+	metadata := LSResponseMetadata{NumberOfFiles: len(page), TotalFiles: total, Truncated: truncated, Incomplete: incomplete}
 	if truncated {
 		metadata.Cursor = makePageKeyCursor("ls", query, generation, last)
 	}
@@ -161,6 +168,13 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 	var output string
 	if truncated {
 		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %[1]d files and directories are included below.\n", maxFiles)
+	}
+	if incomplete {
+		// A model-recoverable condition, not a Go error (AGENTS.md): part
+		// of the tree could not be read (removed mid-walk, permissions,
+		// EMFILE/ENFILE, a network mount hiccup), so this listing may be
+		// missing entries the model should not assume are absent.
+		output += "Part of this directory tree could not be read and its entries are missing from the listing below. A file expected here but not shown may still exist; retry or narrow the path to confirm.\n"
 	}
 	if depth > 0 {
 		// Appended, not assigned: both notes can apply at once, and the

@@ -3,8 +3,6 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,7 +143,7 @@ func (a *testConfigAccessor) RefreshOAuthToken(ctx context.Context, scope config
 	return a.credentials.RefreshOAuthToken(ctx, scope, providerID)
 }
 
-var _ customProviderConfigurer = (*testConfigAccessor)(nil)
+var _ customProviderWriter = (*testConfigAccessor)(nil)
 
 // newTestConfigAccessor builds a real *config.ConfigStore-backed
 // test adapter rooted at four distinct directories (global config, global
@@ -173,54 +171,54 @@ func newTestConfigAccessor(t *testing.T) (accessor *testConfigAccessor, globalDa
 	return &testConfigAccessor{store: store, credentials: credentials.New(store)}, configPath
 }
 
-func TestConfigureCustomProvider_WritesFieldsAndDiscoversModels(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/models", r.URL.Path)
-		require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}, {"id": "model-b"}]}`))
-	}))
-	defer server.Close()
+// stubDiscoverer returns a [ModelDiscoverer] that answers with models/err
+// without making a network call — this package no longer owns the live
+// discovery HTTP call (see ModelDiscoverer's doc comment), so its own tests
+// exercise ConfigureCustomProviderUsing's field-writing/ordering behavior
+// against a canned discovery result. The discovery mechanics themselves
+// (endpoint construction, headers, enrichment) are internal/discover's own
+// tests, and internal/workspace/appws covers the live-HTTP wiring.
+func stubDiscoverer(models []catwalk.Model, err error) ModelDiscoverer {
+	return func(context.Context, ConfigureCustomProviderParams, config.VariableResolver) ([]catwalk.Model, error) {
+		return models, err
+	}
+}
 
+func TestConfigureCustomProviderUsing_WritesFieldsAndDiscoversModels(t *testing.T) {
 	ws, _ := newTestConfigAccessor(t)
 
 	params := ConfigureCustomProviderParams{
 		ID:      "my-custom",
 		Name:    "My Custom Provider",
-		BaseURL: server.URL + "/v1",
+		BaseURL: "https://example.com/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
 		APIKey:  "test-key",
 	}
+	discovered := []catwalk.Model{{ID: "model-a"}, {ID: "model-b"}}
 
-	models, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, params)
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(discovered, nil))
 	require.NoError(t, err)
 	require.Len(t, models, 2)
 
 	pc, ok := ws.Config().Providers.Get("my-custom")
 	require.True(t, ok)
-	require.Equal(t, server.URL+"/v1", pc.BaseURL)
+	require.Equal(t, "https://example.com/v1", pc.BaseURL)
 	require.Equal(t, catwalk.TypeOpenAICompat, pc.Type)
 	require.Equal(t, "My Custom Provider", pc.Name)
 	require.Equal(t, "test-key", pc.APIKey)
 	require.Len(t, pc.Models, 2)
 }
 
-func TestConfigureCustomProvider_NoModelsFoundKeepsFieldsPersisted(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data": []}`))
-	}))
-	defer server.Close()
-
+func TestConfigureCustomProviderUsing_NoModelsFoundKeepsFieldsPersisted(t *testing.T) {
 	ws, configPath := newTestConfigAccessor(t)
 
 	params := ConfigureCustomProviderParams{
 		ID:      "empty-provider",
-		BaseURL: server.URL + "/v1",
+		BaseURL: "https://example.com/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
 	}
 
-	models, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, params)
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(nil, nil))
 	require.Error(t, err)
 	require.Nil(t, models)
 
@@ -232,35 +230,34 @@ func TestConfigureCustomProvider_NoModelsFoundKeepsFieldsPersisted(t *testing.T)
 	// reconfiguring from scratch.
 	raw, err := os.ReadFile(configPath)
 	require.NoError(t, err)
-	require.Equal(t, server.URL+"/v1", gjson.GetBytes(raw, "providers.empty-provider.base_url").String())
+	require.Equal(t, "https://example.com/v1", gjson.GetBytes(raw, "providers.empty-provider.base_url").String())
 	require.Equal(t, string(catwalk.TypeOpenAICompat), gjson.GetBytes(raw, "providers.empty-provider.type").String())
 }
 
-func TestConfigureCustomProvider_RequiresIDAndBaseURL(t *testing.T) {
+func TestConfigureCustomProviderUsing_RequiresIDAndBaseURL(t *testing.T) {
 	ws, _ := newTestConfigAccessor(t)
+	failIfCalled := func(context.Context, ConfigureCustomProviderParams, config.VariableResolver) ([]catwalk.Model, error) {
+		t.Fatal("discoverModels must not be called when validation fails")
+		return nil, nil
+	}
 
-	_, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{})
+	_, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{}, failIfCalled)
 	require.Error(t, err)
 
-	_, err = ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{ID: "x"})
+	_, err = ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{ID: "x"}, failIfCalled)
 	require.Error(t, err)
 }
 
-// TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown
+// TestConfigureCustomProviderUsing_FullCycle_SurvivesRestartWithEndpointDown
 // exercises the whole "Configure Providers → Custom provider…" flow end to
-// end: configure against a live discovery endpoint, confirm the provider is
-// usable immediately, then simulate a process restart (a fresh config.Load
-// against the same on-disk config) with the endpoint unreachable. A custom
-// provider must not depend on its endpoint being reachable at every
-// startup — its models were already discovered and must have been
-// persisted to disk, not just held in memory.
-func TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/models", r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}, {"id": "model-b"}]}`))
-	}))
-	baseURL := server.URL + "/v1"
+// end: configure against a (stubbed) discovery result, confirm the
+// provider is usable immediately, then simulate a process restart (a fresh
+// config.Load against the same on-disk config). A custom provider must not
+// depend on its endpoint being reachable at every startup — its models
+// were already discovered and must have been persisted to disk, not just
+// held in memory.
+func TestConfigureCustomProviderUsing_FullCycle_SurvivesRestartWithEndpointDown(t *testing.T) {
+	baseURL := "https://example.com/v1"
 
 	ws, configPath := newTestConfigAccessor(t)
 
@@ -271,8 +268,9 @@ func TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown(t *te
 		Type:    string(catwalk.TypeOpenAICompat),
 		APIKey:  "test-key",
 	}
+	discovered := []catwalk.Model{{ID: "model-a"}, {ID: "model-b"}}
 
-	models, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, params)
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(discovered, nil))
 	require.NoError(t, err)
 	require.Len(t, models, 2)
 
@@ -289,12 +287,11 @@ func TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown(t *te
 	require.Equal(t, string(catwalk.TypeOpenAICompat), gjson.GetBytes(raw, "providers.restart-test.type").String())
 	require.Len(t, gjson.GetBytes(raw, "providers.restart-test.models").Array(), 2)
 
-	// (c) simulate a restart with the endpoint unreachable: a brand new
-	// config.Load, against the same directories, must still find the
-	// provider alive with its previously-discovered models rather than
-	// dropping it for want of a fresh (and now-impossible) discovery call.
-	server.Close()
-
+	// (c) simulate a restart: a brand new config.Load, against the same
+	// directories, must still find the provider alive with its
+	// previously-discovered models rather than dropping it for want of a
+	// fresh discovery call — the loader never re-discovers a provider
+	// whose models list is already non-empty.
 	store2, err := configruntime.Load(ws.WorkingDir(), ws.store.Config().Options.DataDirectory, false)
 	require.NoError(t, err)
 
@@ -304,38 +301,33 @@ func TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown(t *te
 	require.Len(t, pc2.Models, 2)
 }
 
-// TestConfigureCustomProvider_IDWithDots verifies that a provider ID
+// TestConfigureCustomProviderUsing_IDWithDots verifies that a provider ID
 // containing '.' — a common shape for domain-style IDs like
 // "api.example.com" — round-trips correctly. providers.<id>.<field> is a
 // gjson/sjson path, and an unescaped '.' inside <id> splits into nested
 // path segments instead of naming one literal "providers" entry, so the
 // provider silently vanishes (SetConfigField succeeds, but writes to the
 // wrong place, and the in-memory reload can't find it either).
-func TestConfigureCustomProvider_IDWithDots(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}]}`))
-	}))
-	defer server.Close()
-
+func TestConfigureCustomProviderUsing_IDWithDots(t *testing.T) {
 	ws, configPath := newTestConfigAccessor(t)
 
 	params := ConfigureCustomProviderParams{
 		ID:      "api.example.com",
-		BaseURL: server.URL + "/v1",
+		BaseURL: "https://example.com/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
 	}
+	discovered := []catwalk.Model{{ID: "model-a"}}
 
-	models, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, params)
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(discovered, nil))
 	require.NoError(t, err)
 	require.Len(t, models, 1)
 
 	pc, ok := ws.Config().Providers.Get("api.example.com")
 	require.True(t, ok, "provider with a dotted ID must be saved under its literal ID")
-	require.Equal(t, server.URL+"/v1", pc.BaseURL)
+	require.Equal(t, "https://example.com/v1", pc.BaseURL)
 	require.Len(t, pc.Models, 1)
 
 	raw, err := os.ReadFile(configPath)
 	require.NoError(t, err)
-	require.Equal(t, server.URL+"/v1", gjson.GetBytes(raw, `providers.api\.example\.com.base_url`).String())
+	require.Equal(t, "https://example.com/v1", gjson.GetBytes(raw, `providers.api\.example\.com.base_url`).String())
 }

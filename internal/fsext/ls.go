@@ -243,10 +243,18 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, is
 // semantics as ListDirectory. Its ignore state is an ancestor stack: walking a
 // sibling releases the previous subtree's patterns instead of retaining a
 // matcher for every directory in a wide tree.
-func VisitDirectory(initialPath string, ignorePatterns []string, depth int, visit func(string)) error {
+//
+// incomplete reports whether any path was skipped because it could not be
+// read — a removed directory, ReadDir failing on a wide tree (EMFILE/ENFILE),
+// a transient I/O error on a network mount, not only a permissions denial.
+// Such an entry is left out of the results entirely rather than failing the
+// whole walk, so callers must surface incomplete themselves or a partially
+// read tree looks like a complete, merely small one.
+func VisitDirectory(initialPath string, ignorePatterns []string, depth int, visit func(string)) (incomplete bool, err error) {
 	walker := newDirectoryVisitState(initialPath)
-	return filepath.Walk(initialPath, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(initialPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			incomplete = true
 			return nil
 		}
 		rel, relErr := filepath.Rel(initialPath, path)
@@ -283,6 +291,7 @@ func VisitDirectory(initialPath string, ignorePatterns []string, depth int, visi
 		}
 		return nil
 	})
+	return incomplete, walkErr
 }
 
 type directoryVisitFrame struct {
@@ -336,10 +345,18 @@ func (s *directoryVisitState) shouldIgnore(path string, ignorePatterns []string,
 	return gitignore.NewMatcher(s.patterns).Match(pathToComponents(relPath), isDir)
 }
 
-// ListDirectory lists files and directories in the specified path.
+// ListDirectory lists files and directories in the specified path. The
+// returned bool is true if the results were cut short — either by the
+// limit/depth (the ordinary case) or because part of the tree could not be
+// read (see the comment on the walk callback below). ListDirectory has
+// callers outside fsext that only look at this single bool, so an unreadable
+// subtree is folded into it rather than reported through a separate signal:
+// that keeps a partially read tree from ever being reported as a complete,
+// merely small one, without requiring every caller to be touched.
 func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
+	incomplete := false
 
 	slog.Debug("Listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
 
@@ -358,7 +375,14 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 
 	err := fastwalk.Walk(&conf, initialPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip files we don't have permission to access
+			// The entry is skipped, not the whole walk: a single unreadable
+			// file or directory (removed mid-walk, EMFILE/ENFILE on a wide
+			// tree, a permissions denial, a transient I/O error on a
+			// network mount) shouldn't fail a listing of everything else.
+			// But skipping silently would make a partially read tree look
+			// like a complete, merely small one, so record it instead.
+			incomplete = true
+			return nil
 		}
 
 		isDir := d.IsDir()
@@ -392,5 +416,5 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 	}
 
 	matches, truncated := truncate(slices.Collect(found.Seq()), limit)
-	return matches, truncated, nil
+	return matches, truncated || incomplete, nil
 }

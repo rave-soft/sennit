@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,17 +169,15 @@ func newAuthTestProvider(t *testing.T, ws *realConfigAccessor) {
 // throwaway provider in the same store.
 func newAuthTestProviderWithID(t *testing.T, ws *realConfigAccessor, providerID string) {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}]}`))
-	}))
-	t.Cleanup(server.Close)
+	discoverModels := func(context.Context, workspace.ConfigureCustomProviderParams, config.VariableResolver) ([]catwalk.Model, error) {
+		return []catwalk.Model{{ID: "model-a"}}, nil
+	}
 
-	_, err := workspace.ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, workspace.ConfigureCustomProviderParams{
+	_, err := workspace.ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, workspace.ConfigureCustomProviderParams{
 		ID:      providerID,
-		BaseURL: server.URL + "/v1",
+		BaseURL: "https://example.com/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
-	})
+	}, discoverModels)
 	require.NoError(t, err)
 }
 

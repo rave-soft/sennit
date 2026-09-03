@@ -29,7 +29,7 @@ func globAll(t *testing.T, pattern, dir string) []string {
 		mu      sync.Mutex
 		matches []string
 	)
-	err := VisitGlobGitignoreAware(context.Background(), pattern, dir, func(path string, _ time.Time) {
+	_, err := VisitGlobGitignoreAware(context.Background(), pattern, dir, func(path string, _ time.Time) {
 		mu.Lock()
 		defer mu.Unlock()
 		matches = append(matches, path)
@@ -44,7 +44,8 @@ func globAll(t *testing.T, pattern, dir string) []string {
 func globAllErr(t *testing.T, pattern, dir string) error {
 	t.Helper()
 
-	return VisitGlobGitignoreAware(context.Background(), pattern, dir, func(string, time.Time) {})
+	_, err := VisitGlobGitignoreAware(context.Background(), pattern, dir, func(string, time.Time) {})
+	return err
 }
 
 func TestGlobWithDoubleStar(t *testing.T) {
@@ -226,6 +227,52 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		// makes `glob "pkg"` indistinguishable from "there is no pkg".
 		require.ElementsMatch(t, []string{file, dir, other}, globAll(t, "*.rs", testDir))
 	})
+}
+
+// TestVisitGlobGitignoreAware_UnreadableSubdirReportsIncomplete pins the
+// same fix as TestListDirectory_UnreadableSubdirReportsIncomplete
+// (ls_test.go) for the glob walk: a directory whose contents cannot be read
+// must not make a partial match set look exhaustive.
+func TestVisitGlobGitignoreAware_UnreadableSubdirReportsIncomplete(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not restrict directory access on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permission bits")
+	}
+	t.Parallel()
+	tmp := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "visible.go"), []byte("x"), 0o644))
+	locked := filepath.Join(tmp, "locked")
+	require.NoError(t, os.Mkdir(locked, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(locked, "hidden.go"), []byte("x"), 0o644))
+	require.NoError(t, os.Chmod(locked, 0o000))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(locked, 0o755)) })
+
+	var matches []string
+	incomplete, err := VisitGlobGitignoreAware(context.Background(), "**/*.go", tmp, func(path string, _ time.Time) {
+		matches = append(matches, path)
+	})
+	require.NoError(t, err)
+	require.True(t, incomplete, "an unreadable subdirectory must make the walk report incompleteness")
+	require.NotContains(t, matches, filepath.Join(locked, "hidden.go"))
+}
+
+// TestVisitGlobGitignoreAware_FullyReadableTreeReportsComplete is the
+// companion case: an ordinary, fully-readable tree must still report
+// complete, unchanged from before the fix.
+func TestVisitGlobGitignoreAware_FullyReadableTreeReportsComplete(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "visible.go"), []byte("x"), 0o644))
+
+	var matches []string
+	incomplete, err := VisitGlobGitignoreAware(context.Background(), "**/*.go", tmp, func(path string, _ time.Time) {
+		matches = append(matches, path)
+	})
+	require.NoError(t, err)
+	require.False(t, incomplete)
+	require.Equal(t, []string{filepath.Join(tmp, "visible.go")}, matches)
 }
 
 func TestHasPrefix(t *testing.T) {

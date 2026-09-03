@@ -749,6 +749,7 @@ type FrontendWorkspace interface {
 	OAuthController
 	PreferredModelUpdater
 	ProviderAPIKeySetter
+	CustomProviderConfigurer
 	ProviderCatalog
 	ProviderProxySetter
 	ProjectLifecycle

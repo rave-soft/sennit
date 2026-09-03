@@ -6,7 +6,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/discover"
 )
 
 // ConfigureCustomProviderParams holds the user-supplied fields for a
@@ -19,21 +18,44 @@ type ConfigureCustomProviderParams struct {
 	APIKey  string
 }
 
-type customProviderConfigurer interface {
+// CustomProviderConfigurer persists a custom provider's configuration and
+// discovers its models. It is a one-method role interface — like
+// ProviderAPIKeySetter and ConfigureCustomProvider's other single-method
+// siblings documented on [FrontendWorkspace] — rather than a wider
+// [Workspace] method taking an injected discovery callback:
+// internal/ui/model/dialog_actions.go wants exactly this capability, named,
+// and nothing else. The [Workspace] contract itself still must not import
+// internal/discover, so the live HTTP call lives in the implementation
+// (internal/workspace/appws), driven through [ModelDiscoverer] below.
+type CustomProviderConfigurer interface {
+	ConfigureCustomProvider(ctx context.Context, scope config.Scope, params ConfigureCustomProviderParams) ([]catwalk.Model, error)
+}
+
+// ModelDiscoverer is the one capability [ConfigureCustomProviderUsing]
+// needs beyond writing config: discovering params' models over HTTP. This
+// contract package must not import internal/discover — that would put a
+// live network client on every consumer of [Workspace], including a
+// read-only thread view — so the discovery itself is supplied by the
+// caller. internal/workspace/appws is the only implementation today,
+// wrapping internal/discover's model-discovery and enrichment calls, the
+// same core `sennit models refresh` uses (see internal/cmd/models.go's
+// refreshCmd).
+type ModelDiscoverer func(ctx context.Context, params ConfigureCustomProviderParams, resolver config.VariableResolver) ([]catwalk.Model, error)
+
+// customProviderWriter is what ConfigureCustomProviderUsing needs to
+// persist a provider's configuration, once discovery has already run.
+type customProviderWriter interface {
 	ConfigResolver
 	ConfigFieldEditor
 	ProviderAPIKeySetter
 }
 
-// ConfigureCustomProvider persists a custom provider's configuration and
-// runs model discovery against it, reusing the same discover.DiscoverModels
-// / discover.GetEnricher core that `sennit models refresh` uses (see
-// internal/cmd/models.go's refreshCmd) so the two entry points share
-// identical discovery behavior without duplicating it.
+// ConfigureCustomProviderUsing persists a custom provider's configuration
+// and runs model discovery against it via discoverModels.
 //
-// It takes only the resolver and config-writing capabilities it needs rather
-// than the full [Workspace] interface, so it works against any implementation
-// without depending on unrelated workspace operations.
+// It takes only the resolver and config-writing capabilities it needs
+// rather than the full [Workspace] interface, so it works against any
+// implementation without depending on unrelated workspace operations.
 //
 // Discovery runs first, against params directly, before anything is
 // persisted. The result then decides how fields are ordered: the config
@@ -51,22 +73,12 @@ type customProviderConfigurer interface {
 // returns nothing — callers should treat a zero-model result as "not yet
 // usable" rather than deleted, since the user may fix the URL and retry via
 // `sennit models refresh <id>` or this same flow again.
-func ConfigureCustomProvider(ctx context.Context, ws customProviderConfigurer, scope config.Scope, params ConfigureCustomProviderParams) ([]catwalk.Model, error) {
+func ConfigureCustomProviderUsing(ctx context.Context, ws customProviderWriter, scope config.Scope, params ConfigureCustomProviderParams, discoverModels ModelDiscoverer) ([]catwalk.Model, error) {
 	if params.ID == "" || params.BaseURL == "" {
 		return nil, fmt.Errorf("provider ID and base URL are required")
 	}
 
-	dcfg := discover.Config{
-		ID:      params.ID,
-		BaseURL: params.BaseURL,
-		APIKey:  params.APIKey,
-	}
-	models, discErr := discover.DiscoverModels(ctx, dcfg, ws.Resolver())
-	if discErr == nil && len(models) > 0 {
-		if enricher := discover.GetEnricher(params.Type); enricher != nil {
-			models = enricher.EnrichModels(ctx, dcfg, ws.Resolver(), models)
-		}
-	}
+	models, discErr := discoverModels(ctx, params, ws.Resolver())
 
 	if err := ws.SetConfigField(scope, config.ProviderFieldKey(params.ID, "type"), params.Type); err != nil {
 		return nil, fmt.Errorf("failed to save provider type: %w", err)

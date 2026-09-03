@@ -38,12 +38,13 @@ func TestVisitGlobGitignoreAware_DoesNotFollowSymlinkEscape(t *testing.T) {
 		mu  sync.Mutex
 		got []string
 	)
-	require.NoError(t, VisitGlobGitignoreAware(context.Background(), "**/*.go", project,
+	_, err := VisitGlobGitignoreAware(context.Background(), "**/*.go", project,
 		func(path string, _ time.Time) {
 			mu.Lock()
 			defer mu.Unlock()
 			got = append(got, path)
-		}))
+		})
+	require.NoError(t, err)
 
 	require.NotEmpty(t, got, "the file inside the root must still be found")
 	for _, p := range got {

@@ -521,6 +521,11 @@ func (s *stubWorkspace) SetProviderAPIKey(scope config.Scope, providerID string,
 	return nil
 }
 
+func (s *stubWorkspace) ConfigureCustomProvider(ctx context.Context, scope config.Scope, params ConfigureCustomProviderParams) ([]catwalk.Model, error) {
+	s.track("ConfigureCustomProvider")
+	return nil, nil
+}
+
 func (s *stubWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
 	s.track("RecordAccount")
 	return accounts.Account{}, nil

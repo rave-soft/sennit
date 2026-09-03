@@ -2,8 +2,6 @@ package workspace
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -12,27 +10,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newAccountTestProvider starts a throwaway discovery endpoint and
-// configures a custom provider against it, mirroring
-// TestConfigureCustomProvider_WritesFieldsAndDiscoversModels — accounts
-// need a real, already-configured provider entry to attach to. It
+// newAccountTestProvider configures a custom provider against a stubbed
+// discovery result, mirroring
+// TestConfigureCustomProviderUsing_WritesFieldsAndDiscoversModels —
+// accounts need a real, already-configured provider entry to attach to. It
 // deliberately configures no APIKey: RecordAccount migrates any
 // pre-existing legacy credential on the provider into an account of its
 // own (see config.RecordAccount's doc comment, step 1), and these tests
 // need to control the account count precisely.
 func newAccountTestProvider(t *testing.T, ws *testConfigAccessor, providerID string) {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}]}`))
-	}))
-	t.Cleanup(server.Close)
 
-	_, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{
+	_, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{
 		ID:      providerID,
-		BaseURL: server.URL + "/v1",
+		BaseURL: "https://example.com/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
-	})
+	}, stubDiscoverer([]catwalk.Model{{ID: "model-a"}}, nil))
 	require.NoError(t, err)
 }
 

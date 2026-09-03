@@ -404,7 +404,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			APIKey:  msg.APIKey,
 		}
 		cmds = append(cmds, func() tea.Msg {
-			_, err := workspace.ConfigureCustomProvider(ctx, ws, config.ScopeGlobal, params)
+			_, err := ws.ConfigureCustomProvider(ctx, config.ScopeGlobal, params)
 			return dialog.ActionCustomProviderResult{ProviderID: msg.ID, Err: err}
 		})
 	case dialog.ActionProviderConfigured:
