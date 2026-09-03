@@ -469,18 +469,20 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 }
 
 const listThreadsForGC = `-- name: ListThreadsForGC :many
-SELECT id, project_path, status, updated_at, kind, worktree_path, branch
+SELECT id, project_path, status, updated_at, kind, worktree_path, branch, session_id, parent_session_id
 FROM threads
 `
 
 type ListThreadsForGCRow struct {
-	ID           string `json:"id"`
-	ProjectPath  string `json:"project_path"`
-	Status       string `json:"status"`
-	UpdatedAt    int64  `json:"updated_at"`
-	Kind         string `json:"kind"`
-	WorktreePath string `json:"worktree_path"`
-	Branch       string `json:"branch"`
+	ID              string `json:"id"`
+	ProjectPath     string `json:"project_path"`
+	Status          string `json:"status"`
+	UpdatedAt       int64  `json:"updated_at"`
+	Kind            string `json:"kind"`
+	WorktreePath    string `json:"worktree_path"`
+	Branch          string `json:"branch"`
+	SessionID       string `json:"session_id"`
+	ParentSessionID string `json:"parent_session_id"`
 }
 
 // Every delegation across every project, trimmed to the columns `sennit
@@ -499,6 +501,12 @@ type ListThreadsForGCRow struct {
 // kind, worktree_path and branch are selected so gc can report the
 // worktrees it strands: deleting a thread row leaves its worktree on disk
 // with nothing left to find it by, so gc names them before the row goes.
+//
+// session_id and parent_session_id are selected so gc can protect a
+// session a non-terminal thread still owns (or still delivers its
+// completion into): selectSessions must never sweep either one, even
+// when it belongs to an otherwise-old session tree, or a live delegation's
+// writes hit sessions.id after the row is gone.
 func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreadsForGC)
 	if err != nil {
@@ -516,6 +524,8 @@ func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, 
 			&i.Kind,
 			&i.WorktreePath,
 			&i.Branch,
+			&i.SessionID,
+			&i.ParentSessionID,
 		); err != nil {
 			return nil, err
 		}

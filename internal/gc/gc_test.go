@@ -189,6 +189,68 @@ func TestRun_OrphanedWorktrees_OnlyExistingPaths(t *testing.T) {
 	require.False(t, threadExists(t, q, ids.WorktreeGone), "the gone-worktree thread row is still deleted")
 }
 
+// TestRun_ProtectsSessionOfLiveDelegation reproduces the bug where an old
+// top-level session P sweeps its descendants purely by
+// sessions.parent_session_id, without consulting the threads table: a
+// still-running (non-terminal) thread T owns a fresh child session C
+// (threads.session_id) that is reachable from P via that descendant walk,
+// and T's own parent_session_id also names P. Both P and C must survive:
+// deleting either while T is actively writing to C (and will later write
+// its completion into P) would violate the messages.session_id FK and
+// corrupt an in-flight background task. Run against unfixed selectSessions,
+// C (and transitively nothing beneath it) is swept because the BFS never
+// consults threads at all.
+func TestRun_ProtectsSessionOfLiveDelegation(t *testing.T) {
+	cutoff := time.Now().Unix()
+	q, conn, ids := fixture(t, cutoff)
+	ctx := context.Background()
+
+	old := time.Unix(cutoff, 0).Add(-30 * 24 * time.Hour).Unix()
+	recent := time.Unix(cutoff, 0).Add(30 * 24 * time.Hour).Unix()
+
+	// P: an old top-level session, swept on its own age merits.
+	parentID := "sess-live-parent"
+	_, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{ID: parentID, Title: parentID, ProjectPath: projectA})
+	require.NoError(t, err)
+
+	// C: a fresh child session parented to P via sessions.parent_session_id
+	// -- exactly how a real task/delegation session is created -- so the
+	// descendant BFS actually reaches it.
+	childID := "sess-live-child"
+	_, err = q.CreateSession(ctx, sennitdb.CreateSessionParams{
+		ID: childID, Title: childID, ProjectPath: projectA,
+		ParentSessionID: sql.NullString{String: parentID, Valid: true},
+	})
+	require.NoError(t, err)
+
+	// T: a live (non-terminal) thread that owns C and reports back to P.
+	threadID := "thread-live"
+	_, err = q.CreateThread(ctx, sennitdb.CreateThreadParams{
+		ID: threadID, Name: "live", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
+		Branch: "thread/live", WorktreePath: "", SessionID: childID, Status: "running",
+		MergePolicy: "auto", Kind: "thread", ParentSessionID: parentID,
+	})
+	require.NoError(t, err)
+
+	_, err = conn.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, old, parentID)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, recent, childID)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `UPDATE threads SET updated_at = ? WHERE id = ?`, recent, threadID)
+	require.NoError(t, err)
+
+	_, err = Run(context.Background(), Deps{Queries: q, Conn: conn}, Policy{Cutoff: cutoff})
+	require.NoError(t, err)
+
+	require.True(t, sessionExists(t, q, parentID), "P is the parent session of a live thread and must survive")
+	require.True(t, sessionExists(t, q, childID), "C is the session a live thread owns and must survive")
+	require.True(t, threadExists(t, q, threadID), "a non-terminal thread is never deleted")
+
+	// Unrelated fixture rows keep their ordinary fate untouched by this
+	// protection.
+	require.False(t, sessionExists(t, q, ids.Old))
+}
+
 // TestTerminalStatusParityWithThread pins gc's local terminal classification
 // (persistedThreadStatus.terminal) against the domain classification
 // thread.Status.Terminal. gc deliberately keeps its own set of the persisted

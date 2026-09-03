@@ -159,17 +159,57 @@ func countDependents(ctx context.Context, q *sennitdb.Queries, sessionIDs []stri
 	return messages, files, readFiles, nil
 }
 
+// protectedSessions returns the set of session IDs that must never be
+// swept: threads.session_id and threads.parent_session_id (one hop, non-
+// empty only) of every thread whose status is non-terminal. This must
+// agree with selectThreads's own terminal() check -- the bug this fixes
+// is that selectSessions used to decide deletions purely from session age
+// and sessions.parent_session_id descendant expansion, never consulting
+// the threads table, so a live delegation's session (or the parent
+// session its completion delivers into, see internal/thread/manager.go
+// and internal/agent/dispatch.go) could be swept out from under it and
+// violate messages.session_id's foreign key. Deliberately unscoped by
+// projectPath: it reads every thread so a same-project non-terminal
+// thread's session is never dropped by a project filter that belongs to
+// selection, not to protection; a protected ID outside the scope being
+// collected is simply never a candidate for selected in the first place.
+func protectedSessions(rows []sennitdb.ListThreadsForGCRow) map[string]bool {
+	protected := make(map[string]bool)
+	for _, r := range rows {
+		if persistedThreadStatus(r.Status).terminal() {
+			continue
+		}
+		if r.SessionID != "" {
+			protected[r.SessionID] = true
+		}
+		if r.ParentSessionID != "" {
+			protected[r.ParentSessionID] = true
+		}
+	}
+	return protected
+}
+
 // selectSessions returns the IDs of every session gc should delete: every
 // session whose updated_at is strictly older than cutoff (scoped to
 // projectPath when non-empty), expanded to include any agent-tool/title
 // sub-session parented to a selected session, regardless of the
 // sub-session's own age. The expansion runs to a fixed point so a
-// sub-session's own sub-sessions are swept up too.
+// sub-session's own sub-sessions are swept up too. A session named by
+// protectedSessions is excluded from both the initial age-based pass and
+// the descendant expansion -- since it is never added to selected, the
+// BFS never traverses through it either, so nothing beneath it is force-
+// swept via that path (anything beneath it that is independently old and
+// unprotected is still swept on its own merits, same as today).
 func selectSessions(ctx context.Context, q *sennitdb.Queries, cutoff int64, projectPath string) ([]string, error) {
 	rows, err := q.ListSessionsForGC(ctx)
 	if err != nil {
 		return nil, err
 	}
+	threadRows, err := q.ListThreadsForGC(ctx)
+	if err != nil {
+		return nil, err
+	}
+	protected := protectedSessions(threadRows)
 
 	childrenByParent := make(map[string][]string)
 	inScope := make(map[string]bool)
@@ -186,7 +226,7 @@ func selectSessions(ctx context.Context, q *sennitdb.Queries, cutoff int64, proj
 	selected := make(map[string]bool)
 	var queue []string
 	for _, r := range rows {
-		if !inScope[r.ID] {
+		if !inScope[r.ID] || protected[r.ID] {
 			continue
 		}
 		if r.UpdatedAt < cutoff && !selected[r.ID] {
@@ -198,6 +238,9 @@ func selectSessions(ctx context.Context, q *sennitdb.Queries, cutoff int64, proj
 		id := queue[0]
 		queue = queue[1:]
 		for _, childID := range childrenByParent[id] {
+			if protected[childID] {
+				continue
+			}
 			if !selected[childID] {
 				selected[childID] = true
 				queue = append(queue, childID)

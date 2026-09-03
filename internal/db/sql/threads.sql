@@ -161,5 +161,11 @@ WHERE id = ?;
 -- kind, worktree_path and branch are selected so gc can report the
 -- worktrees it strands: deleting a thread row leaves its worktree on disk
 -- with nothing left to find it by, so gc names them before the row goes.
-SELECT id, project_path, status, updated_at, kind, worktree_path, branch
+--
+-- session_id and parent_session_id are selected so gc can protect a
+-- session a non-terminal thread still owns (or still delivers its
+-- completion into): selectSessions must never sweep either one, even
+-- when it belongs to an otherwise-old session tree, or a live delegation's
+-- writes hit sessions.id after the row is gone.
+SELECT id, project_path, status, updated_at, kind, worktree_path, branch, session_id, parent_session_id
 FROM threads;
