@@ -182,7 +182,29 @@ func TestRuntimeCacheLogsLifecycleAndCorrelation(t *testing.T) {
 	_, err = cache.getOrBuild(ctx, func() runtimeKey { return key }, nil)
 	require.NoError(t, err)
 	cache.invalidate(ctx, "skills_changed", runtimeKey{config: 1, local: 1})
-	output := logs.String()
+
+	// Scope to this test's own lines before asserting on their content: this
+	// test does not call t.Parallel(), but a leaked goroutine from an
+	// unrelated test (e.g. one of the delegation lifecycle's background run
+	// watchers - see the comment on syncLogBuffer) can still write through
+	// the same process-global default while this capture is active. Every
+	// line this test's own calls produce carries session_id=session-1, so
+	// filtering on that keeps both the presence checks and, crucially, the
+	// "threads_changed never appears" absence check from being able to pass
+	// or fail based on someone else's line.
+	//
+	// TestCoordinatorInvalidationKeepsNewestReasonAndGeneration deliberately
+	// logs a real "reason=threads_changed" line elsewhere in this same
+	// file - the exact case an unscoped absence check on the whole buffer
+	// could collide with.
+	const needle = "session_id=session-1 "
+	var ownLines []string
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if strings.Contains(line, needle) {
+			ownLines = append(ownLines, line)
+		}
+	}
+	output := strings.Join(ownLines, "\n")
 	for _, field := range []string{"level=DEBUG", "level=INFO", "event=miss", "event=build", "event=hit", "event=invalidate", "reason=skills_changed", "session_id=session-1", "run_id=run-1"} {
 		require.Contains(t, output, field)
 	}

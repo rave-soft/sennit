@@ -1300,18 +1300,49 @@ func TestTrimToBudgetLogsActualCounts(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	for i, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			before := len(logs.String())
-			kept := trimToBudget(test.msgs, test.budget)
-			record := logs.String()[before:]
+			// This test is not itself parallel (captureLogs above holds
+			// logCaptureMu for its whole body), but a *parallel* test
+			// elsewhere in the package can still log through the same
+			// process-global default while this one holds the capture -
+			// so a plain "did the counts appear anywhere since before"
+			// check could read another test's trim line. Tag this call
+			// with a session id unique to the subtest and select the
+			// line by it, the same way TestTrimToBudgetLogsCorrelationIDs
+			// does, rather than diffing the whole buffer.
+			sessionID := fmt.Sprintf("trim-actual-counts-%d", i)
+			kept := trimToBudget(test.msgs, test.budget, trimCorr(sessionID, ""))
 			assert.LessOrEqual(t, messagesTextLen(kept), test.budget)
-			assert.Contains(t, record, fmt.Sprintf("dropped_messages=%d", test.dropped))
-			assert.Contains(t, record, fmt.Sprintf("kept_messages=%d", test.kept))
-			assert.Contains(t, record, fmt.Sprintf("truncated_messages=%d", test.truncated))
-			assert.Contains(t, record, fmt.Sprintf("placeholder_messages=%d", test.stub))
+
+			line, ok := findTrimLogLine(logs, sessionID)
+			require.True(t, ok, "expected a trim log line for this subtest's session id")
+			assert.Contains(t, line, fmt.Sprintf("dropped_messages=%d", test.dropped))
+			assert.Contains(t, line, fmt.Sprintf("kept_messages=%d", test.kept))
+			assert.Contains(t, line, fmt.Sprintf("truncated_messages=%d", test.truncated))
+			assert.Contains(t, line, fmt.Sprintf("placeholder_messages=%d", test.stub))
 		})
 	}
+}
+
+// findTrimLogLine returns the raw text-handler line logging the carried
+// sub-agent trim (see logTrim) that carries sessionID, and whether one was
+// found. captureLogs installs a text handler, so lines are matched by their
+// rendered "session_id=<id>" token rather than decoded JSON; the trailing
+// space guards against one session id being a prefix of another (e.g.
+// "trim-actual-counts-1" vs "trim-actual-counts-10").
+func findTrimLogLine(buf *syncLogBuffer, sessionID string) (string, bool) {
+	needle := "session_id=" + sessionID + " "
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, `msg="Trimmed the carried sub-agent session to the budget"`) &&
+			strings.Contains(line, needle) {
+			return line, true
+		}
+	}
+	return "", false
 }
 
 // TestTrimToBudgetLogsCorrelationIDs is the actual-site integration contract
@@ -1523,17 +1554,37 @@ func TestTrimToBudgetPreparePromptProducesNoOrphanRepairs(t *testing.T) {
 		assistantText("done"),
 	}
 
+	// Tag every preparePrompt call with a session id unique to this test so
+	// the absence check below can be scoped to this test's own repair
+	// lines. Without this, the check is exposed the other way around from
+	// the usual pollution risk: this test is not itself parallel, but a
+	// *parallel* test elsewhere in the package (repair_diag_test.go's
+	// tests deliberately provoke these exact same messages) can still log
+	// through the shared process-global default while this test holds the
+	// capture, and a bare "not anywhere in the buffer" check would then
+	// spuriously fail on someone else's orphan repair.
+	const sessionID = "trim-no-orphan-repairs"
 	for _, budget := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 40} {
 		kept := trimToBudget(session, budget)
 		assert.False(t, hasOrphanToolResult(kept),
 			"budget %d: trimming must not leave a result whose call was dropped", budget)
 
-		_, _ = agent.preparePrompt(kept, true, nil, nil)
+		_, _ = agent.preparePrompt(kept, true, nil, nil, withRepairSessionID(sessionID, ""))
 	}
 	// The trimming orphans that the old code produced are repaired by
-	// preparePrompt with a warning; T1 must not create any of them.
-	assert.NotContains(t, logs.String(), "Dropping orphaned tool result",
+	// preparePrompt with a warning; T1 must not create any of them. Scope
+	// the check to this test's own session id, not the whole shared
+	// buffer.
+	var ownLines []string
+	needle := "session_id=" + sessionID + " "
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if strings.Contains(line, needle) {
+			ownLines = append(ownLines, line)
+		}
+	}
+	own := strings.Join(ownLines, "\n")
+	assert.NotContains(t, own, "Dropping orphaned tool result",
 		"trimToBudget must not leave a result whose call was dropped for preparePrompt to repair")
-	assert.NotContains(t, logs.String(), "Injecting synthetic tool result",
+	assert.NotContains(t, own, "Injecting synthetic tool result",
 		"trimToBudget must not leave a call whose result was dropped for preparePrompt to repair")
 }
