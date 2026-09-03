@@ -1066,14 +1066,20 @@ UI-диалоги и вложения. Каждая область читала�
 Итог: 25 дефектов, 4 нарушения границ, 5 пунктов DRY/мёртвого кода.
 Ни одна находка не выведена из метрики; метрики (детектор клонов,
 подсчёт вызывающих) использованы только как указатель, куда читать, и
-каждая подтверждена чтением потребителей или репродукцией. Всё открыто.
+каждая подтверждена чтением потребителей или репродукцией.
+
+**Состояние: закрыто всё, кроме B3 и B4.** Хеш коммита стоит у каждого
+пункта. Ни одна находка при реализации не отвалилась — все 32 оказались
+настоящими. B3 (продолжение делегации выполняет агент-кодер) требует
+передела, а не правки, и помечен «не делать наспех»; B4 — продуктовое
+решение, подключать ротацию к делегациям или задокументировать отказ.
 
 ## Фаза 1. Баги
 
 По убыванию тяжести. Первые три — потеря данных или зависание, чинить
 до всего остального.
 
-### G1 [M] Безголовое разрешение теряется при респауне треда
+### G1 [закрыт, `59863fd6f`] Безголовое разрешение теряется при респауне треда
 
 `df020bef1` (F1/F7) пробрасывает грант только в `Manager.Create`
 (`thread/manager.go:356-362`). Грант живёт в `permission.Service`
@@ -1097,7 +1103,7 @@ Merge again» (`merge.go:36-38`) → `agent_send` → `lifecycle.send` при
 `TestManager_CreateInheritsAutoApprovalFromApprovedParent` с завершением
 рана и последующим `Send`.
 
-### G2 [M] `lsp_replace_symbol` режет файл по устаревшим границам
+### G2 [закрыт, `23a17963d`] `lsp_replace_symbol` режет файл по устаревшим границам
 
 `lsp_replace_symbol.go:88-99`: `DocumentSymbols` → сразу
 `applyFileMutation`, без `checkFileFreshness` и `requireReadCoverage`,
@@ -1119,7 +1125,7 @@ Merge again» (`merge.go:36-38`) → `agent_send` → `lifecycle.send` при
 (`filesync.go:105-118` перечитывает диск целиком), плюс тот же switch по
 `checkFileFreshness`, что в `write.go`.
 
-### G3 [M] Переименование сессии из TUI пишет всю строку из снимка
+### G3 [закрыт, `f0676ae0f`] Переименование сессии из TUI пишет всю строку из снимка
 
 `ui/dialog/sessions.go:242,258` берёт сессию из снимка `ListSessions`
 (`dialogs.go:433`, pubsub-обновлений диалог не получает) и зовёт
@@ -1137,7 +1143,7 @@ completion_tokens, summary_message_id, cost, todos` целиком. Пока д�
 (`cmd/session.go:279`). Правка: `Workspace.RenameSession` → `Rename`;
 `SaveSession` после этого без вызывающих вне тестов — удалить.
 
-### G4 [S] Отмена во время авто-суммаризации публикуется как ошибка
+### G4 [закрыт, `168d80daf`] Отмена во время авто-суммаризации публикуется как ошибка
 
 `run_turn.go:519-527`: ветка «ничего не в очереди» кладёт
 `summarizeFailed.Error()` в `RunComplete` без `Cancelled`, тогда как
@@ -1148,7 +1154,7 @@ ctx.Err() != nil`. `thread/lifecycle.go:947-949` по `Error != ""` даёт
 `FinishReasonCanceled` в транскрипте. Правка: то же правило в первой
 ветке; `AgentFinished` при отменённой суммаризации не публиковать.
 
-### G5 [M] Браузерный вход в MCP ограничен таймаутом запуска сервера
+### G5 [закрыт, `864ab6b16`] Браузерный вход в MCP ограничен таймаутом запуска сервера
 
 `tools/mcp/connection.go:121-122`: `mcpCtx` получает `AfterFunc(timeout,
 cancel)`; под ним `client.Connect` → 401 → `transport.go:191`
@@ -1162,7 +1168,7 @@ cancel)`; под ним `client.Connect` → 401 → `transport.go:191`
 `Authorize` под `context.WithoutCancel` + собственный интерактивный лимит,
 привязанный к `flow.cancel`.
 
-### G6 [S] grep-фоллбэк на симлинке-каталоге возвращает пусто
+### G6 [закрыт, `23a17963d`] grep-фоллбэк на симлинке-каталоге возвращает пусто
 
 `grep.go:430` `filepath.Walk(rootPath)` делает `lstat` корня. F5 закрыл
 это для `ls` (`fsext/ls.go:262-271`), `glob` через `fastwalk` stat-ит
@@ -1173,7 +1179,7 @@ cancel)`; под ним `client.Connect` → 401 → `transport.go:191`
 аудита 5: `ls`/`glob` получили `Incomplete`, `grep` молчит. Правка: тот
 же резолв корня, что в `VisitDirectory`, и флаг неполноты в метаданных.
 
-### G7 [S] Два запуска без файлового лога
+### G7 [закрыт, `0ccc91741`] Два запуска без файлового лога
 
 Один инвариант, две поверхности (класс 7).
 
@@ -1195,7 +1201,7 @@ cancel)`; под ним `client.Connect` → 401 → `transport.go:191`
 Проверить выбор файла в `logs.go` — иначе «самый новый лог» окажется от
 `sennit stat`.
 
-### G8 [S] `@`-вставка файла без лимита размера и типа
+### G8 [закрыт, `0ccc91741`] `@`-вставка файла без лимита размера и типа
 
 `ui/model/editor_input.go:249-262` `insertFileCompletion`: `os.ReadFile`
 без `MaxAttachmentSize`; остальные пять путей (`:357,477,531,579,630`,
@@ -1205,7 +1211,7 @@ cancel)`; под ним `client.Connect` → 401 → `transport.go:191`
 `application/octet-stream` (`message_convert.go:57-66`). Правка: `Stat` +
 лимит + для не-текста и не-картинки — только путь в тексте.
 
-### G9 [S] Превью в file picker декодирует без лимита пикселей
+### G9 [закрыт, `0ccc91741`] Превью в file picker декодирует без лимита пикселей
 
 `ui/dialog/filepicker.go:208-219`: `MaxPreviewSize` (2 МБ) по байтам,
 затем `image.Decode`. PNG 20000×20000 однотонной заливки — 1.5 МБ на
@@ -1213,7 +1219,7 @@ cancel)`; под ним `client.Connect` → 401 → `transport.go:191`
 (`:165-167`). `DecodeConfig` в UI не используется. Правка: `DecodeConfig`
 → отказ выше порога → `Seek(0)` → `Decode`.
 
-### G10 [S] `Remove` рушит живой воркспейс раньше проверки, которая может отказать
+### G10 [закрыт, `59863fd6f`] `Remove` рушит живой воркспейс раньше проверки, которая может отказать
 
 `thread/manager.go:888-901`: `c.removed = true`, `runtime = nil`,
 `releaseRuntime` → `App.Shutdown()` — и только на `:920-926`
@@ -1225,7 +1231,7 @@ live», `types.go:16-22`), а App, к которому привязан экра
 Класс 4. Правка: поднять проверку выше `:888` — она читает только
 `repoRoot`.
 
-### G11 [S] `Send` возобновляет тред без ворктри
+### G11 [закрыт, `59863fd6f`] `Send` возобновляет тред без ворктри
 
 `Activate` проверяет `os.Stat(st.WorktreePath)` (`manager.go:615`);
 `Manager.send` (`:777`) и `lifecycle.send` (`:675`) — нет. После
@@ -1237,7 +1243,7 @@ git-ошибкой; `Remove` потом не проходит. Правка: т�
 `Manager.send` (не в `lifecycle.send` — он общий с задачами, у которых
 `spawnPath == ""`).
 
-### G12 [S] MCP `EmbeddedResource`/`ResourceLink` уходят модели как дамп указателя
+### G12 [закрыт, `864ab6b16`] MCP `EmbeddedResource`/`ResourceLink` уходят модели как дамп указателя
 
 `tools/mcp/tools.go:87-88` `default: fmt.Sprintf("%v", v)` для
 `*mcp.EmbeddedResource` (`Resource *ResourceContents`) печатает
@@ -1245,7 +1251,7 @@ git-ошибкой; `Remove` потом не проходит. Правка: т�
 embedded-ресурсом — модель видит адрес памяти при `IsError=false`.
 Правка: ветки на оба типа (`Resource.Text`/`Blob` по MIME; `URI`+`Name`).
 
-### G13 [S] `read_mcp_resource`: бинарный blob без лимита и MIME
+### G13 [закрыт, `864ab6b16`] `read_mcp_resource`: бинарный blob без лимита и MIME
 
 `read_mcp_resource.go:85-87` `string(content.Blob)` — сырые байты, без
 кэпа ни здесь, ни в `Registry.ReadResource` (`resources.go:52-62`).
@@ -1254,7 +1260,7 @@ UTF-8 в SQLite и в каждый ход. Правка: по `MIMEType` (тек
 через `NewImageResponse` / отказ с размером), байтовый лимит с
 `truncated`; ту же границу — текстовому результату `RunTool`.
 
-### G14 [S] Halt хука не останавливает ход у порога окна контекста
+### G14 [закрыт, `168d80daf`] Halt хука не останавливает ход у порога окна контекста
 
 fantasy считает `StopWhen` независимо от `stopTurnRequested`
 (`third_party/fantasy/agent.go:577,616-618`), `onStepFinish` пишет
@@ -1265,7 +1271,7 @@ fantasy считает `StopWhen` независимо от `stopTurnRequested`
 halt/deny превращается в «суммаризировать и продолжить». Правка:
 `t.haltedByTool` в `onStepFinish`, без requeue при нём.
 
-### G15 [S] Отрицательное окно контекста проходит в арифметику
+### G15 [закрыт, `168d80daf`] Отрицательное окно контекста проходит в арифметику
 
 Хвост D2. `summarizePolicy.window` считает «нет окна» при `<= 0`
 (`usage.go:46-51`), `stopOnContextWindow` — только `cw == 0`
@@ -1275,7 +1281,7 @@ halt/deny превращается в «суммаризировать и про
 (`shellconfig/model.go:66`, `flags.go:136` знак не проверяет). Правка:
 `cw <= 0` и отказ отрицательного в `shellconfig`.
 
-### G16 [S] На ошибке провайдера UI получает и «finished», и «failed»
+### G16 [закрыт, `168d80daf`] На ошибке провайдера UI получает и «finished», и «failed»
 
 `completeTurn` публикует `TypeAgentFinished` и при `err != nil`
 (`run_turn.go:495-501`, из error-path `:851`); `AgentDispatcher.run`
@@ -1283,7 +1289,7 @@ halt/deny превращается в «суммаризировать и про
 `ui/model/notifications.go:219-244` шлёт оба уведомления. Правка:
 `AgentFinished` только при `err == nil`.
 
-### G17 [S] Отмена до создания assistant-сообщения не дренирует очередь
+### G17 [закрыт, `168d80daf`] Отмена до создания assistant-сообщения не дренирует очередь
 
 `run_turn.go:825-827` при `currentAssistant == nil` возвращается без
 `drainNext`, комментарий обещает, что сюда ведёт только откат
@@ -1295,7 +1301,7 @@ halt/deny превращается в «суммаризировать и про
 Правка: дренировать на cancel-пути; откат `foldSteering` отличим по
 `!isCancelErr`.
 
-### G18 [S] `UpdateSessionUsage` пишет `title` из снимка
+### G18 [закрыт, `f0676ae0f`] `UpdateSessionUsage` пишет `title` из снимка
 
 Комментарий у `SaveUsage` (`service.go:40-48`) называет конкурента —
 асинхронный заголовок (`title.go:212`) — и защищает `cost` через
@@ -1306,7 +1312,7 @@ halt/deny превращается в «суммаризировать и про
 (`run_turn.go:715`) — «New Session» навсегда. Правка: убрать `title` из
 запроса; никто из вызывающих `SaveUsage` не переименовывает.
 
-### G19 [S] `Rename` обещает не трогать `updated_at`, триггер трогает
+### G19 [закрыт, `f0676ae0f`] `Rename` обещает не трогать `updated_at`, триггер трогает
 
 `service.go:336` против триггера из
 `20260811000001_preserve_explicit_session_updated_at.sql:10-14`: условие
@@ -1318,7 +1324,7 @@ halt/deny превращается в «суммаризировать и про
 (`UpdateSession`, `UpdateSessionUsage`, `AttributeTaskCostOnce`,
 `SetSessionModel`). Дешёвая альтернатива — переписать комментарий.
 
-### G20 [S] Запись через висячий симлинк: диалог подписан путём ссылки
+### G20 [закрыт, `23a17963d`] Запись через висячий симлинк: диалог подписан путём ссылки
 
 `filemutation.go:158-167`: `resolveExistingAncestorSymlinks` на висячей
 ссылке падает (намеренно, `tools.go:243-247`), ошибка гасится в
@@ -1329,14 +1335,14 @@ halt/deny превращается в «суммаризировать и про
 ключе), остаётся ложная подпись. Правка: при ошибке резолва брать
 `writePath` и «(resolves to …)», как `outsideWorkdirNotice`.
 
-### G21 [S] `download` не резолвит симлинки-предки в ключе разрешения
+### G21 [закрыт, `23a17963d`] `download` не резолвит симлинки-предки в ключе разрешения
 
 `download.go:106-115` `Path: filePath` без `resolveWithinWorkdir` и
 `outsideWorkdirNotice`, которыми F4 закрыт для `read_core.go:44-48` и
 `applyFileMutation`. Сценарий из `tools.go:227-231`: `ln -s ../.. up` →
 `download <url> up/x` → диалог «to …/up/x», файл на два уровня выше.
 
-### G22 [S] Потеря владения MCP-сессией обрывает батч
+### G22 [закрыт, `864ab6b16`] Потеря владения MCP-сессией обрывает батч
 
 `tools/mcp/init.go:33,61,66,70` и `resources.go:37` возвращают
 `context.Canceled` вместо `errLostOwnership`; `mcp-tools.go:185` по
@@ -1345,7 +1351,7 @@ halt/deny превращается в «суммаризировать и про
 совпал с правкой `sennitrc`). Две ветки для одного смысла. Правка:
 единый `errLostOwnership`; `connection.go:526` учитывать его.
 
-### G23 [S] `home.Long` склеивает `~user/…` с чужим домом
+### G23 [закрыт, `0ccc91741`] `home.Long` склеивает `~user/…` с чужим домом
 
 `home/home.go:60` проверяет `HasPrefix(p, "~")`, не `"~/"`:
 `~alice/bin/server` → `/home/bobalice/bin/server`. Вызывающие — команды
@@ -1353,20 +1359,20 @@ MCP (`transport.go:68`), LSP (`lsp/lifecycle.go:97`), скиллы
 (`skills/manager.go:290`), контекстные файлы (`prompt.go:160`),
 `fsext/ls.go:82`. Правка: расширять только `~` и `~/`.
 
-### G24 [S] `ErrAllExhausted.ResetsAt` считает выключенные аккаунты
+### G24 [закрыт, `864ab6b16`] `ErrAllExhausted.ResetsAt` считает выключенные аккаунты
 
 `providers/accounts/rotator.go:260-270` берёт `earliestResetFor` и для
 `Disabled`; уведомление «resets at 15:04» указывает на момент, когда
 ничего не изменится. Правка: пропускать `a.Disabled`.
 
-### G25 [S] `fetch` валидирует `timeout` после диалога разрешения
+### G25 [закрыт, `23a17963d`] `fetch` валидирует `timeout` после диалога разрешения
 
 `fetch.go:87-104` — диалог показан, одобрен, затем «timeout must be
 between 0 and 120»; `download.go:85-87` проверяет до. Перенести выше.
 
 ## Фаза 2. Границы контекстов
 
-### B1 [M] `internal/commands` импортирует `internal/agent/tools/mcp`
+### B1 [закрыт, `0ccc91741`] `internal/commands` импортирует `internal/agent/tools/mcp`
 
 `commands/commands.go:13`; `LoadMCPPrompts(*mcp.Registry)` (`:93`) и
 `GetMCPPrompt(*mcp.Registry, mcp.ConfigProvider, …)` (`:250`).
@@ -1377,7 +1383,7 @@ between 0 and 120»; `download.go:85-87` проверяет до. Перенес
 `LoadMCPPrompts` может принимать `iter.Seq2[string, []*sdkmcp.Prompt]`, а
 `GetMCPPrompt` — замыкание; appws передаёт `w.app.MCP.Prompts()`.
 
-### B2 [S] Первое нативное уведомление пишет иконку на диск в `Update`
+### B2 [закрыт, `0ccc91741`] Первое нативное уведомление пишет иконку на диск в `Update`
 
 `ui/notification/native.go` `Send`: `resolvedIcon()` → `CacheIcon`
 (`icon_cache.go:27-34`: `ReadFile`, `MkdirAll`, `WriteFile`) выполняется
@@ -1419,7 +1425,7 @@ finished: <делегация>» на каждый раунд), todo-reminder в
 
 ## Фаза 3. DRY, KISS, мёртвые механизмы
 
-### D1 [S] Шлюз «вне рабочей папки» скопирован в пять читающих инструментов
+### D1 [закрыт, `23a17963d`] Шлюз «вне рабочей папки» скопирован в пять читающих инструментов
 
 `glob.go:80-102`, `grep.go:173-195`, `ripgrep.go:120-142`, `ls.go:104-126`,
 `read_core.go:50-60` — одинаковы вплоть до обработки ошибок, различаются
@@ -1430,13 +1436,13 @@ toolName, action, verb, abs, resolved, params)`; `web_fetch.go:46-67` и
 `web_search.go:99-120` — тот же блок без резолва пути, можно тем же
 хелпером с пустым `resolved`.
 
-### D2 [S] `matchedRanges` и `bytePosToVisibleCharPos` продублированы между UI-пакетами
+### D2 [закрыт, `0ccc91741`] `matchedRanges` и `bytePosToVisibleCharPos` продублированы между UI-пакетами
 
 `ui/completions/item.go:312-355` и `ui/dialog/sessions_item.go:236-278` —
 43 строки побайтово, uniseg-логика ширины графем. Место — `ui/util` или
 `ui/common`, оба уже в графе обоих пакетов.
 
-### D3 [S] `RuntimeStore.WriteRuntimeConfigFields` — без вызывающих вне тестов
+### D3 [закрыт, `0ccc91741`] `RuntimeStore.WriteRuntimeConfigFields` — без вызывающих вне тестов
 
 `config/runtime.go:57`, реализация `store.go:406` с doc-комментарием;
 потребители — `watch_test.go:268` и заглушка
@@ -1447,7 +1453,7 @@ toolName, action, verb, abs, resolved, params)`; `web_fetch.go:46-67` и
 `PrepareContext`). Удалить метод из интерфейса; реализацию — если
 `watch_test` не проверяет ею что-то, что нельзя проверить иначе.
 
-### D4 [S] Мёртвое описание в `turnDispatcher.run`
+### D4 [закрыт, `168d80daf`] Мёртвое описание в `turnDispatcher.run`
 
 `turn_dispatcher.go:263-299` описывает «coalesce per-attempt RunComplete»
 и «the auth-retry chain may call run twice», ради чего `onDispatch`
@@ -1455,7 +1461,7 @@ toolName, action, verb, abs, resolved, params)`; `web_fetch.go:46-67` и
 внутри fantasy. Механизм безвреден, описание вводит в заблуждение —
 класс 2. Убрать `Once` и абзац.
 
-### D5 [S] Отмена в четырёх LSP-инструментах уходит модели текстом
+### D5 [закрыт, `23a17963d`] Отмена в четырёх LSP-инструментах уходит модели текстом
 
 `lsp_replace_symbol.go:93-95`, `lsp_symbols.go:45-47`, `lsp_hover.go:74-76`,
 `lsp_call_hierarchy.go:52,66,81` заворачивают любой `err`, включая
