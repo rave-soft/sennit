@@ -147,7 +147,19 @@ func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
 	if msg, refused := confinementRefusal(req.permissions, req.filePath); refused {
 		return fantasy.NewTextErrorResponse(msg), nil
 	}
-	snapshot, err := readFileSnapshot(req.filePath)
+	// writePath is the file this mutation actually reads, compares, and
+	// writes: req.filePath itself, or, when req.filePath is a symlink, the
+	// file at the end of its target chain — the same file the diff and the
+	// permission prompt already show, since readFileSnapshot below follows
+	// the link the same way opening req.filePath directly always did. A
+	// symlink is never renamed over: only writePath is, so the link itself
+	// is left exactly as it was, and a dangling link's absent target is
+	// simply where the file gets created.
+	writePath, err := fsext.ResolveWriteTarget(req.filePath)
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	snapshot, err := readFileSnapshot(writePath)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -171,7 +183,7 @@ func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
 		return fantasy.WithResponseMetadata(resp, prepared.metadata(prepared.diffContent, diffText, additions, removals)), nil
 	}
 	if !snapshot.exists {
-		if err := ensureParentDir(req.filePath); err != nil {
+		if err := ensureParentDir(writePath); err != nil {
 			return fantasy.ToolResponse{}, err
 		}
 	}
@@ -179,19 +191,19 @@ func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
 	if !snapshot.exists {
 		mode = 0o644
 	}
-	err = fsext.AtomicWriteFileIfUnchanged(req.filePath, snapshot.raw, []byte(prepared.writeContent), mode, snapshot.exists)
+	err = fsext.AtomicWriteFileIfUnchanged(writePath, snapshot.raw, []byte(prepared.writeContent), mode, snapshot.exists)
 	if err != nil {
 		if errors.Is(err, fsext.ErrFileChanged) {
 			return fantasy.NewTextErrorResponse("file changed on disk after approval; retry after reading the current file"), nil
 		}
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to atomically write file: %w", err)
 	}
-	historyErr := recordFileHistory(req.ctx, req.files, req.sessionID, req.filePath, string(snapshot.raw), prepared.writeContent)
+	historyErr := recordFileHistory(req.ctx, req.files, req.sessionID, writePath, string(snapshot.raw), prepared.writeContent)
 	if req.filetracker != nil {
 		if prepared.wholeFileRead {
-			recordWholeFileRead(req.ctx, req.filetracker, req.sessionID, req.filePath)
+			recordWholeFileRead(req.ctx, req.filetracker, req.sessionID, writePath)
 		} else {
-			recordEditedSpan(req.ctx, req.filetracker, req.sessionID, req.filePath, snapshot.content, prepared.diffContent)
+			recordEditedSpan(req.ctx, req.filetracker, req.sessionID, writePath, snapshot.content, prepared.diffContent)
 		}
 	}
 	if historyErr != nil {

@@ -112,13 +112,15 @@ func conditionalReplaceLockPath(path string) string {
 // through this function at all — it calls AtomicWriteFile directly.
 func conditionalReplaceExisting(path string, expected, data []byte, mode os.FileMode) error {
 	path = filepath.Clean(path)
-	// Lock on path's canonical spelling, not its as-given one: a symlink and
-	// its target (or two absolute spellings of the same file) must contend
+	// Lock on path's canonical spelling, not its as-given one: two absolute
+	// spellings of the same file (or a caller that has already resolved a
+	// symlink to its target, as internal/agent/tools/filemutation.go does
+	// via fsext.ResolveWriteTarget before ever reaching here) must contend
 	// on the same lock, in both lockMutationPath's in-process map and
 	// conditionalReplaceLockPath's cross-process flock, or they sail past
-	// each other unserialized. The actual read/write below still targets
-	// path as given, so a symlink is replaced through the symlink, not its
-	// target.
+	// each other unserialized. path is expected to already name the file to
+	// replace, not a symlink to it — the read and the rename below both act
+	// on path exactly as given, so nothing here re-resolves it.
 	lockKey := Canonical(path)
 	unlock := lockMutationPath(lockKey)
 	defer unlock()

@@ -2,6 +2,7 @@ package fsext
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +17,61 @@ var ErrFileChanged = errors.New("file changed")
 // cannot hard-link (see isUnsupportedLinkError) without needing an actual
 // one.
 var linkFile = os.Link
+
+// ResolveWriteTarget reports the file a write to path actually lands on.
+// A path that is not itself a symlink resolves to itself; a symlink
+// resolves to the file at the end of its own target chain, however many
+// hops that takes, so a caller that reads, compares, and writes through
+// this same result never disagrees with itself about which file is being
+// mutated.
+//
+// The target does not have to exist yet: a symlink is allowed to be
+// dangling (a stow or Nix-managed dotfile, a build's output link before
+// the first build), and its target is exactly where a write through it
+// should land. Only path's own chain of symlinks is followed here — a
+// directory symlink elsewhere in path's ancestry is left to however the
+// path ends up opened (which already resolves it, the same way it always
+// has).
+func ResolveWriteTarget(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return path, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+
+	seen := map[string]struct{}{path: {}}
+	cur := path
+	for {
+		linkTarget, err := os.Readlink(cur)
+		if err != nil {
+			return "", fmt.Errorf("read symlink %s: %w", cur, err)
+		}
+		if !filepath.IsAbs(linkTarget) {
+			linkTarget = filepath.Join(filepath.Dir(cur), linkTarget)
+		}
+		cur = filepath.Clean(linkTarget)
+
+		info, err := os.Lstat(cur)
+		if errors.Is(err, os.ErrNotExist) {
+			return cur, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("stat %s: %w", cur, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return cur, nil
+		}
+		if _, ok := seen[cur]; ok {
+			return "", fmt.Errorf("resolve symlink %s: too many levels of symbolic links", path)
+		}
+		seen[cur] = struct{}{}
+	}
+}
 
 func AtomicWriteFileIfUnchanged(path string, expected, data []byte, mode os.FileMode, exists bool) error {
 	if exists {
