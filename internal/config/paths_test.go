@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,23 +66,27 @@ func TestProjectSkillsDir_WorkingDirLast(t *testing.T) {
 
 	dirs := ProjectSkillsDir(workingDir)
 
-	gitRootSkills := filepath.Join(root, ".sennit", "skills")
-	workingDirSkills := filepath.Join(workingDir, ".sennit", "skills")
+	// The git-root entry comes back as git reports the root, which is the
+	// canonical spelling: /private/var/... rather than /var/... on macOS,
+	// and the long form rather than an 8.3 short name on Windows. Match on
+	// the subdirectory component instead of comparing whole paths, so the
+	// assertion is about order rather than about how each side spells the
+	// same directory.
+	subdirSuffix := filepath.Join("aaa-subdir", ".sennit", "skills")
 
 	gitRootIdx, workingDirIdx := -1, -1
 	for i, d := range dirs {
-		switch d {
-		case gitRootSkills:
-			gitRootIdx = i
-		case workingDirSkills:
+		if strings.HasSuffix(d, subdirSuffix) {
 			workingDirIdx = i
+		} else if strings.HasSuffix(d, filepath.Join(".sennit", "skills")) {
+			gitRootIdx = i
 		}
 	}
 	if gitRootIdx == -1 || workingDirIdx == -1 {
-		t.Fatalf("ProjectSkillsDir(%q) = %v, want both %q and %q", workingDir, dirs, gitRootSkills, workingDirSkills)
+		t.Fatalf("ProjectSkillsDir(%q) = %v, want a git-root entry and a working-directory entry", workingDir, dirs)
 	}
 	if workingDirIdx < gitRootIdx {
-		t.Fatalf("ProjectSkillsDir(%q) = %v, want working-directory entry (%q) after git-root entry (%q)", workingDir, dirs, workingDirSkills, gitRootSkills)
+		t.Fatalf("ProjectSkillsDir(%q) = %v, want the working-directory entry after the git-root one", workingDir, dirs)
 	}
 }
 
