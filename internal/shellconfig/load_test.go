@@ -581,6 +581,48 @@ func TestConfigBuilder_NoBuilderInContext(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestLoadShellConfig_TrailingNonZeroStatusKeepsConfig verifies that a
+// script whose last command exits non-zero still yields the config it
+// built rather than discarding it. This is the ordinary rc idiom of a
+// trailing probe, e.g. `command -v foo >/dev/null && lsp add foo ...`:
+// bash does not refuse to start because .bashrc's last line returned
+// non-zero, and Sennit must not either.
+func TestLoadShellConfig_TrailingNonZeroStatusKeepsConfig(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `provider add openai --api-key k
+command -v definitely-not-installed-xyz >/dev/null && provider add other --api-key k2`
+	path := filepath.Join(dir, "sennitrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err, "a non-zero trailing script status must not fail the load")
+	require.NotNil(t, jsonBytes)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	providers := result["providers"].(map[string]any)
+	require.Contains(t, providers, "openai", "config built before the failing probe must survive")
+	require.NotContains(t, providers, "other", "the probe itself must not have run")
+}
+
+// TestLoadShellConfig_BuiltinErrorStillFails verifies that a builtin
+// failure (not just a script's own exit status) still fails the load, even
+// when it isn't the script's last line. Builtin errors surface as their
+// own error value, distinct from interp.ExitStatus, so they must not be
+// swallowed by the trailing-status tolerance above.
+func TestLoadShellConfig_BuiltinErrorStillFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option --bogus foo
+true`
+	path := filepath.Join(dir, "sennitrc")
+
+	_, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.Error(t, err, "a builtin error must fail the load even when a later line succeeds")
+}
+
 // TestLoadShellConfig_RespectsContextCancellation verifies that a hanging
 // sennitrc cannot block config loading indefinitely. Config loads run on the
 // startup and reload critical paths while the config store's write lock is

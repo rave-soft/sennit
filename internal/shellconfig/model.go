@@ -125,6 +125,20 @@ func modelRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if !exists {
 		return nil
 	}
+	// providers[provider] may be a tombstone left by an earlier `provider
+	// remove` in this script: a plain type assertion still succeeds (the
+	// wrapper is itself a map[string]any), and writing "models" beside
+	// __sennit_tombstone corrupts the entry so ParseTombstone rejects the
+	// whole config once it round-trips through JSON. The in-builder
+	// representation stores the marker as a Tombstone value directly (not
+	// yet the JSON-shaped map[string]any ParseTombstone parses), matching
+	// the check addLocal already does. The provider is already gone as far
+	// as this script is concerned, so removing one of its models is a
+	// no-op — same as the !exists case above — rather than resurrecting
+	// the provider entry by writing into (or past) the tombstone.
+	if _, tombstoned := p[TombstoneKey].(Tombstone); tombstoned {
+		return nil
+	}
 	modelsArr, _ := p["models"].([]any)
 	p["models"] = filterOutByField(modelsArr, "id", id)
 

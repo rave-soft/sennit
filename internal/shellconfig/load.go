@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/version"
+	"mvdan.cc/sh/v3/interp"
 )
 
 // loadTimeout bounds a single sennitrc execution. This runs on the startup
@@ -59,8 +61,22 @@ func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, erro
 			slog.Error("Shell config execution timed out or was cancelled", "path", path, "error", err)
 			return nil, fmt.Errorf("shell config %s: execution timed out or was cancelled: %w", path, err)
 		}
-		slog.Error("Shell config execution failed", "path", path, "error", err)
-		return nil, fmt.Errorf("executing shell config %s: %w", path, err)
+		// A bare interp.ExitStatus is the exit code of the script's last
+		// command, not a builtin failure: bash itself doesn't refuse to
+		// start because .bashrc's last line returned non-zero, and rc
+		// idioms like `command -v foo >/dev/null && lsp add foo ...` end
+		// on a probe that can legitimately fail. A builtin error (bad
+		// flag, unknown option, etc.) surfaces as its own error value, not
+		// as interp.ExitStatus, so it still falls through and fails the
+		// load below. Log the status and keep whatever config the script
+		// built before it exited.
+		var exitStatus interp.ExitStatus
+		if errors.As(err, &exitStatus) {
+			slog.Warn("Shell config exited non-zero", "path", path, "status", int(exitStatus))
+		} else {
+			slog.Error("Shell config execution failed", "path", path, "error", err)
+			return nil, fmt.Errorf("executing shell config %s: %w", path, err)
+		}
 	}
 
 	if builder.empty() {

@@ -184,6 +184,27 @@ func TestModelLargeSmallRejected(t *testing.T) {
 	}
 }
 
+// TestModelRemoveAfterProviderRemove verifies that removing a model from a
+// provider already removed in the same script does not corrupt the
+// provider's tombstone. providers[provider] is the {__sennit_tombstone:
+// ...} wrapper at that point; a plain type assertion to map[string]any
+// still succeeds against it, so writing "models" beside the marker would
+// leave an entry ParseTombstone rejects. The provider is already gone as
+// far as this script is concerned, so the model remove is a no-op and the
+// tombstone is left exactly as `provider remove` wrote it.
+func TestModelRemoveAfterProviderRemove(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add openai --api-key k
+model add openai/a --name "A"
+provider remove openai
+model remove openai/a`)
+
+	providers := result["providers"].(map[string]any)
+	openai := providers["openai"].(map[string]any)
+	require.Equal(t, map[string]any{"section": "providers", "name": "openai"}, openai[TombstoneKey])
+}
+
 func TestProviderUnset(t *testing.T) {
 	t.Parallel()
 

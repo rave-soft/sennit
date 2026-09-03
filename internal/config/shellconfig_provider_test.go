@@ -69,3 +69,38 @@ provider remove dropme`)
 	require.True(t, keep, "keepme should remain")
 	require.False(t, drop, "dropme should be gone after remove")
 }
+
+// TestShellConfigModelRemoveAfterProviderRemove is the regression test for
+// `model remove` writing into a provider's tombstone: `provider remove`
+// leaves a {__sennit_tombstone: ...} wrapper in providers[id], and a naive
+// `model remove` on that same id used to add a "models" key beside the
+// marker, which ParseTombstone rejects — failing the whole config load
+// with a tombstone error unrelated to what the script actually said. The
+// provider stays removed; `model remove` on an already-removed provider is
+// a no-op, matching `model remove` on a provider that was never declared.
+// Loading through the real pipeline (not just the builder's in-memory
+// shape) is what would have caught the original bug: the corruption only
+// surfaces when applyLayerTombstones parses the merged JSON.
+func TestShellConfigModelRemoveAfterProviderRemove(t *testing.T) {
+	store, err := loadSennitShGlobalErr(t, `provider add dropme --type openai-compat --base-url "http://localhost:2/v1" --api-key k
+model add dropme/m2 --name M2
+provider remove dropme
+model remove dropme/m2`)
+	require.NoError(t, err, "removing a model from an already-removed provider must not corrupt the config")
+
+	_, drop := store.Config().Providers.Get("dropme")
+	require.False(t, drop, "dropme must stay removed, not be resurrected by the model remove")
+}
+
+// TestShellConfigModelRemoveBeforeProviderRemove pins the reverse order,
+// documented as harmless: removing a model while the provider still has its
+// real entry, then removing the provider.
+func TestShellConfigModelRemoveBeforeProviderRemove(t *testing.T) {
+	store := loadSennitShGlobal(t, `provider add dropme --type openai-compat --base-url "http://localhost:2/v1" --api-key k
+model add dropme/m2 --name M2
+model remove dropme/m2
+provider remove dropme`)
+
+	_, drop := store.Config().Providers.Get("dropme")
+	require.False(t, drop, "dropme should be gone after remove")
+}

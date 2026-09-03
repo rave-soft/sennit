@@ -42,14 +42,21 @@ func loadSennitShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 // has to live in the global sennitrc to have any effect.
 func loadSennitShGlobal(t *testing.T, script string) *config.ConfigStore {
 	t.Helper()
+	store, err := loadSennitShGlobalErr(t, script)
+	require.NoError(t, err)
+	return store
+}
+
+// loadSennitShGlobalErr is loadSennitShGlobal without asserting success, for
+// cases that are expected to fail at load time.
+func loadSennitShGlobalErr(t *testing.T, script string) (*config.ConfigStore, error) {
+	t.Helper()
 	globalDir := isolateSennitHome(t)
 
 	require.NoError(t, os.MkdirAll(globalDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "sennitrc"), []byte(script), 0o644))
 
-	store, err := configruntime.Load(t.TempDir(), t.TempDir(), false)
-	require.NoError(t, err)
-	return store
+	return configruntime.Load(t.TempDir(), t.TempDir(), false)
 }
 
 // isolateSennitHome points every global config location at a fresh temporary
