@@ -559,10 +559,6 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 		if msg.Args != nil {
 			content = substituteArgs(content, msg.Args)
 		}
-		// If this is a skill command, format it using the skill's FormatInvocation method
-		if msg.Skill != nil {
-			content = msg.Skill.FormatInvocation()
-		}
 		cmds = append(cmds, m.sendMessage(content))
 		m.dialog.CloseFrontDialog()
 	case dialog.ActionAttachSkill:

@@ -308,20 +308,6 @@ func ToPromptXML(skills []*Skill) string {
 	return sb.String()
 }
 
-// FormatInvocation generates XML for a skill when invoked as a user command.
-func (s *Skill) FormatInvocation() string {
-	var sb strings.Builder
-	sb.WriteString("<loaded_skill>\n")
-	fmt.Fprintf(&sb, "  <name>%s</name>\n", escape(s.Name))
-	fmt.Fprintf(&sb, "  <description>%s</description>\n", escape(s.Description))
-	fmt.Fprintf(&sb, "  <location>%s</location>\n", escape(s.SkillFilePath))
-	sb.WriteString("  <instructions>\n")
-	sb.WriteString(escape(s.Instructions))
-	sb.WriteString("\n  </instructions>\n")
-	sb.WriteString("</loaded_skill>")
-	return sb.String()
-}
-
 func escape(s string) string {
 	return promptReplacer.Replace(s)
 }

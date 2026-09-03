@@ -11,7 +11,6 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -114,7 +113,6 @@ type (
 		Content   string
 		Arguments []workspace.Argument
 		Args      map[string]string // Actual argument values
-		Skill     *skills.Skill     // Set when this is a skill command
 	}
 	// ActionAttachSkill is sent when a skill is selected from the commands
 	// dialog to be attached to the conversation as a markdown attachment.

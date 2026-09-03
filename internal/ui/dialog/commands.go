@@ -285,7 +285,6 @@ func customCommandItem(sty *styles.Styles, cmd workspace.CustomCommand) *Command
 		action = ActionRunCustomCommand{
 			Content:   cmd.Content,
 			Arguments: cmd.Arguments,
-			Skill:     cmd.Skill,
 		}
 	}
 	item := NewCommandItem(sty, "custom_"+cmd.ID, cmd.Name, "", action)
