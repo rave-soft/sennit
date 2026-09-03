@@ -13,7 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	"github.com/rivo/uniseg"
+	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -182,9 +182,9 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 	if m != nil && len(m.MatchedIndexes) > 0 {
 		var lastPos int
 		parts := make([]string, 0)
-		ranges := matchedRanges(m.MatchedIndexes)
+		ranges := util.MatchedRanges(m.MatchedIndexes)
 		for _, rng := range ranges {
-			start, stop := bytePosToVisibleCharPos(title, rng)
+			start, stop := util.BytePosToVisibleCharPos(title, rng)
 			if start > lastPos {
 				parts = append(parts, ansi.Cut(title, lastPos, start))
 			}
@@ -231,48 +231,4 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 		items[i] = item
 	}
 	return items
-}
-
-func matchedRanges(in []int) [][2]int {
-	if len(in) == 0 {
-		return [][2]int{}
-	}
-	current := [2]int{in[0], in[0]}
-	if len(in) == 1 {
-		return [][2]int{current}
-	}
-	var out [][2]int
-	for i := 1; i < len(in); i++ {
-		if in[i] == current[1]+1 {
-			current[1] = in[i]
-		} else {
-			out = append(out, current)
-			current = [2]int{in[i], in[i]}
-		}
-	}
-	out = append(out, current)
-	return out
-}
-
-func bytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
-	bytePos, byteStart, byteStop := 0, rng[0], rng[1]
-	pos, start, stop := 0, 0, 0
-	gr := uniseg.NewGraphemes(str)
-	for byteStart > bytePos {
-		if !gr.Next() {
-			break
-		}
-		bytePos += len(gr.Str())
-		pos += max(1, gr.Width())
-	}
-	start = pos
-	for byteStop > bytePos {
-		if !gr.Next() {
-			break
-		}
-		bytePos += len(gr.Str())
-		pos += max(1, gr.Width())
-	}
-	stop = pos
-	return start, stop
 }

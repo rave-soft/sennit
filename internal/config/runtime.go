@@ -54,7 +54,6 @@ func (s *ConfigStore) applyProviderCredentials(provider state.Provider) state.Pr
 
 type RuntimeStore interface {
 	RemoveRuntimeConfigField(Scope, string)
-	WriteRuntimeConfigFields(Scope, map[string]any)
 }
 
 type runtimeEnvironmentResolver struct {

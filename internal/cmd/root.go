@@ -210,6 +210,42 @@ func supportsProgressBar() bool {
 	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "iterm2", "rio")
 }
 
+// setupProcessLogging installs the process-wide file logger the first
+// time any command reaches this point, then replays whatever startup
+// diagnostics EarlyHandler buffered before the logger existed (e.g.
+// config/migrate's deprecated-key warnings). It is the one place that
+// calls sennitlog.Setup: setupLocalWorkspace (interactive and
+// `sennit run`) and initConfig (every read-only command: doctor, stat,
+// models, logs, session, gc, import) both funnel through it, so a
+// warning logged before either path had gotten this far isn't lost
+// depending on which command produced it.
+//
+// sennitlog.Setup only takes effect on its first call in the process
+// (see internal/log's initOnce) - later calls, including from a second
+// command in the same process, are no-ops.
+func setupProcessLogging(cmd *cobra.Command, debug bool) {
+	sennitlog.Setup(config.GlobalLogFile(), debug, verboseLogWriters(cmd)...)
+	if earlyLogs != nil {
+		earlyLogs.Replay(slog.Default())
+	}
+}
+
+// verboseLogWriters returns the extra writers Setup should mirror log
+// records to. Only `sennit run --verbose` wants this; cmd.Flags().GetBool
+// returns false (with an ignored error) for a command that has no
+// "verbose" flag, which is every other command, so calling this
+// unconditionally from setupProcessLogging is safe.
+//
+// Split out as its own function so the verbose/no-verbose decision is
+// unit-testable without tripping internal/log's process-wide Setup
+// singleton.
+func verboseLogWriters(cmd *cobra.Command) []io.Writer {
+	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+		return []io.Writer{os.Stderr}
+	}
+	return nil
+}
+
 // setupWorkspaceWithProgressBar wraps setupLocalWorkspace with an optional
 // terminal progress bar shown during initialization.
 func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, func(), error) {
@@ -256,10 +292,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 			return nil
 		},
 		PostConnect: func(cfg *config.ConfigStore) error {
-			sennitlog.Setup(config.GlobalLogFile(), debug)
-			if earlyLogs != nil {
-				earlyLogs.Replay(slog.Default())
-			}
+			setupProcessLogging(cmd, debug)
 			return nil
 		},
 		OnAppInitFailure: func(err error) {

@@ -1,11 +1,15 @@
 package commands
 
 import (
+	"context"
+	"errors"
+	"iter"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
@@ -111,4 +115,96 @@ func TestFromSkillCatalog_UsesDiscoveredSymlinkedSkills(t *testing.T) {
 	require.Equal(t, "user:linked-skill", cmds[0].ID)
 	require.Equal(t, "linked-skill", cmds[0].Skill.Name)
 	require.Equal(t, filepath.Join(link, skills.SkillFileName), cmds[0].Skill.SkillFilePath)
+}
+
+// seqOf builds an iter.Seq2 from a plain map, the shape LoadMCPPrompts now
+// takes in place of *mcp.Registry (B1: this package must not depend on
+// internal/agent/tools/mcp just to read two methods off it).
+func seqOf(catalog map[string][]*sdkmcp.Prompt) iter.Seq2[string, []*sdkmcp.Prompt] {
+	return func(yield func(string, []*sdkmcp.Prompt) bool) {
+		for name, prompts := range catalog {
+			if !yield(name, prompts) {
+				return
+			}
+		}
+	}
+}
+
+// TestLoadMCPPrompts_ConvertsCatalog pins the shape LoadMCPPrompts builds
+// from a prompt catalog, including argument title fallback to name.
+func TestLoadMCPPrompts_ConvertsCatalog(t *testing.T) {
+	t.Parallel()
+
+	catalog := seqOf(map[string][]*sdkmcp.Prompt{
+		"github": {
+			{
+				Name:        "review",
+				Title:       "Review PR",
+				Description: "Reviews a pull request",
+				Arguments: []*sdkmcp.PromptArgument{
+					{Name: "pr", Title: "Pull request", Required: true},
+					{Name: "verbose", Description: "Verbose output"},
+				},
+			},
+		},
+	})
+
+	got, err := LoadMCPPrompts(catalog)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
+	prompt := got[0]
+	require.Equal(t, "github:review", prompt.ID)
+	require.Equal(t, "review", prompt.PromptID)
+	require.Equal(t, "github", prompt.ClientID)
+	require.Equal(t, "Review PR", prompt.Title)
+	require.Equal(t, []Argument{
+		{ID: "pr", Title: "Pull request", Required: true},
+		{ID: "verbose", Title: "verbose", Description: "Verbose output"},
+	}, prompt.Arguments)
+}
+
+// TestLoadMCPPrompts_NilSequence covers the caller with no MCP prompts to
+// offer, mirroring the old *mcp.Registry nil-registry guard.
+func TestLoadMCPPrompts_NilSequence(t *testing.T) {
+	t.Parallel()
+
+	got, err := LoadMCPPrompts(nil)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+// TestGetMCPPrompt_DelegatesAndJoins pins GetMCPPrompt's new shape: a
+// closure over the registry call (B1) rather than *mcp.Registry and
+// mcp.ConfigProvider directly, invoked with the same clientID/promptID/
+// args and joining the returned message parts with a space.
+func TestGetMCPPrompt_DelegatesAndJoins(t *testing.T) {
+	t.Parallel()
+
+	var gotClientID, gotPromptID string
+	var gotArgs map[string]string
+	fetch := func(ctx context.Context, clientID, promptID string, args map[string]string) ([]string, error) {
+		gotClientID, gotPromptID, gotArgs = clientID, promptID, args
+		return []string{"hello", "world"}, nil
+	}
+
+	got, err := GetMCPPrompt(fetch, "github", "review", map[string]string{"pr": "42"})
+	require.NoError(t, err)
+	require.Equal(t, "hello world", got)
+	require.Equal(t, "github", gotClientID)
+	require.Equal(t, "review", gotPromptID)
+	require.Equal(t, map[string]string{"pr": "42"}, gotArgs)
+}
+
+// TestGetMCPPrompt_PropagatesError covers the closure's failure path.
+func TestGetMCPPrompt_PropagatesError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("boom")
+	fetch := func(ctx context.Context, clientID, promptID string, args map[string]string) ([]string, error) {
+		return nil, wantErr
+	}
+
+	_, err := GetMCPPrompt(fetch, "github", "review", nil)
+	require.ErrorIs(t, err, wantErr)
 }

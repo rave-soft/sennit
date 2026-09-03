@@ -9,8 +9,76 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/stretchr/testify/require"
 )
+
+// openAtCompletion opens the "@" completion popup at the end of the editor,
+// mirroring what typing "@" does, so insertFileCompletion's call to
+// completions.replace has a span to splice into.
+func openAtCompletion(t *testing.T, u *UI) {
+	t.Helper()
+	u.focus = uiFocusEditor
+	u.handleKeyPressMsg(tea.KeyPressMsg{Text: "@", Code: '@'})
+	require.True(t, u.editor.completions.open)
+}
+
+// TestInsertFileCompletion_OversizedFileSkipsAttachmentAndWarns is the
+// regression test for G8: insertFileCompletion used to os.ReadFile the
+// picked path with no size check at all, unlike every other attachment
+// path in this package. A file over common.MaxAttachmentSize must not be
+// read into memory; it must instead surface the same kind of warning
+// handleFilePathPaste gives, with the path left in the input as plain text.
+func TestInsertFileCompletion_OversizedFileSkipsAttachmentAndWarns(t *testing.T) {
+	t.Parallel()
+
+	u := newSlashTestUI(t)
+	openAtCompletion(t, u)
+
+	path := filepath.Join(t.TempDir(), "big.bin")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	// Sparse-truncate rather than writing MaxAttachmentSize+1 bytes: the
+	// test only needs os.Stat to report an oversized file, not real data.
+	require.NoError(t, f.Truncate(common.MaxAttachmentSize+1))
+	require.NoError(t, f.Close())
+
+	cmd := u.insertFileCompletion(path)
+	require.NotNil(t, cmd)
+
+	require.Zero(t, drainTo[message.Attachment](t, cmd),
+		"an oversized file must not become an attachment")
+	warn := drainTo[util.InfoMsg](t, cmd)
+	require.Equal(t, util.InfoTypeWarn, warn.Type)
+	require.Contains(t, warn.Msg, "too big")
+}
+
+// TestInsertFileCompletion_BinaryFileInsertsPathOnlyWithoutAttachment is the
+// second regression case of G8: a file that is neither text nor an image
+// (a .sqlite, a .pack, a video — anything fsext.ListDirectory will happily
+// list for "@") must not become a message.Attachment. It would otherwise be
+// read whole into memory, stored in SQLite, and re-sent to the provider as
+// application/octet-stream on every subsequent turn for the rest of the
+// session.
+func TestInsertFileCompletion_BinaryFileInsertsPathOnlyWithoutAttachment(t *testing.T) {
+	t.Parallel()
+
+	u := newSlashTestUI(t)
+	openAtCompletion(t, u)
+
+	path := filepath.Join(t.TempDir(), "data.bin")
+	binary := []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a}
+	require.NoError(t, os.WriteFile(path, binary, 0o600))
+
+	cmd := u.insertFileCompletion(path)
+	require.NotNil(t, cmd)
+
+	require.Contains(t, u.editor.textarea.Value(), path,
+		"the path itself must still land in the input")
+	require.Zero(t, drainTo[message.Attachment](t, cmd),
+		"a non-text, non-image file must not become an attachment")
+}
 
 // TestHandlePasteMsgThreshold_SnapshotsPasteIdxAtCallTime covers the
 // off-goroutine access bug in handlePasteMsg's oversized-paste branch: the

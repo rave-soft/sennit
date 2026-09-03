@@ -37,10 +37,18 @@ func NewNativeBackend(icon []byte) *NativeBackend {
 // Send returns a command that sends a desktop notification using the native
 // OS notification system.
 func (b *NativeBackend) Send(n Notification) tea.Cmd {
-	// Snapshot both: Send returns a command that runs later, and the
-	// backend's notifyFunc is swappable (SetNotifyFunc).
-	notify, icon := b.notifyFunc, b.resolvedIcon()
+	// Snapshot notifyFunc: the backend's notifyFunc is swappable
+	// (SetNotifyFunc), so read it here rather than off the command's
+	// goroutine.
+	notify := b.notifyFunc
 	return func() tea.Msg {
+		// NativeBackend is not the UI model, and resolvedIcon touches
+		// only icon, set once in NewNativeBackend and never reassigned,
+		// and iconPath, whose single write is published by iconPathOnce.
+		// Resolving here rather than in Send is deliberate: it does file
+		// IO (CacheIcon writes the icon into the user cache dir), and
+		// Send is called from Update, which must never touch disk.
+		icon := b.resolvedIcon() // ok: no model access
 		slog.Debug("Sending native notification", "title", n.Title, "message", n.Message)
 
 		if err := notify(n.Title, n.Message, icon); err != nil {

@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,6 +50,38 @@ func TestPreviewKittyOutputIsAppliedAfterAcceptedResult(t *testing.T) {
 	raw, ok := action.Cmd().(tea.RawMsg)
 	require.True(t, ok)
 	require.Equal(t, result.Output, raw.Msg)
+}
+
+// hugePNGHeader builds only the PNG signature and a valid IHDR chunk
+// declaring a huge canvas, with no pixel data at all. image.DecodeConfig
+// only needs IHDR to report dimensions, so this is enough to exercise the
+// pixel-limit rejection without ever allocating (or even producing) the
+// gigabytes of image data the declared size implies.
+func hugePNGHeader(width, height uint32) []byte {
+	sig := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	data := []byte{
+		byte(width >> 24), byte(width >> 16), byte(width >> 8), byte(width),
+		byte(height >> 24), byte(height >> 16), byte(height >> 8), byte(height),
+		8, 2, 0, 0, 0, // 8-bit truecolor, no interlace.
+	}
+	length := len(data)
+	chunk := []byte{byte(length >> 24), byte(length >> 16), byte(length >> 8), byte(length)}
+	chunk = append(chunk, "IHDR"...)
+	chunk = append(chunk, data...)
+	crc := crc32.ChecksumIEEE(chunk[4:])
+	chunk = append(chunk, byte(crc>>24), byte(crc>>16), byte(crc>>8), byte(crc))
+	return append(sig, chunk...)
+}
+
+func TestPreviewRejectsExcessivePixelDimensionsWithoutDecoding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.png")
+	require.NoError(t, os.WriteFile(path, hugePNGHeader(20000, 20000), 0o600))
+	picker := testPicker(t)
+	picker.selectedPath = path
+	picker.generation = 1
+	result := prepare(t, picker, path)
+	require.ErrorContains(t, result.Err, "pixel limit")
+	require.Empty(t, result.Rendered)
 }
 
 func TestPreviewBlocksIsPrepared(t *testing.T) {

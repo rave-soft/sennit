@@ -47,9 +47,19 @@ func Short(p string) string {
 	return filepath.Join("~", rest)
 }
 
-// Long replaces the `~` with actual home path from [Dir].
+// Long replaces the `~` with actual home path from [Dir]. Only a bare
+// `~` and `~/...` are expanded; `~user/...` (another user's home
+// directory) is left untouched rather than mangled into homedir+"user"+
+// the rest, since this package has no way to resolve another user's
+// home directory anyway.
 func Long(p string) string {
-	if homedir == "" || !strings.HasPrefix(p, "~") {
+	if homedir == "" {
+		return p
+	}
+	if p == "~" {
+		return homedir
+	}
+	if !strings.HasPrefix(p, "~/") {
 		return p
 	}
 	// Callers write "~/foo" with a literal forward slash regardless of

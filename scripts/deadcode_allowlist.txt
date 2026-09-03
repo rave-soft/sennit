@@ -7,3 +7,9 @@
 #
 # Empty on purpose: as of 2026-08-29 nothing in the tree is unreachable from
 # both main and the tests.
+
+# A compile-time assertion that RuntimeStore stays narrow: the type exists
+# only so `var _ RuntimeStore = removeOnlyRuntimeStore{}` fails to compile
+# if WriteRuntimeConfigFields is ever put back on the interface. Nothing
+# calls the method, and nothing should — being unreachable is the point.
+internal/config/runtime_store_test.go removeOnlyRuntimeStore.RemoveRuntimeConfigField

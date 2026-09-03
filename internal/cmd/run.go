@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"charm.land/log/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/sennit/internal/config"
@@ -89,10 +88,6 @@ sennit run --continue "Follow up on your last response"
 
 		if !ws.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'sennit' to set up a provider interactively")
-		}
-
-		if verbose {
-			slog.SetDefault(slog.New(log.New(os.Stderr)))
 		}
 
 		if sessionID != "" {

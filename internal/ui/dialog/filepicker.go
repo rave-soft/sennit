@@ -5,6 +5,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"maps"
 	"os"
 	"strings"
@@ -216,6 +217,21 @@ func (f *FilePicker) preparePreviewCmd(instance uint64, path string, generation 
 			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("open image: %w", err)}
 		}
 		defer file.Close()
+
+		// A byte-size cap alone doesn't bound decoded memory: a solid-color
+		// PNG can compress a huge canvas into a couple of megabytes on disk
+		// yet expand to gigabytes of RGBA once decoded. Check the declared
+		// pixel count before doing that decode.
+		cfg, _, err := image.DecodeConfig(file)
+		if err != nil {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("decode image config: %w", err)}
+		}
+		if pixels := int64(cfg.Width) * int64(cfg.Height); pixels > maxPreviewPixels {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("image exceeds preview pixel limit")}
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("seek image: %w", err)}
+		}
 		img, _, err := image.Decode(file)
 		if err != nil {
 			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("decode image: %w", err)}
@@ -270,6 +286,12 @@ const (
 	filePickerMinWidth  = 70
 	filePickerMinHeight = 10
 )
+
+// maxPreviewPixels bounds decoded image dimensions for the preview pane.
+// 24 megapixels covers a typical high-res photo (e.g. 6000x4000) at
+// 4 bytes/px RGBA (~96MB decoded); well above that, a preview is not worth
+// the memory a pathological or hostile file can force us to allocate.
+const maxPreviewPixels = 24_000_000
 
 func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := f.com.Styles

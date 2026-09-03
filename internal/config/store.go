@@ -403,6 +403,15 @@ func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
 // WriteRuntimeConfigFields writes fields to the config file for the given
 // scope without reloading in-memory state. See RemoveRuntimeConfigField for
 // why the staleness snapshot is still refreshed under fileStaleness mutex.
+//
+// Not part of the RuntimeStore interface: providerload, its only would-be
+// caller, only ever removes fields. This method is kept on *ConfigStore
+// anyway because TestWatchForExternalChanges_IgnoresOwnRuntimeConfigWrites
+// (watch_test.go) is the only test proving that a runtime write — one
+// that, unlike SetConfigFields, skips autoReload — still refreshes the
+// staleness snapshot before releasing the write lock; without that, a
+// watcher poll landing right after could misread this process's own
+// runtime write as an external change.
 func (s *ConfigStore) WriteRuntimeConfigFields(scope Scope, fields map[string]any) {
 	// The write and the staleness-snapshot refresh happen under one
 	// fileStaleness.withWrite section; see its doc comment for why.

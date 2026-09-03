@@ -75,6 +75,33 @@ func TestNativeBackend_Send_CachesIconPath(t *testing.T) {
 	require.Equal(t, iconData, got)
 }
 
+// TestNativeBackend_Send_DoesNotTouchDiskBeforeCmdRuns is the regression
+// test for B2: Send used to resolve the icon (and so cache it to disk via
+// CacheIcon) synchronously, before ever returning its tea.Cmd. Send is
+// called from Update (see model/notifications.go), which must never do
+// file IO directly — only the returned tea.Cmd, once run on its own
+// goroutine, may touch the filesystem.
+func TestNativeBackend_Send_DoesNotTouchDiskBeforeCmdRuns(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+
+	backend := notification.NewNativeBackend([]byte("fake-png-data"))
+	backend.SetNotifyFunc(func(_, _ string, _ any) error { return nil })
+
+	cmd := backend.Send(notification.Notification{Title: "Hello"})
+	require.NotNil(t, cmd)
+
+	entries, err := os.ReadDir(cacheDir)
+	require.NoError(t, err)
+	require.Empty(t, entries, "Send must not cache the icon to disk before its returned tea.Cmd runs")
+
+	cmd()
+
+	entries, err = os.ReadDir(cacheDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries, "the cmd must cache the icon once it actually runs")
+}
+
 func extractRawString(t *testing.T, cmd tea.Cmd) string {
 	t.Helper()
 	require.NotNil(t, cmd)

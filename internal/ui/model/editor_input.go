@@ -245,11 +245,39 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			return nil
 		}
 
+		// Stat before reading: the @ completion list comes from
+		// fsext.ListDirectory, which enumerates every file regardless of
+		// size or type, so an oversized pick (a .sqlite, a .pack, a video)
+		// must be caught before it's read whole into memory.
+		info, err := os.Stat(path)
+		if err != nil {
+			// If it fails, let the LLM handle it later.
+			return nil
+		}
+		if info.Size() > common.MaxAttachmentSize {
+			// The @query text was already inserted as the path by
+			// completions.replace above; only the attachment is skipped.
+			return util.NewWarnMsg("File is too big to attach (>5mb); inserted path only")
+		}
+
 		// Add file as attachment.
 		content, err := os.ReadFile(path)
 		if err != nil {
 			// If it fails, let the LLM handle it later.
 			return nil
+		}
+
+		mimeType := mimeOf(content)
+		if !strings.HasPrefix(mimeType, "text/") && !strings.HasPrefix(mimeType, "image/") {
+			// Anything that isn't text or an image (a .sqlite, a .pack, an
+			// .mp4) would otherwise ride along as octet-stream forever in
+			// the session history. Leave just the path in the input; the
+			// LLM can read it with a tool if it actually needs the bytes.
+			// Say so rather than dropping the attachment silently: the
+			// oversized branch above warns, and picking a file only to
+			// find nothing attached and no reason given is worse than
+			// either outcome.
+			return util.NewWarnMsg("Attached files must be text or images; inserted path only")
 		}
 
 		return fileCompletionMsg{
@@ -258,7 +286,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			attachment: message.Attachment{
 				FilePath: path,
 				FileName: filepath.Base(path),
-				MimeType: mimeOf(content),
+				MimeType: mimeType,
 				Content:  content,
 			},
 		}

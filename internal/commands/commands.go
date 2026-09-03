@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"io/fs"
+	"iter"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/home"
@@ -88,14 +89,17 @@ func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
 	return commands
 }
 
-// LoadMCPPrompts loads custom commands from available MCP servers on reg,
-// the caller's per-workspace MCP registry.
-func LoadMCPPrompts(reg *mcp.Registry) ([]MCPPrompt, error) {
-	if reg == nil {
+// LoadMCPPrompts loads custom commands from an MCP prompt catalog. It takes
+// the catalog as a sequence rather than *mcp.Registry itself (its only
+// caller, internal/workspace/appws, has one to spare) so this package —
+// which otherwise just reads .md files off disk — does not have to pull in
+// the MCP client registry, its transport, and process launching.
+func LoadMCPPrompts(prompts iter.Seq2[string, []*sdkmcp.Prompt]) ([]MCPPrompt, error) {
+	if prompts == nil {
 		return nil, nil
 	}
 	var commands []MCPPrompt
-	for mcpName, prompts := range reg.Prompts() {
+	for mcpName, prompts := range prompts {
 		for _, prompt := range prompts {
 			key := mcpName + ":" + prompt.Name
 			var args []Argument
@@ -242,18 +246,18 @@ func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-// GetMCPPrompt takes mcp.ConfigProvider rather than the concrete
-// *config.ConfigStore because it does nothing with the store itself — it
-// hands it straight to the registry. Naming the callee's port here keeps
-// this package from being a hole through which the full store reaches code
-// that was deliberately narrowed.
-func GetMCPPrompt(reg *mcp.Registry, cfg mcp.ConfigProvider, clientID, promptID string, args map[string]string) (string, error) {
+// GetMCPPrompt takes a closure over the registry's GetPromptMessages
+// (rather than *mcp.Registry and mcp.ConfigProvider directly) for the same
+// reason LoadMCPPrompts takes a sequence: this package only assembles the
+// command palette, and the caller — internal/workspace/appws — already
+// holds both the registry and the config store GetPromptMessages needs.
+func GetMCPPrompt(getPromptMessages func(ctx context.Context, clientID, promptID string, args map[string]string) ([]string, error), clientID, promptID string, args map[string]string) (string, error) {
 	// Create a context with timeout since tea.Cmd doesn't support context passing.
 	// The MCP client has its own timeout, but this provides an additional safeguard.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := reg.GetPromptMessages(ctx, cfg, clientID, promptID, args)
+	result, err := getPromptMessages(ctx, clientID, promptID, args)
 	if err != nil {
 		return "", err
 	}

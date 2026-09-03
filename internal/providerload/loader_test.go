@@ -22,8 +22,6 @@ func (store *recordingStore) RemoveRuntimeConfigField(_ config.Scope, key string
 	store.removed = append(store.removed, key)
 }
 
-func (*recordingStore) WriteRuntimeConfigFields(config.Scope, map[string]any) {}
-
 func TestLoadRuntimeResolverReadsCurrentEnvironment(t *testing.T) {
 	workingDir := t.TempDir()
 	globalDir := t.TempDir()

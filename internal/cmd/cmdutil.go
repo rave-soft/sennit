@@ -52,6 +52,12 @@ func initConfig(cmd *cobra.Command, debug bool) (cwd string, cfg *config.ConfigS
 	if err != nil {
 		return "", nil, err
 	}
+	// setupLocalWorkspace's own callers (interactive, `sennit run`) get a
+	// file logger through PostConnect; every other command loads config
+	// through here instead, and without this call their startup
+	// diagnostics (e.g. config/migrate's deprecated-key warnings) stayed
+	// buffered in earlyLogs until the process exited and vanished.
+	setupProcessLogging(cmd, debug)
 	return cwd, cfg, nil
 }
 
