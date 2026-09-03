@@ -186,7 +186,13 @@ func TestClose_WhileConnectionInFlight(t *testing.T) {
 	require.NoError(t, r.Close(context.Background()))
 	close(closeDone)
 
-	require.ErrorIs(t, <-publishDone, context.Canceled)
+	// The race is lost ownership (a newer generation, from Close's teardown
+	// sweep), not caller cancellation - see G22: publishOrClose used to
+	// return context.Canceled for this, which a model-facing caller
+	// (mcp-tools.go) couldn't tell apart from real cancellation and so
+	// aborted the whole tool-call batch over a condition the model could
+	// just have retried.
+	require.ErrorIs(t, <-publishDone, errLostOwnership)
 	require.ErrorIs(t, sessCtx.Err(), context.Canceled,
 		"a connection that loses the race with Close must be closed, not leaked")
 

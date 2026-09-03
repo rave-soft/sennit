@@ -89,8 +89,39 @@ func NewReplaceSymbolTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
 			}
 
+			// Sync the overlay with disk before asking for symbol ranges.
+			// OpenFileOnDemand is a no-op once the file is already open, and
+			// neither read nor bash ever sends a didChange, so the LSP's
+			// view of the file can be older than what's on disk (e.g. after
+			// gofmt, an editor save, or another tool's write). NotifyChange
+			// re-reads the file whole and bumps the LSP's version
+			// (filesync.go), so DocumentSymbols below reports ranges
+			// against the same content applyFileMutation is about to read
+			// and cut. Two calls, not one: NotifyChange itself errors on a
+			// file the LSP has never opened.
+			if err := client.OpenFileOnDemand(ctx, filePath); err != nil {
+				if ctx.Err() != nil {
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to open file for LSP: %s", err)), nil
+			}
+			if err := client.NotifyChange(ctx, filePath); err != nil {
+				if ctx.Err() != nil {
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to sync file with LSP: %s", err)), nil
+			}
+
 			symbols, err := client.DocumentSymbols(ctx, filePath)
 			if err != nil {
+				// A canceled context (Esc) must abort the tool-call batch
+				// like any other infrastructure failure, not read back to
+				// the model as "failed to get document symbols: context
+				// canceled" — see lsp_helpers.go's rule for the sibling
+				// symbol-lookup tools.
+				if ctx.Err() != nil {
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
 			}
 
@@ -109,6 +140,33 @@ func NewReplaceSymbolTool(
 				prepare: func(snapshot fileSnapshot) (preparedFileMutation, error) {
 					if !snapshot.exists {
 						return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)))
+					}
+					// Resyncing the overlay above (client.NotifyChange) only
+					// fixes the LSP's own view of the file; it says nothing
+					// about whether the session has ever seen this content.
+					// Without this check, the model could replace a symbol
+					// in a file it never read — or one a formatter rewrote
+					// after its last read — same as edit/write/multiedit
+					// already refuse for their own mutations.
+					switch state, lastRead := checkFileFreshness(ctx, filetracker, sessionID, filePath, snapshot.modTime); state {
+					case fileNeverRead:
+						return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf(
+							"cannot replace symbol '%s' in %s: it has not been read in this session.\n\n"+
+								"This tool cuts the file at the range the LSP reports for the symbol, so "+
+								"reading it first is how a later mutation can tell whether the file changed "+
+								"underneath it.\n\n"+
+								"Read %s, then retry.",
+							params.Symbol, filePath, filePath,
+						)))
+					case fileStale:
+						return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(staleFileRefusal(
+							filePath, "replace a symbol in", "after you read it",
+							"Something outside this call — the user, a formatter, a build step, another "+
+								"agent — has written to the file, so the symbol's line range may no longer "+
+								"match what's there, and replacing it now could cut the wrong span.",
+							fmt.Sprintf("Read %s again to see the current content, then redo the replacement.", filePath),
+							snapshot.modTime, lastRead,
+						)))
 					}
 					lines := strings.Split(snapshot.content, "\n")
 					if startLine >= len(lines) || endLine >= len(lines) {

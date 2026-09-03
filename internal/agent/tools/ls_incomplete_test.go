@@ -104,3 +104,41 @@ func TestGlobToolReportsCompleteOnFullyReadableTree(t *testing.T) {
 	require.False(t, metadata.Incomplete)
 	require.False(t, metadata.Truncated)
 }
+
+// TestGrepToolReportsIncompleteOnUnreadableSubdir is the grep tool's
+// counterpart to TestLSToolReportsIncompleteOnUnreadableSubdir: grep's pure
+// Go walk (used when rg is not on $PATH — see visitSearchMatches in
+// grep.go) must surface the same signal instead of silently under-reporting
+// matches.
+func TestGrepToolReportsIncompleteOnUnreadableSubdir(t *testing.T) {
+	workspace := t.TempDir()
+	chmodUnreadableDir(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "hit.go"), []byte("needle"), 0o644))
+
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "s1")
+	tool := NewGrepTool(nil, workspace, config.ToolGrep{})
+	resp := runToolWith(t, tool, ctx, GrepToolName, GrepParams{Pattern: "needle"})
+	require.False(t, resp.IsError, resp.Content)
+
+	metadata := responseMetadata[GrepResponseMetadata](t, resp.Metadata)
+	require.True(t, metadata.Incomplete, "an unreadable subdirectory must be reported as incomplete")
+	require.False(t, metadata.Truncated, "incompleteness is a different fact from the result limit cutting the matches short")
+	require.Contains(t, resp.Content, "could not be read")
+}
+
+// TestGrepToolReportsCompleteOnFullyReadableTree is the companion case for
+// the grep tool.
+func TestGrepToolReportsCompleteOnFullyReadableTree(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "hit.go"), []byte("needle"), 0o644))
+
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "s1")
+	tool := NewGrepTool(nil, workspace, config.ToolGrep{})
+	resp := runToolWith(t, tool, ctx, GrepToolName, GrepParams{Pattern: "needle"})
+	require.False(t, resp.IsError, resp.Content)
+
+	metadata := responseMetadata[GrepResponseMetadata](t, resp.Metadata)
+	require.False(t, metadata.Incomplete)
+	require.False(t, metadata.Truncated)
+}

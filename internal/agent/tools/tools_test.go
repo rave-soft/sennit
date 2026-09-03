@@ -5,11 +5,15 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -440,6 +444,106 @@ func TestInvalidParamFormat(t *testing.T) {
 func TestMissingSessionIDFormat(t *testing.T) {
 	err := missingSessionID("editing a file")
 	require.EqualError(t, err, "session ID is required for editing a file")
+}
+
+// TestOutsideWorkdirPermissionRequestsAreUnchanged pins the exact
+// permission.CreatePermissionRequest each of glob, grep, ripgrep, ls, and
+// read/multi_read raises for a path outside the working directory, field
+// for field. requireOutsideWorkdirPermission (tools.go) now backs all five;
+// this table is the guardrail that folding them into one helper did not
+// change the request any of them actually sends — see the D1 audit note on
+// requireOutsideWorkdirPermission for why that had to be proven, not
+// assumed.
+func TestOutsideWorkdirPermissionRequestsAreUnchanged(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := filepath.Join(root, "workdir")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	outside := filepath.Join(root, "elsewhere")
+	require.NoError(t, os.MkdirAll(outside, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.go"), []byte("package elsewhere\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("hello\n"), 0o644))
+
+	sessionCtx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	tests := []struct {
+		name            string
+		tool            func(perms permission.Requester) fantasy.AgentTool
+		toolName        string
+		params          any
+		wantAction      string
+		wantDescription string
+	}{
+		{
+			name: "glob",
+			tool: func(perms permission.Requester) fantasy.AgentTool {
+				return NewGlobTool(perms, workdir, config.ToolGlob{})
+			},
+			toolName:        GlobToolName,
+			params:          GlobParams{Pattern: "*.go", Path: outside},
+			wantAction:      "list",
+			wantDescription: "List files outside working directory: " + outside,
+		},
+		{
+			name: "grep",
+			tool: func(perms permission.Requester) fantasy.AgentTool {
+				return NewGrepTool(perms, workdir, config.ToolGrep{})
+			},
+			toolName:        GrepToolName,
+			params:          GrepParams{Pattern: "hello", Path: outside},
+			wantAction:      "search",
+			wantDescription: "Search file contents outside working directory: " + outside,
+		},
+		{
+			name: "ripgrep",
+			tool: func(perms permission.Requester) fantasy.AgentTool {
+				return NewRipgrepTool(perms, workdir, config.ToolGrep{}, withRipgrepCommand(func(ctx context.Context, pattern, path, include string, caseInsensitive bool) *exec.Cmd {
+					t.Fatal("ripgrep must not run once permission is denied")
+					return nil
+				}))
+			},
+			toolName:        RipgrepToolName,
+			params:          RipgrepParams{Pattern: "hello", Path: outside},
+			wantAction:      "search",
+			wantDescription: "Search file contents outside working directory: " + outside,
+		},
+		{
+			name:            "ls",
+			tool:            func(perms permission.Requester) fantasy.AgentTool { return NewLsTool(perms, workdir, config.ToolLs{}) },
+			toolName:        LSToolName,
+			params:          LSParams{Path: outside},
+			wantAction:      "list",
+			wantDescription: "List directory outside working directory: " + outside,
+		},
+		{
+			name: "read",
+			tool: func(perms permission.Requester) fantasy.AgentTool {
+				return NewReadTool(nil, perms, mockFileTracker{}, nil, workdir)
+			},
+			toolName:        ReadToolName,
+			params:          ReadParams{FilePath: filepath.Join(outside, "secret.txt")},
+			wantAction:      "read",
+			wantDescription: "Read file outside working directory: " + filepath.Join(outside, "secret.txt"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			perms := &searchPermissionFake{grant: false}
+			resp := runToolWith(t, tt.tool(perms), sessionCtx, tt.toolName, tt.params)
+			require.True(t, resp.IsError, "denial must refuse the call")
+			require.Len(t, perms.requests, 1)
+
+			req := perms.requests[0]
+			require.Equal(t, tt.toolName, req.ToolName)
+			require.Equal(t, tt.wantAction, req.Action)
+			require.Equal(t, tt.wantDescription, req.Description)
+			require.Equal(t, tt.wantDescription[strings.Index(tt.wantDescription, ": ")+2:], req.Path,
+				"Path must be the resolved destination the Description names")
+		})
+	}
 }
 
 func (s *stubPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {

@@ -91,10 +91,18 @@ type grepMatch struct {
 }
 
 type GrepResponseMetadata struct {
-	NumberOfMatches int    `json:"number_of_matches"`
-	TotalMatches    int    `json:"total_matches"`
-	Truncated       bool   `json:"truncated"`
-	Cursor          string `json:"cursor,omitempty"`
+	NumberOfMatches int  `json:"number_of_matches"`
+	TotalMatches    int  `json:"total_matches"`
+	Truncated       bool `json:"truncated"`
+	// Incomplete is true when part of the search tree could not be walked
+	// (a directory removed mid-walk, a permissions denial, EMFILE/ENFILE
+	// on a wide tree, ...) and was silently left out of the match set. It
+	// is reported separately from Truncated, the same way ls and glob
+	// report it: that flag means the result limit cut the matches short,
+	// a different fact from part of the tree never having been searched
+	// at all.
+	Incomplete bool   `json:"incomplete,omitempty"`
+	Cursor     string `json:"cursor,omitempty"`
 }
 
 const (
@@ -171,21 +179,12 @@ func NewGrepTool(permissions permission.Requester, workingDir string, config con
 				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
 			}
 			if outside {
-				sessionID := GetSessionFromContext(ctx)
-				if sessionID == "" {
-					return fantasy.ToolResponse{}, missingSessionID("searching file contents outside working directory")
-				}
-
-				path, description := outsideWorkdirNotice("Search file contents outside working directory", absSearchPath, resolvedSearchPath)
-				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        path,
-					ToolCallID:  call.ID,
-					ToolName:    GrepToolName,
-					Action:      "search",
-					Description: description,
-					Params:      GrepPermissionsParams(params),
-				})
+				resp, denied, err := requireOutsideWorkdirPermission(
+					ctx, permissions, call,
+					GrepToolName, "search", "Search file contents outside working directory",
+					"searching file contents outside working directory",
+					absSearchPath, resolvedSearchPath, GrepPermissionsParams(params),
+				)
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
@@ -202,7 +201,7 @@ func NewGrepTool(permissions permission.Requester, workingDir string, config con
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			scan := newPageScan[grepMatch](continuation.Last, limit)
-			err = visitSearchMatches(searchCtx, pattern, searchPath, params.Include, func(match grepMatch) {
+			incomplete, err := visitSearchMatches(searchCtx, pattern, searchPath, params.Include, func(match grepMatch) {
 				scan.Add(grepMatchPageKey(match, params.Sort), match)
 			})
 			if err != nil {
@@ -220,7 +219,14 @@ func NewGrepTool(permissions permission.Requester, workingDir string, config con
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("rendering search context: %w", err)
 			}
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GrepResponseMetadata{NumberOfMatches: len(page), TotalMatches: total, Truncated: truncated, Cursor: cursor}), nil
+			if incomplete {
+				// Mirrors ls/glob: part of the tree could not be read
+				// (removed mid-walk, a permissions denial, EMFILE/ENFILE
+				// on a wide tree, ...), so matches may be missing for a
+				// reason the cursor cannot fix by paging further.
+				output += "\n\n(Part of the search tree could not be read, so some matches may be missing. Retry or narrow the path to confirm.)"
+			}
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GrepResponseMetadata{NumberOfMatches: len(page), TotalMatches: total, Truncated: truncated, Incomplete: incomplete, Cursor: cursor}), nil
 		},
 	)
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{
@@ -397,17 +403,23 @@ func loadGrepContexts(ctx context.Context, matches []grepMatch, before, after in
 
 func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
 	matches := []grepMatch{}
-	err := visitSearchMatches(ctx, pattern, rootPath, include, func(match grepMatch) {
+	_, err := visitSearchMatches(ctx, pattern, rootPath, include, func(match grepMatch) {
 		matches = append(matches, match)
 	})
 	return matches, err
 }
 
-func visitSearchMatches(ctx context.Context, pattern, rootPath, include string, visit func(grepMatch)) error {
+// visitSearchMatches walks rootPath and calls visit for every matching
+// line. incomplete reports whether any part of the tree could not be
+// walked (a directory removed mid-walk, a permissions denial, EMFILE/ENFILE
+// on a wide tree, ...) — such a subtree is simply absent from what visit
+// was called with, so the caller must surface incomplete itself or a
+// partial match set reads as an exhaustive one.
+func visitSearchMatches(ctx context.Context, pattern, rootPath, include string, visit func(grepMatch)) (incomplete bool, err error) {
 	// Use cached regex compilation
 	regex, err := searchRegexCache.get(pattern)
 	if err != nil {
-		return fmt.Errorf("invalid regex pattern: %w", err)
+		return false, fmt.Errorf("invalid regex pattern: %w", err)
 	}
 
 	var includePattern *regexp.Regexp
@@ -420,47 +432,84 @@ func visitSearchMatches(ctx context.Context, pattern, rootPath, include string, 
 		regexPattern := "(^|/)" + globToRegex(include) + "$"
 		includePattern, err = globRegexCache.get(regexPattern)
 		if err != nil {
-			return fmt.Errorf("invalid include pattern: %w", err)
+			return false, fmt.Errorf("invalid include pattern: %w", err)
 		}
 	}
 
-	// Create walker with gitignore and sennitignore support
+	// Create walker with gitignore and sennitignore support, keyed on
+	// rootPath as given — see the walkRoot/virtualPath translation below,
+	// which keeps every path handed to it in that same namespace.
 	walker := fsext.NewFastGlobWalker(rootPath)
 
-	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	// filepath.Walk lstats its root, so a directory-symlink root (e.g. a
+	// "current" symlink into a dated release directory) reports
+	// IsDir()==false and the walk stops after that single, dropped entry
+	// — silently returning zero matches instead of searching the target.
+	// Resolve it once up front and walk the target instead, translating
+	// every visited path back into rootPath's own namespace below: the
+	// caller asked to search "current/", and matches must be reported
+	// under that name, not the release directory it happens to resolve
+	// to. This is the same fix fsext.VisitDirectory applies for ls (see
+	// fsext/ls.go) — glob does not need it because fastwalk stats
+	// (rather than lstats) its root.
+	walkRoot := rootPath
+	if lst, lerr := os.Lstat(rootPath); lerr == nil && lst.Mode()&os.ModeSymlink != 0 {
+		if target, terr := filepath.EvalSymlinks(rootPath); terr == nil {
+			if tinfo, serr := os.Stat(target); serr == nil && tinfo.IsDir() {
+				walkRoot = target
+			}
+		}
+	}
+
+	err = filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		if err != nil {
-			return nil // Skip errors
+			// A subtree filepath.Walk could not read (removed mid-walk,
+			// a permissions denial, EMFILE/ENFILE on a wide tree, ...):
+			// it is dropped from the results, so the caller must be told
+			// the match set is not exhaustive rather than reading a
+			// silently partial tree as a complete, merely small one.
+			incomplete = true
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(walkRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		virtualPath := rootPath
+		if rel != "." {
+			virtualPath = filepath.Join(rootPath, rel)
 		}
 
 		if info.IsDir() {
 			// Check if directory should be skipped
-			if walker.ShouldSkip(path) {
+			if walker.ShouldSkip(virtualPath) {
 				return filepath.SkipDir
 			}
 			return nil // Continue into directory
 		}
 
 		// Use walker's shouldSkip method for files
-		if walker.ShouldSkip(path) {
+		if walker.ShouldSkip(virtualPath) {
 			return nil
 		}
 
 		// Skip hidden files (starting with a dot) to match ripgrep's default behavior
-		base := filepath.Base(path)
+		base := filepath.Base(virtualPath)
 		if base != "." && strings.HasPrefix(base, ".") {
 			return nil
 		}
 
-		if includePattern != nil && !includePattern.MatchString(path) {
+		if includePattern != nil && !includePattern.MatchString(virtualPath) {
 			return nil
 		}
 
-		matchErr := visitFileMatches(ctx, path, regex, func(lm lineMatch) {
+		matchErr := visitFileMatches(ctx, virtualPath, regex, func(lm lineMatch) {
 			visit(grepMatch{
-				path:     path,
+				path:     virtualPath,
 				modTime:  info.ModTime(),
 				lineNum:  lm.lineNum,
 				charNum:  lm.charNum,
@@ -472,7 +521,7 @@ func visitSearchMatches(ctx context.Context, pattern, rootPath, include string, 
 		}
 		return nil
 	})
-	return err
+	return incomplete, err
 }
 
 // lineMatch is a single matching line within a file: its 1-based line

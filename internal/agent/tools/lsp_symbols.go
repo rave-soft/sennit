@@ -43,6 +43,14 @@ func NewSymbolsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentToo
 
 			symbols, err := client.DocumentSymbols(ctx, filePath)
 			if err != nil {
+				// A canceled context (Esc) must abort the tool-call batch
+				// like any other infrastructure failure, not read back to
+				// the model as "failed to get document symbols: context
+				// canceled" — see lsp_helpers.go's rule for the sibling
+				// symbol-lookup tools.
+				if ctx.Err() != nil {
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
 			}
 			if len(symbols) == 0 {

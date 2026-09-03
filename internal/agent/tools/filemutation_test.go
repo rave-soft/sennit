@@ -163,6 +163,42 @@ func TestCheckFileFreshness_SameMillisecondWriteNotStale(t *testing.T) {
 	require.Equal(t, fileFresh, state)
 }
 
+// TestWriteTool_DanglingSymlinkShowsResolvedTargetInPermissionDialog is the
+// regression test for G20: req.filePath pointing at a dangling symlink made
+// resolveExistingAncestorSymlinks fail (it fails closed on an unresolvable
+// component rather than treat it as "doesn't exist yet"), and the error was
+// swallowed by falling back to the unresolved link path. That path sits
+// inside workingDir, so PathOrPrefix collapsed the permission key — and the
+// dialog's Path — back to workingDir, even though the write itself follows
+// the link to whatever it targets, which can be anywhere.
+func TestWriteTool_DanglingSymlinkShowsResolvedTargetInPermissionDialog(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := filepath.Join(root, "workdir")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	outsideTarget := filepath.Join(root, "outside", "current.log")
+
+	link := filepath.Join(workdir, "latest.log")
+	require.NoError(t, os.Symlink(outsideTarget, link))
+
+	perms := &recordingConfinedPermissions{confinedTestPermissions: &confinedTestPermissions{dir: ""}}
+	tool := NewWriteTool(nil, perms, &mockHistoryService{}, mockFileTrackerService{}, workdir)
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  WriteToolName,
+		Input: mustJSONInput(t, WriteParams{FilePath: "latest.log", Content: "hello\n"}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "the request is denied, but a denial is still the tool's normal path here")
+	require.Len(t, perms.requests, 1)
+	require.Equal(t, outsideTarget, perms.requests[0].Path,
+		"the dialog must be keyed on the symlink's target, not the link itself")
+	require.Contains(t, perms.requests[0].Description, outsideTarget,
+		"the dialog must tell the user where the write actually resolves to")
+}
+
 // (b) — a confined workspace refusing a write outside itself even though
 // permission would grant it — is already covered by
 // TestWriteTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside in

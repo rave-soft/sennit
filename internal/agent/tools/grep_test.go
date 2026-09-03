@@ -434,6 +434,38 @@ func TestMultipleMatchesPerFile(t *testing.T) {
 	}
 }
 
+// TestSearchFilesWithRegexFollowsSymlinkRoot pins the fix for the bug
+// filepath.Walk has when its root is itself a directory symlink:
+// filepath.Walk lstats the root, so a symlink root reports IsDir()==false
+// and the walk stops after that single, dropped entry — searching a
+// symlinked root (e.g. "current" pointing at a dated release directory)
+// silently returned zero matches. Results must also stay in the requested
+// root's own namespace: the caller asked to search "current/", not
+// "releases/v1/", so a match's path must be reported under "current/".
+func TestSearchFilesWithRegexFollowsSymlinkRoot(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+
+	release := filepath.Join(tempDir, "releases", "v1")
+	require.NoError(t, os.MkdirAll(release, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(release, "a.txt"), []byte("needle\n"), 0o644))
+
+	link := filepath.Join(tempDir, "current")
+	require.NoError(t, os.Symlink(release, link))
+
+	matches, err := searchFilesWithRegex(t.Context(), "needle", link, "")
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "a symlinked root must be walked, not dropped")
+	require.Equal(t, filepath.Join(link, "a.txt"), matches[0].path,
+		"the match must be reported under the requested root, not the symlink's target")
+
+	// The real directory must keep working exactly as before.
+	direct, err := searchFilesWithRegex(t.Context(), "needle", release, "")
+	require.NoError(t, err)
+	require.Len(t, direct, 1)
+	require.Equal(t, filepath.Join(release, "a.txt"), direct[0].path)
+}
+
 func TestColumnMatch(t *testing.T) {
 	t.Parallel()
 

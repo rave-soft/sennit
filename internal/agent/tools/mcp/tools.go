@@ -84,12 +84,23 @@ func (r *Registry) RunTool(ctx context.Context, cfg ConfigProvider, name, toolNa
 				audioData = content.Data
 				audioMimeType = content.MIMEType
 			}
+		case *mcp.EmbeddedResource:
+			textParts = append(textParts, formatEmbeddedResource(content))
+		case *mcp.ResourceLink:
+			textParts = append(textParts, formatResourceLink(content))
 		default:
 			textParts = append(textParts, fmt.Sprintf("%v", v))
 		}
 	}
 
 	textContent := strings.Join(textParts, "\n")
+	// G13: the same byte cap that bounds a single embedded resource
+	// (formatEmbeddedResource above) must also bound the joined result -
+	// a TextContent part on its own, with no embedded resource involved,
+	// can just as easily be an oversized file dump handed back verbatim.
+	if truncated, wasTruncated := truncateResourceText(textContent); wasTruncated {
+		textContent = truncated + fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxResourceContentBytes)
+	}
 
 	// We need to make sure the data is base64
 	// when using something like docker + playwright the data was not returned correctly.

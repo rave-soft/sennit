@@ -177,6 +177,19 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 
 	result, err := m.reg.RunTool(ctx, m.cfg, m.mcpName, m.tool.Name, params.Input)
 	if err != nil {
+		// mcp.ErrLostOwnership means this attempt merely lost a race against
+		// a concurrent reconnect/teardown/auth flow (e.g. a lazy renewal of
+		// a dropped stdio server overlapping a config edit) - ctx.Err() is
+		// nil, the server is fine, and the model can just retry the call
+		// against the freshly (re)established session. It falls through to
+		// the same text-response branch as the check below would give it
+		// anyway (it is neither Canceled nor DeadlineExceeded), but this
+		// makes that guarantee explicit rather than incidental, since a
+		// future change to the check below could otherwise start
+		// misclassifying it.
+		if errors.Is(err, mcp.ErrLostOwnership) {
+			return fantasy.NewTextErrorResponse(err.Error()), nil
+		}
 		// Cancellation (Esc on a queued tool call, a hook timeout, ...) is
 		// not something the model can react to — it means the turn itself
 		// is over, not that this call failed and can be retried — so it

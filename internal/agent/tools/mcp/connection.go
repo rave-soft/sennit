@@ -25,6 +25,13 @@ import (
 // cancelled ctx and back off quietly instead of surfacing an error.
 var errLostOwnership = errors.New("mcp: lost ownership of connection")
 
+// ErrLostOwnership is the exported face of errLostOwnership for callers
+// outside this package (mcp-tools.go's Tool.Run) that need to tell "this
+// attempt just lost a race, retry the tool call" apart from a genuine
+// connection failure: it is model-recoverable, not a reason to abort the
+// whole tool-call batch the way ctx cancellation is.
+var ErrLostOwnership = errLostOwnership
+
 // errPingFailed means a keepalive ping to an existing session came back with
 // an error, i.e. the connection itself is broken. Unlike errLostOwnership
 // this is a genuine failure and must drive the server to StateError.
@@ -523,7 +530,11 @@ func (cm *connectionManager) getOrRenewClient(ctx context.Context, cfg ConfigPro
 		return nil, err
 	}
 	if err := cm.reg.publishOrClose(ctx, name, m, renewal, newSess); err != nil {
-		if !errors.Is(err, context.Canceled) {
+		// errLostOwnership means a newer attempt already took over the
+		// server (teardown, reconnect, or a fresher renewal); this attempt
+		// just lost the race and must not clobber whatever state that
+		// newer attempt is settling.
+		if !errors.Is(err, errLostOwnership) {
 			cm.reg.updateStateFor(name, renewal, StateError, err)
 		}
 		return nil, err

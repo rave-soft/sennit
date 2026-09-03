@@ -72,6 +72,13 @@ func NewHoverTool(m *lsp.Manager, root string) fantasy.AgentTool {
 		}
 		h, err := c.Hover(ctx, path, line, char)
 		if err != nil {
+			// A canceled context (Esc) must abort the tool-call batch
+			// like any other infrastructure failure, not read back to
+			// the model as "hover failed: context canceled" — see
+			// lsp_helpers.go's rule for the sibling symbol-lookup tools.
+			if ctx.Err() != nil {
+				return fantasy.ToolResponse{}, ctx.Err()
+			}
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("hover failed: %s", err)), nil
 		}
 		if h == nil {

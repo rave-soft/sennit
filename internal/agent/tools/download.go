@@ -104,13 +104,29 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 				return fantasy.ToolResponse{}, missingSessionID("downloading files")
 			}
 
+			// Resolve ancestor symlinks the same way read_core.go and
+			// applyFileMutation do before naming the download's target in
+			// the dialog: an ancestor directory symlink (e.g. `ln -s ../..
+			// up` then `download <url> up/x`) leaves filePath's string form
+			// inside workingDir while the download actually lands wherever
+			// the link points, so the dialog must be keyed and labeled on
+			// where the write really goes, not on the unresolved request.
+			_, resolvedFilePath, _, err := resolveWithinWorkdir(workingDir, filePath)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			description := fmt.Sprintf("Download file from URL: %s to %s", params.URL, filePath)
+			if resolvedFilePath != filePath {
+				description = fmt.Sprintf("%s (resolves to %s)", description, resolvedFilePath)
+			}
+
 			permResp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 				SessionID:   sessionID,
 				ToolCallID:  call.ID,
-				Path:        filePath,
+				Path:        resolvedFilePath,
 				ToolName:    DownloadToolName,
 				Action:      "download",
-				Description: fmt.Sprintf("Download file from URL: %s to %s", params.URL, filePath),
+				Description: description,
 				Params:      DownloadPermissionsParams(params),
 			})
 			if err != nil {

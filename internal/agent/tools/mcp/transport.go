@@ -188,7 +188,19 @@ func (rt *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	// transport can guarantee closure without closing it twice.
 	resp.Body = &onceCloseReadCloser{ReadCloser: resp.Body}
 	defer resp.Body.Close()
-	if err := rt.handler.Authorize(req.Context(), request, resp); err != nil {
+	// req.Context() here is mcpCtx (connection.go's createSession), which
+	// carries a deadline sized for "the server answered" (mcpTimeout: 10-30s)
+	// — not for "the user finished an SSO login with 2FA in their browser".
+	// Authorize's wait for the OAuth redirect must not inherit that deadline,
+	// so it runs on a context stripped of it and given its own, much longer,
+	// interactive bound instead. A hung or abandoned login still terminates
+	// promptly: BeginAuth's abortAuthFlow / Registry.teardown close the
+	// oauth.Handler on cancellation, and Handler.Close settles the pending
+	// callback wait (callbackReceiver.close -> flight.settle) independently
+	// of context cancellation, so this detachment does not leak the wait.
+	authCtx, cancelAuth := context.WithTimeout(context.WithoutCancel(req.Context()), interactiveAuthTimeout)
+	defer cancelAuth()
+	if err := rt.handler.Authorize(authCtx, request, resp); err != nil {
 		return nil, fmt.Errorf("oauth authorize: %w", err)
 	}
 	if req.Body != nil && req.GetBody == nil {
@@ -246,6 +258,14 @@ func closeRequestBody(req *http.Request) {
 		_ = req.Body.Close()
 	}
 }
+
+// interactiveAuthTimeout bounds how long an OAuth authorization wait
+// (browser opened, waiting for the localhost redirect) may run once the
+// server's own connect timeout has been set aside for it. Five minutes
+// comfortably covers an SSO login with a second factor or an approval
+// step on a corporate identity provider without leaving a forgotten
+// browser tab able to hold the flow open indefinitely.
+const interactiveAuthTimeout = 5 * time.Minute
 
 func mcpTimeout(m config.MCPConfig) time.Duration {
 	if m.Timeout > 0 {

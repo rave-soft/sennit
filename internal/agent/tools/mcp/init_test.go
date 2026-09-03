@@ -127,6 +127,86 @@ func TestOAuthRoundTripperRetryAndCleanup(t *testing.T) {
 	require.Empty(t, req.Header.Get("Authorization"))
 }
 
+// TestOAuthRoundTripperAuthorizeOutlivesRequestDeadline is the regression
+// test for G5: req.Context() here stands in for mcpCtx (connection.go's
+// createSession), whose AfterFunc-driven deadline is sized for "the server
+// answered" (mcpTimeout), not for a browser-based SSO login. Before the
+// fix, Authorize ran directly on req.Context(), so a login still in
+// progress when that deadline passed was killed mid-flow. Passing an
+// already-expired context proves the fix: if Authorize inherited it, the
+// fake handler below would see ctx.Done() closed and return immediately,
+// and this test would fail on the "returned too early" branch.
+func TestOAuthRoundTripperAuthorizeOutlivesRequestDeadline(t *testing.T) {
+	t.Parallel()
+
+	reqCtx, reqCancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Millisecond))
+	defer reqCancel()
+	<-reqCtx.Done()
+	require.ErrorIs(t, reqCtx.Err(), context.DeadlineExceeded)
+
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var sawCtx context.Context
+	handler := testOAuthHandler{
+		tokenSource: func(context.Context) (oauth2.TokenSource, error) {
+			return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token"}), nil
+		},
+		authorize: func(ctx context.Context, _ *http.Request, resp *http.Response) error {
+			sawCtx = ctx
+			close(entered)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-release:
+				return resp.Body.Close()
+			}
+		},
+	}
+	var calls atomic.Int32
+	base := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+	})
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, "https://example.test", nil)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	var respStatus int
+	var rtErr error
+	go func() {
+		// Read the status and close the body here rather than handing the
+		// response back: the caller only needs to know the retry
+		// succeeded, and closing it where it is created keeps the
+		// response from outliving this goroutine.
+		resp, err := newOAuthRoundTripper(handler, base).RoundTrip(req)
+		if resp != nil {
+			respStatus = resp.StatusCode
+			_ = resp.Body.Close()
+		}
+		rtErr = err
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("RoundTrip returned before the interactive wait was released: Authorize must not inherit req.Context()'s already-expired deadline")
+	case <-entered:
+	}
+
+	require.NotNil(t, sawCtx)
+	require.NoError(t, sawCtx.Err(), "Authorize's context must not already be done just because req.Context() (mcpCtx) expired")
+	deadline, ok := sawCtx.Deadline()
+	require.True(t, ok, "Authorize's context must carry its own interactive timeout")
+	require.WithinDuration(t, time.Now().Add(interactiveAuthTimeout), deadline, 5*time.Second)
+
+	close(release)
+	<-done
+	require.NoError(t, rtErr)
+	require.Equal(t, http.StatusOK, respStatus)
+}
+
 func TestOAuthRoundTripperClosesUnauthorizedBodyWhenAuthorizeDoesNot(t *testing.T) {
 	t.Parallel()
 	body := &closeCounter{}
@@ -1549,7 +1629,11 @@ func TestConnectAndRegisterPublishFailureClosesSession(t *testing.T) {
 	r.gens.Set(name, r.currentGen(name)+1)
 	r.publishMu.Unlock()
 	err = r.publishOrClose(t.Context(), name, config.MCPConfig{}, owner, session)
-	require.ErrorIs(t, err, context.Canceled)
+	// See G22: this used to be context.Canceled, which a model-facing caller
+	// could not tell apart from real cancellation of its own ctx and so
+	// aborted the whole tool-call batch instead of retrying against the
+	// generation that superseded this attempt.
+	require.ErrorIs(t, err, errLostOwnership)
 	require.ErrorIs(t, ctx.Err(), context.Canceled, "stale session must be closed")
 }
 

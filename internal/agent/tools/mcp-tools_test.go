@@ -122,6 +122,32 @@ func TestToolRun_ExpiredContextPropagatesAsGoError(t *testing.T) {
 	require.Equal(t, fantasy.ToolResponse{}, resp)
 }
 
+// TestToolRun_LostOwnershipStaysTextResponse is the regression test for
+// G22: mcp.ErrLostOwnership signals that this attempt merely lost a race
+// against a concurrent reconnect/teardown/auth flow (e.g. a lazy renewal
+// of a dropped stdio server overlapping a config edit), not that the
+// caller's own ctx was cancelled. ctx.Err() is nil here, exactly like the
+// production case - the batch-aborting branch above must not trigger just
+// because errLostOwnership used to be indistinguishable from
+// context.Canceled before this fix.
+func TestToolRun_LostOwnershipStaysTextResponse(t *testing.T) {
+	t.Parallel()
+
+	tool := &Tool{
+		mcpName: "srv",
+		tool:    &mcp.Tool{Name: "do_thing"},
+		cfg:     &stubMCPConfigProvider{cfg: &config.Config{}},
+		reg:     cancelingRunner{err: mcp.ErrLostOwnership},
+	}
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "sess")
+	require.NoError(t, ctx.Err())
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "1", Name: tool.Name(), Input: "{}"})
+	require.NoError(t, err, "lost ownership must not abort the tool-call batch")
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "lost ownership")
+}
+
 // TestToolRun_GenuineToolFailureStaysTextResponse pins the other side of
 // the split: an ordinary MCP failure (not cancellation) must still come
 // back as a text response the model can react to.

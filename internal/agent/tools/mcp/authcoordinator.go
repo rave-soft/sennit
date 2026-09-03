@@ -34,11 +34,24 @@ type authCoordinator struct {
 // setAuthTerminal settles an auth attempt on error: a token/consent problem
 // goes to StateNeedsAuth (recoverable by re-authenticating), anything else
 // goes to StateError.
+//
+// context.DeadlineExceeded is treated the same as Canceled here: it is what
+// interactiveAuthTimeout (transport.go) produces when the user never
+// finishes the browser login, and the recoverable outcome is the same one
+// an explicit cancel gets — offer the login again, not a raw error. The
+// substring checks are a fallback for the same condition arriving already
+// wrapped by an intermediate layer (e.g. the SDK's own connect error) where
+// errors.Is can't see through the wrapping.
 func (ac *authCoordinator) setAuthTerminal(name string, owner attemptID, err error) {
 	if err == nil {
 		return
 	}
-	if errors.Is(err, context.Canceled) || isOAuthInitErr(err) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || isOAuthInitErr(err) {
+		ac.reg.updateStateFor(name, owner, StateNeedsAuth, nil)
+		return
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "context deadline exceeded") {
 		ac.reg.updateStateFor(name, owner, StateNeedsAuth, nil)
 		return
 	}

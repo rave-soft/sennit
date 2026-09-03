@@ -34,7 +34,7 @@ func (r *Registry) ListResources(ctx context.Context, cfg ConfigProvider, name s
 	}
 	owner, published, ok := r.sessionOwner(name)
 	if !ok || published != session {
-		return nil, context.Canceled
+		return nil, errLostOwnership
 	}
 	resources, err := r.listResources(ctx, session)
 	if err != nil {

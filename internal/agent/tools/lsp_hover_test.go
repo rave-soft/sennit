@@ -102,3 +102,31 @@ func TestLSPHoverThroughManagerConvertsPosition(t *testing.T) {
 	require.Contains(t, strings.TrimSpace(string(contents)), "line=2 character=4",
 		"Hover must send the 0-based position corresponding to the 1-based file_path/line/character it was given")
 }
+
+// TestHoverTool_ContextCanceledIsGoErrorNotTextResponse is the regression
+// test for D5: c.Hover's error used to be wrapped in
+// fantasy.NewTextErrorResponse unconditionally, so canceling the context
+// (e.g. the user hitting Esc) came back to the model as an ordinary tool
+// result reading "hover failed: context canceled" instead of aborting the
+// tool-call batch the way every other infrastructure failure does.
+func TestHoverTool_ContextCanceledIsGoErrorNotTextResponse(t *testing.T) {
+	root := newLSPToolWorktree(t)
+	manager := newLSPToolE2EManager(t, root, "symbols")
+	tool := NewHoverTool(manager, root)
+
+	// Warm the client so the file is already open — a canceled context is
+	// then only exercised on the Hover round trip itself, not on getting
+	// the server started.
+	warm := runToolWith(t, tool, t.Context(), HoverToolName, HoverParams{FilePath: "a.go", Line: 3, Character: 5})
+	require.False(t, warm.IsError, warm.Content)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	input, err := json.Marshal(HoverParams{FilePath: "a.go", Line: 3, Character: 5})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{Input: string(input)})
+	require.Error(t, err, "a canceled context must abort as a Go error, not a text response")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, fantasy.ToolResponse{}, resp)
+}

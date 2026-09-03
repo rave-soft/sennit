@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,6 +42,39 @@ func TestFetchToolRejectsSchemaDriftValues(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, resp.IsError)
 	}
+}
+
+// requestCountingPermissionService wraps stubPermissionService to count how
+// many times Request is called, so a test can tell whether the permission
+// dialog was ever reached.
+type requestCountingPermissionService struct {
+	*stubPermissionService
+	requests int
+}
+
+func (s *requestCountingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	s.requests++
+	return s.stubPermissionService.Request(ctx, req)
+}
+
+// TestFetchTool_InvalidTimeoutIsRejectedBeforePermissionDialog is the
+// regression test for G25: the timeout bound used to be checked only after
+// requirePermission returned, so a model (or a user in the dialog) would
+// approve a fetch that then failed on a check that could have run first —
+// matching download.go, which already validates timeout before asking.
+func TestFetchTool_InvalidTimeoutIsRejectedBeforePermissionDialog(t *testing.T) {
+	t.Parallel()
+
+	perms := &requestCountingPermissionService{stubPermissionService: &stubPermissionService{granted: true}}
+	tool := NewFetchTool(perms, t.TempDir(), &http.Client{Transport: erroringRoundTripper{err: errors.New("unused")}})
+
+	resp, err := tool.Run(context.WithValue(context.Background(), SessionIDContextKey, "test-session"), fantasy.ToolCall{
+		Input: `{"url":"https://example.invalid","format":"text","timeout":121}`,
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "timeout must be between")
+	require.Zero(t, perms.requests, "an invalid timeout must be rejected before the permission dialog is shown")
 }
 
 func TestFetchToolNetworkFailureIsTextResponseNotError(t *testing.T) {

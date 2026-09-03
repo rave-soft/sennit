@@ -50,6 +50,13 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 
 			items, err := resolved.client.PrepareCallHierarchy(ctx, resolved.path, resolved.line, resolved.char)
 			if err != nil {
+				// A canceled context (Esc) must abort the tool-call batch
+				// like any other infrastructure failure, not read back to
+				// the model as text — see lsp_helpers.go's rule, applied
+				// here and at the two lookups below.
+				if ctx.Err() != nil {
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to prepare call hierarchy: %s", err)), nil
 			}
 			if len(items) == 0 {
@@ -64,6 +71,9 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 			if params.Direction == "incoming" {
 				calls, err := resolved.client.IncomingCalls(ctx, item)
 				if err != nil {
+					if ctx.Err() != nil {
+						return fantasy.ToolResponse{}, ctx.Err()
+					}
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get incoming calls: %s", err)), nil
 				}
 				if len(calls) == 0 {
@@ -79,6 +89,9 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 			} else {
 				calls, err := resolved.client.OutgoingCalls(ctx, item)
 				if err != nil {
+					if ctx.Err() != nil {
+						return fantasy.ToolResponse{}, ctx.Err()
+					}
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get outgoing calls: %s", err)), nil
 				}
 				if len(calls) == 0 {

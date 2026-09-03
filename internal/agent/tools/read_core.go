@@ -45,13 +45,21 @@ func newReadCore(permissions permission.Requester, tracker FileTracking, working
 		if rejectSkills && isSkill {
 			return readCoreResult{errText: "multi_read does not support skill files; use read"}, nil
 		}
+		// A session ID is required unconditionally here, not only when the
+		// path is outside workingDir: it is also what the RecordRead /
+		// RecordPartialRead calls below track file history against, for
+		// every read regardless of where the file lives.
 		sessionID := GetSessionFromContext(ctx)
 		if sessionID == "" {
 			return readCoreResult{}, missingSessionID("accessing files outside working directory")
 		}
 		if outside && !isSkill {
-			path, description := outsideWorkdirNotice("Read file outside working directory", abs, resolvedAbs)
-			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{SessionID: sessionID, Path: path, ToolCallID: call.ID, ToolName: toolName, Action: "read", Description: description, Params: ReadPermissionsParams(p)})
+			resp, denied, err := requireOutsideWorkdirPermission(
+				ctx, permissions, call,
+				toolName, "read", "Read file outside working directory",
+				"accessing files outside working directory",
+				abs, resolvedAbs, ReadPermissionsParams(p),
+			)
 			if err != nil {
 				return readCoreResult{}, err
 			}

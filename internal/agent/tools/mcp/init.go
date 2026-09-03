@@ -30,7 +30,7 @@ func (r *Registry) publishOrClose(ctx context.Context, name string, m config.MCP
 	// clobber the newer attempt's registrations; just drop our own session.
 	if !r.owns(name, owner) {
 		slog.Debug("Discarding stale MCP session after config change", "name", name)
-		return context.Canceled
+		return errLostOwnership
 	}
 
 	if err := r.publishSession(ctx, name, m, owner, session); err != nil {
@@ -58,16 +58,16 @@ func (r *Registry) publishSession(ctx context.Context, name string, m config.MCP
 		return err
 	}
 	if !r.owns(name, owner) {
-		return context.Canceled
+		return errLostOwnership
 	}
 	r.publishMu.Lock()
 	if !r.ownsLocked(name, owner) {
 		r.publishMu.Unlock()
-		return context.Canceled
+		return errLostOwnership
 	}
 	if session.auth != nil && r.detachAuthLocked(name, owner, session.auth.handler) != session.auth {
 		r.publishMu.Unlock()
-		return context.Canceled
+		return errLostOwnership
 	}
 	r.catalogMu.Lock()
 	if len(tools) == 0 {

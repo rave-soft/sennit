@@ -78,21 +78,12 @@ func NewGlobTool(permissions permission.Requester, workingDir string, cfg config
 				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
 			}
 			if outside {
-				sessionID := GetSessionFromContext(ctx)
-				if sessionID == "" {
-					return fantasy.ToolResponse{}, missingSessionID("searching for files outside working directory")
-				}
-
-				path, description := outsideWorkdirNotice("List files outside working directory", absSearchPath, resolvedSearchPath)
-				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        path,
-					ToolCallID:  call.ID,
-					ToolName:    GlobToolName,
-					Action:      "list",
-					Description: description,
-					Params:      GlobPermissionsParams(params),
-				})
+				resp, denied, err := requireOutsideWorkdirPermission(
+					ctx, permissions, call,
+					GlobToolName, "list", "List files outside working directory",
+					"searching for files outside working directory",
+					absSearchPath, resolvedSearchPath, GlobPermissionsParams(params),
+				)
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}

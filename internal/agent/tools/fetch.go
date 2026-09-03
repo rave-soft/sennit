@@ -75,6 +75,16 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 				return fantasy.NewTextErrorResponse("URL must start with http:// or https://"), nil
 			}
 
+			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch
+			// requests (2 minutes). Validated before the permission request
+			// below, like download.go already does — otherwise the model
+			// sees the dialog approved and only then learns the call was
+			// malformed, instead of never reaching the dialog at all.
+			const maxFetchTimeoutSeconds = 120
+			if params.Timeout < 0 || params.Timeout > maxFetchTimeoutSeconds {
+				return fantasy.NewTextErrorResponse("timeout must be between 0 and 120 seconds"), nil
+			}
+
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, missingSessionID("fetching a URL")
@@ -94,12 +104,6 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 			}
 			if denied {
 				return permResp, nil
-			}
-
-			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch requests (2 minutes)
-			const maxFetchTimeoutSeconds = 120
-			if params.Timeout < 0 || params.Timeout > maxFetchTimeoutSeconds {
-				return fantasy.NewTextErrorResponse("timeout must be between 0 and 120 seconds"), nil
 			}
 
 			// Handle timeout with context. The client itself carries no

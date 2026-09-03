@@ -64,6 +64,45 @@ func TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace(t *testing.T) {
 	require.Equal(t, "downloaded content", string(downloaded))
 }
 
+// TestDownloadTool_AncestorSymlinkShowsResolvedTargetInPermissionDialog is
+// the regression test for G21: download used to key and label the
+// permission dialog on the unresolved file_path, so an ancestor directory
+// symlink (`ln -s ../.. up` then `download <url> up/x`) showed a path that
+// looked confined to the workspace while the write actually landed wherever
+// the link pointed — two levels above it here.
+func TestDownloadTool_AncestorSymlinkShowsResolvedTargetInPermissionDialog(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := filepath.Join(root, "workspace")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	outsideDir := filepath.Join(root, "outside")
+	require.NoError(t, os.MkdirAll(outsideDir, 0o755))
+
+	// "up" is a directory symlink inside the workspace pointing well
+	// outside it; the requested file "up/x" never leaves the workspace's
+	// string form, only its resolved location does.
+	link := filepath.Join(workdir, "up")
+	require.NoError(t, os.Symlink(outsideDir, link))
+	wantResolved := filepath.Join(outsideDir, "x")
+
+	perms := &recordingConfinedPermissions{confinedTestPermissions: &confinedTestPermissions{dir: ""}}
+	tool := NewDownloadTool(perms, workdir, nil)
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  DownloadToolName,
+		Input: mustJSONInput(t, DownloadParams{URL: "https://example.invalid/x", FilePath: "up/x"}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "the request is denied, but a denial is still the tool's normal path here")
+	require.Len(t, perms.requests, 1)
+	require.Equal(t, wantResolved, perms.requests[0].Path,
+		"the dialog must be keyed on where the download actually lands, not the unresolved request")
+	require.Contains(t, perms.requests[0].Description, wantResolved,
+		"the dialog must tell the user where the download actually resolves to")
+}
+
 // TestDownloadTool_RefusesRedirectFromApprovedHostToLoopbackAddress pins
 // download's half of the redirect-guard fix (see fetch_test.go's
 // TestFetchTool_RefusesRedirectFromApprovedHostToLinkLocalAddress for the

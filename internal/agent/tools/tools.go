@@ -193,6 +193,61 @@ func resolveWithinWorkdir(workingDir, path string) (absPath, resolvedPath string
 	return absPath, resolvedPath, outside, nil
 }
 
+// requireOutsideWorkdirPermission is the "path resolved outside the working
+// directory" gate glob, grep, ripgrep, ls, and read/multi_read each ran as
+// an identical seven-line block (only the tool name, the permission Action,
+// the outsideWorkdirNotice verb, the missingSessionID wording, and the
+// *PermissionsParams type differed): look up the session ID this call is
+// running under — there is nothing model-recoverable about a missing one
+// (it is wired in by the caller, not a tool argument), so that case returns
+// a Go error via missingSessionID rather than a tool response — then build
+// the notice outsideWorkdirNotice shows the user and ask permission.Requester
+// for it.
+//
+// The price of leaving this duplicated rather than shared was not
+// hypothetical: commit 99efb4886 had to repeat the same seven-line diff
+// across all five files, and missed a sixth call site (download.go) doing
+// the same thing, which is why that omission could stand as its own bug.
+//
+// The (resp, denied, err) return mirrors requirePermission's: denied is
+// only meaningful when err is nil. A caller with its own response wrapper
+// (read_core.go's readCoreResult) builds it from resp rather than this
+// helper reaching into that type — and read_core.go additionally needs a
+// session ID even when the path is not outside the working directory (it
+// records file-tracking history against it), so it keeps its own
+// unconditional check ahead of the "outside" branch and calls this helper
+// only for the permission request itself, once a session ID is already
+// known to exist.
+//
+// web_fetch.go and web_search.go run a similar-looking block, but on a
+// completely different trigger (permissions != nil, not "resolved outside
+// the working directory") with no path to resolve at all (Path is always
+// workingDir) — folding them in here would force a needless path argument
+// through every caller, so they keep their own copy.
+func requireOutsideWorkdirPermission(
+	ctx context.Context,
+	perms permission.Requester,
+	call fantasy.ToolCall,
+	toolName, action, verb, missingSessionIDAction string,
+	requestedAbs, resolvedAbs string,
+	params any,
+) (resp fantasy.ToolResponse, denied bool, err error) {
+	sessionID := GetSessionFromContext(ctx)
+	if sessionID == "" {
+		return fantasy.ToolResponse{}, false, missingSessionID(missingSessionIDAction)
+	}
+	path, description := outsideWorkdirNotice(verb, requestedAbs, resolvedAbs)
+	return requirePermission(ctx, perms, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		Path:        path,
+		ToolCallID:  call.ID,
+		ToolName:    toolName,
+		Action:      action,
+		Description: description,
+		Params:      params,
+	})
+}
+
 // outsideWorkdirNotice builds the Path and Description a permission request
 // raises for a path resolveWithinWorkdir reported outside — always keyed
 // and displayed on resolvedAbs, the real destination, so a persistent grant

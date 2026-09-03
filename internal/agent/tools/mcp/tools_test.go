@@ -2,12 +2,103 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/stretchr/testify/require"
 )
+
+// liveSessionWithContent is like liveSession (lifecycle_test.go) but the
+// tool returns exactly the content the caller supplies, so tests can drive
+// RunTool's content-type switch (tools.go) with SDK content types that
+// don't come up in the package's other fixtures.
+func liveSessionWithContent(t *testing.T, toolName string, content []mcp.Content) *ClientSession {
+	t.Helper()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	server := mcp.NewServer(&mcp.Implementation{Name: "srv"}, nil)
+	mcp.AddTool(
+		server,
+		&mcp.Tool{Name: toolName, Description: "test tool"},
+		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: content}, nil, nil
+		},
+	)
+	serverSession, err := server.Connect(context.Background(), serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	client := mcp.NewClient(&mcp.Implementation{Name: "sennit-test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+
+	return &ClientSession{ClientSession: clientSession, cancel: cancel}
+}
+
+// TestRunTool_EmbeddedResourceAndResourceLinkFormatting is the regression
+// test for G12: *mcp.EmbeddedResource and *mcp.ResourceLink used to fall
+// into RunTool's default %v branch, which prints a Go struct's memory
+// address (something like "&{map[] <nil> 0xc000...}") instead of the
+// resource's actual content whenever a server answered a tool call with
+// either type - e.g. a get_file tool returning the file as an embedded
+// resource.
+func TestRunTool_EmbeddedResourceAndResourceLinkFormatting(t *testing.T) {
+	t.Parallel()
+	const name = "embedded-resource-server"
+	r := NewRegistry()
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+
+	sess := liveSessionWithContent(t, "get_file", []mcp.Content{
+		&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{
+			URI:      "file:///project/README.md",
+			MIMEType: "text/plain",
+			Text:     "hello from the embedded resource",
+		}},
+		&mcp.ResourceLink{URI: "file:///project/LICENSE", Name: "LICENSE"},
+	})
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	require.NoError(t, r.publishSession(context.Background(), name, config.MCPConfig{Type: config.MCPStdio}, owner, sess))
+
+	result, err := r.RunTool(context.Background(), cfg, name, "get_file", `{}`)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.Contains(t, result.Content, "hello from the embedded resource")
+	require.Contains(t, result.Content, "file:///project/LICENSE")
+	require.Contains(t, result.Content, "LICENSE")
+	require.NotContains(t, result.Content, "0x", "must not print a raw pointer dump for either content type")
+	require.NotContains(t, result.Content, "map[]", "must not print the zero-value Meta field of a %v dump")
+}
+
+// TestRunTool_TextContentIsTruncated is the regression test for the second
+// half of G13: the byte cap on an embedded resource's text must also bound
+// RunTool's overall joined text result, since a plain TextContent part (no
+// embedded resource involved) can just as easily be an oversized dump
+// handed back verbatim.
+func TestRunTool_TextContentIsTruncated(t *testing.T) {
+	t.Parallel()
+	const name = "oversized-text-server"
+	r := NewRegistry()
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+
+	oversized := strings.Repeat("a", MaxResourceContentBytes+1024)
+	sess := liveSessionWithContent(t, "dump", []mcp.Content{&mcp.TextContent{Text: oversized}})
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	require.NoError(t, r.publishSession(context.Background(), name, config.MCPConfig{Type: config.MCPStdio}, owner, sess))
+
+	result, err := r.RunTool(context.Background(), cfg, name, "dump", `{}`)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.LessOrEqual(t, len(result.Content), MaxResourceContentBytes+64)
+	require.Contains(t, result.Content, "truncated")
+}
 
 func TestEnsureRawBytes(t *testing.T) {
 	t.Parallel()

@@ -181,9 +181,21 @@ func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
 	// different destination. Resolving workingDir the same way keeps an
 	// ordinary in-workdir write's key collapsed to workingDir exactly as
 	// before whenever neither path involves a symlink.
-	resolvedFilePath, err := resolveExistingAncestorSymlinks(req.filePath)
-	if err != nil {
-		resolvedFilePath = req.filePath
+	resolvedFilePath, resolveErr := resolveExistingAncestorSymlinks(req.filePath)
+	description := prepared.description
+	if resolveErr != nil {
+		// req.filePath is itself unresolvable — a dangling symlink, most
+		// likely (resolveExistingAncestorSymlinks fails closed on one
+		// rather than treat it as "doesn't exist yet"; see its own doc
+		// comment). Falling back to the unresolved req.filePath here used
+		// to key the grant, and label the dialog, with a path that looks
+		// contained in workingDir, while the write itself lands at
+		// writePath — the link's target, which can be anywhere. Both must
+		// instead name writePath, the file that actually gets written.
+		resolvedFilePath = writePath
+		if writePath != req.filePath {
+			description = fmt.Sprintf("%s (resolves to %s)", description, writePath)
+		}
 	}
 	resolvedWorkingDir, err := resolveExistingAncestorSymlinks(req.workingDir)
 	if err != nil {
@@ -191,7 +203,7 @@ func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
 	}
 	resp, denied, err := requirePermission(req.ctx, req.permissions, permission.CreatePermissionRequest{
 		SessionID: req.sessionID, Path: fsext.PathOrPrefix(resolvedFilePath, resolvedWorkingDir), ToolCallID: req.call.ID,
-		ToolName: req.toolName, Action: "write", Description: prepared.description, Params: prepared.permParams,
+		ToolName: req.toolName, Action: "write", Description: description, Params: prepared.permParams,
 	})
 	if err != nil {
 		return fantasy.ToolResponse{}, err

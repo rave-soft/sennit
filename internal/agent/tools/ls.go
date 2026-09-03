@@ -102,21 +102,12 @@ func NewLsTool(permissions permission.Requester, workingDir string, lsConfig con
 				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
 			}
 			if outside {
-				sessionID := GetSessionFromContext(ctx)
-				if sessionID == "" {
-					return fantasy.ToolResponse{}, missingSessionID("accessing directories outside working directory")
-				}
-
-				path, description := outsideWorkdirNotice("List directory outside working directory", absSearchPath, resolvedSearchPath)
-				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        path,
-					ToolCallID:  call.ID,
-					ToolName:    LSToolName,
-					Action:      "list",
-					Description: description,
-					Params:      LSPermissionsParams(params),
-				})
+				resp, denied, err := requireOutsideWorkdirPermission(
+					ctx, permissions, call,
+					LSToolName, "list", "List directory outside working directory",
+					"accessing directories outside working directory",
+					absSearchPath, resolvedSearchPath, LSPermissionsParams(params),
+				)
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
