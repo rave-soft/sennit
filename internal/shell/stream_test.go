@@ -33,7 +33,9 @@ func TestRunAndCaptureStream_Canceled(t *testing.T) {
 	t.Cleanup(cancel)
 
 	result, err := RunAndCaptureStream(ctx, RunOptions{
-		Command: "sleep 30",
+		// See TestRunAndCapture_Canceled: a pure-interpreter loop keeps
+		// this portable.
+		Command: "while :; do :; done",
 		Cwd:     t.TempDir(),
 	}, nil)
 	if err != nil {

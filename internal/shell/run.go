@@ -119,15 +119,20 @@ type CaptureResult struct {
 // bare interp.ExitStatus is a normal exit; anything else — a parse
 // failure, a bad Cwd, or newInterp failing to start — means the command
 // never ran.
-func classifyCaptureErr(err error) (exitCode int, canceled bool, startErr error) {
+func classifyCaptureErr(ctx context.Context, err error) (exitCode int, canceled bool, startErr error) {
 	if err == nil {
 		return 0, false, nil
 	}
+	// The context is consulted before the error's shape because a killed
+	// command does not report its death the same way everywhere: the
+	// interpreter surfaces the cancellation itself on some platforms and
+	// the dead child's exit status on others. Once ctx is done, a run that
+	// ended with any error ended because of that, whatever it says.
+	if ctx.Err() != nil || IsInterrupt(err) {
+		return 130, true, nil
+	}
 	if status, ok := errors.AsType[interp.ExitStatus](err); ok {
 		return int(status), false, nil
-	}
-	if IsInterrupt(err) {
-		return 130, true, nil
 	}
 	return 0, false, err
 }
@@ -178,7 +183,7 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 
 	runErr := Run(ctx, opts)
 
-	exitCode, canceled, startErr := classifyCaptureErr(runErr)
+	exitCode, canceled, startErr := classifyCaptureErr(ctx, runErr)
 	if startErr != nil {
 		return CaptureResult{StartErr: startErr}, nil
 	}

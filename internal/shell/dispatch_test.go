@@ -801,7 +801,15 @@ func TestDispatch_LongShebangLineWithinCap(t *testing.T) {
 		t.Fatalf("read %s: %v", sh, err)
 	}
 	dir := t.TempDir()
-	padded := filepath.Join(dir, strings.Repeat("a", 180))
+	// Pad relative to the temp directory's own length: t.TempDir() is
+	// short on Linux and long on macOS, and the shebang line has to land
+	// above probeWindow but at or below maxShebangLine on both.
+	const want = maxShebangLine - 16
+	pad := want - len(filepath.Join(dir, "sh")) - len("#!\n")
+	if pad < probeWindow {
+		t.Skipf("temp dir %q leaves no room for a >probeWindow shebang under the cap", dir)
+	}
+	padded := filepath.Join(dir, strings.Repeat("a", pad))
 	if err := os.MkdirAll(padded, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

@@ -217,7 +217,10 @@ func TestService_ListReadFiles_OrdersMostRecentFirst(t *testing.T) {
 
 	files, err := env.svc.ListReadFiles(env.ctx, sessionID)
 	require.NoError(t, err)
-	require.Equal(t, []string{path2, path1}, files, "the more recently read file should sort first")
+	// ListReadFiles returns paths joined against the working directory,
+	// so the expectation is built the same way rather than from slash
+	// literals that only match on one platform.
+	require.Equal(t, []string{filepath.FromSlash(path2), filepath.FromSlash(path1)}, files, "the more recently read file should sort first")
 }
 
 // TestService_UsesInjectedWorkingDir_NotProcessCwd guards against a

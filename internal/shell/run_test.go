@@ -361,7 +361,10 @@ func TestRunAndCapture_Canceled(t *testing.T) {
 	t.Cleanup(cancel)
 
 	result, err := RunAndCapture(ctx, RunOptions{
-		Command: "sleep 30",
+		// A pure-interpreter loop rather than sleep: it needs no
+		// external binary, so the command is equally long-running on
+		// every platform the suite runs on.
+		Command: "while :; do :; done",
 		Cwd:     t.TempDir(),
 	})
 	if err != nil {

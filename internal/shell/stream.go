@@ -59,7 +59,7 @@ func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(s
 
 	runErr := Run(ctx, opts)
 
-	exitCode, canceled, startErr := classifyCaptureErr(runErr)
+	exitCode, canceled, startErr := classifyCaptureErr(ctx, runErr)
 	if startErr != nil {
 		return CaptureResult{StartErr: startErr}, nil
 	}
