@@ -104,83 +104,20 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	defer release()
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
-	if claim != nil {
-		if !a.swapActive(sessionID, claim, ac) {
-			cancel()
-			return ErrSessionBusy
-		}
-	} else {
-		s.mu.Lock()
-		if s.active != nil {
-			s.mu.Unlock()
-			cancel()
-			return ErrSessionBusy
-		}
-		s.active = ac
-		s.mu.Unlock()
-	}
-
-	defer func() {
-		a.clearActiveIfMatch(sessionID, ac)
+	if err := a.claimSummarizeSlot(s, sessionID, ac, claim); err != nil {
 		cancel()
-
-		// A completion can land in the inbox while this summarize holds
-		// the active slot - wakeEligibleLocked requires s.active == nil,
-		// so DeliverTaskCompletion sees wakeEligible=false and the
-		// caller's own continuation attempt is dropped (SteerDropped).
-		// runTurn's own defer is the ordinary place this gets retried
-		// from, but that defer never runs here: this call *is* the
-		// active slot's owner for as long as the summary takes, and
-		// finishTurn's shouldSummarize path (claim != nil) calls this
-		// instead of clearing the slot itself. Without this call, a
-		// parked delegation session - most idle-sweep summarize
-		// candidates are exactly that, see markActivity below - would
-		// sit at StatusRunning until the watchdog notices, rather than
-		// picking the completion up the moment this summary finishes.
-		// Detached from ctx: this defer's own cancel() above ends
-		// genCtx, and callers on the finishTurn path hand in a ctx tied
-		// to the very turn that is winding down here.
-		a.wakeFromInboxIfIdle(context.WithoutCancel(ctx), sessionID)
-
-		// The queue handoff belongs to a summarize that owns the whole
-		// dispatch — the caller asked for a summary and nothing else.
-		// With claim != nil this runs *inside* finishTurn, before its
-		// turn has published AgentFinished: the nested Run would execute
-		// a queued follow-up too early, and its error would replace the
-		// result of the outer turn that had in fact succeeded. finishTurn
-		// does its own handoff, at the point it is finished.
-		if claim != nil {
-			return
-		}
-
-		_, next, canceledRunIDDrops := a.drainNext(sessionID)
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
-		if next == nil {
-			return
-		}
-		_, handoffErr := a.Run(context.WithoutCancel(ctx), *next)
-		if retErr == nil {
-			retErr = handoffErr
-		}
-	}()
-
-	currentSession, err := a.sessions.Get(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to get session: %w", err)
+		return err
 	}
-	msgs, err := a.getSessionMessages(ctx, currentSession)
+	defer a.finishSummarizeSlot(ctx, sessionID, ac, claim, &retErr)
+
+	currentSession, aiMsgs, ok, err := a.summarizeMessages(ctx, sessionID, model)
 	if err != nil {
 		return err
 	}
-	if len(msgs) == 0 {
+	if !ok {
 		// Nothing to summarize.
 		return nil
 	}
-
-	aiMsgs, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages, currentSession.Todos, nil,
-		withRepairSessionID(sessionID, RunIDFromContext(ctx)),
-		withRepairOrigins(originSlice(msgs, originSummary)),
-	)
 
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
@@ -188,6 +125,118 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}()
 
+	summaryMessage, resp, err := a.streamSummary(genCtx, ctx, sessionID, model, systemPromptPrefix, active, onAuthRefresh, aiMsgs, opts, currentSession.Todos)
+	if err != nil {
+		return err
+	}
+
+	return a.persistSummaryResult(genCtx, model, &currentSession, &summaryMessage, resp)
+}
+
+// claimSummarizeSlot installs ac as sessionID's active-run slot. When claim
+// is non-nil (finishTurn's shouldSummarize path), it takes over that
+// already-installed slot with a single atomic swap instead of releasing it
+// and re-claiming from scratch, closing the window in which a queued
+// continuation could claim the session first and turn a successful turn's
+// summarize into ErrSessionBusy. A nil claim falls back to the normal
+// claim-if-idle check, used by callers (Summarize, and coordinator's
+// explicit trigger) that never held the slot themselves.
+func (a *sessionAgent) claimSummarizeSlot(s *sessionState, sessionID string, ac, claim *activeCancel) error {
+	if claim != nil {
+		if !a.swapActive(sessionID, claim, ac) {
+			return ErrSessionBusy
+		}
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != nil {
+		return ErrSessionBusy
+	}
+	s.active = ac
+	return nil
+}
+
+// finishSummarizeSlot is summarize's deferred cleanup: it releases the
+// active-run slot this call claimed, wakes any completion parked in the
+// inbox while summarize held it, and hands off to whatever ran got queued
+// behind this summarize - the same responsibilities runTurn's own defer
+// carries for an ordinary turn.
+func (a *sessionAgent) finishSummarizeSlot(ctx context.Context, sessionID string, ac, claim *activeCancel, retErr *error) {
+	a.clearActiveIfMatch(sessionID, ac)
+	ac.cancel()
+
+	// A completion can land in the inbox while this summarize holds
+	// the active slot - wakeEligibleLocked requires s.active == nil,
+	// so DeliverTaskCompletion sees wakeEligible=false and the
+	// caller's own continuation attempt is dropped (SteerDropped).
+	// runTurn's own defer is the ordinary place this gets retried
+	// from, but that defer never runs here: this call *is* the
+	// active slot's owner for as long as the summary takes, and
+	// finishTurn's shouldSummarize path (claim != nil) calls this
+	// instead of clearing the slot itself. Without this call, a
+	// parked delegation session - most idle-sweep summarize
+	// candidates are exactly that, see markActivity below - would
+	// sit at StatusRunning until the watchdog notices, rather than
+	// picking the completion up the moment this summary finishes.
+	// Detached from ctx: this defer's own cancel() above ends
+	// genCtx, and callers on the finishTurn path hand in a ctx tied
+	// to the very turn that is winding down here.
+	a.wakeFromInboxIfIdle(context.WithoutCancel(ctx), sessionID)
+
+	// The queue handoff belongs to a summarize that owns the whole
+	// dispatch — the caller asked for a summary and nothing else.
+	// With claim != nil this runs *inside* finishTurn, before its
+	// turn has published AgentFinished: the nested Run would execute
+	// a queued follow-up too early, and its error would replace the
+	// result of the outer turn that had in fact succeeded. finishTurn
+	// does its own handoff, at the point it is finished.
+	if claim != nil {
+		return
+	}
+
+	_, next, canceledRunIDDrops := a.drainNext(sessionID)
+	a.publishCanceledQueueDrops(canceledRunIDDrops)
+	if next == nil {
+		return
+	}
+	_, handoffErr := a.Run(context.WithoutCancel(ctx), *next)
+	if *retErr == nil {
+		*retErr = handoffErr
+	}
+}
+
+// summarizeMessages loads sessionID's session and converts its history into
+// the fantasy messages the summarization request sends to the model. ok is
+// false when there is nothing to summarize (an empty history), which is not
+// an error.
+func (a *sessionAgent) summarizeMessages(ctx context.Context, sessionID string, model Model) (currentSession session.Session, aiMsgs []fantasy.Message, ok bool, err error) {
+	currentSession, err = a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return session.Session{}, nil, false, fmt.Errorf("failed to get session: %w", err)
+	}
+	msgs, err := a.getSessionMessages(ctx, currentSession)
+	if err != nil {
+		return session.Session{}, nil, false, err
+	}
+	if len(msgs) == 0 {
+		return session.Session{}, nil, false, nil
+	}
+
+	aiMsgs, _ = a.preparePrompt(msgs, model.CatalogCfg.SupportsImages, currentSession.Todos, nil,
+		withRepairSessionID(sessionID, RunIDFromContext(ctx)),
+		withRepairOrigins(originSlice(msgs, originSummary)),
+	)
+	return currentSession, aiMsgs, true, nil
+}
+
+// streamSummary issues the summarization provider request: it builds the
+// summary agent, creates the summary message that streaming deltas write
+// into, and runs fantasy.Agent.Stream against it. On a stream error the
+// summary message is already finished with the error (or deleted, if the
+// error was a cancel) by the time this returns, so the caller has nothing
+// left to clean up on that path - it can just propagate err.
+func (a *sessionAgent) streamSummary(genCtx, ctx context.Context, sessionID string, model Model, systemPromptPrefix string, active *activeRuntime, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, aiMsgs []fantasy.Message, opts fantasy.ProviderOptions, todos []session.Todo) (message.Message, *fantasy.AgentResult, error) {
 	agent := fantasy.NewAgent(
 		model.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
@@ -200,10 +249,10 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		IsSummaryMessage: true,
 	})
 	if err != nil {
-		return err
+		return message.Message{}, nil, err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	summaryPromptText := buildSummaryPrompt(todos)
 
 	// The summarize pass is a real provider request of its own, so it gets
 	// its own started/finished pair - not folded into the turn's request
@@ -307,53 +356,58 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		},
 	})
 	if err != nil {
-		isCancelErr := errors.Is(err, context.Canceled)
-		// ctx is canceled on this path (that's exactly what got us here),
-		// so cleanup writes need a context detached from it the same way
-		// handleStreamError detaches cleanupCtx from t.ctx: otherwise the
-		// delete/update below fails immediately, leaving an empty summary
-		// message behind forever.
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cleanupCancel()
-		if isCancelErr {
-			// User cancelled summarize we need to remove the summary message.
-			//
-			// The cancellation itself is what this returns, not the
-			// delete's own error: returning the delete result (nil on the
-			// ordinary path) reported a cancelled summarize as a
-			// successful one, and finishTurn went on to requeue a
-			// continuation — on the un-summarized context that made
-			// summarizing necessary in the first place, so the next turn
-			// walked straight back into it. A delete failure is worth
-			// logging but is not the outcome the caller has to act on.
-			if deleteErr := a.messages.Delete(cleanupCtx, summaryMessage.ID); deleteErr != nil {
-				slog.Error("Failed to remove the summary message of a cancelled summarize",
-					"session_id", sessionID, "message_id", summaryMessage.ID, "error", deleteErr)
-			}
-			return err
-		}
-		// Mark the summary message as finished with an error so the UI
-		// stops spinning.
-		summaryMessage.AddFinish(message.FinishReasonError, time.Now().Unix(), "Summarization Error", err.Error())
-		if updateErr := a.messages.Update(cleanupCtx, summaryMessage); updateErr != nil {
-			return updateErr
-		}
-		return err
+		return a.handleSummarizeStreamError(ctx, sessionID, summaryMessage, err)
 	}
+	return summaryMessage, resp, nil
+}
 
-	// Record what the compaction was worth before the finishing Update,
-	// so one write persists the numbers and one pubsub event carries them
-	// to a chat already rendering the row. "Before" is the summarize
-	// request's own prompt — the whole conversation, as the provider
-	// counted it — rather than the session's counters, which the next
-	// turn overwrites; "after" is the summary that replaces it, reusing
-	// the same fallback the session's own completion count uses when a
-	// provider reports no usage.
+// handleSummarizeStreamError finishes summaryMessage after a failed stream.
+// A cancel deletes it outright: the cancellation is what this returns, not
+// the delete's own error, because returning the delete result (nil on the
+// ordinary path) would report a cancelled summarize as a successful one,
+// and finishTurn would go on to requeue a continuation on the very
+// un-summarized context that made summarizing necessary in the first
+// place. Any other error marks the message finished with it, so the UI
+// stops spinning.
+//
+// ctx is canceled on this path (that's exactly what got us here), so
+// cleanup writes need a context detached from it the same way
+// handleStreamError detaches cleanupCtx from t.ctx: otherwise the
+// delete/update below fails immediately, leaving an empty summary message
+// behind forever.
+func (a *sessionAgent) handleSummarizeStreamError(ctx context.Context, sessionID string, summaryMessage message.Message, err error) (message.Message, *fantasy.AgentResult, error) {
+	isCancelErr := errors.Is(err, context.Canceled)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cleanupCancel()
+	if isCancelErr {
+		// User cancelled summarize we need to remove the summary message.
+		if deleteErr := a.messages.Delete(cleanupCtx, summaryMessage.ID); deleteErr != nil {
+			slog.Error("Failed to remove the summary message of a cancelled summarize",
+				"session_id", sessionID, "message_id", summaryMessage.ID, "error", deleteErr)
+		}
+		return summaryMessage, nil, err
+	}
+	summaryMessage.AddFinish(message.FinishReasonError, time.Now().Unix(), "Summarization Error", err.Error())
+	if updateErr := a.messages.Update(cleanupCtx, summaryMessage); updateErr != nil {
+		return summaryMessage, nil, updateErr
+	}
+	return summaryMessage, nil, err
+}
+
+// persistSummaryResult records what the summarize call produced: the
+// summary message is finished and persisted before its token counts are
+// read back off it, so one write persists the numbers and one pubsub event
+// (published by the Update above) carries them to a chat already rendering
+// the row. "Before" is the summarize request's own prompt — the whole
+// conversation, as the provider counted it — rather than the session's
+// counters, which the next turn overwrites; "after" is the summary that
+// replaces it, reusing the same fallback the session's own completion
+// count uses when a provider reports no usage.
+func (a *sessionAgent) persistSummaryResult(ctx context.Context, model Model, currentSession *session.Session, summaryMessage *message.Message, resp *fantasy.AgentResult) error {
 	summaryMessage.SummaryBeforeTokens = promptTokensOf(resp.Response.Usage)
-	summaryMessage.SummaryAfterTokens = summaryCompletionTokens(resp.Response.Usage, summaryMessage)
+	summaryMessage.SummaryAfterTokens = summaryCompletionTokens(resp.Response.Usage, *summaryMessage)
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, time.Now().Unix(), "", "")
-	err = a.messages.Update(genCtx, summaryMessage)
-	if err != nil {
+	if err := a.messages.Update(ctx, *summaryMessage); err != nil {
 		return err
 	}
 
@@ -363,12 +417,12 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	// read/creation). We do not log a second finished line here - that was
 	// the duplicate the audit caught.
 
-	costDelta := a.updateSessionUsage(model, &currentSession, resp.TotalUsage, a.openrouterTotal(resp.Steps), false)
+	costDelta := a.updateSessionUsage(model, currentSession, resp.TotalUsage, a.openrouterTotal(resp.Steps), false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
+	currentSession.CompletionTokens = summaryCompletionTokens(usage, *summaryMessage)
 	currentSession.PromptTokens = 0
 	currentSession.EstimatedUsage = usageIsZero(usage)
 	// SaveUsage, not Save: this pass's Get happened before an entire
@@ -378,12 +432,8 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	// total computed from the stale read - and silently erase that
 	// write; SaveUsage instead folds costDelta onto whatever cost is
 	// there now, in one atomic UPDATE.
-	_, err = a.sessions.SaveUsage(genCtx, currentSession, costDelta)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	_, err := a.sessions.SaveUsage(ctx, *currentSession, costDelta)
+	return err
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.

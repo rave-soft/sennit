@@ -1,22 +1,14 @@
 package agent
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/anthropic"
-	"charm.land/fantasy/providers/bedrock"
-	"charm.land/fantasy/providers/vercel"
-	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/stringext"
@@ -238,134 +230,6 @@ func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs 
 		Role:    fantasy.MessageRoleTool,
 		Content: syntheticParts,
 	}, true
-}
-
-// workaroundProviderMediaLimitations converts media content in tool results to
-// user messages for providers that don't natively support images in tool results.
-//
-// Problem: OpenAI, Google, OpenRouter, and other OpenAI-compatible providers
-// don't support sending images/media in tool result messages - they only accept
-// text in tool results. However, they DO support images in user messages.
-//
-// If we send media in tool results to these providers, the API returns an error.
-//
-// Solution: For these providers, we:
-//  1. Replace the media in the tool result with a text placeholder
-//  2. Inject a user message immediately after with the image as a file attachment
-//  3. This maintains the tool execution flow while working around API limitations
-//
-// Anthropic and Bedrock support images natively in tool results, so we skip
-// this workaround for them.
-//
-// Example transformation:
-//
-//	BEFORE: [tool result: image data]
-//	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
-func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, model Model) []fantasy.Message {
-	providerSupportsMedia := model.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
-		model.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
-		model.ModelCfg.Provider == string(catwalk.InferenceProviderBedrockEurope)
-
-	if providerSupportsMedia {
-		return messages
-	}
-
-	supportsImages := model.CatalogCfg.SupportsImages
-
-	convertedMessages := make([]fantasy.Message, 0, len(messages))
-
-	for _, msg := range messages {
-		if msg.Role != fantasy.MessageRoleTool {
-			convertedMessages = append(convertedMessages, msg)
-			continue
-		}
-
-		textParts := make([]fantasy.MessagePart, 0, len(msg.Content))
-		var mediaFiles []fantasy.FilePart
-
-		for _, part := range msg.Content {
-			toolResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part)
-			if !ok {
-				textParts = append(textParts, part)
-				continue
-			}
-
-			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
-				if !supportsImages {
-					// Model cannot process images. Replace with a text
-					// placeholder and skip creating a synthetic user
-					// message with FilePart, which would brick the
-					// session on text-only models.
-					textParts = append(textParts, fantasy.ToolResultPart{
-						ToolCallID: toolResult.ToolCallID,
-						Output: fantasy.ToolResultOutputContentText{
-							Text: "[Image/media content not supported by this model]",
-						},
-						ProviderOptions: toolResult.ProviderOptions,
-					})
-					continue
-				}
-
-				decoded, err := base64.StdEncoding.DecodeString(media.Data)
-				if err != nil {
-					slog.Warn("Failed to decode media data", "error", err)
-					textParts = append(textParts, part)
-					continue
-				}
-
-				mediaFiles = append(mediaFiles, fantasy.FilePart{
-					Data:      decoded,
-					MediaType: media.MediaType,
-					Filename:  fmt.Sprintf("tool-result-%s", toolResult.ToolCallID),
-				})
-
-				textParts = append(textParts, fantasy.ToolResultPart{
-					ToolCallID: toolResult.ToolCallID,
-					Output: fantasy.ToolResultOutputContentText{
-						Text: "[Image/media content loaded - see attached file]",
-					},
-					ProviderOptions: toolResult.ProviderOptions,
-				})
-			} else {
-				textParts = append(textParts, part)
-			}
-		}
-
-		convertedMessages = append(convertedMessages, fantasy.Message{
-			Role:    fantasy.MessageRoleTool,
-			Content: textParts,
-		})
-
-		if len(mediaFiles) > 0 {
-			convertedMessages = append(convertedMessages, fantasy.NewUserMessage(
-				"Here is the media content from the tool result:",
-				mediaFiles...,
-			))
-		}
-	}
-
-	return convertedMessages
-}
-
-func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
-	return cacheControlOptions()
-}
-
-func cacheControlOptions() fantasy.ProviderOptions {
-	if t, _ := strconv.ParseBool(os.Getenv(brand.EnvPrefix + "DISABLE_ANTHROPIC_CACHE")); t {
-		return fantasy.ProviderOptions{}
-	}
-	return fantasy.ProviderOptions{
-		anthropic.Name: &anthropic.ProviderCacheControlOptions{
-			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
-		},
-		bedrock.Name: &anthropic.ProviderCacheControlOptions{
-			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
-		},
-		vercel.Name: &anthropic.ProviderCacheControlOptions{
-			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
-		},
-	}
 }
 
 // sessionHeaders returns the HTTP headers we use for cache affinity on
