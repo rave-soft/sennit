@@ -82,6 +82,27 @@ func (m *Manager) RuntimeForTest(id string) (runID string, live bool) {
 	return c.runtime.runID, true
 }
 
+// AwaitingDelegationsForTest reports whether a delegation's runtime is
+// currently parked — its own turn finished but rt.awaitingDelegations is
+// still set because delegations of its own are in flight (see
+// lifecycle.parkIfAwaitingDelegations). StatusRunning alone cannot
+// distinguish "still running its own goal" from "parked awaiting
+// children": both read running from the public API. Tests that need to
+// wait for the park itself, rather than for the pre-park running state it
+// is indistinguishable from, read this instead.
+func (m *Manager) AwaitingDelegationsForTest(id string) bool {
+	c := m.lc.existingControl(id)
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.runtime == nil {
+		return false
+	}
+	return c.runtime.awaitingDelegations
+}
+
 // ResolveDeliveryTargetForTest exposes resolveDeliveryTarget — the
 // lifecycle's deliveryResolver hook — for tests outside this package that
 // need to exercise its branches directly rather than through a full

@@ -270,10 +270,17 @@ func TestManager_ParkedThreadSurvivesCancelledFollowUp(t *testing.T) {
 	// it must park rather than finalize.
 	writeFile(t, parent.WorktreePath, "output.txt", "auto merged\n")
 	publishSuccess(t, spawner.appFor(parent.WorktreePath), parent.SessionID)
+	// StatusRunning alone does not prove the park happened: it is also
+	// the status while the parent's own goal run is still in flight, so
+	// waiting on it races parkIfAwaitingDelegations and can proceed
+	// before the park is established. Wait on the park's own flag
+	// instead.
 	require.Eventually(t, func() bool {
-		got, err := mgr.Get(t.Context(), parent.ID)
-		return err == nil && got.Status == thread.StatusRunning
-	}, eventuallyTimeout, eventuallyTick, "a parked thread's row stays running")
+		return mgr.AwaitingDelegationsForTest(parent.ID)
+	}, eventuallyTimeout, eventuallyTick, "the parent parks once its own goal run ends with the child still in flight")
+	got, err := mgr.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status, "a parked thread's row stays running")
 	require.NotNil(t, mgr.Handle(parent.ID), "a parked entity's workspace stays live")
 
 	// A person attaches to what still reads as running and sends a
@@ -287,7 +294,7 @@ func TestManager_ParkedThreadSurvivesCancelledFollowUp(t *testing.T) {
 	require.NoError(t, err, "a cancelled dispatch is an outcome, not a failure")
 	require.False(t, disp.Steered)
 
-	got, err := mgr.Get(t.Context(), parent.ID)
+	got, err = mgr.Get(t.Context(), parent.ID)
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusRunning, got.Status,
 		"a cancelled follow-up must not clobber a parked entity's status")
