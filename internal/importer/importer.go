@@ -254,11 +254,18 @@ func importSkills(srcDir, dstDir string, opts Options, seen map[string]string) (
 		}
 
 		if !opts.DryRun {
-			if err := copyDir(skillDir, dest); err != nil {
+			skipped, err := copyDir(skillDir, dest)
+			if err != nil {
 				entry.Status = StatusSkipped
 				entry.Reason = fmt.Sprintf("copy failed: %v", err)
 				out = append(out, entry)
 				continue
+			}
+			if len(skipped) > 0 {
+				entry.Status = StatusAdjusted
+				for _, name := range skipped {
+					entry.Warnings = append(entry.Warnings, fmt.Sprintf("%s: not a regular file, not copied", name))
+				}
 			}
 		}
 		out = append(out, entry)
@@ -268,8 +275,11 @@ func importSkills(srcDir, dstDir string, opts Options, seen map[string]string) (
 
 // copyDir recursively copies src onto dst, preserving any files alongside
 // SKILL.md (reference docs, scripts, ...) that a skill directory may carry.
-func copyDir(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+// src is a foreign directory the user pointed us at, not one Sennit
+// generated, so it returns the relative paths of any entries it declined to
+// copy rather than trusting everything it finds there.
+func copyDir(src, dst string) (skipped []string, err error) {
+	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -281,6 +291,17 @@ func copyDir(src, dst string) error {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
+		// fs.WalkDir does not follow symlinks, so a symlink entry reaches
+		// here with d.IsDir() false — but os.ReadFile below DOES follow
+		// symlinks at the OS level. Left unchecked, a symlink pointing
+		// outside src would have its target's bytes copied into dst rather
+		// than being treated as the untrusted reference it is. Requiring
+		// d.Type().IsRegular() rules that out along with sockets, devices,
+		// and other non-file entries in one check, without a second stat.
+		if !d.Type().IsRegular() {
+			skipped = append(skipped, rel)
+			return nil
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -290,6 +311,7 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(target, content, 0o644)
 	})
+	return skipped, err
 }
 
 // importAgentMeta is the frontmatter of a foreign agent file, extended with

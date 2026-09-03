@@ -227,6 +227,49 @@ Fill the form.`)
 	require.Contains(t, string(written), "Fill the form.")
 }
 
+// A symlink inside a foreign skill directory must not be followed: os.ReadFile
+// (unlike fs.WalkDir) follows symlinks at the OS level, so copyDir has to
+// filter them out explicitly or a symlink pointing outside the skill
+// directory would leak its target's bytes into the destination.
+func TestRunImport_Skill_SymlinkNotFollowed(t *testing.T) {
+	root := t.TempDir()
+	writeForeignSkill(t, root, ".claude/skills", "pdf-fill", `---
+name: pdf-fill
+description: Fill PDF forms.
+---
+Fill the form.`)
+
+	outside := filepath.Join(root, "secret.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("super secret contents"), 0o644))
+
+	link := filepath.Join(root, ".claude", "skills", "pdf-fill", "notes.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	report, err := Run(Options{
+		Source: SourceClaude, WorkingDir: root, Skills: true,
+	})
+	require.NoError(t, err)
+
+	entry := findEntry(t, report, "skill", "pdf-fill")
+	require.Equal(t, StatusAdjusted, entry.Status)
+	require.NotEmpty(t, entry.Warnings)
+	require.Contains(t, entry.Warnings[0], "notes.txt")
+
+	dest := filepath.Join(root, ".sennit", "skills", "pdf-fill", "notes.txt")
+	_, err = os.Stat(dest)
+	require.True(t, os.IsNotExist(err), "symlink target must not be copied into the destination")
+
+	entries, err := os.ReadDir(filepath.Join(root, ".sennit", "skills", "pdf-fill"))
+	require.NoError(t, err)
+	for _, e := range entries {
+		content, err := os.ReadFile(filepath.Join(root, ".sennit", "skills", "pdf-fill", e.Name()))
+		require.NoError(t, err)
+		require.NotContains(t, string(content), "super secret contents")
+	}
+}
+
 // A skill whose name doesn't match its directory fails Sennit's own
 // validation and is skipped with a reason, not partially written.
 func TestRunImport_Skill_InvalidIsSkipped(t *testing.T) {
