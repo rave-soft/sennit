@@ -64,6 +64,41 @@ func TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace(t *testing.T) {
 	require.Equal(t, "downloaded content", string(downloaded))
 }
 
+// TestDownloadTool_RefusesRedirectFromApprovedHostToLoopbackAddress pins
+// download's half of the redirect-guard fix (see fetch_test.go's
+// TestFetchTool_RefusesRedirectFromApprovedHostToLinkLocalAddress for the
+// full rationale): the user approves the URL they see, not wherever the
+// server then redirects to, so a redirect that leaves the approved host for
+// a loopback address must be refused rather than followed.
+func TestDownloadTool_RefusesRedirectFromApprovedHostToLoopbackAddress(t *testing.T) {
+	t.Parallel()
+
+	// The redirect target must be a different host than the server below
+	// (a loopback address, standing in for any approved host) — 169.254.
+	// 169.254 is the classic cloud-metadata SSRF target, a link-local
+	// address the redirect leaves the approved host for.
+	entry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer entry.Close()
+
+	workdir := t.TempDir()
+	perms := &mockPermissionService{}
+	tool := NewDownloadTool(perms, workdir, nil)
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  DownloadToolName,
+		Input: mustJSONInput(t, DownloadParams{URL: entry.URL, FilePath: "out.txt"}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "refusing to follow a redirect")
+
+	_, err = os.Stat(filepath.Join(workdir, "out.txt"))
+	require.True(t, os.IsNotExist(err), "a refused redirect must not create the output file")
+}
+
 // TestDownloadTool_DefaultClientDoesNotCapBelowCallerTimeout is download's
 // half of DEFECT 1 (see fetch_test.go's
 // TestFetchTool_DefaultClientDoesNotCapBelowCallerTimeout for the full

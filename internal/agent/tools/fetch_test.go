@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -103,6 +105,114 @@ func TestFetchTool_DefaultClientDoesNotCapBelowCallerTimeout(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, resp.IsError, "NewFetchTool's default client (client: nil) must not impose a fixed cap below the caller's timeout")
 	require.Equal(t, "ok", resp.Content)
+}
+
+// TestFetchTool_DirectLoopbackFetchSucceeds is the regression guard for the
+// legitimate case a redirect guard must not break: "fetch my local dev
+// server on localhost" is a normal, user-approved request, and the initial
+// URL is never subject to the blocked-address check — only a later redirect
+// hop is (see checkFetchRedirect).
+func TestFetchTool_DirectLoopbackFetchSucceeds(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("dev server ok"))
+	}))
+	t.Cleanup(server.Close)
+
+	perms := &stubPermissionService{granted: true}
+	tool := NewFetchTool(perms, t.TempDir(), nil)
+
+	input, err := json.Marshal(FetchParams{URL: server.URL, Format: "text"})
+	require.NoError(t, err)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Equal(t, "dev server ok", resp.Content)
+}
+
+// TestFetchTool_RefusesRedirectFromApprovedHostToLinkLocalAddress pins the
+// actual fix: the user approves the URL they see (the test server's
+// loopback address here, standing in for any host), not wherever the server
+// then redirects to. 169.254.169.254 is the classic cloud-metadata SSRF
+// target — a link-local address the redirect leaves the approved host for,
+// so it must be refused before the client ever dials it.
+func TestFetchTool_RefusesRedirectFromApprovedHostToLinkLocalAddress(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	t.Cleanup(server.Close)
+
+	perms := &stubPermissionService{granted: true}
+	tool := NewFetchTool(perms, t.TempDir(), nil)
+
+	input, err := json.Marshal(FetchParams{URL: server.URL, Format: "text"})
+	require.NoError(t, err)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "refusing to follow a redirect")
+}
+
+// staticRoundTripper serves canned responses keyed by request URL, standing
+// in for a redirect chain across hosts without any real network dial — used
+// so the cross-host case below cannot depend on outbound network access or
+// real DNS.
+type staticRoundTripper struct {
+	responses map[string]*http.Response
+}
+
+func (rt staticRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, ok := rt.responses[req.URL.String()]
+	if !ok {
+		return nil, fmt.Errorf("unstubbed request: %s", req.URL)
+	}
+	resp.Request = req
+	return resp, nil
+}
+
+// TestFetchTool_OrdinaryCrossHostRedirectStillWorks confirms the guard is
+// about address, not host identity: a redirect that leaves the approved
+// host but lands on an ordinary public address must still be followed, or
+// every cross-host redirect (a bare domain to its "www" host, a link
+// shortener, a CDN) would break.
+func TestFetchTool_OrdinaryCrossHostRedirectStillWorks(t *testing.T) {
+	t.Parallel()
+
+	const startURL = "https://198.51.100.1/start"
+	const finalURL = "https://198.51.100.2/final"
+	client := &http.Client{
+		Transport: staticRoundTripper{responses: map[string]*http.Response{
+			startURL: {
+				StatusCode: http.StatusFound,
+				Header:     http.Header{"Location": []string{finalURL}},
+				Body:       http.NoBody,
+			},
+			finalURL: {
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("final content")),
+			},
+		}},
+		CheckRedirect: checkFetchRedirect,
+	}
+
+	perms := &stubPermissionService{granted: true}
+	tool := NewFetchTool(perms, t.TempDir(), client)
+
+	input, err := json.Marshal(FetchParams{URL: startURL, Format: "text"})
+	require.NoError(t, err)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Equal(t, "final content", resp.Content)
 }
 
 // TestTruncateToRuneBoundary pins the fix for content[:MaxFetchSize]

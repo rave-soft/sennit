@@ -32,7 +32,7 @@ var webFetchDescriptionTpl = template.Must(
 func NewWebFetchTool(permissions permission.Requester, workingDir, pageDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
 	availability := applyToolAvailability(options)
 	if client == nil {
-		client = newHTTPClient(30 * time.Second)
+		client = NewHTTPClient(30 * time.Second)
 	}
 
 	return withToolParameterSchema(fantasy.NewAgentTool(

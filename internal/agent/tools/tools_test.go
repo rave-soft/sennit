@@ -285,7 +285,7 @@ func TestToolAvailabilityIsPerInstance(t *testing.T) {
 }
 
 func TestNewHTTPClientAppliesTimeout(t *testing.T) {
-	client := newHTTPClient(5 * time.Second)
+	client := NewHTTPClient(5 * time.Second)
 	require.Equal(t, 5*time.Second, client.Timeout)
 
 	transport, ok := client.Transport.(*http.Transport)

@@ -69,7 +69,7 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 		// documented 600s maximum at whatever this constant said. The
 		// per-call context timeout is the only bound now; defaultDownloadTimeout
 		// keeps an unspecified timeout from hanging forever.
-		client = newHTTPClient(0)
+		client = NewHTTPClient(0)
 	}
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		DownloadToolName,

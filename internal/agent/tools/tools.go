@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -310,20 +311,91 @@ func recordEditedSpan(ctx context.Context, filetracker FileTracking, sessionID, 
 	filetracker.RecordEdit(ctx, sessionID, filePath, start, end, max(start, end+delta))
 }
 
-// newHTTPClient builds an http.Client tuned for outbound fetch/download
+// NewHTTPClient builds an http.Client tuned for outbound fetch/download
 // tools: a shared transport with modest idle-connection pooling, and the
 // given overall request timeout (fetch and download use different
-// timeouts; web_fetch reuses fetch's).
-func newHTTPClient(timeout time.Duration) *http.Client {
+// timeouts; web_fetch reuses fetch's). CheckRedirect is set so a redirect
+// cannot silently carry the request off to an address the user never
+// approved — see checkFetchRedirect. Exported so internal/agent's own
+// agentic-fetch fallback client (delegation_finalizer.go's fetchClient) can
+// share it instead of hand-rolling an identical transport that misses this
+// guard.
+func NewHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 10
 	transport.IdleConnTimeout = 90 * time.Second
 
 	return &http.Client{
-		Timeout:   timeout,
-		Transport: transport,
+		Timeout:       timeout,
+		Transport:     transport,
+		CheckRedirect: checkFetchRedirect,
 	}
+}
+
+// errBlockedRedirect explains why a fetch/download tool refused to follow a
+// redirect. The URL a fetch/download call starts with is one the user has
+// seen and approved through permission.Requester; a redirect target is not
+// — the server can send the request wherever it likes after that approval
+// is granted. Fetching a user's own loopback service ("fetch my local dev
+// server on localhost:3000") is a legitimate request, so the initial
+// address is never checked; only a hop that leaves the approved host and
+// lands on a loopback, private, or link-local address is refused.
+var errBlockedRedirect = errors.New("refusing to follow a redirect to a private, loopback, or link-local address")
+
+// checkFetchRedirect is installed as the shared fetch/download client's
+// CheckRedirect. Go's http.Client never calls CheckRedirect for the first
+// request, only for each hop after a redirect (via[0] is always that first,
+// user-approved request), so this only ever restricts hops the user did not
+// see. A redirect that stays on the originally approved host is let
+// through unchanged — a local dev server redirecting to another path or
+// port on the same host is exactly what an approved "fetch localhost:3000"
+// expects. A redirect that leaves that host and resolves to a blocked
+// address is refused.
+func checkFetchRedirect(req *http.Request, via []*http.Request) error {
+	// Matches net/http's own default cap (checkRedirect in client.go);
+	// overriding CheckRedirect drops that default, so it must be
+	// reinstated here.
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	origHost := via[0].URL.Hostname()
+	newHost := req.URL.Hostname()
+	if strings.EqualFold(newHost, origHost) {
+		return nil
+	}
+	return checkRedirectHostAllowed(req.Context(), newHost)
+}
+
+// checkRedirectHostAllowed resolves host and refuses the redirect if any
+// resolved address is loopback, private, link-local, or unspecified. A
+// lookup failure is not blocked here — it is left to surface at dial time
+// as the same "failed to fetch/download" error the model already sees for
+// any unreachable URL.
+func checkRedirectHostAllowed(ctx context.Context, host string) error {
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedRedirectAddr(ip) {
+			return fmt.Errorf("%w: %s", errBlockedRedirect, host)
+		}
+		return nil
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil
+	}
+	for _, addr := range addrs {
+		if isBlockedRedirectAddr(addr.IP) {
+			return fmt.Errorf("%w: %s", errBlockedRedirect, host)
+		}
+	}
+	return nil
+}
+
+// isBlockedRedirectAddr reports whether ip is one a redirect must not be
+// allowed to carry an approved request to.
+func isBlockedRedirectAddr(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
 }
 
 type toolAvailabilityOption func(*toolAvailability)

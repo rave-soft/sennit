@@ -55,7 +55,7 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 		// to be 30s, silently truncating any longer request). The
 		// per-call context timeout is the only bound now; defaultFetchTimeout
 		// below still keeps an unspecified timeout from hanging forever.
-		client = newHTTPClient(0)
+		client = NewHTTPClient(0)
 	}
 
 	return withToolParameterSchema(fantasy.NewAgentTool(

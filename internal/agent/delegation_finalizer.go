@@ -143,14 +143,15 @@ type fetchClient struct {
 
 // get returns the shared *http.Client, constructing it on first use. An
 // *http.Client is safe for concurrent use, so every caller after the first
-// gets the same instance and shares its connection pool.
+// gets the same instance and shares its connection pool. Built via
+// tools.NewHTTPClient rather than a second hand-rolled transport: the pool
+// settings were already identical, and NewHTTPClient additionally guards
+// against a redirect carrying this model-supplied URL to an address the
+// user never approved (see checkFetchRedirect in tools.go) — a guard a
+// second, separately-built transport would silently miss.
 func (f *fetchClient) get() *http.Client {
 	f.once.Do(func() {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 10
-		transport.IdleConnTimeout = 90 * time.Second
-		f.client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+		f.client = tools.NewHTTPClient(30 * time.Second)
 	})
 	return f.client
 }
