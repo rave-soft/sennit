@@ -72,6 +72,12 @@ type readOnlyWorkspace struct {
 	workingDir string
 	sessionID  string
 	reason     string
+	// uncommittedFiles answers UncommittedFiles for workingDir. It is
+	// supplied by the caller (see NewReadOnlyWorkspace) rather than this
+	// package calling git.UncommittedFiles itself, so the subprocess this
+	// launches stays out of the Workspace contract package: appws, the
+	// only production caller, passes git.UncommittedFiles directly.
+	uncommittedFiles func(ctx context.Context, dir string) ([]git.FileChange, error)
 }
 
 // readOnlyError returns a typed error for the given operation name.
@@ -90,8 +96,19 @@ func (w *readOnlyWorkspace) readOnlyError(op string) error {
 // workspace is not currently spawned (see AppWorkspace.AttachThread);
 // the returned *readOnlyWorkspace stays unexported since callers only
 // ever need it through the Workspace interface it satisfies.
-func NewReadOnlyWorkspace(ws Workspace, workingDir, sessionID, reason string) *readOnlyWorkspace {
-	return &readOnlyWorkspace{ws: ws, workingDir: workingDir, sessionID: sessionID, reason: reason}
+//
+// uncommittedFiles is the function this wrapper's own UncommittedFiles
+// delegates to, scoped to workingDir; production callers pass
+// git.UncommittedFiles.
+func NewReadOnlyWorkspace(
+	ws Workspace,
+	workingDir, sessionID, reason string,
+	uncommittedFiles func(ctx context.Context, dir string) ([]git.FileChange, error),
+) *readOnlyWorkspace {
+	return &readOnlyWorkspace{
+		ws: ws, workingDir: workingDir, sessionID: sessionID, reason: reason,
+		uncommittedFiles: uncommittedFiles,
+	}
 }
 
 // allowsSession permits the thread's root session and genuine agent-tool
@@ -352,7 +369,7 @@ func (w *readOnlyWorkspace) PrepareSessionChanges(ctx context.Context, sessionID
 // is the thread's worktree path (see NewReadOnlyWorkspace), so that is
 // what gets diffed here.
 func (w *readOnlyWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
-	return git.UncommittedFiles(ctx, w.workingDir)
+	return w.uncommittedFiles(ctx, w.workingDir)
 }
 
 // -- FileTracker --

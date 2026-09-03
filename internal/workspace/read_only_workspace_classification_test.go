@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -441,7 +442,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			stub := &stubWorkspace{}
-			ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
+			ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", git.UncommittedFiles)
 			check(t, ro)
 			require.Zerof(t, stub.calls[name],
 				"%s reached the underlying workspace; readOnlyWorkspace must refuse it itself, not let it forward", name)

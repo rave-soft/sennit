@@ -29,7 +29,7 @@ import (
 func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", git.UncommittedFiles)
 
 	// Session mutations denied.
 	_, err := ro.CreateSession(t.Context(), "title")
@@ -113,7 +113,7 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", git.UncommittedFiles)
 
 	// Session reads pass through.
 	sess, err := ro.GetSession(t.Context(), "sess-1")
@@ -237,7 +237,7 @@ func TestReadOnlyWorkspace_AllowsOnlyRootToolDescendants(t *testing.T) {
 		"root$$unrelated":            {ID: "root$$unrelated", ParentSessionID: "other-root"},
 		"root$$forged":               {ID: "root$$forged", ParentSessionID: "root-prefix"},
 	}}
-	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root", "", git.UncommittedFiles)
 
 	for _, id := range []string{"root", "root$$child", "child-message$$nested-tool"} {
 		_, err := ro.ListMessages(t.Context(), id)
@@ -253,7 +253,7 @@ func TestReadOnlyWorkspace_AllowsOnlyRootToolDescendants(t *testing.T) {
 func TestReadOnlyWorkspace_ShutdownIsNoop(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", git.UncommittedFiles)
 
 	require.NotPanics(t, func() { ro.Shutdown() })
 	require.NotPanics(t, func() { ro.Shutdown() })
@@ -273,7 +273,7 @@ func TestReadOnlyError_TypeCheck(t *testing.T) {
 func TestReadOnlyWorkspace_NoopMethods(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", git.UncommittedFiles)
 
 	require.NotPanics(t, func() { ro.AgentCancel("sess-1") })
 	require.NotPanics(t, func() { ro.AgentClearQueue("sess-1") })
@@ -789,7 +789,7 @@ func TestReadOnlyWorkspace_BatchMessages_ChildAndSibling(t *testing.T) {
 			"other$$child": {ID: "other$$child", ParentSessionID: "other"},
 		},
 	}
-	ro := NewReadOnlyWorkspace(stub, "/tmp/worktree", "root", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/worktree", "root", "", git.UncommittedFiles)
 
 	msgs, err := ro.ListMessagesBySessionIDs(t.Context(), "root", 7, []string{"root", "root$$child", "root$$sib"})
 	require.NoError(t, err)
@@ -820,7 +820,7 @@ func TestSupportsThreadAttach_ReadOnlyRefusesUpFront(t *testing.T) {
 	require.True(t, SupportsThreadAttach(stub),
 		"a workspace that says nothing is assumed capable; the opposite default would silently strip the capability from any implementation that forgot to opt in")
 
-	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", git.UncommittedFiles)
 	require.False(t, SupportsThreadAttach(ro))
 
 	_, _, err := ro.AttachThread(t.Context(), "thread-1")
@@ -885,7 +885,7 @@ func TestReadOnlyWorkspace_GetLastSessionReportsThreadsOwnSession(t *testing.T) 
 			"root": {ID: "root"},
 		},
 	}
-	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root", "")
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root", "", git.UncommittedFiles)
 
 	sess, err := ro.GetLastSession(t.Context())
 	require.NoError(t, err)
@@ -913,12 +913,38 @@ func TestReadOnlyWorkspace_UncommittedFilesScopedToThreadWorktree(t *testing.T) 
 	// Stand in for a parent AppWorkspace whose own UncommittedFiles diffs
 	// its own working directory.
 	stub := &stubWorkspace{uncommitted: parentChanges}
-	ro := NewReadOnlyWorkspace(stub, threadDir, "root", "")
+	ro := NewReadOnlyWorkspace(stub, threadDir, "root", "", git.UncommittedFiles)
 
 	files, err := ro.UncommittedFiles(t.Context())
 	require.NoError(t, err)
 	require.Len(t, files, 1)
 	require.Equal(t, filepath.Join(threadDir, "thread-only.txt"), files[0].Path)
+}
+
+// TestReadOnlyWorkspace_UncommittedFilesUsesInjectedFunc pins the
+// NewReadOnlyWorkspace seam itself: UncommittedFiles must call whatever
+// function the constructor was given, scoped to workingDir, rather than
+// reaching for git.UncommittedFiles on its own. That keeps the actual git
+// subprocess launch out of this package's own code — it lives in the
+// caller (appws), which is the only production caller and always passes
+// git.UncommittedFiles.
+func TestReadOnlyWorkspace_UncommittedFilesUsesInjectedFunc(t *testing.T) {
+	t.Parallel()
+
+	want := []git.FileChange{{Path: "injected.txt"}}
+	var gotDir string
+	fake := func(ctx context.Context, dir string) ([]git.FileChange, error) {
+		gotDir = dir
+		return want, nil
+	}
+
+	stub := &stubWorkspace{}
+	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", fake)
+
+	files, err := ro.UncommittedFiles(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, want, files)
+	require.Equal(t, "/tmp/thread-worktree", gotDir)
 }
 
 // TestReadOnlyWorkspace_PrepareSessionChangesScopedToThreadWorktree pins the
@@ -937,7 +963,7 @@ func TestReadOnlyWorkspace_PrepareSessionChangesScopedToThreadWorktree(t *testin
 	stub := &stubWorkspace{
 		historyFiles: []history.File{{Path: changedPath, SessionID: "root"}},
 	}
-	ro := NewReadOnlyWorkspace(stub, threadDir, "root", "")
+	ro := NewReadOnlyWorkspace(stub, threadDir, "root", "", git.UncommittedFiles)
 
 	files, err := ro.PrepareSessionChanges(t.Context(), "root")
 	require.NoError(t, err)
