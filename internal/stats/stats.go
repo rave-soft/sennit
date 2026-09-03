@@ -533,20 +533,22 @@ func agentNameFrom(agentID, title string) string {
 	return strings.TrimSpace(title)
 }
 
-// ComputeTotals aggregates top-level sessions (those a person started)
-// into a single row. Sub-agent sessions are deliberately excluded: their
-// cost is already folded into their parent's, so counting both would
-// double it.
+// ComputeTotals aggregates every session in scope into a single row. Each
+// session records only its own spend, so Cost and token counts sum across
+// the whole tree, sub-agents included. Sessions and TimeSeconds stay
+// top-level only: a delegation is not a session a person started, and its
+// lifetime runs inside its parent's, so adding it in would double-count
+// wall-clock time already covered by the parent.
 func ComputeTotals(sessions []Session) Project {
 	var p Project
 	for _, s := range sessions {
+		p.PromptTokens += s.PromptTokens
+		p.CompletionTokens += s.CompletionTokens
+		p.Cost += s.Cost
 		if s.IsSubAgent() {
 			continue
 		}
 		p.Sessions++
-		p.PromptTokens += s.PromptTokens
-		p.CompletionTokens += s.CompletionTokens
-		p.Cost += s.Cost
 		p.TimeSeconds += s.UpdatedAt - s.CreatedAt
 	}
 	return p

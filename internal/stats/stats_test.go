@@ -31,6 +31,28 @@ func TestOutcome_OnlyCompletedAndMergedCountAsLanded(t *testing.T) {
 	require.InDelta(t, 2.0/6.0, got.Rate(), 0.0001)
 }
 
+// ComputeTotals sums cost and tokens across the whole tree — each session
+// records only its own spend, so a delegation's cost is not folded into
+// its parent's and must be added in separately. Sessions and TimeSeconds,
+// though, stay top-level only: a delegation is not a session a person
+// started, and its lifetime runs inside its parent's.
+func TestComputeTotals_SumsCostAcrossTreeButSessionsAndTimeStayTopLevel(t *testing.T) {
+	t.Parallel()
+
+	sessions := []stats.Session{
+		{ID: "root", PromptTokens: 1000, CompletionTokens: 500, Cost: 1.5, CreatedAt: 0, UpdatedAt: 100},
+		{ID: "kid", ParentID: "root", AgentID: "reviewer", PromptTokens: 300, CompletionTokens: 100, Cost: 0.4, CreatedAt: 10, UpdatedAt: 40},
+	}
+
+	got := stats.ComputeTotals(sessions)
+
+	require.Equal(t, int64(1), got.Sessions, "the sub-agent run is not a session a person started")
+	require.Equal(t, int64(100), got.TimeSeconds, "the child's lifetime runs inside the parent's, so only the parent's span counts")
+	require.Equal(t, int64(1300), got.PromptTokens)
+	require.Equal(t, int64(600), got.CompletionTokens)
+	require.InDelta(t, 1.9, got.Cost, 0.0001)
+}
+
 // The agent column groups by agent_id, and falls back to the session
 // title only when there is no agent id — the case for sessions recorded
 // before that column existed and for generic task-tool delegations.

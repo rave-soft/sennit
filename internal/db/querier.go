@@ -203,6 +203,12 @@ type Querier interface {
 	// that holds this up, so callers must allocate inside the same
 	// transaction as the insert.
 	NextFileVersion(ctx context.Context, path string) (int64, error)
+	// Cost and tokens sum over every session in the window, sub-agents
+	// included, since each session records only its own spend. Sessions and
+	// time_seconds stay restricted to top-level rows: a delegation is not a
+	// session a person started, and its lifetime runs inside its parent's, so
+	// counting it in time_seconds would double-count wall-clock already
+	// covered by the parent.
 	ProjectStatsSince(ctx context.Context, createdAt int64) ([]ProjectStatsSinceRow, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	// The queries below back `sennit stat --by latency`, the per-kind

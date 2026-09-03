@@ -390,10 +390,13 @@ func TestStatCmd_JSONOutput(t *testing.T) {
 	require.Len(t, out.Skills, 1)
 	require.NotNil(t, out.Summary)
 
-	// Summary scopes to top-level sessions only (sessA + sessB + sessC),
-	// excluding subagent sessions and the out-of-window sessOld.
+	// Summary's session count stays top-level only (sessA + sessB +
+	// sessC), excluding the subagent sessions and the out-of-window
+	// sessOld. Its token total, though, sums across the whole tree, so
+	// sessTask and sessCustom's tokens are folded in alongside the
+	// top-level sessions'.
 	require.Equal(t, int64(3), out.Summary.Sessions)
-	require.Equal(t, int64(1000+500+2000+800+900+300), out.Summary.PromptTokens+out.Summary.CompletionTokens)
+	require.Equal(t, int64(1000+500+2000+800+900+300+300+100+500+200), out.Summary.PromptTokens+out.Summary.CompletionTokens)
 }
 
 func TestStatCmd_InvalidByIsUsageError(t *testing.T) {
@@ -458,13 +461,15 @@ func TestGatherAllProjectStats_GroupsByProjectWithoutLeaking(t *testing.T) {
 
 	current, ok := byPath[testProjectPath]
 	require.True(t, ok)
-	// Top-level sessions only (sessA + sessB + sessC): sessTask/sessCustom
-	// are subagent sessions (parent_session_id set) and excluded, sessOld
-	// is outside the 7d window and excluded.
+	// Sessions stays top-level only (sessA + sessB + sessC): sessTask and
+	// sessCustom are subagent sessions (parent_session_id set) and are not
+	// sessions a person started; sessOld is outside the 7d window either
+	// way. Tokens and cost, though, sum across the whole tree — each
+	// session records only its own spend, sub-agents included.
 	require.Equal(t, int64(3), current.Sessions)
-	require.Equal(t, int64(1000+2000+900), current.PromptTokens)
-	require.Equal(t, int64(500+800+300), current.CompletionTokens)
-	require.InDelta(t, 1.5+2.0+3.0, current.Cost, 0.0001)
+	require.Equal(t, int64(1000+2000+900+300+500), current.PromptTokens)
+	require.Equal(t, int64(500+800+300+100+200), current.CompletionTokens)
+	require.InDelta(t, 1.5+2.0+3.0+0.4+0.6, current.Cost, 0.0001)
 
 	other, ok := byPath[otherProjectPath]
 	require.True(t, ok)
@@ -508,8 +513,8 @@ func TestRunStat_DefaultProjectsViewScopedToCurrentProject(t *testing.T) {
 
 	require.Len(t, out.Projects, 1)
 	require.Equal(t, int64(3), out.Projects[0].Sessions)
-	require.Equal(t, int64(1000+2000+900), out.Projects[0].PromptTokens)
-	require.Equal(t, int64(500+800+300), out.Projects[0].CompletionTokens)
+	require.Equal(t, int64(1000+2000+900+300+500), out.Projects[0].PromptTokens)
+	require.Equal(t, int64(500+800+300+100+200), out.Projects[0].CompletionTokens)
 }
 
 // seedLatencyEvents records handoff waits against one of the fixture's

@@ -71,15 +71,21 @@ GROUP BY skill_name
 ORDER BY load_count DESC;
 
 -- name: ProjectStatsSince :many
+-- Cost and tokens sum over every session in the window, sub-agents
+-- included, since each session records only its own spend. Sessions and
+-- time_seconds stay restricted to top-level rows: a delegation is not a
+-- session a person started, and its lifetime runs inside its parent's, so
+-- counting it in time_seconds would double-count wall-clock already
+-- covered by the parent.
 SELECT
     project_path,
-    COUNT(*) as sessions,
+    COUNT(*) FILTER (WHERE parent_session_id IS NULL) as sessions,
     COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
     COALESCE(SUM(completion_tokens), 0) as completion_tokens,
     COALESCE(SUM(cost), 0) as cost,
-    COALESCE(SUM(updated_at - created_at), 0) as time_seconds
+    COALESCE(SUM(CASE WHEN parent_session_id IS NULL THEN updated_at - created_at ELSE 0 END), 0) as time_seconds
 FROM sessions
-WHERE created_at >= ? AND parent_session_id IS NULL
+WHERE created_at >= ?
 GROUP BY project_path
 ORDER BY (COALESCE(SUM(prompt_tokens), 0) + COALESCE(SUM(completion_tokens), 0)) DESC;
 
