@@ -79,9 +79,9 @@ RETURNING *;
 -- with the caller's whole running total. Used by a writer whose
 -- read-to-write window spans an entire provider stream (summarize):
 -- writing back a total computed at the start of that window would
--- silently discard a concurrent AddSessionCost (e.g. a delegation
--- finishing against this same session) that landed while the stream was
--- still in flight.
+-- silently discard a concurrent cost write (e.g. an async
+-- title-generation save against this same session) that landed while
+-- the stream was still in flight.
 UPDATE sessions
 SET
     title = ?,
@@ -103,17 +103,6 @@ SET
     updated_at = strftime('%s', 'now')
 WHERE id = ?;
 
-
--- name: AddSessionCost :execrows
--- Accumulate a delegation's cost onto its parent. Narrow on purpose: the
--- read-modify-write this replaces raced every other writer of the row
--- (a turn saving usage, the todo tool saving todos), and two children
--- finishing together dropped one of the two deltas.
-UPDATE sessions
-SET
-    cost = cost + ?,
-    updated_at = strftime('%s', 'now')
-WHERE id = ?;
 
 -- name: SetSessionTodos :execrows
 -- Write only the todo list. The todo tool runs mid-turn, alongside the

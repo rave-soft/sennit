@@ -426,12 +426,12 @@ func (a *sessionAgent) persistSummaryResult(ctx context.Context, model Model, cu
 	currentSession.PromptTokens = 0
 	currentSession.EstimatedUsage = usageIsZero(usage)
 	// SaveUsage, not Save: this pass's Get happened before an entire
-	// provider stream ran, long enough for another writer (a delegation
-	// finishing against this same session, say) to have landed its own
-	// AddCost in between. Save would write back currentSession.Cost - a
-	// total computed from the stale read - and silently erase that
-	// write; SaveUsage instead folds costDelta onto whatever cost is
-	// there now, in one atomic UPDATE.
+	// provider stream ran, long enough for another writer (an async
+	// title-generation save against this same session, say) to have
+	// landed its own cost write in between. Save would write back
+	// currentSession.Cost - a total computed from the stale read - and
+	// silently erase that write; SaveUsage instead folds costDelta onto
+	// whatever cost is there now, in one atomic UPDATE.
 	_, err := a.sessions.SaveUsage(ctx, *currentSession, costDelta)
 	return err
 }

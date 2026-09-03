@@ -43,8 +43,8 @@ type Service interface {
 	// session's existing cost with a single atomic UPDATE (cost = cost +
 	// costDelta) instead of writing back a whole total. Use this over
 	// Save when the caller's read of sess happened long enough ago that
-	// another writer (e.g. AddCost, from a delegation finishing against
-	// this same session) could plausibly have landed in between —
+	// another writer (e.g. an async title-generation save landing
+	// against this same session) could plausibly have landed in between —
 	// summarize's provider stream is the case this exists for.
 	SaveUsage(ctx context.Context, sess session.Session, costDelta float64) (session.Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
@@ -58,12 +58,10 @@ type Service interface {
 	// every turn would wake every subscriber for a field none of them
 	// display.
 	SetModel(ctx context.Context, sessionID string, model session.ModelRef) error
-	// AddCost accumulates delta onto sessionID's recorded cost with a
-	// single narrow UPDATE. It replaces a Get/modify/Save round trip that
-	// raced every other writer of the row.
-	AddCost(ctx context.Context, sessionID string, delta float64) error
-	// SetTodos writes only sessionID's todo list, for the same reason:
-	// the todo tool runs mid-turn, alongside the turn's own usage saves.
+	// SetTodos writes only sessionID's todo list: the todo tool runs
+	// mid-turn, alongside the turn's own usage saves, and a full-row
+	// write from either side would carry a stale copy of what the other
+	// just wrote.
 	SetTodos(ctx context.Context, sessionID string, todos []session.Todo) error
 	Delete(ctx context.Context, id string) error
 }
@@ -89,8 +87,8 @@ type service struct {
 	telemetry TelemetrySink
 
 	// Estimated usage stays in memory so fetch-modify-save paths (e.g.,
-	// updating todos or parent-session cost) do not rebuild a session from
-	// SQLite and incorrectly clear the UI "~" marker.
+	// updating todos) do not rebuild a session from SQLite and
+	// incorrectly clear the UI "~" marker.
 	estimatedUsageMu sync.RWMutex
 	estimatedUsage   map[string]bool
 }
@@ -303,26 +301,6 @@ func (s *service) SaveUsage(ctx context.Context, sess session.Session, costDelta
 	result.EstimatedUsage = estimatedUsage
 	s.Publish(pubsub.UpdatedEvent, result)
 	return result, nil
-}
-
-// AddCost accumulates delta onto the session's cost. See the interface.
-func (s *service) AddCost(ctx context.Context, sessionID string, delta float64) error {
-	rows, err := s.q.AddSessionCost(ctx, db.AddSessionCostParams{
-		Cost: delta,
-		ID:   sessionID,
-	})
-	if err != nil {
-		return err
-	}
-	// A narrow UPDATE against a row that is not there affects nothing and
-	// reports no error, which would turn "the parent session is gone"
-	// into a silent success. Callers accumulate a delegation's cost onto
-	// its parent and want to know when there is no parent left.
-	if rows == 0 {
-		return fmt.Errorf("session %q: %w", sessionID, session.ErrNotFound)
-	}
-	s.publishSessionUpdate(ctx, sessionID)
-	return nil
 }
 
 // SetTodos writes the session's todo list and nothing else. See the

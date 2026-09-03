@@ -803,12 +803,13 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 	}
 	usage, estimated := fallbackStepUsage(stepMessages, stepResult)
 	costDelta := t.agent.updateSessionUsage(t.model, &updatedSession, usage, t.agent.openrouterCost(stepResult.ProviderMetadata), estimated)
-	// SaveUsage, not Save: Get above can race a concurrent writer (a
-	// delegation finishing against this same session, say) landing its own
-	// cost update in between. Save would write back updatedSession.Cost - a
-	// total computed from the stale read - and silently erase that write;
-	// SaveUsage instead folds costDelta onto whatever cost is there now, in
-	// one atomic UPDATE (see usage.go's summarize for the same pattern).
+	// SaveUsage, not Save: Get above can race a concurrent writer (an
+	// async title-generation save against this same session, say) landing
+	// its own cost update in between. Save would write back
+	// updatedSession.Cost - a total computed from the stale read - and
+	// silently erase that write; SaveUsage instead folds costDelta onto
+	// whatever cost is there now, in one atomic UPDATE (see usage.go's
+	// summarize for the same pattern).
 	_, sessionErr := t.agent.sessions.SaveUsage(t.ctx, updatedSession, costDelta)
 	if sessionErr != nil {
 		return sessionErr

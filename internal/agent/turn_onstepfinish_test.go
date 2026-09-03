@@ -42,10 +42,10 @@ func (s *getHookSessions) Get(ctx context.Context, id string) (session.Session, 
 // same defect fixed in usage.go's summarize (see the SaveUsage comment
 // there): onStepFinish used to Get the session, fold this step's cost into
 // a local copy, then Save the whole row back - clobbering any cost a
-// concurrent writer (e.g. a delegation finishing against the same session)
-// landed in the Get-to-Save window. onStepFinish must instead fold its own
-// delta with SaveUsage, the way summarize does, so both writers' costs
-// survive.
+// concurrent writer (e.g. an async title-generation save against the
+// same session) landed in the Get-to-Save window. onStepFinish must
+// instead fold its own delta with SaveUsage, the way summarize does, so
+// both writers' costs survive.
 func TestOnStepFinish_ConcurrentCostWriteNotLost(t *testing.T) {
 	t.Parallel()
 
@@ -67,9 +67,9 @@ func TestOnStepFinish_ConcurrentCostWriteNotLost(t *testing.T) {
 	sessions := &getHookSessions{
 		Service: realSessions,
 		hook: func(ctx context.Context, sess session.Session) {
-			// Simulate another writer (e.g. a delegation finalizer)
-			// landing its own cost delta between onStepFinish's Get
-			// and its write-back.
+			// Simulate another writer (e.g. an async title-generation
+			// save) landing its own cost delta between onStepFinish's
+			// Get and its write-back.
 			_, saveErr := realSessions.SaveUsage(ctx, sess, concurrentDelta)
 			require.NoError(t, saveErr)
 		},

@@ -10,15 +10,16 @@ import (
 )
 
 // TestSaveUsageAccumulatesConcurrentCost drives SaveUsage's cost delta
-// against a concurrent AddCost on the same session and asserts the
-// recorded cost is their sum, not whichever write landed last.
+// against a concurrent SaveUsage call landing on the same session and
+// asserts the recorded cost is their sum, not whichever write landed
+// last.
 //
-// This is the shape summarize used to have: its Get happens long before
-// its Save (a whole provider stream sits in between), so a concurrent
-// writer like a delegation's AddCost can land in that window. Save would
+// This is the shape summarize has: its Get happens long before its Save
+// (a whole provider stream sits in between), so a concurrent writer (an
+// async title-generation save, say) can land in that window. Save would
 // write back the total computed from the stale Get and erase the
-// concurrent AddCost; SaveUsage instead folds its own delta onto
-// whatever cost is in the row at write time.
+// concurrent write; SaveUsage instead folds its own delta onto whatever
+// cost is in the row at write time.
 func TestSaveUsageAccumulatesConcurrentCost(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
@@ -36,17 +37,18 @@ func TestSaveUsageAccumulatesConcurrentCost(t *testing.T) {
 
 	// Simulate summarize's early Get: this is the stale read a
 	// long-running writer works from, taken before the concurrent
-	// AddCost below lands.
+	// SaveUsage below lands.
 	stale, err := sessions.Get(t.Context(), created.ID)
 	require.NoError(t, err)
 
-	// Simulate a delegation finishing against this same session while
-	// the "provider stream" (i.e. the gap before SaveUsage below) is
-	// still in flight.
-	require.NoError(t, sessions.AddCost(t.Context(), created.ID, 5))
+	// Simulate another writer landing its own cost delta against this
+	// same session while the "provider stream" (i.e. the gap before
+	// SaveUsage below) is still in flight.
+	_, err = sessions.SaveUsage(t.Context(), created, 5)
+	require.NoError(t, err)
 
-	// SaveUsage runs after the concurrent AddCost, but from the stale
-	// snapshot - exactly the ordering that used to lose a write.
+	// SaveUsage runs after the concurrent write, but from the stale
+	// snapshot - exactly the ordering that would lose a write with Save.
 	stale.Title = "summarized"
 	_, err = sessions.SaveUsage(t.Context(), stale, 3)
 	require.NoError(t, err)
