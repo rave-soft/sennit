@@ -157,16 +157,19 @@ func (s *ConfigStore) Config() *Config {
 // Used by the reload path; in-place field mutators leave the pointer
 // untouched and run under mu instead.
 //
-// Freezing Providers here, before the pointer becomes visible to readers,
-// is what makes "a published Config is never mutated in place" (see
-// cloneForWrite's doc comment) a property enforced by the type rather than
-// a convention every caller has to remember: any further Set/Del/Reset/Take
-// on it now panics. cloneForWrite always hands back a fresh, unfrozen
-// *csync.Map, so the next mutation cycle's clone is writable right up
-// until it too is published through here.
+// Freezing Providers and RuntimeProviders here, before the pointer becomes
+// visible to readers, is what makes "a published Config is never mutated in
+// place" (see cloneForWrite's doc comment) a property enforced by the type
+// rather than a convention every caller has to remember: any further
+// Set/Del/Reset/Take on either map now panics. cloneForWrite always hands
+// back fresh, unfrozen *csync.Maps, so the next mutation cycle's clone is
+// writable right up until it too is published through here.
 func (s *ConfigStore) setConfig(cfg *Config) {
 	if cfg != nil && cfg.Providers != nil {
 		cfg.Providers.Freeze()
+	}
+	if cfg != nil && cfg.RuntimeProviders != nil {
+		cfg.RuntimeProviders.Freeze()
 	}
 	s.configMu.Lock()
 	s.config = cfg

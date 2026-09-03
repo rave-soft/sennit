@@ -609,6 +609,14 @@ func testRotationConfigStoreWithProvider(t *testing.T, providerCfg config.Provid
 	providers.Set(providerCfg.ID, providerCfg)
 	base.Providers = providers
 
+	// base was copied out of an already-published Config
+	// (configruntime.Load), so its RuntimeProviders field still aliases
+	// that Config's frozen map — RuntimeProviders is frozen on publish just
+	// like Providers is (see ConfigStore.setConfig). Give base its own,
+	// unfrozen map so callers can SetRuntimeProvider on the store's Config
+	// after NewStore (which itself does not freeze).
+	base.RuntimeProviders = csync.NewMap[string, providerstate.Provider]()
+
 	// WorkingDir is deliberately left unset — see the matching comment in
 	// authTestCoordinator (auth_test.go) for why: it keeps a post-write
 	// autoReload (ActivateAccount, via applyRotationPick) from rebuilding

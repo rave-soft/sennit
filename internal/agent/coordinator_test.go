@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/csync"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -98,6 +99,13 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderCo
 		providers.Set(pc.ID, pc)
 	}
 	base.Providers = providers
+
+	// base was copied out of an already-published Config
+	// (configruntime.Load), so its RuntimeProviders field still aliases
+	// that Config's frozen map — RuntimeProviders is frozen on publish just
+	// like Providers is (see setConfig). Give base its own, unfrozen map
+	// before writing to it, mirroring the Providers replacement above.
+	base.RuntimeProviders = csync.NewMap[string, providerstate.Provider]()
 
 	effective, err := providerruntime.FromConfig(providerCfg, base.RuntimeResolver())
 	require.NoError(t, err)

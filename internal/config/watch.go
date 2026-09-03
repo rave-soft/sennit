@@ -13,6 +13,20 @@ import (
 // externalChangePollInterval is the production polling cadence.
 const externalChangePollInterval = 2 * time.Second
 
+// maxExternalReloadRetries bounds how many consecutive ticks
+// WatchForExternalChanges will retry a reload that keeps failing for the
+// same detected change before giving up on it. reloadFromDisk wraps errors
+// from several stages (disk reads, hook validation, model-discovery HTTP
+// calls) without a typed distinction between "this config cannot work" and
+// "the attempt did not complete" — and even a stage that looks purely
+// content-driven, like ValidateHooks, can fail transiently on a torn read
+// of a file an external editor is still writing. So rather than guess at
+// error types, every failure gets the same small retry budget: enough for a
+// genuine transient (a slow discovery endpoint, a half-written file) to
+// clear on its own, without turning a truly broken config into a poll-rate
+// HTTP hot loop.
+const maxExternalReloadRetries = 3
+
 // externalChangeWatcher owns watcher lifecycle state: polling configuration,
 // callback registration, and the dynamic markdown-agent directory snapshot.
 // Reloading and config publication remain ConfigStore responsibilities.
@@ -24,6 +38,11 @@ type externalChangeWatcher struct {
 
 	agentSnapshotMu sync.Mutex
 	agentFiles      map[string]fileSnapshot
+
+	// reloadFailures counts consecutive failed ReloadFromDisk attempts for
+	// the change currently being retried. Only touched from the
+	// WatchForExternalChanges goroutine, so it needs no lock of its own.
+	reloadFailures int
 }
 
 func (w *externalChangeWatcher) interval() time.Duration {
@@ -97,10 +116,26 @@ func (s *ConfigStore) WatchForExternalChanges(ctx context.Context) {
 			}
 			if err := s.ReloadFromDisk(ctx); err != nil {
 				slog.Warn("Failed to reload config after external change", "error", err)
+				s.watcher.reloadFailures++
+				if s.watcher.reloadFailures < maxExternalReloadRetries {
+					// Leave the staleness snapshot alone: the change is
+					// still marked unseen, so the next tick retries this
+					// same reload rather than silently dropping it.
+					continue
+				}
+				// Retried enough times without success; stop hammering
+				// this change and re-baseline so the poll loop settles
+				// down instead of hot-looping (e.g. against a discovery
+				// endpoint that always times out). A later edit moves the
+				// file's mtime and gets its own fresh retry budget.
+				slog.Warn("Giving up reloading config after repeated failures",
+					"attempts", s.watcher.reloadFailures)
+				s.watcher.reloadFailures = 0
 				s.CaptureStalenessSnapshot(lookupConfigs(s.workingDir))
 				s.watcher.captureAgentFiles(s.workingDir)
 				continue
 			}
+			s.watcher.reloadFailures = 0
 			s.watcher.notify()
 		}
 	}

@@ -177,6 +177,13 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 	providers.Set(providerID, providerCfg)
 	base.Providers = providers
 
+	// base was copied out of an already-published Config (configruntime.Load),
+	// so its RuntimeProviders field still aliases that Config's frozen map —
+	// RuntimeProviders is frozen on publish just like Providers is (see
+	// ConfigStore.setConfig). Give base its own, unfrozen map before writing
+	// to it, mirroring the Providers replacement above.
+	base.RuntimeProviders = csync.NewMap[string, providerstate.Provider]()
+
 	effective, err := runtime.FromConfig(providerCfg, base.RuntimeResolver())
 	require.NoError(t, err)
 	base.SetRuntimeProvider(providerID, effective)

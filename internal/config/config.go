@@ -808,6 +808,9 @@ func (c *Config) ProviderName(id string) (name string, ok bool) {
 // model/effort pair (e.g. the chat view's delegation renderer) can depend
 // on two strings instead of the Agents map and the Agent type.
 func (c *Config) AgentOverride(name string) (model, effort string, ok bool) {
+	if c == nil {
+		return "", "", false
+	}
 	if name == AgentCoder || name == AgentTask {
 		return "", "", false
 	}

@@ -2,10 +2,12 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -574,6 +576,120 @@ func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
 		t.Fatal("OnExternalChange was not invoked after the agents directory was created and populated")
 	}
 	require.Contains(t, store.Config().Agents, "dev")
+}
+
+// flakyProcessor wraps testRuntimeProcessor and fails the first failUntil
+// calls to Process (or every call, when failUntil < 0), then delegates.
+// It simulates a reload stage that fails independently of file content —
+// a discovery timeout, say — so tests can drive WatchForExternalChanges's
+// retry/give-up behavior without touching the network.
+type flakyProcessor struct {
+	calls     *int32
+	failUntil int32
+}
+
+func (f flakyProcessor) Process(ctx context.Context, input RuntimeInput) (RuntimeResult, error) {
+	n := atomic.AddInt32(f.calls, 1)
+	if f.failUntil < 0 || n <= f.failUntil {
+		return RuntimeResult{}, errors.New("simulated transient reload failure")
+	}
+	return (testRuntimeProcessor{}).Process(ctx, input)
+}
+
+// TestWatchForExternalChanges_TransientReloadFailureIsRetried is the
+// regression test for the reload-retry hole: a reload failure that clears
+// up on its own (a discovery timeout, a torn read) must not permanently
+// mark the external change as seen. The poll loop must keep retrying it,
+// within its bounded budget, until it succeeds.
+func TestWatchForExternalChanges_TransientReloadFailureIsRetried(t *testing.T) {
+	dir := t.TempDir()
+	sennitDir := filepath.Join(dir, ".sennit")
+	require.NoError(t, os.MkdirAll(sennitDir, 0o755))
+	configPath := filepath.Join(sennitDir, "sennit.json")
+
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"mcp":{}}`), 0o600))
+	require.NoError(t, Trust(dir))
+
+	store, err := LoadWithProcessor(dir, "", false, testRuntimeProcessor{})
+	require.NoError(t, err)
+	store.watcher.pollInterval = 20 * time.Millisecond
+
+	// Fails the first two reload attempts triggered by the watch loop
+	// (below maxExternalReloadRetries), then succeeds.
+	var calls int32
+	store.processor = flakyProcessor{calls: &calls, failUntil: 2}
+
+	notified := make(chan struct{}, 1)
+	store.OnExternalChange(func() { notified <- struct{}{} })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go store.WatchForExternalChanges(ctx)
+
+	time.Sleep(10 * time.Millisecond) // ensure a distinct mtime
+	require.NoError(t, os.WriteFile(configPath,
+		[]byte(`{"mcp":{"added-by-agent":{"command":"echo"}}}`), 0o600))
+
+	select {
+	case <-notified:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a transient reload failure was not retried until it succeeded")
+	}
+
+	_, ok := store.Config().MCP["added-by-agent"]
+	require.True(t, ok, "the external change must be applied once the transient failure clears")
+	require.LessOrEqual(t, atomic.LoadInt32(&calls), int32(maxExternalReloadRetries),
+		"retries must stay within the bounded budget")
+}
+
+// TestWatchForExternalChanges_PermanentReloadFailureStopsRetrying is the
+// companion regression test: a reload that never succeeds (an invalid
+// config, or a transient-looking error that never actually clears) must
+// not turn the poll loop into a hot loop. Once the retry budget is spent,
+// the watcher must re-baseline and stop attempting that same change.
+func TestWatchForExternalChanges_PermanentReloadFailureStopsRetrying(t *testing.T) {
+	dir := t.TempDir()
+	sennitDir := filepath.Join(dir, ".sennit")
+	require.NoError(t, os.MkdirAll(sennitDir, 0o755))
+	configPath := filepath.Join(sennitDir, "sennit.json")
+
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"mcp":{}}`), 0o600))
+	require.NoError(t, Trust(dir))
+
+	store, err := LoadWithProcessor(dir, "", false, testRuntimeProcessor{})
+	require.NoError(t, err)
+	store.watcher.pollInterval = 20 * time.Millisecond
+
+	var calls int32
+	store.processor = flakyProcessor{calls: &calls, failUntil: -1} // always fails
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go store.WatchForExternalChanges(ctx)
+
+	time.Sleep(10 * time.Millisecond) // ensure a distinct mtime
+	require.NoError(t, os.WriteFile(configPath,
+		[]byte(`{"mcp":{"added-by-agent":{"command":"echo"}}}`), 0o600))
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&calls) >= int32(maxExternalReloadRetries)
+	}, 2*time.Second, 10*time.Millisecond, "expected the watcher to spend its retry budget")
+
+	// Several more poll intervals: a hot loop would keep growing calls past
+	// the budget; the fix must have re-baselined and stopped attempting
+	// this change.
+	time.Sleep(300 * time.Millisecond)
+	require.Equal(t, int32(maxExternalReloadRetries), atomic.LoadInt32(&calls),
+		"a permanently-failing reload must stop retrying once its bounded budget is spent")
+
+	_, ok := store.Config().MCP["added-by-agent"]
+	require.False(t, ok, "a reload that never succeeds must never publish the attempted change")
 }
 
 // TestWatchForExternalChanges_NoWorkingDirNoops verifies the guard that

@@ -102,3 +102,14 @@ func TestDefaultModelForProvider(t *testing.T) {
 		require.Contains(t, err.Error(), "no models configured")
 	})
 }
+
+// TestAgentOverride_NilConfig verifies AgentOverride is nil-safe like its
+// sibling accessors on *Config, rather than panicking on a nil receiver
+// (e.g. a test double that never got a published Config).
+func TestAgentOverride_NilConfig(t *testing.T) {
+	var cfg *Config
+	model, effort, ok := cfg.AgentOverride("some-agent")
+	require.False(t, ok)
+	require.Empty(t, model)
+	require.Empty(t, effort)
+}

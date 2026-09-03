@@ -13,8 +13,10 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/require"
 )
 
@@ -457,7 +459,30 @@ func buildTestProvider(t *testing.T, c *coordinator, providerCfg config.Provider
 		effective.ExtraParams["project"] = "p"
 		effective.ExtraParams["location"] = "us-central1"
 	}
-	c.cfg.Config().SetRuntimeProvider(providerCfg.ID, effective)
+
+	// c.cfg's Config came from configruntime.Load, which freezes
+	// RuntimeProviders on publish (see ConfigStore.setConfig) exactly like
+	// Providers — so it can no longer be edited in place. Build a fresh,
+	// unfrozen clone carrying the new runtime provider and republish that
+	// through a new store before building, rather than mutating the live
+	// snapshot; config.NewStore (unlike the load pipeline) never freezes
+	// what it publishes.
+	base := *c.cfg.Config()
+	runtimeProviders := csync.NewMap[string, providerstate.Provider]()
+	if base.RuntimeProviders != nil {
+		for id, p := range base.RuntimeProviders.Seq2() {
+			runtimeProviders.Set(id, p)
+		}
+	}
+	base.RuntimeProviders = runtimeProviders
+	base.SetRuntimeProvider(providerCfg.ID, effective)
+
+	c.cfg = config.NewStore(config.StoreOptions{
+		Config:     &base,
+		WorkingDir: c.cfg.WorkingDir(),
+		Resolver:   c.cfg.Resolver(),
+	})
+
 	return c.builder.buildProviderForSnapshot(providerCfg, model, false, c.builder.runtimeConfigSnapshot())
 }
 

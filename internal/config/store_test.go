@@ -15,9 +15,25 @@ import (
 
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+// TestSetConfig_FreezesRuntimeProviders verifies that setConfig freezes
+// RuntimeProviders exactly like it freezes Providers: once a Config is
+// published, its runtime provider state can only be replaced via
+// clone-and-swap, never edited in place.
+func TestSetConfig_FreezesRuntimeProviders(t *testing.T) {
+	t.Parallel()
+	store := &ConfigStore{}
+	cfg := &Config{RuntimeProviders: csync.NewMap[string, providerstate.Provider]()}
+	store.setConfig(cfg)
+
+	require.Panics(t, func() {
+		cfg.SetRuntimeProvider("p", providerstate.Provider{ID: "p"})
+	}, "mutating a published Config's RuntimeProviders must panic")
+}
 
 func TestMCPTokenMutationIsConditionalAndOwnerOrdered(t *testing.T) {
 	t.Parallel()
