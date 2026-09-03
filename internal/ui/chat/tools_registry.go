@@ -13,9 +13,8 @@ import (
 type toolItemFactory func(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, canceled bool) ToolMessageItem
 
 // toolRenderers is the registry that maps a tool name to the
-// [ToolRenderer] that draws it. It replaces the former hand-rolled
-// if/else chain over toolCall.Name: adding a renderer for a new tool is
-// a new file plus a single line in registerToolRenderers (see
+// [ToolRenderer] that draws it. Adding a renderer for a new tool is a new
+// file plus a single line in registerToolRenderers (see
 // registerToolRenderer below).
 var toolRenderers = map[string]ToolRenderer{}
 

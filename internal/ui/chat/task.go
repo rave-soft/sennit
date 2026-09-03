@@ -13,20 +13,12 @@ import (
 // Task tools
 // -----------------------------------------------------------------------------
 
-// The task_* tools used to fall through to the generic renderer, which had
-// only the tool call's raw arguments to show. Since every one of them takes
-// a task id and nothing else, that produced lines like
-//
-//	Task Result {"id":"a8355bfc-08c7-4024-8af1-b157a4f836ff"} · 1 line
-//
-// A uuid identifies the task to the model, which has just read it out of a
-// tool result; it identifies nothing to the person reading the transcript,
-// who never sees one anywhere else. "1 line" says as little.
-//
-// What a person wants from these lines is which delegation was asked about
-// and what came back, and both are already on hand: the tools attach the
-// task's own record (goal, status, result summary) as response metadata,
-// and none of it was being read.
+// A task_* tool call's arguments are just a task id — a uuid identifies
+// the task to the model, which has just read it out of a tool result, but
+// it identifies nothing to a person reading the transcript, who never
+// sees one anywhere else. What they want is which delegation was asked
+// about and what came back, so this renderer reads the task's own record
+// (goal, status, result summary) off the response metadata instead.
 
 // registerTaskToolRenderers registers the renderer for every agent_*
 // delegation tool. They share one because they share a subject — one
@@ -38,10 +30,10 @@ func registerTaskToolRenderers() {
 		tools.AgentListToolName,
 		tools.AgentCancelToolName,
 		tools.AgentSendToolName,
-		// The per-kind names these replaced. Sessions recorded before the
-		// merge still hold calls under them and must keep rendering; the
-		// subject each one reads comes from the metadata, which the old
-		// tools attached in the same shape.
+		// The earlier per-kind names: sessions recorded before these tools
+		// were merged into agent_* still hold calls under them and must
+		// keep rendering; the subject each one reads comes from metadata
+		// attached in the same shape.
 		"task_result", "task_output", "task_list", "task_cancel", "task_send",
 		"thread_list", "thread_status", "thread_send",
 	} {

@@ -17,11 +17,11 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// MessageLeftPaddingTotal is the total width that is taken up by the border +
-// padding. We also cap the width so text is readable to the maxTextWidth(120).
+// MessageLeftPaddingTotal is the total width taken up by the border and
+// padding.
 const MessageLeftPaddingTotal = 2
 
-// maxTextWidth is the maximum width text messages can be
+// maxTextWidth is the maximum width text messages can be.
 const maxTextWidth = 120
 
 // Identifiable is an interface for items that can provide a unique identifier.
@@ -195,11 +195,11 @@ func RestyleItems(items []MessageItem) tea.Cmd {
 }
 
 // cachedMessageItem caches rendered message content to avoid re-rendering.
+// Embed this in any message item that stores a cached render (user,
+// assistant, and so on).
 //
-// This should be used by any message that can store a cached version of its render. e.x user,assistant... and so on
-//
-// THOUGHT(kujtim): we should consider if its efficient to store the render for different widths
-// the issue with that could be memory usage
+// THOUGHT(kujtim): consider whether caching the render per width is worth
+// the memory it would cost.
 type cachedMessageItem struct {
 	// rendered is the cached rendered string
 	rendered string
@@ -431,10 +431,10 @@ func cappedMessageWidth(availableWidth int) int {
 // ExtractMessageItems extracts [MessageItem]s from a [message.Message]. It
 // returns all parts of the message as [MessageItem]s.
 //
-// For assistant messages with tool calls, pass a toolResults map to link results.
-// Use BuildToolResultMap to create this map from all messages in a session.
-// cfg is forwarded to NewToolMessageItem to recognize user-defined agent
-// tools; it may be nil.
+// For assistant messages with tool calls, pass a toolResults map to link
+// results. Use BuildToolResultMap to create this map from all messages in
+// a session. cfg is forwarded to NewToolMessageItem to recognize
+// user-defined agent tools; it may be nil.
 func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]ToolResultRef, cfg CustomAgentConfig) []MessageItem {
 	switch msg.Role {
 	case message.User:
@@ -508,10 +508,11 @@ func unixOrZero(sec int64) time.Time {
 	return time.Unix(sec, 0)
 }
 
-// ShouldRenderAssistantMessage determines if an assistant message should be rendered
+// ShouldRenderAssistantMessage reports whether an assistant message should
+// be rendered.
 //
-// In some cases the assistant message only has tools so we do not want to render an
-// empty message.
+// An assistant message that only carries tool calls has no text of its
+// own, so it must not render as an empty message.
 func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	content := strings.TrimSpace(msg.Content().Text)
 	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
@@ -529,9 +530,9 @@ type ToolResultRef struct {
 	CreatedAt int64
 }
 
-// BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.
-// Tool result messages (role == message.Tool) contain the results that should be linked
-// to tool calls in assistant messages.
+// BuildToolResultMap creates a map of tool call IDs to their results from
+// a list of messages. Tool result messages (role == message.Tool) carry
+// the results that get linked to tool calls in assistant messages.
 func BuildToolResultMap(messages []*message.Message) map[string]ToolResultRef {
 	resultMap := make(map[string]ToolResultRef)
 	for _, msg := range messages {

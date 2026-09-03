@@ -82,7 +82,6 @@ func (v *ReadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	// Handle image content.
 	if opts.Result.Data != "" && strings.HasPrefix(opts.Result.MIMEType, "image/") {
 		body := toolOutputImageContent(sty, opts.Result.Data, opts.Result.MIMEType)
 		return joinToolParts(header, body)
@@ -95,7 +94,6 @@ func (v *ReadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		content = meta.Content
 	}
 
-	// Handle skill content.
 	if meta.ResourceType == tools.ReadResourceSkill {
 		body := toolOutputSkillContent(sty, meta.ResourceName, meta.ResourceDescription)
 		return joinToolParts(header, body)
@@ -261,8 +259,6 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
-	// The diff sits directly under the header, capped while collapsed
-	// with click-to-expand — same contract as bash/write bodies.
 	if meta.OldContent != "" || meta.NewContent != "" {
 		return header + "\n" + expandableDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.Expanded, opts.Hovered)
 	}
@@ -352,8 +348,6 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
-	// The diff sits directly under the header, capped while collapsed
-	// with click-to-expand — same contract as bash/write bodies.
 	if meta.OldContent != "" || meta.NewContent != "" {
 		return header + "\n" + expandableDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.Expanded, opts.Hovered)
 	}

@@ -183,7 +183,7 @@ func newBaseToolMessageItem(
 	toolRenderer ToolRenderer,
 	canceled bool,
 ) *baseToolMessageItem {
-	// we only do full width for diffs (as far as I know)
+	// Only Edit/MultiEdit render at full width, for their diffs.
 	hasCappedWidth := toolCall.Name != tools.EditToolName && toolCall.Name != tools.MultiEditToolName
 
 	status := ToolStatusRunning

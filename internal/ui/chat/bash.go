@@ -70,7 +70,6 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		params.Command = "failed to parse command"
 	}
 
-	// Check if this is a background job.
 	var meta tools.BashResponseMetadata
 	if opts.HasResult() {
 		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
@@ -350,11 +349,9 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 // what became of it (summary), and whatever output is worth showing under
 // the header (body).
 //
-// The old header put the plumbing first — "Job (Output) PID 008" — and
-// the work last, so a line about a job with no description yet said
-// nothing at all. A shell id addresses the job to the model, which has
-// just read it out of a tool result; to a reader it is a number that
-// appears nowhere else.
+// Subject leads and the shell id is only a fallback: a shell id addresses
+// the job to the model, which has just read it out of a tool result, but
+// to a reader it is a number that appears nowhere else.
 type jobLine struct {
 	shellID string
 	subject string

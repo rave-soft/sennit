@@ -175,17 +175,17 @@ func (s *ShellItem) Render(width int) string {
 	// RawRender applies cappedMessageWidth itself (see tools_item.go's
 	// RawRender for the same contract): it takes the raw item width, not
 	// one already reduced by MessageLeftPaddingTotal. Pre-subtracting
-	// here used to make output and the xOffset scroll clamp two columns
-	// narrower than the space actually available.
+	// here would make the output and the xOffset scroll clamp two
+	// columns narrower than the space actually available.
 	content := s.RawRender(width)
 
 	// Highlight before prefixing, not after. SetHighlight's stored columns
 	// are already shifted left by MessageLeftPaddingTotal to address the
 	// unprefixed content (see its comment) — assistant.go, user.go and
 	// tools_item.go all highlight for that same reason before adding their
-	// prefix. Highlighting the already-prefixed string here used to land
+	// prefix. Highlighting the already-prefixed string here would land
 	// the selection two columns short of the mouse, onto the bar/padding,
-	// and left copied text (via RawRender, read by the same columns) not
+	// and leave copied text (via RawRender, read by the same columns) not
 	// matching what was shown as selected.
 	content = s.renderHighlighted(content, cappedMessageWidth(width), lipgloss.Height(content))
 
@@ -307,10 +307,6 @@ func (s *ShellItem) RawRender(width int) string {
 	// Remap raw ANSI 16-color codes onto legible Charmtone colors so
 	// dark terminal defaults don't render illegibly on Sennit's
 	// background.
-	// Strip trailing whitespace and bare ANSI resets before remapping.
-	// Programs like `task` emit "\x1b[0m\n" after their last line of
-	// output; trimming only "\n" misses these because the reset bytes
-	// sit between the content and the newline.
 	raw := trimShellOutput(s.output.String())
 	if raw == "" {
 		return header
@@ -333,7 +329,6 @@ func (s *ShellItem) RawRender(width int) string {
 	output := common.RemapANSI16(raw, s.sty.ANSI)
 	lines := strings.Split(output, "\n")
 
-	// Compute max line width for scroll clamping.
 	maxW := 0
 	outputStyle := s.sty.Messages.ShellOutput
 	truncationStyle := s.sty.Messages.ShellTruncation

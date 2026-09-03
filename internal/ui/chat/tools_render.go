@@ -170,7 +170,6 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 	return fmt.Sprintf("%s %s", tag, msgStyle.Render(errContent))
 }
 
-// toolIcon returns the status icon for a tool call.
 // toolIcon returns the status icon for a tool call based on its status.
 func toolIcon(sty *styles.Styles, status ToolStatus) string {
 	switch status {
@@ -200,8 +199,9 @@ func oneLine(s string) string {
 // truncated to width — a tool header is always a single line, so params
 // never wrap.
 func toolParamList(sty *styles.Styles, params []string, width int) string {
-	// minSpaceForMainParam is the min space required for the main param
-	// if this is less that the value set we will only show the main param nothing else
+	// minSpaceForMainParam is the minimum space the main param needs before
+	// key=value pairs are shown alongside it; below this, only the main
+	// param is shown.
 	const minSpaceForMainParam = 30
 	if len(params) == 0 {
 		return ""
@@ -209,7 +209,6 @@ func toolParamList(sty *styles.Styles, params []string, width int) string {
 
 	mainParam := oneLine(params[0])
 
-	// Build key=value pairs from remaining params (consecutive key, value pairs).
 	var kvPairs []string
 	for i := 1; i+1 < len(params); i += 2 {
 		if params[i+1] != "" {

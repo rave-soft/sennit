@@ -61,12 +61,12 @@ type delegationToolMessageItem struct {
 	nestedTools []ToolMessageItem
 
 	// startTime and the token counters back the running status line (see
-	// renderAgentStatusLine): a long delegation used to render as a bare
-	// spinner with no feedback for as long as it took the sub-agent to
-	// finish its first tool call — indistinguishable from a hang. Elapsed
-	// time is wall-clock local to this item, so it keeps advancing even if
-	// child-session events are ever delayed or dropped; the other fields
-	// degrade gracefully to "unknown" instead.
+	// renderAgentStatusLine): without it, a long delegation would render as
+	// a bare spinner with no feedback until the sub-agent's first tool call
+	// finishes — indistinguishable from a hang. Elapsed time is wall-clock
+	// local to this item, so it keeps advancing even if child-session
+	// events are ever delayed or dropped; the other fields degrade
+	// gracefully to "unknown" instead.
 	startTime        time.Time
 	promptTokens     int64
 	completionTokens int64
@@ -278,18 +278,16 @@ func (a *delegationToolMessageItem) NestedTools() []ToolMessageItem {
 
 // SetNestedTools sets the nested tools.
 //
-// SetNestedTools always bumps the version. The previous design
-// deduped when the slice's length and element pointers were
-// unchanged, but the live update path in internal/ui/model/ui.go
-// mutates existing children in place (SetToolCall / SetResult on the
-// same pointers) and then calls SetNestedTools with the same slice.
-// Pointer-equality dedupe in that case skips the parent Bump even
-// though the parent's rendered output (which embeds the children
-// inline) has changed, leaving a stale parent entry in the list
-// cache. Always bumping is cheap (one uint64 increment) and called
-// at most once per agent event; in the rare case the slice is
-// truly unchanged the worst case is one extra parent re-render
-// while every child cache hit stays warm.
+// SetNestedTools always bumps the version rather than deduping on slice
+// length and element pointers: the live update path in
+// internal/ui/model/ui.go mutates existing children in place (SetToolCall /
+// SetResult on the same pointers) and then calls SetNestedTools with the
+// same slice, so pointer-equality dedupe would skip the parent Bump even
+// though the parent's rendered output (which embeds the children inline)
+// has changed, leaving a stale parent entry in the list cache. Always
+// bumping is cheap (one uint64 increment) and called at most once per agent
+// event; in the rare case the slice is truly unchanged the worst case is
+// one extra parent re-render while every child cache hit stays warm.
 func (a *delegationToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
 	a.clearCache()
@@ -298,7 +296,6 @@ func (a *delegationToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 
 // AddNestedTool adds a nested tool.
 func (a *delegationToolMessageItem) AddNestedTool(tool ToolMessageItem) {
-	// Mark nested tools as simple (compact) rendering.
 	if s, ok := tool.(Compactable); ok {
 		s.SetCompact(true)
 	}
@@ -733,15 +730,12 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 // Collapsed (finished) delegation block
 // -----------------------------------------------------------------------------
 //
-// Before this existed, a finished agent/agentic_fetch tool call rendered
-// exactly like a running one: full nested-tool tree plus the delegation's
-// entire result inline. In a long session that's a wall of text for every
-// completed delegation — the user asked to drill into the sub-agent's own
-// session to inspect it, not to have it permanently expanded in the parent
-// chat. renderCollapsedDelegation replaces that with a 2-3 line summary;
-// full detail is reached by clicking the block (see enterChildSession in
-// internal/ui/model/ui.go), never by expanding it inline — see
-// AgentToolMessageItem.ToggleExpanded.
+// A finished agent/agentic_fetch tool call renders as a 2-3 line summary
+// rather than the full nested-tool tree plus the delegation's entire result
+// inline — that would be a wall of text for every completed delegation in a
+// long session. Full detail is reached by clicking the block (see
+// enterChildSession in internal/ui/model/ui.go), never by expanding it
+// inline — see AgentToolMessageItem.ToggleExpanded.
 
 // renderCollapsedDelegation renders a finished (or canceled) delegation as
 // a compact block: a header line (status icon, tool name, the one line
@@ -793,11 +787,6 @@ func renderCollapsedDelegation(
 // second line is what makes the block worth having on screen — a block
 // that only ever says "started" answers nothing about a task that has been
 // running for four minutes.
-//
-// It used to carry a different second line: a "background" badge and the
-// task's uuid. Neither survived the question of who reads it — "background"
-// says what the absent spinner already says, and nobody finds a task by
-// its uuid.
 func renderBackgroundDispatch(
 	sty *styles.Styles,
 	width int,
@@ -876,15 +865,14 @@ func renderResultPreviewLine(sty *styles.Styles, width int, content string) stri
 // -----------------------------------------------------------------------------
 //
 // A delegation (agent/agentic_fetch) can run for many minutes and dozens of
-// child tool calls before it says anything back. Before this line existed,
-// the only feedback during that stretch was the nested-tool tree — which
-// starts out empty and, once populated, only reflects the *last* observed
-// child-session pubsub event. If those events are delayed, coalesced, or
-// briefly interrupted, the render looks frozen even though the sub-agent
-// is making progress. renderAgentStatusLine is a
-// single line that's cheap to keep fresh every animation tick — most
-// importantly, the elapsed-time component advances on wall clock alone, so
-// it never stalls even if every other signal does.
+// child tool calls before it says anything back. The nested-tool tree alone
+// is not enough feedback during that stretch: it starts out empty and, once
+// populated, only reflects the *last* observed child-session pubsub event.
+// If those events are delayed, coalesced, or briefly interrupted, the
+// render looks frozen even though the sub-agent is making progress.
+// renderAgentStatusLine is a single line that's cheap to keep fresh every
+// animation tick — most importantly, the elapsed-time component advances
+// on wall clock alone, so it never stalls even if every other signal does.
 
 // pendingDelegation renders a still-running delegation for the chat
 // transcript: the pending stub (status icon, name, spinner) with the

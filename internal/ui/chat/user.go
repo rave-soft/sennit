@@ -93,11 +93,10 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachment
 // been submitted while the agent was busy and is sitting in its queue
 // until the current turn reaches its next step.
 //
-// It exists because that wait is otherwise invisible: nothing is
-// persisted until the agent actually takes the prompt, so the chat used
-// to show no trace of a message that had been typed, sent, and accepted.
-// Waits of several minutes are ordinary when the turn is deep in a long
-// tool call, and a silent one reads as a lost message.
+// Nothing is persisted until the agent actually takes the prompt, so
+// without this placeholder the wait is invisible in the chat. Waits of
+// several minutes are ordinary when the turn is deep in a long tool call,
+// and a silent one reads as a lost message.
 //
 // id is the caller's own handle for removing this item once the real
 // message lands (see UI.deliverQueuedPrompt); it is not a message id and
@@ -179,7 +178,6 @@ func (m *UserMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)
 
 	content, height, ok := m.getCachedRender(cappedWidth)
-	// cache hit
 	if ok {
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
@@ -196,7 +194,6 @@ func (m *UserMessageItem) RawRender(width int) string {
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
-	// Check if this is a skill invocation (loaded_skill XML)
 	if strings.HasPrefix(msgContent, "<loaded_skill>") {
 		content = m.withTurnSeparator(m.renderSkillInvocation(msgContent, cappedWidth), cappedWidth)
 		height = lipgloss.Height(content)
@@ -254,7 +251,7 @@ func (m *UserMessageItem) renderReportBody(text string, width int) string {
 	return m.sty.Messages.Notice.Render(header) + "\n\n" + m.renderMarkdown(answer, width)
 }
 
-// renderMarkdown renders text through the shared markdown renderer,// renderMarkdown renders text through the shared markdown renderer,
+// renderMarkdown renders text through the shared markdown renderer,
 // falling back to the raw text when it cannot.
 func (m *UserMessageItem) renderMarkdown(text string, width int) string {
 	renderer := common.MarkdownRenderer(m.sty, width)
@@ -268,7 +265,7 @@ func (m *UserMessageItem) renderMarkdown(text string, width int) string {
 	return strings.TrimSuffix(result, "\n")
 }
 
-// renderSkillInvocation renders a loaded_skill XML as a special UI element.// renderSkillInvocation renders a loaded_skill XML as a special UI element.
+// renderSkillInvocation renders a loaded_skill XML as a special UI element.
 func (m *UserMessageItem) renderSkillInvocation(content string, width int) string {
 	var skill skillInvocation
 	if err := xml.Unmarshal([]byte(content), &skill); err != nil {
@@ -332,7 +329,6 @@ func (m *UserMessageItem) ID() string {
 	return m.message.ID
 }
 
-// renderAttachments renders attachments.
 func (m *UserMessageItem) renderAttachments(width int) string {
 	var attachments []message.Attachment
 	for _, at := range m.message.BinaryContent() {

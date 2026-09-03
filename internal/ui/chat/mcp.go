@@ -19,7 +19,7 @@ func NewMCPToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &MCPToolRenderContext{}, canceled)
 }
 
-// MCPToolRenderContext renders bash tool messages.
+// MCPToolRenderContext renders MCP tool messages.
 type MCPToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.

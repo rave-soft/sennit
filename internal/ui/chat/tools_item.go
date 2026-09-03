@@ -271,16 +271,16 @@ func (t *baseToolMessageItem) isSpinning() bool {
 
 // Finished implements list.Item. A tool call is freezable once it can no
 // longer be in progress: it has been canceled, or a result has been
-// recorded. A result on its own is enough, for the same reason isSpinning
-// treats it as decisive — toolCall.Finished describes argument streaming
-// and a hard kill can leave it false forever, which used to keep such an
-// item permanently unfreezable. A later result update bumps the version,
-// and the list cache treats a bump as an implicit unfreeze, so freezing
-// here cannot pin stale output. A call still executing (arguments in, no
-// result yet) stays unfrozen: its renderer keeps updating the running
-// state. Tools that override the spinning logic via spinningFunc would
-// short-circuit live ticks; we still gate freezing on isSpinning to keep
-// the contract conservative.
+// recorded. A result alone is enough, for the same reason isSpinning
+// treats it as decisive: toolCall.Finished only describes argument
+// streaming, and a hard kill can leave it false forever, so relying on
+// it alone would leave such an item permanently unfreezable. A later
+// result update bumps the version, and the list cache treats a bump as
+// an implicit unfreeze, so freezing here cannot pin stale output. A call
+// still executing (arguments in, no result yet) stays unfrozen: its
+// renderer keeps updating the running state. Tools that override the
+// spinning logic via spinningFunc would short-circuit live ticks, so
+// freezing still gates on isSpinning to keep the contract conservative.
 func (t *baseToolMessageItem) Finished() bool {
 	if t.isSpinning() {
 		return false

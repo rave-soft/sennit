@@ -96,7 +96,6 @@ var diagnosticsToolRenderer = simpleToolRenderer{
 	title: "Diagnostics",
 	params: func(input string) []string {
 		p := decodeParams[tools.DiagnosticsParams](input)
-		// Show "project" if no file path, otherwise show the file path.
 		if p.FilePath == "" {
 			return []string{"project"}
 		}

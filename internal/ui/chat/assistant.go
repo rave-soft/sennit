@@ -761,12 +761,9 @@ func (a *AssistantMessageItem) renderMarkdown(content string, width int) string 
 }
 
 // renderSpinning draws the working animation under the phase the message
-// is actually in. The label used to be set only while thinking or
-// summarizing, which left the most common case — request sent, nothing
-// back yet — as a bare band of glyphs and a timer that said how long
-// something unnamed had been taking. [message.Working] is the single
-// reading of that state; PhaseWorking's "Working" is the floor, so the
-// label is never empty while the animation is up.
+// is actually in. [message.Working] is the single reading of that state;
+// PhaseWorking's "Working" is the floor, so the label is never empty
+// while the animation is up.
 //
 // SetLabel re-renders the label rune by rune and recomputes the animation
 // width, so it is called only when the wording actually changes rather
@@ -947,9 +944,9 @@ func (a *AssistantMessageItem) ToggleExpanded() bool {
 // long block.
 //
 // Logical line count is `1 + newlineCount` (a string with no
-// newlines is one line). Comparing newline count alone introduced
-// an off-by-one that let a source whose post-newline-split length
-// equalled the cap skip the tail-window step.
+// newlines is one line): comparing bare newline count would let a
+// source whose post-newline-split length equals the cap skip the
+// tail-window step.
 func (a *AssistantMessageItem) tailWindowWouldTruncate() bool {
 	lineCount := 1 + strings.Count(a.message.ReasoningContent().Thinking, "\n")
 	return lineCount > maxExpandedThinkingTailLines

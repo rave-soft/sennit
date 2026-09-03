@@ -579,10 +579,10 @@ func openListHazard(hasListMarker bool, lastLine string) bool {
 //	   and then a non-indented paragraph is closed; the boundary
 //	   after that paragraph is safe.
 //
-//	   The previous rule rejected on any list marker anywhere in the
-//	   prefix, which killed the streaming cache for every document
-//	   that ever contained a list — the dominant case for LLM
-//	   thinking blocks. See upstream ticket CHARM-1785.
+//	   Rejecting on any list marker anywhere in the prefix instead
+//	   would kill the streaming cache for every document that ever
+//	   contains a list — the dominant case for LLM thinking blocks.
+//	   See upstream ticket CHARM-1785.
 //
 //	B2 (HTML blocks). CommonMark defines seven HTML-block opener
 //	   patterns (script/pre/style/textarea, comments, processing
