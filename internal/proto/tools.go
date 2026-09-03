@@ -136,12 +136,36 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
+// GlobPermissionsParams represents the permission parameters for the glob tool.
+type GlobPermissionsParams struct {
+	Pattern    string `json:"pattern"`
+	Path       string `json:"path"`
+	MaxResults int    `json:"max_results"`
+	Cursor     string `json:"cursor"`
+}
+
 const GrepToolName = "grep"
 
 // GrepResponseMetadata represents the metadata for a grep tool response.
 type GrepResponseMetadata struct {
 	NumberOfMatches int  `json:"number_of_matches"`
 	Truncated       bool `json:"truncated"`
+}
+
+// GrepPermissionsParams represents the permission parameters for the grep
+// tool. GrepParams itself is not aliased into proto (unlike glob/ripgrep),
+// but the permission dialog still asserts on the proto type, so this one
+// needs the same alias treatment as the others.
+type GrepPermissionsParams struct {
+	Pattern       string `json:"pattern"`
+	Path          string `json:"path"`
+	Include       string `json:"include"`
+	LiteralText   bool   `json:"literal_text"`
+	MaxResults    int    `json:"max_results"`
+	BeforeContext int    `json:"before_context"`
+	AfterContext  int    `json:"after_context"`
+	Cursor        string `json:"cursor"`
+	Sort          string `json:"sort"`
 }
 
 const RipgrepToolName = "ripgrep"
@@ -161,6 +185,21 @@ type RipgrepParams struct {
 	AfterContext    int    `json:"after_context,omitempty" description:"Lines after each match (0-30)"`
 	Cursor          string `json:"cursor,omitempty" description:"Stable continuation token"`
 	Sort            string `json:"sort,omitempty" description:"Sort by path or mtime" enum:"path,mtime"`
+}
+
+// RipgrepPermissionsParams represents the permission parameters for the
+// ripgrep tool.
+type RipgrepPermissionsParams struct {
+	Pattern         string `json:"pattern"`
+	Path            string `json:"path"`
+	Include         string `json:"include"`
+	LiteralText     bool   `json:"literal_text"`
+	CaseInsensitive bool   `json:"case_insensitive"`
+	MaxResults      int    `json:"max_results"`
+	BeforeContext   int    `json:"before_context"`
+	AfterContext    int    `json:"after_context"`
+	Cursor          string `json:"cursor"`
+	Sort            string `json:"sort"`
 }
 
 const LSToolName = "ls"

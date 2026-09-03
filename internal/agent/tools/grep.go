@@ -22,6 +22,8 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -75,6 +77,10 @@ type GrepParams struct {
 	Cursor        string `json:"cursor,omitempty" description:"Stable continuation token"`
 	Sort          string `json:"sort,omitempty" description:"Sort by path or mtime" enum:"path,mtime"`
 }
+
+// GrepPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type GrepPermissionsParams = proto.GrepPermissionsParams
 
 type grepMatch struct {
 	path     string
@@ -130,7 +136,7 @@ func escapeRegexPattern(pattern string) string {
 	return escaped
 }
 
-func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
+func NewGrepTool(permissions permission.Requester, workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(
 		GrepToolName,
 		grepDescription(),
@@ -159,6 +165,34 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 				pattern = escapeRegexPattern(pattern)
 			}
 			searchPath := filepathext.SmartJoin(workingDir, params.Path)
+
+			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
+			}
+			if outside {
+				sessionID := GetSessionFromContext(ctx)
+				if sessionID == "" {
+					return fantasy.ToolResponse{}, missingSessionID("searching file contents outside working directory")
+				}
+
+				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        absSearchPath,
+					ToolCallID:  call.ID,
+					ToolName:    GrepToolName,
+					Action:      "search",
+					Description: fmt.Sprintf("Search file contents outside working directory: %s", absSearchPath),
+					Params:      GrepPermissionsParams(params),
+				})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if denied {
+					return resp, nil
+				}
+			}
+
 			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
 			defer cancel()
 			query := fingerprintPage(canonicalPath(searchPath), params.Pattern, params.Include, fmt.Sprint(params.LiteralText), params.Sort, fmt.Sprint(params.BeforeContext), fmt.Sprint(params.AfterContext))

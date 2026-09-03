@@ -223,11 +223,11 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 	case MultiReadToolName:
 		return NewMultiReadTool(nil, nil, dir)
 	case GlobToolName:
-		return NewGlobTool(dir, config.ToolGlob{})
+		return NewGlobTool(nil, dir, config.ToolGlob{})
 	case GrepToolName:
-		return NewGrepTool(dir, config.ToolGrep{})
+		return NewGrepTool(nil, dir, config.ToolGrep{})
 	case RipgrepToolName:
-		return NewRipgrepTool(dir, config.ToolGrep{})
+		return NewRipgrepTool(nil, dir, config.ToolGrep{})
 	case LSToolName:
 		return NewLsTool(nil, dir, config.ToolLs{})
 	case SennitLogsToolName:
@@ -440,10 +440,10 @@ func TestParallelAllowListIsStateless(t *testing.T) {
 		return callCase{tool: tool, params: params, key: tool.Info().Name + "\x00" + fmt.Sprintf("%p", tool) + "\x00" + params}
 	}
 	cases := []callCase{
-		mkCase(NewGrepTool(dir, config.ToolGrep{}), `{"pattern":"const","include":"*.go"}`),
-		mkCase(NewGrepTool(dir, config.ToolGrep{}), `{"pattern":"const","include":"*.go","case_insensitive":true}`),
-		mkCase(NewGlobTool(dir, config.ToolGlob{}), `{"pattern":"*.go"}`),
-		mkCase(NewGlobTool(dir, config.ToolGlob{}), `{"pattern":"sub/**"}`),
+		mkCase(NewGrepTool(nil, dir, config.ToolGrep{}), `{"pattern":"const","include":"*.go"}`),
+		mkCase(NewGrepTool(nil, dir, config.ToolGrep{}), `{"pattern":"const","include":"*.go","case_insensitive":true}`),
+		mkCase(NewGlobTool(nil, dir, config.ToolGlob{}), `{"pattern":"*.go"}`),
+		mkCase(NewGlobTool(nil, dir, config.ToolGlob{}), `{"pattern":"sub/**"}`),
 		mkCase(NewLsTool(nil, dir, config.ToolLs{}), `{}`),
 		mkCase(NewLsTool(nil, dir, config.ToolLs{}), `{"ignore":["*.txt"]}`),
 		mkCase(NewSennitLogsTool(logFile), `{}`),
@@ -460,8 +460,8 @@ func TestParallelAllowListIsStateless(t *testing.T) {
 		return exec.CommandContext(ctx, "sh", "-c", `printf '%s\n' '{"type":"match","data":{"path":{"text":"`+filepath.Join(dir, `alpha.go`)+`"},"lines":{"text":"const A = 1\n"},"line_number":3,"submatches":[{"start":0}]}}'`)
 	}
 	cases = append(cases,
-		mkCase(NewRipgrepTool(dir, config.ToolGrep{}, withRipgrepCommand(ripgrepCommand)), `{"pattern":"const","include":"*.go"}`),
-		mkCase(NewRipgrepTool(dir, config.ToolGrep{}, withRipgrepCommand(ripgrepCommand)), `{"pattern":"second line","include":"*.txt"}`),
+		mkCase(NewRipgrepTool(nil, dir, config.ToolGrep{}, withRipgrepCommand(ripgrepCommand)), `{"pattern":"const","include":"*.go"}`),
+		mkCase(NewRipgrepTool(nil, dir, config.ToolGrep{}, withRipgrepCommand(ripgrepCommand)), `{"pattern":"second line","include":"*.txt"}`),
 	)
 
 	run := func(t *testing.T, tc callCase) string {

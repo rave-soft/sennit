@@ -11,7 +11,7 @@ import (
 func TestNewSearchToolFallsBackToGrep(t *testing.T) {
 	t.Parallel()
 
-	tool := newSearchTool(t.TempDir(), config.ToolGrep{}, "")
+	tool := newSearchTool(nil, t.TempDir(), config.ToolGrep{}, "")
 	require.Equal(t, GrepToolName, tool.Info().Name)
 }
 

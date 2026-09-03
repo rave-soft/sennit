@@ -36,7 +36,7 @@ func TestSearchToolsResolveRelativePathsAgainstTheWorkspace(t *testing.T) {
 
 	t.Run("grep", func(t *testing.T) {
 		t.Parallel()
-		tool := NewGrepTool(workspace, config.ToolGrep{})
+		tool := NewGrepTool(nil, workspace, config.ToolGrep{})
 		resp := runToolWith(t, tool, ctx, GrepToolName, GrepParams{Pattern: "Needle", Path: "sub"})
 		require.False(t, resp.IsError, resp.Content)
 		require.Contains(t, resp.Content, "hit.go")
@@ -44,7 +44,7 @@ func TestSearchToolsResolveRelativePathsAgainstTheWorkspace(t *testing.T) {
 
 	t.Run("glob", func(t *testing.T) {
 		t.Parallel()
-		tool := NewGlobTool(workspace, config.ToolGlob{})
+		tool := NewGlobTool(nil, workspace, config.ToolGlob{})
 		resp := runToolWith(t, tool, ctx, GlobToolName, GlobParams{Pattern: "*.go", Path: "sub"})
 		require.False(t, resp.IsError, resp.Content)
 		require.Contains(t, resp.Content, "hit.go")

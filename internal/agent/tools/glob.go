@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 )
 
@@ -40,6 +41,10 @@ func globDescription() string {
 // GlobParams is the canonical proto data shape used by both the runtime and UI.
 type GlobParams = proto.GlobParams
 
+// GlobPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type GlobPermissionsParams = proto.GlobPermissionsParams
+
 type GlobResponseMetadata struct {
 	NumberOfFiles int    `json:"number_of_files"`
 	TotalFiles    int    `json:"total_files"`
@@ -47,7 +52,7 @@ type GlobResponseMetadata struct {
 	Cursor        string `json:"cursor,omitempty"`
 }
 
-func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
+func NewGlobTool(permissions permission.Requester, workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(
 		GlobToolName,
 		globDescription(),
@@ -61,6 +66,33 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 			// against the process cwd — in a thread, the main checkout
 			// rather than the worktree the agent is working in.
 			searchPath := filepathext.SmartJoin(workingDir, params.Path)
+
+			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
+			}
+			if outside {
+				sessionID := GetSessionFromContext(ctx)
+				if sessionID == "" {
+					return fantasy.ToolResponse{}, missingSessionID("searching for files outside working directory")
+				}
+
+				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        absSearchPath,
+					ToolCallID:  call.ID,
+					ToolName:    GlobToolName,
+					Action:      "list",
+					Description: fmt.Sprintf("List files outside working directory: %s", absSearchPath),
+					Params:      GlobPermissionsParams(params),
+				})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if denied {
+					return resp, nil
+				}
+			}
 
 			// Bound the search so a huge or symlink-heavy root (e.g. $HOME
 			// or a module cache) fails cleanly instead of pinning the CPU

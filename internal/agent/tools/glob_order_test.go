@@ -36,7 +36,7 @@ func TestGlobTool_OrdersByModificationTime(t *testing.T) {
 		require.NoError(t, os.Chtimes(path, stamp, stamp))
 	}
 
-	response := runToolWith(t, NewGlobTool(dir, config.ToolGlob{}), t.Context(), GlobToolName,
+	response := runToolWith(t, NewGlobTool(nil, dir, config.ToolGlob{}), t.Context(), GlobToolName,
 		GlobParams{Pattern: "*.txt"})
 	require.False(t, response.IsError, response.Content)
 
@@ -63,7 +63,7 @@ func TestGlobTool_FindsDirectories(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "pkg", "inner"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "pkg", "inner", "f.go"), []byte("package inner"), 0o644))
 
-	response := runToolWith(t, NewGlobTool(dir, config.ToolGlob{}), t.Context(), GlobToolName,
+	response := runToolWith(t, NewGlobTool(nil, dir, config.ToolGlob{}), t.Context(), GlobToolName,
 		GlobParams{Pattern: "pkg"})
 	require.False(t, response.IsError, response.Content)
 	require.Equal(t, filepath.ToSlash(filepath.Join(dir, "pkg")), strings.TrimSpace(response.Content))

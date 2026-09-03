@@ -18,11 +18,16 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 )
 
 // RipgrepParams is the canonical proto data shape used by both the runtime and UI.
 type RipgrepParams = proto.RipgrepParams
+
+// RipgrepPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type RipgrepPermissionsParams = proto.RipgrepPermissionsParams
 
 const RipgrepToolName = "ripgrep"
 
@@ -43,15 +48,15 @@ func ripgrepDescription() string {
 // NewSearchTool returns the content-search tool to offer the model on this
 // system: ripgrep when the rg binary is installed, otherwise the pure-Go
 // grep fallback.
-func NewSearchTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
-	return newSearchTool(workingDir, cfg, getRg())
+func NewSearchTool(permissions permission.Requester, workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
+	return newSearchTool(permissions, workingDir, cfg, getRg())
 }
 
-func newSearchTool(workingDir string, cfg config.ToolGrep, ripgrepPath string) fantasy.AgentTool {
+func newSearchTool(permissions permission.Requester, workingDir string, cfg config.ToolGrep, ripgrepPath string) fantasy.AgentTool {
 	if ripgrepPath != "" {
-		return NewRipgrepTool(workingDir, cfg, withRipgrepCommand(ripgrepSearchCommand(ripgrepPath)))
+		return NewRipgrepTool(permissions, workingDir, cfg, withRipgrepCommand(ripgrepSearchCommand(ripgrepPath)))
 	}
-	return NewGrepTool(workingDir, cfg)
+	return NewGrepTool(permissions, workingDir, cfg)
 }
 
 func ripgrepSearchCommand(name string) func(context.Context, string, string, string, bool) *exec.Cmd {
@@ -75,7 +80,7 @@ func withRipgrepCommand(command func(context.Context, string, string, string, bo
 	}
 }
 
-func NewRipgrepTool(workingDir string, cfg config.ToolGrep, options ...ripgrepToolOption) fantasy.AgentTool {
+func NewRipgrepTool(permissions permission.Requester, workingDir string, cfg config.ToolGrep, options ...ripgrepToolOption) fantasy.AgentTool {
 	toolOptions := ripgrepToolOptions{command: getRgSearchCmd}
 	for _, option := range options {
 		option(&toolOptions)
@@ -107,6 +112,34 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep, options ...ripgrepTo
 				pattern = escapeRegexPattern(pattern)
 			}
 			searchPath := filepathext.SmartJoin(workingDir, params.Path)
+
+			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
+			}
+			if outside {
+				sessionID := GetSessionFromContext(ctx)
+				if sessionID == "" {
+					return fantasy.ToolResponse{}, missingSessionID("searching file contents outside working directory")
+				}
+
+				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        absSearchPath,
+					ToolCallID:  call.ID,
+					ToolName:    RipgrepToolName,
+					Action:      "search",
+					Description: fmt.Sprintf("Search file contents outside working directory: %s", absSearchPath),
+					Params:      RipgrepPermissionsParams(params),
+				})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if denied {
+					return resp, nil
+				}
+			}
+
 			searchCtx, cancel := context.WithTimeout(ctx, cfg.GetTimeout())
 			defer cancel()
 			query := fingerprintPage(canonicalPath(searchPath), params.Pattern, params.Include, fmt.Sprint(params.LiteralText), fmt.Sprint(params.CaseInsensitive), params.Sort, fmt.Sprint(params.BeforeContext), fmt.Sprint(params.AfterContext))

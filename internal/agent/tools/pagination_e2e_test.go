@@ -73,7 +73,7 @@ func TestGrepHandlerPaginationSortContextAndGeneration(t *testing.T) {
 	now := time.Now()
 	require.NoError(t, os.Chtimes(oldPath, now.Add(-time.Hour), now.Add(-time.Hour)))
 	require.NoError(t, os.Chtimes(newPath, now, now))
-	tool := NewGrepTool(dir, config.ToolGrep{})
+	tool := NewGrepTool(nil, dir, config.ToolGrep{})
 
 	var got []string
 	cursor := ""
@@ -120,7 +120,7 @@ func TestRipgrepHandlerPaginationAndGoRegexDifference(t *testing.T) {
 	command := func(ctx context.Context, pattern, searchPath, include string, caseInsensitive bool) *exec.Cmd {
 		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRipgrepFixtureHelper$", "--", pattern, searchPath, include, strconv.FormatBool(caseInsensitive))
 	}
-	tool := NewRipgrepTool(dir, config.ToolGrep{}, withRipgrepCommand(command))
+	tool := NewRipgrepTool(nil, dir, config.ToolGrep{}, withRipgrepCommand(command))
 	cursor := ""
 	var got []string
 	for _, size := range []int{37, 71, 100, 100} {
@@ -139,7 +139,7 @@ func TestRipgrepHandlerPaginationAndGoRegexDifference(t *testing.T) {
 		require.Equal(t, strconv.Itoa(i+1), line)
 	}
 
-	goRegex := runToolWith(t, NewGrepTool(dir, config.ToolGrep{}), t.Context(), GrepToolName, GrepParams{Pattern: `\hneedle`})
+	goRegex := runToolWith(t, NewGrepTool(nil, dir, config.ToolGrep{}), t.Context(), GrepToolName, GrepParams{Pattern: `\hneedle`})
 	require.True(t, goRegex.IsError)
 	rustRegex := runToolWith(t, tool, t.Context(), RipgrepToolName, RipgrepParams{Pattern: `\hneedle`, Path: "fixtures", Include: "*.txt", MaxResults: 1})
 	require.False(t, rustRegex.IsError, rustRegex.Content)
@@ -190,7 +190,7 @@ func TestGlobAndLSHandlerPaginationNoGapsAndStaleGeneration(t *testing.T) {
 	for i := range 215 {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, fmt.Sprintf("file-%03d.txt", i)), []byte("x"), 0o600))
 	}
-	globTool := NewGlobTool(dir, config.ToolGlob{})
+	globTool := NewGlobTool(nil, dir, config.ToolGlob{})
 	cursor := ""
 	var files []string
 	for _, size := range []int{23, 41, 73, 100} {
@@ -251,9 +251,9 @@ func TestPaginationToolInfoSchemaContract(t *testing.T) {
 		sort   bool
 	}{
 		{name: "read", tool: newReadToolForTest(dir), bounds: map[string][2]int{"offset": {0, 0}, "limit": {0, DefaultReadLimit}}},
-		{name: "grep", tool: NewGrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, maxGrepContextLines}, "after_context": {0, maxGrepContextLines}}, sort: true},
-		{name: "ripgrep", tool: NewRipgrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, maxGrepContextLines}, "after_context": {0, maxGrepContextLines}}, sort: true},
-		{name: "glob", tool: NewGlobTool(dir, config.ToolGlob{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}}},
+		{name: "grep", tool: NewGrepTool(nil, dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, maxGrepContextLines}, "after_context": {0, maxGrepContextLines}}, sort: true},
+		{name: "ripgrep", tool: NewRipgrepTool(nil, dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, maxGrepContextLines}, "after_context": {0, maxGrepContextLines}}, sort: true},
+		{name: "glob", tool: NewGlobTool(nil, dir, config.ToolGlob{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}}},
 	}
 	for _, test := range tools {
 		t.Run(test.name, func(t *testing.T) {
@@ -286,7 +286,7 @@ func TestRipgrepHandlerAcceptsLongJSONRecord(t *testing.T) {
 		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRipgrepLongRecordHelper$")
 	}
 	t.Setenv("SENNIT_RG_LONG_RECORD", path)
-	tool := NewRipgrepTool(dir, config.ToolGrep{}, withRipgrepCommand(command))
+	tool := NewRipgrepTool(nil, dir, config.ToolGrep{}, withRipgrepCommand(command))
 	response := runToolWith(t, tool, t.Context(), RipgrepToolName, RipgrepParams{Pattern: "needle", Sort: "path", MaxResults: 1})
 	require.False(t, response.IsError, response.Content)
 	metadata := responseMetadata[GrepResponseMetadata](t, response.Metadata)
@@ -336,9 +336,9 @@ func TestPaginationHandlerValidationBounds(t *testing.T) {
 		toolName string
 		params   any
 	}{
-		{name: "grep limit", tool: NewGrepTool(dir, config.ToolGrep{}), toolName: GrepToolName, params: GrepParams{Pattern: "x", MaxResults: 1001}},
-		{name: "grep context", tool: NewGrepTool(dir, config.ToolGrep{}), toolName: GrepToolName, params: GrepParams{Pattern: "x", BeforeContext: maxGrepContextLines + 1}},
-		{name: "glob limit", tool: NewGlobTool(dir, config.ToolGlob{}), toolName: GlobToolName, params: GlobParams{Pattern: "*", MaxResults: 1001}},
+		{name: "grep limit", tool: NewGrepTool(nil, dir, config.ToolGrep{}), toolName: GrepToolName, params: GrepParams{Pattern: "x", MaxResults: 1001}},
+		{name: "grep context", tool: NewGrepTool(nil, dir, config.ToolGrep{}), toolName: GrepToolName, params: GrepParams{Pattern: "x", BeforeContext: maxGrepContextLines + 1}},
+		{name: "glob limit", tool: NewGlobTool(nil, dir, config.ToolGlob{}), toolName: GlobToolName, params: GlobParams{Pattern: "*", MaxResults: 1001}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

@@ -1139,7 +1139,7 @@ func (d *delegationFinalizer) buildAgenticFetchAgent(ctx context.Context, client
 		Lifecycle: d.lifecycle,
 		Tools: []fantasy.AgentTool{
 			tools.NewWebFetchTool(nil, tmpDir, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
-			tools.NewGlobTool(tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, d.cfg.Config().Tools.Grep),
+			tools.NewGlobTool(d.permissions, tmpDir, d.cfg.Config().Tools.Glob), tools.NewSearchTool(d.permissions, tmpDir, d.cfg.Config().Tools.Grep),
 			tools.NewReadTool(d.lspManager, d.permissions, newFileTracking(d.filetracker), nil, tmpDir),
 		},
 	}), nil
