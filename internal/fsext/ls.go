@@ -240,9 +240,12 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, is
 }
 
 // VisitDirectory streams directory entries using the same ignore and depth
-// semantics as ListDirectory. Its ignore state is an ancestor stack: walking a
-// sibling releases the previous subtree's patterns instead of retaining a
-// matcher for every directory in a wide tree.
+// semantics as ListDirectory, and the same symlink rule as its fastwalk pass:
+// the root is followed if it is itself a directory symlink, but a symlink
+// found while descending is reported as a leaf and never followed. Its ignore
+// state is an ancestor stack: walking a sibling releases the previous
+// subtree's patterns instead of retaining a matcher for every directory in a
+// wide tree.
 //
 // incomplete reports whether any path was skipped because it could not be
 // read — a removed directory, ReadDir failing on a wide tree (EMFILE/ENFILE),
@@ -252,18 +255,36 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, is
 // read tree looks like a complete, merely small one.
 func VisitDirectory(initialPath string, ignorePatterns []string, depth int, visit func(string)) (incomplete bool, err error) {
 	walker := newDirectoryVisitState(initialPath)
-	walkErr := filepath.Walk(initialPath, func(path string, info os.FileInfo, err error) error {
+
+	// filepath.Walk lstats its root, so a directory symlink root reports
+	// IsDir()==false and the walk stops after that single (dropped) entry.
+	// Resolve it once up front and walk the target instead, translating
+	// every visited path back to initialPath's own namespace below — this
+	// is the same "follow the root, not what's inside it" rule ListDirectory
+	// gets for free from fastwalk stat-ing (not lstat-ing) its root.
+	walkRoot := initialPath
+	if lst, lerr := os.Lstat(initialPath); lerr == nil && lst.Mode()&os.ModeSymlink != 0 {
+		if target, terr := filepath.EvalSymlinks(initialPath); terr == nil {
+			if tinfo, serr := os.Stat(target); serr == nil && tinfo.IsDir() {
+				walkRoot = target
+			}
+		}
+	}
+
+	walkErr := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			incomplete = true
 			return nil
 		}
-		rel, relErr := filepath.Rel(initialPath, path)
+		rel, relErr := filepath.Rel(walkRoot, path)
 		if relErr != nil {
 			return nil
 		}
 		level := 0
+		virtualPath := initialPath
 		if rel != "." {
 			level = len(pathToComponents(rel))
+			virtualPath = filepath.Join(initialPath, rel)
 		}
 		if depth > 0 && level > depth {
 			if info.IsDir() {
@@ -271,23 +292,23 @@ func VisitDirectory(initialPath string, ignorePatterns []string, depth int, visi
 			}
 			return nil
 		}
-		walker.enterParent(filepath.Dir(path))
+		walker.enterParent(filepath.Dir(virtualPath))
 		isDir := info.IsDir()
-		if walker.shouldIgnore(path, ignorePatterns, isDir) {
+		if walker.shouldIgnore(virtualPath, ignorePatterns, isDir) {
 			if isDir {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if path != initialPath {
-			outputPath := path
+		if virtualPath != initialPath {
+			outputPath := virtualPath
 			if isDir {
 				outputPath += string(filepath.Separator)
 			}
 			visit(outputPath)
 		}
 		if isDir {
-			walker.enter(path)
+			walker.enter(virtualPath)
 		}
 		return nil
 	})

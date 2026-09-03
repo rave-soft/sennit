@@ -327,6 +327,89 @@ func TestVisitDirectory_FullyReadableTreeReportsComplete(t *testing.T) {
 	require.ElementsMatch(t, []string{"sub", "sub/file.txt"}, relPaths(t, visited, tmp))
 }
 
+// TestVisitDirectory_FollowsSymlinkedRoot pins the fix for a root that is
+// itself a directory symlink: filepath.Walk lstats its root, so a symlinked
+// root used to report IsDir()==false and the walk returned zero entries
+// with no error and incomplete==false — indistinguishable from an empty
+// directory. VisitDirectory must instead list the target's contents, the
+// same as ListDirectory (fastwalk stats its root) and a shell "ls" of the
+// same path.
+func TestVisitDirectory_FollowsSymlinkedRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires elevated privileges on Windows")
+	}
+	t.Parallel()
+	tmp := t.TempDir()
+	real := filepath.Join(tmp, "real")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(real, "inside.txt"), []byte("x"), 0o644))
+	link := filepath.Join(tmp, "link")
+	require.NoError(t, os.Symlink(real, link))
+
+	var visited []string
+	incomplete, err := VisitDirectory(link, nil, -1, func(p string) { visited = append(visited, p) })
+	require.NoError(t, err)
+	require.False(t, incomplete)
+	require.ElementsMatch(t, []string{"inside.txt"}, relPaths(t, visited, link))
+}
+
+// TestVisitDirectory_DoesNotFollowInteriorSymlink pins the other half of
+// the same-sentence rule: a symlink found while descending an already-open
+// root is reported as a leaf entry and not followed, the same as
+// ListDirectory's fastwalk.Config{Follow: false}. What the symlink points
+// at is not listed a second time underneath it.
+func TestVisitDirectory_DoesNotFollowInteriorSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires elevated privileges on Windows")
+	}
+	t.Parallel()
+	tmp := t.TempDir()
+	real := filepath.Join(tmp, "real")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(real, "inside.txt"), []byte("x"), 0o644))
+	require.NoError(t, os.Symlink(real, filepath.Join(tmp, "link")))
+
+	var visited []string
+	incomplete, err := VisitDirectory(tmp, nil, -1, func(p string) { visited = append(visited, p) })
+	require.NoError(t, err)
+	require.False(t, incomplete)
+	require.ElementsMatch(t, []string{
+		"real", "real/inside.txt", "link",
+	}, relPaths(t, visited, tmp))
+}
+
+// TestVisitDirectory_SymlinkLoopDoesNotHang guards against the hang that
+// following interior symlinks would invite: a directory that symlinks back
+// to one of its own ancestors would otherwise send the walk in circles
+// forever. With interior symlinks never followed, VisitDirectory must
+// return promptly and list the loop-forming symlink as a leaf.
+func TestVisitDirectory_SymlinkLoopDoesNotHang(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires elevated privileges on Windows")
+	}
+	t.Parallel()
+	tmp := t.TempDir()
+	sub := filepath.Join(tmp, "sub")
+	require.NoError(t, os.Mkdir(sub, 0o755))
+	require.NoError(t, os.Symlink(tmp, filepath.Join(sub, "loop")))
+
+	done := make(chan struct{})
+	var visited []string
+	var err error
+	go func() {
+		defer close(done)
+		_, err = VisitDirectory(tmp, nil, -1, func(p string) { visited = append(visited, p) })
+	}()
+
+	select {
+	case <-done:
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"sub", "sub/loop"}, relPaths(t, visited, tmp))
+	case <-time.After(5 * time.Second):
+		t.Fatal("VisitDirectory hung on a symlink loop")
+	}
+}
+
 func relPaths(tb testing.TB, in []string, base string) []string {
 	tb.Helper()
 	out := make([]string, 0, len(in))
