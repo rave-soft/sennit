@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
@@ -462,10 +463,8 @@ func TestMakeThresholdRotateCallback_BelowThreshold_NoOp(t *testing.T) {
 	codex.RecordUsageFor("acct-below", codex.Usage{Plan: "plus", Primary: codex.UsageWindow{UsedPercent: 50, WindowMinutes: 60}})
 
 	notifier := &recordingNotifier{}
-	cfg, err := testRotationConfigStore(t)
-	require.NoError(t, err)
 	providerCfg := codexProviderConfig("acct-below", true)
-	cfg.Config().Providers.Set(codex.ProviderID, providerCfg)
+	cfg := testRotationConfigStoreWithProvider(t, providerCfg)
 	effective, err := providerruntime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
 	require.NoError(t, err)
 	cfg.Config().SetRuntimeProvider(codex.ProviderID, effective)
@@ -498,10 +497,8 @@ func TestMakeThresholdRotateCallback_RotatesOverThreshold(t *testing.T) {
 	codex.RecordUsageFor("acct-over", codex.Usage{Plan: "plus", Primary: codex.UsageWindow{UsedPercent: 95, WindowMinutes: 60}})
 
 	notifier := &recordingNotifier{}
-	cfg, err := testRotationConfigStore(t)
-	require.NoError(t, err)
 	providerCfg := codexProviderConfig("acct-over", true)
-	cfg.Config().Providers.Set(codex.ProviderID, providerCfg)
+	cfg := testRotationConfigStoreWithProvider(t, providerCfg)
 	effective, err := providerruntime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
 	require.NoError(t, err)
 	cfg.Config().SetRuntimeProvider(codex.ProviderID, effective)
@@ -585,16 +582,42 @@ func TestMakeThresholdRotateCallback_SecondStepReadsRotatedAccountUsage(t *testi
 		"the stale-account bug re-reads acct-over-2's usage and re-notifies on every step")
 }
 
-// testRotationConfigStore builds a real, LoadData-backed *config.ConfigStore
-// (via configruntime.Load, the same path authTestCoordinator uses) so
-// ActivateAccount's disk-write-then-reload-then-publish sequence (see its
-// doc comment) is exercised for real, not approximated by a hand-built
-// &ConfigStore{...} literal.
-func testRotationConfigStore(t *testing.T) (*config.ConfigStore, error) {
+// testRotationConfigStoreWithProvider builds a real, LoadData-backed
+// *config.ConfigStore (via configruntime.Load, the same path
+// authTestCoordinator uses) so ActivateAccount's
+// disk-write-then-reload-then-publish sequence is exercised for real rather
+// than approximated by a hand-built &ConfigStore{...} literal. The
+// threshold-rotate tests need providerCfg (a bare Rotation-only
+// config.ProviderConfig with no credentials) folded into Providers before
+// the store is published. Providers is frozen the moment a Config is
+// published (see config.ConfigStore.setConfig), so mutating
+// cfg.Config().Providers after configruntime.Load would panic; going
+// through the real disk-reload pipeline instead would drop a credential-
+// less codex entry as unusable (see providerload's applyCredentials),
+// which is beside the point here. config.NewStore publishes cfg directly,
+// with no processor and no freeze, mirroring the pattern
+// TestRuntimeForUsesCapturedPublishedConfigGeneration uses.
+func testRotationConfigStoreWithProvider(t *testing.T, providerCfg config.ProviderConfig) *config.ConfigStore {
 	t.Helper()
 	writeGlobalConfig(t, "{}")
 	env := testEnv(t)
-	return configruntime.Load(env.workingDir, "", false)
+	loaded, err := configruntime.Load(env.workingDir, "", false)
+	require.NoError(t, err)
+	base := *loaded.Config()
+
+	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers.Set(providerCfg.ID, providerCfg)
+	base.Providers = providers
+
+	// WorkingDir is deliberately left unset — see the matching comment in
+	// authTestCoordinator (auth_test.go) for why: it keeps a post-write
+	// autoReload (ActivateAccount, via applyRotationPick) from rebuilding
+	// this in-memory-only Config from disk and dropping the provider for
+	// lacking an on-disk identity.
+	return config.NewStore(config.StoreOptions{
+		Config:         &base,
+		GlobalDataPath: config.GlobalConfigData(),
+	})
 }
 
 // ---------------------------------------------------------------------------

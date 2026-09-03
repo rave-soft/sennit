@@ -73,7 +73,13 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 	// The store is not published anywhere until Load returns, so nothing
 	// can race these field assignments; writeMu is taken further down only
 	// because updateLocked/SetupAgents document it as a precondition.
-	store.config = built.cfg
+	//
+	// setConfig (rather than a bare field assignment) is used even here so
+	// this first snapshot's Providers gets frozen exactly like every later
+	// one: build-time mutation (providerload's RuntimeProcessor, above)
+	// already happened, so there is nothing left to write before it is
+	// visible to callers.
+	store.setConfig(built.cfg)
 	store.workspacePath.Set(filepath.Join(built.cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)))
 	store.loadedPaths = built.loadedPaths
 	store.knownProviders = built.providers

@@ -14,11 +14,44 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/providers/state"
 )
 
 func newRecordAccountStore(t *testing.T) *ConfigStore {
 	t.Helper()
 	return newActivateAccountTestStore(t, "")
+}
+
+// newRecordAccountStoreWithLegacyCredential mirrors newActivateAccountTestStore,
+// but pre-populates the codex provider's legacy, pre-account credential
+// (APIKey/OAuthToken) on both Providers and RuntimeProviders before the
+// store is ever constructed. A real load would compile the identical value
+// into RuntimeProviders too (see providerload/loader.go), so both are set
+// here to match. Setting them up front — rather than fetching
+// store.Config() and mutating it — matters because Providers is frozen the
+// moment a Config is published, and this literal *ConfigStore construction
+// is standing in for that publication.
+func newRecordAccountStoreWithLegacyCredential(t *testing.T, token string) *ConfigStore {
+	t.Helper()
+	dir := t.TempDir()
+	providers := csync.NewMap[string, ProviderConfig]()
+	providers.Set(codex.ProviderID, ProviderConfig{
+		ID:         codex.ProviderID,
+		APIKey:     token,
+		OAuthToken: &oauth.Token{AccessToken: token},
+	})
+	runtimeProviders := csync.NewMap[string, state.Provider]()
+	runtimeProviders.Set(codex.ProviderID, state.Provider{
+		ID:         codex.ProviderID,
+		APIKey:     token,
+		OAuthToken: &oauth.Token{AccessToken: token},
+	})
+	return &ConfigStore{
+		config:         &Config{Providers: providers, RuntimeProviders: runtimeProviders},
+		globalDataPath: filepath.Join(dir, "sennit.json"),
+		resolver:       NewShellVariableResolver(env.New()),
+		processor:      testRuntimeProcessor{},
+	}
 }
 
 // newCleanMachineStore mimics a fresh install: no providers.codex entry in
@@ -50,19 +83,8 @@ func newTestAccountsStore(t *testing.T) accounts.Store {
 func TestRecordAccount_MigratesExistingAndAddsNew(t *testing.T) {
 	t.Parallel()
 
-	store := newRecordAccountStore(t)
 	oldToken := fakeCodexJWT(t, "acct-old")
-	// The legacy, pre-account credential lived on ProviderConfig; a real
-	// load would compile the identical value into RuntimeProviders too
-	// (see providerload/loader.go), so both are set here to match.
-	provider, _ := store.Config().Providers.Get(codex.ProviderID)
-	provider.APIKey = oldToken
-	provider.OAuthToken = &oauth.Token{AccessToken: oldToken}
-	store.Config().Providers.Set(codex.ProviderID, provider)
-	runtimeProvider, _ := store.Config().RuntimeProvider(codex.ProviderID)
-	runtimeProvider.APIKey = oldToken
-	runtimeProvider.OAuthToken = &oauth.Token{AccessToken: oldToken}
-	store.Config().SetRuntimeProvider(codex.ProviderID, runtimeProvider)
+	store := newRecordAccountStoreWithLegacyCredential(t, oldToken)
 
 	accStore := newTestAccountsStore(t)
 	newToken := fakeCodexJWT(t, "acct-new")

@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
+	"github.com/rave-soft/sennit/internal/csync"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,13 +78,35 @@ func (m *mockSessionAgent) runtimeSnapshot(SessionAgentCall) (string, []fantasy.
 }
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
-func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderConfig) *coordinator {
-	cfg, err := configruntime.Load(env.workingDir, "", false)
+//
+// providerCfg (and any extra) is folded into the config before it is ever
+// published, rather than by mutating cfg.Config().Providers after the
+// fact: Providers is frozen the moment a Config is published (see
+// setConfig), so a post-publish Set would panic. configruntime.Load
+// supplies the realistic defaults (Options, Agents, ...); the loaded
+// Providers map is empty here regardless (env.workingDir has no config
+// file), so a fresh map holding providerCfg and extra stands in for it
+// without needing to merge anything.
+func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderConfig, extra ...config.ProviderConfig) *coordinator {
+	loaded, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
-	cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
-	effective, err := providerruntime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
+	base := *loaded.Config()
+
+	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers.Set(providerCfg.ID, providerCfg)
+	for _, pc := range extra {
+		providers.Set(pc.ID, pc)
+	}
+	base.Providers = providers
+
+	effective, err := providerruntime.FromConfig(providerCfg, base.RuntimeResolver())
 	require.NoError(t, err)
-	cfg.Config().SetRuntimeProvider(providerCfg.ID, effective)
+	base.SetRuntimeProvider(providerCfg.ID, effective)
+
+	cfg := config.NewStore(config.StoreOptions{
+		Config:     &base,
+		WorkingDir: env.workingDir,
+	})
 	coord := &coordinator{
 		agentDeps: agentDeps{
 			cfg:      cfg,

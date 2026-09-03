@@ -9,7 +9,6 @@ import (
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,9 +41,17 @@ func TestSharedCredentialsManager(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_DATA", globalDataDir)
 	require.NoError(t, os.WriteFile(filepath.Join(globalDataDir, "sennit.json"), []byte("{}"), 0o600))
 
-	store, err := configruntime.Load(t.TempDir(), t.TempDir(), false)
+	// LoadData (no RuntimeProcessor), not configruntime.Load: the custom
+	// "test-provider" entry below has no base_url or models, which
+	// providerload's catalog validation would otherwise drop on load —
+	// irrelevant to this test, which only needs the provider to exist so
+	// mgr.WaitForTokenChange/SignalAuthComplete have something to key on.
+	store, err := config.LoadData(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
-	store.Config().Providers.Set("test-provider", config.ProviderConfig{ID: "test-provider", Name: "Test"})
+	require.NoError(t, store.SetConfigFields(config.ScopeGlobal, map[string]any{
+		config.ProviderFieldKey("test-provider", "id"):   "test-provider",
+		config.ProviderFieldKey("test-provider", "name"): "Test",
+	}))
 
 	a := app.NewForTest(t.Context())
 	a.SetConfigForTest(store)

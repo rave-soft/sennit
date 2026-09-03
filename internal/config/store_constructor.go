@@ -22,6 +22,13 @@ type StoreOptions struct {
 // Config must not be mutated after publication. LoadedPaths is copied,
 // Resolver defaults to the process-backed shell resolver, and a non-positive
 // poll interval uses the production default.
+//
+// Unlike the load pipeline (Load/LoadWithProcessor, via setConfig), this
+// constructor does not freeze Config.Providers: options.Config is published
+// exactly as given, so the caller remains responsible for not mutating it
+// afterward. This exists for tests that hand-build a Config (see
+// internal/config/configtest) rather than reading one from disk; production
+// code should use the load pipeline instead.
 func NewStore(options StoreOptions) *ConfigStore {
 	resolver := options.Resolver
 	if resolver == nil {

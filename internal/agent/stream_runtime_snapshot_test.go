@@ -141,8 +141,7 @@ func (a *snapshotMutatingSessionAgent) snapshotStreamRuntime(call SessionAgentCa
 
 func TestRunSubAgentUsesOneRuntimeSnapshotForBudgetAndProvider(t *testing.T) {
 	env := testEnv(t)
-	coord := newTestCoordinator(t, env, config.ProviderConfig{ID: "captured"})
-	coord.cfg.Config().Providers.Set("mutated", config.ProviderConfig{ID: "mutated"})
+	coord := newTestCoordinator(t, env, config.ProviderConfig{ID: "captured"}, config.ProviderConfig{ID: "mutated"})
 	parent, err := env.sessions.Create(t.Context(), "Parent")
 	require.NoError(t, err)
 

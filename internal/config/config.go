@@ -561,6 +561,8 @@ type Config struct {
 	// The providers that are configured. Global-only: a "providers" block in
 	// a project config is stripped before the merge (see globalOnlyKeys), so
 	// a cloned repository can never repoint a session at another endpoint.
+	// Frozen on publish (see ConfigStore.setConfig) — Set/Del/Reset/Take on
+	// a published Config's Providers panics; mutate a clone instead.
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations. Read only from the global config — a providers block in a project config is ignored"`
 
 	RuntimeProviders *csync.Map[string, providerstate.Provider] `json:"-" jsonschema:"-"`

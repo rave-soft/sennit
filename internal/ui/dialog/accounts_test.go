@@ -99,14 +99,24 @@ func (w *accountsTestWorkspace) RefreshAccountLimits(_ context.Context, provider
 	return w.refreshedAccs, nil
 }
 
-func newAccountsTestCommon(t *testing.T, providerID, activeAccountID string) (*common.Common, *accountsTestWorkspace) {
+// newAccountsTestCommon builds a fake workspace.Workspace around a plain
+// *config.Config (not a config.ConfigStore, so nothing here ever runs
+// through ConfigStore.setConfig or its Providers.Freeze). configureProv,
+// if given, can further customize the provider entry (e.g. its Name)
+// before it is set — callers should not mutate cfg.Providers by reaching
+// back through com.Config() afterward.
+func newAccountsTestCommon(t *testing.T, providerID, activeAccountID string, configureProv ...func(*config.ProviderConfig)) (*common.Common, *accountsTestWorkspace) {
 	t.Helper()
 	s := styles.SennitDark()
 	cfg := &config.Config{
 		Options:   &config.Options{},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	}
-	cfg.Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+	pc := config.ProviderConfig{ID: providerID}
+	for _, configure := range configureProv {
+		configure(&pc)
+	}
+	cfg.Providers.Set(providerID, pc)
 	// The active account lives on the runtime provider, not the
 	// disk-shaped one: RuntimeProviders is the sole carrier of live
 	// credential state.
@@ -382,10 +392,9 @@ func TestAccounts_EmptyAccountsEntersEmptyState(t *testing.T) {
 func TestAccounts_TitleIncludesProviderName(t *testing.T) {
 	t.Run("uses the configured provider's name", func(t *testing.T) {
 		providerID := "openai"
-		com, _ := newAccountsTestCommon(t, providerID, "")
-		pc, _ := com.Config().Providers.Get(providerID)
-		pc.Name = "My OpenAI"
-		com.Config().Providers.Set(providerID, pc)
+		com, _ := newAccountsTestCommon(t, providerID, "", func(pc *config.ProviderConfig) {
+			pc.Name = "My OpenAI"
+		})
 		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
 
 		dlg := loadedAccounts(t, com, providerID)

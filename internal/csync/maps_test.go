@@ -792,6 +792,46 @@ func BenchmarkMap_Seq(b *testing.B) {
 	}
 }
 
+// TestMap_FreezeBlocksMutation verifies that Set, Del, Reset, Take and
+// UnmarshalJSON all panic once Freeze has been called, while reads keep
+// working against the frozen contents.
+func TestMap_FreezeBlocksMutation(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap(map[string]int{"a": 1})
+	m.Freeze()
+
+	require.Panics(t, func() { m.Set("b", 2) })
+	require.Panics(t, func() { m.Del("a") })
+	require.Panics(t, func() { m.Reset(map[string]int{"c": 3}) })
+	require.Panics(t, func() { m.Take("a") })
+	require.Panics(t, func() { require.NoError(t, m.UnmarshalJSON([]byte(`{"d":4}`))) })
+
+	// Reads are unaffected by freezing.
+	v, ok := m.Get("a")
+	require.True(t, ok)
+	require.Equal(t, 1, v)
+	require.Equal(t, 1, m.Len())
+	require.Equal(t, map[string]int{"a": 1}, m.Copy())
+	seen := map[string]int{}
+	for k, v := range m.Seq2() {
+		seen[k] = v
+	}
+	require.Equal(t, map[string]int{"a": 1}, seen)
+}
+
+// TestMap_FreezeIsIdempotent verifies that calling Freeze more than once
+// does not panic and leaves the map frozen.
+func TestMap_FreezeIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	m.Freeze()
+	m.Freeze()
+
+	require.Panics(t, func() { m.Set("a", 1) })
+}
+
 func BenchmarkMap_Take(b *testing.B) {
 	m := NewMap[int, int]()
 	for i := range 1000 {

@@ -10,8 +10,9 @@ import (
 // Map is a concurrent map implementation that provides thread-safe access.
 type Map[K comparable, V any] struct {
 	schemaAlias[K, V]
-	inner map[K]V
-	mu    sync.RWMutex
+	inner  map[K]V
+	frozen bool
+	mu     sync.RWMutex
 }
 
 // NewMap creates a thread-safe map, optionally initialized from a map. The
@@ -40,6 +41,7 @@ func (m *Map[K, V]) Reset(input map[K]V) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.panicIfFrozenLocked()
 	m.inner = inner
 }
 
@@ -47,6 +49,7 @@ func (m *Map[K, V]) Reset(input map[K]V) {
 func (m *Map[K, V]) Set(key K, value V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.panicIfFrozenLocked()
 	m.inner[key] = value
 }
 
@@ -54,7 +57,32 @@ func (m *Map[K, V]) Set(key K, value V) {
 func (m *Map[K, V]) Del(key K) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.panicIfFrozenLocked()
 	delete(m.inner, key)
+}
+
+// Freeze marks the map read-only: every subsequent Set, Del, Reset or Take
+// panics instead of mutating it. It is idempotent — freezing an
+// already-frozen map is a no-op, not an error.
+//
+// This exists for published, supposedly-immutable snapshots (e.g.
+// config.Config.Providers) that are reached through a plain exported field
+// rather than an API that could simply omit mutators. Freeze turns the
+// "don't mutate this" convention into something the race detector and a
+// panic enforce instead of something callers have to remember.
+func (m *Map[K, V]) Freeze() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.frozen = true
+}
+
+// panicIfFrozenLocked panics if the map has been frozen. Caller must hold
+// m.mu (read or write) so the check and the mutation it guards observe a
+// consistent frozen flag.
+func (m *Map[K, V]) panicIfFrozenLocked() {
+	if m.frozen {
+		panic("mutation of a frozen csync.Map: the published config snapshot must be replaced via clone-and-swap, not edited in place")
+	}
 }
 
 // CompareAndDelete deletes key from m only if its current value equals
@@ -124,6 +152,7 @@ func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
 func (m *Map[K, V]) Take(key K) (V, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.panicIfFrozenLocked()
 	v, ok := m.inner[key]
 	delete(m.inner, key)
 	return v, ok
@@ -193,6 +222,13 @@ func (schemaAlias[K, V]) JSONSchemaAlias() any {
 func (m *Map[K, V]) UnmarshalJSON(data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Decoding replaces m.inner wholesale, same as Reset — guard it the
+	// same way. In practice this only ever runs against a fresh, unfrozen
+	// Map produced by json.Unmarshal allocating a new Config; a frozen
+	// target would mean something decoded straight into an already-
+	// published snapshot, which is the exact mistake Freeze exists to
+	// catch.
+	m.panicIfFrozenLocked()
 	m.inner = make(map[K]V)
 	return json.Unmarshal(data, &m.inner)
 }

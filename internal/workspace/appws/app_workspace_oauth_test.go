@@ -109,6 +109,32 @@ func TestAppWorkspace_StartOAuthCodex_FallsBackToBrowserFlow(t *testing.T) {
 	// half in this test, and doing so would hang.
 }
 
+// newOAuthProxyTestWorkspace mirrors newOAuthTestWorkspace but loads
+// through config.LoadData instead of configruntime.Load, i.e. without
+// providerload's RuntimeProcessor. The OAuthConfiguredProxy tests below
+// only ever read cfg.Providers.Get(id).ProxyURL, so running the full
+// catalog validation pipeline would be pure friction: it drops a
+// proxy-only Codex/Copilot entry (standing in for "the user set a proxy
+// before ever logging in") for having neither credentials nor models,
+// which has nothing to do with what these tests check.
+func newOAuthProxyTestWorkspace(t *testing.T) *AppWorkspace {
+	t.Helper()
+	globalConfigDir := t.TempDir()
+	globalDataDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalConfigDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDataDir)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDataDir, "sennit.json"), []byte("{}"), 0o600))
+
+	store, err := config.LoadData(t.TempDir(), t.TempDir(), false)
+	require.NoError(t, err)
+
+	a := app.NewForTest(t.Context())
+	a.SetConfigForTest(store)
+	t.Cleanup(a.ShutdownForTest)
+
+	return NewAppWorkspace(a, store)
+}
+
 // TestAppWorkspace_OAuthConfiguredProxyCodex_FallsBackToDisk pins the
 // prefill order the dialog used to compute itself: Sennit's own config
 // first, then the Codex CLI's on-disk config.
@@ -119,12 +145,10 @@ func TestAppWorkspace_OAuthConfiguredProxyCodex_FallsBackToDisk(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
 		[]byte("[network]\nproxy_url = \"http://127.0.0.1:8080\"\n"), 0o600))
 
-	w := newOAuthTestWorkspace(t)
+	w := newOAuthProxyTestWorkspace(t)
 	require.Equal(t, "http://127.0.0.1:8080", w.OAuthConfiguredProxy(codex.ProviderID))
 
-	w.store.Config().Providers.Set(codex.ProviderID, config.ProviderConfig{
-		ID: codex.ProviderID, ProxyURL: "socks5://configured:1080",
-	})
+	require.NoError(t, w.store.SetConfigField(config.ScopeGlobal, config.ProviderFieldKey(codex.ProviderID, "proxy_url"), "socks5://configured:1080"))
 	require.Equal(t, "socks5://configured:1080", w.OAuthConfiguredProxy(codex.ProviderID),
 		"Sennit's own configured proxy must win over the CLI's on-disk one")
 }
@@ -132,12 +156,10 @@ func TestAppWorkspace_OAuthConfiguredProxyCodex_FallsBackToDisk(t *testing.T) {
 // TestAppWorkspace_OAuthConfiguredProxyCopilot_NoDiskFallback pins that
 // Copilot, unlike Codex, has no sibling CLI config to fall back to.
 func TestAppWorkspace_OAuthConfiguredProxyCopilot_NoDiskFallback(t *testing.T) {
-	w := newOAuthTestWorkspace(t)
+	w := newOAuthProxyTestWorkspace(t)
 	require.Empty(t, w.OAuthConfiguredProxy(copilotProviderID))
 
-	w.store.Config().Providers.Set(copilotProviderID, config.ProviderConfig{
-		ID: copilotProviderID, ProxyURL: "socks5://configured:1080",
-	})
+	require.NoError(t, w.store.SetConfigField(config.ScopeGlobal, config.ProviderFieldKey(copilotProviderID, "proxy_url"), "socks5://configured:1080"))
 	require.Equal(t, "socks5://configured:1080", w.OAuthConfiguredProxy(copilotProviderID))
 }
 

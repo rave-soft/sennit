@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/configruntime"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -149,8 +150,9 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 	}
 	env := testEnv(t)
 
-	cfg, err := configruntime.Load(env.workingDir, "", false)
+	loaded, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
+	base := *loaded.Config()
 
 	providerID := cmp.Or(s.providerID, authProviderID)
 	providerCfg := config.ProviderConfig{
@@ -164,10 +166,35 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 	if s.configureProv != nil {
 		s.configureProv(&providerCfg)
 	}
-	cfg.Config().Providers.Set(providerID, providerCfg)
-	effective, err := runtime.FromConfig(providerCfg, cfg.Config().RuntimeResolver())
+	// providerCfg is folded into Providers before the config is ever
+	// published (config.NewStore, not configruntime.Load's own publish):
+	// Providers is frozen the moment a Config is published (see
+	// ConfigStore.setConfig), so mutating cfg.Config().Providers after
+	// Load would panic, and the real disk-reload pipeline would apply
+	// providerload's catalog/custom-provider validation, which this
+	// helper's whole point is to skip.
+	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers.Set(providerID, providerCfg)
+	base.Providers = providers
+
+	effective, err := runtime.FromConfig(providerCfg, base.RuntimeResolver())
 	require.NoError(t, err)
-	cfg.Config().SetRuntimeProvider(providerID, effective)
+	base.SetRuntimeProvider(providerID, effective)
+
+	// WorkingDir is deliberately left unset: ConfigStore.autoReload (called
+	// after every disk write, e.g. by ActivateAccount) no-ops when it is
+	// empty. This store's Config was built in memory rather than by the
+	// real Load pipeline, so it carries no RuntimeProcessor; a reload
+	// would rebuild Providers/Agents from disk alone, find no base_url for
+	// providerID (identity fields live only in this in-memory Config,
+	// never written to disk — see PersistRefreshedToken's own comment on
+	// exactly this), and drop it as unconfigured. GlobalDataPath is still
+	// set, so the disk writes credential flows make (and read back via
+	// ConfigPath elsewhere in this package) keep working.
+	cfg := config.NewStore(config.StoreOptions{
+		Config:         &base,
+		GlobalDataPath: config.GlobalConfigData(),
+	})
 	cfg.OverridePreferredModel(config.SelectedModel{Provider: providerID, Model: authModelID})
 	cfg.SetupAgents()
 
