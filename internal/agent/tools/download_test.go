@@ -76,7 +76,11 @@ func TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace(t *testing.T) {
 func TestDownloadTool_AncestorSymlinkShowsResolvedTargetInPermissionDialog(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	// resolvedTempDir, not t.TempDir: the assertions below name the
+	// resolved destination, and on macOS the temp root itself sits behind
+	// the /var -> /private/var symlink while Windows hands out an 8.3
+	// short name.
+	root := resolvedTempDir(t)
 	workdir := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(workdir, 0o755))
 	outsideDir := filepath.Join(root, "outside")
