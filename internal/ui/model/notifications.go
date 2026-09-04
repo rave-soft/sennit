@@ -236,7 +236,16 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		// has no assistant message in the transcript carrying its
 		// FinishReasonError, so without this the only visible sign is
 		// the busy indicator switching off.
-		cmds = append(cmds, util.ReportError(errors.New(n.Message)))
+		//
+		// Gated on the session the error belongs to, unlike StopTurn and
+		// the cache invalidation below: two top-level sessions can be
+		// busy at once, and a status-bar report is not attributed to a
+		// session the way a chat message is — showing it unconditionally
+		// put session A's failure in the status bar while the person was
+		// looking at session B, telling them the wrong turn just failed.
+		if m.sess.current != nil && n.SessionID == m.sess.current.ID {
+			cmds = append(cmds, util.ReportError(errors.New(n.Message)))
+		}
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
 			Message: notificationBodyTaskFailed(n.Message),

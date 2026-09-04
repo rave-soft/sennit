@@ -102,7 +102,7 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 	owner := m
 	return func() tea.Msg {
 		if err := ws.AgentReadyErr(); err != nil {
-			return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, creating: creating}
+			return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, creating: creating, content: content}
 		}
 		if creating {
 			created, err := ws.CreateSession(ctx, "New Session")
@@ -111,7 +111,18 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 			}
 			return createSessionMsg{uiOwned: uiOwned{owner: owner}, session: created, content: content, attachments: attachments, generation: generation}
 		}
-		common.StartTurn(sessionID)
+		// Only start the clock for a turn that is actually beginning.
+		// AgentRun below either starts a fresh turn or folds this prompt
+		// into one already running (steering) — see
+		// attachedThreadWorkspace.AgentRun's doc. Calling StartTurn
+		// unconditionally reset an in-flight turn's elapsed time on every
+		// follow-up message sent while it was still running, and the
+		// symmetric miss — nothing starting the clock when the agent's own
+		// queue later hands a folded prompt to its own next turn — remains
+		// open: no event today tells this client that happened.
+		if !ws.AgentIsSessionBusy(sessionID) {
+			common.StartTurn(sessionID)
+		}
 		for _, path := range reads {
 			ws.FileTrackerRecordRead(ctx, sessionID, path)
 			ws.LSPStart(ctx, path)
@@ -119,9 +130,9 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		if err := ws.AgentRun(ctx, sessionID, content, attachments...); err != nil && !errors.Is(err, context.Canceled) {
 			if quota, ok := workspace.GetProviderQuotaInfo(err); ok {
 				link := styles.Dialog.OAuth.Link.Hyperlink(quota.SettingsURL, "id=copilot").Render(quota.SettingsURL)
-				return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: fmt.Errorf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quota.Model, link), generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
+				return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: fmt.Errorf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quota.Model, link), generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, content: content}
 			}
-			return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
+			return sendMessageErrorMsg{uiOwned: uiOwned{owner: owner}, Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, content: content}
 		}
 		return agentRunSubmittedMsg{uiOwned: uiOwned{owner: owner}, sessionID: sessionID, loadGeneration: loadGeneration}
 	}
@@ -181,6 +192,12 @@ func (m *UI) confirmAgentCancellation() tea.Cmd {
 	m.editor.bang.cancelRunning()
 
 	m.com.Workspace.AgentCancel(m.sess.current.ID)
+	// A cancelled turn publishes neither AgentNotificationFinished (only
+	// sent on a clean end) nor AgentNotificationError (only sent for a
+	// non-cancellation failure — see handleAgentNotification), so this is
+	// the only place StopTurn runs for it. Left uncalled, the timer table
+	// entry outlives the turn it was tracking.
+	common.StopTurn(m.sess.current.ID)
 	// A cancel clears the agent's queue too, so nothing is left waiting for
 	// these placeholders to stand in for.
 	m.queued.clear(m.chat)

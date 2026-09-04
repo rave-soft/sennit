@@ -11,22 +11,34 @@ import (
 )
 
 // TestSetTheme_SwapsSharedStyles is the core of live theme switching: every
-// component holds the *same* *styles.Styles pointer that lives on Common, so
-// replacing the value behind it repaints the whole UI without rebuilding a
-// single component. If setTheme ever assigned a new pointer instead, the
-// components would keep drawing in the old palette and only this test would
-// notice.
+// component draws through the same *common.Common, so re-reading
+// com.Styles at draw time repaints the whole UI without rebuilding a
+// single component. If setTheme stopped updating com.Styles at all, those
+// components would keep drawing in the old palette and only this test
+// would notice.
+//
+// setTheme assigns com.Styles a *new* pointer rather than overwriting the
+// old one's fields in place — this used to be require.Same here, on the
+// theory that identity was part of the contract components (and
+// tea.Cmd closures that snapshot the pointer, e.g. beginSessionLoad) relied
+// on. It was not: nothing reads a *styles.Styles pointer's identity, only
+// its fields, and a command that had already captured the old pointer was
+// racing this exact in-place write on the theme's own dialog goroutine —
+// see internal/devtools/uicheck's cmdclosure_test.go. Repointing keeps a
+// captured snapshot a valid, frozen copy of the old palette instead.
 func TestSetTheme_SwapsSharedStyles(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	shared := u.com.Styles
-	require.Equal(t, styles.PaletteSteelTeal.Bg, shared.Background)
+	before := u.com.Styles
+	require.Equal(t, styles.PaletteSteelTeal.Bg, before.Background)
 
 	u.setTheme(styles.PaletteInkSage.ID)
 
-	require.Same(t, shared, u.com.Styles, "setTheme must not repoint Common.Styles")
-	require.Equal(t, styles.PaletteInkSage.Bg, shared.Background)
+	require.Equal(t, styles.PaletteInkSage.Bg, u.com.Styles.Background,
+		"a component reading com.Styles fresh must see the new palette")
+	require.Equal(t, styles.PaletteSteelTeal.Bg, before.Background,
+		"a snapshot taken before the switch must keep reading the old palette, not race the switch")
 }
 
 // TestSetTheme_RestylesCopiedStyles covers the widgets that copy a style at

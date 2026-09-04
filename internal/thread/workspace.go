@@ -2,6 +2,7 @@ package thread
 
 import (
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/question"
 )
 
 // Workspace is the domain-facing slice of the App hosting a delegation's
@@ -38,6 +39,11 @@ type Workspace interface {
 	// Permissions is the service whose traffic the delegation workspace
 	// raises.
 	Permissions() permission.Service
+	// Questions is the service a delegation's question tool calls raise.
+	// Like Permissions, it blocks the caller until answered, so a thread's
+	// prompts need the same relay into the parent's event stream (see
+	// lifecycle.forwardQuestions).
+	Questions() question.Service
 	// RunCompletions is the broker the lifecycle's per-run watcher
 	// subscribes to, so a dispatched run's terminal event is picked up
 	// here rather than polled.

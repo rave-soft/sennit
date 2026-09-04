@@ -173,6 +173,7 @@ func (s *service) ListSubAgentSessions(ctx context.Context, parentSessionID, age
 func (s *service) Delete(ctx context.Context, id string) error {
 	var dbSession db.Session
 	var treeIDs []string
+	var deleted []db.Session
 	err := db.InTx(ctx, s.db, func(qtx *db.Queries) error {
 		var err error
 		dbSession, err = qtx.GetSessionByID(ctx, id)
@@ -194,6 +195,17 @@ func (s *service) Delete(ctx context.Context, id string) error {
 			return fmt.Errorf("listing session tree: %w", err)
 		}
 		for _, treeID := range treeIDs {
+			// Read the row before deleting it: every row in the subtree
+			// gets its own DeletedEvent below, and a subscriber that is
+			// looking at one of them needs to recognise it by more than
+			// an id. The root is already in hand from GetSessionByID.
+			if treeID != dbSession.ID {
+				child, getErr := qtx.GetSessionByID(ctx, treeID)
+				if getErr != nil {
+					return fmt.Errorf("reading session %s before deleting it: %w", treeID, getErr)
+				}
+				deleted = append(deleted, child)
+			}
 			// Messages, files and read_files go with each row through
 			// their own ON DELETE CASCADE.
 			if err = qtx.DeleteSession(ctx, treeID); err != nil {
@@ -206,11 +218,22 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	sess := s.fromDBItem(dbSession)
 	for _, treeID := range treeIDs {
 		s.clearEstimatedUsageState(treeID)
 	}
-	s.Publish(pubsub.DeletedEvent, sess)
+	// One event per deleted row, descendants before the root. Publishing
+	// only the root said "this session is gone" while leaving every
+	// delegation and title session under it looking alive to anyone
+	// holding one - and someone does: the UI puts a delegation in
+	// sess.current when the person steps into a sub-agent, compares the
+	// event's id against it, misses, and goes on sending turns to a row
+	// that no longer exists. Descendants first so a subscriber that
+	// reacts to its own session vanishing has already been told before
+	// the root's event arrives.
+	for _, child := range deleted {
+		s.Publish(pubsub.DeletedEvent, s.fromDBItem(child))
+	}
+	s.Publish(pubsub.DeletedEvent, s.fromDBItem(dbSession))
 	s.reportSessionDeleted()
 	return nil
 }

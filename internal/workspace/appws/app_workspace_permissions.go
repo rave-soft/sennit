@@ -95,10 +95,39 @@ func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 
 // -- Questions --
 
+// questionServices returns every question.Service this workspace's answer
+// might belong to: its own, then one per live delegation. A batch ID
+// carries no delegation tag (see Manager.QuestionServices), so unlike
+// permissionsFor this cannot route straight to the right one — it tries
+// them all, safe for the reason answerPermission's doc spells out: a
+// service not holding the given batch ID does nothing at all.
+func (w *AppWorkspace) questionServices() []question.Service {
+	own := w.app.Questions
+	mgr, ok := w.threadManager()
+	if !ok {
+		return []question.Service{own}
+	}
+	services := append([]question.Service{own}, mgr.QuestionServices()...)
+	return services
+}
+
+func questionServiceAttempts(services []question.Service, answer func(question.Service) bool) []func() bool {
+	attempts := make([]func() bool, 0, len(services))
+	for _, svc := range services {
+		if svc == nil {
+			continue
+		}
+		attempts = append(attempts, func() bool { return answer(svc) })
+	}
+	return attempts
+}
+
 func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
-	return w.app.Questions.Answer(batchID, responses)
+	return answerPermission(questionServiceAttempts(w.questionServices(),
+		func(s question.Service) bool { return s.Answer(batchID, responses) })...)
 }
 
 func (w *AppWorkspace) QuestionCancel() bool {
-	return w.app.Questions.Cancel()
+	return answerPermission(questionServiceAttempts(w.questionServices(),
+		func(s question.Service) bool { return s.Cancel() })...)
 }

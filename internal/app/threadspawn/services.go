@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/question"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -73,6 +74,13 @@ func (a *AppWorkspaceAdapter) Messages() thread.MessageService {
 
 func (a *AppWorkspaceAdapter) Permissions() permission.Service {
 	return a.App.Permissions()
+}
+
+// Questions returns a.App's question service directly, the same as
+// Permissions above: App.Questions is already an exported field of the
+// domain's own question.Service type, so no adapter wrapping is needed.
+func (a *AppWorkspaceAdapter) Questions() question.Service {
+	return a.App.Questions
 }
 
 func (a *AppWorkspaceAdapter) RunCompletions() thread.RunCompletionBroker {

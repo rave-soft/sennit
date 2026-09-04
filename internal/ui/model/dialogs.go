@@ -499,8 +499,19 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 // openBatchFormDialog activates a tabbed multi-question form in
 // the editor area. Single questions render without tabs or confirm.
 func (m *UI) openBatchFormDialog(batch question.Request) {
-	// Close any existing question form first to prevent stacking.
+	// The same batch can reach this UI twice — while drilled into a
+	// thread, its question traffic arrives both through the thread's own
+	// event pump and through the relay into the parent's stream (see
+	// lifecycle.forwardQuestions), and the router hands both to the
+	// thread's embedded UI. Reopening for the second copy would throw
+	// away a form the person may have already started filling in, the
+	// same trap openPermissionsDialog's doc explains for permissions.
+	// Keyed on the batch id, so a genuinely new batch still replaces
+	// whatever is open.
 	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
+		if qf.BatchID == batch.ID {
+			return
+		}
 		m.activeInline = nil
 	}
 

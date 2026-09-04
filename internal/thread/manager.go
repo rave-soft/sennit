@@ -23,6 +23,7 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/question"
 )
 
 // defaultDataDirName is the project-local data directory a workspace uses
@@ -1003,6 +1004,35 @@ func (m *Manager) PermissionsFor(delegationID string) permission.Service {
 		return nil
 	}
 	return a.Permissions()
+}
+
+// QuestionServices returns the question service of every delegation
+// currently live under this manager, for routing an answer whose batch ID
+// does not by itself say which delegation raised it.
+//
+// question.Request carries no delegation tag the way permission.Request
+// carries Delegation, so unlike PermissionsFor this cannot look one
+// service up by ID — it hands back every candidate and lets the caller try
+// each (see answerPermission in appws, which the caller reuses): a
+// service that is not holding the given batch ID does nothing at all, so
+// trying the wrong ones first is wasted work, never a wrong answer.
+func (m *Manager) QuestionServices() []question.Service {
+	controls := m.lc.snapshotControls()
+	services := make([]question.Service, 0, len(controls))
+	for _, c := range controls {
+		c.mu.Lock()
+		rt := c.runtime
+		c.mu.Unlock()
+		if rt == nil {
+			continue
+		}
+		a := rt.handle.Workspace()
+		if a == nil || a == m.parentApp {
+			continue
+		}
+		services = append(services, a.Questions())
+	}
+	return services
 }
 
 // Shutdown stops admission, cancels manager work, releases live runtimes, and

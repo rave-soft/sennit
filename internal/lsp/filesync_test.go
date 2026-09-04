@@ -258,7 +258,11 @@ func TestClient_NotifyChangeOnDeletedFileClosesAndClearsDiagnostics(t *testing.T
 	require.NoError(t, client.OpenFile(ctx, file))
 	require.True(t, client.IsFileOpen(file))
 
-	uri := "file://" + filepath.ToSlash(file)
+	// protocol.URIFromPath, not a hand-built "file://"+path: on Windows a
+	// path starts with a drive letter and the canonical URI carries a
+	// third slash before it, so the hand-built form keys nothing the
+	// store ever wrote and the diagnostics below come back empty.
+	uri := string(protocol.URIFromPath(file))
 	gen := client.runtime.currentGeneration()
 	client.diagnostics.publish(gen, []byte(fmt.Sprintf(`{"uri":%q,"diagnostics":[{"message":"stale"}]}`, uri)))
 	client.diagnostics.waitForDrain()

@@ -90,10 +90,9 @@ func (s *threadAttachmentState) release() tea.Cmd {
 	}
 	thread := s.thread
 	s.thread = nil
-	if thread.stop == nil && thread.detach == nil {
-		return nil
-	}
 	return func() tea.Msg {
+		cancelThreadQuestion(thread)
+		stopThreadTurnTimer(thread)
 		if thread.stop != nil {
 			thread.stop()
 		}
@@ -108,6 +107,8 @@ func (s *threadAttachmentState) cleanup() {
 	if s.thread == nil {
 		return
 	}
+	cancelThreadQuestion(s.thread)
+	stopThreadTurnTimer(s.thread)
 	if s.thread.stop != nil {
 		s.thread.stop()
 	}
@@ -115,6 +116,35 @@ func (s *threadAttachmentState) cleanup() {
 		s.thread.detach()
 	}
 	s.thread = nil
+}
+
+// cancelThreadQuestion cancels any question still pending on the detached
+// thread's own workspace. Destroying the embedded window (thread.ui) drops
+// its open QuestionForm without ever calling question.Service.Cancel, and
+// the question tool that raised it is blocked in Ask with no timeout — see
+// forwardQuestions. Detaching used to leave it stuck there forever, since
+// nothing else in the tool's lifetime ever answers or cancels it.
+func cancelThreadQuestion(thread *threadAttachment) {
+	if thread == nil || thread.ui == nil || thread.ui.com == nil || thread.ui.com.Workspace == nil {
+		return
+	}
+	thread.ui.com.Workspace.QuestionCancel()
+}
+
+// stopThreadTurnTimer stops the turn-elapsed clock for the detached
+// thread's own session, if one was running. common.StartTurn/StopTurn are
+// keyed by session ID in a package-level table (see internal/ui/common's
+// timer.go) shared by every *UI in this process, including this thread's
+// embedded one; destroying that embedded UI does not touch that table on
+// its own, so a turn still in flight when the person detaches would sit
+// there marked "started" forever, and Elapsed(sessionID) would go on
+// reporting time for a turn nobody is displaying or ever will finish
+// watching.
+func stopThreadTurnTimer(thread *threadAttachment) {
+	if thread == nil || thread.ui == nil || thread.ui.sess.current == nil {
+		return
+	}
+	common.StopTurn(thread.ui.sess.current.ID)
 }
 
 // Root is the top-level tea.Model. See the package doc comment above.

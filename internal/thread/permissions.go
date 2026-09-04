@@ -53,6 +53,33 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 	}
 }
 
+// forwardQuestions relays a delegation workspace's question traffic into
+// the parent workspace's event stream, exactly as forwardPermissions does
+// for permissions and for the same reason: the question tool is available
+// to a thread (GateInteractive only excludes sub-agents, and a thread runs
+// interactively), and question.Service.Ask blocks its caller with no
+// timeout. Without this relay, a thread that calls the question tool hangs
+// forever with nothing on screen to explain why - the same class of bug
+// F1/F7/G1 already found on the permissions side, just on the sibling
+// service nobody wired up.
+//
+// Unlike forwardPermissions, this has no ActiveRequest recovery step:
+// question.Service exposes no equivalent accessor, so a question raised in
+// the narrow window between spawn and this relay's subscription taking
+// effect is still missed. Closing that gap needs a change to
+// internal/question, which is out of scope here; see the finding-1 report.
+func (l *lifecycle) forwardQuestions(ctx context.Context, handle Handle) {
+	if l.parentApp == nil {
+		return
+	}
+	a := handle.Workspace()
+	if a == nil || a == l.parentApp {
+		return
+	}
+	forwardInto(ctx, l, a.Questions().Subscribe)
+	forwardInto(ctx, l, a.Questions().SubscribeNotifications)
+}
+
 // forwardInto pumps one of a delegation workspace's event sources onto the
 // parent App's fan-in, republishing each event unchanged so a subscriber
 // cannot tell it apart from one the parent raised itself - which is the

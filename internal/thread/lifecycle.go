@@ -162,9 +162,10 @@ type lifecycle struct {
 
 	// parentApp is the workspace this lifecycle's delegations belong to.
 	// A thread runs in an isolated App whose events nobody outside it sees
-	// unless the user has drilled in, so permission traffic raised there is
-	// relayed here (see forwardPermissions). Nil in tests without one;
-	// forwarding is then skipped.
+	// unless the user has drilled in, so permission and question traffic
+	// raised there is relayed here (see forwardPermissions and
+	// forwardQuestions). Nil in tests without one; forwarding is then
+	// skipped.
 	parentApp Workspace
 }
 
@@ -429,6 +430,7 @@ func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner S
 		}
 	})
 	l.forwardPermissions(watchCtx, handle)
+	l.forwardQuestions(watchCtx, handle)
 	return rt
 }
 

@@ -1166,7 +1166,20 @@ func (m *UI) setTheme(id string) tea.Cmd {
 	// setting is config-derived and a palette cannot carry it, so
 	// without re-applying it here the first /theme switch of a session
 	// silently put every spinner back to the scramble.
-	*m.com.Styles = styles.Theme(id).WithSpinner(common.SpinnerMode(m.com.Workspace))
+	//
+	// A new pointer, not an in-place `*m.com.Styles = ...`: com is on the
+	// uicheck opt-out list a tea.Cmd closure may capture, on the theory
+	// that com is set once and never reassigned — true of the com field
+	// itself, but overwriting *m.com.Styles in place broke it one level
+	// down. beginSessionLoad snapshots `styles := m.com.Styles` and hands
+	// that pointer into a command built off the Update goroutine; an
+	// in-place write here raced that command's reads of the very struct
+	// it was promised was a stable snapshot. Swapping the pointer instead
+	// leaves every already-issued snapshot exactly as it was — a frozen
+	// copy of the old palette — while new readers of m.com.Styles see the
+	// new one.
+	newStyles := styles.Theme(id).WithSpinner(common.SpinnerMode(m.com.Workspace))
+	m.com.Styles = &newStyles
 	m.themePreview.setLive(styles.PaletteByID(id).ID)
 	t := m.com.Styles
 
@@ -1277,6 +1290,11 @@ type sendMessageErrorMsg struct {
 	sessionID      string
 	loadGeneration uint64
 	creating       bool
+	// content is the prompt text this send attempted, so a failure can
+	// drop the "queued" placeholder it drew before dispatch — see
+	// applySendMessageError. Empty on the creating path, which never
+	// shows one (queued.show only runs once m.sess.current is set).
+	content string
 }
 
 // bangSessionCreatedMsg is returned by runShellCommandInternal when a bang

@@ -26,6 +26,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -102,6 +103,10 @@ func (w *testAppWorkspace) Messages() thread.MessageService {
 
 func (w *testAppWorkspace) Permissions() permission.Service {
 	return w.app.Permissions()
+}
+
+func (w *testAppWorkspace) Questions() question.Service {
+	return w.app.Questions
 }
 
 func (w *testAppWorkspace) RunCompletions() thread.RunCompletionBroker {

@@ -25,11 +25,20 @@ import (
 const cmdClosureOptOut = "// ok: no model access"
 
 // allowedFromCmd are the receiver fields a command may reach through.
-// They are set once when the model is built and never reassigned, so
-// reading them off the Update goroutine cannot race — and they are how a
+// com itself is set once when the model is built and never reassigned, so
+// reading the field off the Update goroutine cannot race — and it is how a
 // command is meant to reach the workspace, the styles and the lifecycle
 // context in the first place. Everything else on the model is live state
 // that Update mutates.
+//
+// That guarantee depends on com.Styles being swapped, not mutated in
+// place: a theme switch used to overwrite *com.Styles's fields wholesale
+// (`*m.com.Styles = ...`), which raced any command already holding that
+// same pointer (see beginSessionLoad, which snapshots `styles :=
+// m.com.Styles` before building one). setTheme now assigns a fresh
+// pointer instead, so every snapshot a command captured stays exactly
+// what it was — a stable copy of the old palette — and only new readers
+// of the com.Styles field see the new one.
 var allowedFromCmd = map[string]bool{
 	"com": true,
 }

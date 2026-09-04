@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -172,4 +173,46 @@ func TestGetLastBreaksUpdatedAtTiesByID(t *testing.T) {
 	last, err := sessions.GetLast(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, "z", last.ID)
+}
+
+// TestDeletePublishesAnEventForEverySessionInTheTree pins what a delete
+// tells its subscribers. The subtree is removed in one transaction
+// because parent_session_id carries no foreign key, and for a long time
+// only the root's removal was announced - so a delegation the person had
+// stepped into stayed, as far as any subscriber could tell, alive. The UI
+// compares the event's id against the session it is showing, missed, and
+// kept sending turns to a row that no longer existed.
+func TestDeletePublishesAnEventForEverySessionInTheTree(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	queries := db.New(conn)
+	sessions := NewService(queries, conn, dataDir)
+
+	parent, err := sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	child, err := sessions.CreateSubAgentSession(t.Context(), "call-1", parent.ID, "child", "coder")
+	require.NoError(t, err)
+
+	events := sessions.Subscribe(t.Context())
+	require.NoError(t, sessions.Delete(t.Context(), parent.ID))
+
+	seen := map[string]bool{}
+	for range 2 {
+		select {
+		case event := <-events:
+			if event.Type == pubsub.DeletedEvent {
+				seen[event.Payload.ID] = true
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for the subtree's delete events")
+		}
+	}
+	require.True(t, seen[child.ID], "the delegation's own removal must be announced")
+	require.True(t, seen[parent.ID])
 }

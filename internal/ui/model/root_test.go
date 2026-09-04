@@ -59,6 +59,12 @@ func (w *rootTestWorkspace) PermissionSkipRequests() bool { return false }
 func (w *rootTestWorkspace) AgentIsReady() bool           { return false }
 func (w *rootTestWorkspace) SupportsThreads() bool        { return w.supportsThreads }
 
+// QuestionCancel overrides the embedded nil Workspace: detaching an
+// attached thread now cancels any question still pending on it (see
+// cancelThreadQuestion), so any test that builds an embedded thread UI
+// around this stub calls this on teardown.
+func (w *rootTestWorkspace) QuestionCancel() bool { return false }
+
 // SupportsTasks answers for the delegation list behind the panel's
 // agents section; no test here drives one.
 func (w *rootTestWorkspace) SupportsTasks() bool                       { return false }

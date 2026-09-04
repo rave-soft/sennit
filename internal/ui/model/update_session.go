@@ -172,6 +172,14 @@ func (m *UI) applyLoadSession(msg loadSessionMsg, cmds []tea.Cmd) []tea.Cmd {
 	}
 	m.setState(uiChat, m.focus)
 	m.sess.current = msg.session
+	// fileReads has no session ID of its own to key on (see its field
+	// doc), so it is only ever correct for whichever session is current.
+	// newSession already clears it for a brand new session; a load must
+	// clear it too, or a file opened by @ in the session just left carries
+	// over here already marked "read" — @ then skips attaching its
+	// content, and checkFileFreshness reports it as read when this session
+	// never touched it, so the agent can edit a file it was never shown.
+	m.sess.fileReads = nil
 	m.sess.modelUsed = msg.modelUsed
 	// A different session is now current; its delegation total starts
 	// at zero rather than carrying over the session just left, and the
@@ -431,7 +439,8 @@ func (m *UI) applyMessageEvent(msg pubsub.Event[message.Message], cmds []tea.Cmd
 // send, rejects a pending session creation if that is what failed, and
 // dispatches the next queued send if one is waiting. A stale error — for a
 // load generation or session the user has since moved on from — is
-// dropped.
+// dropped; the generation/session check above must run first so a stale
+// error can never drop a placeholder a newer send is still using.
 func (m *UI) applySendMessageError(msg sendMessageErrorMsg, cmds []tea.Cmd) []tea.Cmd {
 	if !msg.creating && m.sess.loadExpectedID != "" && (msg.sessionID != m.sess.loadExpectedID || msg.loadGeneration != m.sess.loadGen) {
 		return cmds
@@ -440,6 +449,14 @@ func (m *UI) applySendMessageError(msg sendMessageErrorMsg, cmds []tea.Cmd) []te
 	if msg.creating && m.editor.pendingSend.matchesGeneration(msg.generation) {
 		m.editor.pendingSend.rejectCreation()
 	}
+	// sendMessage draws a "queued" placeholder before dispatch, on the
+	// optimistic assumption the busy turn ahead of it will eventually take
+	// it (see queued.show). A failed send never reaches that hand-off, so
+	// nothing will ever call queued.deliver for it — left alone, the
+	// placeholder sits in chat forever as a prompt that isn't actually
+	// queued anywhere. deliver is a safe no-op when this send never showed
+	// one (the creating path, or a session that wasn't busy).
+	m.queued.deliver(m.chat, msg.content)
 	cmds = append(cmds, util.ReportError(msg.Err))
 	m.wsCache.agentBusyCache.Set(false)
 	if !msg.creating && m.editor.pendingSend.hasQueued() {

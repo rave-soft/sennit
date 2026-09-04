@@ -6,6 +6,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -75,6 +76,26 @@ func (w *attachedThreadWorkspace) PermissionDeny(perm permission.PermissionReque
 	return answerPermission(
 		func() bool { return w.Workspace.PermissionDeny(perm) },
 		w.parentAttempt(func(p *AppWorkspace) bool { return p.PermissionDeny(perm) }),
+	)
+}
+
+// QuestionAnswer and QuestionCancel answer on the thread's own workspace
+// first and fall back to the parent's, for the same reason as
+// PermissionGrant above: while the user is drilled into this thread, a
+// question raised by the parent workspace behind it is relayed onto this
+// screen too, and answering it here must be able to reach the service
+// that is actually holding it.
+func (w *attachedThreadWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+	return answerPermission(
+		func() bool { return w.Workspace.QuestionAnswer(batchID, responses) },
+		w.parentAttempt(func(p *AppWorkspace) bool { return p.QuestionAnswer(batchID, responses) }),
+	)
+}
+
+func (w *attachedThreadWorkspace) QuestionCancel() bool {
+	return answerPermission(
+		func() bool { return w.Workspace.QuestionCancel() },
+		w.parentAttempt(func(p *AppWorkspace) bool { return p.QuestionCancel() }),
 	)
 }
 
