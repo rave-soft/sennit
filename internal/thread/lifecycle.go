@@ -58,11 +58,33 @@ type runtimeState struct {
 	// entity must ignore every other session's completions without
 	// tearing itself down.
 	parkedSession string
+	// pendingDelegations is the pending subset observed when this runtime
+	// parked whose setup outcome has not yet been delivered. It survives
+	// continuation runs so every observed child remains owed exactly once.
+	pendingDelegations map[string]struct{}
 }
 
 // threadControl is permanent while an entity is known to the lifecycle. opMu
 // serializes lifecycle operations for one entity without serializing
 // unrelated entities or holding the lifecycle map lock across I/O.
+type pendingSetupOwner struct {
+	control *threadControl
+	runtime *runtimeState
+}
+
+type setupOutcome uint8
+
+const (
+	setupUnresolved setupOutcome = iota
+	setupSucceeded
+	setupFailed
+)
+
+type settledSetupFailure struct {
+	thread Thread
+	depth  int
+}
+
 type threadControl struct {
 	opMu    sync.Mutex
 	mu      sync.Mutex
@@ -79,6 +101,12 @@ type threadControl struct {
 	// interrupted). The durable source of truth is Delegation.ParentSessionID,
 	// read directly by resolveDeliveryTarget.
 	parentSessionID string
+	// setupOutcome and setupFailure are protected by lifecycle.mu. Keeping
+	// the outcome, rather than only a settled bit, lets a parent atomically
+	// reconcile a pending store snapshot with setup finishing before owner
+	// registration.
+	setupOutcome setupOutcome
+	setupFailure settledSetupFailure
 	// reports counts the terminal completions already delivered for this
 	// delegation. task_send can reactivate a finished task, so the same
 	// delegation may report more than once; PriorReports on the event lets
@@ -150,10 +178,11 @@ type lifecycle struct {
 	resolveDelivery deliveryResolver
 	broker          *pubsub.Broker[Event]
 
-	mu       sync.Mutex
-	controls map[string]*threadControl
-	closed   bool
-	workers  sync.WaitGroup
+	mu            sync.Mutex
+	controls      map[string]*threadControl
+	pendingSetups map[string]pendingSetupOwner
+	closed        bool
+	workers       sync.WaitGroup
 
 	// changeCh is closed and replaced on every status-affecting event,
 	// giving Wait a broadcast condition to select on without polling.
@@ -184,6 +213,7 @@ func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHo
 		resolveDelivery: resolveDelivery,
 		broker:          pubsub.NewBroker[Event](),
 		controls:        make(map[string]*threadControl),
+		pendingSetups:   make(map[string]pendingSetupOwner),
 		changeCh:        make(chan struct{}),
 		parentApp:       parentApp,
 	}
@@ -230,6 +260,10 @@ func (l *lifecycle) beginControlledCreate(id, parentSessionID string, depth int)
 	c.depth = depth
 	c.parentSessionID = parentSessionID
 	c.mu.Unlock()
+	l.mu.Lock()
+	c.setupOutcome = setupUnresolved
+	c.setupFailure = settledSetupFailure{}
+	l.mu.Unlock()
 	return c, removed
 }
 
@@ -773,6 +807,7 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	defer c.opMu.Unlock()
 	c.mu.Lock()
 	rt := c.runtime
+	l.clearPendingSetups(rt)
 	c.runtime = nil
 	c.mu.Unlock()
 
@@ -911,16 +946,55 @@ func (l *lifecycle) matchRunComplete(ctx context.Context, c *threadControl, id s
 // delegation's own outcome. Returns true when it parked, in which case
 // handleRunComplete must return without finalizing.
 func (l *lifecycle) parkIfAwaitingDelegations(ctx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) bool {
-	if rc.Cancelled || rc.Error != "" || !l.awaitsOwnDelegations(ctx, rc.SessionID) {
+	if rc.Cancelled || rc.Error != "" {
 		return false
 	}
+	awaiting, pending := l.ownDelegationsOutstanding(ctx, rc.SessionID)
 	c.mu.Lock()
-	if c.runtime == rt {
-		rt.runID = ""
-		rt.awaitingDelegations = true
-		rt.parkedSession = rc.SessionID
+	if c.runtime != rt {
+		c.mu.Unlock()
+		return false
 	}
+	var failures []settledSetupFailure
+	l.mu.Lock()
+	for childID := range pending {
+		child := l.controls[childID]
+		outcome := setupUnresolved
+		if child != nil {
+			outcome = child.setupOutcome
+		}
+		switch outcome {
+		case setupSucceeded:
+			// The snapshot saw pending but setup has since reached running.
+			// Its ordinary terminal completion now owns waking the parent.
+			awaiting = true
+		case setupFailed:
+			// Claim a failure that settled before owner registration exactly
+			// once; the snapshot makes it observed by this runtime.
+			awaiting = true
+			failures = append(failures, child.setupFailure)
+			child.setupFailure = settledSetupFailure{}
+		default:
+			l.pendingSetups[childID] = pendingSetupOwner{control: c, runtime: rt}
+			if rt.pendingDelegations == nil {
+				rt.pendingDelegations = make(map[string]struct{})
+			}
+			rt.pendingDelegations[childID] = struct{}{}
+		}
+	}
+	l.mu.Unlock()
+	awaiting = awaiting || len(rt.pendingDelegations) > 0
+	if !awaiting {
+		c.mu.Unlock()
+		return false
+	}
+	rt.runID = ""
+	rt.awaitingDelegations = true
+	rt.parkedSession = rc.SessionID
 	c.mu.Unlock()
+	for _, failure := range failures {
+		l.deliverStoredCompletion(ctx, rt.handle, failure.thread, failure.depth)
+	}
 	slog.Info("Delegation is waiting on delegations of its own; not finalizing yet",
 		"component", "thread", "id", id, "session_id", rc.SessionID)
 	return true
@@ -934,6 +1008,7 @@ func (l *lifecycle) parkIfAwaitingDelegations(ctx context.Context, c *threadCont
 // Called with c.opMu already held.
 func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) {
 	c.mu.Lock()
+	l.clearPendingSetups(rt)
 	c.runtime = nil
 	depth := c.depth
 	c.mu.Unlock()
@@ -1043,31 +1118,92 @@ func (l *lifecycle) finalizeTask(ctx context.Context, st Thread, status Status, 
 	return final, nil
 }
 
-// awaitsOwnDelegations reports whether sessionID has delegations of its
-// own not yet accounted for: still running, or terminal with a result
-// not yet handed to this session (CompletionPending is the durable
-// outbox bit for the latter). A store that cannot answer is treated as
-// "nothing outstanding", so a failed read cannot change finalization
-// behavior.
-func (l *lifecycle) awaitsOwnDelegations(ctx context.Context, sessionID string) bool {
+// ownDelegationsOutstanding reports whether sessionID has delegations of
+// its own not yet accounted for: pending setup, still running, or terminal
+// with a result not yet handed to this session. It also returns the pending
+// task IDs observed so a failed setup can wake only a parent that parked on it.
+func (l *lifecycle) ownDelegationsOutstanding(ctx context.Context, sessionID string) (bool, map[string]struct{}) {
 	if sessionID == "" {
-		return false
+		return false, nil
 	}
 	all, err := l.store.ListAll(ctx)
 	if err != nil {
 		slog.Warn("Could not check a delegation's own delegations before finalizing it",
 			"component", "thread", "session_id", sessionID, "error", err)
-		return false
+		return false, nil
 	}
+	var pending map[string]struct{}
+	outstanding := false
 	for _, child := range all {
 		if child.ParentSessionID != sessionID {
 			continue
 		}
+		if child.Status == StatusPending {
+			if pending == nil {
+				pending = make(map[string]struct{})
+			}
+			pending[child.ID] = struct{}{}
+		}
 		if child.Status == StatusRunning || child.CompletionPending {
-			return true
+			outstanding = true
 		}
 	}
-	return false
+	return outstanding, pending
+}
+
+// resolvePendingSetup publishes setup's outcome and settles any obligation
+// already owned by a parked parent. Publishing and owner lookup share l.mu
+// with snapshot reconciliation, so an outcome that wins that race remains
+// available for the parent to claim without a fallible store lookup.
+func (l *lifecycle) resolvePendingSetup(ctx context.Context, st Thread, depth int, deliverFailure bool) {
+	l.mu.Lock()
+	child := l.controls[st.ID]
+	if child != nil {
+		if deliverFailure {
+			child.setupOutcome = setupFailed
+			child.setupFailure = settledSetupFailure{thread: st, depth: depth}
+		} else {
+			child.setupOutcome = setupSucceeded
+			child.setupFailure = settledSetupFailure{}
+		}
+	}
+	owner, ok := l.pendingSetups[st.ID]
+	if ok {
+		delete(l.pendingSetups, st.ID)
+		if deliverFailure && child != nil {
+			child.setupFailure = settledSetupFailure{}
+		}
+	}
+	l.mu.Unlock()
+	if !ok {
+		return
+	}
+	c, rt := owner.control, owner.runtime
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.mu.Lock()
+	current := c.runtime == rt && rt.parkedSession == st.ParentSessionID
+	if current {
+		delete(rt.pendingDelegations, st.ID)
+	}
+	c.mu.Unlock()
+	if current && deliverFailure {
+		l.deliverStoredCompletion(ctx, rt.handle, st, depth)
+	}
+}
+
+func (l *lifecycle) clearPendingSetups(rt *runtimeState) {
+	if rt == nil || len(rt.pendingDelegations) == 0 {
+		return
+	}
+	l.mu.Lock()
+	for childID := range rt.pendingDelegations {
+		if owner, ok := l.pendingSetups[childID]; ok && owner.runtime == rt {
+			delete(l.pendingSetups, childID)
+		}
+	}
+	l.mu.Unlock()
+	rt.pendingDelegations = nil
 }
 
 // deliverStoredCompletion pushes st (a delegation that just reached a

@@ -222,6 +222,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
 	st = runningSt
+	t.lc.resolvePendingSetup(ctx, st, args.Depth, false)
 	// Registered only once nothing left in this function can fail: a task
 	// shares its parent's App/Coordinator (see DelegationParent's doc
 	// comment), and registering earlier would leave a stale registration
@@ -340,9 +341,18 @@ func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) er
 	// too. See [Manager.failCreate], which has the same problem.
 	writeCtx, cancel := detachForTerminalWork(ctx)
 	defer cancel()
-	if _, err := t.lc.setStatus(writeCtx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
+	failed, err := t.lc.setStatus(writeCtx, st.ID, StatusFailed, cause.Error(), "", 0)
+	if err != nil {
 		slog.Error("Failed to record task create failure", "component", "thread", "task", st.ID, "error", err)
+		return cause
 	}
+	depth := 0
+	if c := t.lc.existingControl(st.ID); c != nil {
+		c.mu.Lock()
+		depth = c.depth
+		c.mu.Unlock()
+	}
+	t.lc.resolvePendingSetup(writeCtx, failed, depth, true)
 	return cause
 }
 

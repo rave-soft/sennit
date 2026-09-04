@@ -3,6 +3,7 @@ package thread_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -933,6 +934,114 @@ func (s *setSessionErrStore) SetSession(ctx context.Context, id, sessionID strin
 	return thread.Thread{}, s.err
 }
 
+type blockingSetSessionErrStore struct {
+	thread.Store
+	mu              sync.Mutex
+	armed           bool
+	entered         chan struct{}
+	release         chan struct{}
+	err             error
+	snapshotArmed   bool
+	snapshotEntered chan struct{}
+	snapshotRelease chan struct{}
+}
+
+func (s *blockingSetSessionErrStore) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
+	s.mu.Lock()
+	armed := s.armed
+	if armed {
+		s.armed = false
+	}
+	s.mu.Unlock()
+	if !armed {
+		return s.Store.SetSession(ctx, id, sessionID)
+	}
+	close(s.entered)
+	select {
+	case <-s.release:
+		if s.err != nil {
+			return thread.Thread{}, s.err
+		}
+		return s.Store.SetSession(ctx, id, sessionID)
+	case <-ctx.Done():
+		return thread.Thread{}, ctx.Err()
+	}
+}
+
+func (s *blockingSetSessionErrStore) ListAll(ctx context.Context) ([]thread.Thread, error) {
+	all, err := s.Store.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	armed := s.snapshotArmed
+	if armed {
+		s.snapshotArmed = false
+	}
+	s.mu.Unlock()
+	if !armed {
+		return all, nil
+	}
+	close(s.snapshotEntered)
+	select {
+	case <-s.snapshotRelease:
+		return all, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type pendingFailureStore struct {
+	thread.Store
+	mu                    sync.Mutex
+	skipSetSession        int
+	gates                 []chan struct{}
+	nextGate              int
+	entered               chan int
+	err                   error
+	failNextListOnFailure bool
+	failList              atomic.Bool
+}
+
+func (s *pendingFailureStore) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
+	s.mu.Lock()
+	if s.skipSetSession > 0 {
+		s.skipSetSession--
+		s.mu.Unlock()
+		return s.Store.SetSession(ctx, id, sessionID)
+	}
+	if s.nextGate >= len(s.gates) {
+		s.mu.Unlock()
+		return s.Store.SetSession(ctx, id, sessionID)
+	}
+	index := s.nextGate
+	s.nextGate++
+	gate := s.gates[index]
+	s.mu.Unlock()
+	s.entered <- index
+	select {
+	case <-gate:
+		return thread.Thread{}, s.err
+	case <-ctx.Done():
+		return thread.Thread{}, ctx.Err()
+	}
+}
+
+func (s *pendingFailureStore) SetStatus(ctx context.Context, id string, params thread.SetStatusParams) (thread.Thread, error) {
+	st, err := s.Store.SetStatus(ctx, id, params)
+	if err == nil && params.Status == thread.StatusFailed && s.failNextListOnFailure {
+		s.failList.Store(true)
+	}
+	return st, err
+}
+
+func (s *pendingFailureStore) ListAll(ctx context.Context) ([]thread.Thread, error) {
+	if s.failList.Swap(false) {
+		return nil, fmt.Errorf("transient list boom")
+	}
+	return s.Store.ListAll(ctx)
+}
+
 // TestTaskManager_CreateFailsWithRealIDWhenSetSessionErrors is the
 // regression test for tasks.go's Create: `st, err =
 // t.store.SetSession(...)` used to overwrite st with the store's zero
@@ -1178,6 +1287,331 @@ func TestTaskManager_CancelFinalizesOnACanceledContext(t *testing.T) {
 // developer-then-reviewer started the reviewer while the developer was
 // still working. The delegation now stays running until its own
 // delegations are accounted for.
+//
+// TestTaskManager_WaitingOnPendingDelegationIsNotFinished covers the creation
+// window before a child task has acquired its runtime and transitioned from
+// pending to running. Its parent can finish in that window, but must remain
+// parked because the child is real work that will continue once setup ends.
+func TestTaskManager_WaitingOnPendingDelegationIsNotFinished(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	// TaskManager.Create persists this exact pending state before the spawn,
+	// session creation, and StatusRunning transition. Leave it there to make
+	// the parent's concurrent RunComplete deterministic.
+	_, err = store.Create(t.Context(), thread.CreateParams{
+		Name:            "pending-child",
+		Goal:            "a piece of it",
+		Kind:            thread.KindTask,
+		ParentSessionID: parent.SessionID,
+	})
+	require.NoError(t, err)
+
+	publishSuccessForSession(t, parentApp, parent.SessionID)
+
+	require.Eventually(t, func() bool {
+		return mgr.AwaitingDelegationsForTest(parent.ID)
+	}, eventuallyTimeout, eventuallyTick, "the parent must stay parked until the child finishes")
+	got, err := store.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status,
+		"a parent waiting for a pending child has not answered its goal")
+	require.Empty(t, coord.deliveredCompletions(),
+		"the parent's parent must not be told it completed")
+}
+
+func TestTaskManager_PendingChildRunningBetweenSnapshotAndRegistrationKeepsParentParked(t *testing.T) {
+	store := &blockingSetSessionErrStore{
+		Store:           thread.NewStoreForTest(t),
+		entered:         make(chan struct{}),
+		release:         make(chan struct{}),
+		snapshotEntered: make(chan struct{}),
+		snapshotRelease: make(chan struct{}),
+	}
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	store.mu.Lock()
+	store.armed = true
+	store.mu.Unlock()
+	createDone := make(chan error, 1)
+	go func() {
+		_, createErr := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "piece", ParentSessionID: parent.SessionID})
+		createDone <- createErr
+	}()
+	<-store.entered
+	store.mu.Lock()
+	store.snapshotArmed = true
+	store.mu.Unlock()
+	publishSuccessForSession(t, parentApp, parent.SessionID)
+	<-store.snapshotEntered
+
+	close(store.release)
+	require.NoError(t, <-createDone)
+	close(store.snapshotRelease)
+	require.Eventually(t, func() bool { return mgr.AwaitingDelegationsForTest(parent.ID) }, eventuallyTimeout, eventuallyTick,
+		"a child that became running after the pending snapshot remains outstanding")
+	got, err := store.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status)
+	require.Empty(t, coord.deliveredCompletions())
+}
+
+func TestTaskManager_PendingChildFailureBetweenSnapshotAndRegistrationIsDelivered(t *testing.T) {
+	createErr := fmt.Errorf("set-session boom")
+	store := &blockingSetSessionErrStore{
+		Store:           thread.NewStoreForTest(t),
+		entered:         make(chan struct{}),
+		release:         make(chan struct{}),
+		err:             createErr,
+		snapshotEntered: make(chan struct{}),
+		snapshotRelease: make(chan struct{}),
+	}
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	store.mu.Lock()
+	store.armed = true
+	store.mu.Unlock()
+	createDone := make(chan error, 1)
+	go func() {
+		_, childErr := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "piece", ParentSessionID: parent.SessionID, Depth: 3})
+		createDone <- childErr
+	}()
+	<-store.entered
+	store.mu.Lock()
+	store.snapshotArmed = true
+	store.mu.Unlock()
+	publishSuccessForSession(t, parentApp, parent.SessionID)
+	<-store.snapshotEntered
+
+	close(store.release)
+	require.ErrorIs(t, <-createDone, createErr)
+	close(store.snapshotRelease)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 }, eventuallyTimeout, eventuallyTick,
+		"a child that failed after the pending snapshot is delivered exactly once")
+	require.Equal(t, 3, coord.deliveredCompletions()[0].completion.Depth)
+	require.Eventually(t, func() bool { return mgr.AwaitingDelegationsForTest(parent.ID) }, eventuallyTimeout, eventuallyTick)
+	require.Len(t, coord.deliveredCompletions(), 1)
+}
+
+func TestTaskManager_PendingDelegationCreationFailureUnparksParent(t *testing.T) {
+	createErr := fmt.Errorf("set-session boom")
+	store := &blockingSetSessionErrStore{
+		Store:   thread.NewStoreForTest(t),
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+		err:     createErr,
+	}
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	store.mu.Lock()
+	store.armed = true
+	store.mu.Unlock()
+	createDone := make(chan error, 1)
+	go func() {
+		_, createErr := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "a piece of it", ParentSessionID: parent.SessionID})
+		createDone <- createErr
+	}()
+	<-store.entered
+
+	publishSuccessForSession(t, parentApp, parent.SessionID)
+	require.Eventually(t, func() bool {
+		return mgr.AwaitingDelegationsForTest(parent.ID)
+	}, eventuallyTimeout, eventuallyTick, "the parent must observe and park on the pending child")
+
+	close(store.release)
+	require.ErrorIs(t, <-createDone, createErr)
+	require.Eventually(t, func() bool {
+		for _, delivered := range coord.deliveredCompletions() {
+			if delivered.sessionID == parent.SessionID && delivered.completion.Status == string(thread.StatusFailed) {
+				return true
+			}
+		}
+		return false
+	}, eventuallyTimeout, eventuallyTick, "the failed child setup must notify the parked parent")
+
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: parent.SessionID, Text: "implemented",
+	})
+	require.Eventually(t, func() bool {
+		st, getErr := store.Get(t.Context(), parent.ID)
+		return getErr == nil && st.Status == thread.StatusCompleted
+	}, eventuallyTimeout, eventuallyTick, "the unparked parent must be able to finish")
+}
+
+func TestTaskManager_TwoObservedPendingFailuresAreBothDelivered(t *testing.T) {
+	createErr := fmt.Errorf("set-session boom")
+	store := &pendingFailureStore{
+		Store:          thread.NewStoreForTest(t),
+		skipSetSession: 1,
+		gates:          []chan struct{}{make(chan struct{}), make(chan struct{})},
+		entered:        make(chan int, 2),
+		err:            createErr,
+	}
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	tasks2 := thread.NewTaskManagerFromManager(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()))
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	createDone := make(chan error, 2)
+	for i, goal := range []string{"first piece", "second piece"} {
+		manager := tasks
+		if i == 1 {
+			manager = tasks2
+		}
+		go func() {
+			_, createErr := manager.Create(t.Context(), thread.TaskCreateArgs{Goal: goal, ParentSessionID: parent.SessionID})
+			createDone <- createErr
+		}()
+	}
+	<-store.entered
+	<-store.entered
+
+	publishSuccessForSession(t, parentApp, parent.SessionID)
+	require.Eventually(t, func() bool { return mgr.AwaitingDelegationsForTest(parent.ID) }, eventuallyTimeout, eventuallyTick)
+
+	close(store.gates[0])
+	require.ErrorIs(t, <-createDone, createErr)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 }, eventuallyTimeout, eventuallyTick)
+	require.NoError(t, sendErr(tasks.Send(t.Context(), parent.ID, "continue after first result")))
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick,
+		"the first observed failure starts a continuation")
+
+	runID, live := mgr.RuntimeForTest(parent.ID)
+	require.True(t, live)
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: parent.SessionID, RunID: runID, Text: "implemented",
+	})
+	require.Eventually(t, func() bool { return mgr.AwaitingDelegationsForTest(parent.ID) }, eventuallyTimeout, eventuallyTick,
+		"the continuation must park again while the second observed setup is unresolved")
+	got, err := store.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status)
+
+	close(store.gates[1])
+	require.ErrorIs(t, <-createDone, createErr)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 2 }, eventuallyTimeout, eventuallyTick,
+		"the second observed failure remains owed after the continuation starts")
+	first, second := coord.deliveredCompletions()[0].completion, coord.deliveredCompletions()[1].completion
+	require.NotEqual(t, first.DelegationID, second.DelegationID)
+
+	require.NoError(t, sendErr(tasks.Send(t.Context(), parent.ID, "continue after second result")))
+	require.Eventually(t, func() bool { return coord.runCount() == 3 }, eventuallyTimeout, eventuallyTick)
+	runID, live = mgr.RuntimeForTest(parent.ID)
+	require.True(t, live)
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: parent.SessionID, RunID: runID, Text: "implemented",
+	})
+	require.Eventually(t, func() bool {
+		st, getErr := store.Get(t.Context(), parent.ID)
+		return getErr == nil && st.Status == thread.StatusCompleted
+	}, eventuallyTimeout, eventuallyTick)
+}
+
+func TestTaskManager_ObservedSetupFailurePreservesDepth(t *testing.T) {
+	createErr := fmt.Errorf("set-session boom")
+	store := &pendingFailureStore{
+		Store:          thread.NewStoreForTest(t),
+		skipSetSession: 1,
+		gates:          []chan struct{}{make(chan struct{})},
+		entered:        make(chan int, 1),
+		err:            createErr,
+	}
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+
+	createDone := make(chan error, 1)
+	go func() {
+		_, createErr := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "piece", ParentSessionID: parent.SessionID, Depth: 4})
+		createDone <- createErr
+	}()
+	<-store.entered
+	publishSuccessForSession(t, parentApp, parent.SessionID)
+	require.Eventually(t, func() bool { return mgr.AwaitingDelegationsForTest(parent.ID) }, eventuallyTimeout, eventuallyTick)
+	close(store.gates[0])
+	require.ErrorIs(t, <-createDone, createErr)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 }, eventuallyTimeout, eventuallyTick)
+	require.Equal(t, 4, coord.deliveredCompletions()[0].completion.Depth)
+}
+
+func TestTaskManager_ObservedSetupFailureNeedsNoPostFailureList(t *testing.T) {
+	createErr := fmt.Errorf("set-session boom")
+	store := &pendingFailureStore{
+		Store:                 thread.NewStoreForTest(t),
+		skipSetSession:        1,
+		gates:                 []chan struct{}{make(chan struct{})},
+		entered:               make(chan int, 1),
+		err:                   createErr,
+		failNextListOnFailure: true,
+	}
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+
+	createDone := make(chan error, 1)
+	go func() {
+		_, createErr := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "piece", ParentSessionID: parent.SessionID})
+		createDone <- createErr
+	}()
+	<-store.entered
+	publishSuccessForSession(t, parentApp, parent.SessionID)
+	require.Eventually(t, func() bool { return mgr.AwaitingDelegationsForTest(parent.ID) }, eventuallyTimeout, eventuallyTick)
+	close(store.gates[0])
+	require.ErrorIs(t, <-createDone, createErr)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 }, eventuallyTimeout, eventuallyTick,
+		"delivery must use the registered owner without a post-failure lookup")
+	require.True(t, store.failList.Load(), "the armed ListAll failure must remain unconsumed")
+}
+
+func TestTaskManager_CreateFailureBeforeParentParksDoesNotStartContinuation(t *testing.T) {
+	createErr := fmt.Errorf("set-session boom")
+	release := make(chan struct{})
+	close(release)
+	store := &blockingSetSessionErrStore{
+		Store:   thread.NewStoreForTest(t),
+		entered: make(chan struct{}),
+		release: release,
+		err:     createErr,
+	}
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "implement it", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	store.mu.Lock()
+	store.armed = true
+	store.mu.Unlock()
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "a piece of it", ParentSessionID: parent.SessionID})
+	require.ErrorIs(t, err, createErr)
+	require.Equal(t, 1, coord.runCount(), "a setup failure must not fabricate a continuation before the parent parks")
+	require.Empty(t, coord.deliveredCompletions(), "a setup failure unseen by the parent needs no completion")
+}
+
 func TestTaskManager_WaitingOnItsOwnDelegationIsNotFinished(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
