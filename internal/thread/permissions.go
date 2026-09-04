@@ -5,6 +5,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/question"
 )
 
 // forwardPermissions relays a delegation workspace's permission traffic
@@ -62,12 +63,7 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 // forever with nothing on screen to explain why - the same class of bug
 // F1/F7/G1 already found on the permissions side, just on the sibling
 // service nobody wired up.
-//
-// Unlike forwardPermissions, this has no ActiveRequest recovery step:
-// question.Service exposes no equivalent accessor, so a question raised in
-// the narrow window between spawn and this relay's subscription taking
-// effect is still missed. Closing that gap needs a change to
-// internal/question, which is out of scope here; see the finding-1 report.
+
 func (l *lifecycle) forwardQuestions(ctx context.Context, handle Handle) {
 	if l.parentApp == nil {
 		return
@@ -78,6 +74,17 @@ func (l *lifecycle) forwardQuestions(ctx context.Context, handle Handle) {
 	}
 	forwardInto(ctx, l, a.Questions().Subscribe)
 	forwardInto(ctx, l, a.Questions().SubscribeNotifications)
+
+	// The same recovery forwardPermissions does, for the same reason: a
+	// question is announced exactly once, when Ask publishes it, so one
+	// already waiting when this relay starts would otherwise sit there
+	// unanswerable while its caller blocks with no timeout.
+	if req, ok := a.Questions().ActiveRequest(); ok {
+		l.parentApp.SendEvent(pubsub.Event[question.Request]{
+			Type:    pubsub.CreatedEvent,
+			Payload: req,
+		})
+	}
 }
 
 // forwardInto pumps one of a delegation workspace's event sources onto the

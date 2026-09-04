@@ -198,6 +198,18 @@ type Service interface {
 	// Cancel cancels the pending question. Returns false if no
 	// question is pending.
 	Cancel() bool
+
+	// ActiveRequest returns the question currently waiting for an
+	// answer, if any. A request is announced to subscribers exactly
+	// once, when Ask publishes it, so anything that starts listening
+	// afterwards has no other way to learn about one already
+	// outstanding - and Ask blocks with no timeout, so a missed
+	// announcement is a caller stuck forever. The permission service
+	// exposes the same accessor for the same reason; see
+	// thread.lifecycle.forwardQuestions, which republishes what this
+	// returns when it installs a relay over a workspace that was
+	// already waiting.
+	ActiveRequest() (Request, bool)
 }
 
 type questionService struct {
@@ -207,6 +219,9 @@ type questionService struct {
 	pending            chan []Answer
 	cancelled          chan struct{}
 	pendingID          string
+	// pendingReq is the request behind pendingID, kept so ActiveRequest
+	// can hand back the whole thing rather than an id nobody can render.
+	pendingReq Request
 }
 
 // NewService creates a new question service.
@@ -264,6 +279,7 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	s.pending = pending
 	s.cancelled = cancelled
 	s.pendingID = req.ID
+	s.pendingReq = req
 	s.mu.Unlock()
 
 	defer func() {
@@ -276,6 +292,7 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 			s.pending = nil
 			s.cancelled = nil
 			s.pendingID = ""
+			s.pendingReq = Request{}
 		}
 		s.mu.Unlock()
 	}()
@@ -292,6 +309,16 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	case answers := <-pending:
 		return answers, nil
 	}
+}
+
+// ActiveRequest returns the question currently awaiting an answer.
+func (s *questionService) ActiveRequest() (Request, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending == nil {
+		return Request{}, false
+	}
+	return s.pendingReq, true
 }
 
 // Answer resolves the pending question. Returns false if no
