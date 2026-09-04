@@ -100,6 +100,22 @@ func FormatResourceContentsText(rc *mcp.ResourceContents) string {
 	return fmt.Sprintf("[binary resource %s: %d bytes, %s - not shown]", rc.URI, len(rc.Blob), cmp.Or(rc.MIMEType, "unknown MIME type"))
 }
 
+// TruncateResourceContentText caps s, the text a caller has already joined
+// from possibly several ResourceContents parts, at MaxResourceContentBytes -
+// the same cap FormatResourceContentsText applies to one part in isolation.
+// Without this, a multi-part resource (read_mcp_resource.go's own read, one
+// call per part) could hand the model N times the intended budget: each
+// part on its own stays under the cap, but the joined response does not.
+// Mirrors tools.go's RunTool, which applies the identical bound to its own
+// joined textContent for the same reason.
+func TruncateResourceContentText(s string) string {
+	truncated, wasTruncated := truncateResourceText(s)
+	if !wasTruncated {
+		return s
+	}
+	return truncated + fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxResourceContentBytes)
+}
+
 // formatEmbeddedResource renders an *mcp.EmbeddedResource's content as text
 // for a tool's textual result. G12: this used to fall through to the
 // default %v branch in tools.go's RunTool, printing a memory-address dump

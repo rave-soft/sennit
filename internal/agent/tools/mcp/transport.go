@@ -201,6 +201,17 @@ func (rt *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	authCtx, cancelAuth := context.WithTimeout(context.WithoutCancel(req.Context()), interactiveAuthTimeout)
 	defer cancelAuth()
 	if err := rt.handler.Authorize(authCtx, request, resp); err != nil {
+		// Tag this specific expiry with errInteractiveAuthTimeout so
+		// setAuthTerminal can offer "log in again" for exactly this case.
+		// A bare context.DeadlineExceeded/Canceled here could equally be
+		// req.Context()'s own mcpTimeout-derived cancellation surfacing
+		// through an unrelated SDK call (e.g. the connect itself never got
+		// past a 401, or a cleanup notification timed out) - those are
+		// server-unreachable failures, not "user didn't finish the login",
+		// and must not be classified the same way.
+		if errors.Is(authCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("oauth authorize: %w: %w", errInteractiveAuthTimeout, err)
+		}
 		return nil, fmt.Errorf("oauth authorize: %w", err)
 	}
 	if req.Body != nil && req.GetBody == nil {
@@ -266,6 +277,16 @@ func closeRequestBody(req *http.Request) {
 // step on a corporate identity provider without leaving a forgotten
 // browser tab able to hold the flow open indefinitely.
 const interactiveAuthTimeout = 5 * time.Minute
+
+// errInteractiveAuthTimeout marks a connect failure as specifically the
+// expiry of interactiveAuthTimeout - the user never finished the browser
+// login - rather than any other context.Canceled/DeadlineExceeded a connect
+// can surface (e.g. the mcpTimeout-bound context that bounds "the server
+// answered" giving up before the OAuth challenge was even reached).
+// setAuthTerminal (authcoordinator.go) checks this sentinel, not the bare
+// stdlib ones, to decide whether the failure is recoverable by offering the
+// login again.
+var errInteractiveAuthTimeout = errors.New("mcp: interactive oauth authorization timed out")
 
 func mcpTimeout(m config.MCPConfig) time.Duration {
 	if m.Timeout > 0 {

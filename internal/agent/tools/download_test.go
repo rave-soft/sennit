@@ -252,3 +252,44 @@ func TestDownloadTool_DefaultClientDoesNotCapBelowCallerTimeout(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, resp.IsError, "NewDownloadTool's default client (client: nil) must not impose a fixed cap below the caller's timeout")
 }
+
+// TestDownloadTool_LeafSymlinkIsNamedAsItself pins the other half of the
+// path the dialog must name, and it exists because the first fix for G21
+// resolved the whole path and so got this case backwards. A download
+// replaces the file at file_path itself — fsext.ReplaceFile renames onto
+// that name, never following a link at the end of it, which is what
+// TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace guarantees. Naming
+// the link's target here would describe a file the download never writes,
+// and worse, key the persistent grant on it: approving a harmless
+// download into the workspace would silently pre-approve a later one that
+// really does target the file outside it.
+func TestDownloadTool_LeafSymlinkIsNamedAsItself(t *testing.T) {
+	t.Parallel()
+
+	root := resolvedTempDir(t)
+	workdir := filepath.Join(root, "workspace")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	outsideDir := filepath.Join(root, "outside")
+	require.NoError(t, os.MkdirAll(outsideDir, 0o755))
+
+	target := filepath.Join(outsideDir, "secret.txt")
+	require.NoError(t, os.WriteFile(target, []byte("do not touch"), 0o644))
+	link := filepath.Join(workdir, "cfg")
+	require.NoError(t, os.Symlink(target, link))
+
+	perms := &recordingConfinedPermissions{confinedTestPermissions: &confinedTestPermissions{dir: ""}}
+	tool := NewDownloadTool(perms, workdir, nil)
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  DownloadToolName,
+		Input: mustJSONInput(t, DownloadParams{URL: "https://example.invalid/x", FilePath: "cfg"}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "the request is denied, but a denial is still the tool's normal path here")
+	require.Len(t, perms.requests, 1)
+	require.Equal(t, link, perms.requests[0].Path,
+		"the dialog must name the link the download replaces, not the file it points at")
+	require.NotContains(t, perms.requests[0].Description, target,
+		"naming the target would pre-approve a download this one never performs")
+}

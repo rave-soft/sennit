@@ -136,10 +136,17 @@ func LatestGlobalLogFile() string {
 	if err != nil {
 		return GlobalLogFile()
 	}
+	// Skip this process's own file by name. The exclusion used to hold by
+	// accident: a reader never opened a log of its own, so it could not
+	// win the newest-mtime race. It does now — every command that loads
+	// config installs a file logger, and `sennit logs` loads config —
+	// which made the reader answer with the log it had just written its
+	// own startup lines into.
+	own := filepath.Base(GlobalLogFile())
 	var newest string
 	var newestAt int64
 	for _, entry := range entries {
-		if entry.IsDir() || !isRunLogName(entry.Name()) {
+		if entry.IsDir() || !isRunLogName(entry.Name()) || entry.Name() == own {
 			continue
 		}
 		info, err := entry.Info()

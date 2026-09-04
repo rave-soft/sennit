@@ -54,7 +54,7 @@ func TestNativeBackend_Send(t *testing.T) {
 // icon data, the backend passes notifyFunc a filesystem path (cached via
 // CacheIcon) rather than raw bytes on every send.
 func TestNativeBackend_Send_CachesIconPath(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	redirectUserCacheDir(t)
 
 	iconData := []byte("fake-png-data")
 	backend := notification.NewNativeBackend(iconData)

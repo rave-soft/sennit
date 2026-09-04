@@ -89,6 +89,48 @@ func TestReadMCPResource_JSONResourceIsText(t *testing.T) {
 	require.Contains(t, resp.Content, `{"ok":true}`)
 }
 
+// TestReadMCPResource_MixedResourceReadsTextAndDescribesBinaryPart is the
+// regression test for the comment/behavior mismatch found reading G13's
+// fix: a resource with several parts (text plus a binary thumbnail) used
+// to be rejected wholesale the moment the loop hit the first binary part,
+// even though the comment above it promised only a size/MIME description
+// for a binary part that isn't the sole image. The text part must survive,
+// and the binary part must be described inline, not abort the read.
+func TestReadMCPResource_MixedResourceReadsTextAndDescribesBinaryPart(t *testing.T) {
+	t.Parallel()
+
+	resp := runReadMCPResource(t, fakeResourceReader{contents: []*mcp.ResourceContents{
+		{URI: "res://doc.md", MIMEType: "text/markdown", Text: "# hello"},
+		{URI: "res://doc-thumb.png", MIMEType: "image/png", Blob: []byte{0x89, 0x50, 0x4E, 0x47}},
+	}})
+
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "# hello")
+	require.Contains(t, resp.Content, "res://doc-thumb.png")
+	require.Contains(t, resp.Content, "image/png")
+}
+
+// TestReadMCPResource_MultiPartRespectsSingleByteBudget is the regression
+// test for the other half of that same fix: FormatResourceContentsText
+// bounds each part to mcp.MaxResourceContentBytes on its own, but the loop
+// joined every part's already-bounded text without ever re-checking the
+// combined length - N parts near the cap could hand the model N times the
+// intended budget. The joined response must respect one shared cap.
+func TestReadMCPResource_MultiPartRespectsSingleByteBudget(t *testing.T) {
+	t.Parallel()
+
+	partSize := mcp.MaxResourceContentBytes/2 + 1024
+	resp := runReadMCPResource(t, fakeResourceReader{contents: []*mcp.ResourceContents{
+		{URI: "res://part1", MIMEType: "text/plain", Blob: []byte(strings.Repeat("a", partSize))},
+		{URI: "res://part2", MIMEType: "text/plain", Blob: []byte(strings.Repeat("b", partSize))},
+	}})
+
+	require.False(t, resp.IsError)
+	require.LessOrEqual(t, len(resp.Content), mcp.MaxResourceContentBytes+128,
+		"two parts each under the per-part cap must not sum past the response's own budget")
+	require.Contains(t, resp.Content, "truncated")
+}
+
 // TestReadMCPResource_ImageResourceReturnsImageResponse pins the image
 // path G13 asked for: a resource whose MIME type is an image must come
 // back as a normal tool image response (like the read tool's own image

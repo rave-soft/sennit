@@ -605,8 +605,10 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 // after send returns, so whatever it installs (Manager.Send uses it to
 // re-register the parent link and its auto-approval grant — see
 // registerThreadParent) is in place before the dispatched turn can raise
-// its first permission request. TaskManager.Send passes nil: a task has
-// its own scheme for both concerns, closed at TaskManager.Create.
+// its first permission request. TaskManager.Send uses it to re-register
+// its own parent link for the same reason; the auto-approval half does
+// not apply there, since a task shares its parent's App and so its
+// permission service outlives any runtime release.
 func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string, from Sender, attachments []Attachment, beforeDispatch func(handle Handle)) (SendDisposition, error) {
 	// Tag bgCtx so coordinator.run persists this dispatch's message with
 	// Origin agent.OriginAgent, not the default message.OriginPerson — a

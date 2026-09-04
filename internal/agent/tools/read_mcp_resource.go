@@ -106,6 +106,26 @@ func NewReadMCPResourceTool(cfg mcpResourceConfig, reg mcpResourceReader, permis
 				return fantasy.NewImageResponse(contents[0].Blob, contents[0].MIMEType), nil
 			}
 
+			// A resource that comes back as a single binary part (not
+			// text, not JSON, not an image) has nothing else to fall back
+			// to, so fail the whole read with a model-recoverable error
+			// naming the size and MIME type. A resource with more than
+			// one part (e.g. text plus a thumbnail) is read in full
+			// instead: the loop below describes any binary/unreadable
+			// part inline via mcp.FormatResourceContentsText rather than
+			// discarding the rest of the resource for it - this used to
+			// bail out on the first binary part it saw regardless of how
+			// many usable parts followed, contradicting the comment above.
+			if len(contents) == 1 && contents[0] != nil {
+				c := contents[0]
+				if c.Text == "" && !mcp.ResourceContentIsText(c.MIMEType) && !mcp.ResourceContentIsImage(c.MIMEType) {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf(
+						"MCP resource %s is binary (%s, %d bytes) and cannot be read as text.",
+						cmp.Or(c.URI, params.URI), cmp.Or(c.MIMEType, "unknown MIME type"), len(c.Blob),
+					)), nil
+				}
+			}
+
 			var textParts []string
 			for _, content := range contents {
 				if content == nil {
@@ -115,19 +135,12 @@ func NewReadMCPResourceTool(cfg mcpResourceConfig, reg mcpResourceReader, permis
 					slog.Debug("MCP resource content missing text/blob", "uri", content.URI)
 					continue
 				}
-				// content.Text is already textual by construction (the
-				// server put it in the text field); a populated Blob is
-				// only safe to decode as text when its MIME type says so
-				// (text/* or a JSON variant). Anything else is binary the
-				// model has no use for as a garbled string - G13: this used
-				// to be string(content.Blob) unconditionally, so a PDF or
-				// image landed in the model's context as invalid UTF-8.
-				if content.Text == "" && !mcp.ResourceContentIsText(content.MIMEType) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf(
-						"MCP resource %s is binary (%s, %d bytes) and cannot be read as text.",
-						cmp.Or(content.URI, params.URI), cmp.Or(content.MIMEType, "unknown MIME type"), len(content.Blob),
-					)), nil
-				}
+				// mcp.FormatResourceContentsText itself decides text vs.
+				// binary per part (text/* or a JSON variant decodes,
+				// anything else gets a "[binary resource ...]" size/MIME
+				// description) - G13: this used to be string(content.Blob)
+				// unconditionally, so a PDF or image landed in the
+				// model's context as invalid UTF-8.
 				if text := mcp.FormatResourceContentsText(content); text != "" {
 					textParts = append(textParts, text)
 				}
@@ -137,7 +150,12 @@ func NewReadMCPResourceTool(cfg mcpResourceConfig, reg mcpResourceReader, permis
 				return fantasy.NewTextResponse(""), nil
 			}
 
-			return fantasy.NewTextResponse(strings.Join(textParts, "\n")), nil
+			// Each part above is already capped at MaxResourceContentBytes
+			// on its own (mcp.FormatResourceContentsText), but that bounds
+			// only one part - N parts could otherwise hand the model N
+			// times the intended budget. Apply the same cap to the joined
+			// result, matching mcp-tools.go's RunTool.
+			return fantasy.NewTextResponse(mcp.TruncateResourceContentText(strings.Join(textParts, "\n"))), nil
 		},
 	), map[string]toolParameterSchema{"mcp_name": {minLength: intPtr(1)}, "uri": {minLength: intPtr(1)}})
 }

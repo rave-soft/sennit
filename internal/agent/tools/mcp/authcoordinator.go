@@ -35,23 +35,24 @@ type authCoordinator struct {
 // goes to StateNeedsAuth (recoverable by re-authenticating), anything else
 // goes to StateError.
 //
-// context.DeadlineExceeded is treated the same as Canceled here: it is what
-// interactiveAuthTimeout (transport.go) produces when the user never
-// finishes the browser login, and the recoverable outcome is the same one
-// an explicit cancel gets — offer the login again, not a raw error. The
-// substring checks are a fallback for the same condition arriving already
-// wrapped by an intermediate layer (e.g. the SDK's own connect error) where
-// errors.Is can't see through the wrapping.
-func (ac *authCoordinator) setAuthTerminal(name string, owner attemptID, err error) {
+// A bare context.Canceled/DeadlineExceeded on err is not enough to call this
+// recoverable: createSession derives its connect context from
+// context.WithoutCancel(ctx) plus its own mcpTimeout-bound cancellation (see
+// the comment there), so a server that simply never answers surfaces the
+// exact same sentinels as a real user cancel, without ctx itself ever being
+// touched. ctx.Err() is the caller's own context, so it is only non-nil when
+// the caller genuinely gave up — e.g. publishSession later using ctx for
+// getTools/getPrompts/getResources after a connect the caller had already
+// abandoned. errInteractiveAuthTimeout is the other legitimate recoverable
+// case: transport.go tags it explicitly when interactiveAuthTimeout (the
+// user never finished the browser login) is what expired, so it doesn't
+// depend on ctx at all. Anything else - including a connect that merely ran
+// past its own mcpTimeout - is a genuine failure and gets StateError.
+func (ac *authCoordinator) setAuthTerminal(ctx context.Context, name string, owner attemptID, err error) {
 	if err == nil {
 		return
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || isOAuthInitErr(err) {
-		ac.reg.updateStateFor(name, owner, StateNeedsAuth, nil)
-		return
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "context deadline exceeded") {
+	if ctx.Err() != nil || errors.Is(err, errInteractiveAuthTimeout) || isOAuthInitErr(err) {
 		ac.reg.updateStateFor(name, owner, StateNeedsAuth, nil)
 		return
 	}
@@ -132,7 +133,7 @@ func (ac *authCoordinator) BeginAuth(cfg ConfigProvider, name string) (finish fu
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				workerErr = fmt.Errorf("panic in MCP authentication: %v", recovered)
-				ac.setAuthTerminal(name, owner, workerErr)
+				ac.setAuthTerminal(ctx, name, owner, workerErr)
 			}
 			ac.detachAuth(name, owner, nil).Close()
 			ac.completeAuthFlow(name, flow, workerErr)
@@ -157,7 +158,7 @@ func (ac *authCoordinator) BeginAuth(cfg ConfigProvider, name string) (finish fu
 func (ac *authCoordinator) runAuthFlow(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
 	ac.reg.updateStateFor(name, owner, StateStarting, nil, withPending(m))
 	err := ac.reg.connectAndRegister(ctx, cfg, name, m, owner, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
-	ac.setAuthTerminal(name, owner, err)
+	ac.setAuthTerminal(ctx, name, owner, err)
 	return err
 }
 
@@ -292,7 +293,7 @@ func (ac *authCoordinator) AuthenticateMCP(ctx context.Context, cfg ConfigProvid
 	// This is user initiated; unlike startup it may open a browser.
 	ctx = mcpoauth.WithInteractive(ctx)
 	err = ac.reg.connectAndRegister(ctx, cfg, name, m, owner, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
-	ac.setAuthTerminal(name, owner, err)
+	ac.setAuthTerminal(ctx, name, owner, err)
 	return err
 }
 
@@ -325,12 +326,12 @@ func (ac *authCoordinator) oauthSetup(ctx context.Context, cfg ConfigProvider, n
 	if ac.reg.currentGen(name) != gen {
 		ac.reg.publishMu.Unlock()
 		h.Close()
-		return nil, context.Canceled
+		return nil, errLostOwnership
 	}
 	if ac.reg.closing || ac.reg.owners[name] != (attemptID{gen: gen, seq: attempt}) {
 		ac.reg.publishMu.Unlock()
 		h.Close()
-		return nil, context.Canceled
+		return nil, errLostOwnership
 	}
 	owned := newOwnedAuthHandler(h)
 	old, hadOld := ac.reg.authURLs.Get(name)

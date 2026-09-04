@@ -104,17 +104,24 @@ func NewDownloadTool(permissions permission.Requester, workingDir string, client
 				return fantasy.ToolResponse{}, missingSessionID("downloading files")
 			}
 
-			// Resolve ancestor symlinks the same way read_core.go and
-			// applyFileMutation do before naming the download's target in
-			// the dialog: an ancestor directory symlink (e.g. `ln -s ../..
-			// up` then `download <url> up/x`) leaves filePath's string form
-			// inside workingDir while the download actually lands wherever
-			// the link points, so the dialog must be keyed and labeled on
-			// where the write really goes, not on the unresolved request.
-			_, resolvedFilePath, _, err := resolveWithinWorkdir(workingDir, filePath)
+			// Resolve the parent, never the leaf. An ancestor directory
+			// symlink (`ln -s ../.. up`, then `download <url> up/x`)
+			// leaves filePath's string form inside workingDir while the
+			// write lands wherever the link points, so the dialog has to
+			// name that destination. A leaf symlink is the opposite case:
+			// fsext.ReplaceFile renames onto filePath itself and so
+			// replaces the link rather than following it (the guarantee
+			// TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace pins),
+			// and naming its target would label the dialog with a file
+			// this download never writes — and key a persistent grant on
+			// it, quietly pre-approving a later download that really does
+			// target it.
+			parent, base := filepath.Split(filePath)
+			_, resolvedParent, _, err := resolveWithinWorkdir(workingDir, filepath.Clean(parent))
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
+			resolvedFilePath := filepath.Join(resolvedParent, base)
 			description := fmt.Sprintf("Download file from URL: %s to %s", params.URL, filePath)
 			if resolvedFilePath != filePath {
 				description = fmt.Sprintf("%s (resolves to %s)", description, resolvedFilePath)

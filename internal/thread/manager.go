@@ -769,8 +769,9 @@ func (m *Manager) send(ctx context.Context, idOrName, message string, from Sende
 	// handle ends up dispatching — the live one or a freshly respawned
 	// one — right before the run is actually dispatched, so a headless
 	// follow-up's first permission request never races a grant that
-	// hasn't landed yet. TaskManager.Send passes nil: a task has its own
-	// scheme, closed at TaskManager.Create.
+	// hasn't landed yet. TaskManager.Send passes a hook of its own for
+	// the parent link; it needs no grant, sharing its parent's App and
+	// therefore its permission service.
 	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message, from, attachments, func(handle Handle) {
 		m.registerThreadParent(handle, st)
 	})

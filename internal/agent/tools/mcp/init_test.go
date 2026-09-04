@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1239,23 +1240,20 @@ func TestAuthenticateMCP_NoTokenStartsInteractiveFlow(t *testing.T) {
 }
 
 // TestSetAuthTerminal_CancelSettlesNeedsAuth pins the cancel→NeedsAuth
-// mapping AuthenticateMCP relies on via setAuthTerminal: a cancelled
-// interactive OAuth flow settles the server in StateNeedsAuth (not
-// StateError), so the user can re-trigger it.
+// mapping AuthenticateMCP relies on via setAuthTerminal: when the CALLER's
+// own ctx is what got cancelled - discovered once publishSession later uses
+// ctx for getTools/getPrompts/getResources after a connect the caller had
+// already abandoned - the interactive OAuth flow settles in StateNeedsAuth
+// so the user can just re-trigger it.
 //
-// This used to be exercised end to end through AuthenticateMCP with a
-// pre-cancelled ctx and an unreachable URL, on the assumption that
-// createSession would fail fast with context.Canceled without touching the
-// network. createSession no longer aborts on the caller's own ctx
-// cancellation (see the comment on createSession) - a cancelled ctx now
-// only surfaces once the caller's ctx is actually used again, e.g. by
-// publishSession listing tools/prompts/resources after a real successful
-// connect. Reconstructing that end to end needs a real, working OAuth-
-// capable HTTP/SSE server (connectAndRegister's createSession call has no
-// test seam to fake success on, unlike getOrRenewClient's newSession field),
-// which is disproportionate for pinning this one mapping, so this tests
-// setAuthTerminal directly instead - the exact piece of logic that
-// implements it.
+// This used to pass a bare context.Canceled err with an ordinary,
+// uncancelled ctx, on the theory that any Canceled/DeadlineExceeded on err
+// meant "recoverable, offer login again". That conflated the caller
+// genuinely giving up with a connect that merely ran past its own
+// mcpTimeout (createSession's WithoutCancel(ctx)-derived context, see its
+// comment) - see G5's regression, TestSetAuthTerminal_ConnectTimeoutIsError
+// below. The distinguishing signal is ctx.Err() itself, not err's type, so
+// this test now cancels ctx to exercise the case it actually pins.
 func TestSetAuthTerminal_CancelSettlesNeedsAuth(t *testing.T) {
 	const name = "auth-terminal-cancel"
 	r := NewRegistry()
@@ -1263,11 +1261,95 @@ func TestSetAuthTerminal_CancelSettlesNeedsAuth(t *testing.T) {
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
 
-	r.setAuthTerminal(name, owner, context.Canceled)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	r.setAuthTerminal(ctx, name, owner, context.Canceled)
 
 	info, ok := r.states.Get(name)
 	require.True(t, ok)
 	require.Equal(t, StateNeedsAuth, info.State)
+}
+
+// TestSetAuthTerminal_ConnectTimeoutIsError is the G5-regression guard: a
+// connect that merely ran past its own mcpTimeout (server never answered)
+// produces the identical context.Canceled/DeadlineExceeded on err as a
+// genuine user cancel (see createSession's WithoutCancel(ctx) comment), but
+// the caller's own ctx here is never touched. Before distinguishing on
+// ctx.Err() this collapsed into the same StateNeedsAuth as a real cancel,
+// offering "log in again" for a server outage the user cannot fix by
+// re-authenticating - reproduced end to end by
+// TestAuthenticateMCP_UnreachableServerIsErrorNotNeedsAuth.
+func TestSetAuthTerminal_ConnectTimeoutIsError(t *testing.T) {
+	const name = "auth-terminal-timeout"
+	r := NewRegistry()
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.updateStateFor(name, owner, StateStarting, nil)
+
+	r.setAuthTerminal(t.Context(), name, owner, context.Canceled)
+
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateError, info.State)
+}
+
+// TestSetAuthTerminal_InteractiveAuthTimeoutIsNeedsAuth: the other
+// legitimate recoverable case, tagged explicitly by transport.go rather
+// than inferred from ctx - the user simply never finished the browser
+// login within interactiveAuthTimeout, on an ordinary (uncancelled) ctx.
+func TestSetAuthTerminal_InteractiveAuthTimeoutIsNeedsAuth(t *testing.T) {
+	const name = "auth-terminal-interactive-timeout"
+	r := NewRegistry()
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.updateStateFor(name, owner, StateStarting, nil)
+
+	wrapped := fmt.Errorf("oauth authorize: %w: %w", errInteractiveAuthTimeout, context.DeadlineExceeded)
+	r.setAuthTerminal(t.Context(), name, owner, wrapped)
+
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateNeedsAuth, info.State)
+}
+
+// TestAuthenticateMCP_UnreachableServerIsErrorNotNeedsAuth reproduces G5's
+// scenario end to end: a server that accepts the TCP connection but never
+// answers at the HTTP level runs the connect past its own mcpTimeout, which
+// cancels createSession's context (see its WithoutCancel(ctx) comment) -
+// producing a joined context.Canceled/context.DeadlineExceeded error with
+// no interactiveAuthTimeout involved (the OAuth 401 challenge is never even
+// reached) and the caller's own ctx never cancelled. That must settle as a
+// genuine connect failure (StateError with the real cause), not "please log
+// in again".
+func TestAuthenticateMCP_UnreachableServerIsErrorNotNeedsAuth(t *testing.T) {
+	t.Parallel()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Accept and hang: never write an HTTP response, so the
+			// client sits waiting until mcpTimeout cancels it.
+			t.Cleanup(func() { conn.Close() })
+		}
+	}()
+
+	const name = "unreachable-oauth-server"
+	r := NewRegistry()
+	url := fmt.Sprintf("http://%s/mcp", ln.Addr().String())
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: url, OAuth: true, Timeout: 1}}})
+
+	err = r.AuthenticateMCP(t.Context(), cfg, name)
+	require.Error(t, err)
+
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateError, info.State, "an unreachable server must not be offered as StateNeedsAuth")
 }
 
 // TestInitClient_NonOAuthCancellationIsError pins the startup semantics: a
@@ -1695,6 +1777,40 @@ func TestBuildHTTPTransportOAuth(t *testing.T) {
 			require.Same(t, handler, pub.auth.handler, "registered handler must match returned handler")
 		})
 	}
+}
+
+// TestOAuthSetup_StaleAttemptReturnsErrLostOwnership covers G22: a stale
+// attempt losing the owners[name] race inside oauthSetup used to surface as
+// context.Canceled, which mcp-tools.go's RunTool path (errors.Is against
+// context.Canceled/DeadlineExceeded) treats as fatal and aborts the whole
+// tool-call batch. It is really the same lost-ownership condition that
+// init.go and resources.go settle with errLostOwnership elsewhere in this
+// package, and must classify the same way so a model-facing caller can
+// retry instead of failing the turn.
+func TestOAuthSetup_StaleAttemptReturnsErrLostOwnership(t *testing.T) {
+	t.Parallel()
+	const name = "oauth-transport"
+	r := NewRegistry()
+	stale, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	// A second attempt for the same server supersedes the first in
+	// r.owners without bumping the generation, exactly like a concurrent
+	// reconnect racing an in-flight connect.
+	fresh, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	t.Cleanup(func() { r.detachAuth(name, fresh, nil).Close() })
+
+	cfg := configtest.NewStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://mcp.example.com/api", OAuth: true}}})
+	m := cfg.Config().MCP[name]
+
+	_, err = r.oauthSetup(t.Context(), cfg, name, m, stale.gen, stale.seq, cfg.Resolver(), m.URL)
+	require.ErrorIs(t, err, errLostOwnership)
+	require.NotErrorIs(t, err, context.Canceled, "must not be classified as a plain cancellation")
+
+	// The still-current attempt is unaffected.
+	handler, err := r.oauthSetup(t.Context(), cfg, name, m, fresh.gen, fresh.seq, cfg.Resolver(), m.URL)
+	require.NoError(t, err)
+	require.NotNil(t, handler)
 }
 
 func TestBeginAuth_UnknownServer(t *testing.T) {

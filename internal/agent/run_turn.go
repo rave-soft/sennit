@@ -543,12 +543,13 @@ func (a *sessionAgent) completeTurn(
 		if summarizeFailed != nil {
 			complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID, Error: summarizeFailed.Error()}
 			complete.Cancelled = summarizeCancelled
-			// Mirror the outerOwesRunComplete branch below: a cancel
-			// (Escape) that lands mid-auto-summarize surfaces here as
-			// summarizeFailed wrapping context.Canceled, and without
-			// Cancelled set the caller (see thread/lifecycle.go) reads
-			// a non-empty Error as StatusFailed instead of a plain
-			// cancellation.
+			// A cancel (Escape) that lands mid-auto-summarize surfaces
+			// here as summarizeFailed wrapping context.Canceled, and
+			// without Cancelled set the caller (see thread/lifecycle.go)
+			// reads a non-empty Error as StatusFailed instead of a plain
+			// cancellation. The outerOwesRunComplete branch below applies
+			// the same rule; both are needed, since which one publishes
+			// depends only on whether a prompt was waiting in the queue.
 			if t.currentAssistant != nil {
 				complete.MessageID = t.currentAssistant.ID
 				complete.Text = t.currentAssistant.Content().String()
@@ -597,6 +598,15 @@ func (a *sessionAgent) completeTurn(
 			complete.Cancelled = errors.Is(err, context.Canceled)
 		} else if summarizeFailed != nil {
 			complete.Error = summarizeFailed.Error()
+			// Same rule as the branch above, and as the no-queue branch:
+			// an Escape landing mid-auto-summarize arrives here wrapping
+			// context.Canceled, and a consumer reading a non-empty Error
+			// without Cancelled calls it a failure. thread/lifecycle.go
+			// does exactly that, so the thread finalized as
+			// "failed: context canceled". ctx.Err() below does not cover
+			// it: a cancel takes down the turn's genCtx, not the outer
+			// ctx this reads.
+			complete.Cancelled = errors.Is(summarizeFailed, context.Canceled)
 		}
 		if t.currentAssistant != nil {
 			complete.MessageID = t.currentAssistant.ID

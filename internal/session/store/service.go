@@ -36,6 +36,16 @@ type Service interface {
 	GetLast(ctx context.Context) (session.Session, error)
 	List(ctx context.Context) ([]session.Session, error)
 	ValidateSessionIDsInTree(ctx context.Context, rootSessionID string, sessionIDs []string) ([]string, error)
+	// Save writes back sess's whole row, title included. It has no
+	// production caller: renaming goes through Rename (a narrow,
+	// title-only write), and every other writer here (SaveUsage,
+	// SetModel, SetTodos, ...) touches only the columns it owns for the
+	// same reason - a wide write like this one collides with whatever
+	// else is concurrently updating the row (see SaveUsage's comment
+	// below, and G3 in REFACTORING.md, which closed exactly this as a UI
+	// write path). Save survives only because tests want a one-call way
+	// to fabricate a fully-populated session row; it must not grow a
+	// production caller again.
 	Save(ctx context.Context, sess session.Session) (session.Session, error)
 	// SaveUsage persists sess's token/summary/todo fields the way Save
 	// does, but ignores sess.Cost and sess.Title: costDelta is
@@ -47,8 +57,9 @@ type Service interface {
 	// against this same session) could plausibly have landed in between —
 	// summarize's provider stream is the case this exists for. Title is
 	// excluded rather than raced the same way cost is because nothing
-	// that calls SaveUsage means to rename the session; Save and Rename
-	// are for that.
+	// that calls SaveUsage means to rename the session; renaming goes
+	// through Rename, not Save (Save has no production caller - see its
+	// own doc above).
 	SaveUsage(ctx context.Context, sess session.Session, costDelta float64) (session.Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error

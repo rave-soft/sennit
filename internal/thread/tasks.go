@@ -491,22 +491,25 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 	if wasCancelled(st) {
 		return SendDisposition{}, fmt.Errorf("thread: task %q was cancelled (%s) and cannot be resumed; create a new task instead", id, st.Error)
 	}
-	disp, err := t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message, SenderAgent, nil, nil)
+	// The dispatcher's DelegationParent registry is per coordinator
+	// instance and empty on a fresh process, so the parent link is
+	// re-registered on every resume. It runs through beforeDispatch, not
+	// after send returns, for the reason Manager.Send documents: a run
+	// dispatched first can raise an ask from its own step 0, and a
+	// registry that is still empty at that moment cannot say whose
+	// session it belongs to.
+	disp, err := t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message, SenderAgent, nil, func(handle Handle) {
+		coord := handle.Workspace().Coordinator()
+		depth := 0
+		if c := t.lc.existingControl(st.ID); c != nil {
+			c.mu.Lock()
+			depth = c.depth
+			c.mu.Unlock()
+		}
+		registerParent(coord, coord, st, depth)
+	})
 	if err != nil {
 		return SendDisposition{}, err
-	}
-	// The dispatcher's DelegationParent registry is per coordinator
-	// instance and empty on a fresh process, so it's re-registered here —
-	// see Manager.Send's identical re-registration.
-	if c := t.lc.existingControl(st.ID); c != nil {
-		c.mu.Lock()
-		rt := c.runtime
-		depth := c.depth
-		c.mu.Unlock()
-		if rt != nil {
-			coord := rt.handle.Workspace().Coordinator()
-			registerParent(coord, coord, st, depth)
-		}
 	}
 	return disp, nil
 }

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,9 +23,10 @@ import (
 // session and reports the cancellation the way a real model does when a
 // canceled context finally surfaces mid-stream.
 type summarizeCancelModel struct {
-	calls   atomic.Int32
-	entered chan struct{}
-	release chan struct{}
+	calls       atomic.Int32
+	entered     chan struct{}
+	enteredOnce sync.Once
+	release     chan struct{}
 }
 
 func (m *summarizeCancelModel) Provider() string { return "fake" }
@@ -50,7 +52,10 @@ func (m *summarizeCancelModel) Stream(_ context.Context, call fantasy.Call) (fan
 		}, nil
 	}
 	return func(yield func(fantasy.StreamPart) bool) {
-		close(m.entered)
+		// Once: a queued follow-up runs a second turn through this same
+		// model, and closing an already-closed channel would panic before
+		// the test could assert anything.
+		m.enteredOnce.Do(func() { close(m.entered) })
 		<-m.release
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: context.Canceled})
 	}, nil
@@ -146,5 +151,78 @@ func TestRunTurn_CancelDuringAutoSummarizeReportsCancelled(t *testing.T) {
 	case n := <-notifications:
 		t.Fatalf("unexpected notification published: %+v", n.Payload)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestRunTurn_CancelDuringAutoSummarizeWithQueuedPromptReportsCancelled is
+// the other half of the test above, and it exists because the first fix
+// for this closed only one of the two branches that publish the turn's
+// RunComplete. Which branch runs is decided by nothing more than whether
+// a prompt was waiting in the queue when the turn ended - the user typing
+// their next message right after pressing Escape is enough - and the
+// queued branch reported the cancel as a plain error, so a thread
+// finalized as "failed: context canceled" exactly as before.
+func TestRunTurn_CancelDuringAutoSummarizeWithQueuedPromptReportsCancelled(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+
+	runCompleteBroker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(runCompleteBroker.Shutdown)
+
+	model := &summarizeCancelModel{entered: make(chan struct{}), release: make(chan struct{})}
+	sa := NewSessionAgent(SessionAgentOptions{
+		Model:       Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000}},
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: runCompleteBroker,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	subCtx, subCancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer subCancel()
+	completions := runCompleteBroker.Subscribe(subCtx)
+
+	runDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, RunID: "main", Prompt: "hello"})
+		runDone <- runErr
+	}()
+
+	select {
+	case <-model.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the summarize pass never reached its blocking Stream call")
+	}
+
+	// Cancel first, then queue: a cancel clears whatever is already
+	// queued, so the prompt has to arrive after it - which is exactly the
+	// real sequence, someone pressing Escape and immediately typing their
+	// next message. The turn then ends with something to drain and takes
+	// the outerOwesRunComplete branch.
+	sa.Cancel(sess.ID)
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "queued", Prompt: "next"})
+	close(model.release)
+
+	select {
+	case <-runDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run never returned")
+	}
+
+	for {
+		select {
+		case evt := <-completions:
+			if evt.Payload.RunID != "main" {
+				continue
+			}
+			require.True(t, evt.Payload.Cancelled,
+				"a cancel mid-summarize must report Cancelled even when a prompt was queued behind the turn")
+			require.NotEmpty(t, evt.Payload.Error)
+			return
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for the main turn's RunComplete")
+		}
 	}
 }

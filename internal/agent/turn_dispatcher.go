@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -285,16 +286,32 @@ func (d *turnDispatcher) run(ctx context.Context, accept *AcceptedRun, sessionID
 	runID := RunIDFromContext(ctx)
 	promptOrigin := PromptOriginFromContext(ctx)
 	// A steering dispatch (agent.WithSteering) asks for this prompt to
-	// reach a turn already in flight rather than queue behind it. run()
-	// below is called exactly once: d.run has no auth-retry loop of its
-	// own - a mid-stream auth failure is retried inside
-	// sessionAgent.Run's own Stream call via OnAuthRefresh, never by
-	// calling run() again here. dispatchDecision already guards its own
-	// call to onDispatch with a sync.Once (see dispatchOutcome's
-	// "dispatched" closure in run_turn.go), so wrapping it a second time
-	// here was redundant - removed rather than left as defensive
-	// duplication that suggested a second call site which does not exist.
+	// reach a turn already in flight rather than queue behind it.
+	//
+	// The hook is wrapped in a Once that spans this whole call, and the
+	// span is the point: dispatchDecision has a Once of its own, but a
+	// fresh one per turn, and one steering call is decided by more than
+	// one turn. A prompt that gets enqueued keeps its OnDispatch in the
+	// queued entry (enqueueLocked clears OnComplete and Accepted, not
+	// this), and sessionAgent.Run drains that entry as a later turn
+	// inside this same call - so its dispatchDecision reports a second
+	// outcome for a steering request that already reported
+	// SteerEnqueued. Downstream that second report is not cosmetic:
+	// threadspawn maps SteerRan to DispatchRan and lifecycle sets
+	// ranOwn from it, which decides whether a failed dispatch may
+	// synthesize a RunComplete for a runID it never owned.
+	//
+	// (An earlier version of this comment blamed an auth-retry chain
+	// calling run twice. There is no such chain - a mid-stream auth
+	// failure is retried inside Stream via OnAuthRefresh - and removing
+	// the Once on the strength of that reasoning reintroduced the double
+	// report. The mechanism is the requeue, not a retry.)
 	onDispatch, steering := SteeringFromContext(ctx)
+	if onDispatch != nil {
+		var once sync.Once
+		hook := onDispatch
+		onDispatch = func(outcome SteerOutcome) { once.Do(func() { hook(outcome) }) }
+	}
 	run := func() (*fantasy.AgentResult, error) {
 		return d.agentPort.current().Run(ctx, d.makeRunCall(SessionAgentCall{
 			Runtime:       runtime,

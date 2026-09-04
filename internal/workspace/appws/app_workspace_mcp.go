@@ -71,6 +71,16 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 }
 
 func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]workspace.MCPPrompt, error) {
+	// A bare &app.App{} (sanctioned for tests, see app.go's comment on the
+	// pattern) leaves MCP nil; *mcp.Registry.Prompts dereferences the
+	// registry's own fields and has no nil-receiver guard, so this must
+	// check before calling it rather than rely on LoadMCPPrompts' own
+	// nil check - that one guards against a nil iterator, which
+	// w.app.MCP.Prompts() never produces (it always returns a valid,
+	// possibly-empty iter.Seq2), so it can't catch this case.
+	if w.app.MCP == nil {
+		return nil, nil
+	}
 	prompts, err := commands.LoadMCPPrompts(w.app.MCP.Prompts())
 	return toWorkspaceMCPPrompts(prompts), err
 }
@@ -138,9 +148,12 @@ func (w *AppWorkspace) RefreshDockerMCPAvailability() bool {
 
 // toWorkspaceArguments converts internal/commands' argument shape into the
 // contract's own. The conversion lives here, at the boundary, so
-// internal/workspace never imports internal/commands — that package pulls
-// in internal/agent/tools/mcp, and internal/workspace is what internal/ui
-// links against (see TestDomainPackageDoesNotDependOnAgentTransitively).
+// internal/workspace never imports internal/commands: internal/workspace is
+// what internal/ui links against for the Workspace interface and DTOs, and
+// TestDomainPackageDoesNotDependOnAgentTransitively checks that guarantee
+// by walking internal/workspace's own transitive imports - keeping the
+// import out of internal/workspace entirely is what makes that check cheap,
+// independent of whatever internal/commands itself happens to import today.
 func toWorkspaceArguments(in []commands.Argument) []workspace.Argument {
 	if in == nil {
 		return nil

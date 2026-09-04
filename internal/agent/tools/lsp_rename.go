@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
@@ -78,6 +79,33 @@ func NewRenameTool(
 			}
 
 			affectedFiles := collectAffectedFiles(edit)
+
+			// The ranges above were computed against the server's overlay,
+			// and nothing in this process sends didChange when a file
+			// changes outside the edit tools — read and bash do not — so
+			// for any file the client has open they can describe an older
+			// version than the one ApplyWorkspaceEdit is about to read off
+			// disk. Applying them then rewrites the wrong lines, which is
+			// the defect lsp_replace_symbol closes for its own single
+			// file; a rename spans however many files the symbol reaches,
+			// and the set is only known once the server has answered.
+			//
+			// So: resync every open file this rename touches and ask
+			// again. The second answer is the one computed against what is
+			// actually on disk. Files the client never opened are already
+			// read from disk by the server and need nothing. When nothing
+			// was stale both answers agree and this costs one round trip.
+			if resynced := resyncOpenFiles(ctx, resolved.client, append(affectedFiles, resolved.path)); resynced {
+				fresh, freshResolved, err := recomputeRename(ctx, lspManager, params, searchDir)
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if fresh == nil {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' moved while its rename was being computed; read the file and try again", params.Symbol)), nil
+				}
+				edit, resolved = fresh, freshResolved
+				affectedFiles = collectAffectedFiles(edit)
+			}
 
 			// A rename is a write to every affected file, so the workspace
 			// boundary applies to each of them, same as write/edit. Checked
@@ -175,4 +203,50 @@ func NewRenameTool(
 			return fantasy.NewTextResponse(text), nil
 		},
 	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}, "new_name": {minLength: intPtr(1)}})
+}
+
+// resyncOpenFiles re-reads from disk every file in paths that the client
+// currently has open, and reports whether it resynced any. Only open files
+// need it: a file the server never opened is read from disk by the server
+// itself, so its view of that one is already current. Errors are ignored
+// on purpose — a file that vanished or became unreadable between the
+// server's answer and this call fails again, with a better message, when
+// the edit is applied.
+func resyncOpenFiles(ctx context.Context, client *lsp.Client, paths []string) bool {
+	seen := make(map[string]struct{}, len(paths))
+	resynced := false
+	for _, path := range paths {
+		if _, done := seen[path]; done {
+			continue
+		}
+		seen[path] = struct{}{}
+		if !client.IsFileOpen(path) {
+			continue
+		}
+		if err := client.NotifyChange(ctx, path); err != nil {
+			slog.Debug("Failed to resync a file before recomputing a rename", "path", path, "error", err)
+			continue
+		}
+		resynced = true
+	}
+	return resynced
+}
+
+// recomputeRename resolves the symbol and asks for its rename edits again,
+// after resyncOpenFiles has brought the server's view back in line with
+// disk. It returns a nil edit when the symbol no longer resolves, which
+// means the file moved under the rename rather than that anything failed.
+func recomputeRename(ctx context.Context, lspManager *lsp.Manager, params RenameParams, searchDir string) (*protocol.WorkspaceEdit, *resolvedSymbol, error) {
+	resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
+	if err != nil {
+		if isGenuineSymbolMiss(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("resolve symbol: %w", err)
+	}
+	edit, err := resolved.client.Rename(ctx, resolved.path, resolved.line, resolved.char, params.NewName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("recompute rename: %w", err)
+	}
+	return edit, resolved, nil
 }

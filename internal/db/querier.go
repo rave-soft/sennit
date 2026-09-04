@@ -232,7 +232,11 @@ type Querier interface {
 	// back here would overwrite a title async generation (title.go) set in
 	// the meantime, permanently, since that generator never runs a second
 	// time once a session has user text. No SaveUsage caller renames a
-	// session - that is Save's and Rename's job.
+	// session - renaming goes through RenameSession (session/store's
+	// Rename). Save also writes title, but has no production caller of its
+	// own: it exists for tests that need to fabricate a session row directly,
+	// not as a second write path from the UI (that wide, whole-row write is
+	// exactly what G3 closed off - see REFACTORING.md).
 	UpdateSessionUsage(ctx context.Context, arg UpdateSessionUsageParams) (Session, error)
 	UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (Thread, error)
 	UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (Thread, error)
