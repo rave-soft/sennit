@@ -1,6 +1,7 @@
 package toolmeta_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,8 +30,12 @@ func TestDocsReadOnlySetMatchesRegistry(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join("..", "..", "docs", "reference", "tools.md")
-	contents, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
+	// Normalized first: a Windows checkout converts the file's line
+	// endings, and a pattern anchored on "\n" then matches nothing at
+	// all - which this test would report as "the section disappeared".
+	contents := bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 
 	match := readOnlyBlock.FindSubmatch(contents)
 	require.NotNil(t, match, "the read-only set section of %s no longer has a bash block; update this test with it", path)
