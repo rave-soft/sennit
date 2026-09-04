@@ -109,16 +109,34 @@ func validateEdits(edits []MultiEditOperation) error {
 	return nil
 }
 
-// formatFailedEditReasons renders one reason line per failed edit. The
-// counts-only summary ("K edit(s) failed") that callers put in the
-// success message doesn't say which edit failed or why; FailedEdit.Error
-// otherwise only reached MultiEditResponseMetadata, which is rendered for
-// a human but never appears in the text the model itself reads back.
+// maxFailedEditReasons caps how many per-edit reason lines
+// formatFailedEditReasons renders. Each reason is notFoundError's text,
+// which can carry a diagnoseMismatch window of real file lines — on a
+// batch with many failures that made the response grow without bound
+// (40 failed edits on a 200-line file measured at 26KB, against 45 bytes
+// for the pre-fix summary line). The model needs enough detail to fix a
+// handful of edits, not a full window per failure once the batch is
+// clearly going wrong wholesale.
+const maxFailedEditReasons = 10
+
+// formatFailedEditReasons renders one reason line per failed edit, up to
+// maxFailedEditReasons, followed by a count of the rest. The counts-only
+// summary ("K edit(s) failed") that callers put in the success message
+// doesn't say which edit failed or why; FailedEdit.Error otherwise only
+// reached MultiEditResponseMetadata, which is rendered for a human but
+// never appears in the text the model itself reads back.
 func formatFailedEditReasons(failed []FailedEdit) string {
 	var b strings.Builder
 	b.WriteString("Failed edits:")
-	for _, f := range failed {
+	shown := failed
+	if len(shown) > maxFailedEditReasons {
+		shown = shown[:maxFailedEditReasons]
+	}
+	for _, f := range shown {
 		fmt.Fprintf(&b, "\n  edit %d: %s", f.Index, f.Error)
+	}
+	if rest := len(failed) - len(shown); rest > 0 {
+		fmt.Fprintf(&b, "\n  ... and %d more failed edit(s)", rest)
 	}
 	return b.String()
 }

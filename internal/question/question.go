@@ -80,8 +80,10 @@ type Request struct {
 	ConfirmDescription string     `json:"confirm_description,omitempty"`
 }
 
-// Validate checks that a Request has valid fields. For multiple
-// questions, ConfirmTitle and ConfirmDescription are required.
+// Validate checks that a Request has valid fields. ConfirmTitle and
+// ConfirmDescription are optional even for multiple questions: the UI's
+// confirm tab falls back to a plain "Confirm" title when ConfirmTitle is
+// empty, and simply omits the description when ConfirmDescription is.
 func (r Request) Validate() error {
 	if len(r.Questions) == 0 {
 		return fmt.Errorf("at least one question is required")

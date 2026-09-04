@@ -343,6 +343,43 @@ func TestDiagnosticsToolDistinguishesCleanFromNoLSPRunning(t *testing.T) {
 	})
 }
 
+// TestDiagnosticsToolChecksClientCoverageNotJustClientCount is the
+// regression test for finding 4: the tool used to gate on
+// lspManager.Clients().Len() == 0 — a global count — so a session with
+// only a Python server running still read as "checked" for a Go file
+// that server has no idea about, reporting noDiagnosticsFoundMessage
+// instead of admitting nothing actually covers it.
+func TestDiagnosticsToolChecksClientCoverageNotJustClientCount(t *testing.T) {
+	root := newLSPToolWorktree(t)
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	autoLSP := false
+	store := configtest.NewStore(t, &config.Config{
+		Options: &config.Options{AutoLSP: &autoLSP},
+		LSP: config.LSPs{"fakepy": {
+			Command:     exe,
+			Args:        []string{"-test.run=^TestLSPToolHelperProcess$"},
+			Env:         map[string]string{lspToolHelperProcess: "1", "SENNIT_LSP_TOOL_SCENARIO": "symbols", "SENNIT_LSP_TOOL_ROOT": root},
+			FileTypes:   []string{"py"},
+			RootMarkers: []string{"go.mod"},
+			Timeout:     5,
+		}},
+	}, configtest.WithWorkingDir(root))
+	manager := lsp.NewManager(store)
+	t.Cleanup(func() { manager.StopAll(t.Context()) })
+
+	// Boot the Python client on an unrelated file, so Clients().Len() > 0
+	// — the old, wrong condition would have called this "checked".
+	require.NoError(t, os.WriteFile(filepath.Join(root, "fake.py"), []byte(""), 0o644))
+	manager.Start(t.Context(), filepath.Join(root, "fake.py"))
+	require.Eventually(t, func() bool { return manager.Clients().Len() > 0 }, time.Second, 10*time.Millisecond)
+
+	response := runToolWith(t, NewDiagnosticsTool(manager, root), t.Context(), DiagnosticsToolName, DiagnosticsParams{FilePath: "a.go"})
+	require.False(t, response.IsError)
+	require.Equal(t, noLSPRunningMessage, response.Content,
+		"a Python-only client covers nothing for a .go file, so this must read as unchecked, not clean")
+}
+
 // TestResolveSymbolResultsStartsOnMatchedFileNotWorkingDir reproduces
 // defect 2: resolveSymbolResults used to call lspManager.Start on the
 // workspace directory, which handlesFiletype always rejects (a directory

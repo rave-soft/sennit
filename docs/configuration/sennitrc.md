@@ -86,10 +86,14 @@ don't download random configs without reading them first.
 ## Project trust
 
 Project-scoped config (`.sennit/sennitrc`, `.sennitrc`, `sennitrc`, and their
-JSON equivalents, in the current working directory) is only read if the
-project is trusted. Trust is recorded per directory, as a marker file under
-the global config directory (`internal/config/trust.go`), and there is no
-interactive "trust this project?" prompt — the only way to grant it is:
+JSON equivalents) is only read if the project is trusted. The search starts
+at the current working directory and walks up to the git working tree root
+(or the working directory itself, if it isn't inside a git repository), so a
+config file at the root of your repository is picked up and gated the same
+way from any subdirectory you happen to be in. Trust is recorded per
+directory, as a marker file under the global config directory
+(`internal/config/trust.go`), and there is no interactive "trust this
+project?" prompt — the only way to grant it is:
 
 ```sh
 sennit --trust-project

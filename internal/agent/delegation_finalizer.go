@@ -1130,7 +1130,14 @@ func (d *delegationFinalizer) agenticFetchFactory(ctx context.Context, client *h
 // built and inspected without also running a permission request or a
 // fetch.
 func (d *delegationFinalizer) buildAgenticFetchAgent(ctx context.Context, client *http.Client, tmpDir string) (SessionAgent, error) {
-	promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), prompt.WithWorkingDir(tmpDir))
+	// agenticFetchToolDescription glues delegationReportContract onto the
+	// caller-facing description (see agentic_fetch_tool.go), promising
+	// whoever calls the tool that a self-contained report comes back on
+	// its own. The delegate itself has to be told the same thing, the way
+	// builtinDelegatePrompt tells the `agent` tool's delegate - otherwise
+	// this was the third of three delegate-creation paths where that
+	// promise was made to the caller but never reached the delegate.
+	promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl)+"\n\n"+delegatedAgentContract, prompt.WithWorkingDir(tmpDir))
 	if err != nil {
 		return nil, err
 	}

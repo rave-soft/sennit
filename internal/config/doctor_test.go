@@ -362,16 +362,33 @@ func TestDoctorPermissionsAllowedToolsUnknownName(t *testing.T) {
 	require.Contains(t, problems[0].Message, "reed")
 }
 
-// TestDoctorPermissionsAllowedToolsWithAction pins that an entry naming a
-// specific action is checked by its tool half only: permissionService
-// matches "bash:npm run build" ahead of a bare "bash", so the text after
-// the colon is a command, not a tool name to validate.
+// TestDoctorPermissionsAllowedToolsWithAction pins both halves of an
+// entry that names an action. The action comes from a closed vocabulary
+// (permission.KnownActions) because Request builds its key by joining the
+// tool name and the action, so "bash:execute" is a rule and "bash:npm run
+// build" reads like one while matching nothing at all - the same silent
+// nothing a misspelled tool name produces, which is what this check
+// exists to surface.
 func TestDoctorPermissionsAllowedToolsWithAction(t *testing.T) {
 	cfg := doctorTestConfig(t)
-	cfg.Permissions = &Permissions{AllowedTools: []string{"bash:npm run build", "nope:whatever"}}
+	cfg.Permissions = &Permissions{AllowedTools: []string{"bash:execute", "bash:npm run build"}}
 	cfg.SetupAgents()
 
 	problems := Doctor(cfg)
 	require.Len(t, problems, 1)
-	require.Contains(t, problems[0].Message, "nope")
+	require.Contains(t, problems[0].Message, "bash:npm run build")
+	require.Contains(t, problems[0].Hint, "execute")
+}
+
+// TestDoctorPermissionsAllowedToolsUnknownToolBeatsAction keeps the two
+// halves from being reported twice for one entry: a misspelled tool is
+// the more useful thing to say.
+func TestDoctorPermissionsAllowedToolsUnknownToolBeatsAction(t *testing.T) {
+	cfg := doctorTestConfig(t)
+	cfg.Permissions = &Permissions{AllowedTools: []string{"bash2:whatever"}}
+	cfg.SetupAgents()
+
+	problems := Doctor(cfg)
+	require.Len(t, problems, 1)
+	require.Contains(t, problems[0].Message, "bash2")
 }

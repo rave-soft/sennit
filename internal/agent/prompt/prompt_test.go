@@ -570,6 +570,35 @@ func TestPromptData(t *testing.T) {
 		require.Contains(t, data.AvailSkillXML, "handed down from the parent workspace")
 	})
 
+	// The coordinator's cache is refreshed by the skills file watcher,
+	// which compares SKILL.md snapshots and sees nothing when only the
+	// config changed. Taking its list verbatim therefore left a skill
+	// the person had just disabled in <available_skills>, under a
+	// mandatory activation flow, while sennit_info read the live config
+	// and called the same skill disabled.
+	t.Run("a disabled skill is dropped even when the provider still lists it", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		cfg := &config.Config{
+			Providers: csync.NewMap[string, config.ProviderConfig](),
+			Options:   &config.Options{DisabledSkills: []string{"retired-skill"}},
+		}
+		base := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
+		store := skillsProviderStore{
+			ConfigStore: base,
+			active: []*skills.Skill{
+				{Name: "retired-skill", Description: "turned off in the config a moment ago"},
+				{Name: "kept-skill", Description: "still wanted"},
+			},
+		}
+		p, err := NewPrompt("t", "")
+		require.NoError(t, err)
+
+		data := p.promptData(context.Background(), "anthropic", "claude", store)
+		require.NotContains(t, data.AvailSkillXML, "retired-skill")
+		require.Contains(t, data.AvailSkillXML, "kept-skill")
+	})
+
 	// HasLSPTools must equal newAgentConfig's own gate for registering the
 	// lsp_* tools (internal/agent/agent_config.go: len(cfg.LSP) > 0 ||
 	// AutoLSPEnabled()). coder.md.tpl used to test a different, looser

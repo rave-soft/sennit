@@ -447,12 +447,43 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 	return s.resolve(permission, false, true, nil)
 }
 
+// KnownActions is the vocabulary CreatePermissionRequest.Action draws
+// from, and therefore the only second half an allowlist entry of the form
+// "tool:action" can have. It is a closed set on purpose: Request builds
+// its lookup key by joining the tool name and the action, so an entry
+// naming anything else - a command line, say - can never match, grants
+// nothing, and leaves the person answering a prompt they believe they
+// turned off. config.Doctor checks entries against this list;
+// TestPermissionActionsAreKnown keeps the list and the tools that raise
+// requests from drifting apart.
+var KnownActions = []string{
+	"cancel",
+	"create",
+	"download",
+	"execute",
+	"fetch",
+	"list",
+	"merge",
+	"read",
+	"remove",
+	"rename",
+	"search",
+	"write",
+}
+
+// IsKnownAction reports whether action is one of KnownActions.
+func IsKnownAction(action string) bool {
+	return slices.Contains(KnownActions, action)
+}
+
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
 	if s.skip.Load() {
 		return true, nil
 	}
 
-	// Check if the tool/action combination is in the allowlist
+	// Check if the tool/action combination is in the allowlist. The
+	// action half is one of KnownActions, never free text: an allowlist
+	// entry of "bash:npm run build" matches nothing and grants nothing.
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
 		return true, nil

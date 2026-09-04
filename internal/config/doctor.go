@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/toolmeta"
 )
 
@@ -231,27 +232,39 @@ func doctorToolNames(cfg *Config) []Problem {
 	}
 
 	// permissions.allowed_tools is the third list of tool names in a
-	// config and the one a typo hurts most: a name that matches nothing
-	// never grants anything, so the person keeps answering the prompt
-	// they believe they turned off, and nothing anywhere says why. The
-	// two lists above have been checked for a while and the
-	// documentation already promises this one is too - it was the entry
-	// nobody had wired up. Entries may carry an action ("bash:npm run
-	// build"), which permissionService.Request matches ahead of the bare
-	// tool name, so only the part before the first colon names a tool.
+	// config and the one a typo hurts most: an entry that matches
+	// nothing never grants anything, so the person keeps answering the
+	// prompt they believe they turned off, and nothing anywhere says
+	// why. The two lists above have been checked for a while and the
+	// documentation already promises this one is too.
+	//
+	// Both halves are checked. An entry may name an action
+	// ("bash:execute"), which permissionService.Request matches ahead of
+	// the bare tool name - but the action comes from a closed vocabulary
+	// (permission.KnownActions), not from free text. "bash:npm run
+	// build" reads like a rule and is one of the two ways to write an
+	// entry that can never fire.
 	if cfg.Permissions != nil {
 		for _, entry := range cfg.Permissions.AllowedTools {
-			name, _, _ := strings.Cut(entry, ":")
-			if isKnown(name) {
-				continue
+			name, action, hasAction := strings.Cut(entry, ":")
+			switch {
+			case !isKnown(name):
+				problems = append(problems, Problem{
+					Severity: SeverityWarn,
+					Area:     AreaAgent,
+					Subject:  "permissions.allowed_tools",
+					Message:  fmt.Sprintf("allowed_tools references unknown tool %q", name),
+					Hint:     "check for a typo; an unknown name grants nothing and the prompt keeps appearing",
+				})
+			case hasAction && !permission.IsKnownAction(action):
+				problems = append(problems, Problem{
+					Severity: SeverityWarn,
+					Area:     AreaAgent,
+					Subject:  "permissions.allowed_tools",
+					Message:  fmt.Sprintf("allowed_tools entry %q names no known action: %q", entry, action),
+					Hint:     fmt.Sprintf("an action is one of %s, not a command; %q grants nothing", strings.Join(permission.KnownActions, ", "), entry),
+				})
 			}
-			problems = append(problems, Problem{
-				Severity: SeverityWarn,
-				Area:     AreaAgent,
-				Subject:  "permissions.allowed_tools",
-				Message:  fmt.Sprintf("allowed_tools references unknown tool %q", name),
-				Hint:     "check for a typo; an unknown name grants nothing and the prompt keeps appearing",
-			})
 		}
 	}
 	return problems

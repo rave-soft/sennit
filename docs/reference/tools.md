@@ -154,11 +154,12 @@ permissions allow read multi_read ls glob grep ripgrep \
 ```
 
 > [!WARNING]
-> `read`, `ls`, `glob`, `grep`, and `ripgrep` only prompt when the path they're
-> given falls outside your working directory — inside it, they never ask.
-> Allowing them removes that one remaining check, so the model can read any
-> file on disk your user can (`~/.ssh`, a sibling repository, ...) without
-> being asked again. See [Permissions](../configuration/permissions.md).
+> `read`, `multi_read`, `ls`, `glob`, `grep`, and `ripgrep` only prompt when
+> the path they're given falls outside your working directory — inside it,
+> they never ask. Allowing them removes that one remaining check, so the
+> model can read any file on disk your user can (`~/.ssh`, a sibling
+> repository, ...) without being asked again. See
+> [Permissions](../configuration/permissions.md).
 
 ## Turning tools off
 

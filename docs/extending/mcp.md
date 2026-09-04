@@ -108,6 +108,14 @@ permissions allow mcp_github_search_issues
 permissions deny mcp_github_create_issue
 ```
 
+One exception: five tools of Sennit's own managed Docker MCP gateway
+(`mcp-find`, `mcp-add`, `mcp-remove`, `mcp-config-set`, `code-mode`) run
+without a permission prompt, the same way `git_status` does. This bypass
+checks that the server is genuinely the built-in gateway command, not just a
+user-configured server sharing the name "docker" — but note that `mcp-add`,
+`mcp-remove` and `mcp-config-set` change which MCP servers are enabled, so
+the exemption is not limited to read-only calls.
+
 A [hook](hooks.md) with a matcher can gate a whole server at once:
 
 ```bash

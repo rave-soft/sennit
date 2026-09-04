@@ -61,12 +61,13 @@ func NewRenameTool(
 			// NewDefinitionTool for why "." was the wrong tree in a
 			// thread's worktree.
 			searchDir := filepathext.SmartJoin(workingDir, params.Path)
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
+			resolved, truncated, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				if !isGenuineSymbolMiss(err) {
 					return fantasy.ToolResponse{}, fmt.Errorf("resolve symbol: %w", err)
 				}
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
+				return fantasy.NewTextErrorResponse(notFoundWithTruncationNote(
+					fmt.Sprintf("Symbol '%s' not found", params.Symbol), truncated)), nil
 			}
 
 			edit, err := resolved.client.Rename(ctx, resolved.path, resolved.line, resolved.char, params.NewName)
@@ -252,7 +253,12 @@ func resyncOpenFiles(ctx context.Context, client *lsp.Client, paths []string) (r
 // disk. It returns a nil edit when the symbol no longer resolves, which
 // means the file moved under the rename rather than that anything failed.
 func recomputeRename(ctx context.Context, lspManager *lsp.Manager, params RenameParams, searchDir string) (*protocol.WorkspaceEdit, *resolvedSymbol, error) {
-	resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
+	// truncated is not surfaced here: a nil edit from this path already
+	// reads back to the caller as "the symbol moved while its rename was
+	// being computed", a distinct, more specific message than the
+	// original not-found case, which already carried its own truncation
+	// note before recomputeRename was ever reached.
+	resolved, _, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 	if err != nil {
 		if isGenuineSymbolMiss(err) {
 			return nil, nil, nil

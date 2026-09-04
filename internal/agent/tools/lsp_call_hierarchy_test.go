@@ -145,3 +145,23 @@ func TestCallHierarchyTool_ContextCanceledIsGoErrorNotTextResponse(t *testing.T)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, fantasy.ToolResponse{}, resp)
 }
+
+// TestCallHierarchyNotFoundMentionsTruncation is the regression test for
+// finding 3: lsp_call_hierarchy used to discard resolveSymbol's truncated
+// flag, so a capped grep whose matched candidates all lacked an LSP
+// client read back identically to a symbol that genuinely does not exist
+// anywhere in the tree.
+func TestCallHierarchyNotFoundMentionsTruncation(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeManySymbolMatches(t, root)
+
+	manager := newNoLSPManager(t)
+	tool := NewCallHierarchyTool(manager, root)
+	resp := runToolWith(t, tool, t.Context(), CallHierarchyToolName, CallHierarchyParams{Symbol: "count", Direction: "incoming", Path: "."})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Symbol 'count' not found")
+	require.Contains(t, resp.Content, "match limit",
+		"a capped grep must say so instead of reading back exactly like a genuine miss")
+}

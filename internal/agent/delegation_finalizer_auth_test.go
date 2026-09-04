@@ -92,7 +92,7 @@ func TestRunSubAgent_RetryUsesRefreshedCredential(t *testing.T) {
 	agentCfg, ok := co.cfg.Config().Agents[config.AgentTask]
 	require.True(t, ok, "authTestCoordinator's SetupAgents must configure the task agent")
 
-	p, err := taskPrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
+	p, err := builtinDelegatePrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
 	require.NoError(t, err)
 	delegate, err := co.delegation.newSubAgent(t.Context(), p, agentCfg)
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestRunSubAgent_RetryUsesRefreshedCredential_DifferentModel(t *testing.T) {
 	agentCfg := taskCfg
 	agentCfg.Model = authProviderID + "/" + subAgentDifferentModelID
 
-	p, err := taskPrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
+	p, err := builtinDelegatePrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
 	require.NoError(t, err)
 	delegate, err := co.delegation.newSubAgent(t.Context(), p, agentCfg)
 	require.NoError(t, err)
@@ -299,7 +299,7 @@ func TestRunSubAgent_RateLimitRotatesAccountAndSucceeds(t *testing.T) {
 	agentCfg, ok := co.cfg.Config().Agents[config.AgentTask]
 	require.True(t, ok, "authTestCoordinator's SetupAgents must configure the task agent")
 
-	p, err := taskPrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
+	p, err := builtinDelegatePrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
 	require.NoError(t, err)
 	delegate, err := co.delegation.newSubAgent(t.Context(), p, agentCfg)
 	require.NoError(t, err)

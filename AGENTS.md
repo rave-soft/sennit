@@ -45,7 +45,6 @@ internal/
   permission/                      Tool permission checking and allow-lists
   skills/                          Skill file discovery and loading
   shell/                           Bash command execution with background job support
-  event/                           Telemetry (PostHog)
   pubsub/                          Internal pub/sub for cross-component messaging
   filetracker/                     Tracks files touched per session
   history/                         Prompt history
@@ -70,7 +69,9 @@ internal/
   snapshots (`store.Config()`); mutators clone-and-swap rather than
   editing the live value.
 - **Tools are self-documenting**: each tool has a `.go` implementation and a
-  `.md` description file in `internal/agent/tools/`.
+  description file in `internal/agent/tools/` - a plain `.md` for a static
+  description, or a `.md.tpl` (more of them than plain `.md` files) when the
+  description depends on config, such as a tool's own limits.
 - **Tool failures: text response vs. Go error**: a model-recoverable failure
   (bad or missing argument, invalid enum value, a target URL/ID that doesn't
   resolve) returns `fantasy.NewTextErrorResponse(...)` so the model sees it

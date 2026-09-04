@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -254,8 +255,20 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 		// this rediscovery caused: a relative skills_paths entry resolved
 		// against store.WorkingDir() below, but DiscoveryConfig.ResolvePaths
 		// (skills/manager.go) resolves the very same entry differently.
+		//
+		// The disabled list is still applied here, over the provided
+		// one. The coordinator's cache is refreshed by the skills file
+		// watcher, which compares SKILL.md snapshots and sees nothing
+		// when only the config changed - so taking the list verbatim
+		// left a skill the person had just disabled sitting in
+		// <available_skills> under a mandatory activation flow, while
+		// sennit_info, reading the live config, called it disabled in
+		// the same breath.
 		if activeSkills := sp.ActiveSkills(); len(activeSkills) > 0 {
-			availSkillXML = skills.ToPromptXML(activeSkills)
+			enabled := skills.Filter(activeSkills, cfg.Options.DisabledSkills)
+			if len(enabled) > 0 {
+				availSkillXML = skills.ToPromptXML(enabled)
+			}
 		}
 	} else {
 		// No coordinator-backed skill list available (e.g. the
@@ -335,19 +348,39 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 // for a ".git" entry: the working directory is a session's cwd (or
 // --cwd), not necessarily the repo root, and a plain stat says "no" for
 // any subdirectory of a repo even though every git tool the prompt
-// recommends works fine there and finds the same repo by walking up. A
-// git failure that is not "not a repository" (missing binary, permission
-// problem) is treated the same as "not a repo" - the safe default that
-// simply omits the git-status block, matching getGitStatusSummary's own
-// "could not be determined" rather than asserting either state.
+// recommends works fine there and finds the same repo by walking up.
+//
+// A git failure that is not "not a repository" (missing binary,
+// permission problem) collapses to the same false as a genuine "not a
+// repo" - unlike getGitStatusSummary, there is no third "could not be
+// determined" state in the prompt itself: both templates print an
+// unconditional "Is directory a git repo: no" (task.md.tpl,
+// coder.md.tpl), so a git failure here reads to the model as flat proof
+// there is no repository, not as "unknown". The slog.Warn below is the
+// only place that distinction survives, and it fires on every prompt
+// build for as long as the condition holds (e.g. git missing from PATH
+// for the rest of the session) - noisy enough to be worth throttling if
+// it turns out to matter in practice.
 func isGitRepo(ctx context.Context, dir string) bool {
 	inRepo, err := git.IsRepo(ctx, dir)
 	if err != nil {
-		slog.Warn("Could not determine whether the working directory is a git repository", "dir", dir, "error", err)
+		// Once per directory, not once per prompt. The condition that
+		// produces this - git missing from PATH, an unreadable parent -
+		// holds for the whole session, and a prompt is built on every
+		// turn, so logging it each time buries everything else in the
+		// run log without telling anyone anything new.
+		if _, warned := gitRepoWarned.LoadOrStore(dir, struct{}{}); !warned {
+			slog.Warn("Could not determine whether the working directory is a git repository", "dir", dir, "error", err)
+		}
 		return false
 	}
 	return inRepo
 }
+
+// gitRepoWarned records the directories isGitRepo has already complained
+// about. Keyed by directory because a process can build prompts for more
+// than one: a thread's workspace is its own worktree.
+var gitRepoWarned sync.Map
 
 func getGitStatus(ctx context.Context, dir string) string {
 	sh := shell.NewShell(&shell.Options{

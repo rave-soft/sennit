@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +216,43 @@ func TestMultiEditAllEditsFail(t *testing.T) {
 
 	require.Len(t, failedEdits, 2)
 	require.Equal(t, content, currentContent, "Content should be unchanged")
+}
+
+// TestFormatFailedEditReasonsCapsOutput is the regression test for finding
+// 6: formatFailedEditReasons rendered one full reason line per failed
+// edit with no cap, and each reason can carry a several-line
+// diagnoseMismatch window of real file content — measured on a batch of
+// 40 failed edits against a 200-line file at 26KB, against 45 bytes
+// before the fix that made every candidate get queried added the
+// per-edit reason in the first place. A batch this size must still name
+// a handful of edits and then say how many more failed, not repeat the
+// same shape 40 times over.
+func TestFormatFailedEditReasonsCapsOutput(t *testing.T) {
+	t.Parallel()
+
+	// Stand-in for a realistic diagnoseMismatch hint, which carries a
+	// several-line window of real file content per failure — simulated
+	// directly here rather than depending on its fuzzy-match heuristics
+	// picking a particular file layout.
+	window := strings.Repeat("  123 | some line of file content near the mismatch\n", 10)
+	const total = 40
+	failed := make([]FailedEdit, total)
+	for i := range failed {
+		failed[i] = FailedEdit{
+			Index: i + 1,
+			Error: "old_string not found in file. Make sure it matches exactly, including whitespace and line breaks\n\n" + window,
+		}
+	}
+
+	out := formatFailedEditReasons(failed)
+
+	require.Contains(t, out, "edit 1:")
+	require.Contains(t, out, fmt.Sprintf("edit %d:", maxFailedEditReasons))
+	require.NotContains(t, out, fmt.Sprintf("edit %d:", maxFailedEditReasons+1),
+		"only the first %d failures get their own reason line", maxFailedEditReasons)
+	require.Contains(t, out, fmt.Sprintf("... and %d more failed edit(s)", total-maxFailedEditReasons))
+	require.Less(t, len(out), 8000,
+		"40 failures at ~400 bytes each must not make the response grow linearly with the batch size")
 }
 
 func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {

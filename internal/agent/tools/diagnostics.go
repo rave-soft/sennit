@@ -27,14 +27,25 @@ var diagnosticsDescription string
 
 // noLSPRunningMessage is returned by the tool (not by getDiagnostics,
 // which other callers rely on staying silent when there's nothing to
-// report — see finishMutation) when no LSP client is running at all. An
-// empty result otherwise reads identically whether nothing was wrong or
-// nothing could be checked; a model that treats "" as "clean" then misses
-// every error a configured-but-not-yet-started server would have found.
+// report — see finishMutation) when no LSP client covers what was asked
+// for at all. An empty result otherwise reads identically whether nothing
+// was wrong or nothing could be checked; a model that treats "" as
+// "clean" then misses every error a configured-but-not-yet-started
+// server would have found.
 const noLSPRunningMessage = "No LSP client is running; diagnostics could not be checked."
 
+// noLSPReadyMessage is returned when a client covers the request but has
+// not finished its initialize handshake yet (GetServerState() is not yet
+// StateReady) — distinct from noLSPRunningMessage: a client that exists
+// but isn't ready can't have published anything, so getDiagnostics below
+// would come back empty and read exactly like a genuinely clean file.
+const noLSPReadyMessage = "LSP client for this file is still starting; diagnostics could not be checked yet."
+
 // noDiagnosticsFoundMessage confirms diagnostics were actually checked
-// and came back empty, as distinct from noLSPRunningMessage above.
+// and came back empty, as distinct from noLSPRunningMessage and
+// noLSPReadyMessage above. It does not by itself guarantee a server that
+// indexes asynchronously after reporting ready has finished doing so —
+// see diagnostics.md.
 const noDiagnosticsFoundMessage = "No diagnostics found."
 
 func NewDiagnosticsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
@@ -47,8 +58,15 @@ func NewDiagnosticsTool(lspManager *lsp.Manager, workingDir string) fantasy.Agen
 				filePath = filepathext.SmartJoin(workingDir, filePath)
 			}
 			notifyLSPs(ctx, lspManager, filePath)
-			if lspManager == nil || lspManager.Clients().Len() == 0 {
+			if lspManager == nil {
 				return fantasy.NewTextResponse(noLSPRunningMessage), nil
+			}
+			clients := clientsForDiagnostics(lspManager, filePath)
+			if len(clients) == 0 {
+				return fantasy.NewTextResponse(noLSPRunningMessage), nil
+			}
+			if !anyClientReady(clients) {
+				return fantasy.NewTextResponse(noLSPReadyMessage), nil
 			}
 			output := getDiagnostics(filePath, lspManager)
 			if output == "" {
@@ -57,6 +75,36 @@ func NewDiagnosticsTool(lspManager *lsp.Manager, workingDir string) fantasy.Agen
 			return fantasy.NewTextResponse(output), nil
 		},
 	)
+}
+
+// clientsForDiagnostics returns the clients relevant to a diagnostics
+// request: every client that handles filePath, or every registered
+// client when filePath is empty (project-wide diagnostics span all of
+// them). Checking coverage this way, per file, is what tells "only a
+// Python server is running and this is a Go file" apart from "nothing is
+// running" — lspManager.Clients().Len() alone can't, since it counts
+// clients for languages that have nothing to do with the file asked
+// about.
+func clientsForDiagnostics(manager *lsp.Manager, filePath string) []*lsp.Client {
+	var clients []*lsp.Client
+	for c := range manager.Clients().Seq() {
+		if filePath == "" || c.HandlesFile(filePath) {
+			clients = append(clients, c)
+		}
+	}
+	return clients
+}
+
+// anyClientReady reports whether at least one of clients has finished its
+// initialize handshake. A client still in StateStarting has not had a
+// chance to publish anything, so its silence must not be read as "clean".
+func anyClientReady(clients []*lsp.Client) bool {
+	for _, c := range clients {
+		if c.GetServerState() == lsp.StateReady {
+			return true
+		}
+	}
+	return false
 }
 
 // openInLSPs ensures LSP servers are running, aware of the file, and

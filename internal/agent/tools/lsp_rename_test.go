@@ -159,3 +159,25 @@ func TestLSPRenameThroughManagerRefusesConfinementBeforeRequestingPermission(t *
 	require.Contains(t, resp.Content, "outside this workspace")
 	require.Empty(t, permissions.requests, "confinement must refuse before any permission request is made")
 }
+
+// TestLSPRenameNotFoundMentionsTruncation is the regression test for
+// finding 3: lsp_rename used to discard resolveSymbol's truncated flag,
+// so a capped grep whose matched candidates all lacked an LSP client read
+// back identically to a symbol that genuinely does not exist anywhere in
+// the tree.
+func TestLSPRenameNotFoundMentionsTruncation(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeManySymbolMatches(t, root)
+
+	manager := newNoLSPManager(t)
+	tool := NewRenameTool(manager, &mockPermissionService{}, &mockHistoryService{}, nil, root)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "rename-session")
+
+	resp := runToolWith(t, tool, ctx, RenameToolName, RenameParams{Symbol: "count", NewName: "renamed", Path: "."})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Symbol 'count' not found")
+	require.Contains(t, resp.Content, "match limit",
+		"a capped grep must say so instead of reading back exactly like a genuine miss")
+}

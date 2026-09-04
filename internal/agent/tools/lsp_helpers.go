@@ -22,6 +22,17 @@ import (
 // infrastructure failure and must propagate as a Go error instead.
 var errSymbolNotFound = errors.New("no matching symbol")
 
+// notFoundWithTruncationNote appends a note to a "not found" message when
+// the grep behind the failed lookup was truncated. Without it, a symbol
+// that only appears past the grep's match cap reads back identically to
+// one that genuinely does not exist anywhere in the tree.
+func notFoundWithTruncationNote(message string, truncated bool) string {
+	if !truncated {
+		return message
+	}
+	return message + " (the search hit its match limit; some candidate locations were never checked, so this symbol may exist)"
+}
+
 // isGenuineSymbolMiss reports whether err from resolveSymbol/
 // resolveSymbolResults is a genuine "no such symbol" — the search
 // completed and matched nothing — rather than an infrastructure failure:
@@ -49,12 +60,19 @@ type resolvedSymbol struct {
 // returns the first match position that a running LSP client confirms
 // is a valid identifier. Matches inside comments or strings are skipped
 // automatically because the LSP will reject them.
-func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) (*resolvedSymbol, error) {
-	results, _, err := resolveSymbolResults(ctx, lspManager, symbol, workingDir)
+//
+// The returned bool reports whether the underlying grep was truncated —
+// same meaning as resolveSymbolResults' own truncated return. A caller
+// that maps a genuine miss to a "not found" message must fold this in:
+// otherwise a symbol that only appears in an untried tail of a capped
+// grep reads back as if the search had covered everything.
+func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) (*resolvedSymbol, bool, error) {
+	results, truncated, err := resolveSymbolResults(ctx, lspManager, symbol, workingDir)
 	if err != nil {
-		return nil, err
+		return nil, truncated, err
 	}
-	return firstSymbolWithDefinition(ctx, results)
+	resolved, err := firstSymbolWithDefinition(ctx, results)
+	return resolved, truncated, err
 }
 
 func firstSymbolWithDefinition(ctx context.Context, results []*resolvedSymbol) (*resolvedSymbol, error) {
@@ -108,7 +126,12 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 		return nil, false, fmt.Errorf("failed to search for symbol: %w", err)
 	}
 	if len(matches) == 0 {
-		return nil, false, fmt.Errorf("symbol '%s' not found in grep results: %w", symbol, errSymbolNotFound)
+		// truncated carries through even here rather than being hardcoded
+		// false: searchFiles reports it capped only when a match limit
+		// was actually hit, and a zero-match capped search cannot happen
+		// in practice, but callers checking this return value should see
+		// what the search actually did, not an assumption about it.
+		return nil, truncated, fmt.Errorf("symbol '%s' not found in grep results: %w", symbol, errSymbolNotFound)
 	}
 
 	var results []*resolvedSymbol
@@ -137,7 +160,11 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 	}
 
 	if len(results) == 0 {
-		return nil, false, fmt.Errorf("no LSP client handles any file matching '%s': %w", symbol, errSymbolNotFound)
+		// Same reasoning as the zero-matches branch above: a capped grep
+		// whose every match happens to land in a file with no LSP client
+		// is still a capped grep, so truncated must say so rather than
+		// silently reporting false.
+		return nil, truncated, fmt.Errorf("no LSP client handles any file matching '%s': %w", symbol, errSymbolNotFound)
 	}
 	return results, truncated, nil
 }

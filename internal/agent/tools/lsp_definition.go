@@ -46,12 +46,13 @@ func NewDefinitionTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			// entirely: the tools searched the main checkout, or found
 			// no LSP client for a file that plainly exists.
 			searchDir := filepathext.SmartJoin(workingDir, params.Path)
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
+			resolved, truncated, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				if !isGenuineSymbolMiss(err) {
 					return fantasy.ToolResponse{}, fmt.Errorf("resolve symbol: %w", err)
 				}
-				return fantasy.NewTextResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
+				return fantasy.NewTextResponse(notFoundWithTruncationNote(
+					fmt.Sprintf("No definition found for symbol '%s'", params.Symbol), truncated)), nil
 			}
 
 			locations, err := resolved.client.Definition(ctx, resolved.path, resolved.line, resolved.char)

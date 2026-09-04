@@ -1,11 +1,17 @@
 # Permissions
 
-By default, every tool call that writes, executes, or reaches outside your
-working directory asks first. A few read-only tools — `read`, `ls`, `glob`,
-`grep`, `ripgrep` — only ask when the path they're given falls outside the
-working directory; inside it, they run without a prompt. `git_status`,
-`git_diff`, `git_log`, and the read-only `lsp_*` tools never ask, regardless
-of path. Permissions are how you stop being asked about the boring cases that
+By default, most tool calls that write, execute, or reach outside your
+working directory ask first. A few read-only tools — `read`, `multi_read`,
+`ls`, `glob`, `grep`, `ripgrep` — only ask when the path they're given falls
+outside the working directory; inside it, they run without a prompt.
+`git_status`, `git_diff`, `git_log`, `agent_trace`, and the read-only
+`lsp_*` tools never ask, regardless of path. `bash` is the one exception to
+"executes asks first": a fixed set of safe, side-effect-free commands (a
+plain `ls`, `cat`, `git status`, and the like — see `isSafeReadOnlyCommand`)
+run without a prompt too, as long as the command has no chaining
+metacharacter. A handful of tools from Sennit's own managed Docker MCP
+gateway are whitelisted the same way — see [MCP](../extending/mcp.md).
+Permissions are how you stop being asked about the boring cases that
 remain, and how you take dangerous ones off the table entirely.
 
 ## Three states
@@ -30,11 +36,11 @@ listed in the [tools reference](../reference/tools.md#the-read-only-set) —
 and keep prompting for anything that writes or executes.
 
 > [!WARNING]
-> For `read`, `ls`, `glob`, `grep`, and `ripgrep`, the prompt this removes is
-> the *only* check standing between the model and files outside your working
-> directory — `~/.ssh`, a sibling repository, anything else readable by your
-> user. Allowing these tools means the model can read any file on disk you
-> can, without asking again.
+> For `read`, `multi_read`, `ls`, `glob`, `grep`, and `ripgrep`, the prompt
+> this removes is the *only* check standing between the model and files
+> outside your working directory — `~/.ssh`, a sibling repository, anything
+> else readable by your user. Allowing these tools means the model can read
+> any file on disk you can, without asking again.
 
 Tool names are listed in the [tools reference](../reference/tools.md).
 A name that doesn't match any known tool is reported by `sennit doctor`, so a

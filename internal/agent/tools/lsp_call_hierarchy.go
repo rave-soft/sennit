@@ -40,12 +40,13 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 			// entirely: the tools searched the main checkout, or found
 			// no LSP client for a file that plainly exists.
 			searchDir := filepathext.SmartJoin(workingDir, params.Path)
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
+			resolved, truncated, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				if !isGenuineSymbolMiss(err) {
 					return fantasy.ToolResponse{}, fmt.Errorf("resolve symbol: %w", err)
 				}
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
+				return fantasy.NewTextErrorResponse(notFoundWithTruncationNote(
+					fmt.Sprintf("Symbol '%s' not found", params.Symbol), truncated)), nil
 			}
 
 			// Checked before the round trip, not only after it fails: a

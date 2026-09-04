@@ -176,3 +176,23 @@ func TestLSPDefinitionResyncsOverlayBeforeCheckingViability(t *testing.T) {
 	require.NotContains(t, resp.Content, "No definition found",
 		"a stale overlay must not make a genuine symbol read back as not found")
 }
+
+// TestLSPDefinitionNotFoundMentionsTruncation is the regression test for
+// finding 3: lsp_definition used to discard resolveSymbol's truncated
+// flag, so a capped grep whose matched candidates all lacked an LSP
+// client read back identically to a symbol that genuinely does not exist
+// anywhere in the tree.
+func TestLSPDefinitionNotFoundMentionsTruncation(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeManySymbolMatches(t, root)
+
+	manager := newNoLSPManager(t)
+	tool := NewDefinitionTool(manager, root)
+	resp := runToolWith(t, tool, t.Context(), DefinitionToolName, DefinitionParams{Symbol: "count", Path: "."})
+
+	require.False(t, resp.IsError, resp.Content)
+	require.Contains(t, resp.Content, "No definition found for symbol 'count'")
+	require.Contains(t, resp.Content, "match limit",
+		"a capped grep must say so instead of reading back exactly like a genuine miss")
+}
