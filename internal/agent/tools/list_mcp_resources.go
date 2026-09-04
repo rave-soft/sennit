@@ -82,6 +82,14 @@ func NewListMCPResourcesTool(cfg mcpResourceConfig, reg mcpResourceLister, permi
 				return resp, nil
 			}
 
+			// Checked before the round trip, not only on its error path: a
+			// canceled context does not force ListResources to fail, and a
+			// listing that arrives anyway would be recorded as an ordinary
+			// tool result for a call the user already abandoned.
+			if err := ctx.Err(); err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+
 			resources, err := reg.ListResources(ctx, cfg, params.MCPName)
 			if err != nil {
 				// See mcp-tools.go's Run for why cancellation must propagate

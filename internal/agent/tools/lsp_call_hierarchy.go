@@ -77,6 +77,12 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 			fmt.Fprintf(&b, "Call hierarchy for '%s':\n\n", item.Name)
 
 			if params.Direction == "incoming" {
+				// Checked before the round trip as well: see NewHoverTool
+				// for why a canceled context that the server happens to
+				// answer first must not come back as a normal result.
+				if err := ctx.Err(); err != nil {
+					return fantasy.ToolResponse{}, err
+				}
 				calls, err := resolved.client.IncomingCalls(ctx, item)
 				if err != nil {
 					if ctx.Err() != nil {
@@ -95,6 +101,12 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 					}
 				}
 			} else {
+				// Checked before the round trip as well: see NewHoverTool
+				// for why a canceled context that the server happens to
+				// answer first must not come back as a normal result.
+				if err := ctx.Err(); err != nil {
+					return fantasy.ToolResponse{}, err
+				}
 				calls, err := resolved.client.OutgoingCalls(ctx, item)
 				if err != nil {
 					if ctx.Err() != nil {
