@@ -24,6 +24,10 @@ come from your password manager, and a machine-specific setting is an `if`.
 > appears. Don't launch Sennit in a directory whose config you haven't read,
 > and don't download configs you haven't read either.
 
+Project-scoped config only runs after you explicitly trust the project with
+`sennit --trust-project` — an untrusted project's config is skipped entirely,
+not run. See [Project trust](sennitrc.md#project-trust).
+
 ## The seven builtin commands
 
 | Command | Configures |

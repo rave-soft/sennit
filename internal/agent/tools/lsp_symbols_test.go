@@ -6,8 +6,39 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
+
+// TestFormatSymbolsPrintsLineRange is the regression test for finding D:
+// lsp_symbols.md promises "line ranges", but formatSymbols only ever
+// printed the start line — the end line symbolRangeEndLine already
+// computes for lsp_replace_symbol was never surfaced here. A multi-line
+// symbol must render as "lines start-end", and a single-line one still as
+// plain "line N" rather than misleading "lines N-N".
+func TestFormatSymbolsPrintsLineRange(t *testing.T) {
+	symbols := []protocol.DocumentSymbolResult{
+		&protocol.DocumentSymbol{
+			Name: "Multi",
+			Kind: protocol.Function,
+			// 0-indexed lines 1-4 inclusive: LSP ranges are end-exclusive,
+			// so End lands at the start of the following line.
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 1},
+				End:   protocol.Position{Line: 5, Character: 0},
+			},
+		},
+		&protocol.DocumentSymbol{
+			Name:  "Single",
+			Kind:  protocol.Field,
+			Range: protocol.Range{Start: protocol.Position{Line: 7}, End: protocol.Position{Line: 7, Character: 12}},
+		},
+	}
+
+	out := formatSymbols(symbols, 0)
+	require.Contains(t, out, "Multi (lines 2-5)")
+	require.Contains(t, out, "Single (line 8)")
+}
 
 // TestSymbolsTool_ContextCanceledIsGoErrorNotTextResponse is the
 // regression test for D5: client.DocumentSymbols' error used to be

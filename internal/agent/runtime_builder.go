@@ -51,6 +51,21 @@ type runtimeConfigSnapshot struct {
 	reserveMCPTokenMutation func(string, config.MCPConfig) (config.MCPTokenMutation, bool)
 	setMCPToken             func(context.Context, *config.MCPTokenMutation, *oauth.Token) (bool, error)
 	clearMCPToken           func(*config.MCPTokenMutation, *oauth.Token) (bool, error)
+	// activeSkills is the coordinator's own computed skill list, handed
+	// to the prompt so it stops recomputing one from disk. See
+	// ActiveSkills.
+	activeSkills []*skills.Skill
+}
+
+// ActiveSkills implements prompt.SkillsProvider. Without it the prompt
+// rediscovers skills by walking the configured directories, which misses
+// the inherited ones entirely - and a thread lives in a git worktree with
+// no .sennit/skills of its own, which is exactly why inheritance exists.
+// The result was a thread whose <available_skills> omitted every project
+// skill while sennit_info, reading the same coordinator's list, reported
+// them active. The two answers come from one list now.
+func (s runtimeConfigSnapshot) ActiveSkills() []*skills.Skill {
+	return s.activeSkills
 }
 
 func (s runtimeConfigSnapshot) Config() *config.Config {
@@ -490,6 +505,10 @@ func (b *runtimeBuilder) runtimeFor(ctx context.Context, inputs runtimeToolInput
 		if err != nil {
 			return nil, err
 		}
+		// Attached here rather than in runtimeConfigSnapshot: the active
+		// list belongs to this build's inputs, not to the published
+		// config the snapshot is otherwise made of.
+		runtimeCfg.activeSkills = inputs.activeSkills
 		systemPrompt, err := runtimePrompt.Build(ctx, model.Model.Provider(), model.Model.Model(), runtimeCfg)
 		if err != nil {
 			return nil, err

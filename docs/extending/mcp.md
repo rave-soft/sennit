@@ -76,6 +76,11 @@ rest continue. Connection health is only observable from a running session:
 `sennit doctor` never starts MCP servers, so use the TUI's `/doctor` command or
 the `sennit_info` tool to see actual connection state.
 
+For an OAuth server, once the browser step is reached `--timeout` no longer
+applies: Sennit sets it aside and waits up to a fixed 5 minutes for the
+login (and any second factor or approval step) to complete at the
+localhost redirect. That five-minute wait is not configurable.
+
 ## The Docker MCP catalog
 
 If Docker's MCP toolkit is available on your machine, Sennit offers to enable

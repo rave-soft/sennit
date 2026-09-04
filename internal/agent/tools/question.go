@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"maps"
 	"strings"
 
@@ -15,14 +16,42 @@ import (
 
 const QuestionToolName = "question"
 
-//go:embed question.md
-var questionDescription string
+//go:embed question.md.tpl
+var questionDescriptionTmpl []byte
+
+var questionDescriptionTpl = template.Must(
+	template.New("questionDescription").
+		Parse(string(questionDescriptionTmpl)),
+)
+
+// questionDescriptionData mirrors the limits question.Validate actually
+// enforces, so the description can never drift from them the way a
+// hand-copied number in prose eventually does.
+type questionDescriptionData struct {
+	MaxQuestions               int
+	MaxChoices                 int
+	MaxQuestionLength          int
+	MaxDescriptionLength       int
+	MaxChoiceLabelLength       int
+	MaxChoiceDescriptionLength int
+}
+
+func questionDescription() string {
+	return renderTemplate(questionDescriptionTpl, questionDescriptionData{
+		MaxQuestions:               question.MaxQuestions,
+		MaxChoices:                 question.MaxChoices,
+		MaxQuestionLength:          question.MaxQuestionLength,
+		MaxDescriptionLength:       question.MaxDescriptionLength,
+		MaxChoiceLabelLength:       question.MaxChoiceLabelLength,
+		MaxChoiceDescriptionLength: question.MaxChoiceDescriptionLength,
+	})
+}
 
 // QuestionParams defines the parameters for the question tool.
 type QuestionParams struct {
 	Questions          []QuestionItem `json:"questions" description:"List of questions to present. Single item = no tabs, multiple = tabbed form."`
-	ConfirmTitle       string         `json:"confirm_title,omitempty" description:"Title for the confirmation tab. Required for multi-question batches."`
-	ConfirmDescription string         `json:"confirm_description,omitempty" description:"Description for the confirmation tab. Required for multi-question batches."`
+	ConfirmTitle       string         `json:"confirm_title,omitempty" description:"Title for the confirmation tab shown for multi-question batches. Optional: defaults to a generic title if omitted, but a specific one is worth setting."`
+	ConfirmDescription string         `json:"confirm_description,omitempty" description:"Description for the confirmation tab shown for multi-question batches. Optional: defaults to a generic description if omitted, but summarizing the expected answers is worth setting."`
 }
 
 // UnmarshalJSON handles models that double-serialize the questions field as a
@@ -84,7 +113,7 @@ type QuestionChoice struct {
 func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 	tool := withToolParameterSchema(fantasy.NewAgentTool(
 		QuestionToolName,
-		questionDescription,
+		questionDescription(),
 		func(ctx context.Context, params QuestionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {

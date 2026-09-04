@@ -3,11 +3,32 @@ package tools
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// TestAgentTraceDescriptionDocumentsPagination is the regression test for
+// finding E: agent_trace had no description at all (an empty string
+// literal) and none of its five params had a `description` tag, leaving a
+// model with no way to learn about the session_id/run_id requirement, the
+// limit bounds, or how to page with cursor/next_cursor.
+func TestAgentTraceDescriptionDocumentsPagination(t *testing.T) {
+	desc := agentTraceDescription()
+	require.NotEmpty(t, desc)
+	require.Contains(t, desc, "session_id")
+	require.Contains(t, desc, "next_cursor")
+	require.Contains(t, desc, "200", "must document the actual default limit")
+	require.Contains(t, desc, "1000", "must document the actual max limit")
+
+	typ := reflect.TypeOf(AgentTraceParams{})
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		require.NotEmpty(t, field.Tag.Get("description"), "field %s must have a description tag", field.Name)
+	}
+}
 
 func TestAgentTraceFixturePaginationAndSafety(t *testing.T) {
 	file := t.TempDir() + "/trace.jsonl"

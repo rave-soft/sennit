@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,6 +37,18 @@ func newStore(t *testing.T, dir string) *config.ConfigStore {
 	}
 	return configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
 }
+
+// skillsProviderStore wraps a *config.ConfigStore to additionally
+// implement SkillsProvider, standing in for the production coordinator
+// wiring (out of scope here - see prompt.go's SkillsProvider doc comment)
+// that hands promptData a pre-computed active-skill list instead of
+// letting it rediscover from disk.
+type skillsProviderStore struct {
+	*config.ConfigStore
+	active []*skills.Skill
+}
+
+func (s skillsProviderStore) ActiveSkills() []*skills.Skill { return s.active }
 
 func TestNewPrompt(t *testing.T) {
 	t.Parallel()
@@ -371,16 +384,34 @@ func TestLoadContextFiles(t *testing.T) {
 func TestIsGitRepo(t *testing.T) {
 	t.Parallel()
 
-	t.Run("directory with a .git entry is a repo", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o755))
-		require.True(t, isGitRepo(dir))
+	// isGitRepo now asks git itself (rev-parse --is-inside-work-tree)
+	// rather than stat'ing for a ".git" entry, so an actual repo is
+	// needed here - a bare, empty ".git" directory (what the old stat
+	// check accepted) is not a working tree git recognizes either, so
+	// treating it as "not a repo" is the correct answer, not a
+	// regression: no git command run in the real prompt would work
+	// there.
+	t.Run("directory with a real .git entry is a repo", func(t *testing.T) {
+		dir := initGitRepo(t)
+		require.True(t, isGitRepo(t.Context(), dir))
 	})
 
 	t.Run("plain directory is not a repo", func(t *testing.T) {
+		requireGit(t)
 		t.Parallel()
-		require.False(t, isGitRepo(t.TempDir()))
+		require.False(t, isGitRepo(t.Context(), t.TempDir()))
+	})
+
+	// Regression: a stat for ".git" said "no" for any subdirectory of a
+	// repo, even though every git command (and the prompt that tells the
+	// model to use them) works fine there by walking up to find the repo
+	// root. sennit run --cwd a/subdir/of/a/repo used to tell the model
+	// "Is directory a git repo: no" and drop the whole git-status block.
+	t.Run("subdirectory of a repo is still a repo", func(t *testing.T) {
+		dir := initGitRepo(t)
+		sub := filepath.Join(dir, "nested")
+		require.NoError(t, os.Mkdir(sub, 0o755))
+		require.True(t, isGitRepo(t.Context(), sub))
 	})
 }
 
@@ -508,6 +539,86 @@ func TestPromptData(t *testing.T) {
 
 		data := p.promptData(context.Background(), "anthropic", "claude", store)
 		require.Contains(t, data.AvailSkillXML, "overridden jq skill for this test.")
+	})
+
+	// TestPromptData_SkillsProviderTakesPrecedenceOverDiscovery pins the
+	// fix for a spawned thread: its workspace has no .sennit/skills of
+	// its own (options.SkillsPaths is empty here, same as a thread's
+	// config), so disk discovery alone finds nothing, even though the
+	// coordinator already computed an active list that folds in skills
+	// inherited from the parent workspace (skills.Manager.ActiveSkills).
+	// A store that implements SkillsProvider must win over rediscovery.
+	t.Run("a SkillsProvider store's active list wins over disk discovery", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		cfg := &config.Config{
+			Providers: csync.NewMap[string, config.ProviderConfig](),
+			Options:   &config.Options{},
+		}
+		base := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
+		store := skillsProviderStore{
+			ConfigStore: base,
+			active: []*skills.Skill{
+				{Name: "inherited-skill", Description: "handed down from the parent workspace"},
+			},
+		}
+		p, err := NewPrompt("t", "")
+		require.NoError(t, err)
+
+		data := p.promptData(context.Background(), "anthropic", "claude", store)
+		require.Contains(t, data.AvailSkillXML, "inherited-skill")
+		require.Contains(t, data.AvailSkillXML, "handed down from the parent workspace")
+	})
+
+	// HasLSPTools must equal newAgentConfig's own gate for registering the
+	// lsp_* tools (internal/agent/agent_config.go: len(cfg.LSP) > 0 ||
+	// AutoLSPEnabled()). coder.md.tpl used to test a different, looser
+	// condition (len(.Config.LSP) > 0 alone) for its <lsp> block and no
+	// condition at all for naming lsp_replace_symbol/lsp_rename, so a
+	// workspace with auto_lsp on but no lsp entries yet was told the
+	// tools exist (true) while the diagnostics block said otherwise
+	// (false).
+	t.Run("HasLSPTools matches the tool-registration gate", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		p, err := NewPrompt("t", "")
+		require.NoError(t, err)
+
+		t.Run("no configured LSP, auto_lsp unset defaults to enabled", func(t *testing.T) {
+			t.Parallel()
+			cfg := &config.Config{
+				Providers: csync.NewMap[string, config.ProviderConfig](),
+				Options:   &config.Options{},
+			}
+			store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
+			data := p.promptData(context.Background(), "anthropic", "claude", store)
+			require.True(t, data.HasLSPTools)
+		})
+
+		t.Run("no configured LSP, auto_lsp explicitly disabled", func(t *testing.T) {
+			t.Parallel()
+			disabled := false
+			cfg := &config.Config{
+				Providers: csync.NewMap[string, config.ProviderConfig](),
+				Options:   &config.Options{AutoLSP: &disabled},
+			}
+			store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
+			data := p.promptData(context.Background(), "anthropic", "claude", store)
+			require.False(t, data.HasLSPTools)
+		})
+
+		t.Run("a configured LSP wins even with auto_lsp disabled", func(t *testing.T) {
+			t.Parallel()
+			disabled := false
+			cfg := &config.Config{
+				Providers: csync.NewMap[string, config.ProviderConfig](),
+				Options:   &config.Options{AutoLSP: &disabled},
+				LSP:       config.LSPs{"go": {}},
+			}
+			store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
+			data := p.promptData(context.Background(), "anthropic", "claude", store)
+			require.True(t, data.HasLSPTools)
+		})
 	})
 }
 

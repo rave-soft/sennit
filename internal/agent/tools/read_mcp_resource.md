@@ -1,1 +1,3 @@
-Read a resource by URI from an MCP server; returns text content.
+Read a resource by URI from an MCP server.
+
+The response isn't always text: a resource that comes back as exactly one image part is returned as an image response instead — refused with an error on a model that doesn't support image input, and on an oversized image (over 5 MiB). A single part that is neither text, JSON, nor an image (e.g. a PDF or other binary blob) fails the read outright with an error naming its size and MIME type, rather than being decoded. A resource with several parts is read in full: any binary or unreadable part among them is described inline (size and MIME type) instead of dropped, and text (including any such descriptions) is capped at 5 MiB total across all parts, with no way to page through what's cut — narrow the request or read a smaller resource if it's truncated.

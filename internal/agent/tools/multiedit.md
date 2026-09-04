@@ -1,1 +1,5 @@
-Apply multiple find-and-replace edits to a single file in one operation; edits run sequentially. Prefer over edit for multiple changes to the same file. Same exact-match rules as edit apply.
+Apply multiple find-and-replace edits to a single file in one operation; edits run sequentially, each against the result of the one before it. Prefer over edit for multiple changes to the same file. Same exact-match and whitespace-matching rules as edit apply, edit by edit.
+
+Only the first edit may have an empty `old_string`, and only as a stand-in for creating the file (its `new_string` becomes the initial content); an empty `old_string` in any later edit is refused before anything is applied.
+
+This is not atomic and not all-or-nothing: an edit whose `old_string` doesn't match (not found, or matches more than once without `replace_all`) is skipped, not fatal — every other edit still applies, and the file is written with whatever succeeded. The response reports "Applied N of M edits" plus a per-edit reason line for each one that was skipped, naming its index in the `edits` array; check the count and the reasons, since a partial apply can leave the file in a state no single edit intended.

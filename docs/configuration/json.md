@@ -50,7 +50,9 @@ a workable stopgap.
 
 **It is trusted code too.** Both formats are read before the UI appears, and
 the expanded fields run through your shell. The trust boundary is the same;
-don't launch Sennit in a directory whose config you haven't read.
+don't launch Sennit in a directory whose config you haven't read. As with
+`sennitrc`, a project-scoped `sennit.json` is only read once you run
+`sennit --trust-project` — see [Project trust](sennitrc.md#project-trust).
 
 ## Converting
 
@@ -80,8 +82,8 @@ Common JSON fields and their `sennitrc` equivalents:
 | `options.progress` | `option progress …` |
 | `options.debug` | `option debug …` |
 | `options.attribution.trailer_style` | `option attribution-trailer-style …` |
-| `options.tui.compact` | `option ui compact …` |
-| `options.tui.diff` | `option ui diff …` |
+| `options.tui.compact_mode` | `option ui compact …` |
+| `options.tui.diff_mode` | `option ui diff …` |
 | `options.tui.keybindings.<action>` | `option ui keybinding <action> <keys…>` |
 
 `options.attribution.co_authored_by: true` in an old config now maps to

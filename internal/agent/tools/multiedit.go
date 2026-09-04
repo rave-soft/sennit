@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/filepathext"
@@ -108,6 +109,20 @@ func validateEdits(edits []MultiEditOperation) error {
 	return nil
 }
 
+// formatFailedEditReasons renders one reason line per failed edit. The
+// counts-only summary ("K edit(s) failed") that callers put in the
+// success message doesn't say which edit failed or why; FailedEdit.Error
+// otherwise only reached MultiEditResponseMetadata, which is rendered for
+// a human but never appears in the text the model itself reads back.
+func formatFailedEditReasons(failed []FailedEdit) string {
+	var b strings.Builder
+	b.WriteString("Failed edits:")
+	for _, f := range failed {
+		fmt.Fprintf(&b, "\n  edit %d: %s", f.Index, f.Error)
+	}
+	return b.String()
+}
+
 // applyEditsToContent applies edits sequentially, collecting the ones that
 // failed. It also reports whether any edit only matched after whitespace
 // normalization.
@@ -162,7 +177,8 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 
 	var message string
 	if len(failedEdits) > 0 {
-		message = fmt.Sprintf("File created with %d of %d edits: %s (%d edit(s) failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
+		message = fmt.Sprintf("File created with %d of %d edits: %s (%d edit(s) failed)\n%s",
+			editsApplied, len(params.Edits), params.FilePath, len(failedEdits), formatFailedEditReasons(failedEdits))
 	} else {
 		message = fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)
 	}
@@ -208,7 +224,8 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		// If we have failed edits, report them
 		if len(failedEdits) > 0 {
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextErrorResponse(fmt.Sprintf("no changes made - all %d edit(s) failed", len(failedEdits))),
+				fantasy.NewTextErrorResponse(fmt.Sprintf("no changes made - all %d edit(s) failed\n%s",
+					len(failedEdits), formatFailedEditReasons(failedEdits))),
 				MultiEditResponseMetadata{
 					EditsApplied: 0,
 					EditsFailed:  failedEdits,
@@ -229,7 +246,8 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 			var preparedDescription, preparedMessage string
 			if len(preparedFailures) > 0 {
 				preparedDescription = fmt.Sprintf("Apply %d of %d edits to file %s (%d failed)", preparedApplied, len(params.Edits), params.FilePath, len(preparedFailures))
-				preparedMessage = fmt.Sprintf("Applied %d of %d edits to file: %s (%d edit(s) failed)", preparedApplied, len(params.Edits), params.FilePath, len(preparedFailures))
+				preparedMessage = fmt.Sprintf("Applied %d of %d edits to file: %s (%d edit(s) failed)\n%s",
+					preparedApplied, len(params.Edits), params.FilePath, len(preparedFailures), formatFailedEditReasons(preparedFailures))
 			} else {
 				preparedDescription = fmt.Sprintf("Apply %d edits to file %s", preparedApplied, params.FilePath)
 				preparedMessage = fmt.Sprintf("Applied %d edits to file: %s", preparedApplied, params.FilePath)

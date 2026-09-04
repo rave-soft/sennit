@@ -16,6 +16,7 @@ Accepted by every command.
 | `-D`, `--data-dir` | use a custom Sennit data directory |
 | `-d`, `--debug` | debug logging |
 | `-h`, `--help` | help |
+| `--trust-project` | trust the current project, enabling its `.sennit/sennitrc`/`sennit.json` config (see [Project trust](../configuration/sennitrc.md#project-trust)) |
 
 The root command takes four more:
 
@@ -46,7 +47,7 @@ stdout, so it pipes.
 |:--|:--|
 | `-m`, `--model` | model for this run; `model` or `provider/model` |
 | `-q`, `--quiet` | hide the spinner |
-| `-v`, `--verbose` | show logs |
+| `-v`, `--verbose` | show logs; also hides the spinner, like `--quiet` |
 | `-s`, `--session` | continue a session by ID |
 | `-C`, `--continue` | continue the most recent session |
 
@@ -189,6 +190,20 @@ sennit logout [platform] [-f]
 
 Available platform: `copilot`. `logout` with no argument lists what you are
 logged in to.
+
+## `accounts` — manage a provider's stored credentials
+
+Where `login`/`logout` manage the single credential a provider used to have,
+`accounts` manages however many it has today — several Codex logins, several
+API keys for the same endpoint.
+
+```sh
+sennit accounts list [provider]                       # list accounts, aliased "ls"
+sennit accounts use <provider> <account>               # switch the active account
+sennit accounts add <provider> [--api-key <key>]       # add another account
+sennit accounts remove <provider> <account>             # drop one, aliased "rm"
+sennit accounts proxy <provider> [<account>] <url|none|-> # set or clear a proxy
+```
 
 ## `dirs`, `projects`, `logs`
 

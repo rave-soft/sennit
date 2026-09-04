@@ -563,6 +563,19 @@ func (d *delegationFinalizer) launchDelegation(ctx context.Context, args tools.T
 	), nil
 }
 
+// builtinDelegatePrompt is the system prompt for the `agent` tool's own
+// stateless delegate (params.SubagentType == ""): task.md.tpl plus the
+// same reporting contract a named agent gets appended via
+// delegatedAgentPrompt (see agent_tool.go). Without this the tool's own
+// description (delegationReportContract, glued onto agentToolDescription)
+// promises the caller a report that arrives by itself, but the delegate
+// never learns that its final message *is* that report - task.md.tpl on
+// its own used to tell it the opposite ("avoid text before/after your
+// response").
+func builtinDelegatePrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
+	return prompt.NewPrompt("task", string(taskPromptTmpl)+"\n\n"+delegatedAgentContract, opts...)
+}
+
 func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, title, childSessionID string, childDepth int) (fantasy.ToolResponse, error) {
 	if title == "" {
 		title = "New Agent Session"
@@ -577,7 +590,7 @@ func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID,
 			if !ok {
 				return nil, nil, errors.New("task agent not configured")
 			}
-			p, err := taskPrompt(prompt.WithWorkingDir(d.cfg.WorkingDir()))
+			p, err := builtinDelegatePrompt(prompt.WithWorkingDir(d.cfg.WorkingDir()))
 			if err != nil {
 				return nil, nil, err
 			}

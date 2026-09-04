@@ -111,7 +111,7 @@ func bashConfinementRefusal(permissions permission.Requester, command string) (m
 			"except arguments to read-only commands such as cat, diff, ls, grep "+
 			"and git diff/log/show, and /dev/null anywhere. "+
 			"To show a whole file as a diff use `git diff --no-index /dev/null <file>`; "+
-			"to read a file outside the workspace use the view tool.",
+			"to read a file outside the workspace use the read tool.",
 		outsidePath, boundary,
 	), true, permissionRequired
 }

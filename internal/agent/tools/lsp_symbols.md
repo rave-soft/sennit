@@ -1,1 +1,3 @@
-List document symbols (functions, types, methods, etc.) for a file via LSP. Returns a structured outline showing symbol names, kinds, and line ranges. Use this before editing unfamiliar files to understand structure, or to find the exact symbol name for `lsp_replace_symbol`.
+List document symbols (functions, types, methods, etc.) for a file via LSP. Returns a structured outline showing symbol names, kinds, and line ranges — a single-line symbol prints as `line N`, a multi-line one as `lines N-M`. Use this before editing unfamiliar files to understand structure, or to find the exact symbol name for `lsp_replace_symbol`.
+
+When a name appears more than once in the file (e.g. a method implemented on two different types), `lsp_replace_symbol` acts on the first match found in a depth-first walk of this outline, not necessarily the one you meant — check the printed line range against the one you intend to change.

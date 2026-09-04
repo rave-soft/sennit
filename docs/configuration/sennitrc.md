@@ -83,6 +83,25 @@ fi
 Just like `sennit.json`, `sennitrc` is a trusted file. Guard it carefully and
 don't download random configs without reading them first.
 
+## Project trust
+
+Project-scoped config (`.sennit/sennitrc`, `.sennitrc`, `sennitrc`, and their
+JSON equivalents, in the current working directory) is only read if the
+project is trusted. Trust is recorded per directory, as a marker file under
+the global config directory (`internal/config/trust.go`), and there is no
+interactive "trust this project?" prompt — the only way to grant it is:
+
+```sh
+sennit --trust-project
+```
+
+Until then, project-scoped config is skipped entirely: not merged with a
+warning, not partially applied — absent. `sennit doctor` and the config
+loader both report an untrusted project as a problem, with a hint to restart
+with `--trust-project` after you've reviewed the files. Global config
+(`~/.config/sennit/sennitrc`) is never gated by this — it is trusted because
+you, not the project, control it.
+
 ## Where config lives
 
 Sennit looks for config in the following places, with lower numbers taking
@@ -261,8 +280,8 @@ Usage:
 #### `model`
 
 Set the selected model. With no model argument, print the current selection.
-Sennit picks a smaller/cheaper model automatically for internal work like
-titles and summarization; that choice is not user-configurable.
+Internal work like titles and summarization runs on this same selected
+model — there is no separate smaller/cheaper model for it.
 
 ```text
 Usage:

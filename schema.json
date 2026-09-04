@@ -60,7 +60,7 @@
       "properties": {
         "max_depth": {
           "type": "integer",
-          "description": "Maximum depth for the ls tool",
+          "description": "Maximum directory depth the @-mention completions popup walks when listing files; 0 is unlimited",
           "default": 0,
           "examples": [
             10
@@ -68,8 +68,8 @@
         },
         "max_items": {
           "type": "integer",
-          "description": "Maximum number of items to return for the ls tool",
-          "default": 1000,
+          "description": "Maximum number of files the @-mention completions popup lists; 0 is unlimited",
+          "default": 0,
           "examples": [
             100
           ]

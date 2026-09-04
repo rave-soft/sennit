@@ -1,8 +1,12 @@
 # Permissions
 
-By default, every tool call that touches your machine asks first. Permissions
-are how you stop being asked about the boring ones, and how you take dangerous
-ones off the table entirely.
+By default, every tool call that writes, executes, or reaches outside your
+working directory asks first. A few read-only tools — `read`, `ls`, `glob`,
+`grep`, `ripgrep` — only ask when the path they're given falls outside the
+working directory; inside it, they run without a prompt. `git_status`,
+`git_diff`, `git_log`, and the read-only `lsp_*` tools never ask, regardless
+of path. Permissions are how you stop being asked about the boring cases that
+remain, and how you take dangerous ones off the table entirely.
 
 ## Three states
 
@@ -21,9 +25,16 @@ The difference between *deny* and *never approving* matters: a denied tool is
 hidden, so the model doesn't attempt it, doesn't reason about it, and doesn't
 route around a refusal. It simply isn't there.
 
-A reasonable starting point is to allow the read-only tools — `read`, `ls`,
-`grep`, `glob`, `ripgrep`, `lsp_definition`, `lsp_symbols`, `lsp_workspace_symbols`, `lsp_hover`,
-`lsp_call_hierarchy` — and keep prompting for anything that writes or executes.
+A reasonable starting point is to allow the read-only tools — the full set is
+listed in the [tools reference](../reference/tools.md#the-read-only-set) —
+and keep prompting for anything that writes or executes.
+
+> [!WARNING]
+> For `read`, `ls`, `glob`, `grep`, and `ripgrep`, the prompt this removes is
+> the *only* check standing between the model and files outside your working
+> directory — `~/.ssh`, a sibling repository, anything else readable by your
+> user. Allowing these tools means the model can read any file on disk you
+> can, without asking again.
 
 Tool names are listed in the [tools reference](../reference/tools.md).
 A name that doesn't match any known tool is reported by `sennit doctor`, so a
@@ -38,6 +49,18 @@ for the session.
 > Yolo mode approves `bash`, `write` and `edit` too. It is for a sandbox, a
 > throwaway container, or work you are watching closely — not for a session you
 > walk away from in a repository you care about.
+
+`permissions bypass on` sets the same thing persistently, as
+`permissions.bypass` in config, instead of per-session with `--yolo`:
+
+```bash
+permissions bypass on
+permissions bypass off
+```
+
+The same warning applies, more so: it survives across restarts until you turn
+it back off. `sennit doctor` flags it as a standing problem for exactly this
+reason.
 
 ## Hooks decide too
 

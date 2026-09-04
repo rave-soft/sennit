@@ -242,6 +242,11 @@ func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "Applied 1 of 2 edits")
+	// Finding C: the model only ever sees resp.Content, not the metadata's
+	// EditsFailed — the reason a failed edit didn't apply must be in the
+	// text itself, not just in a struct rendered for humans.
+	require.Contains(t, resp.Content, "edit 2:", "the failure reason must name which edit failed")
+	require.Contains(t, resp.Content, "old_string not found in file", "the failure reason must say why the edit didn't apply")
 
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
@@ -282,6 +287,8 @@ func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "File created with 2 of 3 edits")
+	require.Contains(t, resp.Content, "edit 3:", "the failure reason must name which edit failed")
+	require.Contains(t, resp.Content, "old_string not found in file", "the failure reason must say why the edit didn't apply")
 
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)

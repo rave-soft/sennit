@@ -67,7 +67,7 @@ Accurate where grep is approximate. See
 | `web_search` | Search the web; returns titles, URLs and snippets | yes |
 | `web_fetch` | Fetch a URL as markdown; pages over 50 KB are saved to a temp file for `grep`/`read` | yes |
 | `fetch` | Fetch raw content as text, markdown or HTML, without processing | yes |
-| `agentic_fetch` | Fetch and have a subagent extract or analyse the content | yes |
+| `agentic_fetch` | Fetch and have a subagent extract or analyse the content | |
 | `download` | Stream a URL straight to a file, binary-safe. Overwrites without warning | |
 
 "Read-only" here means it doesn't modify local state; the network call still
@@ -143,14 +143,22 @@ allowed, denied or matched by a hook under that full name.
 
 ## The read-only set
 
-These are the tools Sennit itself treats as read-only, and a sensible thing to
-allow without prompting:
+These are the tools Sennit itself treats as read-only (`toolmeta.TaskReadOnlyNames`),
+and a sensible thing to allow without prompting:
 
 ```bash
-permissions allow read ls glob grep ripgrep \
-  lsp_definition lsp_symbols lsp_call_hierarchy \
-  fetch web_fetch web_search
+permissions allow read multi_read ls glob grep ripgrep \
+  git_status git_diff git_log \
+  lsp_definition lsp_symbols lsp_workspace_symbols lsp_hover lsp_call_hierarchy \
+  fetch web_fetch web_search agent_trace
 ```
+
+> [!WARNING]
+> `read`, `ls`, `glob`, `grep`, and `ripgrep` only prompt when the path they're
+> given falls outside your working directory — inside it, they never ask.
+> Allowing them removes that one remaining check, so the model can read any
+> file on disk your user can (`~/.ssh`, a sibling repository, ...) without
+> being asked again. See [Permissions](../configuration/permissions.md).
 
 ## Turning tools off
 

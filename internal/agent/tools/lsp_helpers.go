@@ -50,7 +50,7 @@ type resolvedSymbol struct {
 // is a valid identifier. Matches inside comments or strings are skipped
 // automatically because the LSP will reject them.
 func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) (*resolvedSymbol, error) {
-	results, err := resolveSymbolResults(ctx, lspManager, symbol, workingDir)
+	results, _, err := resolveSymbolResults(ctx, lspManager, symbol, workingDir)
 	if err != nil {
 		return nil, err
 	}
@@ -92,20 +92,23 @@ func firstWithDefinition[T any](results []T, definition func(T) ([]protocol.Loca
 }
 
 // resolveSymbolResults greps for a symbol and returns all viable
-// {client, path, position} tuples. Callers that need just one match
-// (definition, rename, call hierarchy) use resolveSymbol; callers that
-// want to iterate all matches (references) use this directly.
-func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) ([]*resolvedSymbol, error) {
+// {client, path, position} tuples, plus whether the grep itself was
+// capped. Callers that need just one match (definition, rename, call
+// hierarchy) use resolveSymbol; callers that want to iterate all matches
+// (references) use this directly and must surface truncated themselves —
+// a capped grep means candidate positions belonging to a same-named but
+// distinct symbol may never have been tried.
+func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) ([]*resolvedSymbol, bool, error) {
 	// Use word boundaries to avoid matching inside larger identifiers
 	// (e.g. "Bar" inside "myBar"). The symbol is already QuoteMeta'd
 	// so dots and other regex metacharacters are escaped.
 	pattern := `\b` + regexp.QuoteMeta(symbol) + `\b`
-	matches, _, err := searchFiles(ctx, pattern, workingDir, "", 100)
+	matches, truncated, err := searchFiles(ctx, pattern, workingDir, "", 100)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search for symbol: %w", err)
+		return nil, false, fmt.Errorf("failed to search for symbol: %w", err)
 	}
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("symbol '%s' not found in grep results: %w", symbol, errSymbolNotFound)
+		return nil, false, fmt.Errorf("symbol '%s' not found in grep results: %w", symbol, errSymbolNotFound)
 	}
 
 	var results []*resolvedSymbol
@@ -134,9 +137,9 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no LSP client handles any file matching '%s': %w", symbol, errSymbolNotFound)
+		return nil, false, fmt.Errorf("no LSP client handles any file matching '%s': %w", symbol, errSymbolNotFound)
 	}
-	return results, nil
+	return results, truncated, nil
 }
 
 // findLSPClient returns the first LSP client that handles the given file path.

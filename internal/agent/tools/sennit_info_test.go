@@ -93,7 +93,7 @@ func TestBuildModelsFor_ListsIDs(t *testing.T) {
 	}})
 
 	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
-	output := buildModelsFor(cfg, "anthropic")
+	output := buildModelsFor(cfg, "anthropic", "")
 	require.Contains(t, output, "[models_for.anthropic]")
 	require.Contains(t, output, "claude-opus-4")
 	require.Contains(t, output, "claude-sonnet-4")
@@ -104,7 +104,7 @@ func TestBuildModelsFor_UnknownProvider(t *testing.T) {
 	t.Parallel()
 
 	cfg := configtest.NewStore(t, &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
-	output := buildModelsFor(cfg, "does-not-exist")
+	output := buildModelsFor(cfg, "does-not-exist", "")
 	require.Contains(t, output, "[models_for.does-not-exist]")
 	require.Contains(t, output, "error = provider not found or disabled")
 }
@@ -120,10 +120,37 @@ func TestBuildModelsFor_CapsLargeRouterCatalog(t *testing.T) {
 	providers.Set("omniroute", config.ProviderConfig{Models: models})
 
 	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
-	output := buildModelsFor(cfg, "omniroute")
+	output := buildModelsFor(cfg, "omniroute", "")
 	require.Contains(t, output, "[models_for.omniroute]")
 	require.Contains(t, output, "...and 1189 more")
 	require.Equal(t, modelsForCap, strings.Count(output, "model-"))
+}
+
+// TestBuildModelsFor_FilterFindsIDPastTheCap is the regression test for
+// finding J: sennit_info.md advised using models_for to verify a model ID
+// exists, but the list was capped at modelsForCap with no filter and no
+// way to page — for a router provider with thousands of models, an ID
+// past the cap was unreachable and read as "not found" even though it was
+// configured. model_filter must find it regardless of position.
+func TestBuildModelsFor_FilterFindsIDPastTheCap(t *testing.T) {
+	t.Parallel()
+
+	models := make([]catwalk.Model, 0, 1239)
+	for i := range 1239 {
+		models = append(models, catwalk.Model{ID: fmt.Sprintf("model-%04d", i)})
+	}
+	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers.Set("omniroute", config.ProviderConfig{Models: models})
+	cfg := configtest.NewStore(t, &config.Config{Providers: providers})
+
+	// model-1200 sorts well past modelsForCap (50), so an unfiltered call
+	// would never show it.
+	output := buildModelsFor(cfg, "omniroute", "1200")
+	require.Contains(t, output, "model-1200")
+	require.NotContains(t, output, "more", "a filtered result small enough to fit must not claim truncation")
+
+	empty := buildModelsFor(cfg, "omniroute", "no-such-id")
+	require.Contains(t, empty, `no model IDs match filter "no-such-id"`)
 }
 
 func TestSennitInfo_DisabledProvidersOmitted(t *testing.T) {

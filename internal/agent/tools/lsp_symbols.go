@@ -81,14 +81,26 @@ func NewSymbolsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentToo
 	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}})
 }
 
+// formatLineRange renders a symbol's line span the way the description
+// promises: a genuine range, not just where it starts. A single-line
+// symbol still prints as one number — "lines N-N" would be misleading
+// filler for the common case of a short function or field.
+func formatLineRange(start, end int) string {
+	if start == end {
+		return fmt.Sprintf("line %d", start)
+	}
+	return fmt.Sprintf("lines %d-%d", start, end)
+}
+
 func formatSymbols(symbols []protocol.DocumentSymbolResult, indent int) string {
 	var b strings.Builder
 	prefix := strings.Repeat("  ", indent)
 	for _, sym := range symbols {
 		rng := sym.GetRange()
-		line := rng.Start.Line + 1
+		start := int(rng.Start.Line) + 1
+		end := symbolRangeEndLine(rng) + 1
 		kind := symbolKindString(sym)
-		fmt.Fprintf(&b, "%s%s %s (line %d)\n", prefix, kind, sym.GetName(), line)
+		fmt.Fprintf(&b, "%s%s %s (%s)\n", prefix, kind, sym.GetName(), formatLineRange(start, end))
 		if ds, ok := sym.(*protocol.DocumentSymbol); ok && len(ds.Children) > 0 {
 			b.WriteString(formatDocumentSymbolChildren(ds.Children, indent+1))
 		}
@@ -102,7 +114,9 @@ func formatDocumentSymbolChildren(children []protocol.DocumentSymbol, indent int
 	for i := range children {
 		c := &children[i]
 		kind := symbolKindString(c)
-		fmt.Fprintf(&b, "%s%s %s (line %d)\n", prefix, kind, c.Name, c.Range.Start.Line+1)
+		start := int(c.Range.Start.Line) + 1
+		end := symbolRangeEndLine(c.Range) + 1
+		fmt.Fprintf(&b, "%s%s %s (%s)\n", prefix, kind, c.Name, formatLineRange(start, end))
 		if len(c.Children) > 0 {
 			b.WriteString(formatDocumentSymbolChildren(c.Children, indent+1))
 		}

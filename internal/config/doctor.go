@@ -229,6 +229,31 @@ func doctorToolNames(cfg *Config) []Problem {
 			})
 		}
 	}
+
+	// permissions.allowed_tools is the third list of tool names in a
+	// config and the one a typo hurts most: a name that matches nothing
+	// never grants anything, so the person keeps answering the prompt
+	// they believe they turned off, and nothing anywhere says why. The
+	// two lists above have been checked for a while and the
+	// documentation already promises this one is too - it was the entry
+	// nobody had wired up. Entries may carry an action ("bash:npm run
+	// build"), which permissionService.Request matches ahead of the bare
+	// tool name, so only the part before the first colon names a tool.
+	if cfg.Permissions != nil {
+		for _, entry := range cfg.Permissions.AllowedTools {
+			name, _, _ := strings.Cut(entry, ":")
+			if isKnown(name) {
+				continue
+			}
+			problems = append(problems, Problem{
+				Severity: SeverityWarn,
+				Area:     AreaAgent,
+				Subject:  "permissions.allowed_tools",
+				Message:  fmt.Sprintf("allowed_tools references unknown tool %q", name),
+				Hint:     "check for a typo; an unknown name grants nothing and the prompt keeps appearing",
+			})
+		}
+	}
 	return problems
 }
 

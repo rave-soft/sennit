@@ -177,8 +177,8 @@ type TUIOptions struct {
 
 // Completions defines options for the completions UI.
 type Completions struct {
-	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
-	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum directory depth the @-mention completions popup walks when listing files; 0 is unlimited,default=0,example=10"`
+	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of files the @-mention completions popup lists; 0 is unlimited,default=0,example=100"`
 }
 
 func (c Completions) Limits() (depth, items int) {

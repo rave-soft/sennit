@@ -311,6 +311,38 @@ func TestDiagnosticsToolAttributesRelativeFilePathToCurrentFile(t *testing.T) {
 	require.Contains(t, response.Content, "Project: 0 errors, 0 warnings")
 }
 
+// TestDiagnosticsToolDistinguishesCleanFromNoLSPRunning is the regression
+// test for finding B: getDiagnostics returned "" both when a real client
+// ran and found nothing, and when no client was running at all (LSP
+// unconfigured, or auto-start off) — a model reading an empty response
+// could not tell "checked, clean" from "never checked".
+func TestDiagnosticsToolDistinguishesCleanFromNoLSPRunning(t *testing.T) {
+	root := newLSPToolWorktree(t)
+
+	t.Run("no LSP client running at all", func(t *testing.T) {
+		autoLSP := false
+		store := configtest.NewStore(t, &config.Config{
+			Options: &config.Options{AutoLSP: &autoLSP},
+		}, configtest.WithWorkingDir(root))
+		manager := lsp.NewManager(store)
+		t.Cleanup(func() { manager.StopAll(t.Context()) })
+		require.Zero(t, manager.Clients().Len(), "no LSP is configured and auto-start is off")
+
+		response := runToolWith(t, NewDiagnosticsTool(manager, root), t.Context(), DiagnosticsToolName, DiagnosticsParams{FilePath: "a.go"})
+		require.False(t, response.IsError)
+		require.Equal(t, noLSPRunningMessage, response.Content)
+	})
+
+	t.Run("client running and genuinely clean", func(t *testing.T) {
+		manager := newLSPToolE2EManager(t, root, "symbols")
+
+		response := runToolWith(t, NewDiagnosticsTool(manager, root), t.Context(), DiagnosticsToolName, DiagnosticsParams{FilePath: "a.go"})
+		require.False(t, response.IsError)
+		require.Equal(t, noDiagnosticsFoundMessage, response.Content,
+			"a client that ran and found nothing must not read the same as no client running")
+	})
+}
+
 // TestResolveSymbolResultsStartsOnMatchedFileNotWorkingDir reproduces
 // defect 2: resolveSymbolResults used to call lspManager.Start on the
 // workspace directory, which handlesFiletype always rejects (a directory
@@ -323,7 +355,7 @@ func TestResolveSymbolResultsStartsOnMatchedFileNotWorkingDir(t *testing.T) {
 	manager := newLSPToolE2EManager(t, root, "symbols")
 	require.Zero(t, manager.Clients().Len(), "fixture must start with no running LSP client")
 
-	results, err := resolveSymbolResults(t.Context(), manager, "Exact", root)
+	results, _, err := resolveSymbolResults(t.Context(), manager, "Exact", root)
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 	require.Positive(t, manager.Clients().Len(), "resolveSymbolResults must start a client for the matched file")

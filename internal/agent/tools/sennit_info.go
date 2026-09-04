@@ -24,6 +24,11 @@ var sennitInfoDescription string
 
 type SennitInfoParams struct {
 	ModelsFor string `json:"models_for,omitempty" description:"Provider ID (e.g. \"anthropic\", \"xl0.ru\") to list that provider's available model IDs instead of the full state dump. Use this to verify a model ID is real before writing it into an agent file or model config."`
+	// ModelFilter narrows models_for's output to IDs containing this
+	// substring (case-insensitive). Without it, a router provider backed
+	// by a large model-discovery catalog silently caps at modelsForCap,
+	// so an ID past the cap reads as "not found" even though it exists.
+	ModelFilter string `json:"model_filter,omitempty" description:"Only used with models_for: case-insensitive substring to narrow the model ID list. Use this to find a specific ID in a provider with more than 50 models, where the unfiltered list is capped."`
 }
 
 // SennitInfoConfig is the slice of *config.ConfigStore this tool needs: the
@@ -58,7 +63,7 @@ func NewSennitInfoTool(
 		sennitInfoDescription,
 		func(ctx context.Context, params SennitInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ModelsFor != "" {
-				return fantasy.NewTextResponse(buildModelsFor(cfg, params.ModelsFor)), nil
+				return fantasy.NewTextResponse(buildModelsFor(cfg, params.ModelsFor, params.ModelFilter)), nil
 			}
 			return fantasy.NewTextResponse(buildSennitInfo(cfg, reg, lspManager, allSkills, activeSkills, skillTracker, skillStates, collectEnvironmentProblems)), nil
 		},
@@ -76,7 +81,7 @@ const modelsForCap = 50
 // sennit_info{"models_for": "..."} — before writing provider/model-id into
 // an agent file, instead of guessing. The full sennit_info dump only reports
 // a per-provider count ([providers]), not the IDs themselves.
-func buildModelsFor(cfg SennitInfoConfig, providerID string) string {
+func buildModelsFor(cfg SennitInfoConfig, providerID, filter string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[models_for.%s]\n", providerID)
 
@@ -88,12 +93,19 @@ func buildModelsFor(cfg SennitInfoConfig, providerID string) string {
 
 	ids := make([]string, 0, len(pc.Models))
 	for _, m := range pc.Models {
+		if filter != "" && !strings.Contains(strings.ToLower(m.ID), strings.ToLower(filter)) {
+			continue
+		}
 		ids = append(ids, m.ID)
 	}
 	slices.Sort(ids)
 
 	if len(ids) == 0 {
-		b.WriteString("(no models configured)\n")
+		if filter != "" {
+			fmt.Fprintf(&b, "(no model IDs match filter %q)\n", filter)
+		} else {
+			b.WriteString("(no models configured)\n")
+		}
 		return b.String()
 	}
 

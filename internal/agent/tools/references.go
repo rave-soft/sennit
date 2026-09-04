@@ -43,7 +43,7 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			// entirely: the tools searched the main checkout, or found
 			// no LSP client for a file that plainly exists.
 			searchDir := filepathext.SmartJoin(workingDir, params.Path)
-			results, err := resolveSymbolResults(ctx, lspManager, params.Symbol, searchDir)
+			results, truncated, err := resolveSymbolResults(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				if !isGenuineSymbolMiss(err) {
 					return fantasy.ToolResponse{}, fmt.Errorf("resolve symbol: %w", err)
@@ -53,6 +53,7 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 
 			var allLocations []protocol.Location
 			var allErrs error
+			var unqueried int
 			for _, r := range results {
 				// r's position came from a grep against disk, which can
 				// already be ahead of r.client's overlay for r.path — read
@@ -61,6 +62,7 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 				// references" for a symbol that plainly has some.
 				if err := syncOverlay(ctx, r.client, r.path); err != nil {
 					allErrs = errors.Join(allErrs, err)
+					unqueried++
 					continue
 				}
 				locations, err := r.client.FindReferences(ctx, r.path, r.line, r.char, true)
@@ -70,17 +72,31 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 					}
 					slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", r.path, "line", r.line)
 					allErrs = errors.Join(allErrs, err)
+					unqueried++
 					continue
 				}
+				// Every viable candidate is queried, not just the first
+				// one that answers: the grep pattern matches on text
+				// alone, so a same-named but distinct symbol (e.g. a
+				// method on two different types) shows up as a separate
+				// candidate here, and stopping early silently dropped its
+				// references. FindReferences within a candidate already
+				// returns every reference to that identity project-wide,
+				// and cleanupLocations below dedupes candidates that
+				// resolved to the same identity.
 				allLocations = append(allLocations, locations...)
-				// LSP returns all references for the symbol, not just from this file.
-				if len(locations) > 0 {
-					break
-				}
 			}
 
 			if len(allLocations) > 0 {
 				output := formatReferences(cleanupLocations(allLocations))
+				if truncated {
+					output += fmt.Sprintf("\n(Search for '%s' hit the match limit; some candidate locations for a "+
+						"same-named but distinct symbol were never queried, so results may be incomplete.)\n", params.Symbol)
+				}
+				if unqueried > 0 {
+					output += fmt.Sprintf("\n(%d candidate location(s) could not be queried due to errors; "+
+						"results may be missing references for a same-named but distinct symbol.)\n", unqueried)
+				}
 				return fantasy.NewTextResponse(output), nil
 			}
 

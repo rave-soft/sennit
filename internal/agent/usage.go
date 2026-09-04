@@ -461,7 +461,13 @@ func (a *sessionAgent) persistSummaryResult(ctx context.Context, model Model, cu
 // buildSummaryPrompt constructs the prompt text for session summarization.
 func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
+	// "Detailed" used to sit here and fight the system prompt's own
+	// opening line ("Compression is the point. A summary that restates
+	// the conversation has failed") - the model follows the later,
+	// more specific instruction, so a request phrased as this one used
+	// to be produced exactly the bloated summary the template warns
+	// against.
+	sb.WriteString("Summarize our conversation above, following the instructions in the system prompt above.")
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {

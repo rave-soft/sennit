@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"os"
 	"strings"
 	"time"
@@ -15,12 +17,40 @@ import (
 
 const AgentTraceToolName = "agent_trace"
 
+// defaultTraceLimit and maxTraceLimit bound Limit: the doc template below
+// renders both, so a future change to either stays in sync with what the
+// description promises instead of silently drifting from it.
+const (
+	defaultTraceLimit = 200
+	maxTraceLimit     = 1000
+)
+
+//go:embed agent_trace.md.tpl
+var agentTraceDescriptionTmpl []byte
+
+var agentTraceDescriptionTpl = template.Must(
+	template.New("agentTraceDescription").
+		Parse(string(agentTraceDescriptionTmpl)),
+)
+
+type agentTraceDescriptionData struct {
+	DefaultLimit int
+	MaxLimit     int
+}
+
+func agentTraceDescription() string {
+	return renderTemplate(agentTraceDescriptionTpl, agentTraceDescriptionData{
+		DefaultLimit: defaultTraceLimit,
+		MaxLimit:     maxTraceLimit,
+	})
+}
+
 type AgentTraceParams struct {
-	SessionID string `json:"session_id,omitempty"`
-	RunID     string `json:"run_id,omitempty"`
-	Since     string `json:"since,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
-	Cursor    string `json:"cursor,omitempty"`
+	SessionID string `json:"session_id,omitempty" description:"Session ID to trace. One of session_id or run_id is required; giving both narrows to events matching both."`
+	RunID     string `json:"run_id,omitempty" description:"Run ID to trace (a single provider-request/tool-loop turn). One of session_id or run_id is required."`
+	Since     string `json:"since,omitempty" description:"RFC3339 timestamp (e.g. 2024-01-15T10:30:00Z) or a duration like 5m/1h relative to now; only events at or after it."`
+	Limit     int    `json:"limit,omitempty" description:"Max events to return, most recent first. Default 200, max 1000; 0 uses the default."`
+	Cursor    string `json:"cursor,omitempty" description:"Continues from a previous response's next_cursor to fetch older events. Bound to session_id/run_id/since — changing any of those invalidates it."`
 }
 
 type agentTraceEvent struct {
@@ -71,7 +101,7 @@ type agentTraceResponse struct {
 }
 
 func NewAgentTraceTool(logFile string) fantasy.AgentTool {
-	return withToolParameterSchema(fantasy.NewParallelAgentTool(AgentTraceToolName, "Read a redacted structured diagnostic trace for a session or run. Never returns prompts, arguments, outputs, or error messages.", func(ctx context.Context, p AgentTraceParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return withToolParameterSchema(fantasy.NewParallelAgentTool(AgentTraceToolName, agentTraceDescription(), func(ctx context.Context, p AgentTraceParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		// See sennit_logs.go's NewSennitLogsTool for why cancellation and
 		// Sennit's own file I/O failures must propagate as Go errors
 		// rather than land in the transcript as ordinary tool results.
@@ -93,12 +123,12 @@ func runAgentTrace(logFile string, p AgentTraceParams) (string, error) {
 	if strings.TrimSpace(p.SessionID) == "" && strings.TrimSpace(p.RunID) == "" {
 		return "", fmt.Errorf("one of session_id or run_id is required")
 	}
-	if p.Limit < 0 || p.Limit > 1000 {
-		return "", fmt.Errorf("limit must be between 1 and 1000")
+	if p.Limit < 0 || p.Limit > maxTraceLimit {
+		return "", fmt.Errorf("limit must be between 1 and %d", maxTraceLimit)
 	}
 	limit := p.Limit
 	if limit == 0 {
-		limit = 200
+		limit = defaultTraceLimit
 	}
 	p.SessionID = strings.TrimSpace(p.SessionID)
 	p.RunID = strings.TrimSpace(p.RunID)

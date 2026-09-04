@@ -9,18 +9,20 @@ confirmation screen at the end.
 
 Every question MUST include:
 - `type` — `yes_no`, `single_choice`, `multi_choice`, or `free_text`
-- `question` — a short, direct question (one line)
+- `question` — a short, direct question (one line), under {{ .MaxQuestionLength }} chars
 - `description` — markdown context shown below the question with details,
   tradeoffs, or examples. **Always required.** Omitting it causes an error.
 
 ## Hard limits (enforced; violations error and waste a round trip)
 
-- Max 5 choices per question; group or prioritize if you have more.
+- Max {{ .MaxChoices }} choices per question; group or prioritize if you have more.
 - `single_choice`/`multi_choice` require `choices` (a single_choice without
-  choices is an error).
-- `description` required on every question, under 300 chars. Choice
-  descriptions under 100 chars each.
-- Max 5 questions per batch — split into multiple batches and tell the
+  choices is an error), and every choice needs a unique `id` — a repeated
+  `id` within the same question is an error.
+- `description` required on every question, under {{ .MaxDescriptionLength }} chars.
+  Choice `label` under {{ .MaxChoiceLabelLength }} chars, choice `description`
+  under {{ .MaxChoiceDescriptionLength }} chars each.
+- Max {{ .MaxQuestions }} questions per batch — split into multiple batches and tell the
   user there will be follow-ups if you need more.
 
 ## Question types
@@ -46,6 +48,8 @@ When asking multiple questions, a confirmation tab is always shown after
 all questions are answered: the user sees a summary of their answers and
 must confirm before submitting, or go back to editing if they decline.
 
+Both fields below are optional — a generic title/description fills in if
+omitted — but a specific one reads much better:
 - `confirm_title`: a short question, e.g. "Ready to go?"
 - `confirm_description`: summarize what will happen based on the expected
   answers, written as if you already know what they'll pick.

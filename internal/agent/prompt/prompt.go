@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -39,6 +40,18 @@ type ConfigProvider interface {
 // this fails to compile the moment the two disagree.
 var _ ConfigProvider = (*config.ConfigStore)(nil)
 
+// SkillsProvider is an optional capability of a ConfigProvider: a caller
+// that already holds the coordinator's computed active-skill list (see
+// skills.Manager.ActiveSkills) can hand it to promptData instead of
+// letting it rediscover skills from disk. It is a separate, narrower
+// interface rather than a new ConfigProvider method so a ConfigProvider
+// with no such list (nothing wired to a *skills.Manager) keeps compiling
+// unchanged; promptData falls back to disk discovery via a type
+// assertion when store does not implement it.
+type SkillsProvider interface {
+	ActiveSkills() []*skills.Skill
+}
+
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
 	name       string
@@ -61,6 +74,14 @@ type PromptDat struct {
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
 	SkillsURIScheme    string
+	// HasLSPTools mirrors the exact gate buildTools uses to register the
+	// lsp_* tools (newAgentConfig: len(cfg.LSP) > 0 ||
+	// AutoLSPEnabled()) - see coder.md.tpl's <editing_files> and <lsp>
+	// blocks, which used to each spell out their own, different
+	// condition (one omitted the tools entirely, the other tested only
+	// len(.Config.LSP)) and could disagree with the real tool set and
+	// with each other.
+	HasLSPTools bool
 }
 
 type ContextFile struct {
@@ -117,6 +138,12 @@ func (p *Prompt) Build(ctx context.Context, provider, model string, store Config
 func processFile(filePath string) *ContextFile {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
+		// The path already passed os.Stat in the caller, so this is not
+		// "file doesn't exist" — it is something like a permissions
+		// problem. Silently dropping it here used to mean a project's
+		// AGENTS.md could vanish from the prompt without a trace, unlike
+		// processContextPath's own error path just above it.
+		slog.Warn("Failed to read context file", "path", filePath, "error", err)
 		return nil
 	}
 	return &ContextFile{
@@ -215,45 +242,67 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 	// Discover and load skills metadata.
 	var availSkillXML string
 
-	// Start with builtin skills.
-	allSkills := skills.DiscoverBuiltin()
-	builtinNames := make(map[string]bool, len(allSkills))
-	for _, s := range allSkills {
-		builtinNames[s.Name] = true
-	}
-
-	// Discover user skills from configured paths.
-	if len(cfg.Options.SkillsPaths) > 0 {
-		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
-		for _, pth := range cfg.Options.SkillsPaths {
-			// Resolve against the workspace, not the process's cwd, the
-			// same way processContextPath does for context files.
-			// SmartJoin leaves an absolute path untouched, so only a
-			// relative entry is anchored. Without this a relative
-			// skills_paths entry means something different depending on
-			// where sennit happened to be launched from.
-			expandedPaths = append(expandedPaths, filepathext.SmartJoin(
-				store.WorkingDir(), expandPath(pth, store)))
+	if sp, ok := store.(SkillsProvider); ok {
+		// The coordinator has already discovered, deduplicated, filtered
+		// and - critically - folded in InheritedSkills: a thread spawned
+		// into its own git worktree has no .sennit/skills of its own, so
+		// re-discovering from cfg.Options.SkillsPaths here would silently
+		// drop every project skill the parent workspace activated, even
+		// though the same thread's `read` tool and `sennit_info` still
+		// report them as available (see skills.Manager.ActiveSkills).
+		// Using that list verbatim also retires the second disagreement
+		// this rediscovery caused: a relative skills_paths entry resolved
+		// against store.WorkingDir() below, but DiscoveryConfig.ResolvePaths
+		// (skills/manager.go) resolves the very same entry differently.
+		if activeSkills := sp.ActiveSkills(); len(activeSkills) > 0 {
+			availSkillXML = skills.ToPromptXML(activeSkills)
 		}
-		for _, userSkill := range skills.Discover(expandedPaths) {
-			if builtinNames[userSkill.Name] {
-				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+	} else {
+		// No coordinator-backed skill list available (e.g. the
+		// initialize prompt, or a bare ConfigProvider in a test) - fall
+		// back to discovering from disk, same as before SkillsProvider
+		// existed.
+
+		// Start with builtin skills.
+		allSkills := skills.DiscoverBuiltin()
+		builtinNames := make(map[string]bool, len(allSkills))
+		for _, s := range allSkills {
+			builtinNames[s.Name] = true
+		}
+
+		// Discover user skills from configured paths.
+		if len(cfg.Options.SkillsPaths) > 0 {
+			expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
+			for _, pth := range cfg.Options.SkillsPaths {
+				// Resolve against the workspace, not the process's cwd, the
+				// same way processContextPath does for context files.
+				// SmartJoin leaves an absolute path untouched, so only a
+				// relative entry is anchored. Without this a relative
+				// skills_paths entry means something different depending on
+				// where sennit happened to be launched from.
+				expandedPaths = append(expandedPaths, filepathext.SmartJoin(
+					store.WorkingDir(), expandPath(pth, store)))
 			}
-			allSkills = append(allSkills, userSkill)
+			for _, userSkill := range skills.Discover(expandedPaths) {
+				if builtinNames[userSkill.Name] {
+					slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+				}
+				allSkills = append(allSkills, userSkill)
+			}
+		}
+
+		// Deduplicate: user skills override builtins with the same name.
+		allSkills = skills.Deduplicate(allSkills)
+
+		// Filter out disabled skills.
+		allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
+
+		if len(allSkills) > 0 {
+			availSkillXML = skills.ToPromptXML(allSkills)
 		}
 	}
 
-	// Deduplicate: user skills override builtins with the same name.
-	allSkills = skills.Deduplicate(allSkills)
-
-	// Filter out disabled skills.
-	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
-
-	if len(allSkills) > 0 {
-		availSkillXML = skills.ToPromptXML(allSkills)
-	}
-
-	isGit := isGitRepo(store.WorkingDir())
+	isGit := isGitRepo(ctx, store.WorkingDir())
 	data := PromptDat{
 		Provider:        provider,
 		Model:           model,
@@ -264,6 +313,13 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 		Date:            p.now().Format("1/2/2006"),
 		AvailSkillXML:   availSkillXML,
 		SkillsURIScheme: brand.SkillsURIScheme,
+		// Same formula as newAgentConfig's hasLSP/autoLSP (internal/agent/
+		// agent_config.go): a configured LSP or an auto_lsp setting that
+		// hasn't been explicitly turned off. Duplicated rather than
+		// imported because internal/agent already imports this package,
+		// so the reverse import would cycle; both sides read the same
+		// two config fields and must be kept in step.
+		HasLSPTools: len(cfg.LSP) > 0 || cfg.Options.AutoLSP == nil || *cfg.Options.AutoLSP,
 	}
 	if isGit {
 		data.GitStatus = getGitStatus(ctx, store.WorkingDir())
@@ -274,9 +330,23 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 	return data
 }
 
-func isGitRepo(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, ".git"))
-	return err == nil
+// isGitRepo reports whether dir is inside a git working tree. It shells
+// out to `git rev-parse --is-inside-work-tree` rather than stat'ing dir
+// for a ".git" entry: the working directory is a session's cwd (or
+// --cwd), not necessarily the repo root, and a plain stat says "no" for
+// any subdirectory of a repo even though every git tool the prompt
+// recommends works fine there and finds the same repo by walking up. A
+// git failure that is not "not a repository" (missing binary, permission
+// problem) is treated the same as "not a repo" - the safe default that
+// simply omits the git-status block, matching getGitStatusSummary's own
+// "could not be determined" rather than asserting either state.
+func isGitRepo(ctx context.Context, dir string) bool {
+	inRepo, err := git.IsRepo(ctx, dir)
+	if err != nil {
+		slog.Warn("Could not determine whether the working directory is a git repository", "dir", dir, "error", err)
+		return false
+	}
+	return inRepo
 }
 
 func getGitStatus(ctx context.Context, dir string) string {

@@ -71,11 +71,14 @@ lsp add gopls --command gopls \
 | `lsp_diagnostics` | current errors and warnings |
 | `lsp_restart` | restart a server that has wedged |
 
-`lsp_definition`, `lsp_symbols` and `lsp_call_hierarchy` are read-only and safe
-to allow without prompting:
+`lsp_definition`, `lsp_symbols`, `lsp_workspace_symbols`, `lsp_hover` and
+`lsp_call_hierarchy` are read-only and safe to allow without prompting.
+`lsp_references` is not in that set — it still asks. See the
+[tools reference](../reference/tools.md#the-read-only-set) for the full
+read-only list across all tools.
 
 ```bash
-permissions allow lsp_definition lsp_symbols lsp_call_hierarchy lsp_references
+permissions allow lsp_definition lsp_symbols lsp_workspace_symbols lsp_hover lsp_call_hierarchy
 ```
 
 Diagnostics also surface automatically after an edit, so the agent sees the

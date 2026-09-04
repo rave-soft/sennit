@@ -11,6 +11,10 @@ Get Sennit's current runtime state: active model, provider, LSP/MCP status, skil
   catalogs) instead of the full dump — use this to verify a model ID
   actually exists before writing `provider/model-id` into an agent file,
   `model add`, or `sennit.json`
+- Add `model_filter` (a case-insensitive substring) alongside `models_for`
+  to search a large catalog for a specific ID instead of relying on the
+  50-entry cap — a router provider can carry thousands of models, and an
+  ID past the cap is invisible without a filter
 </usage>
 
 <tips>

@@ -109,8 +109,9 @@ token threshold is never touched however long it sits, a session with a turn
 in flight is never touched at all, and the sweep runs on a coarse 30-second
 tick, so a trip can be up to half a minute late.
 
-Sennit uses a smaller, cheaper model for summarization and session titles. That
-choice is not configurable.
+Summarization and session titles run on the same model as the turn that
+triggers them — there is no separate smaller/cheaper model for internal
+work.
 
 ## Usage statistics
 

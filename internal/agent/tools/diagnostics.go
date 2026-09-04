@@ -25,6 +25,18 @@ const DiagnosticsToolName = "lsp_diagnostics"
 //go:embed diagnostics.md
 var diagnosticsDescription string
 
+// noLSPRunningMessage is returned by the tool (not by getDiagnostics,
+// which other callers rely on staying silent when there's nothing to
+// report — see finishMutation) when no LSP client is running at all. An
+// empty result otherwise reads identically whether nothing was wrong or
+// nothing could be checked; a model that treats "" as "clean" then misses
+// every error a configured-but-not-yet-started server would have found.
+const noLSPRunningMessage = "No LSP client is running; diagnostics could not be checked."
+
+// noDiagnosticsFoundMessage confirms diagnostics were actually checked
+// and came back empty, as distinct from noLSPRunningMessage above.
+const noDiagnosticsFoundMessage = "No diagnostics found."
+
 func NewDiagnosticsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
@@ -35,7 +47,13 @@ func NewDiagnosticsTool(lspManager *lsp.Manager, workingDir string) fantasy.Agen
 				filePath = filepathext.SmartJoin(workingDir, filePath)
 			}
 			notifyLSPs(ctx, lspManager, filePath)
+			if lspManager == nil || lspManager.Clients().Len() == 0 {
+				return fantasy.NewTextResponse(noLSPRunningMessage), nil
+			}
 			output := getDiagnostics(filePath, lspManager)
+			if output == "" {
+				output = noDiagnosticsFoundMessage
+			}
 			return fantasy.NewTextResponse(output), nil
 		},
 	)
@@ -91,7 +109,7 @@ func syncOverlay(ctx context.Context, client *lsp.Client, path string) error {
 
 // waitForLSPDiagnostics waits briefly for diagnostics publication after a file
 // has been opened. Intended for read-only situations where viewing up-to-date
-// files matters but latency should remain low (i.e. when using the view tool).
+// files matters but latency should remain low (i.e. when using the read tool).
 func waitForLSPDiagnostics(
 	ctx context.Context,
 	manager *lsp.Manager,

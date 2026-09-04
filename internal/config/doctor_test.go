@@ -344,3 +344,34 @@ func TestDoctorExcludesEnvironmentProblems(t *testing.T) {
 
 	require.Empty(t, Doctor(cfg))
 }
+
+// TestDoctorPermissionsAllowedToolsUnknownName covers the third list of
+// tool names a config can carry, and the one a typo hurts most: an entry
+// that matches nothing grants nothing, so the person keeps answering the
+// prompt they believe they turned off. The documentation has promised
+// this check for a while; only disabled_tools and an agent's
+// allowed_tools were actually wired up.
+func TestDoctorPermissionsAllowedToolsUnknownName(t *testing.T) {
+	cfg := doctorTestConfig(t)
+	cfg.Permissions = &Permissions{AllowedTools: []string{"read", "reed"}}
+	cfg.SetupAgents()
+
+	problems := Doctor(cfg)
+	require.Len(t, problems, 1)
+	require.Equal(t, "permissions.allowed_tools", problems[0].Subject)
+	require.Contains(t, problems[0].Message, "reed")
+}
+
+// TestDoctorPermissionsAllowedToolsWithAction pins that an entry naming a
+// specific action is checked by its tool half only: permissionService
+// matches "bash:npm run build" ahead of a bare "bash", so the text after
+// the colon is a command, not a tool name to validate.
+func TestDoctorPermissionsAllowedToolsWithAction(t *testing.T) {
+	cfg := doctorTestConfig(t)
+	cfg.Permissions = &Permissions{AllowedTools: []string{"bash:npm run build", "nope:whatever"}}
+	cfg.SetupAgents()
+
+	problems := Doctor(cfg)
+	require.Len(t, problems, 1)
+	require.Contains(t, problems[0].Message, "nope")
+}

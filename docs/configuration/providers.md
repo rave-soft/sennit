@@ -176,8 +176,9 @@ From the shell, `sennit run -m` overrides the model for one prompt. In the TUI,
 `ctrl+l` opens the model switcher.
 
 > [!NOTE]
-> Sennit picks a smaller, cheaper model automatically for internal work such as
-> session titles and summarization. That choice is not user-configurable.
+> Session titles and summarization run on the same model as the turn that
+> triggers them — Sennit does not switch to a smaller or cheaper model for
+> this internal work.
 
 ### Per-agent models
 
