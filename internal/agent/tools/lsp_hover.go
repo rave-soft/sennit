@@ -70,6 +70,15 @@ func NewHoverTool(m *lsp.Manager, root string) fantasy.AgentTool {
 		if c == nil || !c.SupportsHover() {
 			return fantasy.NewTextErrorResponse("no hover-capable LSP client handles the requested location"), nil
 		}
+		// Checked before the round trip, not only after it fails: a
+		// canceled context does not reliably make Hover return an error -
+		// a server that answers first hands back a perfectly good result -
+		// so testing only the failure path left the abort depending on who
+		// won a race, which is exactly how it behaved differently under
+		// -race in CI.
+		if err := ctx.Err(); err != nil {
+			return fantasy.ToolResponse{}, err
+		}
 		h, err := c.Hover(ctx, path, line, char)
 		if err != nil {
 			// A canceled context (Esc) must abort the tool-call batch

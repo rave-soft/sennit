@@ -48,6 +48,14 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 			}
 
+			// Checked before the round trip, not only after it fails: a
+			// canceled context does not reliably make the request return
+			// an error - a server that answers first hands back a good
+			// result - so testing only the failure path leaves the abort
+			// depending on who wins a race. See NewHoverTool.
+			if err := ctx.Err(); err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			items, err := resolved.client.PrepareCallHierarchy(ctx, resolved.path, resolved.line, resolved.char)
 			if err != nil {
 				// A canceled context (Esc) must abort the tool-call batch

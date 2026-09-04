@@ -41,6 +41,14 @@ func NewSymbolsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentToo
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
 			}
 
+			// Checked before the round trip, not only after it fails: a
+			// canceled context does not reliably make the request return
+			// an error - a server that answers first hands back a good
+			// result - so testing only the failure path leaves the abort
+			// depending on who wins a race. See NewHoverTool.
+			if err := ctx.Err(); err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			symbols, err := client.DocumentSymbols(ctx, filePath)
 			if err != nil {
 				// A canceled context (Esc) must abort the tool-call batch
