@@ -1068,7 +1068,7 @@ func TestProviderRequest_SummarizeLabeled(t *testing.T) {
 
 	// Standalone summarize (the coordinator path) has no SessionAgentCall; its
 	// correlation must therefore preserve the RunID supplied on the context.
-	require.NoError(t, sa.summarize(WithRunID(t.Context(), "standalone-run"), sess.ID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil))
+	require.NoError(t, sa.summarize(WithRunID(t.Context(), "standalone-run"), sess.ID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, nil))
 
 	started := allProviderLogLines(t, logs, "Provider request started", sess.ID)
 	finished := allProviderLogLines(t, logs, "Provider request finished", sess.ID)
@@ -1121,7 +1121,7 @@ func TestProviderRequest_SummarizeCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- sa.summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil)
+		done <- sa.summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, nil)
 	}()
 	// Let the summarize reach its blocking Stream, then cancel.
 	time.Sleep(50 * time.Millisecond)
@@ -1221,7 +1221,7 @@ func TestProviderRequest_SummarizeRetryLabeled(t *testing.T) {
 		Messages:     env.messages,
 	}).(*sessionAgent)
 
-	require.NoError(t, sa.summarize(t.Context(), sessID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil))
+	require.NoError(t, sa.summarize(t.Context(), sessID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, nil))
 
 	started := allProviderLogLines(t, logs, "Provider request started", sessID)
 	finished := allProviderLogLines(t, logs, "Provider request finished", sessID)
@@ -1271,7 +1271,7 @@ func TestProviderRequest_SummarizeUnauthorizedWithoutRefresh(t *testing.T) {
 		Messages:     env.messages,
 	}).(*sessionAgent)
 
-	err := sa.summarize(t.Context(), sessID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil)
+	err := sa.summarize(t.Context(), sessID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, nil)
 	require.Error(t, err)
 
 	started := allProviderLogLines(t, logs, "Provider request started", sessID)
@@ -1306,6 +1306,7 @@ func TestProviderRequest_SummarizeAuthRefreshLabeled(t *testing.T) {
 	// restarts the pass and the next attempt is an auth_refresh.
 	require.NoError(t, sa.summarize(t.Context(), sessID, fantasy.ProviderOptions{},
 		func(ctx context.Context, err *fantasy.ProviderError) error { return nil },
+		nil,
 		sa.model.Get(), "", nil, nil))
 
 	started := allProviderLogLines(t, logs, "Provider request started", sessID)

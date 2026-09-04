@@ -236,3 +236,93 @@ func TestRunSubAgent_RetryUsesRefreshedCredential_DifferentModel(t *testing.T) {
 func catwalkModelWithID(id string) catwalk.Model {
 	return catwalk.Model{ID: id, DefaultMaxTokens: 4096}
 }
+
+// TestRunSubAgent_RateLimitRotatesAccountAndSucceeds is B4's end-to-end
+// pin: before buildSubAgentCall wired OnRateLimit, a 429 mid-delegation had
+// no rotation callback at all (buildSubAgentCall gave only OnAuthRefresh),
+// so the delegation surfaced the original 429 instead of rotating to the
+// other configured account the way a top-level turn would have. This
+// drives a real sub-agent through a real (httptest) provider endpoint that
+// 429s the first request and succeeds on the retry, with two accounts
+// configured and rotation enabled, and asserts the retry actually carries
+// the OTHER account's key.
+func TestRunSubAgent_RateLimitRotatesAccountAndSucceeds(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		authz    []string
+		sawFirst bool
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := readAndReplaceBody(r)
+		require.NoError(t, err)
+		var payload struct {
+			Tools json.RawMessage `json:"tools"`
+		}
+		require.NoError(t, json.Unmarshal(body, &payload))
+		if len(payload.Tools) == 0 {
+			// Title generation carries no tools; keep it out of the
+			// delegation's own request bookkeeping below.
+			sseStream(w, FixtureTurn{Text: "Test session"}, authModelID)
+			return
+		}
+
+		mu.Lock()
+		authz = append(authz, r.Header.Get("Authorization"))
+		first := !sawFirst
+		sawFirst = true
+		mu.Unlock()
+
+		if first {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
+			return
+		}
+		sseStream(w, FixtureTurn{Text: "done after rotation"}, authModelID)
+	}))
+	defer srv.Close()
+
+	co := authTestCoordinator(t, withProvider(func(p *config.ProviderConfig) {
+		p.BaseURL = srv.URL + "/v1"
+		p.APIKey = "key-a"
+		p.Account = "acct-a"
+		p.Rotation = &config.RotationConfig{Enabled: true}
+	}))
+	co.builder.accountsStore = newFakeAccountStore(authProviderID,
+		apiKeyAccount("acct-a", "key-a"),
+		apiKeyAccount("acct-b", "key-b"),
+	)
+
+	parent, err := co.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	agentCfg, ok := co.cfg.Config().Agents[config.AgentTask]
+	require.True(t, ok, "authTestCoordinator's SetupAgents must configure the task agent")
+
+	p, err := taskPrompt(prompt.WithWorkingDir(co.cfg.WorkingDir()))
+	require.NoError(t, err)
+	delegate, err := co.delegation.newSubAgent(t.Context(), p, agentCfg)
+	require.NoError(t, err)
+
+	resp, err := co.delegation.runSubAgent(t.Context(), subAgentParams{
+		Agent:          delegate,
+		SessionID:      parent.ID,
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-1",
+		Prompt:         "do something that hits a rate limit",
+		SessionTitle:   "Test Session",
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "delegation must succeed once the retry rotates onto the other account: %s", resp.Content)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.GreaterOrEqual(t, len(authz), 2, "the 429 must have provoked a retry")
+	require.Equal(t, "Bearer key-a", authz[0], "the first attempt carries the account the delegate was built with")
+	require.Equal(t, "Bearer key-b", authz[len(authz)-1],
+		"the retry must carry the OTHER account's key, i.e. the delegation actually rotated")
+
+	after, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+	require.Equal(t, "acct-b", after.Account, "rotation must have activated the other account globally")
+}

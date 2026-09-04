@@ -95,7 +95,16 @@ func NewRenameTool(
 			// actually on disk. Files the client never opened are already
 			// read from disk by the server and need nothing. When nothing
 			// was stale both answers agree and this costs one round trip.
-			if resynced := resyncOpenFiles(ctx, resolved.client, append(affectedFiles, resolved.path)); resynced {
+			resynced, syncErr := resyncOpenFiles(ctx, resolved.client, append(affectedFiles, resolved.path))
+			if syncErr != nil {
+				// At least one open file failed to resync, so its overlay
+				// is still stale and the edit computed above may target the
+				// wrong lines. Refusing here is the whole point of this
+				// block: silently falling through to "apply what we have"
+				// is exactly the corruption it exists to prevent.
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("could not confirm the rename edits are current: %s", syncErr)), nil
+			}
+			if resynced {
 				fresh, freshResolved, err := recomputeRename(ctx, lspManager, params, searchDir)
 				if err != nil {
 					return fantasy.ToolResponse{}, err
@@ -206,15 +215,17 @@ func NewRenameTool(
 }
 
 // resyncOpenFiles re-reads from disk every file in paths that the client
-// currently has open, and reports whether it resynced any. Only open files
-// need it: a file the server never opened is read from disk by the server
-// itself, so its view of that one is already current. Errors are ignored
-// on purpose — a file that vanished or became unreadable between the
-// server's answer and this call fails again, with a better message, when
-// the edit is applied.
-func resyncOpenFiles(ctx context.Context, client *lsp.Client, paths []string) bool {
+// currently has open. It reports whether any file was open at all — the
+// "nothing to do" case, which is not an error — separately from whether a
+// resync it attempted actually succeeded. The caller must not treat these
+// the same: "nothing was open" means the server's view was already current,
+// while "a resync failed" means the server's view is still stale and the
+// caller's edit may be wrong. A partial failure (some files resynced, one
+// did not) is still reported as an error, since the caller cannot tell
+// which of the affected files' overlays it can now trust.
+func resyncOpenFiles(ctx context.Context, client *lsp.Client, paths []string) (resynced bool, err error) {
 	seen := make(map[string]struct{}, len(paths))
-	resynced := false
+	var failed []string
 	for _, path := range paths {
 		if _, done := seen[path]; done {
 			continue
@@ -223,13 +234,17 @@ func resyncOpenFiles(ctx context.Context, client *lsp.Client, paths []string) bo
 		if !client.IsFileOpen(path) {
 			continue
 		}
-		if err := client.NotifyChange(ctx, path); err != nil {
-			slog.Debug("Failed to resync a file before recomputing a rename", "path", path, "error", err)
+		if syncErr := client.NotifyChange(ctx, path); syncErr != nil {
+			slog.Debug("Failed to resync a file before recomputing a rename", "path", path, "error", syncErr)
+			failed = append(failed, path)
 			continue
 		}
 		resynced = true
 	}
-	return resynced
+	if len(failed) > 0 {
+		return resynced, fmt.Errorf("failed to resync %d file(s): %s", len(failed), strings.Join(failed, ", "))
+	}
+	return resynced, nil
 }
 
 // recomputeRename resolves the symbol and asks for its rename edits again,

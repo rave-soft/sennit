@@ -24,7 +24,12 @@ import (
 func newAttachTestApp(t *testing.T, path string) *app.App {
 	t.Helper()
 	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", t.TempDir())
-	boot, err := app.Bootstrap(t.Context(), path, app.BootstrapOptions{})
+	// WorkspaceLock mirrors both production callers (cmd/root.go and
+	// spawner.go): work that is only safe while no second sennit is
+	// running turns here - finalizing interrupted turns, above all - asks
+	// whether the lock was actually enforced, so a fixture without one
+	// would exercise a configuration production never has.
+	boot, err := app.Bootstrap(t.Context(), path, app.BootstrapOptions{WorkspaceLock: true})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		boot.App.Shutdown()

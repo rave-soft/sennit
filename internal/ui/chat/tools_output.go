@@ -74,9 +74,13 @@ func toolOutputSkillContent(sty *styles.Styles, name, description string) string
 }
 
 // toolOutputHookIndicator renders hook indicator lines from tool metadata.
-// Returns empty string if no hook metadata is present. Hook names are
-// sanitized (newlines replaced with ¶) and truncated to fit the available
-// horizontal space.
+// Returns empty string if no hook metadata is present. Every per-hook
+// column — name, matcher, and detail (a Decision plus, on deny, the
+// hook's raw stderr as Reason) — is sanitized to one line and truncated to
+// fit the available horizontal space; Reason in particular can be a
+// multi-line lint/script output (see hooks/runner.go), so leaving it
+// unsanitized would blow the indicator into several lines and, on a narrow
+// terminal, off the right edge entirely.
 func toolOutputHookIndicator(sty *styles.Styles, metadata string, width int) string {
 	if metadata == "" {
 		return ""
@@ -92,28 +96,30 @@ func toolOutputHookIndicator(sty *styles.Styles, metadata string, width int) str
 		return ""
 	}
 
-	// Sanitize names (replace newlines with ¶) and compute max widths
-	// for the name, matcher, and detail columns so they align. The name
-	// column is capped at maxHookNameWidth characters.
+	// Sanitize every column to one line and compute max widths for the
+	// name, matcher, and detail columns so they align. The name column is
+	// capped at maxHookNameWidth characters.
 	const maxHookNameWidth = 30
 	sanitizedNames := make([]string, len(h.Hooks))
+	sanitizedMatchers := make([]string, len(h.Hooks))
 	details := make([]string, len(h.Hooks))
 	maxNameWidth := 0
 	maxMatcherWidth := 0
 	maxDetailWidth := 0
 	for i, hi := range h.Hooks {
-		sanitizedNames[i] = strings.ReplaceAll(hi.Name, "\n", "¶")
+		sanitizedNames[i] = sanitizeHookText(hi.Name)
 		w := lipgloss.Width(sty.Tool.HookName.Render(sanitizedNames[i]))
 		if w > maxNameWidth {
 			maxNameWidth = w
 		}
-		if hi.Matcher != "" {
-			mw := lipgloss.Width(sty.Tool.HookMatcher.Render(hi.Matcher))
+		sanitizedMatchers[i] = sanitizeHookText(hi.Matcher)
+		if sanitizedMatchers[i] != "" {
+			mw := lipgloss.Width(sty.Tool.HookMatcher.Render(sanitizedMatchers[i]))
 			if mw > maxMatcherWidth {
 				maxMatcherWidth = mw
 			}
 		}
-		details[i] = hookDetail(sty, hi)
+		details[i] = hookDetail(sty, hi, sanitizeHookText(hi.Reason))
 		if dw := lipgloss.Width(details[i]); dw > maxDetailWidth {
 			maxDetailWidth = dw
 		}
@@ -126,24 +132,41 @@ func toolOutputHookIndicator(sty *styles.Styles, metadata string, width int) str
 	// Cap the name column so the widest line still fits in width. The
 	// per-line layout is:
 	//   "Hook " + name(padded) + [" " + matcher(padded)] + " → " + detail
+	detailBudget := maxDetailWidth
 	if width > 0 {
 		fixed := lipgloss.Width(sty.Tool.HookLabel.Render("Hook")) + 1
 		if maxMatcherWidth > 0 {
 			fixed += 1 + maxMatcherWidth
 		}
 		fixed += 1 + lipgloss.Width(sty.Tool.HookArrow.Render(styles.ArrowRightIcon)) + 1
-		fixed += maxDetailWidth
-		if budget := width - fixed; budget < maxNameWidth {
+		if budget := width - fixed - maxDetailWidth; budget < maxNameWidth {
 			maxNameWidth = max(1, budget)
 		}
+		// The name column absorbed what it could; whatever's left after
+		// the (now possibly shrunk) fixed columns is the detail's actual
+		// budget. Unlike the name column, a too-long detail was
+		// previously never truncated at all — maxDetailWidth was computed
+		// and then ignored, so a hook's raw stderr line could run the
+		// indicator past the terminal edge.
+		detailBudget = max(1, width-fixed-maxNameWidth)
 	}
 
 	var lines []string
 	for i, hi := range h.Hooks {
 		name := truncateHookName(sanitizedNames[i], maxNameWidth)
-		lines = append(lines, renderHookLine(sty, hi, name, details[i], maxNameWidth, maxMatcherWidth))
+		detail := ansi.Truncate(details[i], detailBudget, "…")
+		lines = append(lines, renderHookLine(sty, hi, sanitizedMatchers[i], name, detail, maxNameWidth, maxMatcherWidth))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sanitizeHookText collapses a hook-supplied string to one line: embedded
+// newlines become ¶ (kept, rather than dropped, so a multi-line message —
+// most commonly a blocking hook's raw stderr, see hooks/runner.go — still
+// hints that there was more) and any other whitespace run collapses to a
+// single space.
+func sanitizeHookText(s string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", "¶")), " ")
 }
 
 // truncateHookName truncates a hook name to fit within maxWidth cells:
@@ -154,16 +177,18 @@ func truncateHookName(name string, maxWidth int) string {
 }
 
 // renderHookLine renders a single hook indicator line with aligned columns.
-func renderHookLine(sty *styles.Styles, hi proto.HookInfo, rawName, detail string, maxNameWidth, maxMatcherWidth int) string {
+// matcher is already sanitized to one line (see sanitizeHookText) and
+// detail is already truncated to its column budget.
+func renderHookLine(sty *styles.Styles, hi proto.HookInfo, matcher, rawName, detail string, maxNameWidth, maxMatcherWidth int) string {
 	name := sty.Tool.HookName.Render(rawName)
 	namePad := strings.Repeat(" ", max(0, maxNameWidth-lipgloss.Width(name)))
 
 	var matcherPart string
 	if maxMatcherWidth > 0 {
-		if hi.Matcher != "" {
-			matcher := sty.Tool.HookMatcher.Render(hi.Matcher)
-			matcherPad := strings.Repeat(" ", maxMatcherWidth-lipgloss.Width(matcher))
-			matcherPart = " " + matcher + matcherPad
+		if matcher != "" {
+			styledMatcher := sty.Tool.HookMatcher.Render(matcher)
+			matcherPad := strings.Repeat(" ", max(0, maxMatcherWidth-lipgloss.Width(styledMatcher)))
+			matcherPart = " " + styledMatcher + matcherPad
 		} else {
 			matcherPart = " " + strings.Repeat(" ", maxMatcherWidth)
 		}
@@ -188,18 +213,29 @@ func renderHookLine(sty *styles.Styles, hi proto.HookInfo, rawName, detail strin
 }
 
 // hookDetail returns the styled detail text for a single hook result.
-func hookDetail(sty *styles.Styles, hi proto.HookInfo) string {
+// reason is already sanitized to one line (see sanitizeHookText).
+func hookDetail(sty *styles.Styles, hi proto.HookInfo, reason string) string {
 	const (
-		okMessage      = "OK"
-		denialMessage  = "Denied"
+		okMessage     = "OK"
+		denialMessage = "Denied"
+		// haltedMessage marks a hook that stopped the whole agent turn
+		// (hooks.HaltExitCode, see runner.go), not just this one tool
+		// call — a materially bigger consequence than an ordinary deny,
+		// so it gets its own word rather than reading as "Denied" like
+		// any other blocked call.
+		haltedMessage  = "Halted"
 		rewroteMessage = "Rewrote Output"
 	)
 	switch hi.Decision {
 	case "deny":
-		if hi.Reason != "" {
-			return sty.Tool.HookDenied.Render(denialMessage) + " " + sty.Tool.HookDeniedReason.Render(hi.Reason)
+		label := denialMessage
+		if hi.Halt {
+			label = haltedMessage
 		}
-		return sty.Tool.HookDenied.Render(denialMessage)
+		if reason != "" {
+			return sty.Tool.HookDenied.Render(label) + " " + sty.Tool.HookDeniedReason.Render(reason)
+		}
+		return sty.Tool.HookDenied.Render(label)
 	case "allow":
 		result := sty.Tool.HookOK.Render(okMessage)
 		if hi.InputRewrite {

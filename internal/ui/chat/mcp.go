@@ -3,9 +3,9 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
@@ -24,17 +24,25 @@ type MCPToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	toolNameParts := strings.SplitN(opts.ToolCall.Name, "_", 3)
-	if len(toolNameParts) != 3 {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid tool name"}, width)
+	// This renderer has no config in hand (ToolRenderOpts carries only the
+	// call/result, not the app's MCP server list), so it can only use
+	// [proto.SplitMCPToolName]'s naive fallback — the same "first
+	// underscore" split as before, still wrong for a server name that
+	// itself contains an underscore. See internal/ui/dialog/permissions.go
+	// for the version that resolves this correctly against config. What
+	// changed here is the failure mode: a name this can't split at all no
+	// longer renders as a header-less error block with no tool call shown
+	// at all — it falls back to the raw tool name, same as an unrecognized
+	// tool anywhere else in the transcript.
+	mcpServer, mcpTool, ok := proto.SplitMCPToolName(opts.ToolCall.Name, nil)
+	var name string
+	if ok {
+		mcpName := sty.Tool.MCPName.Render(humanizedToolName(mcpServer))
+		toolName := sty.Tool.MCPToolName.Render(humanizedToolName(mcpTool))
+		name = fmt.Sprintf("%s %s %s", mcpName, sty.Tool.MCPArrow.String(), toolName)
+	} else {
+		name = sty.Tool.MCPToolName.Render(humanizedToolName(opts.ToolCall.Name))
 	}
-	mcpName := humanizedToolName(toolNameParts[1])
-	toolName := humanizedToolName(toolNameParts[2])
-
-	mcpName = sty.Tool.MCPName.Render(mcpName)
-	toolName = sty.Tool.MCPToolName.Render(toolName)
-
-	name := fmt.Sprintf("%s %s %s", mcpName, sty.Tool.MCPArrow.String(), toolName)
 
 	if opts.IsPending() {
 		return pendingTool(sty, name, opts)

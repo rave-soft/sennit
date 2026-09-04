@@ -54,6 +54,15 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			var allLocations []protocol.Location
 			var allErrs error
 			for _, r := range results {
+				// r's position came from a grep against disk, which can
+				// already be ahead of r.client's overlay for r.path — read
+				// and bash never send didChange. Resync first, or this
+				// lookup can miss the identifier and read back as "no
+				// references" for a symbol that plainly has some.
+				if err := syncOverlay(ctx, r.client, r.path); err != nil {
+					allErrs = errors.Join(allErrs, err)
+					continue
+				}
 				locations, err := r.client.FindReferences(ctx, r.path, r.line, r.char, true)
 				if err != nil {
 					if isNoIdentifierError(err) {

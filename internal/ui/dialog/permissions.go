@@ -618,17 +618,42 @@ func (p *Permissions) renderKeyValue(key, value string, width int) string {
 func (p *Permissions) renderToolName(width int) string {
 	toolName := p.permission.ToolName
 
-	// Check if this is an MCP tool (format: mcp_<mcpname>_<toolname>).
-	if strings.HasPrefix(toolName, "mcp_") {
-		parts := strings.SplitN(toolName, "_", 3)
-		if len(parts) == 3 {
-			mcpName := prettyName(parts[1])
-			toolPart := prettyName(parts[2])
-			toolName = fmt.Sprintf("%s %s %s", mcpName, styles.ArrowRightIcon, toolPart)
-		}
+	// Check if this is an MCP tool (format: mcp_<mcpname>_<toolname>). The
+	// naive "first two underscores" split this used to do breaks the
+	// moment a server's own config key contains an underscore
+	// ("my_server" + "do_thing" used to render as "My → Server Do
+	// Thing"), so resolve the boundary against the configured server
+	// names when they're available; see [proto.SplitMCPToolName] for the
+	// fallback when they're not (config unset, or the session predates a
+	// server rename/removal).
+	if mcpName, toolPart, ok := proto.SplitMCPToolName(toolName, p.knownMCPServerNames()); ok {
+		toolName = fmt.Sprintf("%s %s %s", prettyName(mcpName), styles.ArrowRightIcon, prettyName(toolPart))
 	}
 
 	return p.renderKeyValue("Tool", toolName, width)
+}
+
+// knownMCPServerNames returns the MCP server names from the active config,
+// used to resolve an MCP tool's "mcp_<server>_<tool>" name unambiguously
+// (see renderToolName). Returns nil when no config is wired up (e.g. a
+// dialog built directly in a test), which is a valid input to
+// [proto.SplitMCPToolName] — it just falls back to the naive split.
+func (p *Permissions) knownMCPServerNames() []string {
+	// Config() panics on a zero-value Common (Workspace unset) — tests
+	// build the dialog directly without one, so guard the same way
+	// Context() already does for Ctx.
+	if p.com == nil || p.com.Workspace == nil {
+		return nil
+	}
+	cfg := p.com.Config()
+	if cfg == nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.MCP))
+	for name := range cfg.MCP {
+		names = append(names, name)
+	}
+	return names
 }
 
 // prettyName converts snake_case or kebab-case to Title Case.

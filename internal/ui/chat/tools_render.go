@@ -334,3 +334,35 @@ func countSummary(n int, singular, plural string) string {
 	}
 	return fmt.Sprintf("%d %s", n, plural)
 }
+
+// pagedCountSummary reports a labeled count for a collapsed header, adding
+// "of total" when the page shown is smaller than the full result (e.g.
+// "100 of 4213 matches") — a plain countSummary would silently hide that a
+// grep/glob/ls/read result was cut down to a page, which reads as "that's
+// everything" when it isn't. Falls back to countSummary when total is not
+// bigger than n (nothing was paged, or the caller has no total to report).
+func pagedCountSummary(n, total int, singular, plural string) string {
+	if total <= n {
+		return countSummary(n, singular, plural)
+	}
+	if n == 1 {
+		return fmt.Sprintf("1 of %d %s", total, plural)
+	}
+	return fmt.Sprintf("%d of %d %s", n, total, plural)
+}
+
+// incompleteSuffix notes, alongside a paged/count summary, that part of the
+// underlying tree could not be read at all. It is deliberately a different
+// message from the "N of M" paging above: paging means a cursor can fetch
+// the rest, Incomplete means some of the tree was silently skipped and no
+// cursor will recover it — see proto.GrepResponseMetadata's doc comment.
+func incompleteSuffix(summary string, incomplete bool) string {
+	if !incomplete {
+		return summary
+	}
+	const note = "some results unreadable"
+	if summary == "" {
+		return note
+	}
+	return summary + ", " + note
+}

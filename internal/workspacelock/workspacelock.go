@@ -41,6 +41,23 @@ type ownerInfo struct {
 type Lock struct {
 	dir  string
 	once sync.Once
+	// enforced records whether this lock actually excludes another
+	// process. It is false when SENNIT_SKIP_DATADIR_LOCK made Acquire hand
+	// back a no-op lock, which callers doing something that is only safe
+	// under mutual exclusion have to know about - see Enforced.
+	enforced bool
+}
+
+// Enforced reports whether holding this lock actually keeps a second
+// sennit out of the same workspace. It is false only when
+// SENNIT_SKIP_DATADIR_LOCK turned acquisition into a no-op, and work that
+// is safe solely because "no other process is running turns against these
+// sessions" must ask before doing it. Finalizing interrupted turns is
+// exactly that work: it writes tool-result errors and a canceled finish
+// into every unfinished assistant message it finds, which is repair for a
+// crashed run and corruption for a live one.
+func (l *Lock) Enforced() bool {
+	return l != nil && l.enforced
 }
 
 // poolEntry is the process-local, refcounted OS lock backing every
@@ -55,6 +72,9 @@ type Lock struct {
 type poolEntry struct {
 	release  func()
 	refCount int
+	// enforced mirrors Lock.enforced for every later acquirer that joins
+	// this entry by refcount rather than taking the OS lock itself.
+	enforced bool
 }
 
 var (
@@ -107,7 +127,7 @@ func Acquire(dir string) (*Lock, error) {
 
 	if entry, ok := pool[absDir]; ok {
 		entry.refCount++
-		return &Lock{dir: absDir}, nil
+		return &Lock{dir: absDir, enforced: entry.enforced}, nil
 	}
 
 	if skipLock() {
@@ -138,8 +158,8 @@ func Acquire(dir string) (*Lock, error) {
 	// can each hold a flock on a different inode that lives at the
 	// same path. Leaving the file in place lets every acquirer see
 	// the same inode and lets the kernel arbitrate correctly.
-	pool[absDir] = &poolEntry{release: release, refCount: 1}
-	return &Lock{dir: absDir}, nil
+	pool[absDir] = &poolEntry{release: release, refCount: 1, enforced: true}
+	return &Lock{dir: absDir, enforced: true}, nil
 }
 
 // canonicalDir returns an absolute, symlink-canonical directory

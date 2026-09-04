@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,7 +43,7 @@ func TestSummarize_ClaimHandsOffTheActiveSlotAtomically(t *testing.T) {
 		// window for anything else to claim the session in between.
 		ac := &activeCancel{cancel: func() {}}
 		sa.setActiveForTest(sess.ID, ac)
-		err := sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, ac)
+		err := sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, ac)
 		require.NoError(t, err, "summarize must succeed by swapping in its own slot, not by finding the session idle")
 		require.False(t, sa.IsSessionBusy(sess.ID), "summarize must release the slot once it's done")
 	})
@@ -57,7 +61,7 @@ func TestSummarize_ClaimHandsOffTheActiveSlotAtomically(t *testing.T) {
 		racer := &activeCancel{cancel: func() {}}
 		sa.setActiveForTest(sess.ID, racer)
 
-		err := sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil)
+		err := sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, nil)
 		require.ErrorIs(t, err, ErrSessionBusy)
 
 		sa.clearActiveIfMatch(sess.ID, racer)
@@ -69,7 +73,7 @@ func TestSummarize_ClaimHandsOffTheActiveSlotAtomically(t *testing.T) {
 		other := &activeCancel{cancel: func() {}}
 		sa.setActiveForTest(sess.ID, other) // something else already took over
 
-		err := sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, ac)
+		err := sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, ac)
 		require.ErrorIs(t, err, ErrSessionBusy)
 		got, ok := sa.getActiveForTest(sess.ID)
 		require.True(t, ok)
@@ -77,4 +81,91 @@ func TestSummarize_ClaimHandsOffTheActiveSlotAtomically(t *testing.T) {
 
 		sa.clearActiveIfMatch(sess.ID, other)
 	})
+}
+
+// TestSummarize_PassesRateLimitCallbackToTheProvider pins B4's other
+// half. A summary is the single most expensive request a session makes
+// and is only asked for once the context is full, so losing the whole
+// pass to a 429 that a spare account would have absorbed is the worst
+// place to skip rotation. The parent turn has rotated on this since
+// rotation existed; the summary it triggers did not, and neither did a
+// delegation's.
+func TestSummarize_PassesRateLimitCallbackToTheProvider(t *testing.T) {
+	env := testEnv(t)
+
+	rotated := make(chan struct{}, 1)
+	model := &rateLimitOnceModel{}
+	sa := NewSessionAgent(SessionAgentOptions{
+		Model:    Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 100000, DefaultMaxTokens: 1000}},
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "hello"}},
+	})
+	require.NoError(t, err)
+
+	onRateLimit := func(context.Context, *fantasy.ProviderError) error {
+		select {
+		case rotated <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	_ = sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, onRateLimit,
+		sa.model.Get(), "", nil, nil)
+
+	select {
+	case <-rotated:
+	default:
+		t.Fatal("a rate-limited summarize must reach the rotation callback")
+	}
+}
+
+// rateLimitOnceModel fails its first stream with a 429 and succeeds on the
+// retry, which is the shape fantasy's OnRateLimit contract is written for.
+type rateLimitOnceModel struct {
+	calls atomic.Int32
+}
+
+func (m *rateLimitOnceModel) Provider() string { return "fake" }
+func (m *rateLimitOnceModel) Model() string    { return "fake-model" }
+
+func (m *rateLimitOnceModel) Stream(_ context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	if m.calls.Add(1) == 1 {
+		return func(yield func(fantasy.StreamPart) bool) {
+			yield(fantasy.StreamPart{
+				Type:  fantasy.StreamPartTypeError,
+				Error: &fantasy.ProviderError{StatusCode: 429, Message: "rate limited"},
+			})
+		}, nil
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "1"}) {
+			return
+		}
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "1", Delta: "summary"}) {
+			return
+		}
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "1"}) {
+			return
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+func (m *rateLimitOnceModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return nil, errors.New("not used")
+}
+
+func (m *rateLimitOnceModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, errors.New("not used")
+}
+
+func (m *rateLimitOnceModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, errors.New("not used")
 }

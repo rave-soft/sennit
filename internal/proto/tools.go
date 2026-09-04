@@ -133,7 +133,15 @@ type GlobParams struct {
 // GlobResponseMetadata represents the metadata for a glob tool response.
 type GlobResponseMetadata struct {
 	NumberOfFiles int  `json:"number_of_files"`
+	TotalFiles    int  `json:"total_files"`
 	Truncated     bool `json:"truncated"`
+	// Incomplete is true when part of the search tree could not be read
+	// and was silently left out of the match set. It is reported
+	// separately from Truncated, which means the result limit cut the
+	// matches short — a different fact from part of the tree never
+	// having been read at all. See tools.GlobResponseMetadata, the
+	// agent-side twin of this DTO.
+	Incomplete bool `json:"incomplete,omitempty"`
 }
 
 // GlobPermissionsParams represents the permission parameters for the glob tool.
@@ -149,7 +157,15 @@ const GrepToolName = "grep"
 // GrepResponseMetadata represents the metadata for a grep tool response.
 type GrepResponseMetadata struct {
 	NumberOfMatches int  `json:"number_of_matches"`
+	TotalMatches    int  `json:"total_matches"`
 	Truncated       bool `json:"truncated"`
+	// Incomplete is true when part of the search tree could not be walked
+	// and was silently left out of the match set. It is reported
+	// separately from Truncated, which means the result limit cut the
+	// matches short — a different fact from part of the tree never
+	// having been searched at all. See tools.GrepResponseMetadata, the
+	// agent-side twin of this DTO.
+	Incomplete bool `json:"incomplete,omitempty"`
 }
 
 // GrepPermissionsParams represents the permission parameters for the grep
@@ -221,7 +237,15 @@ type LSPermissionsParams struct {
 // LSResponseMetadata represents the metadata for an ls tool response.
 type LSResponseMetadata struct {
 	NumberOfFiles int  `json:"number_of_files"`
+	TotalFiles    int  `json:"total_files"`
 	Truncated     bool `json:"truncated"`
+	// Incomplete is true when part of the tree could not be read and was
+	// silently left out of the results. It is reported separately from
+	// Truncated, which means the result limit or depth cut the listing
+	// short — a different fact from part of the tree never having been
+	// read at all. See tools.LSResponseMetadata, the agent-side twin of
+	// this DTO.
+	Incomplete bool `json:"incomplete,omitempty"`
 }
 
 const MultiEditToolName = "multiedit"
@@ -290,8 +314,14 @@ type ReadResourceType string
 const ReadResourceSkill ReadResourceType = "skill"
 
 type ReadResponseMetadata struct {
-	FilePath            string           `json:"file_path"`
-	Content             string           `json:"content"`
+	FilePath   string `json:"file_path"`
+	Content    string `json:"content"`
+	TotalLines int    `json:"total_lines"`
+	NextOffset int    `json:"next_offset,omitempty"`
+	// Truncated means the read stopped at the line limit before reaching
+	// TotalLines; NextOffset says where to resume. See
+	// tools.ReadResponseMetadata, the agent-side twin of this DTO.
+	Truncated           bool             `json:"truncated"`
 	ResourceType        ReadResourceType `json:"resource_type,omitempty"`
 	ResourceName        string           `json:"resource_name,omitempty"`
 	ResourceDescription string           `json:"resource_description,omitempty"`

@@ -414,6 +414,117 @@ func TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
+// makeSubAgentRateLimitCallback (B4: rate-limit rotation for delegations)
+// ---------------------------------------------------------------------------
+
+// subAgentTestModel returns a Model naming authProviderID/authModelID, the
+// only fields buildSubAgentRuntime reads (see its own doc comment: it
+// re-reads providerCfg/providerCredentials from the live config store by
+// model.ModelCfg.Provider, and never consults CatalogCfg/Model here).
+func subAgentTestModel() Model {
+	return Model{ModelCfg: config.SelectedModel{Provider: authProviderID, Model: authModelID}}
+}
+
+// TestMakeSubAgentRateLimitCallback_RotatesAndAppliesNewCredentials is
+// makeSubAgentRateLimitCallback's counterpart to
+// TestMakeRateLimitCallback_RotatesAndAppliesNewCredentials: a 429 marks the
+// current account cooling down, picks the other configured account, and
+// applies it - the config-side assertions are identical to the top-level
+// case, since applyRotationPick's account activation is shared code.
+//
+// What differs, and what this test exists to pin, is the REBUILD half: the
+// rebuilt runtime stored on active must come from buildSubAgentRuntime, not
+// runtimeFor. buildSubAgentRuntime deliberately leaves tools/systemPrompt
+// unset (see its own doc comment - only .model is read back out of it), so
+// asserting they are empty after rotation is the observable proxy that the
+// sub-agent rebuild path ran instead of the top-level one, which would have
+// populated them with the coordinator's full tool set and system prompt -
+// exactly the privilege escalation this trigger must not cause.
+func TestMakeSubAgentRateLimitCallback_RotatesAndAppliesNewCredentials(t *testing.T) {
+	notifier := &recordingNotifier{}
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskAuthProviderJSON),
+		withNotify(notifier),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true}
+			p.Account = "acct-a"
+			p.APIKey = "key-a"
+		}),
+	)
+	co.builder.accountsStore = newFakeAccountStore(authProviderID,
+		apiKeyAccount("acct-a", "key-a"),
+		apiKeyAccount("acct-b", "key-b"),
+	)
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
+	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+
+	// A sub-agent's ActiveRuntime starts nil and is only ever populated by a
+	// successful refresh/rotation (see runSubAgent's own comment on active).
+	active := newActiveRuntime(nil)
+
+	cb := co.builder.makeSubAgentRateLimitCallback(providerCfg, cred, subAgentTestModel(), active)
+	require.NotNil(t, cb)
+
+	err := cb(t.Context(), rateLimitErr(nil))
+	require.NoError(t, err, "a successful rotation must return nil so fantasy retries immediately")
+
+	after, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+	require.Equal(t, "acct-b", after.Account)
+	require.Equal(t, "key-b", after.APIKey)
+
+	require.NotNil(t, active.load(), "the sub-agent's active runtime must be rebuilt so a retried request's ModelProvider sees it")
+	require.Equal(t, "acct-b", active.load().providerCredentials.Account)
+	require.Empty(t, active.load().tools, "rebuild must go through buildSubAgentRuntime (tools left unset), never runtimeFor (which would carry the coordinator's full tool set)")
+	require.Empty(t, active.load().systemPrompt, "rebuild must go through buildSubAgentRuntime (system prompt left unset), never runtimeFor")
+
+	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
+}
+
+// TestMakeSubAgentRateLimitCallback_AllExhausted_DoesNotLoop is the
+// delegation counterpart of TestMakeRateLimitCallback_AllExhausted_SurfacesOriginalError:
+// with a single account and nothing else usable, the callback must return
+// *accounts.ErrAllExhausted (never nil, which would tell fantasy to retry
+// immediately with no backoff and hot-loop the still-limited account)
+// exactly once per call, not repeat the account further into cooldown -
+// pinning "исчерпание аккаунтов в делегации не зацикливается".
+func TestMakeSubAgentRateLimitCallback_AllExhausted_DoesNotLoop(t *testing.T) {
+	notifier := &recordingNotifier{}
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskAuthProviderJSON),
+		withNotify(notifier),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true}
+			p.Account = "only"
+		}))
+	co.builder.accountsStore = newFakeAccountStore(authProviderID, apiKeyAccount("only", "orig-key"))
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(authProviderID)
+	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(authProviderID)
+	require.True(t, ok)
+	active := newActiveRuntime(nil)
+
+	cb := co.builder.makeSubAgentRateLimitCallback(providerCfg, cred, subAgentTestModel(), active)
+	require.NotNil(t, cb)
+
+	// Two consecutive 429s, exactly as a stuck delegation retry loop would
+	// deliver them: the callback must report exhaustion both times rather
+	// than ever finding acct "only" usable again or looping on it.
+	for i := range 2 {
+		err := cb(t.Context(), rateLimitErr(nil))
+		require.Error(t, err, "call %d must report exhaustion, not rotate", i)
+		var exhausted *accounts.ErrAllExhausted
+		require.True(t, errors.As(err, &exhausted), "call %d must return *accounts.ErrAllExhausted unchanged", i)
+	}
+	require.Nil(t, active.load(), "exhaustion must never populate the sub-agent's active runtime")
+	require.Equal(t, 0, notifier.count("", notify.TypeAccountRotated))
+}
+
+// ---------------------------------------------------------------------------
 // makeThresholdRotateCallback (Trigger A: threshold, RotateThreshold providers)
 // ---------------------------------------------------------------------------
 

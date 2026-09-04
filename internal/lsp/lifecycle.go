@@ -324,6 +324,17 @@ func (r *runtime) restart(
 	// lock is silently dropped from the candidate's reopen set (it stays
 	// in f.files, so IsFileOpen reports true, but the new generation
 	// never got its didOpen).
+	//
+	// This only closes restart-vs-restart interleaving. openFile itself
+	// is deliberately not gated by r.mu — it was never meant to block on
+	// a restart in flight — so it can still call didOpen on oldGen after
+	// this snapshot is taken and after the swap below publishes a new
+	// generation, leaving the very same symptom (open per f.files, no
+	// didOpen on the generation that matters). filesync.openFile closes
+	// that half itself, by checking after its didOpen whether the
+	// generation it used is still current and reopening on whichever one
+	// is if not — see its comment for why the fix belongs there and not
+	// here.
 	prepareFiles := prepareSync()
 
 	oldGen := r.currentGeneration()

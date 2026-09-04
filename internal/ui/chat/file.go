@@ -104,8 +104,19 @@ func (v *ReadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	// Always one line: file content is not something this chat lets you
-	// page through — open it in an editor to actually read it.
-	return appendResultSummary(sty, header, lineCountSummary(content))
+	// page through — open it in an editor to actually read it. Prefer the
+	// metadata's own line count when available: it reflects the whole
+	// file's TotalLines, while a plain count of content only counts the
+	// page that was actually returned and reads as the whole file when
+	// Truncated says it isn't.
+	summary := lineCountSummary(content)
+	if meta.TotalLines > 0 {
+		summary = pagedCountSummary(strings.Count(content, "\n")+1, meta.TotalLines, "line", "lines")
+	}
+	if meta.Truncated {
+		summary += fmt.Sprintf(" (more at offset %d)", meta.NextOffset)
+	}
+	return appendResultSummary(sty, header, summary)
 }
 
 // -----------------------------------------------------------------------------
@@ -336,7 +347,18 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	} else {
 		summary := diffSummary(meta.Additions, meta.Removals)
 		if len(meta.EditsFailed) > 0 {
-			summary = fmt.Sprintf("%s · %d/%d edits applied", summary, meta.EditsApplied, len(params.Edits))
+			// diffSummary is "" when every edit failed (0 additions, 0
+			// removals) — only prepend the "· " separator when there is a
+			// diff summary to separate from. Unconditionally formatting
+			// "%s · ..." left a leading "· " that collided with
+			// appendResultSummary's own bullet, rendering "··" (see the
+			// regression test).
+			applied := fmt.Sprintf("%d/%d edits applied", meta.EditsApplied, len(params.Edits))
+			if summary != "" {
+				summary += " · " + applied
+			} else {
+				summary = applied
+			}
 		}
 		header = appendResultSummary(sty, header, summary)
 	}

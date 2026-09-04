@@ -1,7 +1,6 @@
 package util
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"sort"
@@ -9,6 +8,7 @@ import (
 
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encoding powernap.OffsetEncoding) error {
@@ -23,19 +23,23 @@ func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encodin
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Detect line ending style
-	var lineEnding string
-	if bytes.Contains(content, []byte("\r\n")) {
-		lineEnding = "\r\n"
-	} else {
-		lineEnding = "\n"
-	}
+	// The LSP server numbers lines by ANY line terminator, so a file with
+	// even one stray "\r\n" among otherwise bare "\n" lines must still be
+	// split on every terminator, not just the majority one — splitting on
+	// "\r\n" alone (the old behavior) left bare-"\n" lines fused together,
+	// so a server-reported line number pointed at the wrong line and the
+	// edit landed one line off. Normalize to LF for the whole edit, and
+	// restore CRLF on write if that's what the file had.
+	rawContent := string(content)
+	normalized, isCRLF := fsext.ToUnixLineEndings(rawContent)
 
-	// Track if file ends with a newline
-	endsWithNewline := len(content) > 0 && bytes.HasSuffix(content, []byte(lineEnding))
+	// Track if file ends with a newline (checked against the normalized
+	// form so a lone trailing "\r" — part of a CRLF pair — isn't mistaken
+	// for content).
+	endsWithNewline := len(normalized) > 0 && strings.HasSuffix(normalized, "\n")
 
 	// Split into lines without the endings
-	lines := strings.Split(string(content), lineEnding)
+	lines := strings.Split(normalized, "\n")
 
 	// Check for overlapping edits
 	for i, edit1 := range edits {
@@ -65,21 +69,27 @@ func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encodin
 		lines = newLines
 	}
 
-	// Join lines with proper line endings
+	// Join lines with LF first; convert to CRLF afterward if the file was
+	// CRLF, rather than interleaving line-ending choice with line joining.
 	var newContent strings.Builder
 	for i, line := range lines {
 		if i > 0 {
-			newContent.WriteString(lineEnding)
+			newContent.WriteString("\n")
 		}
 		newContent.WriteString(line)
 	}
 
 	// Only add a newline if the original file had one and we haven't already added it
-	if endsWithNewline && !strings.HasSuffix(newContent.String(), lineEnding) {
-		newContent.WriteString(lineEnding)
+	if endsWithNewline && !strings.HasSuffix(newContent.String(), "\n") {
+		newContent.WriteString("\n")
 	}
 
-	if err := os.WriteFile(path, []byte(newContent.String()), 0o644); err != nil {
+	result := newContent.String()
+	if isCRLF {
+		result, _ = fsext.ToWindowsLineEndings(result)
+	}
+
+	if err := os.WriteFile(path, []byte(result), 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -156,9 +166,13 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 		// an empty one, shifting every subsequent line.
 		result = append(result, prefix+suffix)
 	} else {
-		// Split new text into lines, being careful not to add extra newlines
-		// newLines := strings.Split(strings.TrimRight(edit.NewText, "\n"), "\n")
-		newLines := strings.Split(edit.NewText, "\n")
+		// A server is free to send NewText with CRLF line endings regardless
+		// of what the file on disk uses (e.g. a rename edit built from a
+		// CRLF template). lines is always LF-normalized by the caller, so
+		// NewText must be too, or a "\r" left dangling in a split segment
+		// doubles up against the "\n" this function reintroduces below.
+		normalizedNewText, _ := fsext.ToUnixLineEndings(edit.NewText)
+		newLines := strings.Split(normalizedNewText, "\n")
 
 		if len(newLines) == 1 {
 			// Single line change

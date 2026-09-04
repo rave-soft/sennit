@@ -13,18 +13,37 @@ import (
 // ReplaceSymbolToolRenderContext renders replace symbol tool messages.
 type ReplaceSymbolToolRenderContext struct{}
 
+// replaceSymbolTitle maps the tool's Action param to the header it
+// renders under — "replace" is the default when Action is empty (the
+// param description calls it out as such), but add_before/add_after/delete
+// are meaningfully different operations and a header that always reads
+// "Replace Symbol" hides a deletion as if it were an edit.
+func replaceSymbolTitle(action string) string {
+	switch action {
+	case "add_before":
+		return "Insert Before Symbol"
+	case "add_after":
+		return "Insert After Symbol"
+	case "delete":
+		return "Delete Symbol"
+	default:
+		return "Replace Symbol"
+	}
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// Replace symbol uses full width for diffs, like edit.
-	if opts.IsPending() {
-		return pendingTool(sty, "Replace Symbol", opts)
-	}
-
 	var params tools.ReplaceSymbolParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+	title := replaceSymbolTitle(params.Action)
+
+	if opts.IsPending() {
+		return pendingTool(sty, title, opts)
+	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, "Replace Symbol", width, opts, params.Symbol, file)
+	header := toolHeader(sty, opts.Status, title, width, opts, params.Symbol, file)
 	if opts.Compact {
 		return header
 	}

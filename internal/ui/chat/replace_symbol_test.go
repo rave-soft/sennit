@@ -3,6 +3,7 @@ package chat
 import (
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -44,4 +45,36 @@ func TestReplaceSymbolRenderTool_MetadataUnmarshalErrorFallsBackToLineCount(t *t
 	require.Contains(t, out, "1 line",
 		"an unmarshal error must fall back to the raw-content line count summary")
 	require.NotContains(t, out, "+1 −1", "must not render a diff summary derived from broken metadata")
+}
+
+// TestReplaceSymbolRenderTool_TitleFollowsAction pins Audit 12 finding 3:
+// the tool's Action param (replace/add_before/add_after/delete) used to be
+// ignored by the renderer, which always titled the header "Replace
+// Symbol" — a deletion showed up in the transcript looking exactly like
+// an edit.
+func TestReplaceSymbolRenderTool_TitleFollowsAction(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	ctx := &ReplaceSymbolToolRenderContext{}
+
+	for action, wantTitle := range map[string]string{
+		"":           "Replace Symbol", // default per the param's own description
+		"replace":    "Replace Symbol",
+		"add_before": "Insert Before Symbol",
+		"add_after":  "Insert After Symbol",
+		"delete":     "Delete Symbol",
+	} {
+		toolCall := message.ToolCall{
+			ID:       "tc-rs-" + action,
+			Name:     tools.ReplaceSymbolToolName,
+			Input:    `{"symbol":"Foo","file_path":"foo.go","action":"` + action + `"}`,
+			Finished: true,
+		}
+		out := ansi.Strip(ctx.RenderTool(&sty, 80, &ToolRenderOpts{
+			ToolCall: toolCall,
+			Status:   ToolStatusRunning,
+		}))
+		require.Contains(t, out, wantTitle, "action=%q", action)
+	}
 }

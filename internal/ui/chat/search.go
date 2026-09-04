@@ -56,7 +56,9 @@ func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	var meta tools.GlobResponseMetadata
 	_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
-	return appendResultSummary(sty, header, countSummary(meta.NumberOfFiles, "file", "files"))
+	summary := pagedCountSummary(meta.NumberOfFiles, meta.TotalFiles, "file", "files")
+	summary = incompleteSuffix(summary, meta.Incomplete)
+	return appendResultSummary(sty, header, summary)
 }
 
 // -----------------------------------------------------------------------------
@@ -110,7 +112,9 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	var meta tools.GrepResponseMetadata
 	_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
-	return appendResultSummary(sty, header, countSummary(meta.NumberOfMatches, "match", "matches"))
+	summary := pagedCountSummary(meta.NumberOfMatches, meta.TotalMatches, "match", "matches")
+	summary = incompleteSuffix(summary, meta.Incomplete)
+	return appendResultSummary(sty, header, summary)
 }
 
 // -----------------------------------------------------------------------------
@@ -152,7 +156,9 @@ func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *To
 
 	var meta tools.LSResponseMetadata
 	_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
-	return appendResultSummary(sty, header, countSummary(meta.NumberOfFiles, "entry", "entries"))
+	summary := pagedCountSummary(meta.NumberOfFiles, meta.TotalFiles, "entry", "entries")
+	summary = incompleteSuffix(summary, meta.Incomplete)
+	return appendResultSummary(sty, header, summary)
 }
 
 // -----------------------------------------------------------------------------

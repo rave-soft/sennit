@@ -100,20 +100,41 @@ func worstKnownRemainingPercent(u accounts.Usage) int {
 	return 100 - worst
 }
 
+// runtimeRebuild recompiles the runtime active should carry after a
+// rotation pick lands. It is the one thing that legitimately differs
+// between a top-level turn and a delegation: applyRotationPick's decision
+// half (activate the picked account, then rebuild) is identical for both,
+// but WHAT gets rebuilt is not interchangeable.
+//
+// A top-level rebuild goes through runtimeFor(inputs) - the full
+// coordinator runtime, complete with the named-agent roster and every
+// coder-only tool. A delegation must rebuild through buildSubAgentRuntime
+// instead, which recompiles only the model/provider pair. Passing the
+// top-level rebuild for a delegation would hand a delegate the coder's own
+// tools and system prompt on its very next request - exactly the privilege
+// escalation delegation_finalizer.go's agentTool(allowNamedAgents=false)
+// and buildSubAgentRuntime's own doc comment exist to prevent. Threading
+// the strategy in as a parameter (rather than switching on some "is this a
+// sub-agent" flag inside applyRotationPick) is what makes that mistake a
+// compile-time impossibility instead of a runtime one: each caller can only
+// ever supply the rebuild that matches how it obtained providerCfg/cred in
+// the first place.
+type runtimeRebuild func(ctx context.Context) (*compiledRuntime, error)
+
 // applyRotationPick activates picked as providerID's active account and,
-// when active is non-nil, rebuilds and stores the runtime so the next
-// request actually uses the new credentials - the same two steps
+// when active is non-nil, rebuilds and stores the runtime via rebuild so
+// the next request actually uses the new credentials - the same two steps
 // makeAuthRefreshCallback takes after a successful credential refresh:
 // activation is projected into the live ProviderConfig, never touching
 // the provider build path itself.
-func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID string, picked accounts.Account, active *activeRuntime, inputs runtimeToolInputs) error {
+func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID string, picked accounts.Account, active *activeRuntime, rebuild runtimeRebuild) error {
 	if err := b.cfg.ActivateAccount(config.ScopeGlobal, providerID, picked); err != nil {
 		return fmt.Errorf("activating rotated account %s for provider %s: %w", picked.ID, providerID, err)
 	}
 	if active == nil {
 		return nil
 	}
-	runtime, err := b.runtimeFor(ctx, inputs)
+	runtime, err := rebuild(ctx)
 	if err != nil {
 		return fmt.Errorf("rebuilding runtime after rotating provider %s to account %s: %w", providerID, picked.ID, err)
 	}
@@ -138,11 +159,32 @@ func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID strin
 // (over-threshold) account rather than losing the step's own result over
 // a rotation that didn't work out.
 func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, port runtimeOperationPort) func(context.Context) {
+	inputs := port.inputs
+	return b.thresholdRotateCallback(providerCfg, cred, active, func(ctx context.Context) (*compiledRuntime, error) {
+		return b.runtimeFor(ctx, inputs)
+	})
+}
+
+// makeSubAgentThresholdRotateCallback is makeThresholdRotateCallback's
+// delegation counterpart: same decision (mark, list, ShouldRotate, Pick),
+// rebuilt through buildSubAgentRuntime(model) instead of runtimeFor(inputs)
+// - see runtimeRebuild's doc comment for why the two must never be
+// interchanged. model is the delegation's own resolved model (buildAgentModel
+// in buildAgent), mirroring makeSubAgentAuthRefreshCallback.
+func (b *runtimeBuilder) makeSubAgentThresholdRotateCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, model Model, active *activeRuntime) func(context.Context) {
+	return b.thresholdRotateCallback(providerCfg, cred, active, func(ctx context.Context) (*compiledRuntime, error) {
+		return b.buildSubAgentRuntime(ctx, model)
+	})
+}
+
+// thresholdRotateCallback holds the rotation decision both
+// makeThresholdRotateCallback and makeSubAgentThresholdRotateCallback share;
+// only the rebuild strategy differs between them (see runtimeRebuild).
+func (b *runtimeBuilder) thresholdRotateCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, rebuild runtimeRebuild) func(context.Context) {
 	rotator := b.rotatorFor(providerCfg)
 	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateThreshold {
 		return nil
 	}
-	inputs := port.inputs
 	return func(ctx context.Context) {
 		// Resolve the account live rather than trusting cred.Account:
 		// cred is captured by value once per turn, so after a
@@ -194,7 +236,7 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 		if picked.ID == acct.ID {
 			return
 		}
-		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, inputs); err != nil {
+		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, rebuild); err != nil {
 			slog.Warn("Threshold rotation: failed to apply picked account", "provider", providerCfg.ID, "error", err)
 			return
 		}
@@ -232,11 +274,45 @@ func (b *runtimeBuilder) makeThresholdRotateCallback(providerCfg config.Provider
 // ORIGINAL 429 (not this error) is what a caller ultimately sees; see
 // RetryWithExponentialBackoffRespectingRetryHeaders and runTurn.handleStreamError.
 func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, port runtimeOperationPort) fantasy.OnRateLimitFunc {
+	inputs := port.inputs
+	return b.rateLimitCallback(providerCfg, cred, active, func(ctx context.Context) (*compiledRuntime, error) {
+		return b.runtimeFor(ctx, inputs)
+	})
+}
+
+// makeSubAgentRateLimitCallback is makeRateLimitCallback's delegation
+// counterpart: same decision (mark, list, Pick, apply-or-report-exhausted),
+// rebuilt through buildSubAgentRuntime(model) instead of runtimeFor(inputs)
+// - see runtimeRebuild's doc comment for why the two must never be
+// interchanged. model is the delegation's own resolved model, mirroring
+// makeSubAgentAuthRefreshCallback and makeSubAgentThresholdRotateCallback.
+//
+// Notifications are NOT suppressed for a delegation: a rotation or an
+// exhaustion is exactly as true an event when it happens under a
+// delegation as under the top-level turn (the account and its remaining
+// budget are shared with every other caller of that provider), and
+// swallowing them here would hide a delegation quietly burning through
+// every configured account with nothing shown to the person running it.
+// Parallel delegations rotating the same exhausted provider in quick
+// succession can produce more than one notification in a short window,
+// but that is the accurate account of what happened, not noise from this
+// callback double-reporting a single event - see currentRotationAccount's
+// per-call resolution, which keeps each delegation's report attributed to
+// the account IT actually observed.
+func (b *runtimeBuilder) makeSubAgentRateLimitCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, model Model, active *activeRuntime) fantasy.OnRateLimitFunc {
+	return b.rateLimitCallback(providerCfg, cred, active, func(ctx context.Context) (*compiledRuntime, error) {
+		return b.buildSubAgentRuntime(ctx, model)
+	})
+}
+
+// rateLimitCallback holds the rotation decision both makeRateLimitCallback
+// and makeSubAgentRateLimitCallback share; only the rebuild strategy
+// differs between them (see runtimeRebuild).
+func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, rebuild runtimeRebuild) fantasy.OnRateLimitFunc {
 	rotator := b.rotatorFor(providerCfg)
 	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateRateLimit {
 		return nil
 	}
-	inputs := port.inputs
 	return func(ctx context.Context, providerErr *fantasy.ProviderError) error {
 		// Resolve the account live rather than trusting cred.Account:
 		// cred is captured by value once per turn, so after a
@@ -284,7 +360,7 @@ func (b *runtimeBuilder) makeRateLimitCallback(providerCfg config.ProviderConfig
 			// applies before the retry.
 			return &accounts.ErrAllExhausted{ProviderID: providerCfg.ID}
 		}
-		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, inputs); err != nil {
+		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, rebuild); err != nil {
 			slog.Warn("Rate-limit rotation: failed to apply picked account", "provider", providerCfg.ID, "error", err)
 			return err
 		}

@@ -89,6 +89,7 @@ func New(
 		return nil, err
 	}
 	client.diagnostics = newDiagnosticsStore(name, nil)
+	client.files.diagnostics = client.diagnostics
 	rt.closeFiles = client.files.closeAllFiles
 	rt.setState = client.SetServerState
 	rt.onDiagnosticsPublish = client.diagnostics.publish

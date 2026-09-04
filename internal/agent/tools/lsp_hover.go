@@ -79,6 +79,17 @@ func NewHoverTool(m *lsp.Manager, root string) fantasy.AgentTool {
 		if err := ctx.Err(); err != nil {
 			return fantasy.ToolResponse{}, err
 		}
+		// Both branches above resolve path from disk (workspaceSymbolMatches
+		// greps for the symbol; the explicit-position branch takes the path
+		// directly), but c's overlay for it can still be older — read and
+		// bash never send didChange. Sync before asking, or a hover at a
+		// position that has since shifted misses and comes back empty.
+		if err := syncOverlay(ctx, c, path); err != nil {
+			if ctx.Err() != nil {
+				return fantasy.ToolResponse{}, ctx.Err()
+			}
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to sync file with LSP: %s", err)), nil
+		}
 		h, err := c.Hover(ctx, path, line, char)
 		if err != nil {
 			// A canceled context (Esc) must abort the tool-call batch

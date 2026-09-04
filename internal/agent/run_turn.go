@@ -412,7 +412,11 @@ func (a *sessionAgent) finishTurn(
 		// call's RunID explicitly so the summary belongs to the turn that
 		// triggered it.
 		summarizeCtx := WithRunID(genCtx, call.RunID)
-		if summarizeErr := a.summarize(summarizeCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, t.model, t.promptPrefix, call.ActiveRuntime, ac); summarizeErr != nil {
+		// call.OnRateLimit is whatever this turn already rotates with: the
+		// coordinator's for a person's turn, the sub-agent's for a
+		// delegation. Passing it through keeps the summary on the same
+		// account discipline as the turn that triggered it.
+		if summarizeErr := a.summarize(summarizeCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, call.OnRateLimit, t.model, t.promptPrefix, call.ActiveRuntime, ac); summarizeErr != nil {
 			// Not fatal to this turn's completion bookkeeping: the turn
 			// itself already streamed successfully, and there is no
 			// summary to resume a continuation from, so log and fall

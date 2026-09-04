@@ -202,15 +202,32 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	if opts.ConfineWrites {
 		appInstance.Permissions().ConfineToWorkingDir()
 	}
+	appInstance.workspaceLockEnforced = opts.WorkspaceLock && wsLock.Enforced()
 
 	// Close out whatever a previous process was killed in the middle of,
 	// now — before anything of this project's is dispatched, which is what
 	// lets "unfinished" be read as "abandoned". Failure is logged inside
 	// and not fatal: a session that opens with a stale spinner beats one
 	// that does not open. See finalizeInterruptedTurns.
-	if err := finalizeInterruptedTurns(ctx, cfg.WorkingDir(), appInstance.Messages()); err != nil {
-		slog.Error("Failed to close out interrupted turns from a previous run",
-			"component", "app", "project_path", cfg.WorkingDir(), "error", err)
+	//
+	// Only under a lock that actually excludes a second process, though.
+	// "Unfinished" reads as "abandoned" solely because nobody else can be
+	// running turns against these sessions, and SENNIT_SKIP_DATADIR_LOCK
+	// makes Acquire hand back a lock that excludes nothing (see
+	// workspacelock.Lock.Enforced). Under it a second sennit would write
+	// tool-result errors and a canceled finish into the first one's turn
+	// while it is still streaming - repair for a crash, corruption for a
+	// live run. Leaving a stale spinner in that case is the cheaper wrong
+	// answer of the two.
+	switch {
+	case !appInstance.WorkspaceLockEnforced():
+		slog.Warn("Skipping interrupted-turn cleanup: no enforced workspace lock, so another sennit may be running turns here",
+			"component", "app", "project_path", cfg.WorkingDir())
+	default:
+		if err := finalizeInterruptedTurns(ctx, cfg.WorkingDir(), appInstance.Messages()); err != nil {
+			slog.Error("Failed to close out interrupted turns from a previous run",
+				"component", "app", "project_path", cfg.WorkingDir(), "error", err)
+		}
 	}
 
 	// Keep the workspace lock through all repo-dependent teardown. In

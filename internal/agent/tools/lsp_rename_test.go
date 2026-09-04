@@ -109,6 +109,39 @@ func TestLSPRenameThroughManagerRecordsEditedSpansNotWholeFileReads(t *testing.T
 	require.Equal(t, 3, bEdit.end)
 }
 
+// TestLSPRenameRefusesWhenResyncFails is the regression test for finding
+// 1.6: resyncOpenFiles used to swallow NotifyChange errors and report
+// success ("false") whenever every resync it attempted failed — the exact
+// class the caller could not tell apart from "nothing was open." That let
+// lsp_rename fall through to applying edits computed against a stale
+// overlay instead of recomputing against disk. a.go is opened on the
+// client, then deleted before the rename runs, so NotifyChange fails to
+// read it and resyncOpenFiles must return an error the tool surfaces
+// instead of silently proceeding.
+func TestLSPRenameRefusesWhenResyncFails(t *testing.T) {
+	root := newLSPToolRenameEditWorktree(t)
+	manager := newLSPToolE2EManager(t, root, "rename-edit")
+
+	aPath := filepath.Join(root, "a.go")
+	manager.Start(t.Context(), aPath)
+	client := findLSPClient(manager, aPath)
+	require.NotNil(t, client)
+	require.NoError(t, client.OpenFileOnDemand(t.Context(), aPath))
+	require.True(t, client.IsFileOpen(aPath))
+
+	require.NoError(t, os.Remove(aPath))
+
+	tool := NewRenameTool(manager, &mockPermissionService{}, &mockHistoryService{}, nil, root)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "rename-session")
+
+	resp := runToolWith(t, tool, ctx, RenameToolName, RenameParams{Symbol: "Exact", NewName: "Renamed", Path: "."})
+	require.True(t, resp.IsError, "a failed resync must be surfaced as an error, not silently ignored")
+
+	bContent, err := os.ReadFile(filepath.Join(root, "b.go"))
+	require.NoError(t, err)
+	require.NotContains(t, bContent, "Renamed", "no edit may be applied once the resync it depends on failed")
+}
+
 // TestLSPRenameThroughManagerRefusesConfinementBeforeRequestingPermission
 // is the regression test for defect 3: the confinement check ran after the
 // permission request, so a rename that would ultimately be refused for

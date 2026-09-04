@@ -80,19 +80,39 @@ func (l *lspEvents) GetLSPState(name string) (LSPClientInfo, bool) {
 // being torn out.
 //
 //nolint:unparam // see above; the sink for this value already exists in the UI
-func (l *lspEvents) updateLSPState(name string, state lsp.ServerState, err error, client *lsp.Client, diagnosticCount int) {
+func (l *lspEvents) updateLSPState(name string, state lsp.ServerState, err error, client *lsp.Client) {
 	l.writeMu.Lock()
 	info := LSPClientInfo{
-		Name:            name,
-		State:           state,
-		Error:           err,
-		Client:          client,
-		DiagnosticCount: diagnosticCount,
+		Name:   name,
+		State:  state,
+		Error:  err,
+		Client: client,
 	}
+	existing, hadExisting := l.states.Get(name)
 	if state == lsp.StateReady {
 		info.ConnectedAt = time.Now()
-	} else if existing, ok := l.states.Get(name); ok {
+	} else if hadExisting {
 		info.ConnectedAt = existing.ConnectedAt
+	}
+	// Carry the diagnostic count across, the same as ConnectedAt: a state
+	// update knows nothing about diagnostics and must not answer for them.
+	// Every tool call reaches Manager.Start, and a reusable client makes
+	// that a synchronous callback into here (manager.go's startServer), so
+	// treating "no count supplied" as zero republished 0 on every read and
+	// every edit - which is why the header's error tally kept emptying
+	// while the LSP block below it, reading the client's live counters,
+	// still said seven.
+	//
+	// A terminal state is the exception: a server that stopped, never
+	// started or failed has no diagnostics to speak of, and holding the
+	// last count there would leave a dead server reporting errors.
+	switch state {
+	case lsp.StateStopped, lsp.StateUnstarted, lsp.StateError:
+		info.DiagnosticCount = 0
+	default:
+		if hadExisting {
+			info.DiagnosticCount = existing.DiagnosticCount
+		}
 	}
 	l.states.Set(name, info)
 	l.writeMu.Unlock()
@@ -103,7 +123,7 @@ func (l *lspEvents) updateLSPState(name string, state lsp.ServerState, err error
 		Name:            name,
 		State:           state,
 		Error:           err,
-		DiagnosticCount: diagnosticCount,
+		DiagnosticCount: info.DiagnosticCount,
 	})
 }
 

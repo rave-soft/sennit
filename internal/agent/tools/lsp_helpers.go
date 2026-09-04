@@ -59,6 +59,16 @@ func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, working
 
 func firstSymbolWithDefinition(ctx context.Context, results []*resolvedSymbol) (*resolvedSymbol, error) {
 	return firstWithDefinition(results, func(r *resolvedSymbol) ([]protocol.Location, error) {
+		// The position tried here came from a grep against disk moments
+		// ago, but r.client's overlay for r.path can still describe an
+		// older version — read and bash never send didChange. Against a
+		// stale overlay this Definition call misses the identifier
+		// entirely, isNoIdentifierError swallows that as "not an
+		// identifier", and a genuine symbol comes back as "not found"
+		// instead. Sync first so the position and the overlay agree.
+		if err := syncOverlay(ctx, r.client, r.path); err != nil {
+			return nil, err
+		}
 		return r.client.Definition(ctx, r.path, r.line, r.char)
 	})
 }

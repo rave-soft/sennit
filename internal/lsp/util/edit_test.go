@@ -397,6 +397,91 @@ func TestApplyTextEdits_StaleEndLineLeavesFileUntouched(t *testing.T) {
 	require.Equal(t, original, string(content), "a refused edit must not modify the file on disk")
 }
 
+func TestApplyTextEdits_LineEndings(t *testing.T) {
+	t.Parallel()
+
+	// The LSP server numbers lines by ANY terminator, so these edits always
+	// target "line 1" (0-indexed), the middle line, regardless of what
+	// terminator that file actually uses.
+	editB := func(newText string) []protocol.TextEdit {
+		return []protocol.TextEdit{{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 1, Character: 0},
+				End:   protocol.Position{Line: 1, Character: 1},
+			},
+			NewText: newText,
+		}}
+	}
+
+	tests := []struct {
+		name     string
+		original string
+		newText  string
+		expected string
+	}{
+		{
+			name:     "pure LF file, LF NewText",
+			original: "a\nb\nc\n",
+			newText:  "X",
+			expected: "a\nX\nc\n",
+		},
+		{
+			name:     "pure CRLF file, LF NewText",
+			original: "a\r\nb\r\nc\r\n",
+			newText:  "X",
+			expected: "a\r\nX\r\nc\r\n",
+		},
+		{
+			name:     "pure CRLF file, no trailing terminator",
+			original: "a\r\nb\r\nc",
+			newText:  "X",
+			expected: "a\r\nX\r\nc",
+		},
+		{
+			// The bug this closes: with a single "\r\n" among otherwise
+			// bare "\n" lines, the server still counts three lines. The
+			// old code split on "\r\n" only, saw two "lines", and this
+			// edit landed on the wrong one. Once any CRLF is present the
+			// file is treated as CRLF overall (same convention as
+			// lsp_replace_symbol / fsext.ToWindowsLineEndings), so the
+			// rewritten file comes out fully CRLF rather than staying
+			// mixed.
+			name:     "mixed line endings",
+			original: "a\nb\r\nc\n",
+			newText:  "X",
+			expected: "a\r\nX\r\nc\r\n",
+		},
+		{
+			name:     "pure CRLF file, CRLF NewText",
+			original: "a\r\nb\r\nc\r\n",
+			newText:  "X\r\nY",
+			expected: "a\r\nX\r\nY\r\nc\r\n",
+		},
+		{
+			name:     "pure LF file, CRLF NewText",
+			original: "a\nb\nc\n",
+			newText:  "X\r\nY",
+			expected: "a\nX\nY\nc\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "file.txt")
+			require.NoError(t, os.WriteFile(path, []byte(tt.original), 0o644))
+
+			err := applyTextEdits(protocol.URIFromPath(path), editB(tt.newText), powernap.UTF16)
+			require.NoError(t, err)
+
+			content, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			require.Equal(t, tt.expected, string(content))
+		})
+	}
+}
+
 func TestApplyDocumentChange_CreateFile(t *testing.T) {
 	t.Parallel()
 

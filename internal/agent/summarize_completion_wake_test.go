@@ -104,7 +104,7 @@ func TestSummarize_WakesFromInboxAfterReleasingTheActiveSlot(t *testing.T) {
 
 	summarizeDone := make(chan error, 1)
 	go func() {
-		summarizeDone <- sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil)
+		summarizeDone <- sa.summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil, nil, sa.model.Get(), "", nil, nil)
 	}()
 
 	select {

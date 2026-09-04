@@ -600,3 +600,45 @@ func TestBootstrap_TwoProjectsConcurrentWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessionsB, writesPerApp, "project B must see only its own sessions")
 }
+
+// TestBootstrap_SkippedLockDisablesInterruptedTurnCleanup pins the
+// precondition finalizeInterruptedTurns rests on. It stamps error tool
+// results and a canceled finish onto every unfinished assistant message
+// in the project, which is repair when the process that wrote them is
+// gone and corruption when it is still streaming. Only a lock that
+// actually excludes a second sennit tells the two apart, and
+// SENNIT_SKIP_DATADIR_LOCK hands back one that excludes nothing.
+func TestBootstrap_SkippedLockDisablesInterruptedTurnCleanup(t *testing.T) {
+	setBootstrapTestEnv(t)
+	t.Setenv("SENNIT_SKIP_DATADIR_LOCK", "1")
+
+	dataDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDir) })
+	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
+		DataDir:       dataDir,
+		WorkspaceLock: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(result.App.Shutdown)
+
+	require.False(t, result.App.WorkspaceLockEnforced(),
+		"a skipped lock excludes nobody, so the sweep must not treat unfinished as abandoned")
+}
+
+// TestBootstrap_EnforcedLockEnablesInterruptedTurnCleanup is the other
+// half: the ordinary path must keep sweeping, or a crashed run leaves a
+// session stuck behind a spinner that never stops.
+func TestBootstrap_EnforcedLockEnablesInterruptedTurnCleanup(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	dataDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDir) })
+	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
+		DataDir:       dataDir,
+		WorkspaceLock: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(result.App.Shutdown)
+
+	require.True(t, result.App.WorkspaceLockEnforced())
+}

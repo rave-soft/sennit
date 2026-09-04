@@ -41,9 +41,16 @@ func NewDiagnosticsTool(lspManager *lsp.Manager, workingDir string) fantasy.Agen
 	)
 }
 
-// openInLSPs ensures LSP servers are running and aware of the file, but does
-// not notify changes or wait for fresh diagnostics. Use this for read-only
-// operations like read where the file content hasn't changed.
+// openInLSPs ensures LSP servers are running, aware of the file, and
+// resynced against what is actually on disk, but does not wait for fresh
+// diagnostics itself — the caller does that (read uses a short timeout;
+// see waitForLSPDiagnostics). OpenFileOnDemand alone only opens a file a
+// client has never seen; once open it is a no-op, so a file whose overlay
+// went stale after a read or bash tool touched the file on disk (neither
+// sends didChange) would otherwise stay stale, and the diagnostics printed
+// alongside the freshly read content would describe an older version of
+// the file. NotifyChange re-reads and re-syncs it, and itself errors on a
+// file the client has never opened, so OpenFileOnDemand must run first.
 func openInLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,
@@ -59,8 +66,27 @@ func openInLSPs(
 		if !client.HandlesFile(filepath) {
 			continue
 		}
-		_ = client.OpenFileOnDemand(ctx, filepath)
+		if err := syncOverlay(ctx, client, filepath); err != nil {
+			slog.DebugContext(ctx, "Failed to sync overlay before reading", "path", filepath, "error", err)
+		}
 	}
+}
+
+// syncOverlay brings client's overlay for path in line with what is
+// actually on disk before a position- or content-sensitive request goes
+// out. Every client.<Request> method already calls OpenFileOnDemand
+// internally (see requests.go's ensureOpen), but that alone only opens a
+// file the client has never seen — once open it is a no-op, so a file
+// whose overlay went stale (a read or bash tool changed it on disk without
+// going through edit/write/multiedit, none of which notify this client)
+// stays stale indefinitely. NotifyChange re-reads and re-syncs it, and
+// itself errors on a file the client has never opened, so the two calls
+// must run in this order.
+func syncOverlay(ctx context.Context, client *lsp.Client, path string) error {
+	if err := client.OpenFileOnDemand(ctx, path); err != nil {
+		return err
+	}
+	return client.NotifyChange(ctx, path)
 }
 
 // waitForLSPDiagnostics waits briefly for diagnostics publication after a file

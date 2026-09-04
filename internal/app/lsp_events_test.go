@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestLSPEvents_DiagnosticsUpdateDoesNotClobberConcurrentStateChange(t *testi
 
 	for i := 0; i < trials; i++ {
 		le := newLSPEvents()
-		le.updateLSPState(name, lsp.StateStarting, nil, nil, 0)
+		le.updateLSPState(name, lsp.StateStarting, nil, nil)
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -41,7 +42,7 @@ func TestLSPEvents_DiagnosticsUpdateDoesNotClobberConcurrentStateChange(t *testi
 		}()
 		go func() {
 			defer wg.Done()
-			le.updateLSPState(name, lsp.StateReady, nil, nil, 0)
+			le.updateLSPState(name, lsp.StateReady, nil, nil)
 		}()
 		wg.Wait()
 
@@ -49,5 +50,55 @@ func TestLSPEvents_DiagnosticsUpdateDoesNotClobberConcurrentStateChange(t *testi
 		require.True(t, ok)
 		require.Equal(t, lsp.StateReady, info.State,
 			"trial %d: a concurrent diagnostics update must never revert a state change it raced with", i)
+	}
+}
+
+// TestLSPEvents_StateUpdateKeepsDiagnosticCount pins what a state update
+// is allowed to answer for. Every tool call reaches Manager.Start, and a
+// reusable client turns that into a synchronous state callback, so a state
+// update that reported zero diagnostics republished zero on every read and
+// every edit: the header's error tally emptied while the LSP block below
+// it, which reads the client's live counters instead, still showed the
+// real number.
+func TestLSPEvents_StateUpdateKeepsDiagnosticCount(t *testing.T) {
+	t.Parallel()
+
+	le := newLSPEvents()
+	t.Cleanup(le.broker.Shutdown)
+	const name = "gopls"
+
+	le.updateLSPState(name, lsp.StateReady, nil, nil)
+	le.updateLSPDiagnostics(name, 7)
+
+	// A tool call re-entering Start with an already-usable client.
+	le.updateLSPState(name, lsp.StateReady, nil, nil)
+
+	info, ok := le.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, 7, info.DiagnosticCount, "a state update must not answer for diagnostics")
+}
+
+// TestLSPEvents_TerminalStateClearsDiagnosticCount is the other half: a
+// server that stopped, failed or never started has no diagnostics to
+// report, and holding the last count would leave a dead server showing
+// errors it can no longer prove.
+func TestLSPEvents_TerminalStateClearsDiagnosticCount(t *testing.T) {
+	t.Parallel()
+
+	for _, state := range []lsp.ServerState{lsp.StateStopped, lsp.StateUnstarted, lsp.StateError} {
+		t.Run(fmt.Sprintf("%v", state), func(t *testing.T) {
+			t.Parallel()
+			le := newLSPEvents()
+			t.Cleanup(le.broker.Shutdown)
+			const name = "gopls"
+
+			le.updateLSPState(name, lsp.StateReady, nil, nil)
+			le.updateLSPDiagnostics(name, 7)
+			le.updateLSPState(name, state, nil, nil)
+
+			info, ok := le.states.Get(name)
+			require.True(t, ok)
+			require.Zero(t, info.DiagnosticCount)
+		})
 	}
 }

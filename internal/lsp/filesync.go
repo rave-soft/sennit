@@ -30,6 +30,12 @@ type filesync struct {
 	fileTypes   []string
 	rootMarkers []string
 	debug       bool
+
+	// diagnostics is nil in tests that construct a filesync directly, and
+	// non-nil in normal operation (Client.New wires it in right after
+	// creating the store). closeVanished checks before using it, the same
+	// nil-tolerant convention *Client itself uses throughout this package.
+	diagnostics *diagnosticsStore
 }
 
 // OpenFileInfo contains information about an open file. Version is atomic
@@ -81,11 +87,33 @@ func (f *filesync) openFile(ctx context.Context, path string) error {
 	if info != candidate {
 		return nil // Already open or being opened by another caller.
 	}
-	if err := f.didOpen(ctx, path, f.gen()); err != nil {
+	gen := f.gen()
+	if err := f.didOpen(ctx, path, gen); err != nil {
 		f.files.Del(uri)
 		return err
 	}
-	return nil
+	// restart holds r.mu for its whole run, but openFile does not — it was
+	// never meant to block on a restart in flight, only to avoid racing
+	// other openFile calls for the same path. So a restart's generation
+	// swap can land in the window between reading gen above and didOpen
+	// returning: the file's entry survives into the new generation's
+	// f.files (restart's commit only overwrites its own snapshot, never
+	// deletes what openFile added concurrently), which makes IsFileOpen
+	// report true, but the new generation was never sent this didOpen.
+	// Detect that here and reopen on whatever generation is current now,
+	// looping rather than retrying once, since another restart can race
+	// the retry too.
+	for {
+		current := f.gen()
+		if current == gen {
+			return nil
+		}
+		if err := f.didOpen(ctx, path, current); err != nil {
+			f.files.Del(uri)
+			return err
+		}
+		gen = current
+	}
 }
 
 // didOpen sends a didOpen without changing user-open bookkeeping. It is used
@@ -106,6 +134,9 @@ func (f *filesync) notifyChange(ctx context.Context, path string) error {
 	uri := string(protocol.URIFromPath(path))
 	content, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			f.closeVanished(ctx, uri)
+		}
 		return fmt.Errorf("error reading file: %w", err)
 	}
 	fileInfo, isOpen := f.files.Get(uri)
@@ -115,6 +146,26 @@ func (f *filesync) notifyChange(ctx context.Context, path string) error {
 	newVersion := fileInfo.Version.Add(1)
 	changes := []protocol.TextDocumentContentChangeEvent{{Value: protocol.TextDocumentContentChangeWholeDocument{Text: string(content)}}}
 	return f.gen().client.NotifyDidChangeTextDocument(ctx, uri, int(newVersion), changes)
+}
+
+// closeVanished cleans up bookkeeping for a file that used to be open but
+// no longer exists on disk (deleted by git, another process, or a tool
+// that doesn't go through this client — none of which send didClose
+// themselves). Without this, didClose was only ever sent from
+// closeAllFiles at a graceful shutdown: the entry lingered in f.files
+// forever (IsFileOpen kept reporting true for a file that no longer
+// exists), and its last-known diagnostics kept showing up in
+// project_diagnostics for the rest of the session. Best-effort: the file
+// is gone either way, so a failed didClose is logged, not propagated.
+func (f *filesync) closeVanished(ctx context.Context, uri string) {
+	gen := f.gen()
+	if err := gen.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		slog.Debug("Failed to close a vanished file", "name", f.name, "uri", uri, "error", err)
+	}
+	f.files.Del(uri)
+	if f.diagnostics != nil {
+		f.diagnostics.clearURI(gen, protocol.DocumentURI(uri))
+	}
 }
 
 func (f *filesync) isFileOpen(path string) bool {
@@ -135,9 +186,12 @@ func (f *filesync) closeAllFiles(ctx context.Context, gen *clientGeneration) {
 }
 
 // prepareSync snapshots the user-open files, returning a closure that
-// syncs them onto a target generation once that generation is ready.
-// Markers are candidate-only bootstrap documents and are never added to
-// this snapshot. Candidate notifications remain isolated until publish.
+// syncs them onto a target generation once that generation is ready. A
+// root marker opened for the first time is not part of this snapshot —
+// there is nothing to snapshot yet — but prepareSyncOn registers it into
+// f.files at commit, the same as any other file, so it is part of every
+// snapshot after that. Candidate notifications remain isolated until
+// publish, markers included.
 //
 // It serves both callers of the generation-sync path, which is why the
 // name says "sync" rather than "restart": Restart, where the snapshot is
@@ -185,9 +239,27 @@ func (f *filesync) prepareSyncOn(ctx context.Context, gen *clientGeneration, use
 	// and a sync that fails must leave the snapshot exactly as it found
 	// it.
 	var vanished []string
+	// markers opened this round are recorded here, not in f.files, until
+	// commit: a marker is a candidate-only bootstrap document exactly like
+	// a reopened user file, and must stay invisible to IsFileOpen and the
+	// rest of f.files until the candidate that opened it is the published
+	// generation.
+	markerInfo := make(map[string]*OpenFileInfo)
 	restore := func() {
 		for uri, info := range userFiles {
 			f.files.Set(uri, info)
+		}
+		// A marker is registered in f.files the same way a user file is,
+		// so IsFileOpen, resyncOpenFiles, refreshOpenFiles, and
+		// closeAllFiles all see it. Only set it if this generation didn't
+		// already inherit it from userFiles (a marker that is also a
+		// tracked user file — e.g. go.mod read or edited directly — keeps
+		// whatever version userFiles carried forward instead of being
+		// reset to 1 here).
+		for uri, info := range markerInfo {
+			if _, exists := f.files.Get(uri); !exists {
+				f.files.Set(uri, info)
+			}
 		}
 		for _, uri := range vanished {
 			f.files.Del(uri)
@@ -216,8 +288,15 @@ func (f *filesync) prepareSyncOn(ctx context.Context, gen *clientGeneration, use
 		if info.IsDir() {
 			continue
 		}
+		uri := string(protocol.URIFromPath(path))
+		_, alreadyOpened := openedSet[uri]
 		if err := openCandidate(path); err != nil {
 			return nil, fmt.Errorf("open root marker %s: %w", path, err)
+		}
+		if !alreadyOpened {
+			newInfo := &OpenFileInfo{URI: protocol.DocumentURI(uri)}
+			newInfo.Version.Store(1)
+			markerInfo[uri] = newInfo
 		}
 	}
 	for _, uri := range userURIs {
@@ -258,6 +337,10 @@ func (f *filesync) refreshOpenFiles(ctx context.Context) {
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				f.closeVanished(ctx, uri)
+				continue
+			}
 			slog.Warn("Failed to read file for refresh", "path", path, "error", err)
 			continue
 		}

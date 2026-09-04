@@ -49,6 +49,17 @@ func NewSymbolsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentToo
 			if err := ctx.Err(); err != nil {
 				return fantasy.ToolResponse{}, err
 			}
+			// This tool's own description tells the model to read line
+			// numbers off its output for follow-up edits, so a symbol
+			// range computed against a stale overlay (read and bash never
+			// send didChange) hands back a line that no longer matches
+			// disk.
+			if err := syncOverlay(ctx, client, filePath); err != nil {
+				if ctx.Err() != nil {
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to sync file with LSP: %s", err)), nil
+			}
 			symbols, err := client.DocumentSymbols(ctx, filePath)
 			if err != nil {
 				// A canceled context (Esc) must abort the tool-call batch

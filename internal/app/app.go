@@ -51,6 +51,24 @@ type App struct {
 	// still nil-checks it defensively, for hand-built test doubles that
 	// bypass both constructors.
 	agentDispatcher *AgentDispatcher
+
+	// workspaceLockEnforced records whether this App's bootstrap holds a
+	// workspace lock that actually excludes a second sennit. Read by work
+	// that is only safe under mutual exclusion - see
+	// WorkspaceLockEnforced.
+	workspaceLockEnforced bool
+}
+
+// WorkspaceLockEnforced reports whether a second sennit is excluded from
+// this workspace. False means either that no lock was requested or that
+// SENNIT_SKIP_DATADIR_LOCK turned acquisition into a no-op, and anything
+// whose correctness rests on "no other process is running turns against
+// these sessions" has to skip. Finalizing interrupted turns is the case
+// this exists for: it stamps a canceled finish and error tool results onto
+// every unfinished assistant message, which repairs a crashed run and
+// corrupts a live one.
+func (app *App) WorkspaceLockEnforced() bool {
+	return app != nil && app.workspaceLockEnforced
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -149,11 +167,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Set up callback for LSP state updates.
 	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
 		if client == nil {
-			app.lsp.updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
+			app.lsp.updateLSPState(name, lsp.StateUnstarted, nil, nil)
 			return
 		}
 		client.SetDiagnosticsCallback(app.lsp.updateLSPDiagnostics)
-		app.lsp.updateLSPState(name, client.GetServerState(), nil, client, 0)
+		app.lsp.updateLSPState(name, client.GetServerState(), nil, client)
 	})
 
 	// TrackConfigured must run after SetCallback so the callback is already

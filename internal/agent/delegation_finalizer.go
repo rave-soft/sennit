@@ -782,6 +782,17 @@ func (d *delegationFinalizer) subAgentCarryOverMessages(ctx context.Context, par
 // makeAuthRefreshCallback: see that function's own comment for why the
 // sub-agent's own model, not the coordinator's, has to drive what a
 // refresh stores into active.
+//
+// OnRateLimit and RotateThreshold get the same treatment, for the same
+// reason: makeSubAgentRateLimitCallback/makeSubAgentThresholdRotateCallback
+// rebuild through buildSubAgentRuntime(model), never runtimeFor(inputs), so
+// a rotation mid-delegation lands the delegate back on its own model/account
+// instead of quietly upgrading it to the coordinator's full runtime -
+// exactly the escalation agentTool(allowNamedAgents=false) already refuses
+// through the tool set. Without this wiring, a 429 or an over-threshold
+// account on a delegation used to surface immediately as a failed
+// delegation instead of rotating and continuing, even when rotation was
+// configured and would have recovered the parent turn.
 func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID string, priorMessages []message.Message, maxTokens int64, model Model, providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime) SessionAgentCall {
 	return SessionAgentCall{
 		SessionID:       sessionID,
@@ -801,6 +812,8 @@ func (d *delegationFinalizer) buildSubAgentCall(params subAgentParams, sessionID
 		NonInteractive:   true,
 		ActiveRuntime:    active,
 		OnAuthRefresh:    d.builder.makeSubAgentAuthRefreshCallback(providerCfg, cred, model, active, d.operationPort()),
+		OnRateLimit:      d.builder.makeSubAgentRateLimitCallback(providerCfg, cred, model, active),
+		RotateThreshold:  d.builder.makeSubAgentThresholdRotateCallback(providerCfg, cred, model, active),
 	}
 }
 

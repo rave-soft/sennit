@@ -88,7 +88,7 @@ func summarizeBuffer(contextWindow, maxOut int64) int64 {
 var summaryPrompt []byte
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
-	return a.summarize(ctx, sessionID, opts, onAuthRefresh, a.model.Get(), a.systemPromptPrefix.Get(), nil, nil)
+	return a.summarize(ctx, sessionID, opts, onAuthRefresh, nil, a.model.Get(), a.systemPromptPrefix.Get(), nil, nil)
 }
 
 // claim, when non-nil, is the caller's own still-installed active-run slot
@@ -99,7 +99,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 // A nil claim falls back to the normal claim-if-idle check, used by callers
 // (Summarize, and coordinator's explicit trigger) that never held the slot
 // themselves.
-func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, model Model, systemPromptPrefix string, active *activeRuntime, claim *activeCancel) (retErr error) {
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, onRateLimit func(context.Context, *fantasy.ProviderError) error, model Model, systemPromptPrefix string, active *activeRuntime, claim *activeCancel) (retErr error) {
 	s, release := a.session(sessionID)
 	defer release()
 	genCtx, cancel := context.WithCancel(ctx)
@@ -125,7 +125,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}()
 
-	summaryMessage, resp, err := a.streamSummary(genCtx, ctx, sessionID, model, systemPromptPrefix, active, onAuthRefresh, aiMsgs, opts, currentSession.Todos)
+	summaryMessage, resp, err := a.streamSummary(genCtx, ctx, sessionID, model, systemPromptPrefix, active, onAuthRefresh, onRateLimit, aiMsgs, opts, currentSession.Todos)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (a *sessionAgent) summarizeMessages(ctx context.Context, sessionID string, 
 // summary message is already finished with the error (or deleted, if the
 // error was a cancel) by the time this returns, so the caller has nothing
 // left to clean up on that path - it can just propagate err.
-func (a *sessionAgent) streamSummary(genCtx, ctx context.Context, sessionID string, model Model, systemPromptPrefix string, active *activeRuntime, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, aiMsgs []fantasy.Message, opts fantasy.ProviderOptions, todos []session.Todo) (message.Message, *fantasy.AgentResult, error) {
+func (a *sessionAgent) streamSummary(genCtx, ctx context.Context, sessionID string, model Model, systemPromptPrefix string, active *activeRuntime, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, onRateLimit func(context.Context, *fantasy.ProviderError) error, aiMsgs []fantasy.Message, opts fantasy.ProviderOptions, todos []session.Todo) (message.Message, *fantasy.AgentResult, error) {
 	agent := fantasy.NewAgent(
 		model.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
@@ -291,12 +291,34 @@ func (a *sessionAgent) streamSummary(genCtx, ctx context.Context, sessionID stri
 		}
 	}
 
+	// Same nil discipline as OnAuthRefresh above, and the same reason:
+	// fantasy reads a configured callback as permission to retry the
+	// rate-limited attempt immediately, skipping its backoff. A synthetic
+	// wrapper around nil would claim a rotation happened when none did.
+	//
+	// A summary is the single most expensive request a session makes, and
+	// it only happens when the context is already full - the worst moment
+	// to lose the whole pass to a 429 that a spare account would have
+	// absorbed. The parent turn has rotated on this since rotation
+	// existed; this pass, and a delegation's, did not.
+	var summaryOnRateLimit fantasy.OnRateLimitFunc
+	if onRateLimit != nil {
+		summaryOnRateLimit = func(ctx context.Context, err *fantasy.ProviderError) error {
+			if rotateErr := onRateLimit(ctx, err); rotateErr != nil {
+				return rotateErr
+			}
+			summaryPendingReason = reasonAccountRotated
+			return nil
+		}
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: opts,
 		OnAuthRefresh:   summaryOnAuthRefresh,
+		OnRateLimit:     summaryOnRateLimit,
 		OnRetry: func(err *fantasy.ProviderError, _ time.Duration) {
 			// A transient failure the retry loop is about to re-attempt: the
 			// next attempt is a retry, not a fresh summary.

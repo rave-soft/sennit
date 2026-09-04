@@ -128,7 +128,16 @@ func (d *turnDispatcher) Summarize(ctx context.Context, sessionID string) error 
 	summaryOptions := withPromptCacheKey(runtime.providerOptions, runtime.model, runtime.providerCfg, sessionID)
 	agent := d.agentPort.current()
 	if sa, ok := agent.(*sessionAgent); ok {
-		return sa.summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, runtime.providerCredentials, active, d.delegation.operationPort()), runtime.model, runtime.systemPromptPrefix, active, nil)
+		port := d.delegation.operationPort()
+		return sa.summarize(ctx, sessionID, summaryOptions,
+			d.builder.makeAuthRefreshCallback(runtime.providerCfg, runtime.providerCredentials, active, port),
+			// Rotation belongs here for the same reason it belongs on a
+			// turn: a summary is the most expensive request a session
+			// makes and is only asked for when the context is full, so a
+			// 429 that a spare account would absorb otherwise costs the
+			// whole pass.
+			d.builder.makeRateLimitCallback(runtime.providerCfg, runtime.providerCredentials, active, port),
+			runtime.model, runtime.systemPromptPrefix, active, nil)
 	}
 	return agent.Summarize(ctx, sessionID, summaryOptions, d.builder.makeAuthRefreshCallback(runtime.providerCfg, runtime.providerCredentials, active, d.delegation.operationPort()))
 }

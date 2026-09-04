@@ -345,6 +345,15 @@ func threadSkillsConfig(threadApp *app.App, inherited []*skills.Skill) skills.Di
 // Best-effort throughout: this repairs the record of work already over, and
 // nothing about it is worth failing an attach for.
 func finalizeThreadTurns(ctx context.Context, a *app.App, mgr *thread.Manager) {
+	// The paragraph above rests on the attached workspace holding the
+	// repository's lock. It may not: SENNIT_SKIP_DATADIR_LOCK makes
+	// acquisition a no-op that excludes nobody, and then a second sennit
+	// can be mid-turn in these very worktrees - where this would stamp
+	// error tool results and a canceled finish onto its live message.
+	if !a.WorkspaceLockEnforced() {
+		slog.Warn("Skipping interrupted-turn cleanup in thread worktrees: no enforced workspace lock")
+		return
+	}
 	threads, err := mgr.List(ctx)
 	if err != nil {
 		slog.Warn("Failed to list threads while closing out interrupted turns", "error", err)

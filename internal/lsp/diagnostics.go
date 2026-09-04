@@ -259,6 +259,16 @@ func (d *diagnosticsStore) publish(gen *clientGeneration, params json.RawMessage
 	d.publishDiag(gen, diagParams, nil)
 }
 
+// clearURI clears any diagnostics recorded for uri, as if the server had
+// itself published an empty diagnostics list — the same event-ordering
+// path publishDiag uses, so this can never race a real publish for the
+// same generation into landing out of order. Used when a file that was
+// open vanishes from disk: its stale diagnostics must not keep showing up
+// in project_diagnostics for the rest of the session.
+func (d *diagnosticsStore) clearURI(gen *clientGeneration, uri protocol.DocumentURI) {
+	d.publishDiag(gen, protocol.PublishDiagnosticsParams{URI: uri}, nil)
+}
+
 // publishDiag is like publish but with an explicit before-callback that
 // runs inside the event, just before the change callback. The store
 // mutation happens under d.mu (held by the dispatcher), so no separate
