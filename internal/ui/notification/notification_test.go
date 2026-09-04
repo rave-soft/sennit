@@ -3,7 +3,9 @@ package notification_test
 import (
 	"encoding/base64"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -82,8 +84,7 @@ func TestNativeBackend_Send_CachesIconPath(t *testing.T) {
 // file IO directly — only the returned tea.Cmd, once run on its own
 // goroutine, may touch the filesystem.
 func TestNativeBackend_Send_DoesNotTouchDiskBeforeCmdRuns(t *testing.T) {
-	cacheDir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	cacheDir := redirectUserCacheDir(t)
 
 	backend := notification.NewNativeBackend([]byte("fake-png-data"))
 	backend.SetNotifyFunc(func(_, _ string, _ any) error { return nil })
@@ -91,15 +92,48 @@ func TestNativeBackend_Send_DoesNotTouchDiskBeforeCmdRuns(t *testing.T) {
 	cmd := backend.Send(notification.Notification{Title: "Hello"})
 	require.NotNil(t, cmd)
 
-	entries, err := os.ReadDir(cacheDir)
-	require.NoError(t, err)
-	require.Empty(t, entries, "Send must not cache the icon to disk before its returned tea.Cmd runs")
+	require.Zero(t, filesUnder(t, cacheDir),
+		"Send must not cache the icon to disk before its returned tea.Cmd runs")
 
 	cmd()
 
-	entries, err = os.ReadDir(cacheDir)
-	require.NoError(t, err)
-	require.NotEmpty(t, entries, "the cmd must cache the icon once it actually runs")
+	require.NotZero(t, filesUnder(t, cacheDir),
+		"the cmd must cache the icon once it actually runs")
+}
+
+// redirectUserCacheDir points os.UserCacheDir at a temporary directory and
+// returns it. Every variable it reads has to be set, not just the one this
+// platform happens to use: XDG_CACHE_HOME is consulted on Linux only, macOS
+// derives the path from HOME, and Windows from LocalAppData. Setting one of
+// the three made this test pass on Linux while the icon went to the
+// developer's real cache directory everywhere else - and the assertion
+// below then failed on CI's macOS and Windows runners, since nothing had
+// appeared in the directory being watched.
+func redirectUserCacheDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+	t.Setenv("HOME", dir)
+	t.Setenv("LocalAppData", dir)
+	return dir
+}
+
+// filesUnder counts regular files anywhere beneath root, because where the
+// icon lands inside the redirected cache directory is platform-specific:
+// <root>/sennit on Linux and Windows, <root>/Library/Caches/sennit on macOS.
+func filesUnder(t *testing.T, root string) int {
+	t.Helper()
+	count := 0
+	require.NoError(t, filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() {
+			count++
+		}
+		return nil
+	}))
+	return count
 }
 
 func extractRawString(t *testing.T, cmd tea.Cmd) string {

@@ -25,7 +25,15 @@ import (
 // else in this package would be a silent no-op and could pin the wrong
 // destination.
 func TestSetupMirrorsToProvidedWriter(t *testing.T) {
-	dir := t.TempDir()
+	// Not t.TempDir: Setup opens the log through lumberjack and, by
+	// design, keeps that handle for the life of the process — there is no
+	// closer to call, since a process logs until it exits. Windows
+	// refuses to delete an open file, so t.TempDir's cleanup fails the
+	// test there. Owning the directory here makes removal best-effort,
+	// which is the honest contract for a file that is still open.
+	dir, err := os.MkdirTemp("", "sennit-log-test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	logFile := filepath.Join(dir, "sennit-test.log")
 
 	var buf bytes.Buffer

@@ -59,7 +59,14 @@ func Long(p string) string {
 	if p == "~" {
 		return homedir
 	}
-	if !strings.HasPrefix(p, "~/") {
+	// os.IsPathSeparator, not a literal "~/": callers write "~/foo" with a
+	// forward slash on every platform, but a path that has already been
+	// through filepath.FromSlash arrives as "~\foo" on Windows, and both
+	// name this user's home. On Unix a backslash is an ordinary filename
+	// character, and IsPathSeparator says so, so "~\foo" stays untouched
+	// there. Anything else after the tilde is another user's home, which
+	// this package cannot resolve and must not mangle into homedir+"user".
+	if len(p) < 2 || p[0] != '~' || !os.IsPathSeparator(p[1]) {
 		return p
 	}
 	// Callers write "~/foo" with a literal forward slash regardless of

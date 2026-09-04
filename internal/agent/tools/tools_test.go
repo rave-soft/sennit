@@ -457,7 +457,10 @@ func TestMissingSessionIDFormat(t *testing.T) {
 func TestOutsideWorkdirPermissionRequestsAreUnchanged(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	// resolvedTempDir, not t.TempDir: every expectation below names the
+	// resolved destination, and on macOS the temp root itself sits behind
+	// the /var -> /private/var symlink.
+	root := resolvedTempDir(t)
 	workdir := filepath.Join(root, "workdir")
 	require.NoError(t, os.MkdirAll(workdir, 0o755))
 	outside := filepath.Join(root, "elsewhere")

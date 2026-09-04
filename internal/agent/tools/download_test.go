@@ -29,7 +29,10 @@ func TestDownloadTool_DoesNotFollowSymlinkOutOfWorkspace(t *testing.T) {
 	}))
 	defer server.Close()
 
-	root := t.TempDir()
+	// resolvedTempDir, not t.TempDir: the assertion below names the
+	// resolved destination, and on macOS the temp root itself sits behind
+	// the /var -> /private/var symlink.
+	root := resolvedTempDir(t)
 	workdir := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(workdir, 0o755))
 	outsideDir := filepath.Join(root, "outside")
