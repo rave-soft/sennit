@@ -573,7 +573,7 @@ func (d *delegationFinalizer) launchDelegation(ctx context.Context, args tools.T
 // its own used to tell it the opposite ("avoid text before/after your
 // response").
 func builtinDelegatePrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
-	return prompt.NewPrompt("task", string(taskPromptTmpl)+"\n\n"+delegatedAgentContract, opts...)
+	return prompt.NewPrompt("task", string(taskPromptTmpl)+"\n\n"+delegatedAgentContract, append(opts, prompt.ForSubagent())...)
 }
 
 func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, title, childSessionID string, childDepth int) (fantasy.ToolResponse, error) {
@@ -1008,7 +1008,7 @@ func (d *delegationFinalizer) runNamedAgent(ctx context.Context, parentID string
 			if !ok {
 				return nil, nil, fmt.Errorf("agent %q is no longer configured", id)
 			}
-			systemPrompt, err := prompt.NewPrompt(id, delegatedAgentPrompt(definition.Prompt), prompt.WithWorkingDir(d.cfg.WorkingDir()))
+			systemPrompt, err := prompt.NewPrompt(id, delegatedAgentPrompt(definition.Prompt), prompt.WithWorkingDir(d.cfg.WorkingDir()), prompt.ForSubagent())
 			if err != nil {
 				return nil, nil, fmt.Errorf("parse prompt: %w", err)
 			}
@@ -1137,7 +1137,7 @@ func (d *delegationFinalizer) buildAgenticFetchAgent(ctx context.Context, client
 	// builtinDelegatePrompt tells the `agent` tool's delegate - otherwise
 	// this was the third of three delegate-creation paths where that
 	// promise was made to the caller but never reached the delegate.
-	promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl)+"\n\n"+delegatedAgentContract, prompt.WithWorkingDir(tmpDir))
+	promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl)+"\n\n"+delegatedAgentContract, prompt.WithWorkingDir(tmpDir), prompt.ForSubagent())
 	if err != nil {
 		return nil, err
 	}

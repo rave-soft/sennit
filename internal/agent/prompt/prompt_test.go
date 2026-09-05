@@ -570,6 +570,33 @@ func TestPromptData(t *testing.T) {
 		require.Contains(t, data.AvailSkillXML, "handed down from the parent workspace")
 	})
 
+	t.Run("a subagent prompt drops skills restricted to the main agent", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		cfg := &config.Config{
+			Providers: csync.NewMap[string, config.ProviderConfig](),
+			Options:   &config.Options{},
+		}
+		base := configtest.NewStore(t, cfg, configtest.WithWorkingDir(dir))
+		store := skillsProviderStore{
+			ConfigStore: base,
+			active: []*skills.Skill{
+				{Name: "shared-skill", Description: "available to every agent"},
+				{Name: "main-only-skill", Description: "requires main-agent capabilities", DisableSubagentInvocation: true},
+			},
+		}
+		mainPrompt, err := NewPrompt("main", "")
+		require.NoError(t, err)
+		subagentPrompt, err := NewPrompt("subagent", "", ForSubagent())
+		require.NoError(t, err)
+
+		mainData := mainPrompt.promptData(context.Background(), "anthropic", "claude", store)
+		subagentData := subagentPrompt.promptData(context.Background(), "anthropic", "claude", store)
+		require.Contains(t, mainData.AvailSkillXML, "main-only-skill")
+		require.Contains(t, subagentData.AvailSkillXML, "shared-skill")
+		require.NotContains(t, subagentData.AvailSkillXML, "main-only-skill")
+	})
+
 	// The coordinator's cache is refreshed by the skills file watcher,
 	// which compares SKILL.md snapshots and sees nothing when only the
 	// config changed. Taking its list verbatim therefore left a skill

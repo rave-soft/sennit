@@ -81,7 +81,8 @@ option disable-skill jq
 | `name` | yes | alphanumeric and hyphens, ≤64 chars, and **must match the directory name** |
 | `description` | yes | ≤1024 chars; what the agent reads to decide relevance |
 | `user-invocable` | no | also expose it as a `/` command in the TUI |
-| `disable-model-invocation` | no | hide it from the agent; only you can invoke it |
+| `disable-model-invocation` | no | hide it from every agent; only you can invoke it |
+| `disable-subagent-invocation` | no | expose it to the main agent, but hide it from delegated agents |
 | `license` | no | free text |
 | `compatibility` | no | ≤500 chars |
 | `metadata` | no | a string-to-string map, for your own use |
@@ -92,6 +93,8 @@ the skill fail validation and it simply won't appear.
 Setting both `user-invocable: true` and `disable-model-invocation: true` gives
 you a skill that behaves like a
 [custom command](commands.md) — yours to run, never chosen by the model.
+Use `disable-subagent-invocation: true` instead when the main agent may choose
+the skill but delegated agents lack the roles or tools required to execute it.
 
 ## Bundling files
 

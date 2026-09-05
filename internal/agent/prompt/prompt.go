@@ -60,6 +60,7 @@ type Prompt struct {
 	now        func() time.Time
 	platform   string
 	workingDir string
+	subagent   bool
 }
 
 type PromptDat struct {
@@ -107,6 +108,12 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+func ForSubagent() Option {
+	return func(p *Prompt) {
+		p.subagent = true
 	}
 }
 
@@ -267,7 +274,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 		if activeSkills := sp.ActiveSkills(); len(activeSkills) > 0 {
 			enabled := skills.Filter(activeSkills, cfg.Options.DisabledSkills)
 			if len(enabled) > 0 {
-				availSkillXML = skills.ToPromptXML(enabled)
+				availSkillXML = skills.ToPromptXML(enabled, p.subagent)
 			}
 		}
 	} else {
@@ -311,7 +318,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store C
 		allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
 		if len(allSkills) > 0 {
-			availSkillXML = skills.ToPromptXML(allSkills)
+			availSkillXML = skills.ToPromptXML(allSkills, p.subagent)
 		}
 	}
 

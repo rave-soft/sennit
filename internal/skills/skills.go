@@ -32,17 +32,18 @@ var (
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name                   string            `yaml:"name" json:"name"`
-	Description            string            `yaml:"description" json:"description"`
-	UserInvocable          bool              `yaml:"user-invocable" json:"user_invocable"`
-	DisableModelInvocation bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
-	License                string            `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility          string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata               map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions           string            `yaml:"-" json:"instructions"`
-	Path                   string            `yaml:"-" json:"path"`
-	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
-	Builtin                bool              `yaml:"-" json:"builtin"`
+	Name                      string            `yaml:"name" json:"name"`
+	Description               string            `yaml:"description" json:"description"`
+	UserInvocable             bool              `yaml:"user-invocable" json:"user_invocable"`
+	DisableModelInvocation    bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
+	DisableSubagentInvocation bool              `yaml:"disable-subagent-invocation" json:"disable_subagent_invocation"`
+	License                   string            `yaml:"license,omitempty" json:"license,omitempty"`
+	Compatibility             string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+	Metadata                  map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Instructions              string            `yaml:"-" json:"instructions"`
+	Path                      string            `yaml:"-" json:"path"`
+	SkillFilePath             string            `yaml:"-" json:"skill_file_path"`
+	Builtin                   bool              `yaml:"-" json:"builtin"`
 	// Source is the SKILL.md text this skill was parsed from. It is what
 	// lets a skill be handed to another workspace and still be loadable
 	// there: a thread reads its skills by their location, and an
@@ -281,18 +282,17 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	return skills, states
 }
 
-// ToPromptXML generates XML for injection into the system prompt.
-// Skills with DisableModelInvocation set to true are excluded.
-func ToPromptXML(skills []*Skill) string {
+// ToPromptXML generates XML for injection into an agent's system prompt.
+func ToPromptXML(skills []*Skill, subagent ...bool) string {
 	if len(skills) == 0 {
 		return ""
 	}
 
+	isSubagent := len(subagent) > 0 && subagent[0]
 	var sb strings.Builder
 	sb.WriteString("<available_skills>\n")
 	for _, s := range skills {
-		// Skip skills that have disable-model-invocation set
-		if s.DisableModelInvocation {
+		if s.DisableModelInvocation || isSubagent && s.DisableSubagentInvocation {
 			continue
 		}
 		sb.WriteString("  <skill>\n")

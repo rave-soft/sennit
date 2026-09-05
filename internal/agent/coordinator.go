@@ -409,8 +409,8 @@ func managerIdentityOf(manager tools.ThreadManager) managerIdentity {
 }
 
 type effectiveSkill struct {
-	Name, Description, SkillFilePath string
-	DisableModelInvocation, Builtin  bool
+	Name, Description, SkillFilePath                           string
+	DisableModelInvocation, DisableSubagentInvocation, Builtin bool
 }
 
 // sameSkills includes only fields emitted into the runtime skill prompt.
@@ -427,8 +427,8 @@ func sameSkills(a, b []*skills.Skill) bool {
 			}
 			continue
 		}
-		left := effectiveSkill{a[i].Name, a[i].Description, a[i].SkillFilePath, a[i].DisableModelInvocation, a[i].Builtin}
-		right := effectiveSkill{b[i].Name, b[i].Description, b[i].SkillFilePath, b[i].DisableModelInvocation, b[i].Builtin}
+		left := effectiveSkill{a[i].Name, a[i].Description, a[i].SkillFilePath, a[i].DisableModelInvocation, a[i].DisableSubagentInvocation, a[i].Builtin}
+		right := effectiveSkill{b[i].Name, b[i].Description, b[i].SkillFilePath, b[i].DisableModelInvocation, b[i].DisableSubagentInvocation, b[i].Builtin}
 		if !reflect.DeepEqual(left, right) {
 			return false
 		}

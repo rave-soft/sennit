@@ -326,6 +326,23 @@ func TestToPromptXMLDisableModelInvocation(t *testing.T) {
 	require.NotContains(t, xml, "<name>hidden-skill</name>")
 }
 
+func TestToPromptXMLDisableSubagentInvocation(t *testing.T) {
+	t.Parallel()
+
+	skills := []*Skill{
+		{Name: "shared-skill", Description: "Every agent sees this.", SkillFilePath: "/skills/shared/SKILL.md"},
+		{Name: "main-only-skill", Description: "Only the main agent sees this.", SkillFilePath: "/skills/main-only/SKILL.md", DisableSubagentInvocation: true},
+	}
+
+	mainXML := ToPromptXML(skills)
+	subagentXML := ToPromptXML(skills, true)
+
+	require.Contains(t, mainXML, "<name>shared-skill</name>")
+	require.Contains(t, mainXML, "<name>main-only-skill</name>")
+	require.Contains(t, subagentXML, "<name>shared-skill</name>")
+	require.NotContains(t, subagentXML, "<name>main-only-skill</name>")
+}
+
 func TestToPromptXMLEmpty(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, ToPromptXML(nil))
@@ -378,6 +395,7 @@ func TestParseContent(t *testing.T) {
 	content := []byte(`---
 name: my-skill
 description: A test skill.
+disable-subagent-invocation: true
 ---
 
 # My Skill
@@ -388,6 +406,7 @@ Instructions here.
 	require.NoError(t, err)
 	require.Equal(t, "my-skill", skill.Name)
 	require.Equal(t, "A test skill.", skill.Description)
+	require.True(t, skill.DisableSubagentInvocation)
 	require.Equal(t, "# My Skill\n\nInstructions here.", skill.Instructions)
 	require.Empty(t, skill.Path)
 	require.Empty(t, skill.SkillFilePath)

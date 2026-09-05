@@ -2,6 +2,7 @@
 name: development-pipeline
 description: Запускает последовательный цикл разработки через middle- и senior-разработчиков, до трех раундов разработки и ревью на каждом этапе, затем коммитит принятое решение.
 user-invocable: true
+disable-subagent-invocation: true
 ---
 
 # Пайплайн разработки

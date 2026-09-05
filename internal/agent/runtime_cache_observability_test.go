@@ -34,10 +34,11 @@ func TestSameSkillsUsesEffectiveRuntimeFields(t *testing.T) {
 		})
 	}
 	for name, change := range map[string]func(*skills.Skill){
-		"description": func(s *skills.Skill) { s.Description = "Different description" },
-		"invocation":  func(s *skills.Skill) { s.DisableModelInvocation = true },
-		"location":    func(s *skills.Skill) { s.SkillFilePath = "/other/SKILL.md" },
-		"builtin":     func(s *skills.Skill) { s.Builtin = true },
+		"description":         func(s *skills.Skill) { s.Description = "Different description" },
+		"invocation":          func(s *skills.Skill) { s.DisableModelInvocation = true },
+		"subagent_invocation": func(s *skills.Skill) { s.DisableSubagentInvocation = true },
+		"location":            func(s *skills.Skill) { s.SkillFilePath = "/other/SKILL.md" },
+		"builtin":             func(s *skills.Skill) { s.Builtin = true },
 	} {
 		t.Run("detects_"+name, func(t *testing.T) {
 			changed := equivalent

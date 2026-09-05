@@ -598,8 +598,9 @@ half-loaded; `sennit doctor` reports it.
   write it as a trigger: "Use when ..." plus the concrete words, file types,
   and situations that should fire it. A vague description means the skill is
   never loaded.
-- Optional: `user-invocable`, `disable-model-invocation` (see below),
-  `license`, `compatibility` (max 500 chars), `metadata` (a string map).
+- Optional: `user-invocable`, `disable-model-invocation`,
+  `disable-subagent-invocation` (see below), `license`, `compatibility`
+  (max 500 chars), `metadata` (a string map).
 - Everything after the frontmatter is the instruction body.
 - Other files in the skill directory (scripts, references, templates) travel
   with it. The agent is told where the `SKILL.md` lives, so reference them by
@@ -624,7 +625,9 @@ user-invocable: true
 - Global skills appear as `user:skill-name`; project skills as
   `project:skill-name`.
 - Add `disable-model-invocation: true` to keep a skill user-only (hidden from
-  the model's available-skills list but still manually invocable).
+  every agent's available-skills list but still manually invocable).
+- Add `disable-subagent-invocation: true` when the main agent may choose the
+  skill but delegated agents lack the roles or tools required to execute it.
 
 ## Maintenance
 
