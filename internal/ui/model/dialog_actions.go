@@ -374,7 +374,11 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.AccountsID)
 		cmds = append(cmds, refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionOpenProviderSettings:
-		m.dialog.OpenDialog(dialog.NewProviderSettings(m.com, msg.ProviderID))
+		dlg, cmd := dialog.NewProviderSettings(m.com, msg.ProviderID)
+		m.dialog.OpenDialog(dlg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ActionSubmitProviderSettings:
 		ws := m.com.Workspace
 		providerID := msg.ProviderID

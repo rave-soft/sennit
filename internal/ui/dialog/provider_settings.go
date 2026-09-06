@@ -41,6 +41,30 @@ const (
 	providerSettingsFieldCooldown
 )
 
+// providerSettingsAuthState describes the active account's credential
+// state for a provider that uses OAuth tokens. It is read-only display
+// state, not a focusable field.
+type providerSettingsAuthState int
+
+const (
+	providerSettingsAuthUnknown providerSettingsAuthState = iota
+	providerSettingsAuthOK
+	providerSettingsAuthExpired
+	providerSettingsAuthMissing
+)
+
+// providerSettingsAuthLoadedMsg carries the result of the async
+// ListAccounts + RuntimeProvider read kicked off by NewProviderSettings.
+// It round-trips back into this same dialog's HandleMsg via the
+// DialogAddressed mechanism, the same way ActionAccountsLoaded does.
+type providerSettingsAuthLoadedMsg struct {
+	providerID string
+	state      providerSettingsAuthState
+}
+
+// DialogID implements [DialogAddressed].
+func (providerSettingsAuthLoadedMsg) DialogID() string { return ProviderSettingsID }
+
 // ProviderSettings edits a provider's own settings: its base proxy (see
 // the runtime provider's ConfiguredProxyURL, which every account's effective proxy
 // is resolved against) and, where the provider supports it, automatic
@@ -63,6 +87,12 @@ type ProviderSettings struct {
 	enabled   bool
 	threshold textinput.Model
 	cooldown  textinput.Model
+
+	// authState reflects the active account's credential state, populated
+	// by loadAuthStateCmd from ListAccounts + RuntimeProvider. It is only
+	// meaningful for providers that use OAuth tokens; API-key providers
+	// keep it at providerSettingsAuthUnknown.
+	authState providerSettingsAuthState
 
 	// order is the account order the config already carried, kept verbatim
 	// so submitting the form preserves it. The form does not offer the
@@ -88,6 +118,7 @@ type ProviderSettings struct {
 		Next   key.Binding
 		Prev   key.Binding
 		Toggle key.Binding
+		Auth   key.Binding
 		Submit key.Binding
 		Close  key.Binding
 	}
@@ -102,8 +133,13 @@ var _ Dialog = (*ProviderSettings)(nil)
 // remaining-allowance threshold; RotateRateLimit adds the post-429
 // cooldown instead — never both, and never a field config validation
 // would reject (see providerload's rotation validation).
-func NewProviderSettings(com *common.Common, providerID string) *ProviderSettings {
-	return newProviderSettings(com, providerID, com.Workspace.AccountCapabilities(providerID))
+//
+// The returned tea.Cmd kicks off the async auth-state read (ListAccounts +
+// RuntimeProvider) that populates m.authState; run it alongside the
+// dialog to have the auth badge visible on first frame.
+func NewProviderSettings(com *common.Common, providerID string) (*ProviderSettings, tea.Cmd) {
+	m := newProviderSettings(com, providerID, com.Workspace.AccountCapabilities(providerID))
+	return m, m.loadAuthStateCmd()
 }
 
 // newProviderSettings is NewProviderSettings with caps passed in rather
@@ -186,10 +222,33 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 	m.keyMap.Next = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field"))
 	m.keyMap.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous field"))
 	m.keyMap.Toggle = key.NewBinding(key.WithKeys("left", "right", "space"), key.WithHelp("←/→", "toggle rotation"))
+	m.keyMap.Auth = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "sign in"))
 	m.keyMap.Submit = key.NewBinding(key.WithKeys("enter", "ctrl+y"), key.WithHelp("enter", "submit"))
 	m.keyMap.Close = CloseKey
 
 	return m
+}
+
+// loadAuthStateCmd reads the active account's credential state off the
+// Update loop. It is a no-op for providers whose accounts use API keys
+// (authState stays providerSettingsAuthUnknown and the badge is not
+// rendered). com and providerID are captured by value so the closure
+// doesn't race with the dialog being mutated concurrently.
+func (m *ProviderSettings) loadAuthStateCmd() tea.Cmd {
+	com := m.com
+	providerID := m.providerID
+	return func() tea.Msg {
+		state := providerSettingsAuthUnknown
+		if pc, ok := com.Config().RuntimeProvider(providerID); ok && pc.OAuthToken != nil {
+			state = providerSettingsAuthOK
+			if pc.OAuthToken.IsExpired() {
+				state = providerSettingsAuthExpired
+			}
+		} else if pc, ok := com.Config().RuntimeProvider(providerID); ok && pc.APIKey == "" {
+			state = providerSettingsAuthMissing
+		}
+		return providerSettingsAuthLoadedMsg{providerID: providerID, state: state}
+	}
 }
 
 // ID implements Dialog.
@@ -205,6 +264,12 @@ func (m *ProviderSettings) currentField() providerSettingsField {
 // HandleMsg implements [Dialog].
 func (m *ProviderSettings) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case providerSettingsAuthLoadedMsg:
+		if msg.providerID != m.providerID {
+			return nil
+		}
+		m.authState = msg.state
+		return nil
 	case ActionProviderSettingsResult:
 		m.submitting = false
 		if msg.Err != nil {
@@ -219,6 +284,17 @@ func (m *ProviderSettings) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
+		case key.Matches(msg, m.keyMap.Auth):
+			// Only act on 'a' when no text input has focus: a user
+			// typing in the proxy/threshold/cooldown field must not
+			// accidentally trigger sign-in. When the Enabled field (no
+			// text input) has focus, the key is free to act.
+			switch m.currentField() {
+			case providerSettingsFieldEnabled:
+				return ActionAddAccount{ProviderID: m.providerID}
+			default:
+				return nil
+			}
 		case key.Matches(msg, m.keyMap.Next):
 			m.advanceFocus(1)
 		case key.Matches(msg, m.keyMap.Prev):
@@ -423,6 +499,10 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 	}
 
+	if badge := m.authBadge(); badge != "" {
+		rc.AddPart(badge)
+	}
+
 	switch {
 	case m.submitting:
 		rc.AddPart(t.Dialog.SecondaryText.Render("Saving…"))
@@ -452,11 +532,43 @@ func (m *ProviderSettings) enabledView() string {
 	return style.Render(fmt.Sprintf("‹ %s ›", value))
 }
 
+// authBadge renders the active account's credential state as a short
+// status line. It returns "" when the provider uses API keys (authState
+// stays providerSettingsAuthUnknown) so the badge is invisible for
+// non-OAuth providers.
+func (m *ProviderSettings) authBadge() string {
+	t := m.com.Styles
+	label, style := m.authStateLabel()
+	if label == "" {
+		return ""
+	}
+	return t.Dialog.SecondaryText.Render("Active account: ") + style.Render(label)
+}
+
+// authStateLabel returns the display text and style for m.authState.
+// An empty label means "do not render".
+func (m *ProviderSettings) authStateLabel() (string, lipgloss.Style) {
+	t := m.com.Styles
+	switch m.authState {
+	case providerSettingsAuthOK:
+		return "signed in", t.Dialog.OAuth.Success
+	case providerSettingsAuthExpired:
+		return "token expired", t.Dialog.OAuth.ErrorText
+	case providerSettingsAuthMissing:
+		return "not signed in (a to sign in)", t.Dialog.OAuth.ErrorText
+	default:
+		return "", lipgloss.NewStyle()
+	}
+}
+
 // ShortHelp implements [help.KeyMap].
 func (m *ProviderSettings) ShortHelp() []key.Binding {
 	h := []key.Binding{m.keyMap.Next}
 	if m.currentField() == providerSettingsFieldEnabled {
 		h = append(h, m.keyMap.Toggle)
+	}
+	if m.authState != providerSettingsAuthOK && m.authState != providerSettingsAuthUnknown {
+		h = append(h, m.keyMap.Auth)
 	}
 	return append(h, m.keyMap.Submit, m.keyMap.Close)
 }

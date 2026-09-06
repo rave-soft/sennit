@@ -38,6 +38,14 @@ func (w providerSettingsTestWorkspace) BuiltinSkills() []*skills.Skill {
 
 func (w *providerSettingsTestWorkspace) Config() *config.Config { return w.cfg }
 
+// RuntimeProvider returns the provider's resolved credentials for the
+// auth-state read in loadAuthStateCmd. The test config carries whatever
+// the test set via cfg.Providers, so we just look it up there.
+func (w *providerSettingsTestWorkspace) RuntimeProvider(providerID string) (config.ProviderConfig, bool) {
+	pc, ok := w.cfg.Providers.Get(providerID)
+	return pc, ok
+}
+
 // newProviderSettingsTestCommon builds a *common.Common whose Config()
 // carries providerID with pc as its entry.
 func newProviderSettingsTestCommon(t *testing.T, providerID string, pc config.ProviderConfig) *common.Common {
@@ -251,4 +259,69 @@ func TestProviderSettings_SubmitPreservesAccountOrder(t *testing.T) {
 	require.True(t, ok, "expected ActionSubmitProviderSettings, got %#v", action)
 	require.NotNil(t, submit.Rotation)
 	require.Equal(t, []string{"acc_work", "acc_personal"}, submit.Rotation.Order)
+}
+
+// TestProviderSettings_AuthBadgeShowsSignedInWhenTokenPresent covers the
+// auth-state read: a provider whose RuntimeProvider carries a valid
+// OAuthToken must render the "signed in" badge.
+func TestProviderSettings_AuthBadgeShowsSignedInWhenTokenPresent(t *testing.T) {
+	t.Parallel()
+	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateBoth})
+
+	// Simulate the async load delivering an OK state.
+	m.HandleMsg(providerSettingsAuthLoadedMsg{providerID: "codex", state: providerSettingsAuthOK})
+	require.Equal(t, providerSettingsAuthOK, m.authState)
+	require.Contains(t, m.authBadge(), "signed in")
+}
+
+// TestProviderSettings_AuthBadgeShowsExpiredWhenTokenExpired covers the
+// expired-token case: the badge must say "token expired" and the 'a'
+// key (with focus on the Enabled field) must return ActionAddAccount.
+func TestProviderSettings_AuthBadgeShowsExpiredWhenTokenExpired(t *testing.T) {
+	t.Parallel()
+	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateBoth})
+
+	m.HandleMsg(providerSettingsAuthLoadedMsg{providerID: "codex", state: providerSettingsAuthExpired})
+	require.Equal(t, providerSettingsAuthExpired, m.authState)
+	require.Contains(t, m.authBadge(), "token expired")
+
+	// Focus the Enabled field (index 1) so 'a' is free to act.
+	m.advanceFocus(1)
+	action := m.HandleMsg(keyMsg('a'))
+	add, ok := action.(ActionAddAccount)
+	require.True(t, ok, "expected ActionAddAccount, got %#v", action)
+	require.Equal(t, "codex", add.ProviderID)
+}
+
+// TestProviderSettings_AuthBadgeHiddenForAPIKeyProvider covers the
+// API-key case: authState stays Unknown, the badge is not rendered, and
+// the 'a' key does not trigger sign-in.
+func TestProviderSettings_AuthBadgeHiddenForAPIKeyProvider(t *testing.T) {
+	t.Parallel()
+	com := newProviderSettingsTestCommon(t, "anthropic", config.ProviderConfig{APIKey: "sk-test"})
+	m := newProviderSettings(com, "anthropic", workspace.AccountCapabilities{RotateOn: workspace.RotateNever})
+
+	// No auth-state message delivered: stays Unknown.
+	require.Equal(t, providerSettingsAuthUnknown, m.authState)
+	require.Empty(t, m.authBadge())
+
+	m.advanceFocus(0) // focus proxy (a text input)
+	action := m.HandleMsg(keyMsg('a'))
+	require.Nil(t, action, "'a' in a text input must not trigger sign-in")
+}
+
+// TestProviderSettings_AKeyIgnoredWhenTextInputFocused pins that the 'a'
+// key does not trigger ActionAddAccount while a text input has focus:
+// a user typing "proxy" in the proxy field must not accidentally sign in.
+func TestProviderSettings_AKeyIgnoredWhenTextInputFocused(t *testing.T) {
+	t.Parallel()
+	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateBoth})
+	m.HandleMsg(providerSettingsAuthLoadedMsg{providerID: "codex", state: providerSettingsAuthMissing})
+
+	// Focus is on the proxy field (index 0) by default — a text input.
+	action := m.HandleMsg(keyMsg('a'))
+	require.Nil(t, action, "'a' while the proxy text input has focus must be consumed by the input, not trigger sign-in")
 }
