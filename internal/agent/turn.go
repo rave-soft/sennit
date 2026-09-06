@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -135,6 +136,35 @@ type runTurn struct {
 	// pendingCompletions, so a requeued batch takes its messages back
 	// out with it instead of being shown twice when it is folded again.
 	pendingFoldedCount int
+
+	// rateLimitSteps counts consecutive steps that ended on an HTTP 429.
+	// When it reaches rateLimitStepLimit without rotation being able to
+	// save the turn, the next step is not started: the turn ends with a
+	// "rate limited" finish reason instead of re-sending requests at a
+	// provider that keeps refusing them. Reset to zero by every successful
+	// step (onStepFinish), so a single 429 that the step-level retry
+	// budget absorbs never counts. Written and read on the stream's own
+	// goroutine (prepareStep / onStepFinish / handleStreamError run in
+	// fantasy's step loop order), so no lock is needed.
+	rateLimitSteps int
+}
+
+// rateLimitStepLimit is the number of consecutive steps that may end on a
+// 429 before the turn stops itself. Each such step already spent its own
+// retry budget (MaxRetries backoff attempts) on the same refusal, so three
+// consecutive failures are "the provider is not coming back this turn",
+// not "transient".
+const rateLimitStepLimit = 3
+
+// rateLimitStopError is the sentinel prepareStep returns when the
+// consecutive-429 circuit breaker trips: it ends the turn without a
+// network attempt. It is intentionally not a *fantasy.ProviderError, so
+// handleStreamError's rate-limit counting sees it as an ordinary
+// non-retryable error rather than another 429.
+type rateLimitStopError struct{}
+
+func (rateLimitStopError) Error() string {
+	return "turn stopped: provider rate limit (429) on consecutive steps"
 }
 
 // newRunTurn returns a runTurn ready to be wired into a
@@ -171,6 +201,34 @@ func newRunTurn(
 // foldSteering), applies cache-control provider options (applyCacheControl),
 // and creates the step's assistant message (createStepAssistant).
 func (t *runTurn) prepareStep(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+	// The consecutive-429 circuit breaker: the previous steps already spent
+	// their own retry budgets on a provider that keeps refusing them, and
+	// nothing (account rotation, auth refresh) is about to change the
+	// credential this request goes out with, so starting another step would
+	// only add more refused requests to the same dead endpoint. Ending the
+	// turn here - before any network attempt - is the stop the per-step
+	// retry budget cannot give, because each fresh step resets it.
+	//
+	// Only a rate-limited stop can land here: handleStreamError is what
+	// counts a 429 step, and it is reached for non-cancel errors; cancel
+	// takes the turn down through its own path before a step is prepared.
+	if t.rateLimitSteps >= rateLimitStepLimit {
+		slog.Info("Rate limit circuit breaker tripped, ending turn",
+			"session_id", t.call.SessionID, "run_id", t.call.RunID,
+			"turn_id", t.turnID, "rate_limited_steps", t.rateLimitSteps)
+		if t.currentAssistant != nil {
+			t.currentAssistant.FinishThinking(time.Now().Unix())
+			t.closeUnfinishedToolCalls(callContext, t.currentAssistant.ToolCalls(), nil, nil, false)
+			t.currentAssistant.AddFinish(message.FinishReasonError, time.Now().Unix(),
+				"Rate limited",
+				"The provider has refused several consecutive requests with rate limit (429) errors. The turn was stopped instead of retrying; wait a while before trying again.")
+			if updateErr := t.agent.messages.Update(callContext, *t.currentAssistant); updateErr != nil {
+				slog.Error("Failed to persist rate-limited finish reason", "session_id", t.call.SessionID, "error", updateErr)
+			}
+		}
+		return callContext, prepared, &rateLimitStopError{}
+	}
+
 	// Stamp the step for the provider request log lines: the ModelProvider
 	// callback (where a request actually starts) does not receive the step
 	// number, so it reads the value PrepareStep records here. A fresh step
@@ -842,6 +900,10 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 	// disabled or the provider isn't a RotateThreshold one (see
 	// runtimeBuilder.makeThresholdRotateCallback) - it never fails the
 	// turn, so its own errors are handled and logged internally.
+	// A step that completed successfully (regardless of its finish reason)
+	// is proof the provider is answering again: the consecutive-429 streak
+	// breaks, whatever it was.
+	t.rateLimitSteps = 0
 	if t.call.RotateThreshold != nil {
 		t.call.RotateThreshold(t.ctx)
 	}
@@ -925,6 +987,28 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 		"is_cancel", isCancelErr)
 	if t.currentAssistant == nil {
 		return t.handleStreamErrorBeforeAssistant(err, isCancelErr)
+	}
+	// Count a step that died on a rate limit, so the consecutive-429
+	// circuit breaker in prepareStep can stop the turn. Each step that
+	// reaches here has already spent its own retry budget on the same
+	// refusal; a step that merely retried once or twice and then succeeded
+	// never arrives here, so the streak only grows on genuine dead ends.
+	// Only the last attempt's error is counted: a step that hit a 429 and
+	// then a connection reset on the retry is a network problem, not a
+	// rate limit, and retrying it is still reasonable.
+	var retryErr *fantasy.RetryError
+	if errors.As(err, &retryErr) {
+		if len(retryErr.Errors) > 0 {
+			var pe *fantasy.ProviderError
+			if errors.As(retryErr.Errors[len(retryErr.Errors)-1], &pe) && pe.StatusCode == http.StatusTooManyRequests {
+				t.rateLimitSteps++
+			}
+		}
+	} else {
+		var pe *fantasy.ProviderError
+		if errors.As(err, &pe) && pe.StatusCode == http.StatusTooManyRequests {
+			t.rateLimitSteps++
+		}
 	}
 	// Persist final state with a context detached from the run
 	// context. The run context (ctx) is derived from the

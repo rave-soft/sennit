@@ -21,13 +21,31 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
-// refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
+// refreshTokenIfExpired proactively refreshes the OAuth token if it has
+// expired. If the refresh fails because the refresh token itself was
+// revoked, it publishes a re-authentication notification so the user is
+// told to log in again - the stored token is unusable until then, and a
+// caller that "proceeds with the existing token" (see refreshRuntimeToken)
+// would otherwise send dead credentials at the provider for the rest of
+// the session.
 func (b *runtimeBuilder) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig, cred providerstate.Provider, port runtimeOperationPort) error {
 	if cred.OAuthToken == nil || !cred.OAuthToken.IsExpired() {
 		return nil
 	}
 	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
-	return b.refreshOAuth2Token(ctx, providerCfg, port)
+	err := b.refreshOAuth2Token(ctx, providerCfg, port)
+	if err == nil {
+		return nil
+	}
+	var exchangeErr *oauth.TokenExchangeError
+	if errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() && b.notify != nil {
+		slog.Info("Refresh token revoked, asking for re-authentication", "provider", providerCfg.ID)
+		b.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			Type:       notify.TypeReAuthenticate,
+			ProviderID: providerCfg.ID,
+		})
+	}
+	return err
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after an auth error
