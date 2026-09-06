@@ -27,9 +27,10 @@ func run() error {
 	defer cancel()
 
 	// Create the provider with optional logging.
-	provider, err := kronk.New(
+	provider, err := kronk.NewProvider(
 		kronk.WithName("kronk"),
 		kronk.WithLogger(kronk.FmtLogger),
+		kronk.WithAutoTune(true),
 	)
 	if err != nil {
 		return fmt.Errorf("unable to create provider: %w", err)
@@ -38,10 +39,8 @@ func run() error {
 	// Clean up when done.
 	defer func() {
 		fmt.Println("\nUnloading Kronk")
-		if closer, ok := provider.(interface{ Close(context.Context) error }); ok {
-			if err := closer.Close(context.Background()); err != nil {
-				fmt.Printf("failed to close provider: %v\n", err)
-			}
+		if err := provider.Close(context.Background()); err != nil {
+			fmt.Printf("failed to close provider: %v\n", err)
 		}
 	}()
 
@@ -71,14 +70,24 @@ func run() error {
 	// Add the tool.
 	cuteDogTool := fantasy.NewAgentTool("cute_dog_tool", "Provide up-to-date info on cute dogs.", fetchCuteDogInfo)
 
+	seed := int64(42)
+	minP := 0.05
+	repeatPenalty := 1.1
+
 	// Equip your agent.
-	agent := fantasy.NewAgent(model,
+	agent := fantasy.NewAgent(
+		model,
 		fantasy.WithSystemPrompt("You are a moderately helpful, dog-centric assistant."),
 		fantasy.WithTools(cuteDogTool),
 		fantasy.WithMaxOutputTokens(2048),
 		fantasy.WithTemperature(0.7),
 		fantasy.WithTopP(0.8),
 		fantasy.WithTopK(20),
+		fantasy.WithProviderOptions(kronk.NewProviderOptions(&kronk.ProviderOptions{
+			Seed:          &seed,
+			MinP:          &minP,
+			RepeatPenalty: &repeatPenalty,
+		})),
 	)
 
 	// Put that agent to work!
@@ -88,6 +97,7 @@ func run() error {
 		return fmt.Errorf("agent generate failed: %w", err)
 	}
 	fmt.Println(result.Response.Content.Text())
+	fmt.Printf("\nUsage: %s\n", result.TotalUsage)
 
 	return nil
 }

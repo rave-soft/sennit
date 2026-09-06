@@ -1290,6 +1290,102 @@ func TestDoGenerate(t *testing.T) {
 		require.Equal(t, `{"value":"Spark"}`, toolCall.Input)
 	})
 
+	t.Run("should preserve finish_reason length when tool calls are present", func(t *testing.T) {
+		t.Parallel()
+
+		server := newMockServer()
+		defer server.close()
+
+		server.prepareJSONResponse(map[string]any{
+			"finish_reason": "length",
+			"tool_calls": []map[string]any{
+				{
+					"id":   "call_truncated",
+					"type": "function",
+					"function": map[string]any{
+						"name":      "test-tool",
+						"arguments": `{"value":"trunc`,
+					},
+				},
+			},
+		})
+
+		provider, err := New(
+			WithAPIKey("test-api-key"),
+			WithBaseURL(server.server.URL),
+		)
+		require.NoError(t, err)
+		model, _ := provider.LanguageModel(t.Context(), "gpt-3.5-turbo")
+
+		result, err := model.Generate(context.Background(), fantasy.Call{
+			Prompt: testPrompt,
+			Tools: []fantasy.Tool{
+				fantasy.FunctionTool{
+					Name: "test-tool",
+					InputSchema: map[string]any{
+						"type":       "object",
+						"properties": map[string]any{"value": map[string]any{"type": "string"}},
+					},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, fantasy.FinishReasonLength, result.FinishReason)
+		require.NotEmpty(t, result.Warnings)
+		require.Contains(t, result.Warnings[0].Message, "token limit")
+		// Truncated tool calls must not appear in content so agents
+		// don't dispatch them with incomplete arguments.
+		for _, c := range result.Content {
+			require.NotEqual(t, fantasy.ContentTypeToolCall, c.GetType(), "truncated tool call should be suppressed")
+		}
+	})
+
+	t.Run("should override to tool_calls when finish_reason is stop", func(t *testing.T) {
+		t.Parallel()
+
+		server := newMockServer()
+		defer server.close()
+
+		server.prepareJSONResponse(map[string]any{
+			"finish_reason": "stop",
+			"tool_calls": []map[string]any{
+				{
+					"id":   "call_ok",
+					"type": "function",
+					"function": map[string]any{
+						"name":      "test-tool",
+						"arguments": `{"value":"ok"}`,
+					},
+				},
+			},
+		})
+
+		provider, err := New(
+			WithAPIKey("test-api-key"),
+			WithBaseURL(server.server.URL),
+		)
+		require.NoError(t, err)
+		model, _ := provider.LanguageModel(t.Context(), "gpt-3.5-turbo")
+
+		result, err := model.Generate(context.Background(), fantasy.Call{
+			Prompt: testPrompt,
+			Tools: []fantasy.Tool{
+				fantasy.FunctionTool{
+					Name: "test-tool",
+					InputSchema: map[string]any{
+						"type":       "object",
+						"properties": map[string]any{"value": map[string]any{"type": "string"}},
+					},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, fantasy.FinishReasonToolCalls, result.FinishReason)
+		require.Empty(t, result.Warnings)
+	})
+
 	t.Run("should handle ToolChoiceRequired", func(t *testing.T) {
 		t.Parallel()
 
@@ -2634,14 +2730,14 @@ func TestDoStream(t *testing.T) {
 		parts, err := collectStreamParts(stream)
 		require.NoError(t, err)
 
-		// The framing contract: a tool call must be fully delimited
-		// (Start -> Deltas -> End) before the next one opens. No two calls
-		// may be open at once, and no delta may arrive for an already-ended
-		// call. This is what lets an order/index-keyed consumer reconstruct
-		// parallel calls without buffering the whole stream.
-		var openID string // currently open tool call, "" if none
+		// The integrity contract: every opened call is attributed deltas for
+		// its own id only, every call is ended exactly once, and every
+		// ToolCall carries the fully accumulated input. Interleaved
+		// providers may keep sending deltas for an earlier call after the
+		// next one has started, so an end is not required to precede the
+		// next start — but no delta may arrive after its call's end.
+		started := map[string]bool{}
 		ended := map[string]bool{}
-		seenStart := map[string]bool{}
 		argsByID := map[string]*strings.Builder{}
 		nameByID := map[string]string{}
 		var order []string
@@ -2649,24 +2745,19 @@ func TestDoStream(t *testing.T) {
 		for _, part := range parts {
 			switch part.Type {
 			case fantasy.StreamPartTypeToolInputStart:
-				require.Empty(t, openID,
-					"tool call %s opened while %s still open (interleaved framing)", part.ID, openID)
-				require.False(t, seenStart[part.ID], "duplicate start for %s", part.ID)
-				openID = part.ID
-				seenStart[part.ID] = true
+				require.False(t, started[part.ID], "duplicate start for %s", part.ID)
+				started[part.ID] = true
 				nameByID[part.ID] = part.ToolCallName
 				argsByID[part.ID] = &strings.Builder{}
 				order = append(order, part.ID)
 			case fantasy.StreamPartTypeToolInputDelta:
-				require.Equal(t, openID, part.ID,
-					"delta for %s but open call is %q", part.ID, openID)
+				require.True(t, started[part.ID], "delta for never-started call %s", part.ID)
 				require.False(t, ended[part.ID], "delta after end for %s", part.ID)
 				argsByID[part.ID].WriteString(part.Delta)
 			case fantasy.StreamPartTypeToolInputEnd:
-				require.Equal(t, openID, part.ID,
-					"end for %s but open call is %q", part.ID, openID)
+				require.True(t, started[part.ID], "end for never-started call %s", part.ID)
+				require.False(t, ended[part.ID], "duplicate end for %s", part.ID)
 				ended[part.ID] = true
-				openID = ""
 			case fantasy.StreamPartTypeToolCall:
 				require.True(t, ended[part.ID], "tool call %s finalized before end", part.ID)
 				nameByID[part.ID] = part.ToolCallName
@@ -3486,6 +3577,61 @@ func TestDoStream(t *testing.T) {
 		}
 		require.NotNil(t, finish)
 		require.Equal(t, fantasy.FinishReasonToolCalls, finish.FinishReason)
+	})
+
+	t.Run("should preserve finish_reason length with tool calls during streaming", func(t *testing.T) {
+		t.Parallel()
+
+		server := newStreamingMockServer()
+		defer server.close()
+
+		server.chunks = []string{
+			`data: {"id":"chatcmpl-truncated","object":"chat.completion.chunk","created":1,"model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_trunc","type":"function","function":{"name":"test-tool","arguments":""}}]},"finish_reason":null}]}` + "\n\n",
+			`data: {"id":"chatcmpl-truncated","object":"chat.completion.chunk","created":1,"model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"val"}}]},"finish_reason":null}]}` + "\n\n",
+			`data: {"id":"chatcmpl-truncated","object":"chat.completion.chunk","created":1,"model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}` + "\n\n",
+			"data: [DONE]\n\n",
+		}
+
+		provider, err := New(
+			WithAPIKey("test-api-key"),
+			WithBaseURL(server.server.URL),
+		)
+		require.NoError(t, err)
+		model, _ := provider.LanguageModel(t.Context(), "gpt-3.5-turbo")
+
+		stream, err := model.Stream(context.Background(), fantasy.Call{
+			Prompt: testPrompt,
+			Tools: []fantasy.Tool{fantasy.FunctionTool{
+				Name: "test-tool",
+				InputSchema: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"val": map[string]any{"type": "string"}},
+				},
+			}},
+		})
+		require.NoError(t, err)
+
+		parts, err := collectStreamParts(stream)
+		require.NoError(t, err)
+
+		var finish *fantasy.StreamPart
+		var hasWarning bool
+		var toolCallCount int
+		for i, part := range parts {
+			if part.Type == fantasy.StreamPartTypeFinish {
+				finish = &parts[i]
+			}
+			if part.Type == fantasy.StreamPartTypeWarnings {
+				hasWarning = true
+			}
+			if part.Type == fantasy.StreamPartTypeToolCall {
+				toolCallCount++
+			}
+		}
+		require.NotNil(t, finish)
+		require.Equal(t, fantasy.FinishReasonLength, finish.FinishReason)
+		require.True(t, hasWarning, "expected truncation warning")
+		require.Zero(t, toolCallCount, "truncated tool calls must not be emitted")
 	})
 }
 
@@ -5035,4 +5181,103 @@ func TestResponsesStream_TruncatedWithoutResponseCompleted(t *testing.T) {
 	require.ErrorAs(t, errPart.Error, &providerErr)
 	require.True(t, providerErr.IsRetryable())
 	require.ErrorIs(t, providerErr.Cause, io.ErrUnexpectedEOF)
+}
+
+func TestResponsesGenerate_TruncatedToolCalls(t *testing.T) {
+	t.Parallel()
+
+	server := newMockServer()
+	defer server.close()
+	server.response = map[string]any{
+		"id":     "resp_trunc",
+		"object": "response",
+		"model":  "gpt-4.1",
+		"output": []any{
+			map[string]any{
+				"type":      "function_call",
+				"id":        "fc_trunc",
+				"call_id":   "call_trunc",
+				"name":      "test-tool",
+				"arguments": `{"value":"trunc`,
+				"status":    "completed",
+			},
+		},
+		"status":             "incomplete",
+		"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+		"usage": map[string]any{
+			"input_tokens":  10,
+			"output_tokens": 20,
+			"total_tokens":  30,
+		},
+	}
+
+	model := newResponsesProvider(t, server.server.URL)
+
+	resp, err := model.Generate(context.Background(), fantasy.Call{
+		Prompt: testPrompt,
+		Tools: []fantasy.Tool{fantasy.FunctionTool{
+			Name: "test-tool",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"value": map[string]any{"type": "string"}},
+			},
+		}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, fantasy.FinishReasonLength, resp.FinishReason)
+	require.NotEmpty(t, resp.Warnings)
+	require.Contains(t, resp.Warnings[0].Message, "token limit")
+	for _, c := range resp.Content {
+		require.NotEqual(t, fantasy.ContentTypeToolCall, c.GetType(), "truncated tool call should be suppressed")
+	}
+}
+
+func TestResponsesStream_TruncatedToolCalls(t *testing.T) {
+	t.Parallel()
+
+	chunks := []string{
+		responsesSSEEvent("response.created", `{"type":"response.created","response":{"id":"resp_trunc","status":"in_progress","output":[]}}`),
+		responsesSSEEvent("response.output_item.added", `{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_trunc","call_id":"call_trunc","name":"test-tool","status":"in_progress","arguments":""}}`),
+		responsesSSEEvent("response.function_call_arguments.delta", `{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"value\":\"tr"}`),
+		responsesSSEEvent("response.output_item.done", `{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_trunc","call_id":"call_trunc","name":"test-tool","status":"completed","arguments":"{\"value\":\"tr"}}`),
+		responsesSSEEvent("response.incomplete", `{"type":"response.incomplete","response":{"id":"resp_trunc","status":"incomplete","output":[],"incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30}}}`),
+	}
+
+	sms := newStreamingMockServer()
+	defer sms.close()
+	sms.chunks = chunks
+
+	model := newResponsesProvider(t, sms.server.URL)
+
+	stream, err := model.Stream(context.Background(), fantasy.Call{
+		Prompt: testPrompt,
+		Tools: []fantasy.Tool{fantasy.FunctionTool{
+			Name: "test-tool",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"val": map[string]any{"type": "string"}},
+			},
+		}},
+	})
+	require.NoError(t, err)
+
+	var parts []fantasy.StreamPart
+	stream(func(part fantasy.StreamPart) bool {
+		parts = append(parts, part)
+		return true
+	})
+
+	var finish *fantasy.StreamPart
+	var hasWarning bool
+	for i, part := range parts {
+		if part.Type == fantasy.StreamPartTypeFinish {
+			finish = &parts[i]
+		}
+		if part.Type == fantasy.StreamPartTypeWarnings {
+			hasWarning = true
+		}
+	}
+	require.NotNil(t, finish)
+	require.Equal(t, fantasy.FinishReasonLength, finish.FinishReason)
+	require.True(t, hasWarning, "expected truncation warning")
 }

@@ -2,6 +2,7 @@
 package openaicompat
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"charm.land/fantasy"
@@ -52,6 +53,25 @@ func (r ReasoningData) GetReasoningContent() string {
 		return r.ReasoningContent
 	}
 	return r.Reasoning
+}
+
+// hasReasoningField reports whether raw JSON contains a reasoning field
+// ("reasoning_content" or "reasoning") whose value is a JSON string,
+// including the empty string. A null value means "no reasoning in this
+// delta": DeepSeek, vLLM and SGLang put "reasoning_content": null on every
+// content/tool-call/finish chunk, and counting that as reasoning keeps the
+// block open forever.
+func hasReasoningField(rawJSON string) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(rawJSON), &fields); err != nil {
+		return false
+	}
+	for _, key := range []string{"reasoning_content", "reasoning"} {
+		if v, ok := fields[key]; ok && !bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			return true
+		}
+	}
+	return false
 }
 
 // Options implements the ProviderOptions interface.

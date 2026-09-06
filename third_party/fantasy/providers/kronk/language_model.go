@@ -1,14 +1,13 @@
 package kronk
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/object"
-	"github.com/ardanlabs/kronk/sdk/kronk"
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
 	xjson "github.com/charmbracelet/x/json"
 	"github.com/google/uuid"
@@ -17,11 +16,17 @@ import (
 type languageModel struct {
 	provider            string
 	modelID             string
-	kronk               *kronk.Kronk
+	kronk               chatModel
 	objectMode          fantasy.ObjectMode
 	prepareCallFunc     LanguageModelPrepareCallFunc
 	mapFinishReasonFunc LanguageModelMapFinishReasonFunc
 	toPromptFunc        LanguageModelToPromptFunc
+}
+
+type chatModel interface {
+	Chat(context.Context, model.D) (model.ChatResponse, error)
+	ChatStreaming(context.Context, model.D) (<-chan model.ChatResponse, error)
+	ModelInfo() model.ModelInfo
 }
 
 // LanguageModelOption is a function that configures a languageModel.
@@ -55,7 +60,7 @@ func WithLanguageModelObjectMode(om fantasy.ObjectMode) LanguageModelOption {
 	}
 }
 
-func newLanguageModel(modelID string, provider string, krn *kronk.Kronk, opts ...LanguageModelOption) *languageModel {
+func newLanguageModel(modelID string, provider string, krn chatModel, opts ...LanguageModelOption) *languageModel {
 	lm := languageModel{
 		modelID:             modelID,
 		provider:            provider,
@@ -93,13 +98,6 @@ func (l *languageModel) Provider() string {
 func (l *languageModel) prepareDocument(call fantasy.Call) (model.D, []fantasy.CallWarning, error) {
 	messages, warnings := l.toPromptFunc(call.Prompt, l.provider, l.modelID)
 
-	if call.TopK != nil {
-		warnings = append(warnings, fantasy.CallWarning{
-			Type:    fantasy.CallWarningTypeUnsupportedSetting,
-			Setting: "top_k",
-		})
-	}
-
 	d := model.D{
 		"messages": messages,
 	}
@@ -116,20 +114,16 @@ func (l *languageModel) prepareDocument(call fantasy.Call) (model.D, []fantasy.C
 		d["top_p"] = *call.TopP
 	}
 
+	if call.TopK != nil {
+		d["top_k"] = *call.TopK
+	}
+
 	if call.FrequencyPenalty != nil {
-		warnings = append(warnings, fantasy.CallWarning{
-			Type:    fantasy.CallWarningTypeUnsupportedSetting,
-			Setting: "frequency_penalty",
-			Details: "frequency_penalty is not supported by Kronk",
-		})
+		d["frequency_penalty"] = *call.FrequencyPenalty
 	}
 
 	if call.PresencePenalty != nil {
-		warnings = append(warnings, fantasy.CallWarning{
-			Type:    fantasy.CallWarningTypeUnsupportedSetting,
-			Setting: "presence_penalty",
-			Details: "presence_penalty is not supported by Kronk",
-		})
+		d["presence_penalty"] = *call.PresencePenalty
 	}
 
 	optionsWarnings, err := l.prepareCallFunc(l, d, call)
@@ -147,6 +141,21 @@ func (l *languageModel) prepareDocument(call fantasy.Call) (model.D, []fantasy.C
 		warnings = append(warnings, toolWarnings...)
 	}
 
+	if call.ToolChoice != nil {
+		switch *call.ToolChoice {
+		case fantasy.ToolChoiceNone, fantasy.ToolChoiceAuto, fantasy.ToolChoiceRequired:
+			d["tool_choice"] = string(*call.ToolChoice)
+
+		default:
+			d["tool_choice"] = model.D{
+				"type": "function",
+				"function": model.D{
+					"name": string(*call.ToolChoice),
+				},
+			}
+		}
+	}
+
 	return d, warnings, nil
 }
 
@@ -157,78 +166,29 @@ func (l *languageModel) Generate(ctx context.Context, call fantasy.Call) (*fanta
 		return nil, err
 	}
 
-	ch, err := l.kronk.ChatStreaming(ctx, d)
+	response, err := l.kronk.Chat(ctx, d)
 	if err != nil {
 		return nil, toProviderErr(err)
 	}
 
-	var lastResponse model.ChatResponse
-	var fullContent string
-	// Kronk only sets Delta on chunks that carry tool calls; a plain "stop"
-	// final chunk has Delta == nil but still carries the finish reason, so
-	// it must be read regardless of Delta (see the same fix in Stream).
-	var sawFinishReason bool
-
-	for resp := range ch {
-		lastResponse = resp
-
-		if len(resp.Choices) == 0 {
-			continue
-		}
-		choice := resp.Choices[0]
-
-		switch choice.FinishReason() {
-		case model.FinishReasonError:
-			msg := ""
-			if choice.Delta != nil {
-				msg = choice.Delta.Content
-			}
-			return nil, &fantasy.Error{Title: "model error", Message: msg}
-
-		case model.FinishReasonStop, model.FinishReasonTool:
-			sawFinishReason = true
-			if choice.Delta != nil {
-				// Final response already contains full accumulated content in Delta.Content,
-				// so we use it directly instead of continuing to accumulate.
-				fullContent = choice.Delta.Content
-			}
-
-		default:
-			if choice.Delta != nil {
-				fullContent += choice.Delta.Content
-			}
-		}
-	}
-
-	if len(lastResponse.Choices) == 0 {
+	if len(response.Choices) == 0 {
 		return nil, &fantasy.Error{Title: "no response", Message: "no response generated"}
 	}
 
-	// The SDK may close the channel mid-stream (e.g. ctx cancellation)
-	// without ever sending a chunk that carries a finish reason. Treating
-	// that as success would record a silently truncated turn as complete;
-	// every other provider adapter returns an error here instead.
-	if !sawFinishReason {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return nil, fantasy.NewIncompleteStreamError()
-	}
-
-	choice := lastResponse.Choices[0]
+	choice := response.Choices[0]
 	var content []fantasy.Content
-	if choice.Delta != nil {
-		content = make([]fantasy.Content, 0, 1+len(choice.Delta.ToolCalls))
+	if choice.Message != nil {
+		content = make([]fantasy.Content, 0, 1+len(choice.Message.ToolCalls))
 	}
 
-	if fullContent != "" {
+	if choice.Message != nil && choice.Message.Content != "" {
 		content = append(content, fantasy.TextContent{
-			Text: fullContent,
+			Text: choice.Message.Content,
 		})
 	}
 
-	if choice.Delta != nil {
-		for _, tc := range choice.Delta.ToolCalls {
+	if choice.Message != nil {
+		for _, tc := range choice.Message.ToolCalls {
 			// Marshal the underlying map directly, not the ToolCallArguments type
 			// which has a custom MarshalJSON that double-encodes to a JSON string.
 			argsJSON, _ := json.Marshal(map[string]any(tc.Function.Arguments))
@@ -243,35 +203,29 @@ func (l *languageModel) Generate(ctx context.Context, call fantasy.Call) (*fanta
 	}
 
 	usage := fantasy.Usage{}
-	if lastResponse.Usage != nil {
+	if response.Usage != nil {
 		usage = fantasy.Usage{
-			InputTokens:     int64(lastResponse.Usage.PromptTokens),
-			OutputTokens:    int64(lastResponse.Usage.CompletionTokens),
-			TotalTokens:     int64(lastResponse.Usage.PromptTokens + lastResponse.Usage.CompletionTokens),
-			ReasoningTokens: int64(lastResponse.Usage.ReasoningTokens),
+			InputTokens:     int64(response.Usage.PromptTokens),
+			OutputTokens:    int64(response.Usage.CompletionTokens),
+			TotalTokens:     int64(response.Usage.PromptTokens + response.Usage.CompletionTokens),
+			ReasoningTokens: int64(response.Usage.CompletionTokensDetails.ReasoningTokens),
+			CacheReadTokens: int64(response.Usage.PromptTokensDetails.CachedTokens),
 		}
 	}
 
 	mappedFinishReason := l.mapFinishReasonFunc(choice.FinishReason())
-	if choice.Delta != nil && len(choice.Delta.ToolCalls) > 0 {
+	if choice.Message != nil && len(choice.Message.ToolCalls) > 0 {
 		mappedFinishReason = fantasy.FinishReasonToolCalls
 	}
 
-	providerMetadata := fantasy.ProviderMetadata{}
-	if lastResponse.Usage != nil {
-		providerMetadata = fantasy.ProviderMetadata{
-			Name: &ProviderMetadata{
-				TokensPerSecond: lastResponse.Usage.TokensPerSecond,
-				OutputTokens:    int64(lastResponse.Usage.OutputTokens),
-			},
-		}
-	}
+	metadata := newProviderMetadata(l.kronk.ModelInfo())
+	metadata.update(response)
 
 	resp := fantasy.Response{
 		Content:          content,
 		Usage:            usage,
 		FinishReason:     mappedFinishReason,
-		ProviderMetadata: providerMetadata,
+		ProviderMetadata: fantasy.ProviderMetadata{Name: metadata},
 		Warnings:         warnings,
 	}
 
@@ -284,6 +238,7 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 	if err != nil {
 		return nil, err
 	}
+	d["stream_options"] = model.D{"include_usage": true}
 
 	ch, err := l.kronk.ChatStreaming(ctx, d)
 	if err != nil {
@@ -294,9 +249,8 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 	isActiveReasoning := false
 	toolCalls := make(map[int]streamToolCall)
 
-	providerMetadata := fantasy.ProviderMetadata{
-		Name: &ProviderMetadata{},
-	}
+	metadata := newProviderMetadata(l.kronk.ModelInfo())
+	providerMetadata := fantasy.ProviderMetadata{Name: metadata}
 
 	var usage fantasy.Usage
 	var finishReason string
@@ -311,36 +265,42 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 			}
 		}
 
-		toolIndex := 0
 		for resp := range ch {
-			if len(resp.Choices) == 0 {
-				continue
-			}
+			metadata.update(resp)
 
-			choice := resp.Choices[0]
-
-			// Kronk only sets Delta on chunks that carry tool calls; a
-			// plain "stop" final chunk has Delta == nil but still carries
-			// Usage and FinishReason, so both must be read before the
-			// Delta-nil guard below skips the rest of the loop body.
 			if resp.Usage != nil {
 				usage = fantasy.Usage{
 					InputTokens:     int64(resp.Usage.PromptTokens),
 					OutputTokens:    int64(resp.Usage.CompletionTokens),
 					TotalTokens:     int64(resp.Usage.PromptTokens + resp.Usage.CompletionTokens),
-					ReasoningTokens: int64(resp.Usage.ReasoningTokens),
-				}
-
-				if pm, ok := providerMetadata[Name]; ok {
-					if metadata, ok := pm.(*ProviderMetadata); ok {
-						metadata.TokensPerSecond = resp.Usage.TokensPerSecond
-						metadata.OutputTokens = int64(resp.Usage.OutputTokens)
-					}
+					ReasoningTokens: int64(resp.Usage.CompletionTokensDetails.ReasoningTokens),
+					CacheReadTokens: int64(resp.Usage.PromptTokensDetails.CachedTokens),
 				}
 			}
 
+			if len(resp.Choices) == 0 {
+				continue
+			}
+
+			choice := resp.Choices[0]
 			if choice.FinishReason() != "" {
 				finishReason = choice.FinishReason()
+			}
+
+			if choice.FinishReason() == model.FinishReasonError {
+				err := ctx.Err()
+				if err == nil {
+					message := ""
+					if choice.Delta != nil {
+						message = choice.Delta.Content
+					}
+					err = toProviderErr(errors.New(cmp.Or(message, "model stopped with an error")))
+				}
+				yield(fantasy.StreamPart{
+					Type:  fantasy.StreamPartTypeError,
+					Error: err,
+				})
+				return
 			}
 
 			if choice.Delta == nil {
@@ -348,13 +308,6 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 			}
 
 			switch choice.FinishReason() {
-			case model.FinishReasonError:
-				yield(fantasy.StreamPart{
-					Type:  fantasy.StreamPartTypeError,
-					Error: &fantasy.Error{Title: "model error", Message: choice.Delta.Content},
-				})
-				return
-
 			case model.FinishReasonTool:
 				if isActiveReasoning {
 					isActiveReasoning = false
@@ -374,56 +327,6 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 					}) {
 						return
 					}
-				}
-
-				for _, tc := range choice.Delta.ToolCalls {
-					argsJSON, _ := json.Marshal(map[string]any(tc.Function.Arguments))
-					argsStr := string(argsJSON)
-
-					toolID := tc.ID
-					if toolID == "" {
-						toolID = uuid.NewString()
-					}
-
-					if !yield(fantasy.StreamPart{
-						Type:         fantasy.StreamPartTypeToolInputStart,
-						ID:           toolID,
-						ToolCallName: tc.Function.Name,
-					}) {
-						return
-					}
-
-					if !yield(fantasy.StreamPart{
-						Type:  fantasy.StreamPartTypeToolInputDelta,
-						ID:    toolID,
-						Delta: argsStr,
-					}) {
-						return
-					}
-
-					if !yield(fantasy.StreamPart{
-						Type: fantasy.StreamPartTypeToolInputEnd,
-						ID:   toolID,
-					}) {
-						return
-					}
-
-					if !yield(fantasy.StreamPart{
-						Type:          fantasy.StreamPartTypeToolCall,
-						ID:            toolID,
-						ToolCallName:  tc.Function.Name,
-						ToolCallInput: argsStr,
-					}) {
-						return
-					}
-
-					toolCalls[toolIndex] = streamToolCall{
-						id:          toolID,
-						name:        tc.Function.Name,
-						arguments:   argsStr,
-						hasFinished: true,
-					}
-					toolIndex++
 				}
 
 			default:
@@ -447,7 +350,7 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 					}
 				}
 
-				hasToolCalls := len(choice.Delta.ToolCalls) > 0
+				hasToolCalls := len(choice.Delta.ToolCallDeltas) > 0
 				hasContent := choice.Delta.Content != ""
 
 				if isActiveReasoning && (hasContent || hasToolCalls) {
@@ -490,103 +393,65 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 					}
 				}
 
-				for _, tc := range choice.Delta.ToolCalls {
-					argsJSON, _ := json.Marshal(map[string]any(tc.Function.Arguments))
-					argsStr := string(argsJSON)
-
-					switch existingTC, ok := toolCalls[toolIndex]; ok {
-					case true:
-						if existingTC.hasFinished {
-							continue
-						}
-
-						existingTC.arguments += argsStr
-
-						if !yield(fantasy.StreamPart{
-							Type:  fantasy.StreamPartTypeToolInputDelta,
-							ID:    existingTC.id,
-							Delta: argsStr,
-						}) {
-							return
-						}
-
-						toolCalls[toolIndex] = existingTC
-
-						if xjson.IsValid(existingTC.arguments) {
-							if !yield(fantasy.StreamPart{
-								Type: fantasy.StreamPartTypeToolInputEnd,
-								ID:   existingTC.id,
-							}) {
-								return
-							}
-
-							if !yield(fantasy.StreamPart{
-								Type:          fantasy.StreamPartTypeToolCall,
-								ID:            existingTC.id,
-								ToolCallName:  existingTC.name,
-								ToolCallInput: existingTC.arguments,
-							}) {
-								return
-							}
-
-							existingTC.hasFinished = true
-							toolCalls[toolIndex] = existingTC
-						}
-
-					case false:
+				for _, tc := range choice.Delta.ToolCallDeltas {
+					toolCall, ok := toolCalls[tc.Index]
+					if !ok {
 						toolID := tc.ID
 						if toolID == "" {
 							toolID = uuid.NewString()
 						}
 
+						toolCall = streamToolCall{
+							id:   toolID,
+							name: tc.Function.Name,
+						}
 						if !yield(fantasy.StreamPart{
 							Type:         fantasy.StreamPartTypeToolInputStart,
-							ID:           toolID,
-							ToolCallName: tc.Function.Name,
+							ID:           toolCall.id,
+							ToolCallName: toolCall.name,
+						}) {
+							return
+						}
+					}
+
+					if toolCall.hasFinished {
+						continue
+					}
+
+					if tc.Function.Name != "" {
+						toolCall.name = tc.Function.Name
+					}
+					if tc.Function.Arguments != "" {
+						toolCall.arguments += tc.Function.Arguments
+						if !yield(fantasy.StreamPart{
+							Type:  fantasy.StreamPartTypeToolInputDelta,
+							ID:    toolCall.id,
+							Delta: tc.Function.Arguments,
+						}) {
+							return
+						}
+					}
+
+					if xjson.IsValid(toolCall.arguments) {
+						if !yield(fantasy.StreamPart{
+							Type: fantasy.StreamPartTypeToolInputEnd,
+							ID:   toolCall.id,
 						}) {
 							return
 						}
 
-						toolCalls[toolIndex] = streamToolCall{
-							id:        toolID,
-							name:      tc.Function.Name,
-							arguments: argsStr,
+						if !yield(fantasy.StreamPart{
+							Type:          fantasy.StreamPartTypeToolCall,
+							ID:            toolCall.id,
+							ToolCallName:  toolCall.name,
+							ToolCallInput: toolCall.arguments,
+						}) {
+							return
 						}
-
-						if argsStr != "" && argsStr != "null" {
-							if !yield(fantasy.StreamPart{
-								Type:  fantasy.StreamPartTypeToolInputDelta,
-								ID:    toolID,
-								Delta: argsStr,
-							}) {
-								return
-							}
-
-							if xjson.IsValid(argsStr) {
-								if !yield(fantasy.StreamPart{
-									Type: fantasy.StreamPartTypeToolInputEnd,
-									ID:   toolID,
-								}) {
-									return
-								}
-
-								if !yield(fantasy.StreamPart{
-									Type:          fantasy.StreamPartTypeToolCall,
-									ID:            toolID,
-									ToolCallName:  tc.Function.Name,
-									ToolCallInput: argsStr,
-								}) {
-									return
-								}
-
-								stc := toolCalls[toolIndex]
-								stc.hasFinished = true
-								toolCalls[toolIndex] = stc
-							}
-						}
-
-						toolIndex++
+						toolCall.hasFinished = true
 					}
+
+					toolCalls[tc.Index] = toolCall
 				}
 			}
 		}
@@ -609,17 +474,7 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 			}
 		}
 
-		mappedFinishReason := l.mapFinishReasonFunc(finishReason)
-		if len(toolCalls) > 0 {
-			mappedFinishReason = fantasy.FinishReasonToolCalls
-		}
-
-		// The SDK may close the channel mid-stream (e.g. ctx cancellation)
-		// without ever sending a chunk that carries a finish reason.
-		// Treating that as success would record a silently truncated turn
-		// as complete; every other provider adapter returns an error here
-		// instead of a normal Finish part.
-		if finishReason == "" && mappedFinishReason != fantasy.FinishReasonToolCalls {
+		if finishReason == "" {
 			err := ctx.Err()
 			if err == nil {
 				err = fantasy.NewIncompleteStreamError()
@@ -629,6 +484,11 @@ func (l *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 				Error: err,
 			})
 			return
+		}
+
+		mappedFinishReason := l.mapFinishReasonFunc(finishReason)
+		if len(toolCalls) > 0 {
+			mappedFinishReason = fantasy.FinishReasonToolCalls
 		}
 
 		yield(fantasy.StreamPart{
@@ -699,20 +559,4 @@ func toKronkTools(tools []fantasy.Tool) ([]model.D, []fantasy.CallWarning) {
 	}
 
 	return kronkTools, warnings
-}
-
-func toProviderErr(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-
-	return &fantasy.ProviderError{
-		Title:   "kronk error",
-		Message: err.Error(),
-		Cause:   err,
-	}
 }
