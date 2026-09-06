@@ -272,9 +272,9 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		if msg.err != nil {
 			return ActionCmd{util.ReportError(msg.err)}
 		}
-		// The active account changed, but the dialog stays open: the user
-		// asked for the switch, not for the dialog to disappear. A second
-		// Enter (or Esc) on the now-active row closes it.
+		// The active account changed; the dialog stays open so the user
+		// can confirm the switch. A second Enter (or Esc) on the
+		// now-active row closes it.
 		return ActionAccountActivated{ProviderID: m.providerID}
 
 	case ActionRefreshTokensResult:
@@ -362,9 +362,9 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 			return nil
 		}
 		if id == activeAccountID {
-			// Re-selecting the already-active account: nothing to do.
-			// The dialog stays open so a second Enter/Esc can close it.
-			return nil
+			// Re-selecting the already-active account: nothing to activate,
+			// so close the dialog.
+			return ActionClose{}
 		}
 		for _, a := range accs {
 			if a.ID != id {

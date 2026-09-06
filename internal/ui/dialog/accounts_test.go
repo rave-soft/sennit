@@ -406,15 +406,10 @@ func TestAccounts_SelectNonActiveAccount_DialogStaysOpen(t *testing.T) {
 	dlg.sd = rebuilt
 	require.Equal(t, "acct-2", dlg.sd.selectedID(), "the new active account should be selected after rebuild")
 
-	// Second Enter on the active row: no-op, no activation, dialog stays.
+	// Second Enter on the active row closes the dialog.
 	action2 := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Nil(t, action2, "second Enter on the active row must be a no-op")
+	require.IsType(t, ActionClose{}, action2, "second Enter on the active row should close the dialog")
 	require.Equal(t, 1, ws.activateCalls, "no second activation should fire")
-	require.Equal(t, accountsStateList, dlg.state, "dialog must stay open after second Enter")
-
-	// Esc still closes the dialog.
-	action3 := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
-	require.IsType(t, ActionClose{}, action3, "Esc should close the dialog")
 }
 
 func TestAccounts_SelectActiveAccount_NoOp(t *testing.T) {
@@ -429,7 +424,7 @@ func TestAccounts_SelectActiveAccount_NoOp(t *testing.T) {
 	require.Equal(t, "acct-1", dlg.sd.selectedID(), "the active account should start selected")
 
 	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Nil(t, action)
+	require.IsType(t, ActionClose{}, action, "Enter on the active row should close the dialog")
 	require.Zero(t, ws.activateCalls)
 }
 
