@@ -60,18 +60,30 @@ func NewProviders(com *common.Common, isOnboarding bool) (*Providers, error) {
 	return &Providers{selectDialog: sd}, nil
 }
 
-// providerItems builds the provider list items: the catalog providers
-// (sorted by name for stable output), each flagged "Configured" when
-// already present in cfg.Providers, prefixed with a "Custom provider…"
-// entry.
+// providerItems builds the provider list items: the catalog providers,
+// each flagged "Configured" when already present in cfg.Providers,
+// prefixed with a "Custom provider…" entry. User-configured providers
+// come first (by name), then the rest (by name), so what the user has
+// already set up is what they see at the top.
 func providerItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	t := com.Styles
 	cfg := com.Config()
 
 	providers := com.Workspace.KnownProviders()
 
+	isConfigured := func(p catwalk.Provider) bool {
+		_, ok := cfg.Providers.Get(string(p.ID))
+		return ok
+	}
+
 	sorted := slices.Clone(providers)
 	slices.SortFunc(sorted, func(a, b catwalk.Provider) int {
+		if isConfigured(a) != isConfigured(b) {
+			if isConfigured(a) {
+				return -1
+			}
+			return 1
+		}
 		return cmp.Compare(a.Name, b.Name)
 	})
 

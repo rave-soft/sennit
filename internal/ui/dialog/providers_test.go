@@ -89,6 +89,47 @@ func TestNewProviders_ListsCatalogAndCustomEntry(t *testing.T) {
 	require.True(t, foundConfigured, "expected the configured Anthropic provider to be flagged")
 }
 
+// TestNewProviders_ConfiguredProvidersFirst pins the ordering contract:
+// providers present in cfg.Providers must come before catalog-only
+// ones. Without it the list is purely alphabetical and a user's
+// configured provider can land anywhere in the middle.
+func TestNewProviders_ConfiguredProvidersFirst(t *testing.T) {
+	com := newProvidersTestCommon(t)
+
+	// The base fixture already configures Anthropic. Configure OpenAI
+	// too so the configured group has two members.
+	com.Config().Providers.Set(string(catwalk.InferenceProviderOpenAI), config.ProviderConfig{
+		ID: string(catwalk.InferenceProviderOpenAI),
+	})
+
+	providers, err := NewProviders(com, false)
+	require.NoError(t, err)
+
+	items := providers.list.FilteredItems()
+	require.NotEmpty(t, items)
+
+	var lastConfigured, firstUnconfigured int
+	lastConfigured = -1
+	firstUnconfigured = -1
+	for i, it := range items {
+		item, ok := it.(*ProviderItem)
+		require.True(t, ok)
+		if item.ID() == customProviderItemID {
+			continue
+		}
+		if item.configured {
+			lastConfigured = i
+		} else if firstUnconfigured == -1 {
+			firstUnconfigured = i
+		}
+	}
+	require.NotEqual(t, -1, lastConfigured, "expected at least one configured provider")
+	require.NotEqual(t, -1, firstUnconfigured, "expected at least one unconfigured provider")
+	require.Less(t, lastConfigured, firstUnconfigured,
+		"all configured providers must appear before any unconfigured one (configured end at %d, first unconfigured at %d)",
+		lastConfigured, firstUnconfigured)
+}
+
 func TestNewProviders_OnSelectActions(t *testing.T) {
 	com := newProvidersTestCommon(t)
 
