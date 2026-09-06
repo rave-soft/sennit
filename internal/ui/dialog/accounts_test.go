@@ -389,6 +389,32 @@ func TestAccounts_SelectNonActiveAccount_DialogStaysOpen(t *testing.T) {
 	require.Equal(t, ActionAccountActivated{ProviderID: providerID}, activated)
 	require.Equal(t, accountsStateList, dlg.state, "the dialog must stay open after a switch")
 	require.Equal(t, "", dlg.activating)
+
+	// Simulate the model-layer reload: after a switch, the UI rebuilds
+	// the dialog with the new active account. The selection follows the
+	// new active row, so a second Enter is a no-op.
+	com.Config().SetRuntimeProvider(providerID, providerstate.Provider{
+		ID:      providerID,
+		Account: "acct-2",
+	})
+	ws.accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+		{ID: "acct-2", Label: "Personal"},
+	}
+	rebuilt, err := newSelectDialog(com, dlg.selectDialogConfig(ws.accs))
+	require.NoError(t, err)
+	dlg.sd = rebuilt
+	require.Equal(t, "acct-2", dlg.sd.selectedID(), "the new active account should be selected after rebuild")
+
+	// Second Enter on the active row: no-op, no activation, dialog stays.
+	action2 := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Nil(t, action2, "second Enter on the active row must be a no-op")
+	require.Equal(t, 1, ws.activateCalls, "no second activation should fire")
+	require.Equal(t, accountsStateList, dlg.state, "dialog must stay open after second Enter")
+
+	// Esc still closes the dialog.
+	action3 := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.IsType(t, ActionClose{}, action3, "Esc should close the dialog")
 }
 
 func TestAccounts_SelectActiveAccount_NoOp(t *testing.T) {
