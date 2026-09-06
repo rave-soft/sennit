@@ -117,7 +117,6 @@ type ProviderSettings struct {
 		Next   key.Binding
 		Prev   key.Binding
 		Toggle key.Binding
-		Auth   key.Binding
 		Submit key.Binding
 		Close  key.Binding
 	}
@@ -221,7 +220,6 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 	m.keyMap.Next = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field"))
 	m.keyMap.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous field"))
 	m.keyMap.Toggle = key.NewBinding(key.WithKeys("left", "right", "space"), key.WithHelp("←/→", "toggle rotation"))
-	m.keyMap.Auth = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "sign in"))
 	m.keyMap.Submit = key.NewBinding(key.WithKeys("enter", "ctrl+y"), key.WithHelp("enter", "submit"))
 	m.keyMap.Close = CloseKey
 
@@ -283,17 +281,6 @@ func (m *ProviderSettings) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
-		case key.Matches(msg, m.keyMap.Auth):
-			// Only act on 'a' when no text input has focus: a user
-			// typing in the proxy/threshold/cooldown field must not
-			// accidentally trigger sign-in. When the Enabled field (no
-			// text input) has focus, the key is free to act.
-			switch m.currentField() {
-			case providerSettingsFieldEnabled:
-				return ActionAddAccount{ProviderID: m.providerID}
-			default:
-				return nil
-			}
 		case key.Matches(msg, m.keyMap.Next):
 			m.advanceFocus(1)
 		case key.Matches(msg, m.keyMap.Prev):
@@ -593,7 +580,7 @@ func (m *ProviderSettings) authStateLabel() (string, lipgloss.Style) {
 	case providerSettingsAuthExpired:
 		return "token expired", t.Dialog.OAuth.ErrorText
 	case providerSettingsAuthMissing:
-		return "not signed in (a to sign in)", t.Dialog.OAuth.ErrorText
+		return "not signed in", t.Dialog.OAuth.ErrorText
 	default:
 		return "", lipgloss.NewStyle()
 	}
@@ -604,9 +591,6 @@ func (m *ProviderSettings) ShortHelp() []key.Binding {
 	h := []key.Binding{m.keyMap.Next}
 	if m.currentField() == providerSettingsFieldEnabled {
 		h = append(h, m.keyMap.Toggle)
-	}
-	if m.authState != providerSettingsAuthOK && m.authState != providerSettingsAuthUnknown {
-		h = append(h, m.keyMap.Auth)
 	}
 	return append(h, m.keyMap.Submit, m.keyMap.Close)
 }

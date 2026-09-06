@@ -131,3 +131,31 @@ func TestAccountForm_ResultRoundTrip(t *testing.T) {
 		require.False(t, m.submitting)
 	})
 }
+
+// TestAccountForm_CtrlATriggersSignIn pins that ctrl+a returns
+// ActionAddAccount for the form's provider, regardless of which field
+// has focus: the chord cannot collide with typing.
+func TestAccountForm_CtrlATriggersSignIn(t *testing.T) {
+	t.Parallel()
+	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+
+	for i := 0; i < int(accountFormFieldCount); i++ {
+		m.advanceFocus(1)
+		action := m.HandleMsg(ctrlAMsg())
+		add, ok := action.(ActionAddAccount)
+		require.True(t, ok, "field %d: expected ActionAddAccount, got %#v", i, action)
+		require.Equal(t, "openai", add.ProviderID)
+	}
+}
+
+// TestAccountForm_PlainATypesIntoLabel pins that plain 'a' is a regular
+// character in the label field: it does not trigger sign-in.
+func TestAccountForm_PlainATypesIntoLabel(t *testing.T) {
+	t.Parallel()
+	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+
+	action := m.HandleMsg(keyMsg('a'))
+	_, isAdd := action.(ActionAddAccount)
+	require.False(t, isAdd, "'a' must not trigger sign-in")
+	require.Equal(t, "a", m.label.Value())
+}

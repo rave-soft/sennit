@@ -62,6 +62,7 @@ type AccountForm struct {
 		Next   key.Binding
 		Prev   key.Binding
 		Toggle key.Binding
+		Auth   key.Binding
 		Submit key.Binding
 		Close  key.Binding
 	}
@@ -103,6 +104,7 @@ func NewAccountForm(com *common.Common, providerID string, account accounts.Acco
 	m.keyMap.Next = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field"))
 	m.keyMap.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous field"))
 	m.keyMap.Toggle = key.NewBinding(key.WithKeys("left", "right", "space"), key.WithHelp("←/→", "toggle enabled"))
+	m.keyMap.Auth = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "sign in"))
 	m.keyMap.Submit = key.NewBinding(key.WithKeys("enter", "ctrl+y"), key.WithHelp("enter", "submit"))
 	m.keyMap.Close = CloseKey
 
@@ -131,6 +133,8 @@ func (m *AccountForm) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
+		case key.Matches(msg, m.keyMap.Auth):
+			return ActionAddAccount{ProviderID: m.providerID}
 		case key.Matches(msg, m.keyMap.Next):
 			m.advanceFocus(1)
 		case key.Matches(msg, m.keyMap.Prev):
@@ -303,7 +307,7 @@ func (m *AccountForm) enabledView() string {
 
 // ShortHelp implements [help.KeyMap].
 func (m *AccountForm) ShortHelp() []key.Binding {
-	h := []key.Binding{m.keyMap.Next}
+	h := []key.Binding{m.keyMap.Next, m.keyMap.Auth}
 	if m.focus == accountFormFieldEnabled {
 		h = append(h, m.keyMap.Toggle)
 	}

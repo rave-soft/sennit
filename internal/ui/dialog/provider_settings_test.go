@@ -69,6 +69,10 @@ func typeIntoProviderSettings(t *testing.T, m *ProviderSettings, s string) {
 	}
 }
 
+func ctrlAMsg() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
+}
+
 // TestProviderSettings_RotateThreshold_ShowsThresholdNotCooldown covers
 // the Codex-shaped case: the threshold field exists, the cooldown one
 // does not.
@@ -276,8 +280,7 @@ func TestProviderSettings_AuthBadgeShowsSignedInWhenTokenPresent(t *testing.T) {
 }
 
 // TestProviderSettings_AuthBadgeShowsExpiredWhenTokenExpired covers the
-// expired-token case: the badge must say "token expired" and the 'a'
-// key (with focus on the Enabled field) must return ActionAddAccount.
+// expired-token case: the badge must say "token expired".
 func TestProviderSettings_AuthBadgeShowsExpiredWhenTokenExpired(t *testing.T) {
 	t.Parallel()
 	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
@@ -286,42 +289,45 @@ func TestProviderSettings_AuthBadgeShowsExpiredWhenTokenExpired(t *testing.T) {
 	m.HandleMsg(providerSettingsAuthLoadedMsg{providerID: "codex", state: providerSettingsAuthExpired})
 	require.Equal(t, providerSettingsAuthExpired, m.authState)
 	require.Contains(t, m.authBadge(), "token expired")
-
-	// Focus the Enabled field (index 1) so 'a' is free to act.
-	m.advanceFocus(1)
-	action := m.HandleMsg(keyMsg('a'))
-	add, ok := action.(ActionAddAccount)
-	require.True(t, ok, "expected ActionAddAccount, got %#v", action)
-	require.Equal(t, "codex", add.ProviderID)
 }
 
 // TestProviderSettings_AuthBadgeHiddenForAPIKeyProvider covers the
-// API-key case: authState stays Unknown, the badge is not rendered, and
-// the 'a' key does not trigger sign-in.
+// API-key case: authState stays Unknown, the badge is not rendered.
 func TestProviderSettings_AuthBadgeHiddenForAPIKeyProvider(t *testing.T) {
 	t.Parallel()
 	com := newProviderSettingsTestCommon(t, "anthropic", config.ProviderConfig{APIKey: "sk-test"})
 	m := newProviderSettings(com, "anthropic", workspace.AccountCapabilities{RotateOn: workspace.RotateNever})
 
-	// No auth-state message delivered: stays Unknown.
 	require.Equal(t, providerSettingsAuthUnknown, m.authState)
 	require.Empty(t, m.authBadge())
-
-	m.advanceFocus(0) // focus proxy (a text input)
-	action := m.HandleMsg(keyMsg('a'))
-	require.Nil(t, action, "'a' in a text input must not trigger sign-in")
 }
 
-// TestProviderSettings_AKeyIgnoredWhenTextInputFocused pins that the 'a'
-// key does not trigger ActionAddAccount while a text input has focus:
-// a user typing "proxy" in the proxy field must not accidentally sign in.
-func TestProviderSettings_AKeyIgnoredWhenTextInputFocused(t *testing.T) {
+// TestProviderSettings_PlainATypesIntoField pins that 'a' is a regular
+// character in the text inputs: sign-in lives in the account edit form,
+// not here.
+func TestProviderSettings_PlainATypesIntoField(t *testing.T) {
 	t.Parallel()
 	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
 	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateBoth})
 	m.HandleMsg(providerSettingsAuthLoadedMsg{providerID: "codex", state: providerSettingsAuthMissing})
 
-	// Focus is on the proxy field (index 0) by default — a text input.
 	action := m.HandleMsg(keyMsg('a'))
-	require.Nil(t, action, "'a' while the proxy text input has focus must be consumed by the input, not trigger sign-in")
+	_, isAdd := action.(ActionAddAccount)
+	require.False(t, isAdd, "'a' must not trigger sign-in here")
+	require.Equal(t, "a", m.proxy.Value())
+}
+
+// TestProviderSettings_CtrlADoesNotSignIn pins that ctrl+a is not bound
+// in the provider settings dialog: sign-in moved to the account edit
+// form. The chord falls through to the text input, which ignores it.
+func TestProviderSettings_CtrlADoesNotSignIn(t *testing.T) {
+	t.Parallel()
+	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateBoth})
+	m.HandleMsg(providerSettingsAuthLoadedMsg{providerID: "codex", state: providerSettingsAuthMissing})
+
+	action := m.HandleMsg(ctrlAMsg())
+	_, isAdd := action.(ActionAddAccount)
+	require.False(t, isAdd, "ctrl+a must not trigger sign-in in provider settings")
+	require.Empty(t, m.proxy.Value(), "ctrl+a must not type into the field either")
 }
