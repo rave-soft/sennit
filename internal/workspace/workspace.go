@@ -549,6 +549,10 @@ type OAuthController interface {
 	ImportCopilot() (*oauth.Token, bool)
 	// RefreshOAuthToken refreshes providerID's stored OAuth token at scope.
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
+	// RefreshOAuthTokenForAccount refreshes one stored account's OAuth
+	// token, persisting it back to that account without changing which
+	// account is active.
+	RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error
 }
 
 // ProjectLifecycle covers first-run project initialization and skill

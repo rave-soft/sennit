@@ -34,6 +34,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/singleflight"
 )
@@ -79,6 +80,10 @@ type Store interface {
 	// to disk and republishes the in-memory config; see
 	// ConfigStore.PersistRefreshedToken.
 	PersistRefreshedToken(scope config.Scope, providerID string, cfg config.ProviderConfig, token *oauth.Token) error
+	// ListAccounts returns the provider's stored accounts.
+	ListAccounts(providerID string) ([]accounts.Account, error)
+	// UpsertAccount inserts or replaces one account in the store.
+	UpsertAccount(providerID string, a accounts.Account) error
 }
 
 // Manager owns OAuth token refresh, cross-instance auth-completion
@@ -380,6 +385,102 @@ func (m *Manager) usableDiskToken(scope config.Scope, providerID string, entryTo
 		return nil
 	}
 	return diskToken
+}
+
+// RefreshOAuthTokenForAccount refreshes the OAuth token of one stored
+// account (providerID/accountID) off the shared exchange machinery.
+//
+// The exchange itself is the same single-flighted, cross-process-locked
+// operation RefreshOAuthToken runs for the provider's active credential
+// (refreshSF is keyed by account, not provider, so a concurrent refresh of
+// the active account and a refresh of another account never double-spend
+// the same refresh token), but the token is persisted back to the named
+// account in the account store rather than published to the active
+// credential: refreshing a non-active account must not make it live, and
+// the active account keeps its own token until it is selected.
+func (m *Manager) RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error {
+	key := fmt.Sprintf("%d\x00%s\x00%s", scope, providerID, accountID)
+	_, err, _ := m.refreshSF.Do(key, func() (any, error) {
+		return nil, m.refreshOAuthTokenForAccountLocked(ctx, providerID, accountID)
+	})
+	return err
+}
+
+// refreshOAuthTokenForAccountLocked performs the single account's exchange.
+// It is invoked through refreshSF, so at most one goroutine per account
+// runs it at a time within this process.
+func (m *Manager) refreshOAuthTokenForAccountLocked(ctx context.Context, providerID, accountID string) error {
+	cfg := m.store.Config()
+	if _, exists := cfg.Providers.Get(providerID); !exists {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
+	accs, err := m.store.ListAccounts(providerID)
+	if err != nil {
+		return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
+	}
+	var entryToken *oauth.Token
+	for _, a := range accs {
+		if a.ID != accountID {
+			continue
+		}
+		if a.Token == nil {
+			return fmt.Errorf("account %s for provider %s does not have an OAuth token", accountID, providerID)
+		}
+		entryToken = a.Token
+		break
+	}
+	if entryToken == nil {
+		return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
+	}
+
+	// Acquire the per-provider cross-process refresh lock for the same
+	// reason RefreshOAuthToken does: a peer process may be mid-exchange for
+	// the active account and have rotated a refresh token that this account
+	// shares. The exchange below uses the account's own refresh token, and
+	// the per-account single-flight key above keeps this process from
+	// double-spending it.
+	lockCtx, cancel := context.WithTimeout(ctx, refreshLockDeadline)
+	defer cancel()
+	release, lockErr := lock.File(lockCtx, m.store.RefreshLockPath(providerID))
+	if lockErr != nil {
+		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
+	}
+	defer release()
+
+	refreshedToken, refreshErr := m.exchange(ctx, providerID, entryToken.RefreshToken)
+	if refreshErr != nil {
+		return fmt.Errorf("failed to refresh OAuth token for account %s of provider %s: %w", accountID, providerID, refreshErr)
+	}
+	refreshedToken.SetExpiresAt()
+
+	// Persist the refreshed token back to the named account. The store is
+	// re-read inside the write so a concurrent limit-refresh of the same
+	// account is not clobbered.
+	var persistErr error
+	for attempt := 1; attempt <= refreshPersistAttempts; attempt++ {
+		updated, err := m.store.ListAccounts(providerID)
+		if err != nil {
+			return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
+		}
+		idx := -1
+		for i, a := range updated {
+			if a.ID == accountID {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
+		}
+		updated[idx].Token = refreshedToken
+		if persistErr = m.store.UpsertAccount(providerID, updated[idx]); persistErr == nil {
+			slog.Info("Successfully refreshed OAuth token for account", "provider", providerID, "account", accountID)
+			return nil
+		}
+		slog.Warn("Failed to persist refreshed account OAuth token, retrying",
+			"provider", providerID, "account", accountID, "attempt", attempt, "error", persistErr)
+	}
+	return persistErr
 }
 
 // exchange performs the provider-specific OAuth token exchange. Tests may

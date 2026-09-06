@@ -8,6 +8,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -119,6 +120,14 @@ func (f *fakeStore) PersistRefreshedToken(_ config.Scope, providerID string, _ c
 		return errPersistFailed
 	}
 	return f.writeFields(providerID, config.ProviderConfig{APIKey: token.AccessToken, OAuthToken: token})
+}
+
+func (f *fakeStore) ListAccounts(_ string) ([]accounts.Account, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) UpsertAccount(_ string, _ accounts.Account) error {
+	return nil
 }
 
 // writeFields persists the api_key/oauth fields to the fake's config file.

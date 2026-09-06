@@ -63,6 +63,10 @@ func (w *AppWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope
 	return w.app.Credentials().RefreshOAuthToken(ctx, scope, providerID)
 }
 
+func (w *AppWorkspace) RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error {
+	return w.app.Credentials().RefreshOAuthTokenForAccount(ctx, scope, providerID, accountID)
+}
+
 // VerifyProviderAPIKey tests apiKey against providerID by building the same
 // kind of runtime provider the agent itself would use — starting from the
 // provider's already-configured entry (proxy, extra headers, rotation) when

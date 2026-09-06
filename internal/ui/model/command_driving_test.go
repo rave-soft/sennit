@@ -391,6 +391,10 @@ func (w *cmdDrivingWorkspace) RefreshOAuthToken(ctx context.Context, scope confi
 	return nil
 }
 
+func (w *cmdDrivingWorkspace) RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error {
+	return nil
+}
+
 func (w *cmdDrivingWorkspace) ProjectNeedsInitialization() (bool, error) {
 	return false, nil
 }

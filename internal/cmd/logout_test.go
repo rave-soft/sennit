@@ -81,6 +81,10 @@ func (s *stubConfigAccessor) RefreshOAuthToken(context.Context, config.Scope, st
 	return nil
 }
 
+func (s *stubConfigAccessor) RefreshOAuthTokenForAccount(context.Context, config.Scope, string, string) error {
+	return nil
+}
+
 // TestLogoutCodex_RemovesAllFieldsAndReturnsFirstError guards the
 // cmp.Or -> explicit-checks rewrite in logoutProvider: every field must
 // still be removed even when an earlier removal fails (cmp.Or evaluated

@@ -143,6 +143,10 @@ func (a *testConfigAccessor) RefreshOAuthToken(ctx context.Context, scope config
 	return a.credentials.RefreshOAuthToken(ctx, scope, providerID)
 }
 
+func (a *testConfigAccessor) RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error {
+	return a.credentials.RefreshOAuthTokenForAccount(ctx, scope, providerID, accountID)
+}
+
 var _ customProviderWriter = (*testConfigAccessor)(nil)
 
 // newTestConfigAccessor builds a real *config.ConfigStore-backed

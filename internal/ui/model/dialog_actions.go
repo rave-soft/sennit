@@ -367,12 +367,12 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.AccountRemoveConfirmID)
 		cmds = append(cmds, removeAccountCmd(m.com, msg.ProviderID, msg.AccountID), refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionAccountActivated:
-		// Intercepted here rather than falling through to
-		// applyChromeDialogAction's default ActionClose{} handling, so a
-		// switch to a different account also refreshes the sidebar's
-		// cached label for the newly active one (see account_label.go).
-		m.dialog.CloseDialog(dialog.AccountsID)
-		cmds = append(cmds, refreshAccountLabelCmd(m.com, m, msg.ProviderID))
+		// The dialog stays open after a switch: the user asked to change
+		// the active account, not to dismiss the dialog. The sidebar
+		// label is still refreshed so the newly active account shows
+		// immediately, and the account list is reloaded so the "Active"
+		// marker moves to the right row.
+		cmds = append(cmds, reloadAccountsCmd(m.com, msg.ProviderID), refreshAccountLabelCmd(m.com, m, msg.ProviderID))
 	case dialog.ActionRefreshTokens:
 		ws := m.com.Workspace
 		ctx := m.com.Context()
@@ -380,6 +380,21 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		cmds = append(cmds, func() tea.Msg {
 			err := ws.RefreshOAuthToken(ctx, config.ScopeGlobal, providerID)
 			if err != nil {
+				return dialog.ActionRefreshTokensResult{ProviderID: providerID, Err: err}
+			}
+			accs, err := ws.ListAccounts(providerID)
+			if err != nil {
+				return dialog.ActionRefreshTokensResult{ProviderID: providerID, Err: err}
+			}
+			return dialog.ActionAccountsLoaded{ProviderID: providerID, Accounts: accs}
+		})
+	case dialog.ActionRefreshAccountTokens:
+		ws := m.com.Workspace
+		ctx := m.com.Context()
+		providerID := msg.ProviderID
+		accountID := msg.AccountID
+		cmds = append(cmds, func() tea.Msg {
+			if err := ws.RefreshOAuthTokenForAccount(ctx, config.ScopeGlobal, providerID, accountID); err != nil {
 				return dialog.ActionRefreshTokensResult{ProviderID: providerID, Err: err}
 			}
 			accs, err := ws.ListAccounts(providerID)

@@ -287,9 +287,17 @@ type (
 	// account from the list) succeeds. It carries ProviderID so the
 	// caller can refresh anything cached that depends on which account
 	// is now active (the sidebar's account-label cache — see
-	// model/account_label.go) in addition to closing the dialog.
+	// model/account_label.go). The dialog stays open.
 	ActionAccountActivated struct {
 		ProviderID string
+	}
+	// ActionRefreshAccountTokens is sent when the user selects an account
+	// from the list (Enter on a non-active row) to refresh that specific
+	// account's OAuth token. The caller runs the refresh off the Update
+	// loop and reloads the account list when done.
+	ActionRefreshAccountTokens struct {
+		ProviderID string
+		AccountID  string
 	}
 	// ActionOpenProviderSettings is sent when "Provider settings…" is
 	// chosen from the accounts list, to open [ProviderSettings] for the

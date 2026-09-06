@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -12,6 +13,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
@@ -97,6 +99,12 @@ func (w accountsTestWorkspace) AccountCapabilities(providerID string) workspace.
 }
 
 func (w *accountsTestWorkspace) RefreshOAuthToken(_ context.Context, _ config.Scope, providerID string) error {
+	w.refreshTokenCalls++
+	w.lastRefreshTokenProviderID = providerID
+	return w.refreshTokenErr
+}
+
+func (w *accountsTestWorkspace) RefreshOAuthTokenForAccount(_ context.Context, _ config.Scope, providerID, accountID string) error {
 	w.refreshTokenCalls++
 	w.lastRefreshTokenProviderID = providerID
 	return w.refreshTokenErr
@@ -351,6 +359,36 @@ func TestAccounts_SelectNonActiveAccount_NoIOInHandleMsg(t *testing.T) {
 
 	closeAction := dlg.HandleMsg(msg)
 	require.Equal(t, ActionAccountActivated{ProviderID: providerID}, closeAction)
+	require.Equal(t, "", dlg.activating, "activating must be cleared after the activation lands")
+}
+
+// TestAccounts_SelectNonActiveAccount_DialogStaysOpen verifies that after
+// a successful account switch the dialog does not close: the user asked to
+// change the active account, not to dismiss the dialog.
+func TestAccounts_SelectNonActiveAccount_DialogStaysOpen(t *testing.T) {
+	providerID := "openai"
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+		{ID: "acct-2", Label: "Personal"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+
+	dlg.sd.list.SetSelected(1)
+	require.Equal(t, "acct-2", dlg.sd.selectedID())
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok)
+
+	msg := cmdAction.Cmd()
+	_ = msg // run the async activation
+
+	activated := dlg.HandleMsg(accountActivatedMsg{providerID: providerID})
+	require.Equal(t, ActionAccountActivated{ProviderID: providerID}, activated)
+	require.Equal(t, accountsStateList, dlg.state, "the dialog must stay open after a switch")
+	require.Equal(t, "", dlg.activating)
 }
 
 func TestAccounts_SelectActiveAccount_NoOp(t *testing.T) {
@@ -756,4 +794,57 @@ func TestAccounts_RefreshTokensKey_IgnoredForAPIKeyProvider(t *testing.T) {
 	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'r'})
 	_, isRefresh := action.(ActionRefreshTokens)
 	require.False(t, isRefresh, "'r' on an API-key provider must not trigger a token refresh")
+}
+
+// TestAccounts_TokenStatusShownForOAuthAccounts verifies that the token
+// status ("valid", "expired", "expiring soon") appears in the rendered row
+// for OAuth accounts and is absent for API-key accounts.
+func TestAccounts_TokenStatusShownForOAuthAccounts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid token shows 'valid'", func(t *testing.T) {
+		t.Parallel()
+		providerID := "codex"
+		com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+			{
+				ID:    "acct-1",
+				Label: "Work",
+				Token: &oauth.Token{AccessToken: "tok", ExpiresIn: 3600, ExpiresAt: time.Now().Add(time.Hour).Unix()},
+			},
+		}
+		dlg := loadedAccounts(t, com, providerID)
+		rendered := dlg.sd.list.FilteredItems()[0].(*AccountItem).Render(60)
+		require.Contains(t, rendered, "valid")
+		require.NotContains(t, rendered, "expired")
+	})
+
+	t.Run("expired token shows 'expired'", func(t *testing.T) {
+		t.Parallel()
+		providerID := "codex"
+		com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+			{
+				ID:    "acct-1",
+				Label: "Work",
+				Token: &oauth.Token{AccessToken: "tok", ExpiresIn: 3600, ExpiresAt: time.Now().Add(-time.Hour).Unix()},
+			},
+		}
+		dlg := loadedAccounts(t, com, providerID)
+		rendered := dlg.sd.list.FilteredItems()[0].(*AccountItem).Render(60)
+		require.Contains(t, rendered, "expired")
+	})
+
+	t.Run("API-key account shows no token status", func(t *testing.T) {
+		t.Parallel()
+		providerID := "openai"
+		com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+			{ID: "acct-1", Label: "Work", APIKey: "$KEY"},
+		}
+		dlg := loadedAccounts(t, com, providerID)
+		rendered := dlg.sd.list.FilteredItems()[0].(*AccountItem).Render(60)
+		require.NotContains(t, rendered, "valid")
+		require.NotContains(t, rendered, "expired")
+	})
 }

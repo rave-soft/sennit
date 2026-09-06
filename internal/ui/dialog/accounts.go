@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -60,6 +61,7 @@ type Accounts struct {
 	sd         *selectDialog      // built once accounts are loaded; nil until then
 	accs       []accounts.Account // last loaded set, kept for e/d's lookup by ID
 	caps       workspace.AccountCapabilities
+	activating string // account ID currently being switched to; "" when idle
 	keyMap     struct {
 		Edit, Delete, Refresh, RefreshTokens key.Binding
 	}
@@ -266,9 +268,13 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		if msg.providerID != m.providerID {
 			return nil
 		}
+		m.activating = ""
 		if msg.err != nil {
 			return ActionCmd{util.ReportError(msg.err)}
 		}
+		// The active account changed, but the dialog stays open: the user
+		// asked for the switch, not for the dialog to disappear. A second
+		// Enter (or Esc) on the now-active row closes it.
 		return ActionAccountActivated{ProviderID: m.providerID}
 
 	case ActionRefreshTokensResult:
@@ -350,7 +356,14 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 		if id == providerSettingsItemID {
 			return ActionOpenProviderSettings{ProviderID: providerID}
 		}
+		if m.activating != "" {
+			// A switch is already in flight; ignore further selections
+			// until the in-flight one lands.
+			return nil
+		}
 		if id == activeAccountID {
+			// Re-selecting the already-active account: nothing to do.
+			// The dialog stays open so a second Enter/Esc can close it.
 			return nil
 		}
 		for _, a := range accs {
@@ -360,9 +373,10 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 			if a.Disabled {
 				return ActionCmd{util.ReportWarn("This account is disabled")}
 			}
-			break
+			m.activating = id
+			return ActionCmd{m.activateAccountCmd(providerID, id)}
 		}
-		return ActionCmd{m.activateAccountCmd(providerID, id)}
+		return nil
 	}
 
 	return selectDialogConfig{
@@ -555,6 +569,9 @@ func (a *AccountItem) Render(width int) string {
 	if a.account.Disabled {
 		parts = append(parts, "Disabled")
 	}
+	if a.caps.OAuth && a.account.Token != nil {
+		parts = append(parts, a.tokenStatus())
+	}
 	if a.caps.Usage {
 		if a.account.Usage.Known() {
 			parts = append(parts, common.FormatPlanUsage(a.account.Usage.Plan, common.AccountUsageWindows(a.account.Usage), ""))
@@ -566,6 +583,22 @@ func (a *AccountItem) Render(width int) string {
 
 	st := defaultListItemStyles(a.t)
 	return renderItem(st, title, info, a.Focused(), width, a.Cache(), a.Match())
+}
+
+// tokenStatus returns a short human-readable label for the account's
+// OAuth token state: "expired", "expiring soon", or "valid".
+func (a *AccountItem) tokenStatus() string {
+	t := a.account.Token
+	if t.IsExpired() {
+		return "expired"
+	}
+	// Within the refresh buffer (max(expires_in/10, 30s)) the token is
+	// about to expire; flag it so the user knows a refresh is due.
+	buffer := max(int64(t.ExpiresIn)/10, 30)
+	if time.Now().Unix() >= t.ExpiresAt-buffer {
+		return "expiring soon"
+	}
+	return "valid"
 }
 
 // AddAccountItem is the "Add account…" entry appended to the account list,

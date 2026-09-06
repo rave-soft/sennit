@@ -665,6 +665,11 @@ func (s *stubWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scop
 	return nil
 }
 
+func (s *stubWorkspace) RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error {
+	s.track("RefreshOAuthTokenForAccount")
+	return nil
+}
+
 // ProjectLifecycle
 func (s *stubWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }
 

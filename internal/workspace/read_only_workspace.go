@@ -564,6 +564,10 @@ func (w *readOnlyWorkspace) RefreshOAuthToken(ctx context.Context, scope config.
 	return w.readOnlyError("RefreshOAuthToken")
 }
 
+func (w *readOnlyWorkspace) RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error {
+	return w.readOnlyError("RefreshOAuthTokenForAccount")
+}
+
 // -- Project lifecycle (mutations only) --
 
 func (w *readOnlyWorkspace) MarkProjectInitialized() error {
