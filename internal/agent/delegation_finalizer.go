@@ -940,11 +940,18 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allo
 		named = namedAgents(cfg)
 	}
 	constraints := map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}
+	// "general-purpose" is accepted as an alias for the empty value in the
+	// run closure below: the tool's own description names it, and models
+	// routinely pass that name as the value instead of omitting the field,
+	// which used to land in runNamedAgent and fail with "No agent". When
+	// a named roster exists the enum must admit the alias too, or the
+	// schema would reject it before the closure ever runs.
 	if len(named) > 0 {
-		ids := make([]string, len(named))
-		for i, a := range named {
-			ids[i] = a.ID
+		ids := make([]string, 0, len(named)+1)
+		for _, a := range named {
+			ids = append(ids, a.ID)
 		}
+		ids = append(ids, "general-purpose")
 		constraints["subagent_type"] = tools.ToolSchemaConstraint{Enum: ids}
 	}
 	return tools.WithToolSchemaConstraints(fantasy.NewAgentTool(
@@ -958,7 +965,12 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allo
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
-			if params.SubagentType == "" {
+			// "general-purpose" is the built-in default's name, not a
+			// configured agent id: the description tells callers to omit
+			// subagent_type to get it, but models routinely pass the name
+			// as the value. Route that value to the same built-in path
+			// instead of failing it in runNamedAgent.
+			if params.SubagentType == "" || params.SubagentType == "general-purpose" {
 				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, call.ID), delegationDepth(ctx))
 			}
 			if !allowNamedAgents {
