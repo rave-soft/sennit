@@ -101,11 +101,14 @@ func NewClient(config ClientConfig) (*Client, error) {
 	return client, nil
 }
 
-// Kill forcefully terminates the client by canceling the context and closing
-// the connection. This ensures any blocked I/O operations are interrupted.
+// Kill forcefully terminates the client by closing the connection and then
+// canceling its context. Connection.Close closes the process stream and waits
+// for jsonrpc2's read loop to close itself. Canceling first would make
+// jsonrpc2's context watcher close the connection concurrently with a response
+// being delivered by that loop, which can panic in jsonrpc2 v0.2.2.
 func (c *Client) Kill() {
-	c.cancel()
 	_ = c.conn.Close()
+	c.cancel()
 }
 
 // Initialize sends the initialize request to the language server.
@@ -205,13 +208,33 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// Exit sends an exit notification to the language server.
+// gracefulDisconnectWait bounds direct Exit callers that do not otherwise
+// coordinate shutdown. Runtime lifecycle management supplies its own deadline.
+const gracefulDisconnectWait = 5 * time.Second
+
+// Exit sends an exit notification and waits for the server to disconnect and
+// exit normally. If the graceful deadline expires it forcefully tears down the
+// transport and process.
 func (c *Client) Exit() error {
-	err := c.conn.Notify(c.ctx, MethodExit, nil)
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), gracefulDisconnectWait)
+	defer cancel()
+	return c.ExitWithContext(ctx)
+}
+
+// ExitWithContext performs the graceful exit sequence using ctx as its bound.
+// It is for lifecycle owners that already have a shutdown deadline.
+func (c *Client) ExitWithContext(ctx context.Context) error {
+	if err := c.conn.Notify(ctx, MethodExit, nil); err != nil {
 		return fmt.Errorf("exit notification failed: %w", err)
 	}
-
+	if err := c.conn.WaitForDisconnect(ctx); err != nil {
+		c.Kill()
+		return fmt.Errorf("waiting for language server disconnect: %w", err)
+	}
+	if err := c.conn.WaitForProcess(ctx); err != nil {
+		c.Kill()
+		return fmt.Errorf("waiting for language server process: %w", err)
+	}
 	c.cancel()
 	return nil
 }
@@ -854,37 +877,61 @@ func startServerProcess(ctx context.Context, config ClientConfig) (io.ReadWriteC
 }
 
 type processCloser struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    io.ReadCloser
-	stderr    io.ReadCloser
-	closeOnce sync.Once
-	closeErr  error
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	stderr io.ReadCloser
+
+	pipesOnce sync.Once
+	pipesErr  error
+	killOnce  sync.Once
+	killErr   error
+	waitOnce  sync.Once
+	waitDone  chan struct{}
+	waitErr   error
 }
 
+// Close releases the process pipes. jsonrpc2 calls this after peer EOF; it must
+// not kill a cooperative process that is still completing normal cleanup.
 func (c *processCloser) Close() error {
-	c.closeOnce.Do(func() {
-		errs := []error{
-			c.stdin.Close(),
-			c.stdout.Close(),
-			c.stderr.Close(),
-		}
-
-		done := make(chan error, 1)
-		go func() {
-			done <- c.cmd.Wait()
-		}()
-
-		timeout := time.After(5 * time.Second)
-		select {
-		case err := <-done:
-			errs = append(errs, err)
-		case <-timeout:
-			errs = append(errs, c.cmd.Process.Kill())
-			<-done
-		}
-
-		c.closeErr = errors.Join(errs...)
+	c.pipesOnce.Do(func() {
+		c.pipesErr = errors.Join(c.stdin.Close(), c.stdout.Close(), c.stderr.Close())
 	})
-	return c.closeErr
+	return c.pipesErr
+}
+
+// Wait waits for and reaps a normal process exit, bounded by ctx.
+func (c *processCloser) Wait(ctx context.Context) error {
+	c.startWait()
+	select {
+	case <-c.waitDone:
+		return c.waitErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ForceClose immediately interrupts I/O, kills the process, and reaps it.
+func (c *processCloser) ForceClose() error {
+	pipeErr := c.Close()
+	c.killOnce.Do(func() {
+		if c.cmd.Process != nil {
+			if err := c.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				c.killErr = err
+			}
+		}
+	})
+	c.startWait()
+	<-c.waitDone
+	return errors.Join(pipeErr, c.killErr, c.waitErr)
+}
+
+func (c *processCloser) startWait() {
+	c.waitOnce.Do(func() {
+		c.waitDone = make(chan struct{})
+		go func() {
+			c.waitErr = c.cmd.Wait()
+			close(c.waitDone)
+		}()
+	})
 }

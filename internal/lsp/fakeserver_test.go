@@ -90,6 +90,30 @@ func runFakeLSPServer() {
 			}
 		}
 		if len(envelope.ID) == 0 {
+			if envelope.Method == "exit" {
+				switch os.Getenv("SENNIT_LSP_FAKE_SCENARIO") {
+				case "hang-after-exit":
+					// A server may correctly acknowledge shutdown yet ignore exit.
+					// Keep its pipes open so the client must bound the graceful wait
+					// and explicitly force process teardown.
+					for {
+						time.Sleep(time.Hour)
+					}
+				case "cleanup-after-disconnect":
+					// Closing stdout disconnects JSON-RPC before process exit. Stay
+					// alive long enough to prove graceful teardown waits instead of
+					// killing the process as soon as DisconnectNotify closes.
+					_ = os.Stdout.Close()
+					time.Sleep(400 * time.Millisecond)
+					if logPath := os.Getenv("SENNIT_LSP_FAKE_LOG"); logPath != "" {
+						if file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+							_, _ = fmt.Fprintln(file, "cleanup-complete")
+							_ = file.Close()
+						}
+					}
+				}
+				return
+			}
 			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "stop-reading-after-workspace-change" && envelope.Method == "workspace/didChangeWatchedFiles" {
 				// Sleep rather than `select {}`. The scenario needs a
 				// process that is alive and no longer reading stdin, and

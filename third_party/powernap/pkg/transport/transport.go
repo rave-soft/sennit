@@ -200,12 +200,34 @@ func (s *StreamTransport) Write(p []byte) (n int, err error) {
 	return s.writer.Write(p) //nolint:wrapcheck
 }
 
-// Close implements io.Closer.
+// Close implements io.Closer. For process streams this only releases the
+// pipes; terminating the process is an explicit ForceClose operation.
 func (s *StreamTransport) Close() error {
 	if s.closer != nil {
 		return s.closer.Close() //nolint:wrapcheck
 	}
 	return nil
+}
+
+// ForceClose interrupts the stream and any process behind it.
+func (s *StreamTransport) ForceClose() error {
+	closer, ok := s.closer.(interface{ ForceClose() error })
+	if !ok {
+		return s.Close()
+	}
+	return closer.ForceClose() //nolint:wrapcheck
+}
+
+// Wait waits for the process behind the stream to exit, when its closer
+// supports graceful process waiting.
+func (s *StreamTransport) Wait(ctx context.Context) error {
+	waiter, ok := s.closer.(interface {
+		Wait(context.Context) error
+	})
+	if !ok {
+		return nil
+	}
+	return waiter.Wait(ctx) //nolint:wrapcheck
 }
 
 // ObjectStream creates a jsonrpc2.ObjectStream from the transport.

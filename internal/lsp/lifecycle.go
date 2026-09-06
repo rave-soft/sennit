@@ -453,16 +453,18 @@ func (r *runtime) closeProcessLocked(ctx context.Context, gen *clientGeneration)
 		if err := gen.client.Shutdown(closeCtx); err != nil {
 			slog.Warn("Failed to shutdown LSP client", "error", err)
 		}
-		done <- gen.client.Exit()
+		done <- gen.client.ExitWithContext(closeCtx)
 	}()
 
 	select {
 	case err := <-done:
-		// The process is definitively closed: mark the generation dead
-		// so the context is retired by the shared publication step and a
-		// later restart retry does not run the graceful shutdown against
-		// it again (a second shutdown against a closed process is a
-		// timeout-then-kill for no reason).
+		if err == nil {
+			// Exit is only graceful once the server has actually disconnected;
+			// otherwise a live process can outlast this generation.
+			gen.markDead()
+			return nil
+		}
+		gen.client.Kill()
 		gen.markDead()
 		return err
 	case <-closeCtx.Done():

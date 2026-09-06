@@ -76,9 +76,122 @@ func TestClient_CloseTimeoutFallsBackToKillWithoutPanic(t *testing.T) {
 	}
 }
 
-// fakeServerPID waits for the fake server to log its first line and
-// returns the PID it reported. Every logged line is prefixed with
-// os.Getpid() of that single child process, so any line works.
+// TestClient_CloseGracefullyExitsAndReapsProcess verifies that a cooperative
+// server which acknowledges shutdown and exits after exit is reaped without a
+// forced teardown or a timing-dependent os.ErrProcessDone error.
+func TestClient_CloseGracefullyExitsAndReapsProcess(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "lsp.log")
+
+	client, err := New("test-graceful-exit", config.LSPConfig{
+		Command: exe,
+		Env: map[string]string{
+			fakeLSPServerEnv:      "1",
+			"SENNIT_LSP_FAKE_LOG": logPath,
+		},
+	}, config.NewShellVariableResolver(testenv.New(map[string]string{})), dir, false)
+	require.NoError(t, err)
+
+	initCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err = client.Initialize(initCtx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(initCtx))
+	pid := fakeServerPID(t, logPath)
+
+	closeCtx, closeCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer closeCancel()
+	require.NoError(t, client.Close(closeCtx))
+
+	if goruntime.GOOS != "windows" {
+		require.Eventually(t, func() bool {
+			return !processAlive(pid)
+		}, 5*time.Second, 10*time.Millisecond, "fake LSP server process %d was not reaped", pid)
+	}
+}
+
+// TestClient_CloseAllowsCleanupAfterTransportDisconnect verifies that transport
+// EOF is not treated as permission to kill a still-running cooperative server.
+func TestClient_CloseAllowsCleanupAfterTransportDisconnect(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "lsp.log")
+
+	client, err := New("test-cleanup-after-disconnect", config.LSPConfig{
+		Command: exe,
+		Env: map[string]string{
+			fakeLSPServerEnv:           "1",
+			"SENNIT_LSP_FAKE_SCENARIO": "cleanup-after-disconnect",
+			"SENNIT_LSP_FAKE_LOG":      logPath,
+		},
+	}, config.NewShellVariableResolver(testenv.New(map[string]string{})), dir, false)
+	require.NoError(t, err)
+
+	initCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err = client.Initialize(initCtx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(initCtx))
+	pid := fakeServerPID(t, logPath)
+
+	closeCtx, closeCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer closeCancel()
+	started := time.Now()
+	require.NoError(t, client.Close(closeCtx))
+	require.GreaterOrEqual(t, time.Since(started), 300*time.Millisecond,
+		"Close returned before the server's delayed cleanup completed")
+	contents, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	require.Contains(t, string(contents), "cleanup-complete")
+	if goruntime.GOOS != "windows" {
+		require.False(t, processAlive(pid), "fake LSP server process %d was not reaped", pid)
+	}
+}
+
+// TestClient_CloseWaitsForExitDisconnectOrForcesTeardown covers a server that
+// completes the shutdown request but remains alive after receiving exit. Close
+// must not report graceful completion before the JSON-RPC read loop disconnects;
+// it must bound that wait and forcefully reap the child process instead.
+func TestClient_CloseWaitsForExitDisconnectOrForcesTeardown(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "lsp.log")
+
+	client, err := New("test-hang-after-exit", config.LSPConfig{
+		Command: exe,
+		Env: map[string]string{
+			fakeLSPServerEnv:           "1",
+			"SENNIT_LSP_FAKE_SCENARIO": "hang-after-exit",
+			"SENNIT_LSP_FAKE_LOG":      logPath,
+		},
+	}, config.NewShellVariableResolver(testenv.New(map[string]string{})), dir, false)
+	require.NoError(t, err)
+
+	initCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err = client.Initialize(initCtx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(initCtx))
+	pid := fakeServerPID(t, logPath)
+
+	closeCtx, closeCancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer closeCancel()
+	start := time.Now()
+	err = client.Close(closeCtx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(start), 5*time.Second, "Close exceeded its bounded graceful shutdown deadline")
+
+	if goruntime.GOOS != "windows" {
+		require.Eventually(t, func() bool {
+			return !processAlive(pid)
+		}, 5*time.Second, 10*time.Millisecond, "fake LSP server process %d outlived forced teardown", pid)
+	}
+}
+
 func fakeServerPID(t *testing.T, logPath string) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
