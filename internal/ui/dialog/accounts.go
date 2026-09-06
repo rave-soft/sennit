@@ -27,14 +27,14 @@ const (
 	accountsDialogMaxHeight = 20
 )
 
-// addAccountItemID is the sentinel ID for the "Add account…" entry
+// loginAccountItemID is the sentinel ID for the "Login account…" entry
 // appended to the account list, mirroring providers.go's
 // customProviderItemID. It can never collide with a real account.Account
 // ID, which is always a machine-generated accounts.NextID value.
-const addAccountItemID = "__add_account__"
+const loginAccountItemID = "__login_account__"
 
 // providerSettingsItemID is the sentinel ID for the "Provider settings…"
-// entry appended to the account list, alongside addAccountItemID.
+// entry appended to the account list, alongside loginAccountItemID.
 const providerSettingsItemID = "__provider_settings__"
 
 // accountsState tracks the load-then-list lifecycle: ListAccounts is a
@@ -122,7 +122,7 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 	// checked before the selectDialog (whose filter input claims ctrl+a
 	// as LineHome), which is why it lives here rather than in
 	// selectDialogConfig.extraHelp.
-	m.keyMap.AddAccount = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "sign in"))
+	m.keyMap.AddAccount = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "login account"))
 	return m, tea.Batch(m.spinner.Tick, m.loadAccountsCmd())
 }
 
@@ -166,9 +166,9 @@ type ActionAccountsLoaded struct {
 // DialogID implements [DialogAddressed].
 func (ActionAccountsLoaded) DialogID() string { return AccountsID }
 
-// ActionAddAccount is sent when "Add account…" is chosen from the accounts
-// list, to start a fresh sign-in for ProviderID rather than switching to
-// one already on file.
+// ActionAddAccount is sent when "Login account…" is chosen from the
+// accounts list, to start a fresh sign-in for ProviderID rather than
+// switching to one already on file.
 type ActionAddAccount struct {
 	ProviderID string
 }
@@ -352,13 +352,13 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 				startIndex = i
 			}
 		}
-		items = append(items, &AddAccountItem{BaseItem: list.NewBaseItem(), t: t})
+		items = append(items, &LoginAccountItem{BaseItem: list.NewBaseItem(), t: t})
 		items = append(items, &ProviderSettingsItem{BaseItem: list.NewBaseItem(), t: t})
 		return items, startIndex, nil
 	}
 
 	onSelect := func(id string) Action {
-		if id == addAccountItemID {
+		if id == loginAccountItemID {
 			return ActionAddAccount{ProviderID: providerID}
 		}
 		if id == providerSettingsItemID {
@@ -426,13 +426,13 @@ func (m *Accounts) currentActiveAccountID() string {
 
 // selectedAccount returns the account currently highlighted in the list,
 // looked up in the last loaded set by ID. It reports false for the
-// "Add account…" entry or when nothing is loaded yet.
+// "Login account…" entry or when nothing is loaded yet.
 func (m *Accounts) selectedAccount() (accounts.Account, bool) {
 	if m.sd == nil {
 		return accounts.Account{}, false
 	}
 	id := m.sd.selectedID()
-	if id == "" || id == addAccountItemID {
+	if id == "" || id == loginAccountItemID {
 		return accounts.Account{}, false
 	}
 	for _, a := range m.accs {
@@ -609,35 +609,35 @@ func (a *AccountItem) tokenStatus() string {
 	return "valid"
 }
 
-// AddAccountItem is the "Add account…" entry appended to the account list,
-// mirroring ProviderItem's "Custom provider…" entry in providers.go.
+// LoginAccountItem is the "Login account…" entry appended to the account
+// list, mirroring ProviderItem's "Custom provider…" entry in providers.go.
 // Selecting it starts a fresh sign-in for the dialog's provider rather than
 // switching to an existing account.
-type AddAccountItem struct {
+type LoginAccountItem struct {
 	list.BaseItem
 	t *styles.Styles
 }
 
-var _ ListItem = (*AddAccountItem)(nil)
+var _ ListItem = (*LoginAccountItem)(nil)
 
 // Filter implements ListItem.
-func (a *AddAccountItem) Filter() string {
-	return "Add account…"
+func (a *LoginAccountItem) Filter() string {
+	return "Login account…"
 }
 
 // ID implements ListItem.
-func (a *AddAccountItem) ID() string {
-	return addAccountItemID
+func (a *LoginAccountItem) ID() string {
+	return loginAccountItemID
 }
 
 // Render implements ListItem.
-func (a *AddAccountItem) Render(width int) string {
+func (a *LoginAccountItem) Render(width int) string {
 	st := defaultListItemStyles(a.t)
-	return renderItem(st, "Add account…", "", a.Focused(), width, a.Cache(), a.Match())
+	return renderItem(st, "Login account…", "", a.Focused(), width, a.Cache(), a.Match())
 }
 
 // ProviderSettingsItem is the "Provider settings…" entry appended to the
-// account list, after AddAccountItem. Selecting it opens
+// account list, after LoginAccountItem. Selecting it opens
 // [ProviderSettings] for the dialog's provider (proxy, and — where the
 // provider supports it — automatic account rotation).
 type ProviderSettingsItem struct {

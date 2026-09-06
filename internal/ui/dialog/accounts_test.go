@@ -198,8 +198,8 @@ func TestAccounts_ListsAccountsAndMarksActive(t *testing.T) {
 
 	dlg := loadedAccounts(t, com, providerID)
 
-	// 2 accounts plus the trailing "Add account…" and "Provider
-	// settings…" sentinels; see TestAccounts_AddAccountItemAppendedToList
+	// 2 accounts plus the trailing "Login account…" and "Provider
+	// settings…" sentinels; see TestAccounts_LoginAccountItemAppendedToList
 	// for those entries themselves.
 	items := dlg.sd.list.FilteredItems()
 	require.Len(t, items, 4)
@@ -239,7 +239,7 @@ func TestAccounts_UsageShownOnlyForCapableProvider(t *testing.T) {
 		}
 		dlg := loadedAccounts(t, com, providerID)
 
-		// 1 account plus the trailing "Add account…" and "Provider
+		// 1 account plus the trailing "Login account…" and "Provider
 		// settings…" sentinels.
 		items := dlg.sd.list.FilteredItems()
 		require.Len(t, items, 3)
@@ -257,7 +257,7 @@ func TestAccounts_UsageShownOnlyForCapableProvider(t *testing.T) {
 		}
 		dlg := loadedAccounts(t, com, providerID)
 
-		// 1 account plus the trailing "Add account…" and "Provider
+		// 1 account plus the trailing "Login account…" and "Provider
 		// settings…" sentinels.
 		items := dlg.sd.list.FilteredItems()
 		require.Len(t, items, 3)
@@ -505,10 +505,10 @@ func TestAccounts_SelectDisabledAccount_WarnsAndDoesNotActivate(t *testing.T) {
 	require.Equal(t, util.InfoTypeWarn, infoMsg.Type)
 }
 
-// TestAccounts_AddAccountItemAppendedToList covers the sentinel "Add
+// TestAccounts_LoginAccountItemAppendedToList covers the sentinel "Login
 // account…" and "Provider settings…" entries appended after the real
 // accounts, mirroring providers.go's "Custom provider…" entry.
-func TestAccounts_AddAccountItemAppendedToList(t *testing.T) {
+func TestAccounts_LoginAccountItemAppendedToList(t *testing.T) {
 	providerID := "openai"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
 	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
@@ -520,9 +520,9 @@ func TestAccounts_AddAccountItemAppendedToList(t *testing.T) {
 
 	items := dlg.sd.list.FilteredItems()
 	require.Len(t, items, 4)
-	addItem, ok := items[len(items)-2].(*AddAccountItem)
-	require.True(t, ok, "expected the second-to-last item to be an AddAccountItem, got %#v", items[len(items)-2])
-	require.Equal(t, addAccountItemID, addItem.ID())
+	loginItem, ok := items[len(items)-2].(*LoginAccountItem)
+	require.True(t, ok, "expected the second-to-last item to be a LoginAccountItem, got %#v", items[len(items)-2])
+	require.Equal(t, loginAccountItemID, loginItem.ID())
 	settingsItem, ok := items[len(items)-1].(*ProviderSettingsItem)
 	require.True(t, ok, "expected the last item to be a ProviderSettingsItem, got %#v", items[len(items)-1])
 	require.Equal(t, providerSettingsItemID, settingsItem.ID())
@@ -553,10 +553,10 @@ func TestAccounts_EditKey_ReturnsActionOpenAccountEdit_NoIO(t *testing.T) {
 	require.False(t, edit.Active)
 }
 
-// TestAccounts_EditKey_OnAddAccountItem_NoOp covers pressing ctrl+r while the
-// trailing "Add account…" sentinel is highlighted: there is no account to
-// edit, so nothing should happen.
-func TestAccounts_EditKey_OnAddAccountItem_NoOp(t *testing.T) {
+// TestAccounts_EditKey_OnLoginAccountItem_NoOp covers pressing ctrl+r while
+// the trailing "Login account…" sentinel is highlighted: there is no
+// account to edit, so nothing should happen.
+func TestAccounts_EditKey_OnLoginAccountItem_NoOp(t *testing.T) {
 	providerID := "openai"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
 	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
@@ -564,7 +564,7 @@ func TestAccounts_EditKey_OnAddAccountItem_NoOp(t *testing.T) {
 	dlg := loadedAccounts(t, com, providerID)
 	items := dlg.sd.list.FilteredItems()
 	dlg.sd.list.SetSelected(len(items) - 2)
-	require.Equal(t, addAccountItemID, dlg.sd.selectedID())
+	require.Equal(t, loginAccountItemID, dlg.sd.selectedID())
 
 	action := dlg.HandleMsg(tea.KeyPressMsg{Text: "ctrl+r"})
 	require.Nil(t, action)
@@ -594,11 +594,11 @@ func TestAccounts_DeleteKey_ReturnsActionRequestAccountRemoval_NoIO(t *testing.T
 	require.Equal(t, "acct-2", remove.Account.ID)
 }
 
-// TestAccounts_SelectAddAccount_ReturnsActionAddAccount_NoIO covers
-// selecting "Add account…": it must return ActionAddAccount for the
+// TestAccounts_SelectLoginAccount_ReturnsActionAddAccount_NoIO covers
+// selecting "Login account…": it must return ActionAddAccount for the
 // dialog's provider synchronously, without activating/switching any
 // account (no ActivateAccount call, no tea.Cmd).
-func TestAccounts_SelectAddAccount_ReturnsActionAddAccount_NoIO(t *testing.T) {
+func TestAccounts_SelectLoginAccount_ReturnsActionAddAccount_NoIO(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
 	ws.accs = []accounts.Account{
@@ -609,10 +609,10 @@ func TestAccounts_SelectAddAccount_ReturnsActionAddAccount_NoIO(t *testing.T) {
 
 	items := dlg.sd.list.FilteredItems()
 	dlg.sd.list.SetSelected(len(items) - 2)
-	require.Equal(t, addAccountItemID, dlg.sd.selectedID())
+	require.Equal(t, loginAccountItemID, dlg.sd.selectedID())
 
 	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Zero(t, ws.activateCalls, "selecting Add account must not activate/switch accounts")
+	require.Zero(t, ws.activateCalls, "selecting Login account must not activate/switch accounts")
 
 	addAction, ok := action.(ActionAddAccount)
 	require.True(t, ok, "expected ActionAddAccount, got %#v", action)

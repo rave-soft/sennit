@@ -104,7 +104,7 @@ func NewAccountForm(com *common.Common, providerID string, account accounts.Acco
 	m.keyMap.Next = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field"))
 	m.keyMap.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous field"))
 	m.keyMap.Toggle = key.NewBinding(key.WithKeys("left", "right", "space"), key.WithHelp("←/→", "toggle enabled"))
-	m.keyMap.Auth = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "sign in"))
+	m.keyMap.Auth = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "login account"))
 	m.keyMap.Submit = key.NewBinding(key.WithKeys("enter", "ctrl+y"), key.WithHelp("enter", "submit"))
 	m.keyMap.Close = CloseKey
 

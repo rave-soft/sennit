@@ -8,7 +8,7 @@ import (
 )
 
 // TestApplyProviderDialogAction_AddAccountForcesNewAccount is the wiring
-// regression test for "Add account…": ActionAddAccount must construct the
+// regression test for "Login account…": ActionAddAccount must construct the
 // OAuth dialog with ForceNewAccount set, so RecordAccount always creates a
 // new account rather than possibly refreshing the active one in place. The
 // ordinary provider-selection path (ActionConfigureProvider) must leave it
@@ -28,7 +28,7 @@ func TestApplyProviderDialogAction_AddAccountForcesNewAccount(t *testing.T) {
 }
 
 // TestApplyProviderDialogAction_ConfigureProviderDoesNotForceNewAccount
-// covers the ordinary path reached without going through "Add account…":
+// covers the ordinary path reached without going through "Login account…":
 // it must not set ForceNewAccount, since a routine (re-)login there should
 // still be able to update the active account in place.
 func TestApplyProviderDialogAction_ConfigureProviderDoesNotForceNewAccount(t *testing.T) {
