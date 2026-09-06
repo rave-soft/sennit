@@ -48,6 +48,7 @@ func TestLiveCodexStream(t *testing.T) {
 	provider, err := openai.New(
 		openai.WithAPIKey(token.AccessToken),
 		openai.WithUseResponsesAPI(),
+		openai.WithResponsesAPIFunc(func(string) bool { return true }),
 		openai.WithBaseURL(codex.APIBaseURL),
 		openai.WithHeaders(codex.Headers(accountID)),
 	)

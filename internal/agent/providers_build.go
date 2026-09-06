@@ -132,6 +132,9 @@ func (b *runtimeBuilder) buildOpenaiProvider(baseURL, apiKey string, headers map
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
+	if providerID == codex.ProviderID {
+		opts = append(opts, openai.WithResponsesAPIFunc(func(string) bool { return true }))
+	}
 	httpClient, err := buildProviderHTTPClient(proxyURL, debug)
 	if err != nil {
 		return nil, err

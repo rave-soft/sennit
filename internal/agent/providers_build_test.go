@@ -177,14 +177,15 @@ func TestBuildOpenaiProvider(t *testing.T) {
 		require.Equal(t, "v", captured.Header.Get("X-Custom"))
 	})
 
-	t.Run("Codex provider ID wraps the transport without changing the request", func(t *testing.T) {
+	t.Run("Codex provider ID forces the Responses API for every model", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		provider, err := c.builder.buildOpenaiProvider(server.URL, "akey", map[string]string{}, codex.ProviderID, "", false)
 		require.NoError(t, err)
-		probe(t, provider, "gpt-5")
+		probe(t, provider, "gpt-6-astra")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
+		require.Equal(t, "/responses", captured.Path)
 	})
 
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
