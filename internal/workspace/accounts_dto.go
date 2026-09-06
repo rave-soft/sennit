@@ -61,13 +61,17 @@ const (
 
 // AccountCapabilities describes what a provider's accounts support, as far
 // as the settings dialog needs to know. Mirrors the parts of
-// accounts.Capabilities the UI renders; the auth-kind field is
-// deliberately not carried, since nothing in the UI reads it.
+// accounts.Capabilities the UI renders; the auth-kind field is carried
+// so the accounts dialog can offer a token-refresh shortcut for OAuth
+// providers.
 type AccountCapabilities struct {
 	// Usage reports whether the provider quotes a rate-limit snapshot.
 	Usage bool
 	// RotateOn is the provider's rotation trigger.
 	RotateOn RotateOn
+	// OAuth reports whether the provider's accounts use OAuth tokens,
+	// in which case a refresh shortcut is meaningful.
+	OAuth bool
 }
 
 // DefaultMinRemainingPercent and DefaultCooldown are the defaults the

@@ -373,6 +373,21 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// cached label for the newly active one (see account_label.go).
 		m.dialog.CloseDialog(dialog.AccountsID)
 		cmds = append(cmds, refreshAccountLabelCmd(m.com, m, msg.ProviderID))
+	case dialog.ActionRefreshTokens:
+		ws := m.com.Workspace
+		ctx := m.com.Context()
+		providerID := msg.ProviderID
+		cmds = append(cmds, func() tea.Msg {
+			err := ws.RefreshOAuthToken(ctx, config.ScopeGlobal, providerID)
+			if err != nil {
+				return dialog.ActionRefreshTokensResult{ProviderID: providerID, Err: err}
+			}
+			accs, err := ws.ListAccounts(providerID)
+			if err != nil {
+				return dialog.ActionRefreshTokensResult{ProviderID: providerID, Err: err}
+			}
+			return dialog.ActionAccountsLoaded{ProviderID: providerID, Accounts: accs}
+		})
 	case dialog.ActionOpenProviderSettings:
 		dlg, cmd := dialog.NewProviderSettings(m.com, msg.ProviderID)
 		m.dialog.OpenDialog(dlg)

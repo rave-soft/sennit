@@ -45,6 +45,10 @@ type accountsTestWorkspace struct {
 	refreshErr              error
 	refreshedAccs           []accounts.Account
 	lastRefreshedProviderID string
+
+	refreshTokenCalls          int
+	refreshTokenErr            error
+	lastRefreshTokenProviderID string
 }
 
 func (w *accountsTestWorkspace) SupportsThreads() bool { return false }
@@ -89,7 +93,13 @@ func (w accountsTestWorkspace) AccountCapabilities(providerID string) workspace.
 	case c.RotateOn.RotatesOnRateLimit():
 		rotateOn = workspace.RotateRateLimit
 	}
-	return workspace.AccountCapabilities{Usage: c.Usage, RotateOn: rotateOn}
+	return workspace.AccountCapabilities{Usage: c.Usage, RotateOn: rotateOn, OAuth: c.AuthKind == accounts.AuthOAuth}
+}
+
+func (w *accountsTestWorkspace) RefreshOAuthToken(_ context.Context, _ config.Scope, providerID string) error {
+	w.refreshTokenCalls++
+	w.lastRefreshTokenProviderID = providerID
+	return w.refreshTokenErr
 }
 
 func (w *accountsTestWorkspace) RefreshAccountLimits(_ context.Context, providerID string) ([]accounts.Account, error) {
@@ -699,4 +709,51 @@ func TestAccounts_RefreshLimitsError_KeepsLastLoadedAccounts(t *testing.T) {
 	dlg.HandleMsg(loaded)
 	require.Equal(t, accountsStateError, dlg.state)
 	require.Equal(t, original, dlg.accs, "a failed refresh must not wipe the last successfully loaded accounts")
+}
+
+// TestAccounts_RefreshTokensKey_ReturnsActionForOAuthProvider verifies
+// that pressing "r" in the accounts dialog for an OAuth provider returns
+// ActionRefreshTokens, and that the key is not offered for API-key
+// providers.
+func TestAccounts_RefreshTokensKey_ReturnsActionForOAuthProvider(t *testing.T) {
+	t.Parallel()
+
+	// "codex" is an OAuth provider in the capabilities registry.
+	providerID := "codex"
+	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+	require.True(t, dlg.caps.OAuth, "codex should report OAuth capability")
+
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'r'})
+	refreshAction, ok := action.(ActionRefreshTokens)
+	require.True(t, ok, "expected ActionRefreshTokens, got %#v", action)
+	require.Equal(t, providerID, refreshAction.ProviderID)
+}
+
+// TestAccounts_RefreshTokensKey_IgnoredForAPIKeyProvider verifies that
+// the "r" key does not trigger a refresh for a provider whose accounts
+// use API keys.
+func TestAccounts_RefreshTokensKey_IgnoredForAPIKeyProvider(t *testing.T) {
+	t.Parallel()
+
+	// "openai" is not in the capabilities registry, so it falls back to
+	// defaultCapabilities with AuthKind = AuthAPIKey.
+	providerID := "openai"
+	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+	require.False(t, dlg.caps.OAuth, "openai should not report OAuth capability")
+
+	// "r" should be forwarded to the select dialog's filter input,
+	// not trigger ActionRefreshTokens.
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'r'})
+	_, isRefresh := action.(ActionRefreshTokens)
+	require.False(t, isRefresh, "'r' on an API-key provider must not trigger a token refresh")
 }

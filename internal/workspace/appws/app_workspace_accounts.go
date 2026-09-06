@@ -120,5 +120,5 @@ func (w *AppWorkspace) AccountCapabilities(providerID string) workspace.AccountC
 	case c.RotateOn.RotatesOnRateLimit():
 		rotateOn = workspace.RotateRateLimit
 	}
-	return workspace.AccountCapabilities{Usage: c.Usage, RotateOn: rotateOn}
+	return workspace.AccountCapabilities{Usage: c.Usage, RotateOn: rotateOn, OAuth: c.AuthKind == accounts.AuthOAuth}
 }

@@ -60,7 +60,9 @@ type Accounts struct {
 	sd         *selectDialog      // built once accounts are loaded; nil until then
 	accs       []accounts.Account // last loaded set, kept for e/d's lookup by ID
 	caps       workspace.AccountCapabilities
-	keyMap     struct{ Edit, Delete, Refresh key.Binding }
+	keyMap     struct {
+		Edit, Delete, Refresh, RefreshTokens key.Binding
+	}
 }
 
 var _ Dialog = (*Accounts)(nil)
@@ -106,6 +108,13 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 	// precedent ctrl+r/ctrl+y already set here and in select_dialog.go
 	// for their own globally-bound chords.
 	m.keyMap.Refresh = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "refresh limits"))
+	// r for "refresh tokens": the accounts dialog's filter input only
+	// claims bare letters when it has focus, and while a dialog is open
+	// every keypress is routed to the dialog stack before the global
+	// bindings (see internal/ui/model/keypress.go), so a bare "r" is
+	// safe. It is only offered for OAuth providers (m.caps.OAuth), since
+	// API-key providers have no token to refresh.
+	m.keyMap.RefreshTokens = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh tokens"))
 	return m, tea.Batch(m.spinner.Tick, m.loadAccountsCmd())
 }
 
@@ -155,6 +164,24 @@ func (ActionAccountsLoaded) DialogID() string { return AccountsID }
 type ActionAddAccount struct {
 	ProviderID string
 }
+
+// ActionRefreshTokens is sent when the "refresh tokens" shortcut is
+// triggered from the accounts list, to refresh the provider's stored
+// OAuth token off the Update loop.
+type ActionRefreshTokens struct {
+	ProviderID string
+}
+
+// ActionRefreshTokensResult carries the outcome of the async
+// RefreshOAuthToken call. It round-trips back to the Accounts dialog via
+// the DialogAddressed mechanism.
+type ActionRefreshTokensResult struct {
+	ProviderID string
+	Err        error
+}
+
+// DialogID implements [DialogAddressed].
+func (ActionRefreshTokensResult) DialogID() string { return AccountsID }
 
 // accountActivatedMsg carries the outcome of the async ActivateAccount call
 // kicked off when the user picks a different account. Like
@@ -244,6 +271,17 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 		}
 		return ActionAccountActivated{ProviderID: m.providerID}
 
+	case ActionRefreshTokensResult:
+		if msg.ProviderID != m.providerID {
+			return nil
+		}
+		if msg.Err != nil {
+			return ActionCmd{util.ReportError(msg.Err)}
+		}
+		// Refresh succeeded; the ActionAccountsLoaded message that
+		// followed will rebuild the list with the updated token state.
+		return nil
+
 	case tea.KeyPressMsg:
 		if m.state == accountsStateList {
 			switch {
@@ -260,6 +298,8 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 			case m.caps.Usage && key.Matches(msg, m.keyMap.Refresh):
 				m.state = accountsStateLoading
 				return ActionCmd{tea.Batch(m.spinner.Tick, m.refreshLimitsCmd())}
+			case m.caps.OAuth && key.Matches(msg, m.keyMap.RefreshTokens):
+				return ActionRefreshTokens{ProviderID: m.providerID}
 			}
 			return m.sd.HandleMsg(msg)
 		}
@@ -343,6 +383,9 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 			bindings := []key.Binding{m.keyMap.Edit, m.keyMap.Delete}
 			if m.caps.Usage {
 				bindings = append(bindings, m.keyMap.Refresh)
+			}
+			if m.caps.OAuth {
+				bindings = append(bindings, m.keyMap.RefreshTokens)
 			}
 			return bindings
 		},
