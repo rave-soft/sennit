@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/proxyhttp"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -109,8 +110,6 @@ type ProviderSettings struct {
 
 	submitting bool
 	errMsg     string
-
-	fieldRow map[providerSettingsField]int
 
 	help help.Model
 
@@ -424,25 +423,68 @@ func (m *ProviderSettings) submit() Action {
 	return ActionSubmitProviderSettings{ProviderID: m.providerID, Proxy: proxy, Rotation: rotation}
 }
 
-// Cursor returns the cursor position relative to the dialog. Each focusable
-// field's text input sits some number of rendered lines below the title —
-// Draw() fills in m.fieldRow with that offset each frame.
-func (m *ProviderSettings) Cursor() *tea.Cursor {
-	var cur *tea.Cursor
+// Cursor returns the cursor position relative to the dialog by searching
+// the rendered view for the focused field's prompt. Deriving the offset
+// from style getters (the old fieldRow approach) drifts from what is
+// actually rendered when the layout includes blank-line margins around
+// InputPrompt-styled inputs, which added a phantom row that pushed the
+// cursor one line too low. Searching for the prompt in the rendered view
+// cannot drift: the first line whose visible text, trimmed of frame
+// padding and border, begins with the field's prompt is the field.
+//
+// All three fields share the same prompt ("> "), so the search skips
+// lines rendered by a different field. When the focused field has a
+// value, the line must contain that value. When it is empty, the line
+// must contain this field's placeholder (distinct from the other fields'
+// placeholders).
+//
+// view is the full rendered dialog string (what Draw renders). It is nil
+// when the caller does not yet have a view, in which case the cursor is
+// dropped rather than guessed at.
+func (m *ProviderSettings) Cursor(view string) *tea.Cursor {
+	var input textinput.Model
 	switch m.currentField() {
 	case providerSettingsFieldProxy:
-		cur = InputCursor(m.com.Styles, m.proxy.Cursor())
+		input = m.proxy
 	case providerSettingsFieldThreshold:
-		cur = InputCursor(m.com.Styles, m.threshold.Cursor())
+		input = m.threshold
 	case providerSettingsFieldCooldown:
-		cur = InputCursor(m.com.Styles, m.cooldown.Cursor())
+		input = m.cooldown
 	default:
 		return nil
 	}
-	if cur != nil {
-		cur.Y += m.fieldRow[m.currentField()]
+
+	cur := input.Cursor()
+	if cur == nil || view == "" {
+		return nil
 	}
-	return cur
+
+	value := input.Value()
+	// The anchor distinguishes this field's line from the other fields'
+	// lines: the value when non-empty, the placeholder when empty.
+	anchor := value
+	if anchor == "" {
+		anchor = input.Placeholder
+	}
+
+	for y, line := range strings.Split(view, "\n") {
+		plain := ansi.Strip(line)
+		trimmed := strings.TrimLeft(plain, "│╭╰ ")
+		if !strings.HasPrefix(trimmed, input.Prompt) {
+			continue
+		}
+		if anchor != "" && !strings.Contains(plain, anchor) {
+			continue
+		}
+		x := strings.Index(plain, trimmed)
+		if x < 0 {
+			continue
+		}
+		cur.X += ansi.StringWidth(plain[:x])
+		cur.Y += y
+		return cur
+	}
+	return nil
 }
 
 // Draw implements [Dialog].
@@ -469,33 +511,29 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, m.Width())
 	rc.Title = providerDisplayName(m.com, m.providerID) + " Settings"
 
-	lines := 0
 	addPart := func(part string) {
 		rc.AddPart(part)
-		lines += lipgloss.Height(part)
 	}
-	addField := func(field providerSettingsField, label string, input textinput.Model) {
+	addField := func(label string, input textinput.Model) {
 		addPart(labelStyle.Render(label))
-		m.fieldRow[field] = lines
 		addPart(inputStyle.Render(input.View()))
 	}
 
-	m.fieldRow = make(map[providerSettingsField]int, len(m.fields))
-	addField(providerSettingsFieldProxy, "Proxy (optional)", m.proxy)
+	addField("Proxy (optional)", m.proxy)
 
 	if m.caps.RotateOn != workspace.RotateNever {
 		addPart(labelStyle.Render("Rotate accounts automatically") + "  " + m.enabledView())
 		switch m.caps.RotateOn {
 		case workspace.RotateThreshold:
 			addPart(t.Dialog.SecondaryText.Render("Switches when the remaining limit drops below the threshold."))
-			addField(providerSettingsFieldThreshold, "Remaining-allowance threshold, %", m.threshold)
+			addField("Remaining-allowance threshold, %", m.threshold)
 		case workspace.RotateRateLimit:
 			addPart(t.Dialog.SecondaryText.Render("Switches when the provider answers with a rate-limit error."))
-			addField(providerSettingsFieldCooldown, "Cooldown after a rate limit", m.cooldown)
+			addField("Cooldown after a rate limit", m.cooldown)
 		case workspace.RotateBoth:
 			addPart(t.Dialog.SecondaryText.Render("Switches when the remaining limit drops below the threshold, or when the provider answers with a rate-limit error."))
-			addField(providerSettingsFieldThreshold, "Remaining-allowance threshold, %", m.threshold)
-			addField(providerSettingsFieldCooldown, "Cooldown after a rate limit", m.cooldown)
+			addField("Remaining-allowance threshold, %", m.threshold)
+			addField("Cooldown after a rate limit", m.cooldown)
 		}
 	}
 
@@ -513,7 +551,7 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	view := rc.Render()
-	cur := m.Cursor()
+	cur := m.Cursor(view)
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }
