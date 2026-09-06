@@ -80,7 +80,7 @@ func Prepare(key PreviewKey, img image.Image) (string, string, error) {
 			Columns:          key.Columns,
 			Rows:             key.Rows,
 			VirtualPlacement: true,
-			Quite:            1,
+			Quiet:            1,
 			Chunk:            true,
 			ChunkFormatter: func(chunk string) string {
 				if key.Tmux {
