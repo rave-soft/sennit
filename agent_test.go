@@ -2326,6 +2326,22 @@ func TestAgent_Stream_ExecutableProviderTool(t *testing.T) {
 
 	model := &mockLanguageModel{
 		streamFunc: func(ctx context.Context, call Call) (StreamResponse, error) {
+			// First call issues the tool call; after the tool result comes
+			// back the model stops, so the agent loop terminates.
+			for _, msg := range call.Prompt {
+				if msg.Role == MessageRoleTool {
+					return func(yield func(StreamPart) bool) {
+						yield(StreamPart{Type: StreamPartTypeTextStart, ID: "t"})
+						yield(StreamPart{Type: StreamPartTypeTextDelta, ID: "t", Delta: "done"})
+						yield(StreamPart{Type: StreamPartTypeTextEnd, ID: "t"})
+						yield(StreamPart{
+							Type:         StreamPartTypeFinish,
+							FinishReason: FinishReasonStop,
+							Usage:        Usage{TotalTokens: 5},
+						})
+					}, nil
+				}
+			}
 			return func(yield func(StreamPart) bool) {
 				if !yield(StreamPart{
 					Type:          StreamPartTypeToolCall,
@@ -2337,7 +2353,7 @@ func TestAgent_Stream_ExecutableProviderTool(t *testing.T) {
 				}
 				yield(StreamPart{
 					Type:         StreamPartTypeFinish,
-					FinishReason: FinishReasonStop,
+					FinishReason: FinishReasonToolCalls,
 					Usage:        Usage{TotalTokens: 10},
 				})
 			}, nil
@@ -2352,7 +2368,7 @@ func TestAgent_Stream_ExecutableProviderTool(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, runCalled, "expected Run func to be called")
-	require.Len(t, result.Steps, 1)
+	require.Len(t, result.Steps, 2)
 
 	// Verify tool result is in the step content.
 	var toolResults []ToolResultContent
@@ -2830,4 +2846,130 @@ func TestAgent_Generate_ParallelToolPanicBecomesFailedResult(t *testing.T) {
 	require.True(t, ok, "expected error result, got %T", toolResults[0].Result)
 	require.ErrorContains(t, errResult.Error, "panicking_parallel_tool")
 	require.ErrorContains(t, errResult.Error, "parallel boom")
+}
+
+// TestAgent_SkipsToolDispatchOnAbnormalFinish_NonStreaming mirrors the
+// stream-path guard on Generate: a response carrying tool calls but ending
+// length, content-filter, or error must not execute them — the arguments
+// may have been cut short (CHARM-2020).
+func TestAgent_SkipsToolDispatchOnAbnormalFinish_NonStreaming(t *testing.T) {
+	t.Parallel()
+
+	for _, reason := range []FinishReason{FinishReasonLength, FinishReasonError, FinishReasonContentFilter, FinishReasonUnknown} {
+		t.Run(string(reason), func(t *testing.T) {
+			t.Parallel()
+
+			var toolExecuted bool
+			model := &mockLanguageModel{
+				generateFunc: func(ctx context.Context, call Call) (*Response, error) {
+					return &Response{
+						Content: []Content{
+							ToolCallContent{ToolCallID: "call-x", ToolName: "echo", Input: `{"message":"hi"}`},
+						},
+						FinishReason: reason,
+						Usage:        Usage{TotalTokens: 10},
+					}, nil
+				},
+			}
+
+			echoTool := &trackingEchoTool{onExecute: func() { toolExecuted = true }}
+			agent := NewAgent(model, WithTools(echoTool))
+
+			result, err := agent.Generate(context.Background(), AgentCall{Prompt: "test"})
+			require.NoError(t, err)
+			require.False(t, toolExecuted, "tool must not be dispatched when finish_reason is %s", reason)
+			require.Equal(t, reason, result.Response.FinishReason)
+			require.Len(t, result.Steps, 1)
+		})
+	}
+}
+
+// TestAgent_StopWithToolCallsStillDispatches documents the tolerated shape:
+// some providers report stop on a tool turn. Unlike abnormal finishes
+// (length/error/content-filter/unknown), stop carries no truncation risk,
+// so dispatch proceeds.
+func TestAgent_StopWithToolCallsStillDispatches(t *testing.T) {
+	t.Parallel()
+
+	var toolExecuted bool
+	model := &mockLanguageModel{
+		generateFunc: func(ctx context.Context, call Call) (*Response, error) {
+			for _, m := range call.Prompt {
+				if m.Role == MessageRoleTool {
+					return &Response{
+						Content:      []Content{TextContent{Text: "done"}},
+						FinishReason: FinishReasonStop,
+						Usage:        Usage{TotalTokens: 5},
+					}, nil
+				}
+			}
+			return &Response{
+				Content: []Content{
+					ToolCallContent{ToolCallID: "call-x", ToolName: "echo", Input: `{"message":"hi"}`},
+				},
+				FinishReason: FinishReasonStop,
+				Usage:        Usage{TotalTokens: 10},
+			}, nil
+		},
+	}
+
+	echoTool := &trackingEchoTool{onExecute: func() { toolExecuted = true }}
+	agent := NewAgent(model, WithTools(echoTool))
+
+	result, err := agent.Generate(context.Background(), AgentCall{Prompt: "test"})
+	require.NoError(t, err)
+	require.True(t, toolExecuted, "stop with tool calls must still dispatch")
+	// The loop stops after one step because the finish reason is stop, not
+	// tool_calls — but the tool result is recorded in the step content.
+	require.Len(t, result.Steps, 1)
+	var results []ToolResultContent
+	for _, c := range result.Steps[0].Content {
+		if tr, ok := AsContentType[ToolResultContent](c); ok {
+			results = append(results, tr)
+		}
+	}
+	require.Len(t, results, 1)
+	require.Equal(t, "call-x", results[0].ToolCallID)
+}
+
+// TestAgent_NoRepairOnAbnormalFinish_NonStreaming guards CHARM-2020: when a
+// response ends abnormally, the agent must not invoke the repair callback —
+// which can be an extra model call — on arguments that may be truncated.
+func TestAgent_NoRepairOnAbnormalFinish_NonStreaming(t *testing.T) {
+	t.Parallel()
+
+	for _, reason := range []FinishReason{FinishReasonLength, FinishReasonError, FinishReasonContentFilter, FinishReasonUnknown} {
+		t.Run(string(reason), func(t *testing.T) {
+			t.Parallel()
+
+			var repaired bool
+			model := &mockLanguageModel{
+				generateFunc: func(ctx context.Context, call Call) (*Response, error) {
+					return &Response{
+						Content: []Content{
+							ToolCallContent{ToolCallID: "call-x", ToolName: "echo", Input: `{"message":"tr`},
+						},
+						FinishReason: reason,
+						Usage:        Usage{TotalTokens: 10},
+					}, nil
+				},
+			}
+
+			agent := NewAgent(
+				model,
+				WithTools(&trackingEchoTool{}),
+				WithRepairToolCall(func(ctx context.Context, options ToolCallRepairOptions) (*ToolCallContent, error) {
+					repaired = true
+					repairedCall := options.OriginalToolCall
+					repairedCall.Input = `{"message":"fixed"}`
+					return &repairedCall, nil
+				}),
+			)
+
+			result, err := agent.Generate(context.Background(), AgentCall{Prompt: "test"})
+			require.NoError(t, err)
+			require.False(t, repaired, "repair must not run when finish_reason is %s", reason)
+			require.Len(t, result.Steps, 1)
+		})
+	}
 }
