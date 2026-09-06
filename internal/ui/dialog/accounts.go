@@ -63,7 +63,7 @@ type Accounts struct {
 	caps       workspace.AccountCapabilities
 	activating string // account ID currently being switched to; "" when idle
 	keyMap     struct {
-		Edit, Delete, Refresh, RefreshTokens key.Binding
+		Edit, Delete, Refresh, RefreshTokens, AddAccount key.Binding
 	}
 }
 
@@ -117,6 +117,12 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 	// safe. It is only offered for OAuth providers (m.caps.OAuth), since
 	// API-key providers have no token to refresh.
 	m.keyMap.RefreshTokens = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh tokens"))
+	// ctrl+a for "add account" / sign-in: the same chord the account edit
+	// form uses, so the muscle memory carries between the two. It is
+	// checked before the selectDialog (whose filter input claims ctrl+a
+	// as LineHome), which is why it lives here rather than in
+	// selectDialogConfig.extraHelp.
+	m.keyMap.AddAccount = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "sign in"))
 	return m, tea.Batch(m.spinner.Tick, m.loadAccountsCmd())
 }
 
@@ -291,6 +297,8 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 	case tea.KeyPressMsg:
 		if m.state == accountsStateList {
 			switch {
+			case key.Matches(msg, m.keyMap.AddAccount):
+				return ActionAddAccount{ProviderID: m.providerID}
 			case key.Matches(msg, m.keyMap.Edit):
 				if a, ok := m.selectedAccount(); ok {
 					return ActionOpenAccountEdit{ProviderID: m.providerID, Account: a, Active: a.ID == m.currentActiveAccountID()}
@@ -394,7 +402,7 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 		// otherwise these hints are defined on Accounts.ShortHelp/FullHelp
 		// but never actually rendered.
 		extraHelp: func() []key.Binding {
-			bindings := []key.Binding{m.keyMap.Edit, m.keyMap.Delete}
+			bindings := []key.Binding{m.keyMap.AddAccount, m.keyMap.Edit, m.keyMap.Delete}
 			if m.caps.Usage {
 				bindings = append(bindings, m.keyMap.Refresh)
 			}

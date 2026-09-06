@@ -619,6 +619,27 @@ func TestAccounts_SelectAddAccount_ReturnsActionAddAccount_NoIO(t *testing.T) {
 	require.Equal(t, providerID, addAction.ProviderID)
 }
 
+// TestAccounts_CtrlATriggersAddAccount pins that the ctrl+a shortcut
+// returns ActionAddAccount no matter which row is highlighted: it is a
+// chord, so the filter input cannot swallow it as LineHome.
+func TestAccounts_CtrlATriggersAddAccount(t *testing.T) {
+	providerID := "openai"
+	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
+	ws.accs = []accounts.Account{
+		{ID: "acct-1", Label: "Work"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+
+	action := dlg.HandleMsg(ctrlAMsg())
+	require.Zero(t, ws.activateCalls, "ctrl+a must not activate/switch accounts")
+
+	addAction, ok := action.(ActionAddAccount)
+	require.True(t, ok, "expected ActionAddAccount, got %#v", action)
+	require.Equal(t, providerID, addAction.ProviderID)
+	require.Empty(t, dlg.sd.input.Value(), "ctrl+a must not type into the filter")
+}
+
 // TestAccounts_SelectProviderSettings_ReturnsActionOpenProviderSettings_NoIO
 // covers selecting "Provider settings…": it must return
 // ActionOpenProviderSettings for the dialog's provider synchronously,
