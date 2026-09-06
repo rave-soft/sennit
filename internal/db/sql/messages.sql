@@ -65,13 +65,15 @@ WHERE session_id = ? AND role = 'user' AND origin = 'person'
 ORDER BY created_at DESC;
 
 -- name: ListAllUserMessages :many
--- Prompt-history source: only messages a human typed. Sub-agent child sessions
--- and thread sessions carry machine-generated prompts as user-role messages.
+-- Prompt-history source: only messages a human typed in the current project.
+-- Sub-agent child sessions and thread sessions carry machine-generated prompts
+-- as user-role messages.
 SELECT messages.*
 FROM messages
 JOIN sessions ON sessions.id = messages.session_id
 WHERE messages.role = 'user'
   AND messages.origin = 'person'
+  AND sessions.project_path = ?
   AND sessions.parent_session_id IS NULL
   AND NOT EXISTS (
       SELECT 1

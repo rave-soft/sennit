@@ -175,7 +175,7 @@ func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skil
 	}
 	return &appServices{
 		sessions:         sessionstore.NewService(q, conn, store.WorkingDir()),
-		messages:         messagestore.NewService(q),
+		messages:         messagestore.NewService(q, messagestore.WithProjectPath(store.WorkingDir())),
 		queries:          q,
 		History:          historystore.NewService(q, conn),
 		permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),

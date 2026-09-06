@@ -216,6 +216,7 @@ FROM messages
 JOIN sessions ON sessions.id = messages.session_id
 WHERE messages.role = 'user'
   AND messages.origin = 'person'
+  AND sessions.project_path = ?
   AND sessions.parent_session_id IS NULL
   AND NOT EXISTS (
       SELECT 1
@@ -225,10 +226,11 @@ WHERE messages.role = 'user'
 ORDER BY messages.created_at DESC
 `
 
-// Prompt-history source: only messages a human typed. Sub-agent child sessions
-// and thread sessions carry machine-generated prompts as user-role messages.
-func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
-	rows, err := q.db.QueryContext(ctx, listAllUserMessages)
+// Prompt-history source: only messages a human typed in the current project.
+// Sub-agent child sessions and thread sessions carry machine-generated prompts
+// as user-role messages.
+func (q *Queries) ListAllUserMessages(ctx context.Context, projectPath string) ([]Message, error) {
+	rows, err := q.db.QueryContext(ctx, listAllUserMessages, projectPath)
 	if err != nil {
 		return nil, err
 	}

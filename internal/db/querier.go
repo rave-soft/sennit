@@ -72,9 +72,10 @@ type Querier interface {
 	ListAllDelegationOutcomesSince(ctx context.Context, createdAt int64) ([]ListAllDelegationOutcomesSinceRow, error)
 	ListAllLatencyEventsSince(ctx context.Context, createdAt int64) ([]ListAllLatencyEventsSinceRow, error)
 	ListAllSessionsSince(ctx context.Context, createdAt int64) ([]ListAllSessionsSinceRow, error)
-	// Prompt-history source: only messages a human typed. Sub-agent child sessions
-	// and thread sessions carry machine-generated prompts as user-role messages.
-	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	// Prompt-history source: only messages a human typed in the current project.
+	// Sub-agent child sessions and thread sessions carry machine-generated prompts
+	// as user-role messages.
+	ListAllUserMessages(ctx context.Context, projectPath string) ([]Message, error)
 	// The queries below back `sennit stat`, a terminal-table
 	// breakdown by model/agent/project/skill. They intentionally return raw
 	// rows for a time window rather than pre-aggregating, since the

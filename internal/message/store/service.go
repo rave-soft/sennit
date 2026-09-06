@@ -210,8 +210,9 @@ type pendingState struct {
 
 type service struct {
 	*pubsub.Broker[message.Message]
-	q        db.Querier
-	debounce time.Duration
+	q           db.Querier
+	projectPath string
+	debounce    time.Duration
 
 	mu sync.Mutex
 	// closed is set by Close: rearmFlushTimer and the debounce arming in
@@ -222,6 +223,12 @@ type service struct {
 
 // ServiceOption configures a [Service] at construction.
 type ServiceOption func(*service)
+
+func WithProjectPath(projectPath string) ServiceOption {
+	return func(s *service) {
+		s.projectPath = projectPath
+	}
+}
 
 // WithDebounce overrides the debounce window for [Service.Update]. A
 // zero or negative value disables debouncing entirely (every update
@@ -779,7 +786,7 @@ func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]mes
 }
 
 func (s *service) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
-	dbMessages, err := s.q.ListAllUserMessages(ctx)
+	dbMessages, err := s.q.ListAllUserMessages(ctx, s.projectPath)
 	if err != nil {
 		return nil, err
 	}

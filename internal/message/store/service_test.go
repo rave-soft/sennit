@@ -61,6 +61,7 @@ func newTestService(t *testing.T, opts ...ServiceOption) (Service, string) {
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 
+	opts = append([]ServiceOption{WithProjectPath("/test/project")}, opts...)
 	svc := NewService(q, opts...)
 	return svc, sess.ID
 }
@@ -80,6 +81,9 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 	require.NoError(t, err)
 	threadSession, err := sessions.Create(t.Context(), "thread")
 	require.NoError(t, err)
+	otherProject := sessionstore.NewService(q, conn, "/test/other-project")
+	otherRoot, err := otherProject.Create(t.Context(), "other root")
+	require.NoError(t, err)
 
 	_, err = q.CreateThread(t.Context(), db.CreateThreadParams{
 		ID:           "thread-1",
@@ -95,7 +99,7 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	svc := NewService(q)
+	svc := NewService(q, WithProjectPath("/test/project"))
 	for _, tc := range []struct {
 		sessionID string
 		text      string
@@ -103,6 +107,7 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 		{sessionID: root.ID, text: "human prompt"},
 		{sessionID: child.ID, text: "sub-agent prompt"},
 		{sessionID: threadSession.ID, text: "thread prompt"},
+		{sessionID: otherRoot.ID, text: "other project prompt"},
 	} {
 		_, err = svc.Create(t.Context(), tc.sessionID, CreateMessageParams{
 			Role:  User,
