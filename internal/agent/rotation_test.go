@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -511,6 +512,112 @@ func TestMakeSubAgentRateLimitCallback_CodexRotatesOn429(t *testing.T) {
 	require.Equal(t, "key-b", after.APIKey)
 
 	require.Equal(t, 0, notifier.count("", notify.TypeAccountRotated), "the rotation notification is only published after a successful rebuild")
+}
+
+// TestApplyRotationPick_AuthErrorQuarantinesAccount pins the
+// "if the rotated-to account is unauthorized, do not hammer it"
+// requirement: when applyRotationPick's rebuild surfaces an auth error
+// (401 / AuthError flag) from the new account, the account must be
+// marked rate-limited so Pick will never hand it back again in this
+// rotation cycle, and the auth error is still returned to the caller so
+// fantasy's OnAuthRefresh path (or normal backoff) can engage.
+func TestApplyRotationPick_AuthErrorQuarantinesAccount(t *testing.T) {
+	notifier := &recordingNotifier{}
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskCodexProviderJSON),
+		withNotify(notifier),
+		withProviderID(codex.ProviderID),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true, MinRemainingPercent: 10}
+			p.Account = "auth-a"
+			p.APIKey = "key-a"
+		}),
+	)
+	co.builder.accountsStore = codexAccountStore(
+		apiKeyAccount("auth-a", "key-a"),
+		apiKeyAccount("auth-b", "key-b"),
+	)
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+
+	// A rebuild that reports an auth error, as if the new account's
+	// credential were rejected on first use.
+	authErr := &fantasy.ProviderError{Title: "unauthorized", StatusCode: 401}
+	rebuild := func(context.Context) (*compiledRuntime, error) {
+		return nil, fmt.Errorf("rotated account rejected: %w", authErr)
+	}
+
+	picked := apiKeyAccount("auth-b", "key-b")
+	active := newActiveRuntime(nil)
+	err := co.builder.applyRotationPick(t.Context(), codex.ProviderID, picked, active, rebuild)
+	require.Error(t, err, "the auth error must still be returned so fantasy's OnAuthRefresh path can engage")
+	var pe *fantasy.ProviderError
+	require.ErrorAs(t, err, &pe)
+	require.Equal(t, 401, pe.StatusCode)
+
+	// The picked account must now be cooling down, so a subsequent Pick
+	// will not hand it back.
+	rotator := co.builder.rotatorFor(providerCfg)
+	require.NotNil(t, rotator)
+	all, err := co.builder.accountsStore.List(codex.ProviderID)
+	require.NoError(t, err)
+	picked2, pickErr := rotator.Pick(codex.ProviderID, "auth-a", all)
+	// auth-b is quarantined; auth-a is currentID. Pick must not hand
+	// back auth-b. It either returns auth-a (no rotation) or reports
+	// exhaustion; both are acceptable, auth-b is not.
+	if pickErr == nil {
+		require.Equal(t, "auth-a", picked2.ID, "Pick must not return the quarantined auth-b")
+	} else {
+		var exhausted *accounts.ErrAllExhausted
+		require.ErrorAs(t, pickErr, &exhausted, "Pick must report exhaustion, not some other error, when the only non-current candidate is quarantined")
+	}
+}
+
+// TestApplyRotationPick_NonAuthErrorDoesNotQuarantine is the inverse: a
+// rebuild failure that is NOT an auth error (e.g. a transient network
+// blip while rebuilding) must not quarantine the picked account; the
+// error is still returned, but the account remains available for a
+// future Pick.
+func TestApplyRotationPick_NonAuthErrorDoesNotQuarantine(t *testing.T) {
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskCodexProviderJSON),
+		withProviderID(codex.ProviderID),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true, MinRemainingPercent: 10}
+			p.Account = "net-a"
+			p.APIKey = "key-a"
+		}),
+	)
+	co.builder.accountsStore = codexAccountStore(
+		apiKeyAccount("net-a", "key-a"),
+		apiKeyAccount("net-b", "key-b"),
+	)
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+
+	rebuild := func(context.Context) (*compiledRuntime, error) {
+		return nil, errors.New("connection reset during rebuild")
+	}
+
+	picked := apiKeyAccount("net-b", "key-b")
+	active := newActiveRuntime(nil)
+	err := co.builder.applyRotationPick(t.Context(), codex.ProviderID, picked, active, rebuild)
+	require.Error(t, err, "the non-auth rebuild error must still be returned")
+
+	rotator := co.builder.rotatorFor(providerCfg)
+	require.NotNil(t, rotator)
+	all, listErr := co.builder.accountsStore.List(codex.ProviderID)
+	require.NoError(t, listErr)
+	// Pick with currentID = net-b (the account we just activated). The
+	// non-auth rebuild failure must not have quarantined it, so Pick
+	// must find at least one usable candidate (net-b) and NOT report
+	// exhaustion. The returned account may be net-b itself (no rotation)
+	// or net-a (a rotation back), but exhaustion would mean net-b was
+	// treated as unusable, which is what we are guarding against.
+	_, pickErr := rotator.Pick(codex.ProviderID, "net-b", all)
+	require.NoError(t, pickErr, "a non-auth rebuild failure must not quarantine the picked account; Pick must still find a usable candidate")
 }
 
 // ---------------------------------------------------------------------------

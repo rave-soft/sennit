@@ -128,6 +128,10 @@ type runtimeRebuild func(ctx context.Context) (*compiledRuntime, error)
 // activation is projected into the live ProviderConfig, never touching
 // the provider build path itself.
 func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID string, picked accounts.Account, active *activeRuntime, rebuild runtimeRebuild) error {
+	providerCfg, ok := b.cfg.Config().Providers.Get(providerID)
+	if !ok {
+		return fmt.Errorf("provider %s not found after rotation", providerID)
+	}
 	if err := b.cfg.ActivateAccount(config.ScopeGlobal, providerID, picked); err != nil {
 		return fmt.Errorf("activating rotated account %s for provider %s: %w", picked.ID, providerID, err)
 	}
@@ -136,10 +140,33 @@ func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID strin
 	}
 	runtime, err := rebuild(ctx)
 	if err != nil {
+		// A 401 from a just-rotated account means the new credential is
+		// invalid (bad token, expired, etc.). Mark it rate-limited so
+		// Pick will never hand it back again in this rotation cycle,
+		// preventing a hot loop that keeps activating the same broken
+		// account. The original error is still returned so fantasy's
+		// OnAuthRefresh path (or normal backoff) can engage as usual.
+		if isAuthError(err) {
+			if rotator := b.rotatorFor(providerCfg); rotator != nil {
+				rotator.MarkRateLimited(picked.ID, 0)
+			}
+		}
 		return fmt.Errorf("rebuilding runtime after rotating provider %s to account %s: %w", providerID, picked.ID, err)
 	}
 	active.store(runtime)
 	return nil
+}
+
+// isAuthError reports whether err carries a *fantasy.ProviderError that
+// looks like an authentication failure (401 or AuthError flag). It is
+// checked after a rotation rebuild so an invalid new credential is
+// quarantined rather than retried against.
+func isAuthError(err error) bool {
+	var pe *fantasy.ProviderError
+	if !errors.As(err, &pe) {
+		return false
+	}
+	return pe.StatusCode == 401 || pe.AuthError
 }
 
 // makeThresholdRotateCallback returns the RotateThreshold hook (the

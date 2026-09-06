@@ -68,18 +68,28 @@ func getRetryDelayInMs(err error, exponentialBackoffDelay time.Duration) time.Du
 // pass to exhaust its backoff budget. See RetryOptions.OnRateLimit.
 func RetryWithExponentialBackoffRespectingRetryHeaders[T any](options RetryOptions) RetryFunction[T] {
 	return func(ctx context.Context, fn RetryFn[T]) (T, error) {
+		var zero T
 		result, err := retryWithExponentialBackoff(ctx, fn, options, nil)
 		if err == nil || options.OnAuthRefresh == nil {
 			return result, err
 		}
 		var authErr *ProviderError
-		if !errors.As(err, &authErr) || !isAuthError(authErr) {
-			return result, err
+		if errors.As(err, &authErr) && isAuthError(authErr) {
+			if refreshErr := options.OnAuthRefresh(ctx, authErr); refreshErr != nil {
+				return result, err // refresh failed: surface the original auth error
+			}
+			// Refresh succeeded: run a second pass with a fresh budget.
+			return retryWithExponentialBackoff(ctx, fn, options, nil)
 		}
-		if refreshErr := options.OnAuthRefresh(ctx, authErr); refreshErr != nil {
-			return result, err // refresh failed: surface the original auth error
+		// The pass did not end in a refreshable auth error. If the final
+		// error is a *RetryError, its chain may still carry a 401 behind
+		// the last attempt's non-auth failure; surface that directly
+		// rather than hammering an endpoint that is already rejecting us.
+		var retryErr *RetryError
+		if errors.As(err, &retryErr) && isRetryErrorAuthError(retryErr) {
+			return zero, retryErr
 		}
-		return retryWithExponentialBackoff(ctx, fn, options, nil)
+		return result, err
 	}
 }
 
@@ -228,6 +238,20 @@ func retryWithExponentialBackoff[T any](ctx context.Context, fn RetryFn[T], opti
 // caller-supplied OnAuthRefresh hook may be able to resolve.
 func isAuthError(err *ProviderError) bool {
 	return err.StatusCode == http.StatusUnauthorized || err.AuthError
+}
+
+// isRetryErrorAuthError reports whether e's error chain carries an auth
+// error behind the last attempt's non-auth failure, e.g. a 401 attempt
+// followed by a connection reset on the retry. Callers use this to stop
+// hammering an endpoint that is already rejecting us.
+func isRetryErrorAuthError(e *RetryError) bool {
+	for _, inner := range e.Errors {
+		var pe *ProviderError
+		if errors.As(inner, &pe) && isAuthError(pe) {
+			return true
+		}
+	}
+	return false
 }
 
 // isRateLimitError reports whether the error is an HTTP 429 that a

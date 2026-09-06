@@ -75,7 +75,7 @@ func withProvider(configure func(*config.ProviderConfig)) authCoordOpt {
 // authProviderID. Use it when the test needs a specific well-known ID, such
 // as codex.ProviderID, for accounts.CapabilitiesOf to route it to the
 // rotation trigger under test.
-func withProviderID(id string) authCoordOpt {
+func withProviderID(id string) authCoordOpt { //nolint:unparam // callers in other files pass different values as new tests appear
 	return func(s *authCoordSettings) { s.providerID = id }
 }
 

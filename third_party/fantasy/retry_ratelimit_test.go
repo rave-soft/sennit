@@ -136,6 +136,77 @@ func TestOnAuthRefreshStillFiresOn401AndNotOn429(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, 0, refreshCalls)
 	})
+
+	t.Run("401 hidden inside a RetryError chain stops the pass", func(t *testing.T) {
+		// fn fails twice: first with a 401 (retryable via TransientError),
+		// then with a connection error. With MaxRetries: 1 the pass ends in
+		// a *RetryError whose chain contains the 401 behind the last
+		// attempt's non-auth failure. The wrapper must surface that
+		// *RetryError directly and NOT call OnAuthRefresh: hammering an
+		// endpoint that is already rejecting us is exactly what we want to avoid.
+		calls := 0
+		fn := func() (string, error) {
+			calls++
+			if calls == 1 {
+				return "", retryableAuthErr()
+			}
+			return "", &ProviderError{Title: "connection reset", TransientError: true}
+		}
+		var refreshCalls int
+
+		opts := RetryOptions{
+			MaxRetries:     1,
+			InitialDelayIn: time.Millisecond,
+			BackoffFactor:  2.0,
+			OnAuthRefresh: func(_ context.Context, _ *ProviderError) error {
+				refreshCalls++
+				return nil
+			},
+		}
+
+		retryFn := RetryWithExponentialBackoffRespectingRetryHeaders[string](opts)
+		_, err := retryFn(context.Background(), fn)
+		require.Error(t, err)
+		assert.Equal(t, 0, refreshCalls, "a 401 hidden in the RetryError chain must not trigger a refresh")
+		var retryErr *RetryError
+		require.ErrorAs(t, err, &retryErr)
+		// The chain must include the original 401 so callers can inspect it.
+		found401 := false
+		for _, e := range retryErr.Errors {
+			var pe *ProviderError
+			if errors.As(e, &pe) && pe.StatusCode == http.StatusUnauthorized {
+				found401 = true
+				break
+			}
+		}
+		assert.True(t, found401, "the surfaced RetryError must still carry the original 401 in its chain")
+	})
+
+	t.Run("plain 401 with OnAuthRefresh set still refreshes", func(t *testing.T) {
+		// Sanity check: the new short-circuit must not swallow the normal
+		// one-shot refresh path. A pass ending directly in a 401 (no
+		// RetryError wrapper because MaxRetries: 0) must still hand the
+		// hook the chance to refresh.
+		calls, fn := countingFn(1, authErr())
+		var refreshCalls int
+
+		opts := RetryOptions{
+			MaxRetries:     0,
+			InitialDelayIn: time.Millisecond,
+			BackoffFactor:  2.0,
+			OnAuthRefresh: func(_ context.Context, _ *ProviderError) error {
+				refreshCalls++
+				return nil
+			},
+		}
+
+		retryFn := RetryWithExponentialBackoffRespectingRetryHeaders[string](opts)
+		result, err := retryFn(context.Background(), fn)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", result)
+		assert.Equal(t, 1, refreshCalls)
+		assert.Equal(t, 2, *calls)
+	})
 }
 
 func TestRetryOnRateLimitHookFiresAtMostOncePerPass(t *testing.T) {
