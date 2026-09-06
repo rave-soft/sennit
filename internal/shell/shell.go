@@ -317,6 +317,75 @@ func isEnvAssignment(tok string) bool {
 	return true
 }
 
+// BlockedBy reports whether any of blockFuncs blocks the first command the
+// shell would actually run for command, using the same AST the exec path
+// uses. It is the model-facing "will this be refused" check: the bash tool
+// calls it before deciding whether to prompt the user for a deny-listed
+// command. It reports only the block-list verdict - a command that is not
+// blocked here may still need a permission prompt for other reasons
+// (non-read-only, workspace-confinement concerns).
+func BlockedBy(command string, blockFuncs []BlockFunc) bool {
+	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		// A command the shell cannot parse is refused earlier, with a
+		// parse error the user already sees - not by the block list.
+		// Treat it as not blocked so the caller does not prompt for
+		// something that cannot be refused.
+		return false
+	}
+	seen := false
+	syntax.Walk(line, func(n syntax.Node) bool {
+		if seen {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.CallExpr:
+			seen = blockedCallExpr(n, blockFuncs)
+			// Its words are data, not commands - do not descend into
+			// them; the next command in the list is what matters.
+			return false
+		case *syntax.File, *syntax.Stmt, *syntax.BinaryCmd, *syntax.Subshell, *syntax.CmdSubst:
+			return true
+		default:
+			return false
+		}
+	})
+	return seen
+}
+
+// blockedCallExpr reports whether any of blockFuncs blocks the literal
+// words of the call. A word that is not a simple literal (a variable, a
+// substitution, quotes) means the command's identity depends on runtime
+// expansion, which the static block list cannot see - no BlockFunc is run
+// in that case, the same way the exec path's static check treats it.
+func blockedCallExpr(cmd *syntax.CallExpr, blockFuncs []BlockFunc) bool {
+	if len(cmd.Args) == 0 {
+		return false
+	}
+	args := make([]string, 0, len(cmd.Args))
+	for _, a := range cmd.Args {
+		if len(a.Parts) == 0 {
+			continue
+		}
+		lit := a.Lit()
+		if lit == "" && len(a.Parts) > 0 {
+			// A word that is not a simple literal (a variable, a
+			// substitution, quotes) means the command's identity
+			// depends on runtime expansion, which the static block
+			// list cannot see - no BlockFunc is run, the same way the
+			// exec path's static check treats it.
+			return false
+		}
+		args = append(args, lit)
+	}
+	for _, bf := range blockFuncs {
+		if bf(args) {
+			return true
+		}
+	}
+	return false
+}
+
 // ArgumentsBlocker creates a BlockFunc that blocks specific subcommand
 func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
 	return func(parts []string) bool {

@@ -252,6 +252,41 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
+			// The command may be on the deny list (e.g. go install,
+			// apt-get install, sudo, curl). The deny list is not a
+			// silent refusal: prompt the user, and on denial hand the
+			// model the exact command so the user can run it manually.
+			// On approval, the command runs with an empty deny list
+			// (execBlockFuncs) for this one user-approved run.
+			execBlockFuncs := blockFuncs()
+			if shell.BlockedBy(command, blockFuncs()) {
+				sessionID := GetSessionFromContext(ctx)
+				if sessionID == "" {
+					return fantasy.ToolResponse{}, missingSessionID("executing shell command")
+				}
+				_, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        execWorkingDir,
+					ToolCallID:  call.ID,
+					ToolName:    BashToolName,
+					Action:      "execute",
+					Description: fmt.Sprintf("Execute deny-listed command: %s", params.Command),
+					Params:      BashPermissionsParams(params),
+				})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if denied {
+					deniedResp := fantasy.NewTextErrorResponse(
+						"User denied permission. This command is on the deny list and will not run. " +
+							"If you still need it, ask the user to run it manually: " + params.Command,
+					)
+					deniedResp.StopTurn = true
+					return deniedResp, nil
+				}
+				execBlockFuncs = nil
+			}
+
 			isSafeReadOnly := isSafeReadOnlyCommand(params.Command)
 
 			sessionID := GetSessionFromContext(ctx)
@@ -285,7 +320,7 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 				startTime := time.Now()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description) // ok: detached - a background shell outlives the tool call that started it
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, execBlockFuncs, command, params.Description) // ok: detached - a background shell outlives the tool call that started it
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -325,7 +360,7 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 
 			// Start with detached context so it can survive if moved to background
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), command, params.Description) // ok: detached - the shell may yet be moved to the background and must survive that
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, execBlockFuncs, command, params.Description) // ok: detached - the shell may yet be moved to the background and must survive that
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

@@ -361,6 +361,45 @@ func TestCommandsBlocker_UnwrapsPathsAndWrapperPrefixes(t *testing.T) {
 	}
 }
 
+// TestBlockedBy covers the model-facing "will this be refused" check the
+// bash tool uses to decide whether to prompt the user for a deny-listed
+// command. It must agree with the exec path's static block list: literal
+// commands match, wrapper prefixes are unwrapped, and a command whose
+// identity depends on runtime expansion (a variable) does not match.
+func TestBlockedBy(t *testing.T) {
+	t.Parallel()
+	blocked := []BlockFunc{
+		CommandsBlocker([]string{"curl", "sudo", "apt-get"}),
+		ArgumentsBlocker("go", []string{"install"}, nil),
+		ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
+	}
+	tests := []struct {
+		name      string
+		command   string
+		wantBlock bool
+	}{
+		{name: "plain banned command", command: "curl https://example.com", wantBlock: true},
+		{name: "banned command with redirect", command: "curl https://example.com > out.txt", wantBlock: true},
+		{name: "wrapper prefix unwrap", command: "env FOO=1 curl https://example.com", wantBlock: true},
+		{name: "path form", command: "/usr/bin/sudo apt update", wantBlock: true},
+		{name: "arguments blocker", command: "go install ./cmd/tool", wantBlock: true},
+		{name: "arguments blocker flag", command: "go test -exec /bin/sh ./...", wantBlock: true},
+		{name: "go build allowed", command: "go build ./...", wantBlock: false},
+		{name: "go test without exec allowed", command: "go test ./...", wantBlock: false},
+		{name: "echo allowed", command: "echo hello", wantBlock: false},
+		{name: "semicolon list: second blocked", command: "echo hi; curl https://example.com", wantBlock: true},
+		{name: "and list: first blocked", command: "curl https://example.com && echo done", wantBlock: true},
+		{name: "unparseable command is not blocked", command: "if then", wantBlock: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.wantBlock, BlockedBy(tt.command, blocked),
+				"Expected block=%v for %q", tt.wantBlock, tt.command)
+		})
+	}
+}
+
 func TestSplitArgsFlags(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -221,6 +221,45 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 	require.Contains(t, resp.Content, "User denied permission")
 }
 
+// TestBashTool_DenyListedCommandPromptsAndRuns covers the deny-list path:
+// a command that would be refused by the block list (curl is banned) must
+// prompt the user; on approval it runs with the deny list bypassed for
+// that one approved run.
+func TestBashTool_DenyListedCommandPromptsAndRuns(t *testing.T) {
+	workingDir := t.TempDir()
+	tool, perms := newBashToolWithRecordingPerms(workingDir, true)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "deny-listed curl",
+		Command:     "curl --version",
+	})
+
+	require.Equal(t, 2, perms.requestCount, "deny-listed command should prompt the user")
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "curl", "approved deny-listed command should execute and return its output")
+}
+
+// TestBashTool_DenyListedCommandDenied hands the model the exact command
+// for manual execution and stops the turn, so the agent loop does not
+// retry the same denied command.
+func TestBashTool_DenyListedCommandDenied(t *testing.T) {
+	workingDir := t.TempDir()
+	tool, perms := newBashToolWithRecordingPerms(workingDir, false)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "deny-listed curl denied",
+		Command:     "curl https://example.com",
+	})
+
+	require.Equal(t, 1, perms.requestCount)
+	require.Contains(t, resp.Content, "User denied permission")
+	require.Contains(t, resp.Content, "run it manually")
+	require.Contains(t, resp.Content, "curl https://example.com")
+	require.True(t, resp.StopTurn)
+}
+
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
 	t.Helper()
 
