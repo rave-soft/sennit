@@ -84,6 +84,22 @@ func TestProviderSettings_RotateRateLimit_ShowsCooldownNotThreshold(t *testing.T
 	}, m.fields)
 }
 
+// TestProviderSettings_RotateBoth_ShowsThresholdAndCooldown covers the
+// Codex-shaped case (RotateBoth): both the threshold and the cooldown
+// field exist.
+func TestProviderSettings_RotateBoth_ShowsThresholdAndCooldown(t *testing.T) {
+	com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{
+		Rotation: &config.RotationConfig{Enabled: true, MinRemainingPercent: 10, Cooldown: "20m"},
+	})
+	m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateBoth})
+
+	require.Equal(t, []providerSettingsField{
+		providerSettingsFieldProxy, providerSettingsFieldEnabled, providerSettingsFieldThreshold, providerSettingsFieldCooldown,
+	}, m.fields)
+	require.Equal(t, "10", m.threshold.Value())
+	require.Equal(t, "20m", m.cooldown.Value())
+}
+
 // TestProviderSettings_RotateNever_NoRotationControls pins the requirement
 // that a provider whose capabilities say rotation is never offered shows
 // only the proxy field — no Enabled toggle, no threshold, no cooldown,
@@ -198,6 +214,22 @@ func TestProviderSettings_SubmitCarriesRotationOnlyWhenApplicable(t *testing.T) 
 		require.NotNil(t, submit.Rotation)
 		require.Equal(t, "15m", submit.Rotation.Cooldown)
 		require.Zero(t, submit.Rotation.MinRemainingPercent)
+	})
+
+	t.Run("RotateBoth", func(t *testing.T) {
+		com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
+		m := newProviderSettings(com, "codex", workspace.AccountCapabilities{RotateOn: workspace.RotateBoth})
+		m.advanceFocus(2) // Proxy -> Enabled -> Threshold
+		typeIntoProviderSettings(t, m, "15")
+		m.advanceFocus(1) // Threshold -> Cooldown
+		typeIntoProviderSettings(t, m, "20m")
+
+		action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+		submit, ok := action.(ActionSubmitProviderSettings)
+		require.True(t, ok, "expected ActionSubmitProviderSettings, got %#v", action)
+		require.NotNil(t, submit.Rotation)
+		require.Equal(t, 15, submit.Rotation.MinRemainingPercent)
+		require.Equal(t, "20m", submit.Rotation.Cooldown)
 	})
 }
 

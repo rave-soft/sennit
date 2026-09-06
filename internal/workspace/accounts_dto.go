@@ -55,6 +55,8 @@ const (
 	// RotateRateLimit rotates when the provider reports a rate limit, and
 	// treats the account as cooling down for a configured period.
 	RotateRateLimit
+	// RotateBoth rotates on either condition.
+	RotateBoth
 )
 
 // AccountCapabilities describes what a provider's accounts support, as far

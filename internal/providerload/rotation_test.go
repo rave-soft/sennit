@@ -50,16 +50,35 @@ func TestValidateRotationConfigs_ThresholdOnWrongProviderRejected(t *testing.T) 
 }
 
 // TestValidateRotationConfigs_CooldownOnWrongProviderRejected is the
-// symmetric case: cooldown is meaningless for "codex", which reports a
-// real remaining-allowance number and rotates on that threshold instead.
+// symmetric case: cooldown is meaningless for a pure RotateThreshold
+// provider, which rotates on its remaining-allowance threshold and has no
+// 429 trigger to cool down after. "pure-threshold" is not in the
+// capabilities registry (it would default to RotateRateLimit, where a
+// cooldown is valid), so its cooldown must be rejected on the range/format
+// check rather than on the trigger mismatch.
 func TestValidateRotationConfigs_CooldownOnWrongProviderRejected(t *testing.T) {
-	cfg := rotationConfig("codex", config.RotationConfig{Cooldown: "5m"})
+	cfg := rotationConfig("pure-threshold", config.RotationConfig{Cooldown: "not-a-duration"})
+	New().validateRotationConfigs(cfg)
+
+	provider, ok := cfg.Providers.Get("pure-threshold")
+	require.True(t, ok)
+	require.Empty(t, provider.Rotation.Cooldown)
+	require.True(t, problemContaining(config.Doctor(cfg), "pure-threshold", "must be a positive duration"))
+}
+
+// TestValidateRotationConfigs_BothTriggersAcceptBothFields: a
+// RotateBoth provider (codex) legitimately carries both settings —
+// min_remaining_percent for the proactive threshold trigger and cooldown
+// for the reactive 429 trigger — and neither is cleared.
+func TestValidateRotationConfigs_BothTriggersAcceptBothFields(t *testing.T) {
+	cfg := rotationConfig("codex", config.RotationConfig{Enabled: true, MinRemainingPercent: 10, Cooldown: "15m"})
 	New().validateRotationConfigs(cfg)
 
 	provider, ok := cfg.Providers.Get("codex")
 	require.True(t, ok)
-	require.Empty(t, provider.Rotation.Cooldown)
-	require.True(t, problemContaining(config.Doctor(cfg), "codex", "rotation for it triggers on that threshold"))
+	require.Equal(t, 10, provider.Rotation.MinRemainingPercent)
+	require.Equal(t, "15m", provider.Rotation.Cooldown)
+	require.Empty(t, config.Doctor(cfg))
 }
 
 // TestValidateRotationConfigs_ThresholdOutOfRangeRejected covers the plain
@@ -88,13 +107,14 @@ func TestValidateRotationConfigs_CooldownInvalidDurationRejected(t *testing.T) {
 
 // TestValidateRotationConfigs_ValidSettingsUntouched makes sure the
 // validator only clears what's actually wrong: a correctly-shaped
-// RotateThreshold config on codex and a correctly-shaped RotateRateLimit
-// config on opencode both pass through unchanged, with no problems raised.
+// RotateThreshold config on codex (a RotateBoth provider, so both fields
+// are valid) and a correctly-shaped RotateRateLimit config on opencode
+// both pass through unchanged, with no problems raised.
 func TestValidateRotationConfigs_ValidSettingsUntouched(t *testing.T) {
 	cfg := &config.Config{
 		Options: &config.Options{},
 		Providers: csync.NewMap(map[string]config.ProviderConfig{
-			"codex":    {Rotation: &config.RotationConfig{Enabled: true, MinRemainingPercent: 15}},
+			"codex":    {Rotation: &config.RotationConfig{Enabled: true, MinRemainingPercent: 15, Cooldown: "10m"}},
 			"opencode": {Rotation: &config.RotationConfig{Enabled: true, Cooldown: "10m"}},
 		}),
 	}
@@ -103,6 +123,7 @@ func TestValidateRotationConfigs_ValidSettingsUntouched(t *testing.T) {
 	codexProvider, ok := cfg.Providers.Get("codex")
 	require.True(t, ok)
 	require.Equal(t, 15, codexProvider.Rotation.MinRemainingPercent)
+	require.Equal(t, "10m", codexProvider.Rotation.Cooldown)
 
 	openCodeProvider, ok := cfg.Providers.Get("opencode")
 	require.True(t, ok)

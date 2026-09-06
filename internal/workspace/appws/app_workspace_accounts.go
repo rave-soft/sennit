@@ -111,11 +111,13 @@ func (w *AppWorkspace) KnownProviders() []catwalk.Provider {
 // dialog without importing internal/providers/accounts for it.
 func (w *AppWorkspace) AccountCapabilities(providerID string) workspace.AccountCapabilities {
 	c := accounts.CapabilitiesOf(providerID)
-	rotateOn := workspace.RotateNever
-	switch c.RotateOn {
-	case accounts.RotateThreshold:
+	var rotateOn workspace.RotateOn
+	switch {
+	case c.RotateOn.RotatesOnThreshold() && c.RotateOn.RotatesOnRateLimit():
+		rotateOn = workspace.RotateBoth
+	case c.RotateOn.RotatesOnThreshold():
 		rotateOn = workspace.RotateThreshold
-	case accounts.RotateRateLimit:
+	case c.RotateOn.RotatesOnRateLimit():
 		rotateOn = workspace.RotateRateLimit
 	}
 	return workspace.AccountCapabilities{Usage: c.Usage, RotateOn: rotateOn}

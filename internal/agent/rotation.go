@@ -143,14 +143,14 @@ func (b *runtimeBuilder) applyRotationPick(ctx context.Context, providerID strin
 }
 
 // makeThresholdRotateCallback returns the RotateThreshold hook (the
-// proactive rotation trigger, Codex today): called once per finished step,
+// proactive rotation trigger): called once per finished step,
 // it checks the active account's last usage snapshot and, if
 // accounts.Rotator.ShouldRotate says the account is over threshold,
 // switches to the next usable one.
 //
 // Returns nil - meaning "nothing to do here, ever" - when rotation is
-// disabled for providerCfg (rotatorFor's nil check) or the provider isn't
-// a RotateThreshold one, so a RotateRateLimit or RotateNever provider
+// disabled for providerCfg (rotatorFor's nil check) or the provider does
+// not rotate on a threshold, so a RotateRateLimit or RotateNever provider
 // never even gets this hook wired onto a call.
 //
 // The returned function never fails the turn: every error path logs and
@@ -182,7 +182,7 @@ func (b *runtimeBuilder) makeSubAgentThresholdRotateCallback(providerCfg config.
 // only the rebuild strategy differs between them (see runtimeRebuild).
 func (b *runtimeBuilder) thresholdRotateCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, rebuild runtimeRebuild) func(context.Context) {
 	rotator := b.rotatorFor(providerCfg)
-	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateThreshold {
+	if rotator == nil || !accounts.CapabilitiesOf(providerCfg.ID).RotateOn.RotatesOnThreshold() {
 		return nil
 	}
 	return func(ctx context.Context) {
@@ -256,15 +256,15 @@ func (b *runtimeBuilder) thresholdRotateCallback(providerCfg config.ProviderConf
 }
 
 // makeRateLimitCallback returns the fantasy OnRateLimitFunc for the
-// reactive rotation trigger (every RotateRateLimit provider): on a 429,
-// it marks the active account cooling down, picks the next usable one
-// via the provider's Rotator, and applies it exactly like
-// makeThresholdRotateCallback.
+// reactive rotation trigger: on a 429, it marks the active account
+// cooling down, picks the next usable one via the provider's Rotator,
+// and applies it exactly like makeThresholdRotateCallback.
 //
 // Returns nil when rotation is disabled for providerCfg or the provider
-// isn't a RotateRateLimit one, mirroring makeAuthRefreshCallback's own
-// "no mechanism configured" nil return - fantasy never engages an unset
-// hook, so a disabled/non-matching provider's retry behavior is untouched.
+// does not rotate on a rate limit, mirroring makeAuthRefreshCallback's
+// own "no mechanism configured" nil return - fantasy never engages an
+// unset hook, so a disabled/non-matching provider's retry behavior is
+// untouched.
 //
 // On success, the returned function returns nil so fantasy retries
 // immediately with the new account's credentials (RetryOptions.OnRateLimit's
@@ -310,7 +310,7 @@ func (b *runtimeBuilder) makeSubAgentRateLimitCallback(providerCfg config.Provid
 // differs between them (see runtimeRebuild).
 func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, rebuild runtimeRebuild) fantasy.OnRateLimitFunc {
 	rotator := b.rotatorFor(providerCfg)
-	if rotator == nil || accounts.CapabilitiesOf(providerCfg.ID).RotateOn != accounts.RotateRateLimit {
+	if rotator == nil || !accounts.CapabilitiesOf(providerCfg.ID).RotateOn.RotatesOnRateLimit() {
 		return nil
 	}
 	return func(ctx context.Context, providerErr *fantasy.ProviderError) error {

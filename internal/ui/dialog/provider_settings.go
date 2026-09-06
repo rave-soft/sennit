@@ -32,11 +32,12 @@ type providerSettingsField int
 const (
 	providerSettingsFieldProxy providerSettingsField = iota
 	providerSettingsFieldEnabled
-	// providerSettingsFieldThreshold exists only for workspace.RotateThreshold
-	// providers (Codex: it reports remaining allowance).
+	// providerSettingsFieldThreshold exists for providers that rotate on
+	// a threshold (workspace.RotateThreshold and workspace.RotateBoth:
+	// the latter also keeps its rate-limit fallback).
 	providerSettingsFieldThreshold
-	// providerSettingsFieldCooldown exists only for workspace.RotateRateLimit
-	// providers (everyone else: rotation triggers on HTTP 429).
+	// providerSettingsFieldCooldown exists for providers that rotate on a
+	// 429 (workspace.RotateRateLimit and workspace.RotateBoth).
 	providerSettingsFieldCooldown
 )
 
@@ -150,6 +151,24 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 			}
 		case workspace.RotateRateLimit:
 			m.fields = append(m.fields, providerSettingsFieldCooldown)
+			m.cooldown = textinput.New()
+			m.cooldown.SetVirtualCursor(false)
+			m.cooldown.Placeholder = "e.g. 10m, default " + workspace.DefaultCooldown.String()
+			m.cooldown.SetStyles(com.Styles.TextInput)
+			m.cooldown.Prompt = "> "
+			if pc.Rotation != nil {
+				m.cooldown.SetValue(pc.Rotation.Cooldown)
+			}
+		case workspace.RotateBoth:
+			m.fields = append(m.fields, providerSettingsFieldThreshold, providerSettingsFieldCooldown)
+			m.threshold = textinput.New()
+			m.threshold.SetVirtualCursor(false)
+			m.threshold.Placeholder = fmt.Sprintf("1-99, default %d", workspace.DefaultMinRemainingPercent)
+			m.threshold.SetStyles(com.Styles.TextInput)
+			m.threshold.Prompt = "> "
+			if pc.Rotation != nil && pc.Rotation.MinRemainingPercent != 0 {
+				m.threshold.SetValue(strconv.Itoa(pc.Rotation.MinRemainingPercent))
+			}
 			m.cooldown = textinput.New()
 			m.cooldown.SetVirtualCursor(false)
 			m.cooldown.Placeholder = "e.g. 10m, default " + workspace.DefaultCooldown.String()
@@ -303,6 +322,23 @@ func (m *ProviderSettings) submit() Action {
 				}
 				rotation.Cooldown = raw
 			}
+		case workspace.RotateBoth:
+			if raw := strings.TrimSpace(m.threshold.Value()); raw != "" {
+				value, err := strconv.Atoi(raw)
+				if err != nil || value < 1 || value > 99 {
+					m.errMsg = "Threshold must be a whole number between 1 and 99"
+					return nil
+				}
+				rotation.MinRemainingPercent = value
+			}
+			if raw := strings.TrimSpace(m.cooldown.Value()); raw != "" {
+				d, err := time.ParseDuration(raw)
+				if err != nil || d <= 0 {
+					m.errMsg = "Cooldown must be a positive duration, e.g. 10m"
+					return nil
+				}
+				rotation.Cooldown = raw
+			}
 		}
 	}
 
@@ -346,6 +382,9 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.threshold.SetWidth(dialogInputTextWidth(t, m.threshold, innerWidth))
 	case workspace.RotateRateLimit:
 		m.cooldown.SetWidth(dialogInputTextWidth(t, m.cooldown, innerWidth))
+	case workspace.RotateBoth:
+		m.threshold.SetWidth(dialogInputTextWidth(t, m.threshold, innerWidth))
+		m.cooldown.SetWidth(dialogInputTextWidth(t, m.cooldown, innerWidth))
 	}
 
 	labelStyle := t.Dialog.SecondaryText
@@ -376,6 +415,10 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			addField(providerSettingsFieldThreshold, "Remaining-allowance threshold, %", m.threshold)
 		case workspace.RotateRateLimit:
 			addPart(t.Dialog.SecondaryText.Render("Switches when the provider answers with a rate-limit error."))
+			addField(providerSettingsFieldCooldown, "Cooldown after a rate limit", m.cooldown)
+		case workspace.RotateBoth:
+			addPart(t.Dialog.SecondaryText.Render("Switches when the remaining limit drops below the threshold, or when the provider answers with a rate-limit error."))
+			addField(providerSettingsFieldThreshold, "Remaining-allowance threshold, %", m.threshold)
 			addField(providerSettingsFieldCooldown, "Cooldown after a rate limit", m.cooldown)
 		}
 	}

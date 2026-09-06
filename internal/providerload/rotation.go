@@ -30,7 +30,7 @@ func (l *Loader) validateRotationConfigs(cfg *config.Config) {
 
 		if rotation.MinRemainingPercent != 0 {
 			switch {
-			case caps.RotateOn != accounts.RotateThreshold:
+			case !caps.RotateOn.RotatesOnThreshold():
 				cfg.AddRuntimeProblem(providerProblem(id, fmt.Sprintf(
 					"provider %s does not report how much of its limit is left; rotation for it triggers on HTTP 429, not a remaining-allowance threshold",
 					id), "remove rotation.min_remaining_percent for this provider"))
@@ -47,9 +47,9 @@ func (l *Loader) validateRotationConfigs(cfg *config.Config) {
 
 		if rotation.Cooldown != "" {
 			switch d, err := time.ParseDuration(rotation.Cooldown); {
-			case caps.RotateOn != accounts.RotateRateLimit:
+			case !caps.RotateOn.RotatesOnRateLimit():
 				cfg.AddRuntimeProblem(providerProblem(id, fmt.Sprintf(
-					"provider %s reports how much of its limit is left; rotation for it triggers on that threshold, not a cooldown",
+					"provider %s does not rotate on HTTP 429; rotation for it triggers on the remaining-allowance threshold, not a cooldown",
 					id), "remove rotation.cooldown for this provider"))
 				rotation.Cooldown = ""
 				changed = true

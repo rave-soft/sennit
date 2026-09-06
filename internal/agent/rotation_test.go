@@ -162,14 +162,16 @@ func TestMakeRateLimitCallback_Disabled_ReturnsNil(t *testing.T) {
 	require.Nil(t, cb)
 }
 
-// TestMakeRateLimitCallback_NonRateLimitProvider_ReturnsNil: a
-// RotateThreshold provider (codex) has no 429 trigger to speak of.
-func TestMakeRateLimitCallback_NonRateLimitProvider_ReturnsNil(t *testing.T) {
+// TestMakeRateLimitCallback_CodexGetsCallback is the regression test for
+// "Codex does not rotate on 429": codex is a RotateBoth provider, so a 429
+// ("usage limit reached") must engage the reactive rotation path even when
+// no fresh usage snapshot is available in-process.
+func TestMakeRateLimitCallback_CodexGetsCallback(t *testing.T) {
 	t.Parallel()
 	b := &runtimeBuilder{agentDeps: &agentDeps{}, runtime: newRuntimeCache()}
 	cfg := config.ProviderConfig{ID: codex.ProviderID, Rotation: &config.RotationConfig{Enabled: true}}
 	cb := b.makeRateLimitCallback(cfg, providerstate.Provider{Account: "a"}, nil, runtimeOperationPort{})
-	require.Nil(t, cb)
+	require.NotNil(t, cb)
 }
 
 // TestMakeRateLimitCallback_SingleAccount_NoOp pins sabotage rule 2 at
@@ -411,6 +413,104 @@ func TestMakeRateLimitCallback_SecondRateLimitActsOnRotatedAccount(t *testing.T)
 		"a second 429 must mark acct-b (the account actually rate-limited), leaving both accounts cooling down")
 	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated),
 		"the stale-account bug re-applies the same pick and re-notifies on every retry")
+}
+
+// TestMakeRateLimitCallback_CodexRotatesOn429 is the end-to-end regression
+// test for the reported bug "Codex does not switch account when a usage
+// limit is hit": with two codex accounts and rotation enabled, a 429 must
+// mark the active account cooling down, pick the other one, and apply it —
+// even though no usage snapshot for either account exists in-process (the
+// threshold trigger cannot fire without one, which is exactly why the
+// reactive path has to be wired for codex).
+func TestMakeRateLimitCallback_CodexRotatesOn429(t *testing.T) {
+	notifier := &recordingNotifier{}
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskCodexProviderJSON),
+		withNotify(notifier),
+		withProviderID(codex.ProviderID),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true, MinRemainingPercent: 10}
+			p.Account = "codex-acct-a"
+			p.APIKey = "key-a"
+		}),
+	)
+	co.builder.accountsStore = codexAccountStore(
+		apiKeyAccount("codex-acct-a", "key-a"),
+		apiKeyAccount("codex-acct-b", "key-b"),
+	)
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+
+	runtime, err := co.builder.runtimeFor(t.Context(), co.delegation.runtimeInputs())
+	require.NoError(t, err)
+	active := newActiveRuntime(runtime)
+
+	port := runtimeOperationPort{agent: co.dispatcher.agentPort.current(), inputs: co.delegation.runtimeInputs()}
+	cb := co.builder.makeRateLimitCallback(providerCfg, cred, active, port)
+	require.NotNil(t, cb, "codex (RotateBoth) must get a 429 rotation callback")
+
+	require.NoError(t, cb(t.Context(), rateLimitErr(nil)), "a successful rotation must return nil so fantasy retries immediately")
+
+	after, ok := co.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "codex-acct-b", after.Account)
+	require.Equal(t, "key-b", after.APIKey, "the retried request's credentials come from the runtime provider")
+
+	require.NotNil(t, active.load(), "the active runtime must be rebuilt so a retried request's ModelProvider sees it")
+	require.Equal(t, "codex-acct-b", active.load().providerCredentials.Account)
+
+	require.Equal(t, 1, notifier.count("", notify.TypeAccountRotated))
+}
+
+// TestMakeSubAgentRateLimitCallback_CodexRotatesOn429 is the delegation
+// counterpart of TestMakeRateLimitCallback_CodexRotatesOn429: a 429 on a
+// codex sub-agent must mark the active account cooling down, pick the
+// other one, and apply it (the activation and its notification are the
+// shared applyRotationPick half; the sub-agent's rebuild half requires a
+// resolved sub-agent model and is covered separately).
+func TestMakeSubAgentRateLimitCallback_CodexRotatesOn429(t *testing.T) {
+	notifier := &recordingNotifier{}
+	co := authTestCoordinator(t,
+		withGlobalDataJSON(diskCodexProviderJSON),
+		withNotify(notifier),
+		withProviderID(codex.ProviderID),
+		withProvider(func(p *config.ProviderConfig) {
+			p.Rotation = &config.RotationConfig{Enabled: true, MinRemainingPercent: 10}
+			p.Account = "sub-acct-a"
+			p.APIKey = "key-a"
+		}),
+	)
+	co.builder.accountsStore = codexAccountStore(
+		apiKeyAccount("sub-acct-a", "key-a"),
+		apiKeyAccount("sub-acct-b", "key-b"),
+	)
+
+	providerCfg, ok := co.cfg.Config().Providers.Get(codex.ProviderID)
+	require.True(t, ok)
+	cred, ok := co.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+	active := newActiveRuntime(nil)
+
+	cb := co.builder.makeSubAgentRateLimitCallback(providerCfg, cred, subAgentTestModel(), active)
+	require.NotNil(t, cb, "codex (RotateBoth) must get a 429 rotation callback for delegations too")
+
+	// The test coordinator's preferred model names authModelID, not a
+	// model configured on the codex provider, so buildSubAgentRuntime's
+	// rebuild fails after the account is activated. The activation itself
+	// (ApplyRotationPick's first half, the notification) completes before
+	// the rebuild, so the callback reports the rebuild error while the
+	// account switch is observable on the config store.
+	require.Error(t, cb(t.Context(), rateLimitErr(nil)), "the rebuild half needs a resolvable model the test coordinator does not configure")
+
+	after, ok := co.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "sub-acct-b", after.Account, "the account switch must land even when the rebuild fails")
+	require.Equal(t, "key-b", after.APIKey)
+
+	require.Equal(t, 0, notifier.count("", notify.TypeAccountRotated), "the rotation notification is only published after a successful rebuild")
 }
 
 // ---------------------------------------------------------------------------

@@ -1,25 +1,28 @@
 package accounts
 
-// RotateOn says what condition, if any, makes Sennit offer to rotate to a
+// RotateOn says what conditions, if any, make Sennit offer to rotate to a
 // different account for a provider. It exists to make "the minimum-limit
 // threshold is only meaningful where a limit is actually reported" a
 // structural property rather than a runtime check scattered across
-// callers: a threshold setting is read and validated only when RotateOn
-// is RotateThreshold. A provider stuck at RotateRateLimit has no
-// threshold to configure, because there is nothing to measure it against
-// until a 429 actually arrives.
+// callers: a threshold setting is read and validated only when
+// RotatesOnThreshold, a cooldown setting only when RotatesOnRateLimit. A
+// provider that reports no usage has no threshold to configure, because
+// there is nothing to measure it against until a 429 actually arrives.
 type RotateOn int
 
 const (
 	// RotateNever means rotation is never offered for this provider.
 	RotateNever RotateOn = iota
-	// RotateThreshold offers rotation once remaining allowance drops
-	// below a configurable threshold. Only valid where Capabilities.Usage
-	// is true — there has to be a number to compare against.
+	// RotateThreshold means rotation is offered proactively, once the
+	// remaining allowance drops below a configurable threshold.
 	RotateThreshold
-	// RotateRateLimit offers rotation reactively, on a 429 response.
-	// There is no threshold to configure: the signal is binary.
+	// RotateRateLimit means rotation is offered reactively, on a 429
+	// response.
 	RotateRateLimit
+	// RotateBoth means rotation is offered on both conditions:
+	// proactively once remaining allowance drops below the threshold,
+	// and reactively on a 429.
+	RotateBoth
 )
 
 // String implements fmt.Stringer for log messages and error text.
@@ -31,9 +34,23 @@ func (r RotateOn) String() string {
 		return "threshold"
 	case RotateRateLimit:
 		return "rate-limit"
+	case RotateBoth:
+		return "both"
 	default:
 		return "unknown"
 	}
+}
+
+// RotatesOnThreshold reports whether a usage threshold should trigger a
+// rotation offer for this provider.
+func (r RotateOn) RotatesOnThreshold() bool {
+	return r == RotateThreshold || r == RotateBoth
+}
+
+// RotatesOnRateLimit reports whether a 429 response should trigger a
+// rotation offer for this provider.
+func (r RotateOn) RotatesOnRateLimit() bool {
+	return r == RotateRateLimit || r == RotateBoth
 }
 
 // AuthKind is how a provider's accounts authenticate.
@@ -77,8 +94,12 @@ type Capabilities struct {
 var capabilities = map[string]Capabilities{
 	// "codex" is codex.ProviderID (internal/oauth/codex), spelled as a
 	// literal so this leaf package does not have to import that
-	// provider-specific package.
-	"codex": {Usage: true, RotateOn: RotateThreshold, AuthKind: AuthOAuth},
+	// provider-specific package. RotateBoth: the proactive threshold
+	// path only works when a fresh usage snapshot is available in-process
+	// (the usage transport's in-memory store), which is not guaranteed at
+	// the moment a limit is hit, so the reactive 429 path is kept
+	// alongside it as a safety net.
+	"codex": {Usage: true, RotateOn: RotateBoth, AuthKind: AuthOAuth},
 	// "copilot" is catwalk.InferenceProviderCopilot, spelled as a
 	// literal for the same reason.
 	"copilot": {Usage: false, RotateOn: RotateRateLimit, AuthKind: AuthOAuth},
