@@ -12,14 +12,14 @@ Update this file whenever a commit touches `third_party/`.
 ## Module: charm.land/fantasy
 
 - Upstream: https://github.com/charmbracelet/fantasy (Apache-2.0).
-- Baseline: **v0.40.0**, upstream commit `58d4a10d`.
+- Baseline: **v0.43.0**, upstream commit `cb378300d`.
 - Recorded by: `git log --grep="git-subtree-dir: third_party/fantasy"`.
 
 ### Upgrading
 
 ```
 git subtree pull --prefix=third_party/fantasy \
-    https://github.com/charmbracelet/fantasy v0.41.3 --squash
+    https://github.com/charmbracelet/fantasy v0.44.0 --squash
 ```
 
 Conflicts will land in the files listed below; resolve them keeping the
@@ -27,12 +27,15 @@ local behaviour unless upstream has since implemented the same thing.
 
 ### Local patches
 
-Verified by diffing this tree against a real v0.40.0 checkout, not
-inferred from commit stats. Ten source files differed as of the last
-count; `providers/kronk/language_model.go`,
-`providers/openrouter/language_model_hooks.go` and
-`providers/azure/azure.go` have since gained local fixes too (see below)
-and are not reflected in that count.
+Verified by diffing this tree against a real v0.43.0 checkout.
+`providers/kronk/language_model.go` and `providers/google/google.go`
+are **not** patched: the v0.43.0 upstream kronk rewrite obsoleted our
+old Delta-nil guard (the new non-streaming `Generate` reads
+`response.Usage` directly, and `Stream` reads usage before the Delta
+guard), and the four dead helper functions in `google.go`
+(`convertSchemaProperties`, `convertToSchema`, `processArrayItems`,
+`mapJSONTypeToGoogle`) were removed as unused after the upstream
+refactor.
 
 | File | Change |
 |---|---|
@@ -45,7 +48,6 @@ and are not reflected in that count.
 | `providers/anthropic/anthropic.go`, `providers/openai/language_model.go` | Carry the fuller tool schema (`InputSchema`, see `agent.go`/`tool.go` above) through to each provider's own request shape. `anthropic.go`'s `required` handling (around line 709) now also accepts a `[]any`-typed `required` field, not just `[]string` - `InputSchema` round-trips through `encoding/json`, which decodes a JSON array into `[]any` rather than `[]string`, so an MCP tool's schema silently lost its `required` list under the old type-switch. |
 | `providers/google/google.go` | Route stream-error classification through `IsTransientStreamError`. Its stream loop (and `streamObjectWithJSONMode`) now overwrites usage with the latest `mapUsage(resp.UsageMetadata)` each chunk instead of summing `CacheReadTokens`/`OutputTokens`/`ReasoningTokens` across chunks - Gemini's `usageMetadata` is cumulative per chunk (`cachedContentTokenCount` is a prompt-side constant repeated in every chunk), so summing multiplied cached/output tokens by the chunk count. |
 | `providers/azure/azure.go` | `New` now returns an error when no base URL is configured, instead of falling through to `openai.New`'s `cmp.Or(baseURL, DefaultURL)` fallback - an Azure provider with no base URL silently sent its `api-key` header to `https://api.openai.com/v1`, and the resulting 401 read to the user as a bad key rather than a missing endpoint. |
-| `providers/kronk/language_model.go` | `Stream` now reads `resp.Usage`/`choice.FinishReason()` before the `choice.Delta == nil` guard, not after - kronk only sets `Delta` on chunks carrying tool calls, so a plain "stop" final chunk (`Delta == nil`, `Usage` set, `FinishReason` "stop") previously skipped both and every streamed text-only answer finished with zero usage and `FinishReasonUnknown`. `Generate` needed the same Delta-nil-vs-FinishReason restructure to track it correctly. Both `Generate` and `Stream` also now track whether a finish reason was ever seen and return `ctx.Err()` or `fantasy.NewIncompleteStreamError()` if the channel closes without one (e.g. cancellation mid-stream), matching the openai/anthropic adapters - previously channel closure was always treated as a successful, complete turn. |
 | `providers/openrouter/language_model_hooks.go` | Two fixes. (1) `languageModelExtraContent`'s `responsesReasoningBlocks`/`googleReasoningBlocks` accumulation now grows the slice to `detail.Index+1` before indexing into it, instead of appending exactly one element regardless of the actual gap - a non-contiguous `reasoning_details[].index` (a first detail already at index 1, or a gap) indexed past the slice's length and panicked inside `Generate`. (2) `languageModelStreamExtra` now allocates `currentReasoningState.metadata`/`googleMetadata` lazily, right before each is first written, instead of assuming the Reasoning Start block already set the one matching field - that block only allocates the field for the *first* detail's own format, so a stream that starts on a different format (e.g. `anthropic-claude`) and only later switches to `openai-responses` or `google-gemini` dereferenced the still-nil field and panicked mid-stream. |
 | `providers/vercel/language_model_hooks.go` | Four fixes. (1) `languageModelExtraContent`'s `responsesReasoningBlocks`/`googleReasoningBlocks` accumulation grows the slice to `detail.Index+1` before indexing, same bug and same fix as the openrouter patch above - both files should read the same. (2) `languagePrepareModelCall`'s BYOK handling now reaches through to the nested `extraFields["providerOptions"]["gateway"]` map and writes `byok` there (creating the nested map if the outer one exists but has no `gateway` key yet), instead of writing `byok` directly onto the outer `providerOptions` map when routing options were also set - that silently misplaced BYOK credentials outside Vercel's documented `providerOptions.gateway.byok` shape, so a user who set both routing options and BYOK had their credentials ignored and was billed through gateway credits instead. (3) `languageModelToPrompt`'s tool-result switch now handles `ToolResultContentTypeMedia` (routing through `openaipkg.ToolResultMediaMessages`, with the same `cache_control` handling the other arms apply) plus a `default:` warning arm, mirroring the openai provider's default - previously a media tool result (e.g. an image-returning MCP tool) fell through with no message and no warning, leaving an assistant `tool_calls` entry with no matching `tool` message and getting the whole conversation rejected with a 400 on the next turn. (4) `languageModelStreamExtra` now allocates `currentReasoningState.metadata`/`googleMetadata` lazily, right before each is first written, instead of assuming the Reasoning Start block already set them - that block only allocates a field when the *first* reasoning chunk's own `reasoning_details` matched it, so a start chunk carrying only the bare `reasoning` string (no `reasoning_details` at all) left both nil, and a later chunk carrying an `openai-responses` or `google-gemini` detail dereferenced the still-nil field and panicked mid-stream. Same fix, same shape, as the openrouter patch above. |
 
