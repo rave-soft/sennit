@@ -233,6 +233,22 @@ func TestShellItemRenderUsesFullWidthOnce(t *testing.T) {
 		"maxLineWidth must be derived from a single cappedMessageWidth(width) subtraction")
 }
 
+func TestMessageWidthUsesAvailableSpace(t *testing.T) {
+	t.Parallel()
+
+	for _, width := range []int{0, 1, 2, 80, 120, 160, 240, 320} {
+		require.Equal(t, max(0, width-MessageLeftPaddingTotal), cappedMessageWidth(width))
+	}
+
+	sty := styles.SennitDark()
+	item := NewPendingShellItem(&sty, "wide output")
+	item.Complete(strings.Repeat("x", 200)+"\n", 0)
+	for _, width := range []int{240, 80, 320} {
+		_ = item.Render(width)
+		require.Equal(t, max(0, 200-(width-MessageLeftPaddingTotal)), item.maxLineWidth)
+	}
+}
+
 func TestShellOutputWindows(t *testing.T) {
 	t.Parallel()
 
