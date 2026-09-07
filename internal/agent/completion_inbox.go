@@ -36,7 +36,8 @@ type TaskCompletion struct {
 	Goal string
 	// Status is the terminal status the delegation rested at (e.g.
 	// "completed", "failed", "interrupted").
-	Status string
+	Status       string
+	Intermediate bool
 	// ChildSessionID is the task's own session - never the delivery
 	// target. Delivery always targets the *parent* session (resolved via
 	// session.Session.ParentSessionID by the caller of
@@ -457,7 +458,11 @@ func formatTaskCompletion(c TaskCompletion) string {
 	}
 	var b strings.Builder
 	b.WriteString(message.DelegationReportPrefix + "\n")
-	fmt.Fprintf(&b, "A background %s has finished.\n", c.Kind)
+	if c.Intermediate {
+		fmt.Fprintf(&b, "A background %s has produced an intermediate result; queued work continues.\n", c.Kind)
+	} else {
+		fmt.Fprintf(&b, "A background %s has finished.\n", c.Kind)
+	}
 	writeRepeatNotice(&b, c)
 	writeOrphanTrail(&b, c)
 	fmt.Fprintf(&b, "id: %s\n", c.DelegationID)
@@ -482,8 +487,7 @@ func writeRepeatNotice(b *strings.Builder, c TaskCompletion) {
 	if c.PriorReports <= 0 {
 		return
 	}
-	fmt.Fprintf(b, "You have heard from it %s before: this is what came back after the follow-up you sent, "+
-		"not a fresh run of the original goal.\n", timesEnglish(c.PriorReports))
+	fmt.Fprintf(b, "You have heard from it %s before; this is another report from the same delegation.\n", timesEnglish(c.PriorReports))
 }
 
 // timesEnglish renders a small count the way the sentence above needs to

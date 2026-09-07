@@ -41,6 +41,7 @@ type runtimeState struct {
 	watchCancel context.CancelFunc
 	runCancel   context.CancelFunc
 	runID       string
+	runIDs      map[string]struct{}
 	// person marks runID as a turn the person is driving by hand, rather
 	// than one this package dispatched on a delegation's behalf. The two
 	// end very differently — see handleRunComplete — so the flag is set
@@ -369,6 +370,7 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 	runID := uuid.NewString()
 	c.mu.Lock()
 	rt.runID = runID
+	rt.runIDs = map[string]struct{}{runID: {}}
 	rt.awaitingDelegations = false
 	c.mu.Unlock()
 
@@ -415,6 +417,7 @@ func (l *lifecycle) startFactoryRun(ctx context.Context, handle Handle, spawner 
 	runCtx, runCancel := context.WithCancel(ctx)
 	c.mu.Lock()
 	rt.runID = runID
+	rt.runIDs = map[string]struct{}{runID: {}}
 	rt.runCancel = runCancel
 	rt.awaitingDelegations = false
 	c.mu.Unlock()
@@ -558,6 +561,7 @@ func (l *lifecycle) steerApplyDecision(bgCtx context.Context, c *threadControl, 
 	// workspace intact, not by merging — see handleRunComplete.
 	c.mu.Lock()
 	rt.runID = runID
+	rt.runIDs = map[string]struct{}{runID: {}}
 	rt.person = true
 	rt.awaitingDelegations = false
 	c.mu.Unlock()
@@ -705,6 +709,10 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		}
 		c.mu.Lock()
 		rt.runID = runID
+		if rt.runIDs == nil {
+			rt.runIDs = make(map[string]struct{})
+		}
+		rt.runIDs[runID] = struct{}{}
 		rt.awaitingDelegations = false
 		c.mu.Unlock()
 		// Reserved before dispatch, same reason as startRun and steer: a
@@ -887,8 +895,18 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	if !matched {
 		return
 	}
-
+	c.mu.Lock()
+	owned := rc.RunID != "" && matchesRunID(rt, rc.RunID)
+	intermediate := owned && rc.RunID != rt.runID
+	if owned {
+		delete(rt.runIDs, rc.RunID)
+	}
+	c.mu.Unlock()
 	if l.parkIfAwaitingDelegations(ctx, c, rt, id, rc) {
+		return
+	}
+	if intermediate {
+		l.deliverIntermediateRunComplete(ctx, rt.handle, id, rc)
 		return
 	}
 
@@ -902,6 +920,11 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 // means handleRunComplete must return immediately.
 //
 // Called with c.opMu already held.
+func matchesRunID(rt *runtimeState, runID string) bool {
+	_, ok := rt.runIDs[runID]
+	return ok
+}
+
 func (l *lifecycle) matchRunComplete(ctx context.Context, c *threadControl, id string, rc RunComplete) (rt *runtimeState, matched bool) {
 	c.mu.Lock()
 	rt = c.runtime
@@ -909,13 +932,17 @@ func (l *lifecycle) matchRunComplete(ctx context.Context, c *threadControl, id s
 		c.mu.Unlock()
 		return nil, false
 	}
-	// A parked delegation (see the park branch below) has no run id to
-	// match; its session is the identity checked below instead.
-	if !rt.awaitingDelegations && (rc.RunID == "" || rc.RunID != rt.runID) {
-		c.mu.Unlock()
-		return nil, false
-	}
-	if rt.awaitingDelegations && rc.SessionID != rt.parkedSession {
+	// A parked delegation normally has no run id to match, so its session
+	// identifies the continuation. Queued runs are different: while any
+	// owned run remains, a completion must name one of those runs. Otherwise
+	// a duplicate of the turn that parked us (or a foreign same-session run)
+	// could release the runtime before the queued work settles.
+	if rt.awaitingDelegations {
+		if rc.SessionID != rt.parkedSession || (len(rt.runIDs) > 0 && (rc.RunID == "" || !matchesRunID(rt, rc.RunID))) {
+			c.mu.Unlock()
+			return nil, false
+		}
+	} else if rc.RunID == "" || !matchesRunID(rt, rc.RunID) {
 		c.mu.Unlock()
 		return nil, false
 	}
@@ -988,7 +1015,9 @@ func (l *lifecycle) parkIfAwaitingDelegations(ctx context.Context, c *threadCont
 		c.mu.Unlock()
 		return false
 	}
-	rt.runID = ""
+	if len(rt.runIDs) == 0 {
+		rt.runID = ""
+	}
 	rt.awaitingDelegations = true
 	rt.parkedSession = rc.SessionID
 	c.mu.Unlock()
@@ -998,6 +1027,32 @@ func (l *lifecycle) parkIfAwaitingDelegations(ctx context.Context, c *threadCont
 	slog.Info("Delegation is waiting on delegations of its own; not finalizing yet",
 		"component", "thread", "id", id, "session_id", rc.SessionID)
 	return true
+}
+
+func (l *lifecycle) deliverIntermediateRunComplete(ctx context.Context, handle Handle, id string, rc RunComplete) {
+	st, err := l.store.Get(ctx, id)
+	if err != nil || st.SessionID != rc.SessionID || st.Status != StatusRunning {
+		return
+	}
+	c := l.control(id)
+	c.mu.Lock()
+	depth := c.depth
+	c.mu.Unlock()
+	switch {
+	case rc.Cancelled:
+		st.Status = StatusInterrupted
+		st.ResultSummary = ""
+		st.Error = ""
+	case rc.Error != "":
+		st.Status = StatusFailed
+		st.ResultSummary = ""
+		st.Error = rc.Error
+	default:
+		st.Status = StatusCompleted
+		st.ResultSummary = rc.Text
+		st.Error = ""
+	}
+	l.deliverCompletion(ctx, handle, st, depth, true)
 }
 
 // finalizeRunComplete is handleRunComplete's last step: release rt's
@@ -1221,6 +1276,10 @@ func (l *lifecycle) clearPendingSetups(rt *runtimeState) {
 // and refuse to cascade past the hard limit (see
 // agent.TaskCompletion.Depth). Always 0 for a thread today.
 func (l *lifecycle) deliverStoredCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
+	l.deliverCompletion(ctx, handle, st, depth, false)
+}
+
+func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thread, depth int, intermediate bool) {
 	if l.resolveDelivery == nil {
 		return
 	}
@@ -1249,6 +1308,7 @@ func (l *lifecycle) deliverStoredCompletion(ctx context.Context, handle Handle, 
 		Name:           st.Name,
 		Goal:           st.Goal,
 		Status:         string(st.Status),
+		Intermediate:   intermediate,
 		ChildSessionID: st.SessionID,
 		ResultText:     st.ResultSummary,
 		Error:          st.Error,

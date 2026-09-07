@@ -1085,7 +1085,16 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 					// shutdownCtx is cancelled and this write is skipped —
 					// the run is being abandoned, not tidily finalized.
 					if getErr == nil && st.Status == StatusRunning {
-						_, _ = m.lc.setStatus(shutdownCtx, st.ID, StatusInterrupted, "", "", 0)
+						if st.Kind == KindTask {
+							final, err := m.lc.finalizeTask(shutdownCtx, st, StatusInterrupted, "", "", 0, st.CompletionDepth)
+							if err != nil {
+								slog.Error("Failed to finalize task on shutdown", "component", "thread", "id", st.ID, "error", err)
+							} else if final.ID != "" {
+								m.lc.deliverStoredCompletion(shutdownCtx, rt.handle, final, final.CompletionDepth)
+							}
+						} else if _, err := m.lc.setStatus(shutdownCtx, st.ID, StatusInterrupted, "", "", 0); err != nil {
+							slog.Error("Failed to interrupt delegation on shutdown", "component", "thread", "id", st.ID, "error", err)
+						}
 					}
 				}
 				c.opMu.Unlock()

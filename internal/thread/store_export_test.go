@@ -54,13 +54,29 @@ func NewStoreForTest(t testing.TB) Store {
 	})
 	conn, err := db.Connect(context.Background(), dataDir)
 	require.NoError(t, err)
-	return &testStoreDB{q: db.New(conn), projectPath: dataDir}
+	return storeWithoutTaskFinalization{Store: &testStoreDB{q: db.New(conn), conn: conn, projectPath: dataDir}}
+}
+
+func NewTaskFinalizationStoreForTest(t testing.TB) Store {
+	t.Helper()
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+	})
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	return &testStoreDB{q: db.New(conn), conn: conn, projectPath: dataDir}
+}
+
+type storeWithoutTaskFinalization struct {
+	Store
 }
 
 // testStoreDB is a minimal Store over the sqlc queries, mirroring the
 // threadspawn implementation (which cannot be imported here).
 type testStoreDB struct {
 	q           db.Querier
+	conn        *sql.DB
 	projectPath string
 }
 
@@ -188,6 +204,65 @@ func (s *testStoreDB) Delete(ctx context.Context, id string) error {
 	return s.q.DeleteThread(ctx, id)
 }
 
+var errTestFinalizeLost = errors.New("task finalization lost race")
+
+func (s *testStoreDB) FinalizeTask(ctx context.Context, id string, params FinalizeTaskParams) (Thread, bool, error) {
+	var finalized db.Thread
+	err := db.InTx(ctx, s.conn, func(q *db.Queries) error {
+		st, err := q.GetThread(ctx, id)
+		if err != nil {
+			return fmt.Errorf("load task for finalization: %w", err)
+		}
+		if st.Kind != string(KindTask) || st.Status != string(StatusRunning) {
+			return nil
+		}
+		if _, err := q.AttributeTaskCostOnce(ctx, db.AttributeTaskCostOnceParams{
+			ID: st.ID, SessionID: st.SessionID, ParentSessionID: st.ParentSessionID,
+		}); err != nil {
+			return err
+		}
+		finalized, err = q.FinalizeTask(ctx, db.FinalizeTaskParams{
+			Status: string(params.Status), Error: params.Error, ResultSummary: params.ResultSummary,
+			CompletedAt: sqlInt64(params.CompletedAt),
+			TerminalAt:  sql.NullInt64{Int64: params.TerminalAt, Valid: true}, CompletionDepth: int64(params.CompletionDepth),
+			ID: st.ID, SessionID: st.SessionID, ParentSessionID: st.ParentSessionID,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return errTestFinalizeLost
+		}
+		return err
+	})
+	if errors.Is(err, errTestFinalizeLost) {
+		st, getErr := s.Get(ctx, id)
+		return st, false, getErr
+	}
+	if err != nil {
+		return Thread{}, false, err
+	}
+	if finalized.ID == "" {
+		st, err := s.Get(ctx, id)
+		return st, false, err
+	}
+	return testFromDBItem(finalized), true, nil
+}
+
+func (s *testStoreDB) ListPendingTaskCompletions(ctx context.Context) ([]Thread, error) {
+	rows, err := s.q.ListPendingTaskCompletions(ctx, s.projectPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Thread, len(rows))
+	for i, row := range rows {
+		out[i] = testFromDBItem(row)
+	}
+	return out, nil
+}
+
+func (s *testStoreDB) MarkTaskCompletionDelivered(ctx context.Context, id string) error {
+	_, err := s.q.MarkTaskCompletionDelivered(ctx, id)
+	return err
+}
+
 // sqlInt64 mirrors the threadspawn store's CompletedAt handling: zero leaves
 // the column NULL.
 func sqlInt64(v int64) sql.NullInt64 {
@@ -199,18 +274,21 @@ func sqlInt64(v int64) sql.NullInt64 {
 func testFromDBItem(item db.Thread) Thread {
 	return Thread{
 		Delegation: Delegation{
-			ID:              item.ID,
-			Name:            item.Name,
-			Goal:            item.Goal,
-			SessionID:       item.SessionID,
-			Status:          Status(item.Status),
-			Kind:            Kind(item.Kind),
-			ResultSummary:   item.ResultSummary,
-			Error:           item.Error,
-			CreatedAt:       item.CreatedAt,
-			UpdatedAt:       item.UpdatedAt,
-			CompletedAt:     item.CompletedAt.Int64,
-			ParentSessionID: item.ParentSessionID,
+			ID:                item.ID,
+			Name:              item.Name,
+			Goal:              item.Goal,
+			SessionID:         item.SessionID,
+			Status:            Status(item.Status),
+			Kind:              Kind(item.Kind),
+			ResultSummary:     item.ResultSummary,
+			Error:             item.Error,
+			CreatedAt:         item.CreatedAt,
+			UpdatedAt:         item.UpdatedAt,
+			CompletedAt:       item.CompletedAt.Int64,
+			ParentSessionID:   item.ParentSessionID,
+			CompletionPending: item.CompletionPending != 0,
+			CompletionDepth:   int(item.CompletionDepth),
+			TerminalAt:        item.TerminalAt.Int64,
 		},
 		BaseBranch:   item.BaseBranch,
 		Branch:       item.Branch,

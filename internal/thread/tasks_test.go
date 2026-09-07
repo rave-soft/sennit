@@ -269,6 +269,53 @@ func TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable(t *testin
 // kinds register in the one shared lifecycle, so the same
 // closeAdmission-then-wait sequence covers both without Manager knowing
 // tasks exist.
+func TestTaskManager_ShutdownPersistsTaskCompletionForRecovery(t *testing.T) {
+	store := thread.NewTaskFinalizationStoreForTest(t)
+	parentApp := newTestParentApp(t)
+	parent := &testAppWorkspace{app: parentApp}
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:     store,
+		Spawner:   newFakeSpawner(t),
+		RepoRoot:  t.TempDir(),
+		ParentApp: parent,
+	})
+	tasks := thread.NewTaskManagerFromManager(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()))
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	require.NoError(t, mgr.Shutdown(context.Background()))
+	got, err := store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusInterrupted, got.Status)
+	require.True(t, got.CompletionPending)
+	require.Len(t, coord.deliveredCompletions(), 1)
+
+	recovered := thread.NewManager(thread.ManagerOptions{
+		Store:     store,
+		Spawner:   newFakeSpawner(t),
+		RepoRoot:  t.TempDir(),
+		ParentApp: parent,
+	})
+	shutdownManagerOnCleanup(t, recovered)
+	require.NoError(t, recovered.Recover(t.Context()))
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 2 }, eventuallyTimeout, eventuallyTick)
+	delivered := coord.deliveredCompletions()[1]
+	require.Equal(t, "parent-sess", delivered.sessionID)
+	require.Equal(t, st.ID, delivered.completion.DelegationID)
+	require.Equal(t, string(thread.StatusInterrupted), delivered.completion.Status)
+	require.NotNil(t, delivered.completion.Acknowledge)
+	require.NoError(t, delivered.completion.Acknowledge(t.Context()))
+
+	got, err = store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.False(t, got.CompletionPending)
+	require.NoError(t, recovered.Recover(t.Context()))
+	require.Never(t, func() bool { return len(coord.deliveredCompletions()) > 2 }, 100*time.Millisecond, eventuallyTick)
+}
+
 func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
@@ -753,6 +800,151 @@ func TestTaskManager_SendReachesLiveTask(t *testing.T) {
 	require.Equal(t, "follow up", last.prompt)
 	require.Equal(t, message.OriginAgent, last.origin,
 		"a task_send follow-up must be dispatched as agent-origin")
+}
+
+func TestTaskManager_SendDeliversIntermediateQueuedRunCompletion(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "first follow-up")))
+	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "second follow-up")))
+	require.Eventually(t, func() bool { return coord.runCount() == 3 }, eventuallyTimeout, eventuallyTick)
+	coord.mu.Lock()
+	first, second, last := coord.runs[0], coord.runs[1], coord.runs[2]
+	coord.mu.Unlock()
+
+	firstComplete := notify.RunComplete{SessionID: st.SessionID, RunID: first.runID, Text: "first result"}
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, firstComplete)
+	require.Eventually(t, func() bool {
+		return len(coord.deliveredCompletions()) == 1
+	}, eventuallyTimeout, eventuallyTick)
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, firstComplete)
+	require.Never(t, func() bool { return len(coord.deliveredCompletions()) > 1 }, 100*time.Millisecond, eventuallyTick)
+	delivered := coord.deliveredCompletions()[0].completion
+	require.Equal(t, "first result", delivered.ResultText)
+	require.True(t, delivered.Intermediate)
+	got, err := store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status)
+	require.NotNil(t, mgr.Handle(st.ID))
+
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: st.SessionID, RunID: "foreign", Text: "must not deliver",
+	})
+	require.Never(t, func() bool { return len(coord.deliveredCompletions()) > 1 }, 100*time.Millisecond, eventuallyTick)
+
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: st.SessionID, RunID: second.runID, Text: "second result",
+	})
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 2 }, eventuallyTimeout, eventuallyTick)
+	got, err = store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status)
+
+	finalComplete := notify.RunComplete{SessionID: st.SessionID, RunID: last.runID, Text: "final result"}
+	var publish sync.WaitGroup
+	publish.Add(2)
+	for range 2 {
+		go func() {
+			defer publish.Done()
+			parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, finalComplete)
+		}()
+	}
+	publish.Wait()
+	require.Eventually(t, func() bool {
+		got, getErr := store.Get(t.Context(), st.ID)
+		return getErr == nil && got.Status == thread.StatusCompleted
+	}, eventuallyTimeout, eventuallyTick)
+	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, eventuallyTimeout, eventuallyTick)
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, finalComplete)
+	require.Never(t, func() bool { return len(coord.deliveredCompletions()) > 3 }, 100*time.Millisecond, eventuallyTick)
+	require.Len(t, coord.deliveredCompletions(), 3)
+	require.False(t, coord.deliveredCompletions()[2].completion.Intermediate)
+}
+
+func TestTaskManager_QueuedCompletionWaitsForOwnDelegation(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.Coordinator().(*fakeCoordinator)
+
+	parent, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "parent goal", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+	child, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "child goal", ParentSessionID: parent.SessionID})
+	require.NoError(t, err)
+	require.NoError(t, sendErr(tasks.Send(t.Context(), parent.ID, "first queued follow-up")))
+	require.NoError(t, sendErr(tasks.Send(t.Context(), parent.ID, "last queued follow-up")))
+	require.Eventually(t, func() bool { return coord.runCount() == 4 }, eventuallyTimeout, eventuallyTick)
+
+	coord.mu.Lock()
+	var parentRuns []fakeRun
+	for _, run := range coord.runs {
+		if run.sessionID == parent.SessionID {
+			parentRuns = append(parentRuns, run)
+		}
+	}
+	coord.mu.Unlock()
+	require.Len(t, parentRuns, 3)
+
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: parent.SessionID, RunID: parentRuns[0].runID, Text: "initial result",
+	})
+	require.Eventually(t, func() bool { return mgr.AwaitingDelegationsForTest(parent.ID) }, eventuallyTimeout, eventuallyTick)
+	got, err := store.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status)
+	require.NotNil(t, mgr.Handle(parent.ID))
+	require.Empty(t, coord.deliveredCompletions(), "a result that is waiting on a child is not ready to report")
+
+	childRunID, live := mgr.RuntimeForTest(child.ID)
+	require.True(t, live)
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: child.SessionID, RunID: childRunID, Text: "child result",
+	})
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 1 }, eventuallyTimeout, eventuallyTick)
+	require.Equal(t, child.ID, coord.deliveredCompletions()[0].completion.DelegationID)
+
+	// The parent remains parked after the child settles because B and C are
+	// still owned queued runs. Neither a duplicate of A nor a foreign or
+	// runless same-session completion may use the parked-session fallback to
+	// release the runtime before B and C finish.
+	for _, completion := range []notify.RunComplete{
+		{SessionID: parent.SessionID, RunID: parentRuns[0].runID, Text: "duplicate initial result"},
+		{SessionID: parent.SessionID, RunID: "foreign", Text: "foreign result"},
+		{SessionID: parent.SessionID, Text: "runless result"},
+	} {
+		parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, completion)
+	}
+	require.Never(t, func() bool { return len(coord.deliveredCompletions()) > 1 }, 100*time.Millisecond, eventuallyTick)
+	got, err = store.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status)
+	require.NotNil(t, mgr.Handle(parent.ID))
+
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: parent.SessionID, RunID: parentRuns[1].runID, Text: "queued result",
+	})
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 2 }, eventuallyTimeout, eventuallyTick)
+	require.True(t, coord.deliveredCompletions()[1].completion.Intermediate)
+	got, err = store.Get(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, thread.StatusRunning, got.Status)
+	require.NotNil(t, mgr.Handle(parent.ID))
+	parentApp.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{
+		SessionID: parent.SessionID, RunID: parentRuns[2].runID, Text: "final result",
+	})
+	require.Eventually(t, func() bool {
+		got, getErr := store.Get(t.Context(), parent.ID)
+		return getErr == nil && got.Status == thread.StatusCompleted
+	}, eventuallyTimeout, eventuallyTick)
+	require.Eventually(t, func() bool { return mgr.Handle(parent.ID) == nil }, eventuallyTimeout, eventuallyTick)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) == 3 }, eventuallyTimeout, eventuallyTick)
+	require.Equal(t, parent.ID, coord.deliveredCompletions()[2].completion.DelegationID)
 }
 
 // TestTaskManager_SendReactivatesUnspawnedTask proves the not-live branch:

@@ -85,6 +85,17 @@ func (m *twoStepToolModel) lastStep2Prompt() fantasy.Prompt {
 	return m.step2Prompt
 }
 
+func TestFormatTaskCompletionIntermediate(t *testing.T) {
+	intermediate := formatTaskCompletion(TaskCompletion{Kind: "task", Intermediate: true, PriorReports: 1})
+	require.Contains(t, intermediate, "has produced an intermediate result; queued work continues")
+	require.NotContains(t, intermediate, "has completed a follow-up")
+	require.Contains(t, intermediate, "You have heard from it once before; this is another report from the same delegation.")
+
+	terminal := formatTaskCompletion(TaskCompletion{Kind: "task"})
+	require.Contains(t, terminal, "A background task has finished.")
+	require.NotContains(t, terminal, "queued work continues")
+}
+
 // TestPrepareStep_CompletionDeliveredBeforeSteering proves the ordering
 // half of the completion-inbox contract: a completion raised while the
 // parent turn is active (mid-turn, between two steps of the same Run)

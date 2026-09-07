@@ -179,6 +179,7 @@ func (a *coordinatorAdapter) DeliverTaskCompletion(ctx context.Context, parentSe
 		Name:           completion.Name,
 		Goal:           completion.Goal,
 		Status:         completion.Status,
+		Intermediate:   completion.Intermediate,
 		ChildSessionID: completion.ChildSessionID,
 		ResultText:     completion.ResultText,
 		Error:          completion.Error,

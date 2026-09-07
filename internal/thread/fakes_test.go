@@ -232,12 +232,14 @@ func (a *testCoordinatorAdapter) DeliverTaskCompletion(ctx context.Context, pare
 		Name:           completion.Name,
 		Goal:           completion.Goal,
 		Status:         completion.Status,
+		Intermediate:   completion.Intermediate,
 		ChildSessionID: completion.ChildSessionID,
 		ResultText:     completion.ResultText,
 		Error:          completion.Error,
 		Depth:          completion.Depth,
 		TerminalAt:     completion.TerminalAt,
 		PriorReports:   completion.PriorReports,
+		Acknowledge:    completion.Acknowledge,
 	})
 }
 
@@ -446,12 +448,14 @@ func (f *fakeCoordinator) DeliverTaskCompletion(_ context.Context, sessionID str
 		Name:           completion.Name,
 		Goal:           completion.Goal,
 		Status:         completion.Status,
+		Intermediate:   completion.Intermediate,
 		ChildSessionID: completion.ChildSessionID,
 		ResultText:     completion.ResultText,
 		Error:          completion.Error,
 		Depth:          completion.Depth,
 		TerminalAt:     completion.TerminalAt,
 		PriorReports:   completion.PriorReports,
+		Acknowledge:    completion.Acknowledge,
 	}})
 }
 

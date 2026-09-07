@@ -144,6 +144,7 @@ type TaskCompletion struct {
 	Name           string
 	Goal           string
 	Status         string
+	Intermediate   bool
 	ChildSessionID string
 	ResultText     string
 	Error          string

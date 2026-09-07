@@ -152,6 +152,18 @@ func TestParentAppSpawner_StableWorkspaceIdentity(t *testing.T) {
 // WithAgentDispatch/WithRunID tags survive the adapter onto the agent's own
 // context keys, so a dispatched run keeps its origin and run-id exactly as
 // before the port was introduced.
+func TestCoordinatorAdapter_DeliverTaskCompletionPreservesIntermediate(t *testing.T) {
+	coord := &attachFakeCoordinator{}
+	adapter := NewCoordinatorAdapter(coord)
+
+	adapter.DeliverTaskCompletion(t.Context(), "parent", thread.TaskCompletion{DelegationID: "task", Intermediate: true})
+
+	coord.mu.Lock()
+	defer coord.mu.Unlock()
+	require.Len(t, coord.delivered, 1)
+	require.True(t, coord.delivered[0].Intermediate)
+}
+
 func TestCoordinatorAdapter_TranslateCtxCarriesDispatchTag(t *testing.T) {
 	var seenOrigin, seenRunID atomic.Value
 	coord := &tagRecodingCoordinator{
