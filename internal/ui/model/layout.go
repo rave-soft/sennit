@@ -306,6 +306,9 @@ func (m *UI) View() tea.View {
 	}
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
+	v.KeyboardEnhancements.ReportAlternateKeys = true
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	v.KeyboardEnhancements.ReportAssociatedText = true
 	v.WindowTitle = brand.Slug + " " + home.Short(m.com.Workspace.WorkingDir())
 	if m.sess.hasSession() && m.sess.current.Title != "" {
 		v.WindowTitle += " — " + m.sess.current.Title

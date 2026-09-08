@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -994,8 +995,8 @@ func (a *AssistantMessageItem) SetHovered(hovered bool) {
 }
 
 // HandleKeyEvent implements KeyEventHandler.
-func (a *AssistantMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if k := key.String(); k == "c" || k == "y" {
+func (a *AssistantMessageItem) HandleKeyEvent(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if key.Matches(msg, key.NewBinding(key.WithKeys("c", "y"))) {
 		text := a.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
 	}

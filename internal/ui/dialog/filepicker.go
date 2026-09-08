@@ -13,13 +13,13 @@ import (
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
+	"github.com/rave-soft/sennit/internal/ui/key"
 )
 
 const FilePickerID = "filepicker"

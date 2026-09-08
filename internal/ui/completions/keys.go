@@ -1,7 +1,7 @@
 package completions
 
 import (
-	"charm.land/bubbles/v2/key"
+	"github.com/rave-soft/sennit/internal/ui/key"
 )
 
 // KeyMap defines the key bindings for the completions component.

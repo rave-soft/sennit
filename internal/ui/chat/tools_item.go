@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -332,8 +333,8 @@ func (t *baseToolMessageItem) SetHovered(hovered bool) {
 }
 
 // HandleKeyEvent implements KeyEventHandler.
-func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if k := key.String(); k == "c" || k == "y" {
+func (t *baseToolMessageItem) HandleKeyEvent(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if key.Matches(msg, key.NewBinding(key.WithKeys("c", "y"))) {
 		text := t.formatToolForCopy()
 		return true, common.CopyToClipboard(text, "Tool content copied to clipboard")
 	}

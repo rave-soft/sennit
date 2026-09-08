@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/rave-soft/sennit/internal/ui/key"
 
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/ui/common"

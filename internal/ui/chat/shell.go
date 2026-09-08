@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -240,18 +241,18 @@ func (s *ShellItem) SetHovered(hovered bool) {
 }
 
 // HandleKeyEvent implements KeyEventHandler for copy and horizontal scrolling.
-func (s *ShellItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	switch k := key.String(); k {
-	case "c", "y":
+func (s *ShellItem) HandleKeyEvent(msg tea.KeyMsg) (bool, tea.Cmd) {
+	switch {
+	case key.Matches(msg, key.NewBinding(key.WithKeys("c", "y"))):
 		text := "$ " + s.command + "\n" + ansi.Strip(s.output.String())
 		return true, common.CopyToClipboard(text, "Shell output copied to clipboard")
-	case "shift+left", "H":
+	case key.Matches(msg, key.NewBinding(key.WithKeys("shift+left", "H"))):
 		if s.xOffset > 0 {
 			s.xOffset = max(0, s.xOffset-shellHScrollStep)
 			s.Bump()
 			return true, nil
 		}
-	case "shift+right", "L":
+	case key.Matches(msg, key.NewBinding(key.WithKeys("shift+right", "L"))):
 		s.xOffset = min(s.xOffset+shellHScrollStep, max(s.maxLineWidth, s.xOffset))
 		s.Bump()
 		return true, nil

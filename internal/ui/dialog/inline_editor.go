@@ -1,9 +1,9 @@
 package dialog
 
 import (
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/rave-soft/sennit/internal/ui/key"
 )
 
 // InlineEditor is the interface for components that replace the

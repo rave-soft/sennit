@@ -4,12 +4,12 @@ import (
 	"os"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -142,7 +142,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			return action
 		}
 		for _, item := range c.list.FilteredItems() {
-			if command, ok := item.(*CommandItem); ok && msg.String() == command.Shortcut() {
+			if command, ok := item.(*CommandItem); ok && key.MatchesString(msg, command.Shortcut()) {
 				return command.Action()
 			}
 		}

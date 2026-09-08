@@ -121,6 +121,21 @@ func TestViewEnablesAllMouseMotionForHoverFeedback(t *testing.T) {
 	require.Equal(t, tea.MouseModeAllMotion, r.main.View().MouseMode)
 }
 
+func TestViewsRequestLayoutIndependentKeyData(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	assertEnhancements := func(view tea.View) {
+		require.True(t, view.KeyboardEnhancements.ReportAlternateKeys)
+		require.True(t, view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes)
+		require.True(t, view.KeyboardEnhancements.ReportAssociatedText)
+	}
+
+	assertEnhancements(r.main.View())
+	r.dashboard = threads.New(r.com, &r.main.threadList)
+	assertEnhancements(r.dashboardView())
+}
+
 // drainShowDashboard runs cmd the way the Bubble Tea runtime would (unwrapping
 // tea.BatchMsg) until it finds the showThreadsDashboardMsg that
 // UI.handleGlobalKeys produces for the threads key, feeding it back into

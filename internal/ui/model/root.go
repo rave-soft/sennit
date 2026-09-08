@@ -20,7 +20,6 @@ import (
 	"reflect"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -33,6 +32,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
+	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/uimsg"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -243,6 +243,9 @@ func (r *Root) dashboardView() tea.View {
 	v.AltScreen = true
 	v.BackgroundColor = r.com.Styles.Background
 	v.MouseMode = tea.MouseModeCellMotion
+	v.KeyboardEnhancements.ReportAlternateKeys = true
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	v.KeyboardEnhancements.ReportAssociatedText = true
 	v.WindowTitle = brand.Slug + " threads"
 
 	canvas := uv.NewScreenBuffer(r.width, r.height)

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"sync"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
 	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
 )
 
@@ -466,7 +466,7 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 		// Tab on a command inserts its name into the editor instead of
 		// running it, so commands that take arguments can be finished by
 		// hand before Enter runs them.
-		if msg.String() == "tab" {
+		if key.MatchesString(msg, "tab") {
 			if v, ok := c.selectedCommand(); ok {
 				c.open = false
 				return SelectionMsg[CommandCompletionValue]{Value: v, InsertOnly: true}, true

@@ -1,7 +1,7 @@
 package model
 
 import (
-	"charm.land/bubbles/v2/key"
+	"github.com/rave-soft/sennit/internal/ui/key"
 )
 
 // ShortHelp implements [help.KeyMap].
