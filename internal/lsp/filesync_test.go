@@ -219,6 +219,14 @@ func TestFilesync_OpenFileRetargetsToNewGenerationAfterConcurrentSwap(t *testing
 	}
 	require.Eventually(t, func() bool { return countDidOpens(log2) >= 1 }, 2*time.Second, 10*time.Millisecond,
 		"gen2 — the generation current after the simulated swap — must receive didOpen for the file, not just gen1")
+	// gen1's line is written by a server process of its own, so it is not
+	// ordered against gen2's: reading log1 the instant log2 filled in
+	// caught a runner that had not flushed gen1's line yet and reported 0
+	// didOpens, failing the run for a timing artifact. Wait for the line
+	// to appear, then assert the count, which is what this is actually
+	// about — exactly one didOpen, neither none nor a duplicate.
+	require.Eventually(t, func() bool { return countDidOpens(log1) >= 1 }, 2*time.Second, 10*time.Millisecond,
+		"gen1 must have received the didOpen sent before the swap")
 	require.Equal(t, 1, countDidOpens(log1), "gen1 must still get exactly the one didOpen from before the swap")
 }
 
