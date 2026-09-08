@@ -174,7 +174,7 @@ func waitForLSPDiagnostics(
 			continue
 		}
 		wg.Go(func() {
-			client.WaitForDiagnostics(ctx, timeout)
+			client.WaitForFileDiagnostics(ctx, filepath, timeout)
 		})
 	}
 	wg.Wait()
@@ -218,7 +218,7 @@ func notifyLSPs(
 		_ = client.OpenFileOnDemand(ctx, filepath)
 		_ = client.NotifyChange(ctx, filepath)
 		wg.Go(func() {
-			client.WaitForDiagnostics(ctx, 5*time.Second)
+			client.WaitForFileDiagnostics(ctx, filepath, 5*time.Second)
 		})
 	}
 	wg.Wait()

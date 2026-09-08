@@ -1852,3 +1852,68 @@ func TestClient_DirectoryRootMarkerDoesNotFailReadiness(t *testing.T) {
 		"the file marker beside it must still be opened")
 	client.Shutdown()
 }
+
+// TestWaitForFileDiagnostics_IgnoresOtherFiles is the reason
+// waitForFileDiagnostics exists: a server that keeps republishing for
+// unrelated files — a large workspace being analysed in the background —
+// used to hold every waiter in its settle loop until the deadline, since
+// the store-wide version moved on someone else's publish. A per-file wait
+// settles on its own file and is unmoved by the noise.
+func TestWaitForFileDiagnostics_IgnoresOtherFiles(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient()
+	target := protocol.DocumentURI("file:///target.go")
+
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			c.diagnostics.store.Set(
+				protocol.DocumentURI(fmt.Sprintf("file:///noise-%d.go", i)),
+				[]protocol.Diagnostic{{Message: "noise"}},
+			)
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		c.diagnostics.store.Set(target, []protocol.Diagnostic{{Message: "target"}})
+	}()
+
+	start := time.Now()
+	c.diagnostics.waitForFileDiagnostics(t.Context(), target, time.Second, 100*time.Millisecond, 30*time.Millisecond, 5*time.Millisecond)
+	elapsed := time.Since(start)
+
+	require.Less(t, elapsed, 200*time.Millisecond,
+		"a per-file wait must settle on its own file while other files keep changing")
+	require.Greater(t, elapsed, 30*time.Millisecond, "should wait for settle duration")
+}
+
+// TestWaitForFileDiagnostics_UnaffectedByOtherFileOnly checks the other
+// half: publishes that never touch the watched file must not be mistaken
+// for it, so the wait ends on the no-first-change path rather than
+// reporting a change that was someone else's.
+func TestWaitForFileDiagnostics_UnaffectedByOtherFileOnly(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		c.diagnostics.store.Set(protocol.DocumentURI("file:///other.go"), []protocol.Diagnostic{{Message: "other"}})
+	}()
+
+	start := time.Now()
+	c.diagnostics.waitForFileDiagnostics(t.Context(), protocol.DocumentURI("file:///target.go"),
+		time.Second, 50*time.Millisecond, 30*time.Millisecond, 5*time.Millisecond)
+	elapsed := time.Since(start)
+
+	require.Less(t, elapsed, 200*time.Millisecond, "should return on the first-change timer, not the deadline")
+}

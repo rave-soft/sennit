@@ -396,11 +396,46 @@ func (d *diagnosticsStore) waitForDiagnostics(
 	ctx context.Context,
 	timeout, firstChangeDuration, settleDuration, pollInterval time.Duration,
 ) {
+	d.waitForVersion(ctx, d.versionLocked, timeout, firstChangeDuration, settleDuration, pollInterval)
+}
+
+// waitForFileDiagnostics is waitForDiagnostics narrowed to one file: it
+// watches that file's own version stamp instead of the whole store's, so
+// it returns as soon as the server has published for this file and gone
+// quiet about it.
+//
+// The distinction matters on a busy workspace. The store-wide version
+// moves whenever the server republishes for any file at all, and a server
+// analysing a large project republishes constantly in the background — so
+// a store-wide waiter finds the version changed (from someone else's
+// file), drops into the settle loop, and is then kept there by the next
+// unrelated publish until its deadline expires. Every caller waiting on
+// behalf of one file therefore paid its full timeout, and concurrent
+// waiters reset each other. Watching one key removes that coupling: an
+// unrelated file's publish leaves this key's stamp alone.
+func (d *diagnosticsStore) waitForFileDiagnostics(
+	ctx context.Context,
+	uri protocol.DocumentURI,
+	timeout, firstChangeDuration, settleDuration, pollInterval time.Duration,
+) {
+	d.waitForVersion(ctx, func() uint64 { return d.keyVersionLocked(uri) },
+		timeout, firstChangeDuration, settleDuration, pollInterval)
+}
+
+// waitForVersion is the shared body of the two waits above: it polls
+// version until it moves, then waits for it to hold still, bounded by
+// timeout throughout. version is read without holding d.mu across the
+// wait, so a publish is never blocked by a waiter.
+func (d *diagnosticsStore) waitForVersion(
+	ctx context.Context,
+	version func() uint64,
+	timeout, firstChangeDuration, settleDuration, pollInterval time.Duration,
+) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	firstChangeTimer := time.NewTimer(min(timeout, firstChangeDuration))
 	defer firstChangeTimer.Stop()
-	previousVersion := d.versionLocked()
+	previousVersion := version()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
@@ -414,10 +449,10 @@ func (d *diagnosticsStore) waitForDiagnostics(
 			// No change arrived quickly — server isn't republishing.
 			return
 		case <-ticker.C:
-			currentVersion := d.versionLocked()
+			currentVersion := version()
 			if currentVersion != previousVersion {
 				// Diagnostics changed — now wait for them to settle.
-				d.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration, pollInterval/2)
+				d.waitForDiagnosticsToSettle(ctx, deadline.C, version, settleDuration, pollInterval/2)
 				return
 			}
 		}
@@ -430,14 +465,25 @@ func (d *diagnosticsStore) versionLocked() uint64 {
 	return d.store.Version()
 }
 
+// keyVersionLocked is versionLocked narrowed to one file. It takes d.mu
+// for the same reason: a generation swap replaces d.store wholesale (see
+// resetLocked), so the field read and the map read must be one critical
+// section.
+func (d *diagnosticsStore) keyVersionLocked(uri protocol.DocumentURI) uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.store.KeyVersion(uri)
+}
+
 // waitForDiagnosticsToSettle waits until diagnostics version stays the same
 // for settleDuration, indicating the LSP server has finished publishing.
 func (d *diagnosticsStore) waitForDiagnosticsToSettle(
 	ctx context.Context,
 	deadline <-chan time.Time,
+	version func() uint64,
 	settleDuration, pollInterval time.Duration,
 ) {
-	lastVersion := d.versionLocked()
+	lastVersion := version()
 	settleTicker := time.NewTicker(pollInterval)
 	defer settleTicker.Stop()
 
@@ -451,7 +497,7 @@ func (d *diagnosticsStore) waitForDiagnosticsToSettle(
 		case <-deadline:
 			return
 		case <-settleTicker.C:
-			currentVersion := d.versionLocked()
+			currentVersion := version()
 			if currentVersion != lastVersion {
 				// New change detected — reset the stable timer.
 				lastVersion = currentVersion

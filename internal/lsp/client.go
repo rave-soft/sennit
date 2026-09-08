@@ -336,6 +336,20 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 	c.diagnostics.waitForDiagnostics(ctx, timeout, time.Second, 300*time.Millisecond, 100*time.Millisecond)
 }
 
+// WaitForFileDiagnostics is WaitForDiagnostics for a caller that only
+// cares about one file: it settles on that file's own diagnostics rather
+// than on the server going quiet about the whole workspace. Prefer it
+// whenever the file is known — on a large project a store-wide wait is
+// held open by background re-analysis of unrelated files and reliably
+// costs the caller its entire timeout.
+func (c *Client) WaitForFileDiagnostics(ctx context.Context, filepath string, timeout time.Duration) {
+	if c == nil {
+		return
+	}
+	uri := protocol.URIFromPath(filepath)
+	c.diagnostics.waitForFileDiagnostics(ctx, uri, timeout, time.Second, 300*time.Millisecond, 100*time.Millisecond)
+}
+
 // FindReferences finds all references to the symbol at the given position.
 func (c *Client) FindReferences(ctx context.Context, filepath string, line, character int, includeDeclaration bool) ([]protocol.Location, error) {
 	return c.requests.FindReferences(ctx, filepath, line, character, includeDeclaration)
