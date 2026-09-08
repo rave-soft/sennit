@@ -76,11 +76,12 @@ type Permissions struct {
 	help   help.Model
 	keyMap permissionsKeyMap
 
-	// buttonRects holds the absolute screen rectangles of the action buttons
-	// from the most recent Draw, used to hit-test mouse clicks and hover
-	// (mirrors the childPanelButtonRect pattern in model/child_session_panel.go:
-	// geometry is captured at draw time and read back on the next mouse event).
-	buttonRects [4]image.Rectangle
+	// buttonRects holds the absolute screen rectangles of the Allow /
+	// Allow for Session / Deny buttons from the most recent Draw, used
+	// to hit-test mouse clicks and hover (mirrors the childPanelButtonRect
+	// pattern in model/child_session_panel.go: geometry is captured at
+	// draw time and read back on the next mouse event).
+	buttonRects [3]image.Rectangle
 	// hoverIndex is the index of the button currently under the pointer,
 	// or -1 when the pointer isn't over any button.
 	hoverIndex int
@@ -137,7 +138,7 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithHelp("d", "deny"),
 		),
 		EnableYolo: key.NewBinding(
-			key.WithKeys("y", "Y", "ctrl+y"),
+			key.WithKeys("ctrl+y"),
 			key.WithHelp("ctrl+y", "enable yolo"),
 		),
 		Close: CloseKey,
@@ -253,10 +254,10 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			// Escape denies the permission request.
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 4
+			p.selectedOption = (p.selectedOption + 1) % 3
 		case key.Matches(msg, p.keyMap.Left):
-			// Add 3 instead of subtracting 1 to avoid negative modulo.
-			p.selectedOption = (p.selectedOption + 3) % 4
+			// Add 2 instead of subtracting 1 to avoid negative modulo.
+			p.selectedOption = (p.selectedOption + 2) % 3
 		case key.Matches(msg, p.keyMap.Select):
 			return p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
@@ -342,10 +343,8 @@ func (p *Permissions) selectCurrentOption() tea.Msg {
 		return p.respond(PermissionAllow)
 	case 1:
 		return p.respond(PermissionAllowForSession)
-	case 2:
-		return p.respond(PermissionDeny)
 	default:
-		return p.respond(PermissionEnableYolo)
+		return p.respond(PermissionDeny)
 	}
 }
 
@@ -441,6 +440,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentWidth := p.calculateContentWidth(width)
 	header := p.renderHeader(contentWidth)
 	buttons := p.renderButtons(contentWidth, fullscreen)
+	yoloHint := p.renderYoloHint(contentWidth, fullscreen)
 	// Pack the hints to the content width so they truncate cleanly instead
 	// of overflowing. The dialog frame supplies the padding, so this renders
 	// the hint line without the extra help view inset that renderDialogHelp
@@ -478,7 +478,8 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		contentHeight = lipgloss.Height(renderedContent)
 	}
 	fixedHeight := lipgloss.Height(header) + lipgloss.Height(buttons) +
-		lipgloss.Height(helpView) + dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
+		lipgloss.Height(yoloHint) + lipgloss.Height(helpView) +
+		dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
 	availableHeight := p.contentViewportHeight(forceFullscreen, maxHeight, fixedHeight, contentHeight)
 
 	// Determine if scrollbar is needed.
@@ -520,7 +521,11 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if content != "" {
 		parts = append(parts, "", content)
 	}
-	parts = append(parts, "", buttons, "", helpView)
+	parts = append(parts, "", buttons)
+	if yoloHint != "" {
+		parts = append(parts, yoloHint)
+	}
+	parts = append(parts, "", helpView)
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	view := dialogStyle.Render(innerContent)
@@ -906,15 +911,14 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 	return panelStyle.Width(width).Render(content)
 }
 
-// buttonOptsList builds the action button specs from current selection and
-// hover state. Shared by renderButtons (drawing) and buttonRects (click/hover
+// buttonOptsList builds the Allow / Allow for Session / Deny button specs
+// from current selection and hover state. Shared by renderButtons (drawing) and buttonRects (click/hover
 // hit-testing) so their button order and text never drift apart.
 func (p *Permissions) buttonOptsList() []common.ButtonOpts {
 	return []common.ButtonOpts{
 		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0, Hovered: p.hoverIndex == 0},
 		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1, Hovered: p.hoverIndex == 1},
 		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2, Hovered: p.hoverIndex == 2},
-		{Text: "Enable YOLO", UnderlineIndex: 7, Selected: p.selectedOption == 3, Hovered: p.hoverIndex == 3},
 	}
 }
 
@@ -951,13 +955,38 @@ func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 		Render(common.ButtonGroup(p.com.Styles, opts, spacing))
 }
 
+// renderYoloHint renders the yolo escape hatch as a dim one-line hint under
+// the buttons rather than as a fourth button. Enabling yolo skips every
+// later prompt, so it stays out of the tab order and off the mouse hit-test:
+// it should be findable, not a neighbour of Allow that a stray click reaches.
+func (p *Permissions) renderYoloHint(contentWidth int, fullscreen bool) string {
+	if contentWidth <= 0 {
+		return ""
+	}
+	h := p.com.Styles.Dialog.Help
+	hint := h.ShortKey.Inline(true).Render(p.keyMap.EnableYolo.Help().Key) + " " +
+		h.ShortDesc.Inline(true).Render("enable yolo — skip all further permission prompts")
+	if lipgloss.Width(hint) > contentWidth {
+		hint = h.ShortKey.Inline(true).Render(p.keyMap.EnableYolo.Help().Key) + " " +
+			h.ShortDesc.Inline(true).Render("enable yolo")
+	}
+
+	// Sit under the buttons, using their alignment so the hint tracks the
+	// row it belongs to instead of drifting to the opposite edge.
+	align := lipgloss.Right
+	if fullscreen {
+		align = lipgloss.Center
+	}
+	return lipgloss.NewStyle().Width(contentWidth).Align(align).Render(hint)
+}
+
 // computeButtonRects computes the absolute on-screen rectangle of each
-// action button, given the row's origin (top-left of its content-width slot,
+// button (Allow, Allow for Session, Deny), given the row's origin (top-left of its content-width slot,
 // in absolute screen coordinates) and the same layout decision renderButtons
 // made. Button style (selected/hovered) doesn't affect width, so opts here
 // need not match hover state exactly.
-func (p *Permissions) computeButtonRects(opts []common.ButtonOpts, contentWidth int, fullscreen bool, originX, originY int) [4]image.Rectangle {
-	var rects [4]image.Rectangle
+func (p *Permissions) computeButtonRects(opts []common.ButtonOpts, contentWidth int, fullscreen bool, originX, originY int) [3]image.Rectangle {
+	var rects [3]image.Rectangle
 	vertical, align := p.buttonLayout(opts, contentWidth, fullscreen)
 
 	widths := make([]int, len(opts))
@@ -1013,7 +1042,6 @@ func (p *Permissions) ShortHelp() []key.Binding {
 	bindings := []key.Binding{
 		p.keyMap.Choose,
 		p.keyMap.Select,
-		p.keyMap.EnableYolo,
 		p.keyMap.Close,
 	}
 

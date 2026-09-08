@@ -2,10 +2,12 @@ package dialog
 
 import (
 	"image"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -39,8 +41,6 @@ func TestPermissions_ActionKeysResolve(t *testing.T) {
 		{keyMsg('D'), PermissionDeny},
 		{keyMsg('s'), PermissionAllowForSession},
 		{keyMsg('S'), PermissionAllowForSession},
-		{keyMsg('y'), PermissionEnableYolo},
-		{keyMsg('Y'), PermissionEnableYolo},
 		{tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}, PermissionEnableYolo},
 	}
 
@@ -54,7 +54,7 @@ func TestPermissions_ActionKeysResolve(t *testing.T) {
 }
 
 // TestPermissions_NavigationCyclesOptions verifies that tab and arrow keys
-// cycle through the four permission options.
+// cycle through the three permission options.
 func TestPermissions_NavigationCyclesOptions(t *testing.T) {
 	t.Parallel()
 
@@ -68,16 +68,13 @@ func TestPermissions_NavigationCyclesOptions(t *testing.T) {
 	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.Equal(t, 2, p.selectedOption)
 
-	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
-	require.Equal(t, 3, p.selectedOption)
-
 	// Wrap around.
 	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.Equal(t, 0, p.selectedOption)
 
 	// Left cycles backward.
 	p.HandleMsg(keyMsg('h'))
-	require.Equal(t, 3, p.selectedOption)
+	require.Equal(t, 2, p.selectedOption)
 }
 
 // TestPermissions_EnterConfirmsSelection verifies that enter confirms the
@@ -94,24 +91,46 @@ func TestPermissions_EnterConfirmsSelection(t *testing.T) {
 	require.Equal(t, PermissionAllowForSession, resp.Action)
 }
 
-func TestPermissions_EnterEnablesYolo(t *testing.T) {
+// TestPermissions_YoloIsNotAButton verifies that yolo stays out of the
+// button row: it is neither reachable by tabbing nor clickable, so a stray
+// click next to Allow can't turn every later prompt off.
+func TestPermissions_YoloIsNotAButton(t *testing.T) {
 	t.Parallel()
 
 	p := newTestPermissions(t)
-	p.selectedOption = 3
+	for _, opt := range p.buttonOptsList() {
+		require.NotContains(t, strings.ToLower(opt.Text), "yolo")
+	}
 
+	p.selectedOption = 2
 	action := p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	resp, ok := action.(ActionPermissionResponse)
 	require.True(t, ok)
-	require.Equal(t, PermissionEnableYolo, resp.Action)
+	require.Equal(t, PermissionDeny, resp.Action)
 }
 
-func TestPermissions_HelpIncludesYoloShortcut(t *testing.T) {
+// TestPermissions_YoloHintDescribesItself verifies the dim hint line under
+// the buttons names the shortcut and says what it does.
+func TestPermissions_YoloHintDescribesItself(t *testing.T) {
 	t.Parallel()
 
 	p := newTestPermissions(t)
-	bindings := p.ShortHelp()
-	require.Contains(t, bindings, p.keyMap.EnableYolo)
+	hint := ansi.Strip(p.renderYoloHint(80, false))
+	require.Contains(t, hint, "ctrl+y")
+	require.Contains(t, hint, "enable yolo")
+	require.Contains(t, hint, "skip all further permission prompts")
+
+	// Too narrow for the description: keep the shortcut, drop the prose.
+	narrow := ansi.Strip(p.renderYoloHint(20, false))
+	require.Contains(t, narrow, "ctrl+y")
+	require.NotContains(t, narrow, "skip all further")
+}
+
+func TestPermissions_HelpOmitsYoloShortcut(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPermissions(t)
+	require.NotContains(t, p.ShortHelp(), p.keyMap.EnableYolo)
 	require.Equal(t, "ctrl+y", p.keyMap.EnableYolo.Help().Key)
 	require.Equal(t, "enable yolo", p.keyMap.EnableYolo.Help().Desc)
 }
@@ -151,7 +170,6 @@ func TestPermissions_MouseClickTriggersButtonAction(t *testing.T) {
 		{"Allow", 0, PermissionAllow},
 		{"Allow for Session", 1, PermissionAllowForSession},
 		{"Deny", 2, PermissionDeny},
-		{"Enable YOLO", 3, PermissionEnableYolo},
 	}
 
 	for _, tc := range tests {
@@ -181,7 +199,7 @@ func TestPermissions_MouseClickIgnoresNonLeftButton(t *testing.T) {
 	p := newTestPermissions(t)
 	drawTestPermissions(t, p)
 
-	rect := p.buttonRects[2]
+	rect := p.buttonRects[2] // Deny
 	action := p.HandleMsg(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseRight})
 	require.Nil(t, action)
 }
