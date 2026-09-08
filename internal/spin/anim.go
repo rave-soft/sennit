@@ -12,6 +12,7 @@ import (
 	"image/color"
 	"math/rand/v2"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -625,12 +626,75 @@ func (a *Anim) Render() string {
 	return b.String()
 }
 
+// maxAggregateFPS bounds how many animation ticks every live Anim in the
+// process may emit between them, per second.
+//
+// Each Anim drives its own self-perpetuating tick chain, and bubbletea
+// calls Model.View() — a full re-layout of the whole UI — once per
+// message it delivers. So N spinners animating at fps cost N*fps full
+// renders per second, not fps: a session with a dozen running tools and
+// delegations on screen was spending entire cores laying out frames.
+//
+// Frames past this ceiling are not merely expensive, they are provably
+// discarded: bubbletea's renderer flushes to the terminal on its own
+// ticker, capped at 60fps (see its defaultFPS/maxFPS), so a view built
+// between two flushes is overwritten without ever being drawn. Spacing
+// ticks so the aggregate stays at that ceiling therefore costs nothing
+// visible while removing the surplus work.
+const maxAggregateFPS = 60
+
+// frameInterval is one animation step: the cadence a chain ticks at when
+// nothing else is competing for the budget.
+const frameInterval = time.Second / fps
+
+var (
+	frameSlotMu sync.Mutex
+	// nextFrameSlot is the wall-clock instant the most recently reserved
+	// tick will fire at. Reservations queue behind it, which is what
+	// spaces every live chain's ticks apart from every other's.
+	nextFrameSlot time.Time
+)
+
+// maxFrameDelay bounds how far a reservation may be pushed into the
+// future. Without it a large enough population of spinners would queue
+// slots indefinitely and each individual one would crawl (or, once its
+// siblings stopped, sit waiting out a backlog nothing is left to draw).
+// With it, aggregate output can exceed maxAggregateFPS when very many
+// anims are live, but no single spinner ever animates slower than 4fps.
+const maxFrameDelay = 250 * time.Millisecond
+
+// reserveFrameSlot returns how long a chain should wait before its next
+// tick: the animation's own interval, pushed back far enough that ticks
+// from all live chains land at most 1/maxAggregateFPS apart.
+func reserveFrameSlot() time.Duration {
+	frameSlotMu.Lock()
+	defer frameSlotMu.Unlock()
+
+	now := time.Now()
+	earliest := now.Add(frameInterval)
+	slot := nextFrameSlot.Add(time.Second / maxAggregateFPS)
+	if slot.Before(earliest) {
+		// The chains between them are running below the ceiling: nothing
+		// to space out, so this tick keeps its natural cadence.
+		slot = earliest
+	}
+	if latest := now.Add(maxFrameDelay); slot.After(latest) {
+		slot = latest
+	}
+	nextFrameSlot = slot
+	return slot.Sub(now)
+}
+
 // Step is a command that triggers the next step in the animation. The
 // emitted StepMsg carries the current generation so Animate() can tell
 // whether this tick still belongs to the armed chain.
+//
+// The delay is the animation's interval widened by reserveFrameSlot when
+// other chains are live, so the number of spinners on screen does not
+// multiply the UI's frame rate.
 func (a *Anim) Step() tea.Cmd {
 	gen := a.gen.Load()
-	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
+	return tea.Tick(reserveFrameSlot(), func(t time.Time) tea.Msg {
 		return StepMsg{ID: a.id, Gen: gen}
 	})
 }
