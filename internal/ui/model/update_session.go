@@ -59,6 +59,14 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = m.applySessionEvent(msg, cmds)
 	case pubsub.Event[message.Message]:
 		cmds = m.applyMessageEvent(msg, cmds)
+	case MessagesUpdatedMsg:
+		// One frame's worth of streaming updates, collapsed on the way in
+		// (see messagePacer). Each is applied exactly as it would have
+		// been had it arrived on its own; the saving is in the single
+		// re-layout this costs instead of one per event.
+		for _, event := range msg.Events {
+			cmds = m.applyMessageEvent(event, cmds)
+		}
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.sess.refreshModifiedFiles(m.com, m))
 	case sendMessageErrorMsg:

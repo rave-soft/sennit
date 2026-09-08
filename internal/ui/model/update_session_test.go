@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -453,6 +455,36 @@ func TestUpdateSession_MessageEvent(t *testing.T) {
 		// the DeletedEvent arm ran instead of Created/Updated.
 		_ = cmds
 	})
+}
+
+// TestUpdateSession_MessagesUpdatedBatch pins that a paced batch is
+// applied event by event, exactly as the same updates would have been had
+// each arrived on its own — the batching is a delivery optimisation, not a
+// change in what the UI does with them.
+func TestUpdateSession_MessagesUpdatedBatch(t *testing.T) {
+	t.Parallel()
+
+	batched := newBusyUI(&countingWorkspace{ready: true})
+	batched.sess.current = &session.Session{ID: "s1"}
+	batchedCmds, done := batched.updateSession(MessagesUpdatedMsg{Events: []pubsub.Event[message.Message]{
+		{Type: pubsub.UpdatedEvent, Payload: message.Message{ID: "m1", SessionID: "s1"}},
+		{Type: pubsub.UpdatedEvent, Payload: message.Message{ID: "m2", SessionID: "s1"}},
+	}}, nil)
+	require.False(t, done)
+
+	individual := newBusyUI(&countingWorkspace{ready: true})
+	individual.sess.current = &session.Session{ID: "s1"}
+	var individualCmds []tea.Cmd
+	for _, id := range []string{"m1", "m2"} {
+		individualCmds, done = individual.updateSession(pubsub.Event[message.Message]{
+			Type:    pubsub.UpdatedEvent,
+			Payload: message.Message{ID: id, SessionID: "s1"},
+		}, individualCmds)
+		require.False(t, done)
+	}
+
+	require.Len(t, batchedCmds, len(individualCmds),
+		"a batch must produce the same work as the events it carries")
 }
 
 func TestUpdateSession_HistoryFileEvent(t *testing.T) {

@@ -124,9 +124,16 @@ sennit --continue
 			tea.WithFilter(inputFilter.Filter),
 		)
 		model.SetSend(program.Send)
-		go ws.Subscribe(func(msg any) { program.Send(msg) })
+		// Streaming message updates are paced into one batch per frame on
+		// the way in: bubbletea re-lays the whole UI out once per message
+		// it delivers, and a session with several delegations streaming at
+		// once publishes far more of them per second than the renderer can
+		// ever draw. See ui.MessagesUpdatedMsg.
+		pacedSend, stopPacing := ui.PaceMessages(func(msg any) { program.Send(msg) })
+		go ws.Subscribe(pacedSend)
 
 		_, err = program.Run()
+		stopPacing()
 		model.Cleanup()
 		if err != nil {
 			slog.Error("TUI run error", "error", err)

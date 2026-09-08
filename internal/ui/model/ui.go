@@ -626,6 +626,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 		reflect.TypeFor[sessionFilesUpdatesMsg](), reflect.TypeFor[sendMessageMsg](),
 		reflect.TypeFor[pubsub.Event[session.Session]](), reflect.TypeFor[pubsub.Event[message.Message]](),
 		reflect.TypeFor[pubsub.Event[history.File]](), reflect.TypeFor[sendMessageErrorMsg](),
+		reflect.TypeFor[MessagesUpdatedMsg](),
 		reflect.TypeFor[sendPendingQueueMsg](), reflect.TypeFor[bangSessionCreatedMsg](),
 		reflect.TypeFor[createSessionMsg]())
 
