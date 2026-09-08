@@ -108,6 +108,17 @@ type yoloToggledMsg struct {
 	generation uint64
 }
 
+// yoloPermissionEnabledMsg carries the result of enabling yolo mode and
+// granting the permission that prompted the choice.
+type yoloPermissionEnabledMsg struct {
+	uiOwned
+
+	Accepted             bool
+	Permission           string
+	permissionGeneration uint64
+	yoloGeneration       uint64
+}
+
 type permissionResponseMsg struct {
 	uiOwned
 
@@ -252,6 +263,22 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.updateNotificationBackend()
 		m.dialog.CloseDialog(dialog.NotificationsID)
 		cmds = append(cmds, util.ReportInfo("Notifications set to: "+msg.Style))
+
+	case yoloPermissionEnabledMsg:
+		yoloCompleted := m.yolo.complete(msg.yoloGeneration)
+		permissionCompleted := m.permissionResponse.complete(msg.Permission, msg.permissionGeneration)
+		if yoloCompleted {
+			m.wsCache.yoloCache.Set(true)
+			m.wsCache.busyFetchGen++
+			m.setEditorPrompt(true)
+			cmds = append(cmds, util.ReportInfo("Yolo mode enabled"))
+		}
+		if permissionCompleted {
+			m.dialog.CloseDialog(dialog.PermissionsID)
+			if !msg.Accepted {
+				cmds = append(cmds, util.ReportError(errors.New("permission request is no longer waiting for an answer")))
+			}
+		}
 
 	case permissionResponseMsg:
 		if !m.permissionResponse.complete(msg.Permission, msg.generation) {

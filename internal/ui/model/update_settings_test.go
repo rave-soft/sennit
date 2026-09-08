@@ -590,6 +590,40 @@ func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 	})
 }
 
+func TestUpdateSettings_YoloPermissionEnabledMsgAppliesYoloForReplacedPermission(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newSettingsUI(newSettingsConfig())
+	m.wsCache.yoloCache.Set(false)
+	yoloGeneration, yoloStarted := m.yolo.begin()
+	require.True(t, yoloStarted)
+	_, opened := m.permissionResponse.open("perm-1", false)
+	require.True(t, opened)
+	permissionGeneration, permissionStarted := m.permissionResponse.begin("perm-1")
+	require.True(t, permissionStarted)
+	_, opened = m.permissionResponse.open("perm-2", false)
+	require.True(t, opened)
+	m.dialog.OpenDialog(stubIDDialog{id: dialog.PermissionsID})
+
+	cmds, done := m.updateSettings(yoloPermissionEnabledMsg{
+		Accepted:             true,
+		Permission:           "perm-1",
+		permissionGeneration: permissionGeneration,
+		yoloGeneration:       yoloGeneration,
+	}, nil)
+
+	require.False(t, done)
+	require.False(t, m.yolo.isLoading())
+	require.True(t, m.wsCache.yoloModeCached())
+	require.True(t, m.dialog.ContainsDialog(dialog.PermissionsID))
+	permissionID, _ := m.permissionResponse.current()
+	require.Equal(t, "perm-2", permissionID)
+	require.Len(t, cmds, 1)
+	info, ok := firstMsg(cmds[0]).(util.InfoMsg)
+	require.True(t, ok)
+	require.Equal(t, "Yolo mode enabled", info.Msg)
+}
+
 func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 	t.Parallel()
 

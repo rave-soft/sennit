@@ -74,7 +74,9 @@ type cmdDrivingWorkspace struct {
 	permGrantCalls          int
 	permGrantPersistentCall permission.PermissionRequest
 	permDenyCalls           int
+	permSetSkipCalls        int
 	permSkipCalls           int
+	lastPermSkip            bool
 
 	listMessagesCalls       int
 	listMessagesByIDsCalls  int
@@ -156,7 +158,13 @@ func (w *cmdDrivingWorkspace) PermissionSkipRequests() bool {
 	w.permSkipCalls++
 	return w.yolo
 }
-func (w *cmdDrivingWorkspace) PermissionSetSkipRequests(bool) {}
+
+func (w *cmdDrivingWorkspace) PermissionSetSkipRequests(skip bool) {
+	w.permSetSkipCalls++
+	w.lastPermSkip = skip
+	w.yolo = skip
+}
+
 func (w *cmdDrivingWorkspace) PermissionGrant(p permission.PermissionRequest) bool {
 	w.permGrantCalls++
 	return true
@@ -830,6 +838,34 @@ func TestCmdDriving_PermissionRoundTrip_Allow(t *testing.T) {
 	// Dialog must close.
 	require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID),
 		"permissions dialog must close after action")
+}
+
+func TestCmdDriving_PermissionRoundTrip_EnableYolo(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{agentReady: true, yolo: true}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	perm := permission.PermissionRequest{
+		ID:         "perm-enable-yolo",
+		ToolCallID: "tool-call-enable-yolo",
+		ToolName:   "bash",
+	}
+	m.permissionResponse.open(perm.ID, false)
+	m.dialog.OpenDialog(dialog.NewPermissions(m.com, perm))
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	require.Zero(t, ws.permSetSkipCalls, "permission changes must not run in Update")
+	require.Zero(t, ws.permGrantCalls, "permission grants must not run in Update")
+
+	runCmdTree(m, cmd, nil)
+	require.Equal(t, 1, ws.permSetSkipCalls)
+	require.True(t, ws.lastPermSkip)
+	require.Equal(t, 1, ws.permGrantCalls)
+	require.True(t, ws.yolo)
+	require.True(t, m.wsCache.yoloModeCached())
+	require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID))
 }
 
 // ---------------------------------------------------------------------------

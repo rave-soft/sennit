@@ -648,7 +648,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 		reflect.TypeFor[agentModelInitializedMsg](), reflect.TypeFor[modelSettingUpdatedMsg](),
 		reflect.TypeFor[transparentToggledMsg](), reflect.TypeFor[themeSetMsg](),
 		reflect.TypeFor[compactModeToggledMsg](), reflect.TypeFor[notificationStyleSetMsg](),
-		reflect.TypeFor[permissionResponseMsg](), reflect.TypeFor[yoloToggledMsg](),
+		reflect.TypeFor[permissionResponseMsg](), reflect.TypeFor[yoloToggledMsg](), reflect.TypeFor[yoloPermissionEnabledMsg](),
 		reflect.TypeFor[notificationSentMsg](), reflect.TypeFor[importCopilotResult]())
 
 	register((*UI).updateMouse,

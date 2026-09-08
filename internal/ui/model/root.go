@@ -1048,6 +1048,7 @@ var (
 	_ uiOwnedMsg = notificationStyleSetMsg{}
 	_ uiOwnedMsg = permissionResponseMsg{}
 	_ uiOwnedMsg = yoloToggledMsg{}
+	_ uiOwnedMsg = yoloPermissionEnabledMsg{}
 	_ uiOwnedMsg = notificationSentMsg{}
 	_ uiOwnedMsg = importCopilotResult{}
 	_ uiOwnedMsg = openEditorMsg{}

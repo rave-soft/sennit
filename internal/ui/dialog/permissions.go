@@ -29,6 +29,7 @@ type PermissionAction string
 const (
 	PermissionAllow           PermissionAction = "allow"
 	PermissionAllowForSession PermissionAction = "allow_session"
+	PermissionEnableYolo      PermissionAction = "enable_yolo"
 	PermissionDeny            PermissionAction = "deny"
 )
 
@@ -60,7 +61,7 @@ type Permissions struct {
 	fullscreen bool // true when dialog is fullscreen
 
 	permission     permission.PermissionRequest
-	selectedOption int // 0: Allow, 1: Allow for session, 2: Deny
+	selectedOption int
 
 	viewport      viewport.Model
 	viewportDirty bool // true when viewport content needs to be re-rendered
@@ -75,12 +76,11 @@ type Permissions struct {
 	help   help.Model
 	keyMap permissionsKeyMap
 
-	// buttonRects holds the absolute screen rectangles of the Allow /
-	// Allow for Session / Deny buttons from the most recent Draw, used
-	// to hit-test mouse clicks and hover (mirrors the childPanelButtonRect
-	// pattern in model/child_session_panel.go: geometry is captured at
-	// draw time and read back on the next mouse event).
-	buttonRects [3]image.Rectangle
+	// buttonRects holds the absolute screen rectangles of the action buttons
+	// from the most recent Draw, used to hit-test mouse clicks and hover
+	// (mirrors the childPanelButtonRect pattern in model/child_session_panel.go:
+	// geometry is captured at draw time and read back on the next mouse event).
+	buttonRects [4]image.Rectangle
 	// hoverIndex is the index of the button currently under the pointer,
 	// or -1 when the pointer isn't over any button.
 	hoverIndex int
@@ -94,6 +94,7 @@ type permissionsKeyMap struct {
 	Allow            key.Binding
 	AllowSession     key.Binding
 	Deny             key.Binding
+	EnableYolo       key.Binding
 	Close            key.Binding
 	ToggleDiffMode   key.Binding
 	ToggleFullscreen key.Binding
@@ -120,7 +121,7 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithHelp("tab", "next option"),
 		),
 		Select: key.NewBinding(
-			key.WithKeys("enter", "ctrl+y"),
+			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
 		Allow: key.NewBinding(
@@ -134,6 +135,10 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 		Deny: key.NewBinding(
 			key.WithKeys("d", "D"),
 			key.WithHelp("d", "deny"),
+		),
+		EnableYolo: key.NewBinding(
+			key.WithKeys("y", "Y", "ctrl+y"),
+			key.WithHelp("ctrl+y", "enable yolo"),
 		),
 		Close: CloseKey,
 		ToggleDiffMode: key.NewBinding(
@@ -248,10 +253,10 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			// Escape denies the permission request.
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 3
+			p.selectedOption = (p.selectedOption + 1) % 4
 		case key.Matches(msg, p.keyMap.Left):
-			// Add 2 instead of subtracting 1 to avoid negative modulo.
-			p.selectedOption = (p.selectedOption + 2) % 3
+			// Add 3 instead of subtracting 1 to avoid negative modulo.
+			p.selectedOption = (p.selectedOption + 3) % 4
 		case key.Matches(msg, p.keyMap.Select):
 			return p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
@@ -260,6 +265,8 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			return p.respond(PermissionAllowForSession)
 		case key.Matches(msg, p.keyMap.Deny):
 			return p.respond(PermissionDeny)
+		case key.Matches(msg, p.keyMap.EnableYolo):
+			return p.respond(PermissionEnableYolo)
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
 			if p.hasDiffView() {
 				newMode := !p.isSplitMode()
@@ -335,8 +342,10 @@ func (p *Permissions) selectCurrentOption() tea.Msg {
 		return p.respond(PermissionAllow)
 	case 1:
 		return p.respond(PermissionAllowForSession)
-	default:
+	case 2:
 		return p.respond(PermissionDeny)
+	default:
+		return p.respond(PermissionEnableYolo)
 	}
 }
 
@@ -897,15 +906,15 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 	return panelStyle.Width(width).Render(content)
 }
 
-// buttonOptsList builds the Allow / Allow for Session / Deny button specs
-// from current selection and hover state. Shared by renderButtons (drawing)
-// and buttonRects (click/hover hit-testing) so their button order and text
-// never drift apart.
+// buttonOptsList builds the action button specs from current selection and
+// hover state. Shared by renderButtons (drawing) and buttonRects (click/hover
+// hit-testing) so their button order and text never drift apart.
 func (p *Permissions) buttonOptsList() []common.ButtonOpts {
 	return []common.ButtonOpts{
 		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0, Hovered: p.hoverIndex == 0},
 		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1, Hovered: p.hoverIndex == 1},
 		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2, Hovered: p.hoverIndex == 2},
+		{Text: "Enable YOLO", UnderlineIndex: 7, Selected: p.selectedOption == 3, Hovered: p.hoverIndex == 3},
 	}
 }
 
@@ -943,13 +952,12 @@ func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 }
 
 // computeButtonRects computes the absolute on-screen rectangle of each
-// button (Allow, Allow for Session, Deny), given the row's origin
-// (top-left of its content-width slot, in absolute screen coordinates)
-// and the same layout decision renderButtons made. Button style
-// (selected/hovered) doesn't affect width, so opts here need not match
-// hover state exactly.
-func (p *Permissions) computeButtonRects(opts []common.ButtonOpts, contentWidth int, fullscreen bool, originX, originY int) [3]image.Rectangle {
-	var rects [3]image.Rectangle
+// action button, given the row's origin (top-left of its content-width slot,
+// in absolute screen coordinates) and the same layout decision renderButtons
+// made. Button style (selected/hovered) doesn't affect width, so opts here
+// need not match hover state exactly.
+func (p *Permissions) computeButtonRects(opts []common.ButtonOpts, contentWidth int, fullscreen bool, originX, originY int) [4]image.Rectangle {
+	var rects [4]image.Rectangle
 	vertical, align := p.buttonLayout(opts, contentWidth, fullscreen)
 
 	widths := make([]int, len(opts))
@@ -1005,6 +1013,7 @@ func (p *Permissions) ShortHelp() []key.Binding {
 	bindings := []key.Binding{
 		p.keyMap.Choose,
 		p.keyMap.Select,
+		p.keyMap.EnableYolo,
 		p.keyMap.Close,
 	}
 

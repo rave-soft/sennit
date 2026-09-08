@@ -279,6 +279,33 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 	case dialog.ActionPermissionResponse:
 		action := msg.Action
 		perm := msg.Permission
+		if action == dialog.PermissionEnableYolo {
+			yoloGeneration, yoloStarted := m.yolo.begin()
+			if !yoloStarted {
+				cmds = append(cmds, util.ReportWarn("Yolo mode is already being updated"))
+				break
+			}
+			permissionGeneration, permissionStarted := m.permissionResponse.begin(perm.ID)
+			if !permissionStarted {
+				m.yolo.complete(yoloGeneration)
+				cmds = append(cmds, util.ReportWarn("Permission response is already being submitted"))
+				break
+			}
+			permissionID, _ := m.permissionResponse.current()
+			workspace := m.com.Workspace
+			cmds = append(cmds, func() tea.Msg {
+				workspace.PermissionSetSkipRequests(true)
+				accepted := workspace.PermissionGrant(perm)
+				return yoloPermissionEnabledMsg{
+					uiOwned:              uiOwned{owner: m},
+					Accepted:             accepted,
+					Permission:           permissionID,
+					permissionGeneration: permissionGeneration,
+					yoloGeneration:       yoloGeneration,
+				}
+			})
+			break
+		}
 		generation, started := m.permissionResponse.begin(perm.ID)
 		if !started {
 			cmds = append(cmds, util.ReportWarn("Permission response is already being submitted"))

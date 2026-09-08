@@ -39,6 +39,9 @@ func TestPermissions_ActionKeysResolve(t *testing.T) {
 		{keyMsg('D'), PermissionDeny},
 		{keyMsg('s'), PermissionAllowForSession},
 		{keyMsg('S'), PermissionAllowForSession},
+		{keyMsg('y'), PermissionEnableYolo},
+		{keyMsg('Y'), PermissionEnableYolo},
+		{tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}, PermissionEnableYolo},
 	}
 
 	for _, tc := range tests {
@@ -51,7 +54,7 @@ func TestPermissions_ActionKeysResolve(t *testing.T) {
 }
 
 // TestPermissions_NavigationCyclesOptions verifies that tab and arrow keys
-// cycle through the three permission options.
+// cycle through the four permission options.
 func TestPermissions_NavigationCyclesOptions(t *testing.T) {
 	t.Parallel()
 
@@ -65,13 +68,16 @@ func TestPermissions_NavigationCyclesOptions(t *testing.T) {
 	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.Equal(t, 2, p.selectedOption)
 
+	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, 3, p.selectedOption)
+
 	// Wrap around.
 	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.Equal(t, 0, p.selectedOption)
 
 	// Left cycles backward.
 	p.HandleMsg(keyMsg('h'))
-	require.Equal(t, 2, p.selectedOption)
+	require.Equal(t, 3, p.selectedOption)
 }
 
 // TestPermissions_EnterConfirmsSelection verifies that enter confirms the
@@ -86,6 +92,28 @@ func TestPermissions_EnterConfirmsSelection(t *testing.T) {
 	resp, ok := action.(ActionPermissionResponse)
 	require.True(t, ok)
 	require.Equal(t, PermissionAllowForSession, resp.Action)
+}
+
+func TestPermissions_EnterEnablesYolo(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPermissions(t)
+	p.selectedOption = 3
+
+	action := p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	resp, ok := action.(ActionPermissionResponse)
+	require.True(t, ok)
+	require.Equal(t, PermissionEnableYolo, resp.Action)
+}
+
+func TestPermissions_HelpIncludesYoloShortcut(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPermissions(t)
+	bindings := p.ShortHelp()
+	require.Contains(t, bindings, p.keyMap.EnableYolo)
+	require.Equal(t, "ctrl+y", p.keyMap.EnableYolo.Help().Key)
+	require.Equal(t, "enable yolo", p.keyMap.EnableYolo.Help().Desc)
 }
 
 // TestPermissions_EscapeDenies verifies that escape denies the request.
@@ -123,6 +151,7 @@ func TestPermissions_MouseClickTriggersButtonAction(t *testing.T) {
 		{"Allow", 0, PermissionAllow},
 		{"Allow for Session", 1, PermissionAllowForSession},
 		{"Deny", 2, PermissionDeny},
+		{"Enable YOLO", 3, PermissionEnableYolo},
 	}
 
 	for _, tc := range tests {
@@ -152,7 +181,7 @@ func TestPermissions_MouseClickIgnoresNonLeftButton(t *testing.T) {
 	p := newTestPermissions(t)
 	drawTestPermissions(t, p)
 
-	rect := p.buttonRects[2] // Deny
+	rect := p.buttonRects[2]
 	action := p.HandleMsg(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseRight})
 	require.Nil(t, action)
 }
