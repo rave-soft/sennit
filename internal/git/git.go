@@ -297,13 +297,6 @@ func BranchExists(ctx context.Context, repo, name string) (bool, error) {
 	return false, err
 }
 
-func CreateBranch(ctx context.Context, repo, branch, base string) error {
-	if _, err := run(ctx, repo, "branch", "--", branch, base); err != nil {
-		return fmt.Errorf("git: create branch: %w", err)
-	}
-	return nil
-}
-
 func ResolveCommit(ctx context.Context, repo, revision string) (string, error) {
 	out, err := run(ctx, repo, "rev-parse", "--verify", revision+"^{commit}")
 	if err != nil {
@@ -704,20 +697,6 @@ func MergeIntoWorktree(ctx context.Context, worktree, ref string) (*MergeResult,
 	}
 
 	return &MergeResult{Merged: false, Conflicts: strings.Split(conflicts, "\n")}, nil
-}
-
-// ConflictedFiles lists the paths currently left in conflicted (unmerged)
-// state in worktree. Empty when there is no merge in progress or all
-// conflicts have been resolved and staged.
-func ConflictedFiles(ctx context.Context, worktree string) ([]string, error) {
-	out, err := run(ctx, worktree, "diff", "--name-only", "--diff-filter=U")
-	if err != nil {
-		return nil, fmt.Errorf("git: list conflicts: %w", err)
-	}
-	if out == "" {
-		return nil, nil
-	}
-	return strings.Split(out, "\n"), nil
 }
 
 // MergeFFOnly fast-forwards the branch checked out in dir to ref via
