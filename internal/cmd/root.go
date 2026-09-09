@@ -59,7 +59,6 @@ func init() {
 		accountsCmd,
 		statCmd,
 		sessionCmd,
-		threadsCmd,
 		gcCmd,
 	)
 }

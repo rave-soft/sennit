@@ -118,7 +118,6 @@ var readOnlySafeMethods = []string{
 	"KnownProviders",
 	"GetMCPPrompt",
 	"GetSession",
-	"GetThread",
 	"InitializePrompt",
 	"LSPGetDiagnosticCounts",
 	"LSPGetStates",

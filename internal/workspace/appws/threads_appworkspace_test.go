@@ -335,7 +335,7 @@ func TestAppWorkspace_SupportsThreads(t *testing.T) {
 	require.False(t, plain.SupportsThreads())
 }
 
-func TestAppWorkspace_CreateListGetThread(t *testing.T) {
+func TestAppWorkspace_CreateListThread(t *testing.T) {
 	aw, _ := newTestThreadAppWorkspace(t)
 	ctx := t.Context()
 
@@ -351,12 +351,6 @@ func TestAppWorkspace_CreateListGetThread(t *testing.T) {
 	require.NotEmpty(t, created.ID)
 	require.Equal(t, "test-thread", created.Name)
 	require.Equal(t, "do the thing", created.Goal)
-
-	got, err := aw.GetThread(ctx, created.ID)
-	require.NoError(t, err)
-	require.Equal(t, created.ID, got.ID)
-	require.Equal(t, created.Name, got.Name)
-	require.Equal(t, created.Goal, got.Goal)
 
 	threads, err = aw.ListThreads(ctx)
 	require.NoError(t, err)
@@ -471,13 +465,6 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	spawnCount := len(spawner.byPath)
 	spawner.mu.Unlock()
 	require.Zero(t, spawnCount, "AttachThread must never call Spawn")
-
-	// The status and the finished run's summary are still readable through
-	// the read-only view.
-	got, err := aw.GetThread(t.Context(), created.ID)
-	require.NoError(t, err)
-	require.Equal(t, string(thread.StatusCompleted), got.Status)
-	require.Equal(t, "did the thing", got.ResultSummary)
 }
 
 // TestAppWorkspace_AttachThread_LiveThread verifies that AttachThread for

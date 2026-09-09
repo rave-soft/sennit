@@ -45,3 +45,15 @@ func TestSmallModelFlagRemovedFromRunCmd(t *testing.T) {
 	flag := runCmd.Flags().Lookup("small-model")
 	require.Nil(t, flag, "--small-model must not be registered on `sennit run`; helper model selection is automatic")
 }
+
+func TestThreadsCommandRemoved(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range rootCmd.Commands() {
+		require.NotEqual(t, "threads", command.Name())
+	}
+
+	_, _, err := rootCmd.Find([]string{"threads"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unknown command "threads"`)
+}

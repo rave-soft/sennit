@@ -718,10 +718,6 @@ func (w *readOnlyWorkspace) GetMCPPrompt(clientID, promptID string, args map[str
 	return w.ws.GetMCPPrompt(clientID, promptID, args)
 }
 
-func (w *readOnlyWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
-	return w.ws.GetThread(ctx, id)
-}
-
 func (w *readOnlyWorkspace) InitializePrompt() (string, error) {
 	return w.ws.InitializePrompt()
 }

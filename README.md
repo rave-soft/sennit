@@ -172,7 +172,6 @@ earlier one and `--cwd` picks the project.
 sennit run "explain internal/agent"   # single non-interactive prompt (pipeable)
 sennit models [refresh]               # list models; re-discover custom providers
 sennit session list|show|last         # browse sessions
-sennit threads list|create|merge      # manage work threads
 sennit stat                           # usage statistics
 sennit doctor                         # check the loaded config for problems
 sennit dirs / projects / logs         # where things live, and what's in them

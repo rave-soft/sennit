@@ -682,7 +682,6 @@ type MCPController interface {
 type ThreadController interface {
 	SupportsThreads() bool
 	ListThreads(ctx context.Context) ([]proto.Thread, error)
-	GetThread(ctx context.Context, id string) (proto.Thread, error)
 	CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error)
 	// ActivateThread respawns id's isolated workspace without dispatching
 	// an agent run, so a thread whose run has finished can be attached to
