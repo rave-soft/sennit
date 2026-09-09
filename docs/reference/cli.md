@@ -83,18 +83,6 @@ sennit session delete <id>
 
 Every subcommand accepts `--json`.
 
-## `threads` — parallel work streams
-
-```
-sennit threads [list]
-sennit threads create <name>
-sennit threads remove <name>
-```
-
-With no subcommand it lists. `--json` for machine-readable output. Each thread
-runs in its own git worktree and branch; see
-[Steering, tasks and threads](../concepts/delegation.md).
-
 ## `stat` — usage statistics
 
 ```
@@ -124,9 +112,9 @@ looks like is the P50 rising.
 The TUI's `/stats` shows the same aggregation (both run on
 `internal/stats`, so they cannot disagree), with tabs for three scopes:
 the current session and everything it delegated, the current project, and
-every project at once. It also reports how background delegations ended —
-"landed" meaning the task or thread reached a completed or merged state,
-which is what the database records; no review verdict is stored anywhere.
+every project at once. It also reports how delegations ended —
+"landed" meaning the delegation reached a completed state, which is what the
+database records; no review verdict is stored anywhere.
 
 ## `doctor` — check the config
 
@@ -159,7 +147,7 @@ sennit gc [--flags]
 | `--project` | scope to the current project instead of the whole database |
 | `--json` | machine-readable output |
 
-Deletes old sessions and finished threads, then `VACUUM`s the database and
+Deletes old sessions and finished delegations, then `VACUUM`s the database and
 checkpoints its WAL. Defaults to the whole shared database across every
 project.
 

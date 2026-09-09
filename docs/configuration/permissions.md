@@ -91,9 +91,10 @@ worked examples.
 
 ## Delegated work is not exempt
 
-Background tasks and threads run tools through the same permission service as
-the foreground turn. Delegating does not launder a tool call into an approved
-one — a task that wants to run `bash` prompts exactly as the main agent would.
+Delegations run tools through the same permission service as the foreground
+turn, isolated or not. Delegating does not launder a tool call into an
+approved one — a subagent that wants to run `bash` prompts exactly as the
+main agent would.
 
 To rule out unattended concurrent work entirely, turn dispatch off rather than
 relying on prompts:

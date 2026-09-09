@@ -75,44 +75,44 @@ goes through the normal permission flow.
 
 ## Delegation
 
-See [Steering, tasks and threads](../concepts/delegation.md).
+See [Steering and delegation](../concepts/delegation.md).
 
 | Tool | Does |
 |:--|:--|
-| `agent` | Delegate to a subagent. `subagent_type` names one from `.sennit/agents/`; omit it for the general-purpose agent |
-| `agent_list` | Every delegation you can act on — your background tasks, and the workspace's threads |
+| `agent` | Delegate to a subagent. `subagent_type` names one from `.sennit/agents/`; omit it for the general-purpose agent. `isolation: worktree` gives it a git worktree of its own |
+| `agent_list` | Every delegation you can act on, isolated or not |
 | `agent_result` | A delegation's status, and its final answer once finished |
-| `agent_output` | A background task's transcript so far, without waiting |
+| `agent_output` | An unisolated delegation's transcript so far, without waiting |
 | `agent_send` | Send a follow-up into a delegation's session |
 | `agent_cancel` | Stop a running delegation |
 | `ask_parent` | Message the session that created this delegation, waking it if idle |
 
-The `agent_*` tools take a task's id or a thread's id or name, so one set
-addresses both kinds. The older management names (`task_list`, `task_result`,
-`task_cancel`, `task_send`, `task_output`, `thread_list`, `thread_status`,
-`thread_result`, `thread_cancel`, `thread_send`, and `thread_output`) still
-resolve to them in `tools:` lists and permission configs. The tools are
-available whenever either background tasks or workspace threads are available.
+The `agent_*` tools take a delegation's id, or an isolated one's name, so
+one set addresses both kinds. The older management names (`task_list`,
+`task_result`, `task_cancel`, `task_send`, `task_output`, `thread_list`,
+`thread_status`, `thread_result`, `thread_cancel`, `thread_send`, and
+`thread_output`) still resolve to them in `tools:` lists and permission
+configs. There is no tool that creates or removes a worktree: isolation is
+`agent`'s `isolation: worktree` parameter, and cleaning up afterwards is the
+runtime's and the user's, not the model's.
 
-Listing, inspecting, steering and stopping a thread use the `agent_*` tools.
-`agent_output` is the exception: a thread's transcript lives in its own
-worktree session and is not readable from the parent workspace. Create an
-isolated delegation with `agent` and `isolation: worktree`; its merge and
-cleanup remain runtime and user-interface responsibilities, not model tools.
+`agent_output` is the one exception to "both kinds": an isolated
+delegation's transcript lives in its own worktree session, which the parent
+workspace cannot read.
 
 > [!NOTE]
-> A thread that is mid-turn does not read a follow-up until that turn ends —
-> an agent inside a long sub-agent call can be minutes away from it — so
-> `agent_send` cannot steer or time-box work already in flight. Its result
+> A delegation that is mid-turn does not read a follow-up until that turn
+> ends — an agent inside a long sub-agent call can be minutes away from it —
+> so `agent_send` cannot steer or time-box work already in flight. Its result
 > says whether the message runs next or is waiting behind the turn in flight;
-> read it rather than assuming delivery. Sending to a thread from the TUI's
-> thread view is a separate path.
+> read it rather than assuming delivery. Sending from the TUI's delegation
+> dashboard is a separate path.
 
 > [!NOTE]
-> A thread's completion arrives on its own through the parent's completion
-> inbox. Use `agent_result` to inspect an individual result; there is no
-> blocking wait tool. When several threads are involved, inspect their statuses
-> and continue when the corresponding completion messages arrive.
+> A completion arrives on its own through the parent's completion inbox. Use
+> `agent_result` to inspect an individual result; there is no blocking wait
+> tool. When several delegations are involved, inspect their statuses and
+> continue when the corresponding completion messages arrive.
 
 ## MCP
 

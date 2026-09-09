@@ -16,7 +16,7 @@ that edits files.
 Start one with the `agent` tool — delegation is always asynchronous and there
 is no separate task-creation tool.
 
-## Choosing: steering, a task, or a thread
+## Choosing: steering, a task, or an isolated delegation
 
 - **Steering.** A message sent while a turn is already running is folded into
   that turn at its next step, not started as a new one, and does not
@@ -25,21 +25,23 @@ is no separate task-creation tool.
 - **A background task.** Cheap, parallel work that doesn't touch files —
   research, locating code, drafting something to report back on. The default
   for "go look into this while I keep working."
-- **A thread.** Real isolation: its own git worktree, branch, app instance,
-  and database. Clean results with no unique commits are removed automatically;
-  retained work remains available for explicit removal. Use it only when the
-  work would otherwise collide with something already happening —
-  see the `threads` skill.
+- **An isolated delegation** — `agent` with `isolation: worktree`. Real
+  isolation: its own git worktree, branch, app instance, and database. Clean
+  results with no unique commits are removed automatically; retained work
+  remains available for explicit removal. Use it only when the work would
+  otherwise collide with something already happening — see the `threads`
+  skill.
 
-Rule of thumb: isolation → thread; cheap parallel read-only work → task;
-refining work already in flight → steering (say it, don't dispatch anything).
+Rule of thumb: isolation → `isolation: worktree`; cheap parallel read-only
+work → a plain delegation; refining work already in flight → steering (say
+it, don't dispatch anything).
 
 ## When to use one
 
 - Suited to read-only/research work. Anything that edits files competes with
   the current turn (and any other active task) for the same working
-  directory and the same permission queue — prefer doing it directly, or use
-  a thread if it genuinely needs isolation.
+  directory and the same permission queue — prefer doing it directly, or ask
+  for `isolation: worktree` if it genuinely needs isolation.
 - Do not poll for the result. A task's outcome — completed, failed, or
   cancelled, with its result or error — is delivered into your own context
   automatically once it finishes, arriving as a system-generated report at

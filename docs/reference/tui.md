@@ -20,7 +20,9 @@ Both are fed from the same list, so they never drift apart.
 | `doctor` | | check config problems, including live MCP health |
 | `stats` | | usage by model and subagent (aliases: *usage*, *tokens*, *cost*) |
 | `theme` | | switch colour theme |
-| `threads` | `ctrl+e` | the threads dashboard |
+| `delegations` | `ctrl+e` | the delegation dashboard (aliases: *threads*, *monitor work*) |
+| `worktree` | | move this session into a git worktree |
+| `exit worktree` | | bring it back to the main root |
 | `compact` | | summarize the session |
 | `thinking` | | toggle thinking mode |
 | `effort` | | reasoning effort |
@@ -35,11 +37,13 @@ Both are fed from the same list, so they never drift apart.
 | `init` | | write a project context file |
 | `exit` | `ctrl+c` | quit |
 
-Some entries only appear when they apply: `compact`, `files` and `todos` need
-an active session; `thinking` and `effort` depend on what the current model
-supports; `threads` needs a workspace that supports them; `files` needs a model
-that accepts images; `editor` needs `$EDITOR` set; the Docker MCP entries need
-Docker's MCP toolkit installed.
+Some entries only appear when they apply: `compact`, `files`, `todos` and the
+worktree pair need an active session, and only one of `worktree` / `exit
+worktree` is offered — whichever one you are not already in; `thinking` and
+`effort` depend on what the current model supports; `delegations` needs a
+workspace that stores them; `files` needs a model that accepts images;
+`editor` needs `$EDITOR` set; the Docker MCP entries need Docker's MCP
+toolkit installed.
 
 Below the built-ins, the same list carries your
 [custom commands](../extending/commands.md)
@@ -57,7 +61,7 @@ Below the built-ins, the same list carries your
 | `ctrl+g` | toggle help |
 | `ctrl+s` | sessions |
 | `ctrl+l` (or `ctrl+m`) | models |
-| `ctrl+e` | threads |
+| `ctrl+e` | delegations |
 | `ctrl+y` | toggle yolo |
 | `ctrl+z` | suspend |
 | `ctrl+c` | quit |
@@ -101,7 +105,7 @@ Below the built-ins, the same list carries your
 > [!IMPORTANT]
 > Typing a message while the agent is working does not interrupt it — the
 > message is steered into the running turn. `esc` `esc` is what stops it. See
-> [Steering, tasks and threads](../concepts/delegation.md).
+> [Steering and delegation](../concepts/delegation.md).
 
 ## Rebinding
 
@@ -115,7 +119,8 @@ list all the keys you want in one line.
 
 Action names use the groups `editor.*`, `chat.*` and `initialize.*`; global
 actions have no prefix. The global ones are `quit`, `help`, `commands`,
-`models`, `suspend`, `sessions`, `tab`, `toggle_yolo`, `threads`.
+`models`, `suspend`, `sessions`, `tab`, `toggle_yolo`, `threads` (the
+delegation dashboard, under the name it was bound as).
 
 Editor actions: `send_message`, `open_editor`, `newline`, `add_image`,
 `paste_image`, `mention_file`, `commands`, `attachment_delete_mode`, `escape`,
