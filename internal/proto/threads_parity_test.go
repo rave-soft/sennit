@@ -25,14 +25,10 @@ func TestThreadStatusParityWithDomain(t *testing.T) {
 		{proto.ThreadStatusPending, thread.StatusPending},
 		{proto.ThreadStatusRunning, thread.StatusRunning},
 		{proto.ThreadStatusIdle, thread.StatusIdle},
-		{proto.ThreadStatusMerging, thread.StatusMerging},
 		{proto.ThreadStatusCompleted, thread.StatusCompleted},
-		{proto.ThreadStatusMerged, thread.StatusMerged},
 		{proto.ThreadStatusFailed, thread.StatusFailed},
 		{proto.ThreadStatusInterrupted, thread.StatusInterrupted},
 		{proto.ThreadStatusCancelled, thread.StatusCancelled},
-		{proto.ThreadStatusConflict, thread.StatusConflict},
-		{proto.ThreadStatusMergeBlocked, thread.StatusMergeBlocked},
 	}
 
 	for _, s := range statuses {

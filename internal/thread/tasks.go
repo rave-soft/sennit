@@ -181,7 +181,6 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (created 
 		WorktreePath:    args.WorktreePath,
 		Branch:          args.Branch,
 		BaseBranch:      args.BaseBranch,
-		MergePolicy:     MergeManual,
 		Execution:       args.Execution,
 		Depth:           args.Depth,
 		SessionID:       args.SessionID,

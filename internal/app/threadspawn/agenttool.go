@@ -109,7 +109,6 @@ func toToolInfo(st thread.Thread) tools.ThreadInfo {
 		WorktreePath:  st.WorktreePath,
 		SessionID:     st.SessionID,
 		Status:        string(st.Status),
-		MergePolicy:   string(st.MergePolicy),
 		ResultSummary: st.ResultSummary,
 		Error:         st.Error,
 		CreatedAt:     st.CreatedAt,

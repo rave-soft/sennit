@@ -28,9 +28,8 @@ func TestManager_ThreadPermissionRequestReachesTheParentStream(t *testing.T) {
 	events := parent.Events(t.Context())
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "asks-for-bash",
-		Goal:        "implement the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "asks-for-bash",
+		Goal: "implement the thing",
 	})
 	require.NoError(t, err)
 
@@ -67,9 +66,8 @@ func TestManager_ForwardedPermissionCarriesItsDelegation(t *testing.T) {
 	events := parent.Events(t.Context())
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "named-thread",
-		Goal:        "implement the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "named-thread",
+		Goal: "implement the thing",
 	})
 	require.NoError(t, err)
 
@@ -110,9 +108,8 @@ func TestManager_PermissionsForRoutesToTheThreadThatIsWaiting(t *testing.T) {
 	events := parent.Events(t.Context())
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "waiting-thread",
-		Goal:        "implement the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "waiting-thread",
+		Goal: "implement the thing",
 	})
 	require.NoError(t, err)
 

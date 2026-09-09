@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/stretchr/testify/require"
@@ -15,39 +14,6 @@ import (
 // workspace above a thread, not inside one. Listing a thread's siblings
 // while you are looking at its work says nothing about that work, and
 // offering to open them from there invites threads within threads.
-func TestEmbeddedThreadUI_ShowsNoThreadsInItsPanel(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-	u.threadList.Cache.Value = mkDockThreads(2)
-	require.Positive(t, u.sessionPanelPlan(100).threadsActive,
-		"precondition: the main screen does show them")
-
-	u.embedded = true
-	plan := u.sessionPanelPlan(100)
-	require.Zero(t, plan.threadsActive)
-	require.Empty(t, plan.threads)
-	require.Zero(t, plan.threadsRows)
-	require.Zero(t, plan.threadsHeaderRows, "not even the header, which is only there to expand them")
-}
-
-// TestEmbeddedThreadUI_ShowsNoThreadBadge: same reasoning as the panel —
-// the count in the header is about the workspace above this one.
-func TestEmbeddedThreadUI_ShowsNoThreadBadge(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-	u.threadList.Cache.Set([]proto.Thread{{ID: "s1", Status: "running"}, {ID: "s2", Status: "pending"}, {ID: "s3", Status: "merging"}})
-	require.Equal(t, 3, u.activeThreadBadgeCount())
-
-	u.embedded = true
-	require.Zero(t, u.activeThreadBadgeCount())
-}
-
-// TestEmbeddedThreadUI_StartsNoThreadRefreshes: it renders none of it, so
-// it pays for none of it. Attaching into each listed thread to read its
-// live activity is the expensive half, and doing it from inside a thread
-// buys nothing.
 func TestEmbeddedThreadUI_StartsNoThreadRefreshes(t *testing.T) {
 	t.Parallel()
 

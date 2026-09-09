@@ -340,10 +340,6 @@ func (w *cmdDrivingWorkspace) CreateThread(_ context.Context, _ proto.CreateThre
 	return proto.Thread{}, nil
 }
 func (w *cmdDrivingWorkspace) SendThread(_ context.Context, _, _ string) error { return nil }
-func (w *cmdDrivingWorkspace) MergeThread(_ context.Context, _ string) (proto.Thread, error) {
-	return proto.Thread{}, nil
-}
-
 func (w *cmdDrivingWorkspace) RemoveThread(_ context.Context, _ string, _ proto.RemoveThreadOptions) error {
 	return nil
 }

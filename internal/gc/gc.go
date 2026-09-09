@@ -116,12 +116,12 @@ func Collect(ctx context.Context, q *sennitdb.Queries, cutoff int64, projectPath
 	if err != nil {
 		return Selection{}, err
 	}
-	threadIDs, orphanedWorktrees, err := selectThreads(ctx, q, cutoff, projectPath)
+	threadIDs, err := selectThreads(ctx, q, cutoff, projectPath)
 	if err != nil {
 		return Selection{}, err
 	}
 
-	selection := Selection{SessionIDs: sessionIDs, ThreadIDs: threadIDs, OrphanedWorktrees: orphanedWorktrees}
+	selection := Selection{SessionIDs: sessionIDs, ThreadIDs: threadIDs}
 	selection.MessagesDeleted, selection.FilesDeleted, selection.ReadFilesDeleted, err = countDependents(ctx, q, sessionIDs)
 	if err != nil {
 		return Selection{}, err
@@ -270,14 +270,11 @@ type persistedThreadStatus string
 type persistedThreadKind string
 
 const (
-	persistedStatusCompleted    persistedThreadStatus = "completed"
-	persistedStatusMerged       persistedThreadStatus = "merged"
-	persistedStatusFailed       persistedThreadStatus = "failed"
-	persistedStatusCancelled    persistedThreadStatus = "cancelled"
-	persistedStatusConflict     persistedThreadStatus = "conflict"
-	persistedStatusMergeBlocked persistedThreadStatus = "merge_blocked"
-	persistedStatusInterrupted  persistedThreadStatus = "interrupted"
-	persistedKindThread         persistedThreadKind   = "thread"
+	persistedStatusCompleted   persistedThreadStatus = "completed"
+	persistedStatusFailed      persistedThreadStatus = "failed"
+	persistedStatusCancelled   persistedThreadStatus = "cancelled"
+	persistedStatusInterrupted persistedThreadStatus = "interrupted"
+	persistedKindThread        persistedThreadKind   = "thread"
 )
 
 // terminal reports whether status is a known terminal status. Unknown
@@ -287,11 +284,8 @@ const (
 func (status persistedThreadStatus) terminal() bool {
 	switch status {
 	case persistedStatusCompleted,
-		persistedStatusMerged,
 		persistedStatusFailed,
 		persistedStatusCancelled,
-		persistedStatusConflict,
-		persistedStatusMergeBlocked,
 		persistedStatusInterrupted:
 		return true
 	default:
@@ -317,13 +311,13 @@ func (status persistedThreadStatus) terminal() bool {
 // -- an already-cleaned-up worktree is not an orphan and is silently
 // skipped, along with any os.Stat error, since that is not a failure of
 // gc itself.
-func selectThreads(ctx context.Context, q *sennitdb.Queries, cutoff int64, projectPath string) ([]string, []string, error) {
+func selectThreads(ctx context.Context, q *sennitdb.Queries, cutoff int64, projectPath string) ([]string, error) {
 	rows, err := q.ListThreadsForGC(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	var ids, orphaned []string
+	var ids []string
 	for _, r := range rows {
 		if projectPath != "" && r.ProjectPath != projectPath {
 			continue
@@ -339,16 +333,15 @@ func selectThreads(ctx context.Context, q *sennitdb.Queries, cutoff int64, proje
 		if r.CompletionPending != 0 || (r.Kind == "task" && r.WorktreePath != "") {
 			continue
 		}
-		ids = append(ids, r.ID)
 		if persistedThreadKind(r.Kind) == persistedKindThread && r.WorktreePath != "" {
-			if _, err := os.Stat(r.WorktreePath); err == nil {
-				orphaned = append(orphaned, r.WorktreePath)
+			if _, err := os.Stat(r.WorktreePath); err == nil || !os.IsNotExist(err) {
+				continue
 			}
 		}
+		ids = append(ids, r.ID)
 	}
 	sort.Strings(ids)
-	sort.Strings(orphaned)
-	return ids, orphaned, nil
+	return ids, nil
 }
 
 // DeleteFunc performs the actual row deletions for a Selection, inside the

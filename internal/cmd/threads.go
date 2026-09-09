@@ -49,13 +49,6 @@ var threadsCreateCmd = &cobra.Command{
 	RunE:  runThreadsCreate,
 }
 
-var threadsMergeCmd = &cobra.Command{
-	Use:   "merge <name>",
-	Short: "Merge a thread's branch back into its base branch",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runThreadsMerge,
-}
-
 var threadsRemoveCmd = &cobra.Command{
 	Use:     "remove <name>",
 	Aliases: []string{"rm"},
@@ -75,10 +68,10 @@ func init() {
 	threadsCmd.Flags().BoolVar(&threadsListJSON, "json", false, "output in JSON format")
 	threadsListCmd.Flags().BoolVar(&threadsListJSON, "json", false, "output in JSON format")
 	threadsCreateCmd.Flags().StringVar(&threadsCreateGoal, "goal", "", "goal prompt to dispatch immediately")
-	threadsRemoveCmd.Flags().BoolVar(&threadsRemoveForce, "force", false, "remove even if running/merging or dirty")
+	threadsRemoveCmd.Flags().BoolVar(&threadsRemoveForce, "force", false, "remove even if running or dirty")
 	threadsRemoveCmd.Flags().BoolVar(&threadsRemoveDeleteBranch, "delete-branch", false, "also delete the thread's git branch")
 
-	threadsCmd.AddCommand(threadsListCmd, threadsCreateCmd, threadsMergeCmd, threadsRemoveCmd)
+	threadsCmd.AddCommand(threadsListCmd, threadsCreateCmd, threadsRemoveCmd)
 }
 
 // acquireWorkspace is an indirection over setupWorkspaceWithProgressBar so
@@ -158,21 +151,6 @@ func runThreadsCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("threads: create: %w", err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Created thread %q (branch %s)\n", t.Name, t.Branch)
-	return nil
-}
-
-func runThreadsMerge(cmd *cobra.Command, args []string) error {
-	ctx, ws, cleanup, err := requireThreads(cmd, "this workspace doesn't support threads")
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	t, err := ws.MergeThread(ctx, args[0])
-	if err != nil {
-		return fmt.Errorf("threads: merge: %w", err)
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Thread %q: %s\n", t.Name, t.Status)
 	return nil
 }
 

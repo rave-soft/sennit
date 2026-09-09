@@ -26,8 +26,9 @@ is no separate task-creation tool.
   research, locating code, drafting something to report back on. The default
   for "go look into this while I keep working."
 - **A thread.** Real isolation: its own git worktree, branch, app instance,
-  and database, with a merge policy for folding the work back in. Use it only
-  when the work would otherwise collide with something already happening —
+  and database. Clean results with no unique commits are removed automatically;
+  retained work remains available for explicit removal. Use it only when the
+  work would otherwise collide with something already happening —
   see the `threads` skill.
 
 Rule of thumb: isolation → thread; cheap parallel read-only work → task;

@@ -1,11 +1,11 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/stretchr/testify/require"
 )
@@ -17,62 +17,26 @@ import (
 // (util.ReportInfo/ReportWarn) instead. A thread's first-ever sighting
 // already being terminal (e.g. this UI attaching after the fact) must NOT
 // toast — only a transition observed live.
-func TestNotifyThreadCompletion_TerminalTransitionToasts(t *testing.T) {
+func TestThreadCompletionCleanupOutcomes(t *testing.T) {
 	t.Parallel()
-
-	u := sessionUI()
-
-	// First sighting, already running: no prior status recorded, and
-	// "running" isn't terminal anyway — no toast either way.
-	require.Nil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "running"}))
-
-	// Transition running -> merged: must toast, info-styled.
-	cmd := u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "merged", CreatedAt: 1000, CompletedAt: 1720})
-	require.NotNil(t, cmd)
-	msg, ok := cmd().(util.InfoMsg)
-	require.True(t, ok)
-	require.Equal(t, util.InfoTypeInfo, msg.Type)
-	require.Contains(t, msg.Msg, "fix-auth")
-	require.Contains(t, msg.Msg, "merged")
-	require.Contains(t, msg.Msg, "12m", "must include the elapsed time from CreatedAt/CompletedAt")
-
-	// A repeated event for the same (already-reported) status must not
-	// re-fire.
-	require.Nil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "merged"}))
-}
-
-// TestNotifyThreadCompletion_NonTerminalTransitionDoesNotToast is the
-// direct regression guard for "must not re-fire for a non-terminal status
-// change (e.g. pending -> running)".
-// TestNotifyThreadCompletion_TaskDoesNotToast pins that a subagent task
-// finishing raises nothing. Tasks share the thread event stream, so every
-// delegated subagent used to toast on completion — on top of the report it
-// already writes back into the transcript, and once per subagent in a turn
-// that may have started several.
-func TestNotifyThreadCompletion_TaskDoesNotToast(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-
-	require.Nil(t, u.notifyThreadCompletion(proto.Thread{
-		ID: "task1", Name: "review", Kind: string(proto.ThreadKindTask), Status: "running",
-	}))
-	require.Nil(t, u.notifyThreadCompletion(proto.Thread{
-		ID: "task1", Name: "review", Kind: string(proto.ThreadKindTask), Status: "completed",
-	}), "a task completing must not toast")
-	require.NotContains(t, u.threadLastStatus, "task1", "a task should not occupy the transition map either")
-
-	// A thread on the same stream still toasts, including one whose Kind
-	// an older server left empty.
-	require.Nil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "running"}))
-	require.NotNil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "completed"}))
-
-	require.Nil(t, u.notifyThreadCompletion(proto.Thread{
-		ID: "t2", Name: "fix-db", Kind: string(proto.ThreadKindThread), Status: "running",
-	}))
-	require.NotNil(t, u.notifyThreadCompletion(proto.Thread{
-		ID: "t2", Name: "fix-db", Kind: string(proto.ThreadKindThread), Status: "merged",
-	}))
+	for _, testCase := range []struct {
+		name  string
+		error string
+		want  string
+	}{
+		{"removed", "", "clean worktree removed"},
+		{"dirty", "cleanup retained: uncommitted changes", "uncommitted changes"},
+		{"commits", "cleanup retained: unique commits", "unique commits"},
+		{"unknown", "cleanup retained: safety could not be verified", "could not be verified"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := threadCompletionToast(proto.Thread{Name: "work", Status: "completed", Error: testCase.error})
+			msg, ok := cmd().(util.InfoMsg)
+			require.True(t, ok)
+			require.Contains(t, msg.Msg, testCase.want)
+		})
+	}
 }
 
 func TestNotifyThreadCompletion_NonTerminalTransitionDoesNotToast(t *testing.T) {
@@ -106,46 +70,62 @@ func TestNotifyThreadCompletion_FailedTransitionWarns(t *testing.T) {
 // wiring check: the pubsub.Event[proto.Thread] case in ui.go's Update
 // loop must actually call notifyThreadCompletion, not just have the
 // standalone method work in isolation.
-func TestUpdate_ThreadEvent_TogglesThreadCompletionToast(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-	u.dialog = dialog.NewOverlay()
-
-	_, _ = u.Update(pubsub.Event[proto.Thread]{Type: pubsub.UpdatedEvent, Payload: proto.Thread{ID: "t1", Name: "fix-auth", Status: "running"}})
-	_, cmd := u.Update(pubsub.Event[proto.Thread]{Type: pubsub.UpdatedEvent, Payload: proto.Thread{ID: "t1", Name: "fix-auth", Status: "merged"}})
-	require.NotNil(t, cmd)
-}
-
-// TestNotifyThreadCompletion_PrunesEntryOnTerminalTransition covers §7:
-// threadLastStatus must not grow unbounded over a long session. Once a
-// thread's terminal transition has been reported, its entry is no longer
-// needed to detect a future transition (see the !known short-circuit
-// above), so it must be dropped rather than kept around forever.
-func TestNotifyThreadCompletion_PrunesEntryOnTerminalTransition(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-
-	require.Nil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "running"}))
-	require.NotNil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "merged"}))
-
-	_, stillTracked := u.threadLastStatus["t1"]
-	require.False(t, stillTracked, "threadLastStatus must prune a thread's entry once its terminal transition has been reported")
-}
-
-// TestUpdateThreads_DeletedEventPrunesThreadLastStatus covers the other
-// pruning path required by §7: a thread removed via pubsub.DeletedEvent
-// must have its threadLastStatus entry dropped too, mirroring the existing
-// threadsDock.DropActivity(id) cleanup for the same event.
 func TestUpdateThreads_DeletedEventPrunesThreadLastStatus(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
 	u.threadLastStatus = map[string]string{"t1": "running"}
 
-	u.updateThreads(pubsub.Event[proto.Thread]{Type: pubsub.DeletedEvent, Payload: proto.Thread{ID: "t1"}}, nil)
+	cmds, _ := u.updateThreads(pubsub.Event[proto.Thread]{
+		Type:    pubsub.DeletedEvent,
+		Payload: proto.Thread{ID: "t1", Name: "clean", Status: "completed"},
+	}, nil)
 
+	reports := 0
+	for _, cmd := range cmds {
+		if msg, ok := cmd().(util.InfoMsg); ok && strings.Contains(msg.Msg, "clean worktree removed") {
+			reports++
+		}
+	}
+	require.Equal(t, 1, reports)
 	_, stillTracked := u.threadLastStatus["t1"]
 	require.False(t, stillTracked, "a deleted thread's threadLastStatus entry must be dropped")
+}
+
+func TestWorkspaceConvertedCleanupEventsDriveOneUIOutcome(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		eventType pubsub.EventType
+		error     string
+		want      string
+	}{
+		{"removed", pubsub.DeletedEvent, "", "clean worktree removed"},
+		{"dirty", pubsub.UpdatedEvent, "cleanup retained: uncommitted changes", "uncommitted changes"},
+		{"unique", pubsub.UpdatedEvent, "cleanup retained: unique commits", "unique commits"},
+		{"unverified", pubsub.UpdatedEvent, "cleanup retained: safety could not be verified", "could not be verified"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			u := sessionUI()
+			u.threadLastStatus = map[string]string{"thread-1": "running"}
+			converted := pubsub.Event[proto.Thread]{
+				Type: testCase.eventType,
+				Payload: proto.Thread{
+					ID: "thread-1", Name: "work", Kind: "thread",
+					Status: "completed", Error: testCase.error,
+				},
+			}
+			cmds, _ := u.updateThreads(converted, nil)
+			var reports []string
+			for _, cmd := range cmds {
+				if msg, ok := cmd().(util.InfoMsg); ok {
+					reports = append(reports, msg.Msg)
+				}
+			}
+			require.Len(t, reports, 1)
+			require.Contains(t, reports[0], testCase.want)
+			if testCase.name != "removed" {
+				require.NotContains(t, reports[0], "clean worktree removed")
+			}
+		})
+	}
 }

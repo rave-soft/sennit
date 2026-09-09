@@ -19,9 +19,8 @@ func TestAppWorkspace_QuestionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	ws, mgr := newTestThreadAppWorkspace(t)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "asks-a-question",
-		Goal:        "do the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "asks-a-question",
+		Goal: "do the thing",
 	})
 	require.NoError(t, err)
 
@@ -73,9 +72,8 @@ func TestAttachedThread_QuestionAnswerReachesTheParentThatRaisedIt(t *testing.T)
 	ws, mgr := newTestThreadAppWorkspace(t)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "attached",
-		Goal:        "do the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "attached",
+		Goal: "do the thing",
 	})
 	require.NoError(t, err)
 

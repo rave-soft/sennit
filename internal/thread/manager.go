@@ -1,8 +1,7 @@
 // Package thread implements threads: parallel agent work streams, each
 // running in its own git worktree and branch with a fully isolated
 // workspace (own .sennit data directory, database, and agent
-// coordinator), and by default auto-merged back into its base branch on
-// completion.
+// coordinator), and by default safely cleaned up after completion when it has no retained work.
 package thread
 
 import (
@@ -13,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -37,13 +35,11 @@ const defaultDataDirName = brand.DataDir
 var nameRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 
 // CreateArgs holds the inputs to [Manager.Create]. BaseBranch defaults to
-// the repository's currently checked-out branch when empty; MergePolicy
-// defaults to [MergeAuto].
+// the repository's currently checked-out branch when empty.
 type CreateArgs struct {
 	Name            string
 	Goal            string
 	BaseBranch      string
-	MergePolicy     MergePolicy
 	ParentSessionID string
 }
 
@@ -90,15 +86,17 @@ type ManagerOptions struct {
 	// disables thread delivery without otherwise affecting the manager
 	// (Attach always supplies it in production; a test building a bare
 	// Manager may not need thread delivery at all).
-	ParentApp Workspace
+	ParentApp      Workspace
+	WorktreeRemove func(context.Context, string, string, bool) error
+	DeleteBranch   func(context.Context, string, string, bool) error
 }
 
 // Manager is the core of the threads feature: it drives thread creation,
 // dispatches and tracks each thread's agent run in its isolated
-// workspace, and folds completed work back into the base branch. The
+// workspace, and safely cleans up redundant completed work. The
 // generic admission, per-entity serialization, worker tracking, and event
 // plumbing it needs to do that live in the [lifecycle] it holds; Manager
-// itself is the git/merge-specific overlay on top.
+// itself is the git/worktree-specific overlay on top.
 type Manager struct {
 	store           Store
 	spawner         Spawner
@@ -109,7 +107,9 @@ type Manager struct {
 	rollbackTimeout time.Duration
 	// parentApp is the workspace this Manager is attached to — see
 	// ManagerOptions.ParentApp and resolveDeliveryTarget.
-	parentApp Workspace
+	parentApp      Workspace
+	worktreeRemove func(context.Context, string, string, bool) error
+	deleteBranch   func(context.Context, string, string, bool) error
 
 	lc *lifecycle
 
@@ -157,17 +157,25 @@ func NewManager(opts ManagerOptions) *Manager {
 		ctx:             ctx,
 		rollbackTimeout: rollbackTimeout,
 		parentApp:       opts.ParentApp,
+		worktreeRemove:  opts.WorktreeRemove,
+		deleteBranch:    opts.DeleteBranch,
 		shutdownStarted: make(chan struct{}),
 		shutdownDone:    make(chan struct{}),
 	}
-	// onAutoMerge/recoverWorktree/resolveDeliveryTarget are this package's
-	// git/merge overlay on the generic lifecycle; a lighter, worktree-less
+	if m.worktreeRemove == nil {
+		m.worktreeRemove = git.WorktreeRemove
+	}
+	if m.deleteBranch == nil {
+		m.deleteBranch = git.DeleteBranch
+	}
+	// onCompletedCleanup/recoverWorktree/resolveDeliveryTarget are this package's
+	// git/worktree overlay on the generic lifecycle; a lighter, worktree-less
 	// delegation kind would pass nil for the first two (see TaskManager,
 	// which supplies neither — it shares this same lifecycle instead). A
 	// TaskManager sharing this lifecycle (see NewTaskManager) must be
 	// constructed with this same m.lc and m.ctx, not fresh ones, or
 	// recovery and shutdown would only ever see threads.
-	m.lc = newLifecycle(opts.Store, m.onAutoMerge, m.recoverWorktree, m.resolveDeliveryTarget, opts.ParentApp)
+	m.lc = newLifecycle(opts.Store, m.onCompletedCleanup, m.recoverWorktree, m.resolveDeliveryTarget, opts.ParentApp)
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	return m
 }
@@ -195,9 +203,9 @@ func (m *Manager) Get(ctx context.Context, idOrName string) (Thread, error) {
 //
 // A miss is reported as [ErrNotFound] rather than whatever the store said.
 // The store's own "sql: no rows in result set" is an implementation detail
-// that means nothing to the caller, and since a merged thread is removed
-// (see discardMerged), asking about one by name is an ordinary thing to
-// do — the answer has to be a sentence, not a database message.
+// that means nothing to the caller. A completed thread may have been removed
+// automatically, so asking about one by name is ordinary and must return a
+// domain error rather than a database message.
 func (m *Manager) resolve(ctx context.Context, idOrName string) (Thread, error) {
 	st, err := m.store.Get(ctx, idOrName)
 	if err == nil {
@@ -263,10 +271,6 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, fmt.Errorf("thread: branch %q already exists", branch)
 	}
 
-	mergePolicy := args.MergePolicy
-	if mergePolicy == "" {
-		mergePolicy = MergeAuto
-	}
 	worktreePath := filepath.Join(m.worktreeDir, name)
 
 	st, err := m.store.Create(ctx, CreateParams{
@@ -275,7 +279,6 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		BaseBranch:      base,
 		Branch:          branch,
 		WorktreePath:    worktreePath,
-		MergePolicy:     mergePolicy,
 		ParentSessionID: args.ParentSessionID,
 	})
 	if err != nil {
@@ -447,102 +450,6 @@ func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error 
 	return cause
 }
 
-// onAutoMerge is the [runCompleteHook] that gives MergeAuto threads their
-// merge-instead-of-completed treatment: on a successful run it folds the
-// thread's branch back into its base branch rather than letting the
-// generic lifecycle rest the thread at StatusCompleted. Manual-policy
-// threads decline (return false) and get the generic StatusCompleted
-// write.
-//
-// Auto-merge threads go straight from running into the merge flow without
-// resting at "completed" in between: setting a terminal "completed"
-// status first would give [Manager.Wait] a window where it observes a
-// non-active status and returns before the merge that is about to start
-// has even begun. That is what the goroutine handoff below preserves —
-// handleRunComplete calls this method with the thread's opMu held, so the
-// merge itself cannot start until this method (and the handleRunComplete
-// call it returns to) release it; until then the thread is still
-// StatusRunning, which [Status.Active] reports as active, so Wait never
-// observes anything but an active status between the run finishing and
-// mergeAttempt setting StatusMerging.
-func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, resultText string) bool {
-	// Merging makes no sense for a delegation kind with no worktree.
-	// store.Create never defaults a non-thread's MergePolicy to
-	// MergeAuto, so this should not be reachable for a task today, but
-	// checking Kind directly — the same defense recoverWorktree applies —
-	// means this hook stays correct even if that changes.
-	if st.Kind != KindThread || st.MergePolicy != MergeAuto {
-		return false
-	}
-	m.lc.goWorker(func() {
-		c.opMu.Lock()
-		defer c.opMu.Unlock()
-		// ctx is handleRunComplete's followUpCtx: the manager's own
-		// long-lived context, kept alive past that call's return so this
-		// goroutine can outlive it — but that also means a Shutdown
-		// concurrent with this run's completion has already cancelled it
-		// (m.cancel, see Shutdown), which would fail mergeAttempt
-		// silently and strand the row at StatusRunning until the next
-		// process's Recover. Detach so a shutdown in progress still gets
-		// a finished merge (or a deliberately recorded outcome) instead
-		// of a stranded row; shutdownPhases already joins this worker via
-		// m.lc.wait(), so bounding it here is what makes that join finite.
-		mergeCtx, cancel := detachForTerminalWork(ctx)
-		defer cancel()
-		if err := m.mergeAttempt(mergeCtx, st.ID, true, resultText); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Error("Auto-merge failed", "component", "thread", "thread", st.ID, "error", err)
-		}
-		// The run finishing is not this thread's useful terminal event —
-		// an auto-merge thread hands straight from running into the merge
-		// flow (see this method's own doc comment), and the parent can't
-		// act on "the run finished" when the outcome that actually matters
-		// (merged cleanly, hit a conflict, or got blocked) is still
-		// pending. Deliver once mergeAttempt has landed on whichever of
-		// those three it reached instead.
-		m.deliverMergeOutcome(mergeCtx, st.ID)
-		// Strictly after delivery: discardMerged deletes the store row,
-		// and deliverMergeOutcome re-reads that row to learn which of the
-		// three outcomes the attempt reached.
-		m.discardMerged(mergeCtx, st.ID)
-	})
-	return true
-}
-
-// deliverMergeOutcome delivers an auto-merge thread's own terminal event —
-// merged, conflict, or merge_blocked — to its parent session, once,
-// right after mergeAttempt concludes from onAutoMerge. It is deliberately
-// not wired into mergeAttempt/finishMerge/setConflict/blockMerge
-// themselves: those four are shared with Manager.Merge's manual retry
-// path (resolving a conflict, or retrying after merge_blocked), and a
-// manually-triggered retry must not re-deliver an event its caller
-// already observes synchronously through Merge's own return value — only
-// the original, automatic attempt this method is called from should ever
-// notify the parent. That is also what keeps delivery at-most-once
-// across a thread's two terminal moments: handleRunComplete's own
-// delivery call only ever reaches a thread that failed or was cancelled,
-// or a manual-policy thread that completed — never one whose
-// onAutoMerge just returned true, which is precisely the case that
-// lands here instead.
-func (m *Manager) deliverMergeOutcome(ctx context.Context, threadID string) {
-	st, err := m.store.Get(ctx, threadID)
-	if err != nil {
-		slog.Error("Failed to re-fetch thread for merge-outcome delivery", "component", "thread", "thread", threadID, "error", err)
-		return
-	}
-	if !st.Status.Terminal() {
-		// mergeAttempt returned without ever reaching a terminal write —
-		// a pure infrastructure error (e.g. the initial store.Get inside
-		// mergeAttempt itself failing) before the merge flow properly
-		// started. Nothing to report yet.
-		return
-	}
-	// handle is nil: a thread's delivery target never comes from its own
-	// workspace handle (see resolveDeliveryTarget's KindThread branch),
-	// and by the time an auto-merge lands on Merged the workspace may
-	// already be released (finishMerge's own teardown) regardless.
-	m.lc.deliverStoredCompletion(ctx, nil, st, 0)
-}
-
 // Activate makes a thread's isolated workspace live again without
 // dispatching any agent run, moving it to [StatusIdle] while preserving
 // the result summary and error of whatever run finished earlier. It is
@@ -552,28 +459,6 @@ func (m *Manager) deliverMergeOutcome(ctx context.Context, threadID string) {
 //
 // Activating a thread that is already live is a no-op that returns its
 // current state.
-//
-// Only [StatusMerging] and [StatusMerged] are rejected, and for two
-// different reasons: merging is an operation in flight (mergeAttempt
-// holds the thread's opMu for its whole duration), and a merged thread
-// has already been folded into its base and is on its way to being
-// discarded, worktree included.
-//
-// The two resting merge-flow states are not rejected. A thread at
-// [StatusConflict] or [StatusMergeBlocked] is exactly the one a person
-// needs to open and work in: its worktree is still on disk with the
-// half-finished merge in it, and resolving that by hand and calling
-// [Manager.Merge] again is the recovery path mergeAttempt documents for
-// itself. Refusing here left that path reachable through Send but not
-// through the TUI, which attaches (see appws.AppWorkspace.AttachThread)
-// and so fell back to a read-only workspace.
-//
-// Those two statuses are also preserved rather than reset to idle, unlike
-// every other status this reactivates from. The status is a fact about the
-// state of the worktree's merge, which attaching does not change: resetting
-// it would drop the thread out of the dashboard's failed filter merely
-// because somebody looked at it. It moves to idle on its own once a turn
-// actually runs in the thread — see lifecycle.restIdleAfterPersonTurn.
 func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error) {
 	done, err := m.lc.beginOp()
 	if err != nil {
@@ -611,10 +496,6 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 		return st, nil
 	}
 
-	switch st.Status {
-	case StatusMerging, StatusMerged:
-		return Thread{}, fmt.Errorf("thread: %q is in the merge flow (%s) and cannot be reactivated", idOrName, st.Status)
-	}
 	if _, err := os.Stat(st.WorktreePath); err != nil {
 		return Thread{}, fmt.Errorf("thread: worktree for %q is unavailable: %w", idOrName, err)
 	}
@@ -644,16 +525,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	// Preserve the earlier run's outcome: SetStatus rewrites all four
 	// columns, so the summary/error/timestamp have to be carried across
 	// explicitly or reactivating would erase the record of what ran.
-	//
-	// A resting merge-flow status is carried across as well, for the reason
-	// in the doc comment: the unresolved merge in the worktree is still
-	// there after attaching, so the row must keep saying so.
-	activated := StatusIdle
-	switch st.Status {
-	case StatusConflict, StatusMergeBlocked:
-		activated = st.Status
-	}
-	st, err = m.lc.setStatus(ctx, st.ID, activated, st.Error, st.ResultSummary, st.CompletedAt)
+	st, err = m.lc.setStatus(ctx, st.ID, StatusIdle, st.Error, st.ResultSummary, st.CompletedAt)
 	if err != nil {
 		return Thread{}, err
 	}
@@ -683,20 +555,6 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 // task's own session, just for a different structural reason (a thread's
 // App genuinely has nothing else in it, rather than a task sharing its
 // parent's).
-//
-// Refuses a thread already in the merge flow (merging, merged, conflict,
-// merge_blocked). This is wider than what [Manager.Activate] refuses, and
-// deliberately so: the two answer different questions. Activate asks
-// whether a person may work in the worktree, and for a merge that stopped
-// on a conflict the answer is yes; this asks whether there is a run in
-// flight to stop, and for all four statuses the answer is no.
-// mergeAttempt holds the thread's opMu for its entire duration (see
-// onAutoMerge's doc comment), so by the time this call's own status read
-// can matter the merge has either not started (an active run is exactly
-// what Cancel exists to stop) or has already landed on one of its own
-// terminal outcomes — at which point there is no run left in flight to
-// cancel, and folding a branch back into its base is not a step to
-// interrupt partway.
 func (m *Manager) Cancel(ctx context.Context, idOrName, reason string) error {
 	// See TaskManager.Cancel: the resolve below is part of the terminal
 	// work and has to survive the context the cancel arrived on.
@@ -713,10 +571,6 @@ func (m *Manager) Cancel(ctx context.Context, idOrName, reason string) error {
 	}
 	if st.Kind != KindThread {
 		return fmt.Errorf("thread: %q is not a thread", idOrName)
-	}
-	switch st.Status {
-	case StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked:
-		return fmt.Errorf("thread: %q is in the merge flow (%s) and cannot be cancelled", idOrName, st.Status)
 	}
 	return m.lc.cancel(ctx, st, reason)
 }
@@ -754,13 +608,12 @@ func (m *Manager) SendFromPerson(ctx context.Context, idOrName, message string) 
 // manager, rather than straight to the thread's coordinator, makes it the
 // one owner of every turn in a thread's session — without that, the
 // manager never learns a turn started, an untracked run has no RunID to
-// match on completion, and a thread revived by hand could never settle,
-// merge, or report again.
+// match on completion, and a thread revived by hand could never settle or
+// report again.
 //
 // What it does not do is treat such a turn as the thread's work being
-// finished: it rests at idle with its workspace live, and merging stays
-// the person's own call — see lifecycle.handleRunComplete's person
-// branch.
+// finished: it rests at idle with its workspace live. See
+// lifecycle.handleRunComplete's person branch.
 func (m *Manager) RunFromPerson(ctx context.Context, idOrName, message string, attachments []Attachment) (SendDisposition, error) {
 	return m.send(ctx, idOrName, message, SenderPerson, attachments)
 }
@@ -810,66 +663,10 @@ func (m *Manager) send(ctx context.Context, idOrName, message string, from Sende
 	return disp, nil
 }
 
-// Merge runs (or retries) the merge flow for a thread. Manual-policy
-// threads are merged this way once their run completes; auto-policy
-// threads use this to retry after a conflict has been resolved.
-//
-// It returns the thread as the attempt left it. Conflict and
-// merge_blocked are outcomes, not errors (see mergeAttempt), so the
-// returned status is how a caller tells them from a clean landing — and
-// the value is returned rather than re-read afterwards because a thread
-// that merged cleanly has already been discarded by the time this
-// returns, and there is no row left to read.
-func (m *Manager) Merge(ctx context.Context, idOrName string) (Thread, error) {
-	done, err := m.lc.beginOp()
-	if err != nil {
-		return Thread{}, err
-	}
-	defer done()
-	st, err := m.resolve(ctx, idOrName)
-	if err != nil {
-		return Thread{}, err
-	}
-	if st.Kind != KindThread && st.WorktreePath == "" {
-		return Thread{}, fmt.Errorf("thread: %q is not a thread", idOrName)
-	}
-	// A turn still in flight owns the worktree: merging under it commits
-	// whatever half-written state the agent happens to be holding, and
-	// then finishMerge cancels the run — whose cancelled RunComplete is
-	// dropped, since the row is no longer StatusRunning by the time it
-	// lands. Refuse, the way Remove refuses for the same statuses.
-	if st.Status.Active() {
-		return Thread{}, fmt.Errorf("thread: %q is active (status=%s) and cannot be merged; cancel or wait for it first", st.Name, st.Status)
-	}
-	// Empty resultSummary tells mergeAttempt to keep whatever is already
-	// on the row (e.g. from the run that led to the current conflict or
-	// merge_blocked state) instead of clobbering it.
-	c := m.lc.control(st.ID)
-	c.opMu.Lock()
-	defer c.opMu.Unlock()
-	if err := m.mergeAttempt(ctx, st.ID, true, ""); err != nil {
-		return Thread{}, err
-	}
-	// Read the outcome before discarding: this is the caller's only
-	// chance to see it.
-	final, err := m.store.Get(ctx, st.ID)
-	if err != nil {
-		return Thread{}, err
-	}
-	// A hand-merged thread is as spent as an auto-merged one, so it is
-	// discarded on the same terms. Nothing about who triggered the merge
-	// changes what is left behind. Not folded into mergeAttempt itself:
-	// that is also the retry path, and only a merge that actually
-	// concluded may discard anything — discardMerged's own status check
-	// is what makes a conflict or a block survive this call untouched.
-	m.discardMerged(ctx, st.ID)
-	return final, nil
-}
-
 // Remove tears a thread down: it cancels and releases its workspace (if
 // force), removes its git worktree (and branch, if deleteBranch), and
-// deletes its store row. It refuses to run/merging threads unless force,
-// and refuses unmerged threads with a dirty worktree unless force.
+// deletes its store row. It refuses active threads unless force, and
+// refuses threads with a dirty worktree unless force.
 func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBranch bool) error {
 	done, err := m.lc.beginOp()
 	if err != nil {
@@ -884,13 +681,11 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 		return fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 
-	if (st.Status == StatusRunning || st.Status == StatusMerging) && !force {
+	if st.Status == StatusRunning && !force {
 		return fmt.Errorf("thread: %q is active (status=%s); use force to remove", st.Name, st.Status)
 	}
-	if st.Status != StatusMerged {
-		if dirty, err := git.IsDirty(ctx, st.WorktreePath); err == nil && dirty && !force {
-			return fmt.Errorf("thread: %q has unmerged, uncommitted changes; use force to remove", st.Name)
-		}
+	if dirty, err := git.IsDirty(ctx, st.WorktreePath); err == nil && dirty && !force {
+		return fmt.Errorf("thread: %q has uncommitted changes; use force to remove", st.Name)
 	}
 	// Checked here, before anything below tears down the live workspace:
 	// this reads only m.repoRoot and st's own Branch/BaseBranch, so it
@@ -921,7 +716,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 
 	if rt != nil {
 		// Cancel this delegation's own session, not the whole workspace's
-		// coordinator — see finishMerge's identical comment. Only on force:
+		// coordinator. Only on force:
 		// an unforced remove has already refused any active status above,
 		// so there is nothing left running to cancel.
 		if err := releaseRuntime(ctx, rt, st.SessionID, force); err != nil {
@@ -1180,8 +975,8 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 }
 
 // Recover reconciles store state against reality after a process restart:
-// threads left pending/running/merging (their goroutines are gone with
-// the old process) become interrupted, and threads whose worktree has
+// threads left pending or running (their goroutines are gone with the old
+// process) become interrupted, and threads whose worktree has
 // vanished from disk become failed.
 //
 // This deliberately does not call RegisterDelegationParent for anything:
@@ -1202,9 +997,8 @@ func (m *Manager) Recover(ctx context.Context) error {
 
 // recoverWorktree is the [recoverHook] that fails threads whose worktree
 // has vanished from disk, ahead of the generic active-status sweep in
-// lifecycle.recover. A thread already StatusFailed or StatusMerged is
-// left alone: re-failing it would be a no-op at best and clobber a merged
-// thread's outcome at worst. A Stat error other than "not exist" (e.g. a
+// lifecycle.recover. A thread already StatusFailed is left alone because
+// re-failing it would be a no-op. A Stat error other than "not exist" (e.g. a
 // permission problem) is treated as "worktree present" and falls through
 // to the generic sweep, matching the pre-hook behavior.
 func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) {
@@ -1218,7 +1012,7 @@ func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) 
 	if _, statErr := os.Stat(st.WorktreePath); !os.IsNotExist(statErr) {
 		return false, nil
 	}
-	if st.Status == StatusFailed || st.Status == StatusMerged {
+	if st.Status == StatusFailed {
 		return true, nil
 	}
 	if st.Kind == KindTask && st.Status.Active() {
@@ -1240,7 +1034,7 @@ func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) 
 // resolveDeliveryTarget is the lifecycle's deliveryResolver hook (see
 // lifecycle.deliverStoredCompletion, the only caller): it finds where a
 // delegation's terminal completion should go, branching on Kind the same
-// way onAutoMerge and recoverWorktree do, since both kinds sharing this
+// way onCompletedCleanup and recoverWorktree do, since both kinds sharing this
 // lifecycle resolve their delivery target completely differently.
 //
 // Both branches now read st.ParentSessionID directly — the persisted
@@ -1288,7 +1082,7 @@ func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st T
 }
 
 // Wait blocks until none of the threads named by ids (all threads, when
-// ids is empty) are pending, running, or merging, or until ctx is
+// ids is empty) are pending or running, or until ctx is
 // canceled or timeout elapses (timeout <= 0 means no timeout beyond ctx).
 func (m *Manager) Wait(ctx context.Context, ids []string, timeout time.Duration) error {
 	if timeout > 0 {
@@ -1338,8 +1132,8 @@ func (m *Manager) anyActive(ctx context.Context, ids []string) (bool, error) {
 
 // waitTargets resolves the entities Wait should watch. With ids empty this
 // deliberately uses the kind = 'thread'-scoped store.List, not
-// store.ListAll: Manager's whole public surface (Create, Merge, Wait's own
-// doc comment) is stated in terms of threads, so "wait for everything"
+// store.ListAll: Manager's whole public surface and Wait's own doc comment
+// are stated in terms of threads, so "wait for everything"
 // means "wait for every thread" here, unlike the kind-agnostic sweep
 // lifecycle.recover needs. A future Task-flavored manager over this same
 // table would make the analogous choice for its own kind.
@@ -1351,8 +1145,8 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 	for _, id := range ids {
 		st, err := m.resolve(ctx, id)
 		if err != nil {
-			// A thread that is no longer there is one that finished:
-			// merging discards the row, and so does removal. Waiting for
+			// A thread that is no longer there finished and was cleaned up or
+			// was explicitly removed. Waiting for
 			// it is satisfied, not failed — reporting not-found turned
 			// "wait for these three" into an error whenever one of them
 			// completed while the call was blocked, which is the very
@@ -1461,11 +1255,4 @@ func validateName(name string) (string, error) {
 		return "", fmt.Errorf("thread: invalid name %q: must be a lowercase alphanumeric slug (hyphens allowed, not leading or trailing)", name)
 	}
 	return name, nil
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }

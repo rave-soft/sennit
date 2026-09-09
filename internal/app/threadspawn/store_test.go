@@ -24,7 +24,7 @@ func TestStore_ExecutionSurvivesReopen(t *testing.T) {
 	original := NewStore(db.New(conn), dataDir)
 	created, err := original.Create(ctx, thread.CreateParams{
 		Name: "isolated", Kind: thread.KindTask, Execution: "immutable selected execution",
-		SessionID: "child", ParentSessionID: "parent", MergePolicy: thread.MergeManual,
+		SessionID: "child", ParentSessionID: "parent",
 		Branch: "thread/isolated", BaseBranch: "main", WorktreePath: "/isolated",
 	})
 	require.NoError(t, err)
@@ -38,7 +38,6 @@ func TestStore_ExecutionSurvivesReopen(t *testing.T) {
 	require.Equal(t, "immutable selected execution", got.Execution)
 	require.Equal(t, "child", got.SessionID)
 	require.Equal(t, "parent", got.ParentSessionID)
-	require.Equal(t, thread.MergeManual, got.MergePolicy)
 	require.Equal(t, "/isolated", got.WorktreePath)
 	rows, err := reopened.ListAll(ctx)
 	require.NoError(t, err)

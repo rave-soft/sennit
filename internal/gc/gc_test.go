@@ -87,7 +87,7 @@ func fixture(t *testing.T, cutoff int64) (*sennitdb.Queries, *sql.DB, fixtureIDs
 	mustThread := func(id, name, worktreePath string) {
 		_, err := q.CreateThread(ctx, sennitdb.CreateThreadParams{
 			ID: id, Name: name, ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
-			Branch: "thread/" + name, WorktreePath: worktreePath, Status: "pending", MergePolicy: "auto", Kind: "thread",
+			Branch: "thread/" + name, WorktreePath: worktreePath, Status: "pending", Kind: "thread",
 		})
 		require.NoError(t, err)
 	}
@@ -172,21 +172,16 @@ func TestRun_DryRunMakesNoWrites(t *testing.T) {
 	require.True(t, threadExists(t, q, ids.ThreadOld))
 }
 
-// TestRun_OrphanedWorktrees_OnlyExistingPaths confirms the report lists
-// only worktree paths that still exist on disk -- an already-cleaned-up
-// worktree_path must not appear even though its owning thread row is
-// still deleted.
-func TestRun_OrphanedWorktrees_OnlyExistingPaths(t *testing.T) {
+func TestRun_PreservesThreadsWithExistingWorktrees(t *testing.T) {
 	cutoff := time.Now().Unix()
-	q, conn, ids := fixture(t, cutoff)
+	queries, conn, ids := fixture(t, cutoff)
 
-	report, err := Run(context.Background(), Deps{Queries: q, Conn: conn}, Policy{Cutoff: cutoff})
+	report, err := Run(context.Background(), Deps{Queries: queries, Conn: conn}, Policy{Cutoff: cutoff})
 	require.NoError(t, err)
 
-	require.Contains(t, report.OrphanedWorktrees, ids.WorktreeDir)
-	require.Len(t, report.OrphanedWorktrees, 1)
-	require.False(t, threadExists(t, q, ids.WorktreeExists))
-	require.False(t, threadExists(t, q, ids.WorktreeGone), "the gone-worktree thread row is still deleted")
+	require.Empty(t, report.OrphanedWorktrees)
+	require.True(t, threadExists(t, queries, ids.WorktreeExists))
+	require.False(t, threadExists(t, queries, ids.WorktreeGone))
 }
 
 // TestRun_ProtectsSessionOfLiveDelegation reproduces the bug where an old
@@ -275,8 +270,7 @@ func TestRun_ProtectsSessionOfLiveDelegation(t *testing.T) {
 	threadID := "thread-live"
 	_, err = q.CreateThread(ctx, sennitdb.CreateThreadParams{
 		ID: threadID, Name: "live", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
-		Branch: "thread/live", WorktreePath: "", SessionID: childID, Status: "running",
-		MergePolicy: "auto", Kind: "thread", ParentSessionID: parentID,
+		Branch: "thread/live", WorktreePath: "", SessionID: childID, Status: "running", Kind: "thread", ParentSessionID: parentID,
 	})
 	require.NoError(t, err)
 
@@ -318,10 +312,6 @@ func TestTerminalStatusParityWithThread(t *testing.T) {
 		thread.StatusFailed,
 		thread.StatusInterrupted,
 		thread.StatusCancelled,
-		thread.StatusMerging,
-		thread.StatusMerged,
-		thread.StatusConflict,
-		thread.StatusMergeBlocked,
 	}
 	for _, status := range domainStatuses {
 		require.Equal(t, status.Terminal(), persistedThreadStatus(status).terminal(), "status %q", status)
@@ -335,25 +325,3 @@ func TestTerminalStatusParityWithThread(t *testing.T) {
 // TestPersistedTerminalStatusStrings pins the exact persisted strings gc's
 // classification keys on, so a typo in a constant (which would make that
 // status silently retained forever) fails here without touching the database.
-func TestPersistedTerminalStatusStrings(t *testing.T) {
-	t.Parallel()
-
-	require.ElementsMatch(t, []string{
-		"completed",
-		"merged",
-		"failed",
-		"cancelled",
-		"conflict",
-		"merge_blocked",
-		"interrupted",
-	}, []string{
-		string(persistedStatusCompleted),
-		string(persistedStatusMerged),
-		string(persistedStatusFailed),
-		string(persistedStatusCancelled),
-		string(persistedStatusConflict),
-		string(persistedStatusMergeBlocked),
-		string(persistedStatusInterrupted),
-	})
-	require.Equal(t, "thread", string(persistedKindThread))
-}

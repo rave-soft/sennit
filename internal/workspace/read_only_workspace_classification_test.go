@@ -56,7 +56,6 @@ var refusedMethods = []string{
 	"MCPRefreshPrompts",
 	"MCPRefreshResources",
 	"MarkProjectInitialized",
-	"MergeThread",
 	"OverridePreferredModel",
 	"PermissionDeny",
 	"PermissionGrant",
@@ -312,10 +311,6 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"MarkProjectInitialized": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.MarkProjectInitialized()
-			require.True(t, IsReadOnlyError(err))
-		},
-		"MergeThread": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, err := ro.MergeThread(t.Context(), "id")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"OverridePreferredModel": func(t *testing.T, ro *readOnlyWorkspace) {

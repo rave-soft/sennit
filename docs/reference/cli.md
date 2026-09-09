@@ -88,7 +88,6 @@ Every subcommand accepts `--json`.
 ```
 sennit threads [list]
 sennit threads create <name>
-sennit threads merge <name>
 sennit threads remove <name>
 ```
 

@@ -70,7 +70,6 @@ INSERT INTO threads (
     worktree_path,
     session_id,
     status,
-    merge_policy,
     kind,
     parent_session_id,
     execution,
@@ -91,10 +90,9 @@ INSERT INTO threads (
     ?,
     ?,
     ?,
-    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type CreateThreadParams struct {
@@ -107,7 +105,6 @@ type CreateThreadParams struct {
 	WorktreePath    string `json:"worktree_path"`
 	SessionID       string `json:"session_id"`
 	Status          string `json:"status"`
-	MergePolicy     string `json:"merge_policy"`
 	Kind            string `json:"kind"`
 	ParentSessionID string `json:"parent_session_id"`
 	Execution       string `json:"execution"`
@@ -133,7 +130,6 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		arg.WorktreePath,
 		arg.SessionID,
 		arg.Status,
-		arg.MergePolicy,
 		arg.Kind,
 		arg.ParentSessionID,
 		arg.Execution,
@@ -150,7 +146,6 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -193,7 +188,7 @@ WHERE threads.id = ?7
   AND threads.status IN ('pending', 'running')
   AND threads.session_id = ?8
   AND threads.parent_session_id = ?9
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type FinalizeTaskParams struct {
@@ -231,7 +226,6 @@ func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thr
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -249,7 +243,7 @@ func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thr
 }
 
 const getThread = `-- name: GetThread :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 FROM threads
 WHERE id = ? LIMIT 1
 `
@@ -271,7 +265,6 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -289,7 +282,7 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 }
 
 const getThreadByName = `-- name: GetThreadByName :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 FROM threads
 WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1
 `
@@ -312,7 +305,6 @@ func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -368,7 +360,7 @@ func (q *Queries) InsertTaskCompletionOutbox(ctx context.Context, arg InsertTask
 }
 
 const listPendingTaskCompletions = `-- name: ListPendingTaskCompletions :many
-SELECT threads.id, threads.name, threads.project_path, threads.goal, threads.base_branch, threads.branch, threads.worktree_path, threads.session_id, threads.status, threads.merge_policy, threads.result_summary, threads.error, threads.created_at, threads.updated_at, threads.completed_at, threads.kind, threads.parent_session_id, threads.completion_pending, threads.completion_depth, threads.terminal_at, threads.cost_attributed, threads.execution, task_completion_outbox.status, task_completion_outbox.error,
+SELECT threads.id, threads.name, threads.project_path, threads.goal, threads.base_branch, threads.branch, threads.worktree_path, threads.session_id, threads.status, threads.result_summary, threads.error, threads.created_at, threads.updated_at, threads.completed_at, threads.kind, threads.parent_session_id, threads.completion_pending, threads.completion_depth, threads.terminal_at, threads.cost_attributed, threads.execution, task_completion_outbox.status, task_completion_outbox.error,
        task_completion_outbox.result_summary, task_completion_outbox.completion_depth,
        task_completion_outbox.completed_at, task_completion_outbox.terminal_at,
        task_completion_outbox.name, task_completion_outbox.goal,
@@ -389,7 +381,6 @@ type ListPendingTaskCompletionsRow struct {
 	WorktreePath      string        `json:"worktree_path"`
 	SessionID         string        `json:"session_id"`
 	Status            string        `json:"status"`
-	MergePolicy       string        `json:"merge_policy"`
 	ResultSummary     string        `json:"result_summary"`
 	Error             string        `json:"error"`
 	CreatedAt         int64         `json:"created_at"`
@@ -433,7 +424,6 @@ func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath st
 			&i.WorktreePath,
 			&i.SessionID,
 			&i.Status,
-			&i.MergePolicy,
 			&i.ResultSummary,
 			&i.Error,
 			&i.CreatedAt,
@@ -471,7 +461,7 @@ func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath st
 }
 
 const listThreads = `-- name: ListThreads :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 FROM threads
 WHERE project_path = ? AND kind = 'thread'
 ORDER BY created_at
@@ -501,7 +491,6 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 			&i.WorktreePath,
 			&i.SessionID,
 			&i.Status,
-			&i.MergePolicy,
 			&i.ResultSummary,
 			&i.Error,
 			&i.CreatedAt,
@@ -529,7 +518,7 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 }
 
 const listThreadsAll = `-- name: ListThreadsAll :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 FROM threads
 WHERE project_path = ?
 ORDER BY created_at
@@ -561,7 +550,6 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 			&i.WorktreePath,
 			&i.SessionID,
 			&i.Status,
-			&i.MergePolicy,
 			&i.ResultSummary,
 			&i.Error,
 			&i.CreatedAt,
@@ -614,7 +602,7 @@ type ListThreadsForGCRow struct {
 // Deliberately unscoped by kind, unlike the display queries above. gc is
 // not a thread-facing caller -- it is the only thing that reclaims rows
 // here, and a task has nothing else that would: it is never merged (so
-// discardMerged cannot reach it) and the task API has no removal of its
+// automatic cleanup may retain it) and the task API has no removal of its
 // own. Scoping this to threads meant finished tasks accumulated for the
 // life of the database. A task carries no worktree, so reclaiming one is
 // the row and its retention alone, with nothing left orphaned on disk.
@@ -682,7 +670,7 @@ const setTaskPreparation = `-- name: SetTaskPreparation :one
 UPDATE threads
 SET base_branch = ?, branch = ?, worktree_path = ?
 WHERE id = ? AND kind = 'task' AND status = 'pending'
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type SetTaskPreparationParams struct {
@@ -710,7 +698,6 @@ func (q *Queries) SetTaskPreparation(ctx context.Context, arg SetTaskPreparation
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -732,7 +719,7 @@ UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type UpdateThreadSessionParams struct {
@@ -753,7 +740,6 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -778,7 +764,7 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type UpdateThreadStatusParams struct {
@@ -808,7 +794,6 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,

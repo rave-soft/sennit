@@ -19,14 +19,12 @@ func TestManager_RemoveThatFailsLeavesTheThreadUsable(t *testing.T) {
 	mgr, _ := newTestManager(t, repo)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "stuck",
-		Goal:        "do it",
-		MergePolicy: thread.MergeManual,
+		Name: "stuck",
+		Goal: "do it",
 	})
 	require.NoError(t, err)
 
-	// The same stand-in TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo
-	// uses: a worktree this process cannot remove.
+	// Stand in for a worktree this process cannot remove.
 	t.Cleanup(blockWorktreeRemoval(t, st.WorktreePath))
 
 	require.Error(t, mgr.Remove(t.Context(), st.ID, true, false),

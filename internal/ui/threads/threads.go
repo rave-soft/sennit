@@ -54,12 +54,6 @@ type EnterMsg struct {
 // the dashboard can be wired up ahead of it.
 type OpenCreateMsg struct{}
 
-// MergeMsg requests merging a completed thread's branch back into its
-// base branch.
-type MergeMsg struct {
-	ID string
-}
-
 // RemoveMsg requests removing a thread, already confirmed by the
 // thread-remove-confirm dialog (see ConfirmRemoveMsg).
 type RemoveMsg struct {
@@ -96,7 +90,6 @@ type threadsKeyMap struct {
 	Down       key.Binding
 	Enter      key.Binding
 	New        key.Binding
-	Merge      key.Binding
 	Remove     key.Binding
 	Cancel     key.Binding
 	Reload     key.Binding
@@ -122,10 +115,6 @@ func defaultThreadsKeyMap() threadsKeyMap {
 		New: key.NewBinding(
 			key.WithKeys("n"),
 			key.WithHelp("n", "new"),
-		),
-		Merge: key.NewBinding(
-			key.WithKeys("m"),
-			key.WithHelp("m", "merge"),
 		),
 		Remove: key.NewBinding(
 			key.WithKeys("x", "d"),
@@ -157,7 +146,7 @@ func (k threadsKeyMap) ShortHelp() []key.Binding {
 	// explaining, and the footer is one line — every binding it lists is
 	// one an operator might not guess.
 	return []key.Binding{
-		k.Enter, k.New, k.Merge, k.Cancel, k.Remove, k.Reload, k.NextFilter,
+		k.Enter, k.New, k.Cancel, k.Remove, k.Reload, k.NextFilter,
 	}
 }
 
@@ -724,9 +713,6 @@ func (m *Dashboard) runAction(action threadAction) tea.Cmd {
 	case actionOpen:
 		id, sessionID, name := sel.ID, sel.SessionID, sel.Name
 		return func() tea.Msg { return EnterMsg{ID: id, SessionID: sessionID, Name: name} }
-	case actionMerge:
-		id := sel.ID
-		return func() tea.Msg { return MergeMsg{ID: id} }
 	case actionCancel:
 		id, kind := sel.ID, sel.Kind
 		return func() tea.Msg { return CancelDelegationMsg{ID: id, Kind: kind} }
@@ -759,8 +745,6 @@ func (m *Dashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 		return true, m.runAction(actionOpen)
 	case key.Matches(msg, m.keyMap.New):
 		return true, m.runAction(actionNew)
-	case key.Matches(msg, m.keyMap.Merge):
-		return true, m.runAction(actionMerge)
 	case key.Matches(msg, m.keyMap.Remove):
 		return true, m.runAction(actionRemove)
 	case key.Matches(msg, m.keyMap.Cancel):
@@ -787,23 +771,6 @@ func nextThreadsFilter(current threadsFilter, delta int) threadsFilter {
 		return threadsFilters[next]
 	}
 	return filterAll
-}
-
-// threadMergeable reports whether a delegation in the given kind/status is
-// eligible to be merged: a task has no worktree/branch of its own (see
-// TaskController's doc comment), so it never reports mergeable regardless
-// of status; a thread is mergeable in any status other than already merged
-// or currently merging.
-func threadMergeable(kind, status string) bool {
-	if proto.ThreadKind(kind) == proto.ThreadKindTask {
-		return false
-	}
-	switch proto.ThreadStatus(status) {
-	case proto.ThreadStatusMerged, proto.ThreadStatusMerging:
-		return false
-	default:
-		return true
-	}
 }
 
 // threadItem renders a single row of the threads table: name, status,

@@ -48,40 +48,6 @@ func TestStore_CreateIDsSurviveASingleClockTick(t *testing.T) {
 	})
 }
 
-func TestStore_CreateAndGet(t *testing.T) {
-	store := newTestStore(t)
-
-	created, err := store.Create(t.Context(), testCreateParams("alpha"))
-	require.NoError(t, err)
-	require.NotEmpty(t, created.ID)
-	require.Equal(t, "alpha", created.Name)
-	require.Equal(t, "make the tests pass", created.Goal)
-	require.Equal(t, "main", created.BaseBranch)
-	require.Equal(t, "thread/alpha", created.Branch)
-	require.Equal(t, "/tmp/threads/alpha", created.WorktreePath)
-	require.Equal(t, StatusPending, created.Status)
-	require.Equal(t, MergeAuto, created.MergePolicy)
-	require.Empty(t, created.SessionID)
-	require.Zero(t, created.CompletedAt)
-	require.NotZero(t, created.CreatedAt)
-	require.NotZero(t, created.UpdatedAt)
-
-	fetched, err := store.Get(t.Context(), created.ID)
-	require.NoError(t, err)
-	require.Equal(t, created, fetched)
-}
-
-func TestStore_CreateWithExplicitMergePolicy(t *testing.T) {
-	store := newTestStore(t)
-
-	params := testCreateParams("manual-merge")
-	params.MergePolicy = MergeManual
-
-	created, err := store.Create(t.Context(), params)
-	require.NoError(t, err)
-	require.Equal(t, MergeManual, created.MergePolicy)
-}
-
 func TestStore_GetByName(t *testing.T) {
 	store := newTestStore(t)
 

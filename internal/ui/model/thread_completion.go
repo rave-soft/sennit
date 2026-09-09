@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -26,18 +27,16 @@ import (
 // the explicitly sanctioned fallback; the durable record remains the
 // /threads dashboard, which already shows terminal status per thread.
 
-// isTerminalThreadStatus reports whether status is a resting/finished
-// state — anything outside the active set (pending, running, merging).
-// Deliberately !Active rather than Terminal: for a toast, an unknown
-// status from a newer build reads as "no longer running" too.
+// isTerminalThreadStatus reports whether status is a known finished state.
+// Unknown statuses deliberately remain neither active nor terminal, matching
+// the domain and preventing an uncertain state from being presented as done.
 //
-// Idle is the one non-active status excluded: a thread created without a
+// Idle is excluded: a thread created without a
 // goal transitions pending -> idle, and a reactivated one goes
 // completed -> idle. Neither is work finishing, so neither should raise a
 // "thread finished" toast.
 func isTerminalThreadStatus(status string) bool {
-	s := proto.ThreadStatus(status)
-	return !s.Active() && s != proto.ThreadStatusIdle
+	return proto.ThreadStatus(status).Terminal()
 }
 
 // notifyThreadCompletion detects a thread's edge transition into a
@@ -59,8 +58,7 @@ func (n *notifyState) notifyThreadCompletion(t proto.Thread) tea.Cmd {
 	// says nothing new — it just interrupts, once per subagent, in a turn
 	// that may have started several. A thread is the opposite case: it
 	// outlives the turn that started it, and the dock is the only place it
-	// is otherwise visible, so a thread finishing (or hitting a merge
-	// conflict) is worth the interruption.
+	// is otherwise visible, so a thread finishing is worth the interruption.
 	//
 	// An empty Kind is a thread: older servers sent no discriminator at
 	// all, matching listcache.threadEventMatchesKind.
@@ -86,7 +84,7 @@ func (n *notifyState) notifyThreadCompletion(t proto.Thread) tea.Cmd {
 }
 
 // threadCompletionToast formats and reports the toast for one terminal
-// transition, e.g. "thread fix-auth merged · 12m" (info) or "thread
+// transition, e.g. "thread fix-auth completed · 12m" (info) or "thread
 // fix-auth failed" (warn) — matching threadBadge's success/warn/error
 // status groupings (dashboard parity: a thread that reads as a green
 // badge there reports as an info toast here, a red badge as a warn toast).
@@ -96,16 +94,19 @@ func threadCompletionToast(t proto.Thread) tea.Cmd {
 		name = t.ID
 	}
 	switch proto.ThreadStatus(t.Status) {
-	case proto.ThreadStatusMerged:
-		return util.ReportInfo(fmt.Sprintf("thread %s merged%s", name, threadCompletionElapsedSuffix(t)))
 	case proto.ThreadStatusCompleted:
-		return util.ReportInfo(fmt.Sprintf("thread %s completed%s", name, threadCompletionElapsedSuffix(t)))
+		switch {
+		case strings.Contains(t.Error, "uncommitted changes"):
+			return util.ReportWarn(fmt.Sprintf("thread %s completed; kept because it has uncommitted changes", name))
+		case strings.Contains(t.Error, "unique commits"):
+			return util.ReportWarn(fmt.Sprintf("thread %s completed; kept because it has unique commits", name))
+		case strings.Contains(t.Error, "could not be verified"):
+			return util.ReportWarn(fmt.Sprintf("thread %s completed; cleanup safety could not be verified", name))
+		default:
+			return util.ReportInfo(fmt.Sprintf("thread %s completed; clean worktree removed%s", name, threadCompletionElapsedSuffix(t)))
+		}
 	case proto.ThreadStatusFailed:
 		return util.ReportWarn(fmt.Sprintf("thread %s failed", name))
-	case proto.ThreadStatusConflict:
-		return util.ReportWarn(fmt.Sprintf("thread %s has a merge conflict", name))
-	case proto.ThreadStatusMergeBlocked:
-		return util.ReportWarn(fmt.Sprintf("thread %s is merge-blocked", name))
 	case proto.ThreadStatusInterrupted:
 		return util.ReportWarn(fmt.Sprintf("thread %s was interrupted", name))
 	case proto.ThreadStatusCancelled:

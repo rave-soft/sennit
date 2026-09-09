@@ -1,7 +1,10 @@
 package thread_test
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/thread"
 
@@ -29,11 +32,69 @@ func runtimeRunID(t *testing.T, mgr *thread.Manager, id string) string {
 // whole point of the person's path: a thread's turn can sit inside a
 // sub-agent call for many minutes, and a correction read after those
 // minutes has corrected nothing.
+func TestManager_CompletionWaitsForActiveAttachmentOperationLock(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "attached-lock", Goal: "finish"})
+	require.NoError(t, err)
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
+
+	writeFile(t, st.WorktreePath, "attached.txt", "keep\n")
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	got := requireCleanupPreserved(t, mgr, repo, st)
+	require.Contains(t, got.Error, "uncommitted changes")
+	_, live := mgr.RuntimeForTest(st.ID)
+	require.False(t, live)
+
+	events := mgr.Subscribe(t.Context())
+	spawner.blockSpawnAfterCreate = true
+	spawner.spawnEntered = make(chan struct{})
+	spawner.spawnRelease = make(chan struct{})
+	activated := make(chan error, 1)
+	go func() {
+		_, activateErr := mgr.Activate(context.Background(), st.ID)
+		activated <- activateErr
+	}()
+	<-spawner.spawnEntered
+
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.Never(t, func() bool {
+		current, getErr := mgr.Get(context.Background(), st.ID)
+		return getErr != nil || current.Error == ""
+	}, 50*time.Millisecond, time.Millisecond)
+	select {
+	case event := <-events:
+		require.NotEqual(t, thread.EventRemoved, event.Payload.Type)
+	default:
+	}
+	require.DirExists(t, st.WorktreePath)
+	require.NotEmpty(t, strings.TrimSpace(runGit(t, repo, "branch", "--list", st.Branch)))
+
+	close(spawner.spawnRelease)
+	require.NoError(t, <-activated)
+	require.Eventually(t, func() bool {
+		current, getErr := mgr.Get(context.Background(), st.ID)
+		return getErr == nil && current.Status == thread.StatusIdle
+	}, eventuallyTimeout, eventuallyTick)
+	require.NotNil(t, mgr.Handle(st.ID))
+	require.DirExists(t, st.WorktreePath)
+	require.NotEmpty(t, strings.TrimSpace(runGit(t, repo, "branch", "--list", st.Branch)))
+	for {
+		select {
+		case event := <-events:
+			require.NotEqual(t, thread.EventRemoved, event.Payload.Type)
+		default:
+			return
+		}
+	}
+}
+
 func TestManager_SendFromPersonFoldsIntoRunningTurn(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "busy", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "busy", Goal: "do it"})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -71,7 +132,7 @@ func TestManager_SendFromPersonStartsOwnTurnWhenIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "idle", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "idle", Goal: "do it"})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -101,7 +162,7 @@ func TestManager_SendFromAgentStillQueuesBehindRunningTurn(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "agentsend", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "agentsend", Goal: "do it"})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -136,7 +197,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "revived", Goal: "do it", MergePolicy: thread.MergeAuto})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "revived", Goal: "do it"})
 	require.NoError(t, err)
 	worktree := st.WorktreePath
 
@@ -172,8 +233,8 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	coord.mu.Unlock()
 	require.NotEmpty(t, personRun.runID, "the manager owns this turn, so it must be able to match its completion")
 
-	// The turn ends: back to idle, workspace still live, nothing merged
-	// and nothing reported — the person is still sitting in it.
+	// The turn ends: back to idle, workspace still live, and nothing is
+	// reported because the person is still sitting in it.
 	publishSuccess(t, spawner.appFor(worktree), st.SessionID)
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
@@ -184,8 +245,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.Empty(t, got.Error, "the turn succeeded, so the stale failure is finally gone")
-	require.Equal(t, thread.MergeAuto, got.MergePolicy)
-	require.DirExists(t, worktree, "an auto-policy thread is not merged and discarded because the person stopped typing")
+	require.DirExists(t, worktree, "an attached thread is not cleaned up because the person stopped typing")
 }
 
 // publishFailure simulates a thread's agent run ending in an error, the
@@ -210,7 +270,7 @@ func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "raced", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "raced", Goal: "do it"})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -232,9 +292,8 @@ func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
 }
 
 // TestManager_ParkedThreadSurvivesCancelledFollowUp is the regression test
-// for a parked delegation losing its terminal completion (and, for an
-// auto-merge thread, its merge) when a person cancels a follow-up sent
-// while it was parked.
+// for a parked delegation losing its terminal completion when a person
+// cancels a follow-up sent while it was parked.
 //
 // A thread whose own turn finishes while its children are still running
 // parks: its row is deliberately left at StatusRunning (see
@@ -245,71 +304,4 @@ func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
 // ordinary case above. For a parked thread that clobber is fatal:
 // finalizeRunComplete only reacts to a completion while the row still
 // reads StatusRunning, so the real completion arriving later is silently
-// dropped, and an auto-merge thread never merges.
-func TestManager_ParkedThreadSurvivesCancelledFollowUp(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
-
-	parent, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:            "parent",
-		Goal:            "coordinate",
-		ParentSessionID: "parent-sess",
-	})
-	require.NoError(t, err)
-	require.Equal(t, thread.MergeAuto, parent.MergePolicy)
-
-	child, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:            "child",
-		Goal:            "a piece of it",
-		MergePolicy:     thread.MergeManual,
-		ParentSessionID: parent.SessionID,
-	})
-	require.NoError(t, err)
-
-	// The parent's own goal run finishes while the child is still running:
-	// it must park rather than finalize.
-	writeFile(t, parent.WorktreePath, "output.txt", "auto merged\n")
-	publishSuccess(t, spawner.appFor(parent.WorktreePath), parent.SessionID)
-	// StatusRunning alone does not prove the park happened: it is also
-	// the status while the parent's own goal run is still in flight, so
-	// waiting on it races parkIfAwaitingDelegations and can proceed
-	// before the park is established. Wait on the park's own flag
-	// instead.
-	require.Eventually(t, func() bool {
-		return mgr.AwaitingDelegationsForTest(parent.ID)
-	}, eventuallyTimeout, eventuallyTick, "the parent parks once its own goal run ends with the child still in flight")
-	got, err := mgr.Get(t.Context(), parent.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusRunning, got.Status, "a parked thread's row stays running")
-	require.NotNil(t, mgr.Handle(parent.ID), "a parked entity's workspace stays live")
-
-	// A person attaches to what still reads as running and sends a
-	// follow-up, then cancels it before it dispatches — the race
-	// TestManager_SendFromPersonCancelledOnEntryRestsAtIdle covers for the
-	// ordinary, non-parked case.
-	coord := spawner.coordFor(parent.WorktreePath)
-	coord.setQueue(false, 0)
-	coord.setCancelOnEntry(true)
-	disp, err := mgr.SendFromPerson(t.Context(), parent.ID, "never mind")
-	require.NoError(t, err, "a cancelled dispatch is an outcome, not a failure")
-	require.False(t, disp.Steered)
-
-	got, err = mgr.Get(t.Context(), parent.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusRunning, got.Status,
-		"a cancelled follow-up must not clobber a parked entity's status")
-
-	// The child settles, and the parent's real completion finally arrives.
-	require.NoError(t, mgr.Cancel(t.Context(), child.ID, "no longer needed"))
-	publishSuccess(t, spawner.appFor(parent.WorktreePath), parent.SessionID)
-
-	require.Eventually(t, func() bool {
-		got, err := mgr.Get(t.Context(), parent.ID)
-		return err == nil && got.Status == thread.StatusMerged
-	}, eventuallyTimeout, eventuallyTick,
-		"the thread must reach a terminal status once its own delegations settle")
-
-	parentCoord := parentApp.Coordinator().(*fakeCoordinator)
-	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick,
-		"its completion must be delivered")
-}
+// dropped, and completion cleanup never runs.

@@ -14,7 +14,7 @@ import (
 )
 
 // threadEventPubsubType maps a thread lifecycle event's semantic type
-// (created/status_changed/merged/removed, see thread.EventType) onto
+// (created/status_changed/removed, see thread.EventType) onto
 // the coarser pubsub.EventType the TUI's thread state machines
 // (threads_cache.go, threads_dock.go, thread_indicator.go) key their
 // upsert/remove logic off. AppWorkspace.translateEvent funnels through
@@ -25,7 +25,7 @@ func threadEventPubsubType(t thread.EventType) pubsub.EventType {
 		return pubsub.CreatedEvent
 	case thread.EventRemoved:
 		return pubsub.DeletedEvent
-	default: // status_changed, merged
+	default: // status_changed
 		return pubsub.UpdatedEvent
 	}
 }
@@ -81,7 +81,6 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 		Name:            req.Name,
 		Goal:            req.Goal,
 		BaseBranch:      req.BaseBranch,
-		MergePolicy:     thread.MergePolicy(req.MergePolicy),
 		ParentSessionID: req.ParentSessionID,
 	})
 	if err != nil {
@@ -114,20 +113,6 @@ func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thr
 		return proto.Thread{}, workspace.ErrThreadsNotSupported
 	}
 	st, err := mgr.Activate(ctx, id)
-	if err != nil {
-		return proto.Thread{}, err
-	}
-	return threadToProto(mgr, st), nil
-}
-
-func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
-	mgr, ok := w.threadManager()
-	if !ok {
-		return proto.Thread{}, workspace.ErrThreadsNotSupported
-	}
-	// Merge returns the outcome directly: a thread that merged cleanly is
-	// discarded, so re-fetching it here would find nothing.
-	st, err := mgr.Merge(ctx, id)
 	if err != nil {
 		return proto.Thread{}, err
 	}

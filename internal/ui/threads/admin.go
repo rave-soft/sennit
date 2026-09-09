@@ -63,15 +63,13 @@ func (f threadsFilter) matches(t proto.Thread) bool {
 	status := proto.ThreadStatus(t.Status)
 	switch f {
 	case filterRunning:
-		return status == proto.ThreadStatusRunning || status == proto.ThreadStatusMerging
+		return status == proto.ThreadStatusRunning
 	case filterIdle:
 		return status == proto.ThreadStatusIdle
 	case filterDone:
-		return status == proto.ThreadStatusCompleted || status == proto.ThreadStatusMerged
+		return status == proto.ThreadStatusCompleted
 	case filterFailed:
-		return status == proto.ThreadStatusFailed ||
-			status == proto.ThreadStatusConflict ||
-			status == proto.ThreadStatusMergeBlocked
+		return status == proto.ThreadStatusFailed
 	default:
 		return true
 	}
@@ -97,7 +95,6 @@ type threadAction int
 const (
 	actionNew threadAction = iota
 	actionOpen
-	actionMerge
 	actionCancel
 	actionRemove
 	actionRefresh
@@ -108,7 +105,7 @@ const (
 // actions sit at the end, away from Open, so a mis-click on the busiest
 // button is not the one that tears a worktree down.
 var threadsToolbarActions = []threadAction{
-	actionNew, actionOpen, actionMerge, actionCancel, actionRemove, actionRefresh,
+	actionNew, actionOpen, actionCancel, actionRemove, actionRefresh,
 }
 
 // label is the button's text. The key hint rides along in the footer help
@@ -120,8 +117,6 @@ func (a threadAction) label() string {
 		return "+ New"
 	case actionOpen:
 		return "Open"
-	case actionMerge:
-		return "Merge"
 	case actionCancel:
 		return "Cancel"
 	case actionRemove:
@@ -151,8 +146,6 @@ func (a threadAction) enabledFor(sel *proto.Thread) bool {
 		return true
 	case actionOpen, actionRemove:
 		return sel != nil
-	case actionMerge:
-		return sel != nil && threadMergeable(sel.Kind, sel.Status)
 	case actionCancel:
 		return sel != nil && !proto.ThreadStatus(sel.Status).Terminal()
 	default:
@@ -176,11 +169,11 @@ type threadsHitZone struct {
 // threadStatusStyle maps a status onto its dashboard color class.
 func threadStatusStyle(sty *styles.Styles, status string) lipgloss.Style {
 	switch proto.ThreadStatus(status) {
-	case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
+	case proto.ThreadStatusRunning:
 		return sty.Threads.StatusRunning
-	case proto.ThreadStatusCompleted, proto.ThreadStatusMerged:
+	case proto.ThreadStatusCompleted:
 		return sty.Threads.StatusDone
-	case proto.ThreadStatusFailed, proto.ThreadStatusConflict, proto.ThreadStatusMergeBlocked:
+	case proto.ThreadStatusFailed:
 		return sty.Threads.StatusError
 	case proto.ThreadStatusCancelled, proto.ThreadStatusInterrupted:
 		return sty.Threads.StatusWarn

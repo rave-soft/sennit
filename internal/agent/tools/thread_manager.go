@@ -17,7 +17,6 @@ type ThreadInfo struct {
 	WorktreePath  string
 	SessionID     string
 	Status        string
-	MergePolicy   string
 	ResultSummary string
 	Error         string
 	CreatedAt     int64

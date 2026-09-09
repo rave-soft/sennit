@@ -32,7 +32,6 @@ func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:            "restart-thread",
 		Goal:            "do it",
-		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
@@ -77,7 +76,6 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:            "resume-thread",
 		Goal:            "do it",
-		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
@@ -166,9 +164,8 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 	})
 	shutdownManagerOnCleanup(t, mgr1)
 	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
-		Name:        "restart-solo",
-		Goal:        "do it",
-		MergePolicy: thread.MergeManual,
+		Name: "restart-solo",
+		Goal: "do it",
 		// No ParentSessionID.
 	})
 	require.NoError(t, err)

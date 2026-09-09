@@ -688,7 +688,6 @@ type ThreadController interface {
 	// an agent run, so a thread whose run has finished can be attached to
 	// and worked in by hand instead of only viewed read-only.
 	ActivateThread(ctx context.Context, id string) (proto.Thread, error)
-	MergeThread(ctx context.Context, id string) (proto.Thread, error)
 	// CancelThread stops id's in-flight run and rests it at
 	// StatusCancelled, leaving its worktree and branch on disk — unlike
 	// RemoveThread, which tears everything down. Mirrors TaskController's

@@ -125,25 +125,16 @@ func (m *Manager) AwaitingDelegationsForTest(id string) bool {
 // ResolveDeliveryTargetForTest exposes resolveDeliveryTarget — the
 // lifecycle's deliveryResolver hook — for tests outside this package that
 // need to exercise its branches directly rather than through a full
-// run/merge flow.
+// completion flow.
 func (m *Manager) ResolveDeliveryTargetForTest(ctx context.Context, handle Handle, st Thread) (Workspace, string, bool) {
 	return m.resolveDeliveryTarget(ctx, handle, st)
 }
 
 // SetStatusForTest forces a delegation's status through the lifecycle,
 // exactly as a real transition would, for tests outside this package that
-// need to put a row into a state no ordinary Manager call reaches (for
-// example: a merged status with no completed merge behind it, to drive
-// discardMerged in isolation).
+// need to put a row into a state no ordinary Manager call reaches.
 func (m *Manager) SetStatusForTest(ctx context.Context, id string, status Status, errText, resultSummary string, completedAt int64) (Thread, error) {
 	return m.lc.setStatus(ctx, id, status, errText, resultSummary, completedAt)
-}
-
-// DiscardMergedForTest exposes discardMerged for tests outside this
-// package that need to drive it directly, independent of the merge flow
-// that ordinarily triggers it.
-func (m *Manager) DiscardMergedForTest(ctx context.Context, threadID string) {
-	m.discardMerged(ctx, threadID)
 }
 
 // WorktreeDirForTest exposes the resolved worktree directory NewManager

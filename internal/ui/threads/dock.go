@@ -342,8 +342,6 @@ func threadDockStatusWord(status proto.ThreadStatus) string {
 		return "pending"
 	case proto.ThreadStatusRunning:
 		return "running…"
-	case proto.ThreadStatusMerging:
-		return "merging…"
 	case proto.ThreadStatusIdle:
 		// Explicit, not the raw-status default: idle must read as its own
 		// waiting state, distinct from both "running" and a terminal word.

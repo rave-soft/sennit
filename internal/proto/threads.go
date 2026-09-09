@@ -3,26 +3,22 @@ package proto
 type ThreadStatus string
 
 const (
-	ThreadStatusPending      ThreadStatus = "pending"
-	ThreadStatusRunning      ThreadStatus = "running"
-	ThreadStatusIdle         ThreadStatus = "idle"
-	ThreadStatusCompleted    ThreadStatus = "completed"
-	ThreadStatusFailed       ThreadStatus = "failed"
-	ThreadStatusInterrupted  ThreadStatus = "interrupted"
-	ThreadStatusCancelled    ThreadStatus = "cancelled"
-	ThreadStatusMerging      ThreadStatus = "merging"
-	ThreadStatusMerged       ThreadStatus = "merged"
-	ThreadStatusConflict     ThreadStatus = "conflict"
-	ThreadStatusMergeBlocked ThreadStatus = "merge_blocked"
+	ThreadStatusPending     ThreadStatus = "pending"
+	ThreadStatusRunning     ThreadStatus = "running"
+	ThreadStatusIdle        ThreadStatus = "idle"
+	ThreadStatusCompleted   ThreadStatus = "completed"
+	ThreadStatusFailed      ThreadStatus = "failed"
+	ThreadStatusInterrupted ThreadStatus = "interrupted"
+	ThreadStatusCancelled   ThreadStatus = "cancelled"
 )
 
 func (s ThreadStatus) Active() bool {
-	return s == ThreadStatusPending || s == ThreadStatusRunning || s == ThreadStatusMerging
+	return s == ThreadStatusPending || s == ThreadStatusRunning
 }
 
 func (s ThreadStatus) Terminal() bool {
 	switch s {
-	case ThreadStatusCompleted, ThreadStatusMerged, ThreadStatusConflict, ThreadStatusMergeBlocked, ThreadStatusFailed, ThreadStatusInterrupted, ThreadStatusCancelled:
+	case ThreadStatusCompleted, ThreadStatusFailed, ThreadStatusInterrupted, ThreadStatusCancelled:
 		return true
 	default:
 		return false
@@ -56,7 +52,6 @@ type Thread struct {
 	// "thread". Additive field: older clients that don't read it are
 	// unaffected.
 	Kind          string `json:"kind"`
-	MergePolicy   string `json:"merge_policy"`
 	ResultSummary string `json:"result_summary,omitempty"`
 	Error         string `json:"error,omitempty"`
 	CreatedAt     int64  `json:"created_at"`
@@ -71,10 +66,9 @@ type Thread struct {
 
 // CreateThreadRequest is the request body for creating a thread.
 type CreateThreadRequest struct {
-	Name        string `json:"name"`
-	Goal        string `json:"goal"`
-	BaseBranch  string `json:"base_branch,omitempty"`
-	MergePolicy string `json:"merge_policy,omitempty"`
+	Name       string `json:"name"`
+	Goal       string `json:"goal"`
+	BaseBranch string `json:"base_branch,omitempty"`
 	// ParentSessionID is the session the thread was started from. It is
 	// what lets the thread's completion reach the agent that is waiting
 	// for it: without it the delegation has nobody to report to and its

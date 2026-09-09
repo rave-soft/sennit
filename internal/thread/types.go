@@ -1,15 +1,10 @@
 package thread
 
 // Status is the lifecycle state shared by every delegation kind this
-// package manages. [Status.Active] and [Status.Terminal] are exhaustive
-// over every value below — core and overlay alike — even though only
-// [Thread] ever reaches the overlay-only values below, so that a status
-// this build doesn't recognize (from a newer overlay sharing the
-// database) safely reports neither.
+// package manages. A status this build does not recognize safely reports
+// neither active nor terminal.
 type Status string
 
-// Core statuses: reachable by any delegation, with no dependency on
-// Thread's git-worktree/merge overlay.
 const (
 	StatusPending Status = "pending"
 	StatusRunning Status = "running"
@@ -30,27 +25,16 @@ const (
 	// incidental way a run stops without anyone choosing to (a process
 	// restart reconciled by lifecycle.recover, Manager.Shutdown releasing
 	// live runtimes, or the run itself reporting RunComplete.Cancelled).
-	// Core, not overlay: both a task and a thread can be cancelled this
-	// way, unlike the git-worktree/merge statuses below which only a
-	// thread ever reaches.
+	// Both tasks and threads can be cancelled this way.
 	StatusCancelled Status = "cancelled"
 )
 
-// Overlay statuses: reachable only by a [Thread], as part of its
-// git-worktree merge flow.
-const (
-	StatusMerging      Status = "merging"
-	StatusMerged       Status = "merged"
-	StatusConflict     Status = "conflict"
-	StatusMergeBlocked Status = "merge_blocked"
-)
-
-// Active reports whether the delegation still has work in flight: pending,
-// running, or (Thread overlay) merging. Idle delegations are deliberately
-// excluded: their workspace is live, but nothing is executing in it.
+// Active reports whether the delegation still has work in flight. Idle
+// delegations are deliberately excluded: their workspace is live, but
+// nothing is executing in it.
 func (s Status) Active() bool {
 	switch s {
-	case StatusPending, StatusRunning, StatusMerging:
+	case StatusPending, StatusRunning:
 		return true
 	default:
 		return false
@@ -65,8 +49,7 @@ func (s Status) Active() bool {
 // that simply has no run of its own in flight.
 func (s Status) Terminal() bool {
 	switch s {
-	case StatusCompleted, StatusMerged, StatusConflict,
-		StatusMergeBlocked, StatusFailed, StatusInterrupted, StatusCancelled:
+	case StatusCompleted, StatusFailed, StatusInterrupted, StatusCancelled:
 		return true
 	default:
 		return false
@@ -79,7 +62,7 @@ type Kind string
 
 const (
 	// KindThread is the value every [Thread] writes: a delegation that
-	// lives in its own git worktree and branch, with a merge policy.
+	// lives in its own git worktree and branch.
 	KindThread Kind = "thread"
 	// KindTask is the lightweight, worktree-less delegation kind built on
 	// top of this same table; see [TaskManager.Create].
@@ -116,15 +99,6 @@ type Delegation struct {
 	CompletionDepth int
 	TerminalAt      int64
 }
-
-// MergePolicy controls how a completed thread's branch is merged back into
-// its base branch.
-type MergePolicy string
-
-const (
-	MergeAuto   MergePolicy = "auto"
-	MergeManual MergePolicy = "manual"
-)
 
 // SendDisposition reports what actually happened to a message handed to
 // [Manager.Send] or [TaskManager.Send]. A send always succeeds in the
@@ -180,13 +154,11 @@ const (
 )
 
 // Thread is a [Delegation] that additionally runs in its own git worktree
-// and branch, and is by default folded back into a base branch on
-// completion according to MergePolicy.
+// and branch.
 type Thread struct {
 	Delegation
 	BaseBranch   string
 	Branch       string
 	WorktreePath string
 	Execution    string
-	MergePolicy  MergePolicy
 }

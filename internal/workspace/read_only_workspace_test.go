@@ -87,8 +87,6 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	// Thread mutations denied.
 	_, err = ro.CreateThread(t.Context(), proto.CreateThreadRequest{Name: "x"})
 	require.True(t, IsReadOnlyError(err))
-	_, err = ro.MergeThread(t.Context(), "id")
-	require.True(t, IsReadOnlyError(err))
 	err = ro.RemoveThread(t.Context(), "id", proto.RemoveThreadOptions{})
 	require.True(t, IsReadOnlyError(err))
 	_, _, err = ro.AttachThread(t.Context(), "id")
@@ -741,11 +739,6 @@ func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThread
 
 func (s *stubWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
 	s.track("ActivateThread")
-	return proto.Thread{}, nil
-}
-
-func (s *stubWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
-	s.track("MergeThread")
 	return proto.Thread{}, nil
 }
 

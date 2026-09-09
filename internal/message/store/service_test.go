@@ -95,7 +95,6 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 		WorktreePath: "/tmp/thread-1",
 		SessionID:    threadSession.ID,
 		Status:       "running",
-		MergePolicy:  "manual",
 	})
 	require.NoError(t, err)
 

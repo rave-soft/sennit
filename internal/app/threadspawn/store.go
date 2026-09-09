@@ -47,16 +47,6 @@ func (s *store) Create(ctx context.Context, params thread.CreateParams) (thread.
 	if kind == "" {
 		kind = thread.KindThread
 	}
-	// MergePolicy is a Thread-overlay concept: defaulting it for every
-	// kind would leave a non-thread row reading MergeAuto, which used to
-	// be enough on its own to send a task into Manager's merge flow (see
-	// onAutoMerge, which now also guards on Kind directly). Only a thread
-	// gets the default; every other kind's column stays "".
-	mergePolicy := params.MergePolicy
-	if mergePolicy == "" && kind == thread.KindThread {
-		mergePolicy = thread.MergeAuto
-	}
-
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
 		ID:              uuid.New().String(),
 		Name:            params.Name,
@@ -67,7 +57,6 @@ func (s *store) Create(ctx context.Context, params thread.CreateParams) (thread.
 		WorktreePath:    params.WorktreePath,
 		SessionID:       params.SessionID,
 		Status:          string(thread.StatusPending),
-		MergePolicy:     string(mergePolicy),
 		Kind:            string(kind),
 		ParentSessionID: params.ParentSessionID,
 		Execution:       params.Execution,
@@ -258,7 +247,7 @@ func fromPendingDBRow(item db.ListPendingTaskCompletionsRow) thread.Thread {
 	return fromDBItem(db.Thread{
 		ID: item.ID, Name: item.Name_2, ProjectPath: item.ProjectPath, Goal: item.Goal_2,
 		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
-		SessionID: item.SessionID_2, Status: item.Status_2, MergePolicy: item.MergePolicy,
+		SessionID: item.SessionID_2, Status: item.Status_2,
 		ResultSummary: item.ResultSummary_2, Error: item.Error_2, CreatedAt: item.CreatedAt,
 		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt_2, Kind: item.Kind,
 		ParentSessionID: item.ParentSessionID_2, CompletionPending: 1,
@@ -290,6 +279,5 @@ func fromDBItem(item db.Thread) thread.Thread {
 		Branch:       item.Branch,
 		WorktreePath: item.WorktreePath,
 		Execution:    item.Execution,
-		MergePolicy:  thread.MergePolicy(item.MergePolicy),
 	}
 }

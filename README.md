@@ -157,8 +157,9 @@ Three ways work happens alongside the current turn: a message sent
 mid-turn is **steered** into that turn rather than starting a new one; a
 **background task** is a delegation with no isolation, sharing the working
 directory and reporting back automatically; a **thread** is fully isolated —
-its own git worktree, branch, app instance and merge policy — for work that
-would otherwise collide with what's already running. `sennit threads` manages
+its own git worktree, branch and app instance — for work that would otherwise
+collide with what's already running. Clean duplicate worktrees are removed on
+completion; changed or uniquely committed work is retained. `sennit threads` manages
 the last of these from the CLI. See
 [docs/concepts](docs/concepts/delegation.md) for the trade-offs and limits.
 

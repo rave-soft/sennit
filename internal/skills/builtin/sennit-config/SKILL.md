@@ -646,9 +646,9 @@ sennit gc [--days N] [--dry-run] [--project] [--json]
 - Deleting a session also deletes any agent-tool/title sub-session parented
   to it, regardless of the sub-session's own age; old sub-sessions under a
   kept parent are deleted independently, on their own age.
-- Also deletes finished threads (`completed`, `merged`, `conflict`,
-  `merge_blocked`, `failed`, `interrupted`) past the same window —
-  `pending`/`running`/`merging` threads are never touched, regardless of age.
+- Also deletes finished delegation records (`completed`, `failed`,
+  `interrupted`, `cancelled`) past the same window. Thread records are retained
+  while their worktree still exists, and unknown statuses are never touched.
 - Runs `VACUUM` and a WAL checkpoint afterward to actually shrink
   `sennit.db` on disk.
 - Defaults to the entire shared database (every project); pass `--project`

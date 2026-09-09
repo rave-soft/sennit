@@ -62,7 +62,7 @@ func (m *UI) panelSpinnerWanted() bool {
 	}
 	for _, t := range m.threadList.Threads() {
 		switch proto.ThreadStatus(t.Status) {
-		case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
+		case proto.ThreadStatusRunning:
 			return true
 		}
 	}
@@ -1067,7 +1067,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 			line2: func(i int) string {
 				item := plan.threads[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
-				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning || status == proto.ThreadStatusMerging {
+				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning {
 					icon = m.panel.panelActivityIcon(m.com)
 				}
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.ActivityOf(item.ID)))

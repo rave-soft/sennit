@@ -2,6 +2,7 @@ package appws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,13 +11,16 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/configtest"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -24,7 +28,11 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/model"
+	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -262,7 +270,7 @@ func (s *fakeThreadSpawner) Release(ctx context.Context, id string) error {
 
 // shutdownManagerOnCleanup registers a t.Cleanup that shuts mgr down on a
 // bounded context and fails the test if Shutdown does not return cleanly.
-// A Manager owns background goroutines (auto-merge, delivery, worktree
+// A Manager owns background goroutines (completion cleanup, delivery, worktree
 // removal) that keep touching a thread's worktree - and the
 // repo's own .git directory - after the test body returns; App.Shutdown/
 // ShutdownForTest does NOT join these, since publishing the manager
@@ -284,24 +292,37 @@ func shutdownManagerOnCleanup(t *testing.T, mgr *thread.Manager) {
 // newTestThreadAppWorkspace wires an AppWorkspace whose App has a real
 // *thread.Manager attached over a real git repo, a real store, and the
 // fakeThreadSpawner defined above.
-func newTestThreadAppWorkspace(t *testing.T) (*AppWorkspace, *thread.Manager) {
+func newTestThreadAppWorkspaceWithOptions(t *testing.T, configure func(*thread.ManagerOptions)) (*AppWorkspace, *thread.Manager, *fakeThreadSpawner) {
 	t.Helper()
 	repo := initRepoForWorkspaceThreadsTest(t)
 
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
+	a.Skills = skills.NewManager(nil, nil, nil)
+	t.Cleanup(a.Skills.Shutdown)
 
-	mgr := thread.NewManager(thread.ManagerOptions{
+	spawner := newFakeThreadSpawner(t)
+	opts := thread.ManagerOptions{
 		Store:       newTestThreadStoreDB(t),
-		Spawner:     newFakeThreadSpawner(t),
+		Spawner:     spawner,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-	})
+	}
+	if configure != nil {
+		configure(&opts)
+	}
+	mgr := thread.NewManager(opts)
 	a.SetDelegationManagers(mgr, nil, nil, nil)
+	app.ForwardEvents(a, "thread-test", mgr.Subscribe)
 	shutdownManagerOnCleanup(t, mgr)
 
-	store := configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo))
-	return NewAppWorkspace(a, store), mgr
+	store := configtest.NewStore(t, &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}, configtest.WithLoadedPaths(repo))
+	return NewAppWorkspace(a, store), mgr, spawner
+}
+
+func newTestThreadAppWorkspace(t *testing.T) (*AppWorkspace, *thread.Manager) {
+	aw, mgr, _ := newTestThreadAppWorkspaceWithOptions(t, nil)
+	return aw, mgr
 }
 
 func TestAppWorkspace_SupportsThreads(t *testing.T) {
@@ -545,12 +566,140 @@ func TestAppWorkspace_TranslateEvent_ThreadLifecycle(t *testing.T) {
 	}
 }
 
-// TestAppWorkspace_AttachThread_MergedThread_ReadMessages verifies the
-// read-only fallback: a thread with no live handle (here, one in the merge
-// flow) yields a read-only workspace whose session metadata is read from
-// the shared database via the main app's session store, without
-// AttachThread attempting to spawn anything.
-func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
+func TestAppWorkspace_CompletionCleanupEventSequencing(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		prepare   func(*testing.T, proto.Thread)
+		configure func(*thread.ManagerOptions)
+		wantType  pubsub.EventType
+		wantError string
+		wantToast string
+	}{
+		{"clean", func(*testing.T, proto.Thread) {}, func(*thread.ManagerOptions) {}, pubsub.DeletedEvent, "", "clean worktree removed"},
+		{"dirty", func(t *testing.T, st proto.Thread) {
+			require.NoError(t, os.WriteFile(filepath.Join(st.WorktreePath, "dirty.txt"), []byte("keep\n"), 0o644))
+		}, func(*thread.ManagerOptions) {}, pubsub.UpdatedEvent, "uncommitted changes", "uncommitted changes"},
+		{"unique", func(t *testing.T, st proto.Thread) {
+			require.NoError(t, os.WriteFile(filepath.Join(st.WorktreePath, "result.txt"), []byte("keep\n"), 0o644))
+			runGitForWorkspaceThreadsTest(t, st.WorktreePath, "add", "result.txt")
+			runGitForWorkspaceThreadsTest(t, st.WorktreePath, "commit", "-m", "retain result")
+		}, func(*thread.ManagerOptions) {}, pubsub.UpdatedEvent, "unique commits", "unique commits"},
+		{"unverified", func(*testing.T, proto.Thread) {}, func(opts *thread.ManagerOptions) {
+			opts.WorktreeRemove = func(context.Context, string, string, bool) error { return errors.New("blocked") }
+		}, pubsub.UpdatedEvent, "could not be verified", "could not be verified"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			aw, mgr, spawner := newTestThreadAppWorkspaceWithOptions(t, testCase.configure)
+			events := make(chan any, 32)
+			go aw.Subscribe(func(msg any) { events <- msg })
+			ui := model.New(common.DefaultCommon(t.Context(), aw), "", false)
+			created, err := aw.CreateThread(t.Context(), proto.CreateThreadRequest{Name: testCase.name, Goal: "finish"})
+			require.NoError(t, err)
+			testCase.prepare(t, created)
+
+			spawner.mu.Lock()
+			handle := spawner.byPath[created.WorktreePath]
+			spawner.mu.Unlock()
+			runID, live := mgr.RuntimeForTest(created.ID)
+			require.True(t, live)
+			handle.app.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: created.SessionID, RunID: runID, Text: "finished"})
+
+			var terminals []pubsub.Event[proto.Thread]
+			var reports []util.InfoMsg
+			deadline := time.After(5 * time.Second)
+			for len(terminals) == 0 {
+				select {
+				case raw := <-events:
+					event, ok := raw.(pubsub.Event[proto.Thread])
+					if !ok || event.Payload.ID != created.ID {
+						continue
+					}
+					_, cmd := ui.Update(event)
+					collectThreadCompletionReports(cmd, &reports)
+					terminal := event.Payload.Status == string(thread.StatusCompleted) || event.Type == pubsub.DeletedEvent
+					if !terminal {
+						require.Empty(t, reports)
+						continue
+					}
+					terminals = append(terminals, event)
+				case <-deadline:
+					t.Fatal("timed out waiting for terminal cleanup event")
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			for {
+				select {
+				case raw := <-events:
+					event, ok := raw.(pubsub.Event[proto.Thread])
+					if !ok || event.Payload.ID != created.ID {
+						continue
+					}
+					_, cmd := ui.Update(event)
+					collectThreadCompletionReports(cmd, &reports)
+					if event.Payload.Status == string(thread.StatusCompleted) || event.Type == pubsub.DeletedEvent {
+						terminals = append(terminals, event)
+					}
+				default:
+					goto asserted
+				}
+			}
+		asserted:
+			require.Len(t, terminals, 1)
+			require.Equal(t, testCase.wantType, terminals[0].Type)
+			require.Contains(t, terminals[0].Payload.Error, testCase.wantError)
+			require.Len(t, reports, 1)
+			require.Contains(t, reports[0].Msg, testCase.wantToast)
+			if testCase.wantType == pubsub.DeletedEvent {
+				_, getErr := mgr.Get(t.Context(), created.ID)
+				require.Error(t, getErr)
+				require.NoDirExists(t, created.WorktreePath)
+				cmd := exec.CommandContext(t.Context(), "git", "branch", "--list", created.Branch)
+				cmd.Dir = aw.WorkingDir()
+				out, branchErr := cmd.Output()
+				require.NoError(t, branchErr)
+				require.Empty(t, out)
+			} else {
+				_, getErr := mgr.Get(t.Context(), created.ID)
+				require.NoError(t, getErr)
+				require.DirExists(t, created.WorktreePath)
+				require.NotContains(t, reports[0].Msg, "clean worktree removed")
+			}
+		})
+	}
+}
+
+func collectThreadCompletionReports(cmd tea.Cmd, reports *[]util.InfoMsg) {
+	if cmd == nil {
+		return
+	}
+	msg, ok := runThreadCompletionCommand(cmd)
+	if !ok {
+		return
+	}
+	switch msg := msg.(type) {
+	case tea.BatchMsg:
+		for _, child := range msg {
+			collectThreadCompletionReports(child, reports)
+		}
+	case util.InfoMsg:
+		*reports = append(*reports, msg)
+	}
+}
+
+func runThreadCompletionCommand(cmd tea.Cmd) (msg tea.Msg, ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	return cmd(), true
+}
+
+// TestAppWorkspace_AttachThread_CompletedThread_ReadMessages verifies the
+// read-only fallback: a completed thread with no live handle yields a read-only
+// workspace whose session metadata is read from the shared database via the
+// main app's session store, without AttachThread attempting to spawn anything.
+func TestAppWorkspace_AttachThread_CompletedThread_ReadMessages(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 
 	a := app.NewForTest(t.Context())
@@ -584,13 +733,13 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
-		Status: thread.StatusMerged,
+		Status: thread.StatusCompleted,
 	})
 	require.NoError(t, err)
 
 	require.Nil(t, mgr.Handle(created.ID), "handle should be nil after completion")
 
-	// Attach to the merged thread — it has no live handle, so AttachThread
+	// Attach to the completed thread: it has no live handle, so AttachThread
 	// falls back to a read-only workspace without attempting to spawn one.
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
 	attached, detach, err := aw.AttachThread(t.Context(), created.ID)
@@ -608,16 +757,15 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	// The attached workspace can read the persisted session from the
 	// shared session store via the main app.
 	sess, err := attached.GetSession(t.Context(), "sess-1")
-	require.NoError(t, err, "GetSession on merged thread should succeed")
+	require.NoError(t, err, "GetSession on completed thread should succeed")
 	require.Equal(t, "read-msgs", sess.Title)
 }
 
-// TestAppWorkspace_AttachThread_MergedThread_IsReadOnly verifies that the
-// workspace returned for a thread that cannot be reactivated (one in the
-// merge flow) is read-only: all mutating operations return
-// ErrReadOnlyOperation, and shutdown of the attached workspace does not
-// affect the parent.
-func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
+// TestAppWorkspace_AttachThread_CompletedThread_IsReadOnly verifies that the
+// workspace returned for a completed thread that cannot be reactivated is
+// read-only: all mutating operations return ErrReadOnlyOperation, and shutdown
+// of the attached workspace does not affect the parent.
+func TestAppWorkspace_AttachThread_CompletedThread_IsReadOnly(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 
 	a := app.NewForTest(t.Context())
@@ -648,7 +796,7 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
-		Status: thread.StatusMerged,
+		Status: thread.StatusCompleted,
 	})
 	require.NoError(t, err)
 
@@ -706,7 +854,7 @@ func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testin
 		SessionID:    "sess-1",
 	})
 	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{Status: thread.StatusMerged})
+	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{Status: thread.StatusCompleted})
 	require.NoError(t, err)
 
 	aw := NewAppWorkspace(a, configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(repo)))
@@ -729,9 +877,8 @@ func TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	ws, mgr := newTestThreadAppWorkspace(t)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "waiting",
-		Goal:        "do the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "waiting",
+		Goal: "do the thing",
 	})
 	require.NoError(t, err)
 
@@ -788,9 +935,8 @@ func TestAttachedThread_PermissionAnswerReachesTheParentThatRaisedIt(t *testing.
 	ws, mgr := newTestThreadAppWorkspace(t)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "attached",
-		Goal:        "do the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "attached",
+		Goal: "do the thing",
 	})
 	require.NoError(t, err)
 

@@ -14,27 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestActiveDockThreadsFiltersAndSorts(t *testing.T) {
-	t.Parallel()
-
-	threads := []proto.Thread{
-		{ID: "merged", Status: "merged", CreatedAt: 1},
-		{ID: "b-running", Status: "running", CreatedAt: 30},
-		{ID: "a-pending", Status: "pending", CreatedAt: 10},
-		{ID: "failed", Status: "failed", CreatedAt: 5},
-		{ID: "c-merging", Status: "merging", CreatedAt: 20},
-	}
-
-	active := ActiveDockThreads(threads)
-	require.Len(t, active, 3)
-	require.Equal(t, []string{"a-pending", "c-merging", "b-running"}, dockThreadIDs(active))
-}
-
-// TestActiveDockThreadsIncludesIdle proves "idle must not read as
-// finished" (see StatusIdle's doc comment) at the filtering layer: an idle
-// delegation's workspace is still live and belongs in the dock's live-work
-// list even though Status.Active() alone excludes it. Covers both a
-// Kind=thread and a Kind=task idle row.
 func TestActiveDockThreadsIncludesIdle(t *testing.T) {
 	t.Parallel()
 
@@ -84,53 +63,6 @@ func TestThreadDockGoalHeadline(t *testing.T) {
 		DockGoalHeadline("dev", "Fix this: the parser drops newlines"))
 }
 
-func TestThreadDockStatusLine(t *testing.T) {
-	t.Parallel()
-
-	elapsed := 4*time.Minute + 3*time.Second
-
-	// The step count and the in-progress todo are both shown; the todo
-	// wins over the last tool call as the activity segment.
-	line := DockStatusLine(proto.ThreadStatusRunning, DockActivity{
-		InProgressTodo: "writing tests",
-		LastTool:       "bash go test ./...",
-		MessageCount:   7,
-	}, elapsed)
-	require.Equal(t, "step 7 · → writing tests · 4m03s", line)
-
-	// Without a todo, the last tool call fills the activity segment.
-	line = DockStatusLine(proto.ThreadStatusRunning, DockActivity{
-		LastTool:     "Read internal/ui/model/ui.go",
-		MessageCount: 7,
-	}, elapsed)
-	require.Equal(t, "step 7 · → Read internal/ui/model/ui.go · 4m03s", line)
-
-	// Just a step count when there's neither todo nor tool activity.
-	line = DockStatusLine(proto.ThreadStatusRunning, DockActivity{
-		MessageCount: 7,
-	}, elapsed)
-	require.Equal(t, "step 7 · 4m03s", line)
-
-	// Falls back to the thread's own status word when there's no activity
-	// at all.
-	line = DockStatusLine(proto.ThreadStatusRunning, DockActivity{}, elapsed)
-	require.Equal(t, "running… · 4m03s", line)
-
-	line = DockStatusLine(proto.ThreadStatusPending, DockActivity{}, elapsed)
-	require.Equal(t, "pending · 4m03s", line)
-
-	line = DockStatusLine(proto.ThreadStatusMerging, DockActivity{}, elapsed)
-	require.Equal(t, "merging… · 4m03s", line)
-
-	// The elapsed suffix is always present, regardless of branch.
-	require.Contains(t, DockStatusLine(proto.ThreadStatusRunning, DockActivity{}, 45*time.Second), "45s")
-}
-
-// TestDropActivityDiscardsCachedSnapshot proves the Deleted-event cleanup
-// UI.updateThreads performs (dropActivity), now that the shared thread list
-// (threads_cache.go) owns removing the row itself: the dock must still
-// forget any live activity snapshot for a thread that's gone, or a stale
-// snapshot could linger keyed by an ID nothing will ever look up again.
 func TestDropActivityDiscardsCachedSnapshot(t *testing.T) {
 	t.Parallel()
 

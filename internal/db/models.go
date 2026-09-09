@@ -90,7 +90,6 @@ type Thread struct {
 	WorktreePath      string        `json:"worktree_path"`
 	SessionID         string        `json:"session_id"`
 	Status            string        `json:"status"`
-	MergePolicy       string        `json:"merge_policy"`
 	ResultSummary     string        `json:"result_summary"`
 	Error             string        `json:"error"`
 	CreatedAt         int64         `json:"created_at"`

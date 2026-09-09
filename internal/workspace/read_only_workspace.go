@@ -610,10 +610,6 @@ func (w *readOnlyWorkspace) ActivateThread(ctx context.Context, id string) (prot
 	return proto.Thread{}, w.readOnlyError("ActivateThread")
 }
 
-func (w *readOnlyWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
-	return proto.Thread{}, w.readOnlyError("MergeThread")
-}
-
 func (w *readOnlyWorkspace) CancelThread(ctx context.Context, id, reason string) error {
 	return w.readOnlyError("CancelThread")
 }

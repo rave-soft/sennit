@@ -87,10 +87,6 @@ func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, 
 	if kind == "" {
 		kind = KindThread
 	}
-	mergePolicy := params.MergePolicy
-	if mergePolicy == "" && kind == KindThread {
-		mergePolicy = MergeAuto
-	}
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
 		// A time-derived ID (fmt.Sprintf("thread-%d", time.Now().UnixNano()))
 		// used to sit here; on a coarse wall clock — Windows' default
@@ -108,7 +104,6 @@ func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, 
 		WorktreePath:    params.WorktreePath,
 		SessionID:       params.SessionID,
 		Status:          string(StatusPending),
-		MergePolicy:     string(mergePolicy),
 		Kind:            string(kind),
 		ParentSessionID: params.ParentSessionID,
 		Execution:       params.Execution,
@@ -300,7 +295,7 @@ func testFromPendingDBRow(item db.ListPendingTaskCompletionsRow) Thread {
 	return testFromDBItem(db.Thread{
 		ID: item.ID, Name: item.Name_2, ProjectPath: item.ProjectPath, Goal: item.Goal_2,
 		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
-		SessionID: item.SessionID_2, Status: item.Status_2, MergePolicy: item.MergePolicy,
+		SessionID: item.SessionID_2, Status: item.Status_2,
 		ResultSummary: item.ResultSummary_2, Error: item.Error_2, CreatedAt: item.CreatedAt,
 		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt_2, Kind: item.Kind,
 		ParentSessionID: item.ParentSessionID_2, CompletionPending: 1,
@@ -332,6 +327,5 @@ func testFromDBItem(item db.Thread) Thread {
 		Branch:       item.Branch,
 		WorktreePath: item.WorktreePath,
 		Execution:    item.Execution,
-		MergePolicy:  MergePolicy(item.MergePolicy),
 	}
 }

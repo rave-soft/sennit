@@ -84,10 +84,6 @@ func (w *threadsTestWorkspace) CreateThread(context.Context, proto.CreateThreadR
 	return proto.Thread{}, w.err
 }
 
-func (w *threadsTestWorkspace) MergeThread(context.Context, string) (proto.Thread, error) {
-	return proto.Thread{}, w.err
-}
-
 func (w *threadsTestWorkspace) RemoveThread(context.Context, string, proto.RemoveThreadOptions) error {
 	return w.err
 }

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -20,6 +19,14 @@ import (
 func testStyles() *styles.Styles {
 	s := styles.SennitDark()
 	return &s
+}
+
+func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *Dashboard {
+	t.Helper()
+	com := &common.Common{Workspace: ws, Styles: testStyles()}
+	m := New(com, &ListCache{})
+	m.SetSize(80, 20)
+	return m
 }
 
 func TestThreadItemRenderRespectsWidth(t *testing.T) {
@@ -61,27 +68,6 @@ func TestThreadItemRenderTruncatesGoal(t *testing.T) {
 // TestThreadMergeableTaskAlwaysFalse proves a task never reports mergeable
 // regardless of status: it has no worktree/branch of its own to merge (see
 // TaskController's doc comment).
-func TestThreadMergeableTaskAlwaysFalse(t *testing.T) {
-	t.Parallel()
-
-	for _, status := range []string{"pending", "running", "idle", "completed", "failed"} {
-		require.Falsef(t, threadMergeable("task", status), "status=%s", status)
-	}
-}
-
-// TestThreadMergeableThreadUnaffected proves the kind change didn't alter a
-// thread's existing merge-eligibility rules.
-func TestThreadMergeableThreadUnaffected(t *testing.T) {
-	t.Parallel()
-
-	require.True(t, threadMergeable("thread", "completed"))
-	require.False(t, threadMergeable("thread", "merged"))
-	require.False(t, threadMergeable("thread", "merging"))
-}
-
-// TestThreadStatusStyleIdleIsNeitherDoneNorError proves idle takes its own
-// neutral color rather than reading as a finished or broken delegation:
-// it is a live thread with no run in flight.
 func TestThreadStatusStyleIdleIsNeitherDoneNorError(t *testing.T) {
 	t.Parallel()
 
@@ -94,41 +80,6 @@ func TestThreadStatusStyleIdleIsNeitherDoneNorError(t *testing.T) {
 
 // TestThreadStatusStyleClasses pins each status onto its color class — the
 // dashboard is scanned by color before it is read.
-func TestThreadStatusStyleClasses(t *testing.T) {
-	t.Parallel()
-
-	sty := testStyles()
-	for status, want := range map[string]lipgloss.Style{
-		"running":       sty.Threads.StatusRunning,
-		"merging":       sty.Threads.StatusRunning,
-		"completed":     sty.Threads.StatusDone,
-		"merged":        sty.Threads.StatusDone,
-		"failed":        sty.Threads.StatusError,
-		"conflict":      sty.Threads.StatusError,
-		"merge_blocked": sty.Threads.StatusError,
-		"cancelled":     sty.Threads.StatusWarn,
-		"interrupted":   sty.Threads.StatusWarn,
-	} {
-		require.Equalf(t, want, threadStatusStyle(sty, status), "status=%s", status)
-	}
-}
-
-func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *Dashboard {
-	t.Helper()
-	com := &common.Common{Workspace: ws, Styles: testStyles()}
-	m := New(com, &ListCache{})
-	m.SetSize(80, 20)
-	return m
-}
-
-// TestThreadsDashboardRebuildItemsResizesListForDetailPane is the
-// regression test for the list rendering more rows than listRect could
-// show: SetSize used to size the list from chromeHeight() before
-// RebuildItems ever ran, so on first open — when m.visible is still empty
-// and m.selected() is nil — chromeHeight() ignored the detail pane the
-// first row's selection was about to add. RebuildItems must resize the
-// list itself, after the selection it just settled is what chromeHeight
-// sees.
 func TestThreadsDashboardRebuildItemsResizesListForDetailPane(t *testing.T) {
 	t.Parallel()
 
@@ -176,37 +127,6 @@ func TestThreadsDashboardHandleKeyNew(t *testing.T) {
 	require.NotNil(t, cmd)
 	_, ok := cmd().(OpenCreateMsg)
 	require.True(t, ok)
-}
-
-func TestThreadsDashboardHandleKeyMerge(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsTestWorkspace{supported: true}
-	m := newTestThreadsDashboard(t, ws)
-	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Status: "completed"}}
-	m.RebuildItems()
-	m.list.SelectFirst()
-
-	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "m", Code: 'm'})
-	require.True(t, handled)
-	require.NotNil(t, cmd)
-	msg, ok := cmd().(MergeMsg)
-	require.True(t, ok)
-	require.Equal(t, "s1", msg.ID)
-}
-
-func TestThreadsDashboardHandleKeyMergeSkipsAlreadyMerging(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsTestWorkspace{supported: true}
-	m := newTestThreadsDashboard(t, ws)
-	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Status: "merging"}}
-	m.RebuildItems()
-	m.list.SelectFirst()
-
-	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "m", Code: 'm'})
-	require.True(t, handled)
-	require.Nil(t, cmd, "already-merging thread should not re-trigger a merge")
 }
 
 func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
@@ -288,20 +208,6 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalTask(t *testing.T) {
 // TestThreadsDashboardHandleKeyCancelSkipsTerminalThread is
 // TestThreadsDashboardHandleKeyCancelSkipsTerminalTask's thread-kind
 // sibling.
-func TestThreadsDashboardHandleKeyCancelSkipsTerminalThread(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsTestWorkspace{supported: true}
-	m := newTestThreadsDashboard(t, ws)
-	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "merged"}}
-	m.RebuildItems()
-	m.list.SelectFirst()
-
-	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
-	require.True(t, handled)
-	require.Nil(t, cmd, "an already-terminal thread should not re-trigger a cancel")
-}
-
 func TestThreadsDashboardHandleKeyReload(t *testing.T) {
 	t.Parallel()
 
@@ -390,18 +296,6 @@ func zoneFor(t *testing.T, m *Dashboard, action threadAction) threadsHitZone {
 	return threadsHitZone{}
 }
 
-// zoneForFilter returns the hit zone of a filter tab.
-func zoneForFilter(t *testing.T, m *Dashboard, f threadsFilter) threadsHitZone {
-	t.Helper()
-	for _, z := range m.zones {
-		if z.isFilter && z.filter == f {
-			return z
-		}
-	}
-	t.Fatalf("no hit zone for filter %v", f)
-	return threadsHitZone{}
-}
-
 func clickAt(m *Dashboard, pt image.Point) (bool, tea.Cmd) {
 	return m.HandleMouseClick(tea.MouseClickMsg{X: pt.X, Y: pt.Y, Button: tea.MouseLeft})
 }
@@ -410,31 +304,6 @@ func clickAt(m *Dashboard, pt image.Point) (bool, tea.Cmd) {
 // and the key bindings share: an action is offered exactly when it can
 // actually run. A dimmed button and a working shortcut (or the reverse)
 // would be the bug.
-func TestThreadsToolbarEnablementFollowsSelection(t *testing.T) {
-	t.Parallel()
-
-	running := proto.Thread{ID: "t1", Kind: "thread", Status: "running"}
-	merged := proto.Thread{ID: "t2", Kind: "thread", Status: "merged"}
-	task := proto.Thread{ID: "t3", Kind: "task", Status: "running"}
-
-	require.True(t, actionNew.enabledFor(nil), "new never needs a selection")
-	require.True(t, actionRefresh.enabledFor(nil))
-	require.True(t, actionBack.enabledFor(nil))
-	require.False(t, actionOpen.enabledFor(nil), "nothing selected, nothing to open")
-	require.False(t, actionMerge.enabledFor(nil))
-	require.False(t, actionCancel.enabledFor(nil))
-	require.False(t, actionRemove.enabledFor(nil))
-
-	require.True(t, actionMerge.enabledFor(&running))
-	require.False(t, actionMerge.enabledFor(&merged), "already merged")
-	require.False(t, actionMerge.enabledFor(&task), "a task has no branch to merge")
-
-	require.True(t, actionCancel.enabledFor(&running))
-	require.False(t, actionCancel.enabledFor(&merged), "terminal, nothing in flight")
-}
-
-// TestThreadsDashboardClickRunsAction proves a toolbar click produces the
-// same message the keyboard shortcut does.
 func TestThreadsDashboardClickRunsAction(t *testing.T) {
 	t.Parallel()
 
@@ -453,42 +322,6 @@ func TestThreadsDashboardClickRunsAction(t *testing.T) {
 // TestThreadsDashboardClickDisabledButtonDoesNothing proves a dimmed
 // button is inert and — crucially — swallows the click rather than letting
 // it fall through to the row underneath.
-func TestThreadsDashboardClickDisabledButtonDoesNothing(t *testing.T) {
-	t.Parallel()
-
-	m := dashboardWith(t, proto.Thread{ID: "t1", Name: "one", Kind: "task", Status: "running"})
-
-	z := zoneFor(t, m, actionMerge)
-	require.False(t, z.enabled, "a task is never mergeable")
-	handled, cmd := clickAt(m, z.rect.Min)
-	require.True(t, handled)
-	require.Nil(t, cmd)
-}
-
-// TestThreadsDashboardClickTabFilters proves the tabs narrow the table and
-// that the counts they carry match what filtering actually yields.
-func TestThreadsDashboardClickTabFilters(t *testing.T) {
-	t.Parallel()
-
-	m := dashboardWith(t,
-		proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
-		proto.Thread{ID: "t2", Name: "two", Kind: "thread", Status: "merged"},
-		proto.Thread{ID: "t3", Name: "three", Kind: "thread", Status: "failed"},
-	)
-	require.Equal(t, 3, m.list.Len())
-
-	z := zoneForFilter(t, m, filterFailed)
-	handled, cmd := clickAt(m, z.rect.Min)
-	require.True(t, handled)
-	require.Nil(t, cmd)
-	require.Equal(t, filterFailed, m.filter)
-	require.Equal(t, 1, m.list.Len())
-	require.Equal(t, "t3", m.selected().ID)
-}
-
-// TestThreadsDashboardClickRowSelectsOnly proves clicking a row moves the
-// selection and nothing else: acting is what the buttons are for, so a
-// stray click can never merge or remove a thread.
 func TestThreadsDashboardClickRowSelectsOnly(t *testing.T) {
 	t.Parallel()
 

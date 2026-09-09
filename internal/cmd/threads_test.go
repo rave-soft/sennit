@@ -29,14 +29,11 @@ type fakeThreadsWorkspace struct {
 	listErr      error
 	createResult proto.Thread
 	createErr    error
-	mergeResult  proto.Thread
-	mergeErr     error
 	removeErr    error
 
 	// Captured call arguments, for tests that assert on what was passed
 	// through.
 	createReq  proto.CreateThreadRequest
-	mergeID    string
 	removeID   string
 	removeOpts proto.RemoveThreadOptions
 }
@@ -50,11 +47,6 @@ func (f *fakeThreadsWorkspace) ListThreads(context.Context) ([]proto.Thread, err
 func (f *fakeThreadsWorkspace) CreateThread(_ context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
 	f.createReq = req
 	return f.createResult, f.createErr
-}
-
-func (f *fakeThreadsWorkspace) MergeThread(_ context.Context, id string) (proto.Thread, error) {
-	f.mergeID = id
-	return f.mergeResult, f.mergeErr
 }
 
 func (f *fakeThreadsWorkspace) RemoveThread(_ context.Context, id string, opts proto.RemoveThreadOptions) error {
@@ -162,18 +154,6 @@ func TestRunThreadsCreate_NotSupported(t *testing.T) {
 	require.True(t, *cleanupCalled)
 }
 
-func TestRunThreadsMerge_NotSupported(t *testing.T) {
-	ws := &fakeThreadsWorkspace{supportsThreads: false}
-	cleanupCalled := stubAcquireWorkspace(t, ws, nil)
-
-	testCmd, _ := newThreadsTestCmd(t)
-	err := runThreadsMerge(testCmd, []string{"my-thread"})
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "this workspace doesn't support threads")
-	require.True(t, *cleanupCalled)
-}
-
 func TestRunThreadsRemove_NotSupported(t *testing.T) {
 	ws := &fakeThreadsWorkspace{supportsThreads: false}
 	cleanupCalled := stubAcquireWorkspace(t, ws, nil)
@@ -263,46 +243,6 @@ func TestRunThreadsCreate_Success(t *testing.T) {
 	require.Equal(t, "ship it", ws.createReq.Goal)
 	require.Contains(t, stdout.String(), `Created thread "my-thread" (branch thread/my-thread)`)
 }
-
-func TestRunThreadsCreate_Error(t *testing.T) {
-	ws := &fakeThreadsWorkspace{supportsThreads: true, createErr: errors.New("name taken")}
-	stubAcquireWorkspace(t, ws, nil)
-
-	testCmd, _ := newThreadsTestCmd(t)
-	err := runThreadsCreate(testCmd, []string{"dup"})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "threads: create:")
-	require.Contains(t, err.Error(), "name taken")
-}
-
-// --- runThreadsMerge ---
-
-func TestRunThreadsMerge_Success(t *testing.T) {
-	ws := &fakeThreadsWorkspace{
-		supportsThreads: true,
-		mergeResult:     proto.Thread{Name: "my-thread", Status: "merged"},
-	}
-	stubAcquireWorkspace(t, ws, nil)
-
-	testCmd, stdout := newThreadsTestCmd(t)
-	require.NoError(t, runThreadsMerge(testCmd, []string{"my-thread"}))
-
-	require.Equal(t, "my-thread", ws.mergeID)
-	require.Contains(t, stdout.String(), `Thread "my-thread": merged`)
-}
-
-func TestRunThreadsMerge_Error(t *testing.T) {
-	ws := &fakeThreadsWorkspace{supportsThreads: true, mergeErr: errors.New("conflict")}
-	stubAcquireWorkspace(t, ws, nil)
-
-	testCmd, _ := newThreadsTestCmd(t)
-	err := runThreadsMerge(testCmd, []string{"my-thread"})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "threads: merge:")
-	require.Contains(t, err.Error(), "conflict")
-}
-
-// --- runThreadsRemove ---
 
 func TestRunThreadsRemove_Success(t *testing.T) {
 	ws := &fakeThreadsWorkspace{supportsThreads: true}

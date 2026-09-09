@@ -248,7 +248,7 @@ func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, a, parentWorkspace.App)
 
-	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: thread.MergeManual})
+	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go"})
 	require.NoError(t, err)
 
 	// Leave both dispatched runs in flight (no RunComplete published for
@@ -289,7 +289,7 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 
 	taskSt, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: thread.MergeManual})
+	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go"})
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool { return taskCoord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -400,9 +400,8 @@ func TestAttach_SetPermissionsSkipReachesLiveThread(t *testing.T) {
 	require.NotNil(t, mgr)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "yolo-follower",
-		Goal:        "implement the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "yolo-follower",
+		Goal: "implement the thing",
 	})
 	require.NoError(t, err)
 

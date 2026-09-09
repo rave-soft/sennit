@@ -129,15 +129,15 @@ type threadControl struct {
 var ErrManagerClosed = errors.New("thread: manager is closed")
 
 // ErrNotFound is returned when no delegation matches the id or name a
-// caller asked for — including one that already merged and was deleted
-// along with its worktree and branch, not only a name that never existed.
+// caller asked for, including one whose clean resources and record were
+// removed after completion, not only a name that never existed.
 var ErrNotFound = errors.New("thread: no such thread")
 
 // runCompleteHook lets an overlay intervene when a run finishes
 // successfully, before the generic lifecycle rests the entity at
 // StatusCompleted. Called with the entity's opMu held; a hook that needs
 // more work hands off to its own goroutine and re-acquires opMu there
-// (see [Manager.onAutoMerge]). Returning true means the hook took over
+// (see [Manager.onCompletedCleanup]). Returning true means the hook took over
 // the terminal transition and the generic StatusCompleted write must not
 // also run; false falls through to it.
 type runCompleteHook func(ctx context.Context, c *threadControl, st Thread, resultText string) (handled bool)
@@ -172,7 +172,7 @@ type deliveryResolver func(ctx context.Context, handle Handle, st Thread) (targe
 // every kind of background delegation this package drives: admission
 // control, per-entity serialization, worker tracking, run dispatch,
 // workspace release, and event plumbing. It has no notion of git
-// worktrees or merge policy — those live in the onRunSuccess/onRecover
+// worktrees or cleanup safety — those live in the onRunSuccess/onRecover
 // hooks an overlay such as [Manager] supplies. Each entity carries its
 // own Spawner in runtimeState rather than the lifecycle holding one,
 // since [Manager]'s threads and [TaskManager]'s tasks are spawned
@@ -462,7 +462,7 @@ func (l *lifecycle) dispatchFactoryRun(ctx context.Context, rt *runtimeState, id
 		}
 		c.mu.Unlock()
 		terminalCtx, terminalCancel := detachForTerminalWork(runCtx)
-		l.handleRunCompleteLocked(terminalCtx, ctx, c, id, rc)
+		l.handleRunCompleteLocked(terminalCtx, c, id, rc)
 		terminalCancel()
 		c.opMu.Unlock()
 		runCancel()
@@ -583,7 +583,7 @@ func (l *lifecycle) steerApplyDecision(bgCtx context.Context, c *threadControl, 
 	// It became the active turn and owns the workspace from here. Still
 	// under opMu, so the run it displaced (if any) hasn't been reacted to
 	// yet. Marked as the person's: it ends by resting at idle with its
-	// workspace intact, not by merging — see handleRunComplete.
+	// workspace intact, not by completion cleanup. See handleRunComplete.
 	c.mu.Lock()
 	rt.runID = runID
 	rt.runIDs = map[string]struct{}{runID: {}}
@@ -911,22 +911,14 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 // failed, or completed, unless onRunSuccess takes over.
 //
 // Once a terminal status is recorded, this delivers to the entity's
-// parent session (see deliverStoredCompletion), except a thread whose
-// successful run onRunSuccess (Manager's auto-merge overlay) takes over:
-// that returns before the delivery call, since an auto-merge thread's
-// useful terminal event is the merge outcome — see Manager.onAutoMerge
-// and Manager.deliverMergeOutcome.
+// parent session (see deliverStoredCompletion). A successful thread delegates
+// that write, delivery, and conservative resource cleanup to onRunSuccess.
 func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComplete) {
 	// See detachForTerminalWork: the contexts reaching here are exactly
 	// the ones a cancellation kills, so an interrupted run's own ctx
 	// would otherwise fail store.Get below, leaving the status stale and
 	// the parent never told.
 	//
-	// followUpCtx keeps the caller's own lifetime for the one branch that
-	// outlives this call: onRunSuccess hands an auto-merge thread to a
-	// worker goroutine that captures its context, so the bounded ctx
-	// below would cancel the merge the moment this function returns.
-	followUpCtx := ctx
 	ctx, cancel := detachForTerminalWork(ctx)
 	defer cancel()
 
@@ -937,10 +929,10 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 
-	l.handleRunCompleteLocked(ctx, followUpCtx, c, id, rc)
+	l.handleRunCompleteLocked(ctx, c, id, rc)
 }
 
-func (l *lifecycle) handleRunCompleteLocked(ctx, followUpCtx context.Context, c *threadControl, id string, rc RunComplete) {
+func (l *lifecycle) handleRunCompleteLocked(ctx context.Context, c *threadControl, id string, rc RunComplete) {
 	rt, matched := l.matchRunComplete(ctx, c, id, rc)
 	if !matched {
 		return
@@ -960,7 +952,7 @@ func (l *lifecycle) handleRunCompleteLocked(ctx, followUpCtx context.Context, c 
 		return
 	}
 
-	l.finalizeRunComplete(ctx, followUpCtx, c, rt, id, rc)
+	l.finalizeRunComplete(ctx, c, rt, id, rc)
 }
 
 // matchRunComplete is handleRunComplete's first step: reads c's current
@@ -999,9 +991,8 @@ func (l *lifecycle) matchRunComplete(ctx context.Context, c *threadControl, id s
 	if rt.person {
 		// A hand-driven turn ends where it started: back to idle with
 		// the workspace still live, since the person is likely to type
-		// again. Releasing or merging here would pull the workspace out
-		// from under them; a thread revived by hand merges when they say
-		// so, not when they stop typing.
+		// again. Releasing or cleaning up here would pull the workspace
+		// out from under them.
 		rt.runID = ""
 		rt.person = false
 		c.mu.Unlock()
@@ -1108,10 +1099,8 @@ func (l *lifecycle) deliverIntermediateRunComplete(ctx context.Context, handle H
 // finalizeRunComplete is handleRunComplete's last step: release rt's
 // workspace, load the entity's current row, and — if the completion still
 // applies to the session this entity currently owns — record its
-// terminal status and deliver it to the parent. followUpCtx is passed
-// through only to onRunSuccess (see handleRunComplete's doc for why).
-// Called with c.opMu already held.
-func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) {
+// terminal status and deliver it to the parent. Called with c.opMu held.
+func (l *lifecycle) finalizeRunComplete(ctx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) {
 	c.mu.Lock()
 	l.clearPendingSetups(rt)
 	c.runtime = nil
@@ -1139,7 +1128,7 @@ func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *thr
 		}
 	}
 	// Only react to the session this entity currently owns while a run is
-	// in flight: Remove or a completed merge can race a straggling
+	// in flight: Remove or completion cleanup can race a straggling
 	// RunComplete from a run that no longer matters.
 	if rc.SessionID != st.SessionID || st.Status != StatusRunning {
 		return
@@ -1152,7 +1141,7 @@ func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *thr
 	case rc.Error != "":
 		status, errText, result, completedAt = StatusFailed, rc.Error, "", 0
 	default:
-		if l.onRunSuccess != nil && l.onRunSuccess(followUpCtx, c, st, rc.Text) {
+		if l.onRunSuccess != nil && l.onRunSuccess(ctx, c, st, rc.Text) {
 			return
 		}
 	}

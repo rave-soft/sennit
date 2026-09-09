@@ -1,6 +1,6 @@
 // Package git shells out to the git CLI for the repository operations
 // needed by threads (parallel agent work streams, each running in its own
-// git worktree and auto-merged back into a base branch). It deliberately
+// git worktree and conservative completion cleanup). It deliberately
 // avoids go-git for repo operations — go-git in this codebase is used only
 // for .gitignore parsing — so behavior matches whatever git binary the user
 // has on PATH.
@@ -297,6 +297,21 @@ func BranchExists(ctx context.Context, repo, name string) (bool, error) {
 	return false, err
 }
 
+func CreateBranch(ctx context.Context, repo, branch, base string) error {
+	if _, err := run(ctx, repo, "branch", "--", branch, base); err != nil {
+		return fmt.Errorf("git: create branch: %w", err)
+	}
+	return nil
+}
+
+func ResolveCommit(ctx context.Context, repo, revision string) (string, error) {
+	out, err := run(ctx, repo, "rev-parse", "--verify", revision+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("git: resolve commit: %w", err)
+	}
+	return out, nil
+}
+
 // WorktreeAdd creates a new worktree at path, checking out a new branch
 // newBranch created from base.
 //
@@ -329,10 +344,17 @@ func WorktreeAdd(ctx context.Context, repo, path, newBranch, base string) error 
 	if _, err := run(ctx, repo, "branch", "--", newBranch, base); err != nil {
 		return fmt.Errorf("git: worktree add: %w", err)
 	}
-	if _, err := run(ctx, repo, "worktree", "add", "--", path, newBranch); err != nil {
+	if err := WorktreeAddExisting(ctx, repo, path, newBranch); err != nil {
 		if delErr := DeleteBranch(ctx, repo, newBranch, true); delErr != nil {
 			return fmt.Errorf("git: worktree add: %w (cleanup of branch %q also failed: %w)", err, newBranch, delErr)
 		}
+		return err
+	}
+	return nil
+}
+
+func WorktreeAddExisting(ctx context.Context, repo, path, branch string) error {
+	if _, err := run(ctx, repo, "worktree", "add", "--", path, branch); err != nil {
 		return fmt.Errorf("git: worktree add: %w", err)
 	}
 	return nil

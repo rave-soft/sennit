@@ -17,7 +17,7 @@ import (
 var ErrNameTaken = errors.New("thread: name already in use")
 
 // CreateParams holds the fields needed to create a new thread. Status
-// defaults to StatusPending, MergePolicy defaults to MergeAuto, and Kind
+// defaults to StatusPending, and Kind
 // defaults to KindThread when left unset.
 type CreateParams struct {
 	Name         string
@@ -28,7 +28,6 @@ type CreateParams struct {
 	Execution    string
 	Depth        int
 	SessionID    string
-	MergePolicy  MergePolicy
 	Kind         Kind
 	// ParentSessionID is the session this delegation's own session nests
 	// under; see [Delegation.ParentSessionID]. It is persisted, and so

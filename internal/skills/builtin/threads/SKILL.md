@@ -13,5 +13,6 @@ The delegation reports its terminal result automatically. Use `agent_list`,
 `agent_result`, `agent_send`, `agent_cancel`, and `agent_output` to inspect or
 steer delegations you started. Historical `thread_list`, `thread_status`, and
 `thread_send` names remain compatible aliases for the applicable management
-tools. Worktree merge and cleanup policy remains managed by the runtime and
-user interfaces; do not attempt lifecycle tool calls that are not offered.
+tools. On completion, the runtime removes only a clean worktree whose branch
+has no commits outside its base. Changes, unique commits, or an uncertain Git
+state preserve the worktree, branch, and record for explicit removal.

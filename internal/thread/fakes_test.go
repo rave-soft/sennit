@@ -375,6 +375,8 @@ type fakeCoordinator struct {
 	// arrived: neither run nor folded. Only reachable because the dispatch
 	// reserves acceptance — see agent.SteerCanceled.
 	cancelOnEntry bool
+	steerEntered  chan struct{}
+	steerRelease  chan struct{}
 }
 
 // setCancelOnEntry makes every subsequent steering dispatch land on the
@@ -487,6 +489,13 @@ func (f *fakeCoordinator) dispatch(ctx context.Context, sessionID, prompt string
 		err := f.steerDispatchErr
 		f.mu.Unlock()
 		return err
+	}
+	if steering && f.steerEntered != nil {
+		entered, release := f.steerEntered, f.steerRelease
+		f.mu.Unlock()
+		close(entered)
+		<-release
+		f.mu.Lock()
 	}
 	if steering && f.cancelOnEntry {
 		f.mu.Unlock()
@@ -645,6 +654,7 @@ type fakeSpawner struct {
 	spawnErr              error
 	runErr                error
 	blockSpawn            bool
+	blockSpawnAfterCreate bool
 	spawnEntered          chan struct{}
 	spawnRelease          chan struct{}
 	// sessionsErr, when set, is handed to every fakeSessions this spawner
@@ -686,6 +696,10 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, er
 	if s.blockSpawn {
 		close(s.spawnEntered)
 		<-ctx.Done()
+		<-s.spawnRelease
+	}
+	if s.blockSpawnAfterCreate {
+		close(s.spawnEntered)
 		<-s.spawnRelease
 	}
 	s.mu.Lock()
@@ -879,7 +893,7 @@ func newTestManager(t *testing.T, repo string) (*thread.Manager, *fakeSpawner) {
 
 // shutdownManagerOnCleanup registers a t.Cleanup that shuts mgr down on a
 // bounded context and fails the test if Shutdown does not return cleanly.
-// A Manager owns background goroutines (auto-merge, delivery, worktree
+// A Manager owns background goroutines (completion cleanup, delivery, worktree
 // removal via WorktreeRemove) that keep reading and writing a thread's
 // worktree - and the repo's own .git directory - after the test body
 // returns. Without a join here, t.TempDir()'s RemoveAll can race one of

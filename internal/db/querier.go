@@ -153,7 +153,7 @@ type Querier interface {
 	// Deliberately unscoped by kind, unlike the display queries above. gc is
 	// not a thread-facing caller -- it is the only thing that reclaims rows
 	// here, and a task has nothing else that would: it is never merged (so
-	// discardMerged cannot reach it) and the task API has no removal of its
+	// automatic cleanup may retain it) and the task API has no removal of its
 	// own. Scoping this to threads meant finished tasks accumulated for the
 	// life of the database. A task carries no worktree, so reclaiming one is
 	// the row and its retention alone, with nothing left orphaned on disk.

@@ -32,6 +32,9 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.agentList.applyEvent(msg)
 		if msg.Type == pubsub.DeletedEvent {
 			m.threadsDock.DropActivity(msg.Payload.ID)
+			if cmd := m.notifyThreadCompletion(msg.Payload); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			delete(m.threadLastStatus, msg.Payload.ID)
 		}
 		cmds = append(cmds, m.threadViewsRefreshCmds()...)
@@ -41,12 +44,8 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// importantly the update that names a task with its child
 		// session, which is what makes that delegation openable.
 		m.refreshDelegationBlocks()
-		// A thread's edge transition into a terminal status (merged,
-		// failed, ...) gets a toast — see thread_completion.go for why a
-		// toast rather than a persisted chat entry. Skipped for a deleted
-		// thread: there is no meaningful "transition" left to report, and
-		// calling it here would just re-insert the threadLastStatus entry
-		// dropped above.
+		// A thread's edge transition into a terminal status gets a toast.
+		// Removed threads use the terminal payload on their delete event above.
 		if msg.Type != pubsub.DeletedEvent {
 			if cmd := m.notifyThreadCompletion(msg.Payload); cmd != nil {
 				cmds = append(cmds, cmd)

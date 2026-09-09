@@ -344,8 +344,6 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, r.leaveThreadToMain()
 	case threadAttachedMsg:
 		return r.handleThreadAttached(msg)
-	case threads.MergeMsg:
-		return r, r.mergeThreadCmd(msg.ID)
 	case threads.RemoveMsg:
 		return r, r.removeThreadCmd(msg.ID)
 	case threads.CancelDelegationMsg:
@@ -777,15 +775,6 @@ func (r *Root) leaveThreadToMain() tea.Cmd {
 	r.active = screenMain
 	r.attachment.pendingID = ""
 	return cmd
-}
-
-func (r *Root) mergeThreadCmd(id string) tea.Cmd {
-	ctx := r.com.Context()
-	ws := r.com.Workspace
-	return func() tea.Msg {
-		_, err := ws.MergeThread(ctx, id)
-		return threadActionDoneMsg{err: err}
-	}
 }
 
 func (r *Root) removeThreadCmd(id string) tea.Cmd {

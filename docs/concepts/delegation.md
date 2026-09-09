@@ -107,10 +107,11 @@ and are unaffected by it.
 ## Threads
 
 A thread is the opposite trade-off: real isolation — its own git worktree
-and branch, its own app instance and database, a merge policy for folding the
-work back in — at real cost (a full agent session, plus a git merge on the
-way back). Use one only when the work would otherwise collide with something
-else already happening: the same files, the same branch.
+and branch, its own app instance and database — at real cost (a full agent
+session). Use one only when the work would otherwise collide with something
+else already happening: the same files, the same branch. On completion,
+Sennit removes only a clean worktree whose branch has no commits outside its
+base; changes, unique commits, or an uncertain Git state preserve everything.
 
 A thread runs in an app instance of its own, and that instance works in one
 session the same way yours does — the one your session asked for. That is
