@@ -8,8 +8,9 @@ func quickStyleSection(s *Styles, o quickStyleOpts, base, _, subtle lipgloss.Sty
 	s.Section.Line = base.Foreground(o.separator)
 }
 
-// quickStyleThreads fills in Threads, the threads dashboard. This is an
-// operations screen — a list of live work someone is about to act on — so
+// quickStyleThreads fills the Threads token used by the delegations
+// dashboard. This is an operations screen — a list of live work someone is
+// about to act on — so
 // unlike the chat's chrome it leans on state being readable at a glance:
 // each status class gets a distinct color rather than the one muted tone
 // Status.*Message collapses to, and the toolbar's buttons carry a real

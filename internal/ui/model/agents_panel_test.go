@@ -75,10 +75,10 @@ func TestSessionDelegations_IdleIsStillLive(t *testing.T) {
 	require.Len(t, sessionDelegations([]proto.Thread{idle}, "s1"), 1)
 }
 
-// TestAgentListCache_KeepsOnlyTasks proves the event filter that keeps this
-// cache and threads.ListCache from swallowing each other's rows: both kinds
-// ride one pubsub stream. Threads (and payloads predating the Kind field)
-// must not land here.
+// TestAgentListCache_KeepsOnlyTasks proves this session-panel cache accepts
+// only task rows from the shared pubsub stream. Isolated delegations and
+// payloads predating the Kind field still belong in the all-delegation cache,
+// not here.
 func TestAgentListCache_KeepsOnlyTasks(t *testing.T) {
 	t.Parallel()
 

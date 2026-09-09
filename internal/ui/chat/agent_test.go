@@ -741,7 +741,7 @@ func TestExtractMessageItems_RestoresDelegationStartTime(t *testing.T) {
 
 	provider, ok := items[0].(DelegationInfoProvider)
 	require.True(t, ok, "an agent tool call must rebuild as a delegation item")
-	_, _, _, gotStart, _ := provider.DelegationInfo()
+	_, _, _, _, gotStart, _ := provider.DelegationInfo()
 	require.WithinDuration(t, start, gotStart, time.Second,
 		"the delegation must keep the start time recorded on its message, not restart at load time")
 }
@@ -773,7 +773,7 @@ func TestExtractMessageItems_RestoresDelegationDuration(t *testing.T) {
 	require.Len(t, items, 1)
 	provider, ok := items[0].(DelegationInfoProvider)
 	require.True(t, ok)
-	_, _, _, gotStart, gotDuration := provider.DelegationInfo()
+	_, _, _, _, gotStart, gotDuration := provider.DelegationInfo()
 	require.WithinDuration(t, start, gotStart, time.Second)
 	require.Equal(t, 4*time.Minute, gotDuration,
 		"a finished delegation must report the runtime its two messages bracket")
@@ -805,7 +805,7 @@ func TestExtractMessageItems_SubSecondDelegationReportsNoDuration(t *testing.T) 
 	require.Len(t, items, 1)
 	provider, ok := items[0].(DelegationInfoProvider)
 	require.True(t, ok)
-	_, _, _, _, gotDuration := provider.DelegationInfo()
+	_, _, _, _, _, gotDuration := provider.DelegationInfo()
 	require.Zero(t, gotDuration)
 }
 
@@ -829,7 +829,7 @@ func TestExtractMessageItems_IgnoresMissingCreatedAt(t *testing.T) {
 	require.Len(t, items, 1)
 	provider, ok := items[0].(DelegationInfoProvider)
 	require.True(t, ok)
-	_, _, _, gotStart, _ := provider.DelegationInfo()
+	_, _, _, _, gotStart, _ := provider.DelegationInfo()
 	require.WithinDuration(t, time.Now(), gotStart, time.Minute)
 }
 
@@ -906,7 +906,7 @@ func TestAgentToolMessageItem_IdentityFollowsStreamedInput(t *testing.T) {
 	item := NewAgentToolMessageItem(&sty, message.ToolCall{
 		ID: "a1", Name: "agent", Input: `{"prom`,
 	}, nil, false, cfg)
-	name, model, effort, _, _ := item.DelegationInfo()
+	name, model, effort, _, _, _ := item.DelegationInfo()
 	require.Equal(t, builtinTaskAgentName, name, "an unparseable input names no agent yet")
 	require.Empty(t, model)
 	require.Empty(t, effort)
@@ -915,7 +915,7 @@ func TestAgentToolMessageItem_IdentityFollowsStreamedInput(t *testing.T) {
 	item.SetToolCall(message.ToolCall{
 		ID: "a1", Name: "agent", Input: `{"prompt":"review","subagent_type":"developer"}`, Finished: true,
 	})
-	name, model, effort, _, _ = item.DelegationInfo()
+	name, model, effort, _, _, _ = item.DelegationInfo()
 	require.Equal(t, "developer", name)
 	require.Equal(t, "big-model", model)
 	require.Equal(t, "high", effort)
@@ -934,7 +934,7 @@ func TestAgentToolMessageItem_LegacyPerAgentToolNameStillRenders(t *testing.T) {
 	item := NewAgentToolMessageItem(&sty, message.ToolCall{
 		ID: "a1", Name: "reviewer", Input: `{"prompt":"review"}`, Finished: true,
 	}, nil, false, cfg)
-	name, model, _, _, _ := item.DelegationInfo()
+	name, model, _, _, _, _ := item.DelegationInfo()
 	require.Equal(t, "reviewer", name)
 	require.Equal(t, "small-model", model)
 }

@@ -6,16 +6,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/ui/threads"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/stretchr/testify/require"
 )
 
 // TestThreadEventDispatchesOneListThreadsCall is the point of the
-// threads_cache.go/threads_dock.go/thread_indicator.go collapse: before it,
+// shared delegation-cache collapse: before it,
 // a single pubsub.Event[proto.Thread] could trigger three independent
 // ListThreads round trips — one each from the header badge's indicator
-// cache, the session panel's dock cache, and (while open) the threads
-// dashboard's own cache. They now all read threads.ListCache, so the event
+// cache, the session panel's dock cache, and (while open) the delegations
+// dashboard cache. They now all read delegations.ListCache, so the event
 // costs exactly one.
 //
 // The scenario is deliberately the worst case for the old code: the
@@ -29,7 +29,7 @@ func TestThreadEventDispatchesOneListThreadsCall(t *testing.T) {
 	ws := r.com.Workspace.(*rootTestWorkspace)
 
 	r.main.state = uiChat
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 	// Becoming active dispatches its own refresh when the cache is not
 	// fresh. Drain it and reset the counter, so what is measured below is
 	// the event's cost and not the dashboard's arrival — dropping the
@@ -50,7 +50,7 @@ func TestThreadEventDispatchesOneListThreadsCall(t *testing.T) {
 }
 
 // drainThreadRefresh runs cmd the way the Bubble Tea runtime would
-// (unwrapping tea.BatchMsg), feeding threads.LoadedMsg results back into
+// (unwrapping tea.BatchMsg), feeding delegations.LoadedMsg results back into
 // r.Update so a stale-generation re-dispatch (if any) also runs. Other leaf
 // messages are executed for their side effects and dropped.
 func drainThreadRefresh(t *testing.T, r *Root, cmd tea.Cmd) {
@@ -64,7 +64,7 @@ func drainThreadRefresh(t *testing.T, r *Root, cmd tea.Cmd) {
 		for _, c := range msg {
 			drainThreadRefresh(t, r, c)
 		}
-	case threads.LoadedMsg:
+	case delegations.LoadedMsg:
 		_, next := r.Update(msg)
 		drainThreadRefresh(t, r, next)
 	}

@@ -1,4 +1,4 @@
-package threads
+package delegations
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 )
 
 // threadsTestWorkspace is a minimal workspace.Workspace stub for exercising
-// the thread list cache, following the testWorkspace pattern above (embed
+// the all-delegation cache, following the testWorkspace pattern above (embed
 // the full interface, override only what's exercised).
 type threadsTestWorkspace struct {
 	workspace.Workspace
@@ -75,8 +75,7 @@ func (w *threadsTestWorkspace) CancelThread(_ context.Context, id, _ string) err
 }
 
 // The following ThreadController methods round out threadsTestWorkspace for
-// root_test.go, which drives the router through attach/merge/remove/create
-// rather than just ListThreads.
+// tests that drive open, cancel, and cleanup rather than just ListThreads.
 
 func (w *threadsTestWorkspace) AttachThread(context.Context, string) (workspace.Workspace, func(), error) {
 	return w.attachWS, func() { w.detachCalls++ }, w.attachErr
@@ -312,11 +311,8 @@ func TestApplyThreadsLoadedErrorPreservesCachedValue(t *testing.T) {
 	require.False(t, c.Cache.InFlight)
 }
 
-// TestApplyThreadsLoadedErrorBacksOff proves the fix for the divergence
-// this cache used to have from its dock/indicator siblings (see
-// threads_cache.go's package doc comment): an error must record a failure
-// so staleRefreshCmd backs off, instead of leaving no record at all and
-// re-dispatching on every Update.
+// TestApplyThreadsLoadedErrorBacksOff proves that a failed refresh records
+// backoff instead of immediately re-dispatching on every Update.
 func TestApplyThreadsLoadedErrorBacksOff(t *testing.T) {
 	t.Parallel()
 
@@ -362,10 +358,8 @@ func TestApplyThreadsLoadedStaleGenerationFailureRedispatches(t *testing.T) {
 		"and it must not record a backoff that would stall that re-dispatch")
 }
 
-// TestStaleRefreshCmdStopsPollingWhenEmpty proves the other half of the
-// divergence fix: once a refresh lands empty, staleRefreshCmd must not
-// re-poll forever for a project with no threads at all — only an
-// invalidation (a thread event, or an explicit call) re-arms it.
+// TestStaleRefreshCmdStopsPollingWhenEmpty proves that an empty fetched list
+// stops polling until a delegation event or explicit invalidation re-arms it.
 func TestStaleRefreshCmdStopsPollingWhenEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -380,10 +374,8 @@ func TestStaleRefreshCmdStopsPollingWhenEmpty(t *testing.T) {
 	require.NotNil(t, c.StaleRefreshCmd(com, true), "an invalidation re-arms it")
 }
 
-// The threads list is threads only. A task is the `agent` tool's own
-// delegation: it renders inline in the chat that started it, it is never
-// merged, and nothing removed a finished one from the shared table — so
-// merging them here only buried the threads this screen is about.
+// ListThreads is the single all-delegations source. This cache must not make
+// a second ListTasks request; the workspace result already includes tasks.
 func TestDispatchThreadsRefreshExcludesTasks(t *testing.T) {
 	t.Parallel()
 
@@ -401,7 +393,7 @@ func TestDispatchThreadsRefreshExcludesTasks(t *testing.T) {
 	msg := cmd()
 	loaded, ok := msg.(LoadedMsg)
 	require.True(t, ok)
-	require.Zero(t, ws.taskCalls, "the threads list must not pay for a task round trip it does not use")
+	require.Zero(t, ws.taskCalls, "the dashboard must not duplicate the all-delegations fetch with ListTasks")
 	require.Equal(t, []proto.Thread{
 		{ID: "thr-1", Name: "a-thread", Kind: "thread"},
 	}, loaded.Threads)
@@ -460,25 +452,18 @@ func TestDispatchThreadsRefreshPropagatesError(t *testing.T) {
 	require.Nil(t, loaded.Threads, "best-effort: zero value returned alongside the logged error")
 }
 
-// A task's lifecycle event must not write a row into the threads cache.
-//
-// Tasks share the delegations table and the lifecycle that publishes these
-// events, so filtering the fetch was not enough: a task's own create or
-// status event went straight into the cache, around the kind-scoped query,
-// and stayed there until a full refresh replaced the slice.
-func TestApplyThreadEventIgnoresTasks(t *testing.T) {
+func TestApplyDelegationEventIncludesTasks(t *testing.T) {
 	t.Parallel()
 
 	c := &ListCache{}
 	c.Cache.Set([]proto.Thread{{ID: "thr-1", Kind: "thread"}})
+	task := proto.Thread{ID: "task-1", Kind: "task", Status: "running"}
 
-	c.ApplyEvent(pubsub.Event[proto.Thread]{
-		Type:    pubsub.CreatedEvent,
-		Payload: proto.Thread{ID: "task-1", Kind: "task", Status: "running"},
-	})
+	c.ApplyEvent(pubsub.Event[proto.Thread]{Type: pubsub.CreatedEvent, Payload: task})
 
-	require.Equal(t, []proto.Thread{{ID: "thr-1", Kind: "thread"}}, c.Cache.Value,
-		"a task must not appear in a list scoped to threads")
+	require.Equal(t, []proto.Thread{{ID: "thr-1", Kind: "thread"}, task}, c.Cache.Value)
+	require.Equal(t, []proto.Thread{{ID: "thr-1", Kind: "thread"}}, c.Threads(),
+		"the isolated-work dock must remain thread-only")
 }
 
 // A thread's own event still writes through, which is what makes the list

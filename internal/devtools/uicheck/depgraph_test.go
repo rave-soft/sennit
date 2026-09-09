@@ -83,7 +83,7 @@ var forbiddenImports = []forbiddenImportRule{
 	{
 		Pattern:   "github.com/rave-soft/sennit/internal/ui",
 		Forbidden: "github.com/rave-soft/sennit/internal/thread",
-		Why:       "the delegation runtime reaches the TUI as proto.Thread data, never as its own types; internal/ui/threads is the view, internal/thread is the machine",
+		Why:       "the delegation runtime reaches the TUI as proto.Thread data, never as its own types; internal/ui/delegations is the view, internal/thread is the machine",
 	},
 	{
 		Pattern:   "github.com/rave-soft/sennit/internal/ui",

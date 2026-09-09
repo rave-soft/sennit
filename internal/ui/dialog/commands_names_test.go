@@ -33,7 +33,7 @@ func (w commandsNamesTestWorkspace) SkillStates() []*skills.SkillState { return 
 func (w commandsNamesTestWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w commandsNamesTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *commandsNamesTestWorkspace) SupportsThreads() bool { return false }
+func (w *commandsNamesTestWorkspace) SupportsThreads() bool { return true }
 
 // DockerMCPAvailable: unknown, so no Docker entry is offered and nothing
 // runs the probe.
@@ -89,6 +89,7 @@ func TestSystemCommandItems_ShortNames(t *testing.T) {
 		{"switch_model", "models", []string{"switch model"}},
 		{"configure_providers", "providers", []string{"configure providers"}},
 		{"doctor", "doctor", nil},
+		{"delegations", "delegations", []string{"threads", "delegation dashboard"}},
 		{"summarize", "compact", []string{"summarize", "summarize session"}},
 		{"toggle_sidebar", "sidebar", []string{"toggle sidebar"}},
 		{"select_notifications", "notifications", []string{"notification style"}},

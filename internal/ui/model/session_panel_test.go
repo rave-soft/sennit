@@ -15,9 +15,9 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +49,7 @@ func TestThreadDockStatusText(t *testing.T) {
 		ID: "t1", Name: "fix-auth", Goal: "Refactor login flow to OAuth2",
 		Status: "running", CreatedAt: time.Now().Add(-4 * time.Minute).Unix(),
 	}
-	activity := threads.DockActivity{MessageCount: 12, LastTool: "bash go test ./..."}
+	activity := delegations.DockActivity{MessageCount: 12, LastTool: "bash go test ./..."}
 
 	status := threadDockStatusText(th, activity)
 	require.Contains(t, status, "step 12 · → bash go test ./... · ")
@@ -143,37 +143,6 @@ func TestDrawSessionPanel_RendersEveryThreadBlock(t *testing.T) {
 }
 
 // TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed proves a task
-// row draws through the exact same panel-block path a thread does (see
-// drawSessionPanel's "[task] " name tag), showing its own identity (name,
-// tagged as a task so it's not mistaken for a thread), goal, and a live
-// elapsed time — not just that the dock/cache merge tested elsewhere
-// carries the row through, but that it actually paints.
-func TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-	u.threadList.Cache.Value = []proto.Thread{{
-		ID:        "t1",
-		Name:      "scan-todos",
-		Goal:      "Scan the repo for TODOs",
-		Status:    "running",
-		Kind:      "task",
-		CreatedAt: time.Now().Add(-90 * time.Second).Unix(),
-	}}
-
-	height := u.sessionPanelPlan(100).totalRows
-	scr := uv.NewScreenBuffer(u.lay.width, height)
-	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: height}}
-	u.drawSessionPanel(scr, area)
-	out := ansi.Strip(scr.Render())
-
-	require.Contains(t, out, "[task] scan-todos", "a task row must be tagged and show its own name")
-	require.Contains(t, out, "Scan the repo for TODOs", "the task's goal must render like a thread's")
-	require.Contains(t, out, "1m", "a running task must show a live elapsed time, not a frozen/absent one")
-	require.Len(t, u.panel.threads, 1)
-	require.Equal(t, "task", u.panel.threads[0].Kind)
-}
-
 // TestDrawSessionPanel_NoOpOnZeroArea guards against a panic when the panel
 // is given a degenerate (zero-height or zero-width) area.
 func TestDrawSessionPanel_NoOpOnZeroArea(t *testing.T) {
@@ -538,8 +507,8 @@ func TestSessionPanelPlan_RealisticTerminalNoSheddingForEverydayTodoList(t *test
 
 // TestMouseClick_ThreadBlockEntersThread covers the click hit-test: a
 // tea.MouseClickMsg landing on a rendered thread block's rect must return a
-// tea.Cmd that yields threads.EnterMsg with that thread's ID/session ID —
-// the same drill-in mechanism the threads dashboard uses (see
+// tea.Cmd that yields delegations.EnterMsg with that thread's ID/session ID —
+// the same drill-in mechanism the delegations dashboard uses (see
 // Root.attachThreadCmd), not enterChildSession/navStack.
 func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
 	t.Parallel()
@@ -563,8 +532,8 @@ func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	msg := cmd()
-	entered, ok := msg.(threads.EnterMsg)
-	require.True(t, ok, "expected threads.EnterMsg, got %T", msg)
+	entered, ok := msg.(delegations.EnterMsg)
+	require.True(t, ok, "expected delegations.EnterMsg, got %T", msg)
 	require.Equal(t, "t1", entered.ID)
 	require.Equal(t, "s-t1", entered.SessionID)
 }
@@ -606,7 +575,7 @@ func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
 // TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw mirrors
 // TestMouseClick_TodosHeaderTogglesWithoutPriorDraw for the thread-block
 // hit-test, which shared the same Draw-time-cache bug via
-// m.panel.threadRects/m.panel.threads.
+// m.panel.threadRects and m.panel.threads.
 func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	t.Parallel()
 
@@ -627,8 +596,8 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	msg := cmd()
-	entered, ok := msg.(threads.EnterMsg)
-	require.True(t, ok, "expected threads.EnterMsg, got %T", msg)
+	entered, ok := msg.(delegations.EnterMsg)
+	require.True(t, ok, "expected delegations.EnterMsg, got %T", msg)
 	require.Equal(t, "t1", entered.ID)
 	require.Equal(t, "s-t1", entered.SessionID)
 }
@@ -936,8 +905,8 @@ func TestMouseClick_ThreadBlockEntersThreadBelowItsHeader(t *testing.T) {
 	_, cmd := u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
 	require.NotNil(t, cmd)
 	msg := cmd()
-	entered, ok := msg.(threads.EnterMsg)
-	require.True(t, ok, "expected threads.EnterMsg, got %T", msg)
+	entered, ok := msg.(delegations.EnterMsg)
+	require.True(t, ok, "expected delegations.EnterMsg, got %T", msg)
 	require.Equal(t, "t1", entered.ID)
 	require.Equal(t, "s-t1", entered.SessionID)
 }

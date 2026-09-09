@@ -27,11 +27,11 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
 	"github.com/rave-soft/sennit/internal/ui/notification"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -222,20 +222,19 @@ type UI struct {
 	// its workspace fetches, session scope, and layout effects.
 	promptQueue promptQueueState
 
-	// threadList holds the memoized thread list shared by the header
-	// badge, the session panel's dock, and (via a pointer handed to
-	// threads.New) the threads dashboard — one ListThreads round
-	// trip serves all three. See threads_cache.go.
-	threadList threads.ListCache
+	// threadList holds the memoized delegation list shared by the dashboard,
+	// isolated-delegation header badge, and dock. One ListThreads round trip
+	// serves all three.
+	threadList delegations.ListCache
 
 	// agentList holds the memoized delegation (task) list behind the
 	// session panel's agents section. See agents_cache.go.
 	agentList agentListCache
 
 	// threadsDock holds the session panel's per-thread live activity
-	// (in-progress todo, message count). See threads_dock.go /
+	// (in-progress todo, message count). See delegations/dock.go and
 	// session_panel.go.
-	threadsDock threads.DockState
+	threadsDock delegations.DockState
 
 	// mouseState holds UI-level hover/click bookkeeping. See mouse.go.
 	mouseState
@@ -264,8 +263,8 @@ func WithBreadcrumbRoot(name string) Option {
 // A thread's own embedded UI does not. Threads belong to the workspace
 // above it — listing its siblings inside one of them says nothing about
 // the work you drilled in to look at, and offering to open them from
-// there invites a stack of threads within threads. The panel is for what
-// this session is doing.
+// there invites nested navigation between sibling worktrees. The panel is
+// for what this session is doing.
 //
 // This is also what keeps the messages those refreshes produce
 // unambiguous: with only the main UI ever asking, a thread-panel result
@@ -665,8 +664,8 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 		reflect.TypeFor[pubsub.Event[workspace.AgentNotification]](), reflect.TypeFor[cancelTimerExpiredMsg]())
 
 	register((*UI).updateThreads,
-		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[threads.LoadedMsg](),
-		reflect.TypeFor[threads.DockActivityLoadedMsg](), reflect.TypeFor[agentsLoadedMsg]())
+		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[delegations.LoadedMsg](),
+		reflect.TypeFor[delegations.DockActivityLoadedMsg](), reflect.TypeFor[agentsLoadedMsg]())
 
 	return g
 }
@@ -800,6 +799,7 @@ type childSessionRef struct {
 	agentName, model, effort string
 	delegationStart          time.Time
 	delegationDuration       time.Duration
+	isolated                 bool
 }
 
 // sessionNavFrame is one level of the sub-agent session-navigation stack
@@ -837,6 +837,7 @@ type sessionNavFrame struct {
 	agentName, model, effort string
 	delegationStart          time.Time
 	delegationDuration       time.Duration
+	isolated                 bool
 
 	// childSessionID is the session this frame descends into — the id
 	// requestSessionLoad was given. Kept so the delegation's own busy
@@ -862,6 +863,7 @@ func (f *sessionNavFrame) adoptRef(ref childSessionRef) {
 	}
 	f.agentName, f.model, f.effort = ref.agentName, ref.model, ref.effort
 	f.delegationStart, f.delegationDuration = ref.delegationStart, ref.delegationDuration
+	f.isolated = ref.isolated
 	f.delegationSawBusy = false
 }
 
@@ -1023,7 +1025,7 @@ func (m *UI) activeThreadBadgeCount() int {
 	if !m.surfacesThreads() {
 		return 0
 	}
-	return threads.ActiveCount(m.threadList.Threads())
+	return delegations.ActiveCount(m.threadList.Threads())
 }
 
 func currentModelSupportsImages(com *common.Common) bool {

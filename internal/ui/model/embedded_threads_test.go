@@ -6,14 +6,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/ui/common"
-	"github.com/rave-soft/sennit/internal/ui/threads"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/stretchr/testify/require"
 )
 
 // TestEmbeddedThreadUI_ShowsNoThreadsInItsPanel: threads belong to the
 // workspace above a thread, not inside one. Listing a thread's siblings
 // while you are looking at its work says nothing about that work, and
-// offering to open them from there invites threads within threads.
+// offering to open them from there invites threads within delegations.
 func TestEmbeddedThreadUI_StartsNoThreadRefreshes(t *testing.T) {
 	t.Parallel()
 
@@ -47,7 +47,7 @@ func TestRoot_MainScreenResultsArriveWhileAThreadIsOpen(t *testing.T) {
 	gen, started := r.main.threadList.Cache.Begin()
 	require.True(t, started)
 
-	r.Update(threads.LoadedMsg{Gen: gen, Threads: mkDockThreads(2)})
+	r.Update(delegations.LoadedMsg{Gen: gen, Threads: mkDockThreads(2)})
 
 	require.False(t, r.main.threadList.Cache.InFlight,
 		"the result must reach the screen that asked, or its next refresh never starts")
@@ -59,7 +59,7 @@ func TestRoot_MainScreenResultsArriveWhileAThreadIsOpen(t *testing.T) {
 // TestRoot_MainScreenResultsSurviveTheDashboardToo: the dashboard screen
 // must not drop the shared cache's result on the floor either — it is
 // explicitly routed to r.main regardless of which screen is on top (see
-// root.go's threads.LoadedMsg case), the same guarantee
+// root.go's delegations.LoadedMsg case), the same guarantee
 // TestRoot_MainScreenResultsArriveWhileAThreadIsOpen pins for screenThread.
 func TestRoot_MainScreenResultsSurviveTheDashboardToo(t *testing.T) {
 	t.Parallel()
@@ -70,7 +70,7 @@ func TestRoot_MainScreenResultsSurviveTheDashboardToo(t *testing.T) {
 	gen, started := r.main.threadList.Cache.Begin()
 	require.True(t, started)
 
-	r.Update(threads.LoadedMsg{Gen: gen, Threads: mkDockThreads(4)})
+	r.Update(delegations.LoadedMsg{Gen: gen, Threads: mkDockThreads(4)})
 
 	require.False(t, r.main.threadList.Cache.InFlight)
 	require.Len(t, r.main.threadList.Cache.Value, 4)

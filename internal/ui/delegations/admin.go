@@ -1,10 +1,10 @@
-package threads
+package delegations
 
-// The threads dashboard's administration chrome: the toolbar of buttons,
-// the status filter tabs, and the detail pane under the list. threads.go
-// owns the screen's state, layout, and list; this file owns the pieces
-// that are pointed at with a mouse — what they contain, when they are
-// enabled, and where they land on screen.
+// The delegations dashboard's administration chrome: the toolbar of buttons,
+// status filter tabs, and detail pane under the list. threads.go owns the
+// screen's state, layout, and list; this file owns the pieces that are pointed
+// at with a mouse — what they contain, when they are enabled, and where they
+// land on screen.
 //
 // Every button is also a key binding (threadsKeyMap), and both paths
 // produce the same message: the toolbar is a second way to reach the
@@ -25,8 +25,8 @@ import (
 )
 
 // threadsFilter is the status class the list is narrowed to. The tabs are
-// coarse on purpose: an operator asks "what is running", "what needs
-// attention", not "show me exactly the merging ones".
+// coarse on purpose: an operator asks "what is running" or "what needs
+// attention", not for every persisted status separately.
 type threadsFilter int
 
 const (
@@ -56,9 +56,9 @@ func (f threadsFilter) label() string {
 	}
 }
 
-// matches reports whether a thread belongs in this tab. Statuses not named
-// by any narrower tab (merging, cancelled, interrupted, ...) still appear
-// under All, so no delegation can hide from the screen entirely.
+// matches reports whether a delegation belongs in this tab. Statuses not
+// named by a narrower tab still appear under All, so no delegation can hide
+// from the screen entirely.
 func (f threadsFilter) matches(t proto.Thread) bool {
 	status := proto.ThreadStatus(t.Status)
 	switch f {
@@ -75,7 +75,7 @@ func (f threadsFilter) matches(t proto.Thread) bool {
 	}
 }
 
-// filterThreads returns the threads f admits, preserving order.
+// filterThreads returns the delegations f admits, preserving order.
 func filterThreads(threads []proto.Thread, f threadsFilter) []proto.Thread {
 	if f == filterAll {
 		return threads
@@ -93,10 +93,9 @@ func filterThreads(threads []proto.Thread, f threadsFilter) []proto.Thread {
 type threadAction int
 
 const (
-	actionNew threadAction = iota
-	actionOpen
+	actionOpen threadAction = iota
 	actionCancel
-	actionRemove
+	actionCleanup
 	actionRefresh
 	actionBack
 )
@@ -105,7 +104,7 @@ const (
 // actions sit at the end, away from Open, so a mis-click on the busiest
 // button is not the one that tears a worktree down.
 var threadsToolbarActions = []threadAction{
-	actionNew, actionOpen, actionCancel, actionRemove, actionRefresh,
+	actionOpen, actionCancel, actionCleanup, actionRefresh,
 }
 
 // label is the button's text. The key hint rides along in the footer help
@@ -113,14 +112,12 @@ var threadsToolbarActions = []threadAction{
 // narrow widths.
 func (a threadAction) label() string {
 	switch a {
-	case actionNew:
-		return "+ New"
 	case actionOpen:
 		return "Open"
 	case actionCancel:
 		return "Cancel"
-	case actionRemove:
-		return "Remove"
+	case actionCleanup:
+		return "Cleanup"
 	case actionRefresh:
 		return "Refresh"
 	case actionBack:
@@ -133,7 +130,7 @@ func (a threadAction) label() string {
 // destructive reports whether the action tears something down, and so is
 // rendered in the danger fill when hovered.
 func (a threadAction) destructive() bool {
-	return a == actionRemove
+	return a == actionCleanup
 }
 
 // enabledFor reports whether the action can run against the given
@@ -142,10 +139,10 @@ func (a threadAction) destructive() bool {
 // dimmed button and a dead shortcut can never disagree.
 func (a threadAction) enabledFor(sel *proto.Thread) bool {
 	switch a {
-	case actionNew, actionRefresh, actionBack:
+	case actionRefresh, actionBack:
 		return true
-	case actionOpen, actionRemove:
-		return sel != nil
+	case actionOpen, actionCleanup:
+		return sel != nil && (proto.ThreadKind(sel.Kind) == proto.ThreadKindThread || sel.Kind == "")
 	case actionCancel:
 		return sel != nil && !proto.ThreadStatus(sel.Status).Terminal()
 	default:
@@ -189,11 +186,12 @@ func threadStatusStyle(sty *styles.Styles, status string) lipgloss.Style {
 // the right as the terminal narrows so the name and status — the two
 // fields an operator scans by — always survive.
 type threadsColumns struct {
-	name    int
-	status  int
-	branch  int // 0 when dropped
-	updated int // 0 when dropped
-	goal    int // 0 when there is no room left
+	name     int
+	status   int
+	isolated int
+	branch   int // 0 when dropped
+	updated  int // 0 when dropped
+	goal     int // 0 when there is no room left
 }
 
 // computeThreadsColumns lays the table out for a given total width.
@@ -202,15 +200,16 @@ func computeThreadsColumns(width int) threadsColumns {
 		gap        = 2
 		nameWidth  = 22
 		statusW    = 10
+		isolatedW  = 8
 		branchW    = 26
 		updatedW   = 14
 		minGoal    = 12
 		minNameCol = 12
 	)
 
-	c := threadsColumns{name: nameWidth, status: statusW, branch: branchW, updated: updatedW}
+	c := threadsColumns{name: nameWidth, status: statusW, isolated: isolatedW, branch: branchW, updated: updatedW}
 	fits := func(cc threadsColumns) int {
-		total := cc.name + gap + cc.status
+		total := cc.name + gap + cc.status + gap + cc.isolated
 		if cc.branch > 0 {
 			total += gap + cc.branch
 		}
@@ -240,6 +239,7 @@ func renderThreadsColumnHeader(sty *styles.Styles, c threadsColumns, width int) 
 	var b strings.Builder
 	b.WriteString(presentation.PadTo("NAME", c.name))
 	b.WriteString("  " + presentation.PadTo("STATUS", c.status))
+	b.WriteString("  " + presentation.PadTo("ISOLATED", c.isolated))
 	if c.branch > 0 {
 		b.WriteString("  " + presentation.PadTo("BRANCH", c.branch))
 	}
@@ -252,10 +252,10 @@ func renderThreadsColumnHeader(sty *styles.Styles, c threadsColumns, width int) 
 	return sty.Threads.ColumnHeader.Render(ansi.Truncate(b.String(), width, "…"))
 }
 
-// threadsDetailLines renders the detail pane's content for the selected
-// thread: the fields too long for a table row (the full goal, the branch
-// pair, timings, and whatever the run left behind — a result summary or an
-// error). Returns nil when nothing is selected.
+// threadsDetailLines renders the detail pane for the selected delegation:
+// fields too long for a table row, timings, and the result summary or error.
+// Isolated delegations additionally carry branch details. It returns nil when
+// nothing is selected.
 func threadsDetailLines(sty *styles.Styles, sel *proto.Thread, width int) []string {
 	if sel == nil {
 		return nil
@@ -286,9 +286,8 @@ func threadsDetailLines(sty *styles.Styles, sel *proto.Thread, width int) []stri
 		timing += fmt.Sprintf(", updated %s", humanize.Time(time.Unix(sel.UpdatedAt, 0)))
 	}
 
-	// The outcome line is the reason this pane exists: a failed thread's
-	// error is the one thing a table row can never show, and it is exactly
-	// what someone opening this screen is looking for.
+	// The outcome line exposes the result or error that cannot fit in a table
+	// row.
 	outcome := ""
 	outcomeLabel := "result"
 	if sel.Error != "" {

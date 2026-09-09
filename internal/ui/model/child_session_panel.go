@@ -26,11 +26,11 @@ const childSessionPanelHeight = 2
 // interface — shouldn't happen in practice, since only delegation items
 // ever feed enterChildSession/cycleChildSession, but keeps those callers
 // simple.
-func delegationInfo(item chat.ToolMessageItem) (displayName, model, effort string, startTime time.Time, duration time.Duration) {
+func delegationInfo(item chat.ToolMessageItem) (displayName, model, effort string, isolated bool, startTime time.Time, duration time.Duration) {
 	if di, ok := item.(chat.DelegationInfoProvider); ok {
 		return di.DelegationInfo()
 	}
-	return "", "", "", time.Time{}, 0
+	return "", "", "", false, time.Time{}, 0
 }
 
 // childSessionLevelName formats one breadcrumb level's plain text: the
@@ -105,6 +105,9 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	// back from history, where the model of the day may be long gone from
 	// the picker. "default model" only when it has yet to answer anything.
 	line := childPanelModelSubtitle(frame.model, frame.effort)
+	if frame.isolated {
+		line = presentation.JoinStatusParts([]string{"isolated", line}, -1)
+	}
 	if line == "" {
 		// forSession: the loaded session is still the parent for as
 		// long as the child's load takes, and its reading is not this

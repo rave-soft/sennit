@@ -15,8 +15,7 @@ import (
 
 // threadEventPubsubType maps a thread lifecycle event's semantic type
 // (created/status_changed/removed, see thread.EventType) onto
-// the coarser pubsub.EventType the TUI's thread state machines
-// (threads_cache.go, threads_dock.go, thread_indicator.go) key their
+// the coarser pubsub.EventType the TUI delegation cache keys its
 // upsert/remove logic off. AppWorkspace.translateEvent funnels through
 // this so its mapping stays centralized.
 func threadEventPubsubType(t thread.EventType) pubsub.EventType {
@@ -49,7 +48,7 @@ func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) 
 	if !ok {
 		return nil, workspace.ErrThreadsNotSupported
 	}
-	sts, err := mgr.List(ctx)
+	sts, err := mgr.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}

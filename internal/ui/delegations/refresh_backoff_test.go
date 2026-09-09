@@ -1,4 +1,4 @@
-package threads
+package delegations
 
 import (
 	"errors"
@@ -100,9 +100,5 @@ func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 		"a stale-generation failure must not hold back the newer request that replaced it")
 }
 
-// The dock's and indicator's own list-refresh backoff tests moved to
-// threads_cache_test.go (TestApplyThreadsLoadedErrorBacksOff,
-// TestApplyThreadsLoadedStaleGenerationFailureRedispatches): both caches
-// (and the dashboard's) collapsed onto the single ListCache in
-// threads_cache.go, so there is exactly one list-refresh backoff path left
-// to pin instead of three copies of it.
+// The list-refresh backoff cases live in cache_test.go because dashboard,
+// dock, and header share one ListCache and therefore one refresh path.

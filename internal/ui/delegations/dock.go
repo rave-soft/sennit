@@ -1,20 +1,17 @@
-package threads
+package delegations
 
 // Memoized state for the threads dock: a compact panel that sits above the
 // chat input and shows a handful of active background threads, each with a
 // live one-line status.
 //
-// The thread list itself lives in threads.ListCache (threads_cache.go),
-// shared with the dashboard and the header badge — one ListThreads round
-// trip serves every consumer. What's specific to the dock, and stays here,
-// is per-thread live activity (in-progress todo, message count): it
-// requires AttachThread into the thread's own isolated workspace before
-// GetSession can see its session — cheap for a live thread, but a completed
-// one must first be reactivated (respawning its worktree and process; see
-// AttachThread). Because of that cost this is fetched on its own, longer
-// TTL and only for the threads the dock actually renders.
+// The all-delegation list lives in ListCache, shared with the dashboard and
+// header badge. The dock filters that cache to active isolated delegations and
+// separately fetches their live activity through AttachThread and GetSession.
+// AttachThread observes an existing runtime and may return a read-only fallback;
+// the dock never activates completed work. Activity therefore uses a longer TTL
+// and is fetched only for isolated delegations the dock renders.
 //
-// Follows the same TTL-cache idiom as threads_cache.go: a memoized value,
+// Follows the same TTL-cache idiom as cache.go: a memoized value,
 // checkedAt/inFlight/gen bookkeeping, a dispatchXRefresh that fetches
 // off-thread, an applyXLoaded that writes through on the Update goroutine
 // (discarding stale generations), and a staleXRefreshCmd TTL backstop. It
@@ -68,17 +65,16 @@ type DockActivity struct {
 type DockState struct {
 	// activity holds the last known live snapshot per thread ID.
 	activity map[string]listcache.TTLCache[DockActivity]
-	// activityGen is bumped whenever the shared thread list changes, so a
-	// per-thread fetch that started before the thread list moved on (e.g.
+	// activityGen is bumped whenever the shared delegation list changes, so a
+	// per-thread fetch that started before the delegation list moved on (e.g.
 	// the thread was removed) is discarded when it lands, mirroring gen but
-	// scoped to the activity half. Bumped by UI.updateThreads on every
-	// applied threads.LoadedMsg (see threads.ListCache.applyLoaded's applied
-	// return).
+	// scoped to the activity half. UI.updateThreads bumps it after every
+	// applied LoadedMsg, based on ListCache.ApplyLoaded's applied return.
 	activityGen uint64
 }
 
 // dropActivity discards a thread's cached live activity, leaving the shared
-// thread list alone: the caller (UI.updateThreads, on a Deleted event) is
+// delegation list alone: the caller (UI.updateThreads, on a Deleted event) is
 // responsible for that. A stale activity snapshot for a thread that no
 // longer exists is otherwise silently harmless — nothing reads it once the
 // thread is gone from the shared list — but there is no reason to keep it
@@ -88,9 +84,9 @@ func (c *DockState) ActivityOf(threadID string) DockActivity {
 	return c.activity[threadID].Value
 }
 
-// InvalidateActivity marks the per-thread activity as belonging to an older
-// list, so results still in flight for the previous one are discarded. The
-// screen calls it after the thread list itself changed.
+// InvalidateActivity marks per-thread activity as belonging to an older
+// delegation list, so results still in flight for the previous one are
+// discarded. The screen calls it after the shared cache changes.
 func (c *DockState) InvalidateActivity() { c.activityGen++ }
 
 func (c *DockState) DropActivity(id string) {
@@ -98,8 +94,7 @@ func (c *DockState) DropActivity(id string) {
 }
 
 // ActiveDockThreads filters threads down to the ones worth showing in the
-// dock as live work: pending, running, or merging (mirroring
-// threads.ActiveCount's status set), plus idle. Idle is deliberately included
+// dock as live work: active statuses plus idle. Idle is deliberately included
 // here even though Status.Active() excludes it (see thread/types.go's
 // StatusIdle doc comment): an idle delegation's workspace is still live and
 // worth surfacing, it just has no run in flight right now — "idle must not
@@ -222,7 +217,7 @@ func (c *DockState) dispatchThreadActivityRefresh(com *common.Common, threadID, 
 }
 
 // applyThreadActivityLoaded writes an off-thread activity fetch result
-// through, discarding it if it started before a newer thread-list
+// through, discarding it if it started before a newer delegation-list
 // generation (the activityGen check), and always clearing the per-thread
 // inFlight flag. Runs on the Update goroutine.
 func (c *DockState) ApplyActivityLoaded(msg DockActivityLoadedMsg) {

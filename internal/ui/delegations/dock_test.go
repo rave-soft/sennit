@@ -1,4 +1,4 @@
-package threads
+package delegations
 
 import (
 	"context"
@@ -165,8 +165,8 @@ func dockThreadIDs(threads []proto.Thread) []string {
 }
 
 // threadsDockTestWorkspace is a minimal workspace.Workspace stub for
-// exercising the dock's list and activity fetches, following the
-// threadsTestWorkspace pattern in threads_cache_test.go.
+// exercising the dock's isolated activity fetches, following the
+// threadsTestWorkspace pattern in cache_test.go.
 type threadsDockTestWorkspace struct {
 	workspace.Workspace
 	threads   []proto.Thread

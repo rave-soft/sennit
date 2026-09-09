@@ -8,8 +8,8 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
@@ -112,12 +112,11 @@ func (m *UI) applyMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) ([]tea.Cmd, 
 		}
 	}
 
-	// A click anywhere on the header while threads are active opens the
-	// threads dashboard — the badge rendered there (see header.go's
-	// renderHeaderDetails) is the only visible hint threads are running
-	// while on the main screen, so it doubles as a button.
+	// A click anywhere on the header while isolated delegations are active
+	// opens the delegations dashboard. The header badge is their only visible
+	// hint on the main screen, so it doubles as a button.
 	if msg.Button == tea.MouseLeft && m.activeThreadBadgeCount() > 0 && image.Pt(msg.X, msg.Y).In(m.lay.layout.header) {
-		cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
+		cmds = append(cmds, util.CmdHandler(showDelegationsDashboardMsg{}))
 		return cmds, true
 	}
 
@@ -136,7 +135,7 @@ func (m *UI) applyMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) ([]tea.Cmd, 
 	// A click on the session panel's todos header row toggles its
 	// expand state; a click on a rendered thread block drills into
 	// that thread's own session — the same transition Enter takes on
-	// the threads dashboard (see Root.attachThreadCmd), not
+	// the delegations dashboard (see Root.attachThreadCmd), not
 	// enterChildSession/navStack, which point at the wrong workspace.
 	//
 	// Hit-test rects are recomputed here from m.lay.layout.panel +
@@ -166,7 +165,7 @@ func (m *UI) applyMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) ([]tea.Cmd, 
 		}
 		if hit.threadIndex >= 0 {
 			th := hit.plan.threads[hit.threadIndex]
-			cmds = append(cmds, util.CmdHandler(threads.EnterMsg{ID: th.ID, SessionID: th.SessionID, Name: th.Name}))
+			cmds = append(cmds, util.CmdHandler(delegations.EnterMsg{ID: th.ID, SessionID: th.SessionID, Name: th.Name}))
 			return cmds, true
 		}
 		// A click on a delegation block drills into its child session:

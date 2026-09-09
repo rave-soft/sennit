@@ -4,12 +4,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
-	"github.com/rave-soft/sennit/internal/ui/threads"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 )
 
-// updateThreads handles the thread-tracking branches of UI.Update: the
-// thread pubsub event and the shared list's / dock's off-thread loads. It
-// is called from Update's message-type switch and shares that switch's
+// updateThreads handles delegation-tracking branches of UI.Update: lifecycle
+// events, all-kind list results, task-only list results, and isolated dock
+// activity. It is called from Update's message-type switch and shares its
 // cmds accumulator.
 //
 // The second return value reports whether a branch below took one of
@@ -27,8 +27,8 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// only cares about keeping the shared list (and the header badge
 		// it feeds) current.
 		m.threadList.ApplyEvent(msg)
-		// Tasks ride the same event stream as threads; each cache keeps
-		// only its own kind (see agentListCache.applyEvent).
+		// Tasks and isolated delegations share this event stream. The shared
+		// ListCache accepts every kind; agentListCache keeps only task rows.
 		m.agentList.applyEvent(msg)
 		if msg.Type == pubsub.DeletedEvent {
 			m.threadsDock.DropActivity(msg.Payload.ID)
@@ -56,15 +56,15 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case threads.LoadedMsg:
+	case delegations.LoadedMsg:
 		loadCmds, applied := m.threadList.ApplyLoaded(m.com, msg)
 		cmds = append(cmds, loadCmds...)
 		if applied {
-			// The freshly listed threads may have added or retired
-			// per-thread activity; see threads.DockState.activityGen.
+			// The refreshed delegation list may have added or retired isolated
+			// rows with per-thread activity; see delegations.DockState.activityGen.
 			m.threadsDock.InvalidateActivity()
 		}
-		// The freshly listed threads may introduce (or retire) live work.
+		// The refreshed delegation list may introduce or retire live work.
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -80,7 +80,7 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// enters or leaves the panel — and so when the transcript has to
 		// stop or start showing it. See Chat.SetDelegationsHidden.
 		m.refreshDelegationBlocks()
-	case threads.DockActivityLoadedMsg:
+	case delegations.DockActivityLoadedMsg:
 		m.threadsDock.ApplyActivityLoaded(msg)
 	}
 	return cmds, false

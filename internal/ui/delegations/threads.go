@@ -1,17 +1,16 @@
-package threads
+package delegations
 
-// Dashboard is the threads administration screen. It wraps a
-// list.List over the memoized thread cache (threads_cache.go) the same way
-// Chat wraps a list.List over messages: items are rebuilt from the cache
-// on load/event, never fetched directly from Draw/HandleKey.
+// Dashboard is the delegations administration screen. It wraps a list.List
+// over the memoized all-delegation cache: items are rebuilt from the cache on
+// load or event and never fetched directly from Draw or HandleKey.
 //
 // The screen is operated, not just read, so it is built as a table with
 // chrome around it rather than a bare list: a toolbar whose buttons
 // enable and disable with the selection, status filter tabs, and a detail
 // pane carrying the fields a row cannot hold (the full goal, and the error
-// a failed thread left behind). Buttons and shortcuts both go through
+// a failed delegation left behind). Buttons and shortcuts both go through
 // runAction, so what a button offers is exactly what a key can do. The
-// chrome that responds to a pointer is described in threads_admin.go.
+// pointer-facing chrome is described in admin.go.
 //
 // Statuses render as a colored cell rather than a live per-row spinner: an
 // spin.Anim only advances when something drives it with spin.StepMsg on a
@@ -49,21 +48,12 @@ type EnterMsg struct {
 	Name string
 }
 
-// OpenCreateMsg requests opening the create-thread dialog. The dialog
-// itself is implemented in a later step; this is a placeholder message so
-// the dashboard can be wired up ahead of it.
-type OpenCreateMsg struct{}
-
-// RemoveMsg requests removing a thread, already confirmed by the
-// thread-remove-confirm dialog (see ConfirmRemoveMsg).
+// RemoveMsg requests cleaning up an isolated delegation after confirmation.
 type RemoveMsg struct {
 	ID string
 }
 
-// ConfirmRemoveMsg requests opening the remove-confirmation dialog
-// for a thread. Consumed by the router (root.go), which pushes
-// dialog.NewThreadRemoveConfirm onto dashboardDialog; that dialog's
-// ActionRemoveThreadConfirmed is what actually sends RemoveMsg.
+// ConfirmRemoveMsg requests opening the delegation cleanup confirmation.
 type ConfirmRemoveMsg struct {
 	ID, Name string
 }
@@ -82,22 +72,21 @@ type CancelDelegationMsg struct {
 	ID, Kind string
 }
 
-// threadsKeyMap holds the key bindings local to the threads dashboard. It
+// threadsKeyMap holds the key bindings local to the delegations dashboard. It
 // is intentionally separate from the app-wide KeyMap in keys.go: these
 // bindings only apply while the dashboard has focus.
 type threadsKeyMap struct {
 	Up         key.Binding
 	Down       key.Binding
 	Enter      key.Binding
-	New        key.Binding
-	Remove     key.Binding
+	Cleanup    key.Binding
 	Cancel     key.Binding
 	Reload     key.Binding
 	NextFilter key.Binding
 	AllFilter  key.Binding
 }
 
-// defaultThreadsKeyMap returns the threads dashboard's key bindings.
+// defaultThreadsKeyMap returns the delegations dashboard's key bindings.
 func defaultThreadsKeyMap() threadsKeyMap {
 	return threadsKeyMap{
 		Up: key.NewBinding(
@@ -112,13 +101,9 @@ func defaultThreadsKeyMap() threadsKeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "open"),
 		),
-		New: key.NewBinding(
-			key.WithKeys("n"),
-			key.WithHelp("n", "new"),
-		),
-		Remove: key.NewBinding(
+		Cleanup: key.NewBinding(
 			key.WithKeys("x", "d"),
-			key.WithHelp("x/d", "remove"),
+			key.WithHelp("x/d", "cleanup"),
 		),
 		Cancel: key.NewBinding(
 			key.WithKeys("c"),
@@ -146,13 +131,13 @@ func (k threadsKeyMap) ShortHelp() []key.Binding {
 	// explaining, and the footer is one line — every binding it lists is
 	// one an operator might not guess.
 	return []key.Binding{
-		k.Enter, k.New, k.Cancel, k.Remove, k.Reload, k.NextFilter,
+		k.Enter, k.Cancel, k.Cleanup, k.Reload, k.NextFilter,
 	}
 }
 
-// Dashboard is the threads administration screen: a title bar with
-// a Back button, a toolbar of action buttons, status filter tabs, the
-// thread table, a detail pane for the selected thread, and a help footer.
+// Dashboard is the delegations administration screen: a title bar with a
+// Back button, action toolbar, status filters, delegation table, selected-row
+// detail pane, and help footer.
 //
 // Buttons and tabs are hit-tested from zones recomputed on every Draw
 // (threadsHitZone), the same recompute-don't-cache approach the session
@@ -186,10 +171,9 @@ type Dashboard struct {
 	styleRev uint64
 }
 
-// New creates a new threads dashboard over the given shared
-// thread list cache (threads_cache.go) — the same instance the main UI's
-// dock and header badge read, so all three stay in sync off a single
-// ListThreads round trip.
+// New creates a delegations dashboard over the shared list cache. The
+// isolated-delegation dock and header badge read the same cache, so one
+// ListThreads round trip serves all three.
 func New(com *common.Common, cache *ListCache) *Dashboard {
 	l := list.NewList()
 	l.RegisterRenderCallback(list.FocusedRenderCallback(l))
@@ -239,12 +223,12 @@ func (m *Dashboard) detailHeight() int {
 	return min(threadsDetailMaxRows, len(threadsDetailLines(m.com.Styles, sel, m.width)))
 }
 
-// selected returns the thread under the list's selection, or nil when the
-// (filtered) list is empty.
+// selected returns the delegation under the list's selection, or nil when
+// the filtered list is empty.
 //
 // Returns a pointer to a copy, not &m.visible[idx]: under filterAll,
 // m.visible aliases the cache's backing array (see filterThreads), and
-// ListCache.applyEvent deletes from that array in place on a
+// ListCache.ApplyEvent deletes from that array in place on a
 // DeletedEvent, shifting elements under any pointer taken into it. No
 // current caller holds the result across such a mutation, but returning
 // an alias into shared, mutable storage is a structural landmine — copy
@@ -361,13 +345,13 @@ func (m *Dashboard) Draw(scr uv.Screen, area uv.Rectangle) {
 }
 
 // emptyText is the message shown in place of the table. It names the
-// reason the table is empty — no threads at all, versus a filter hiding
-// them — since the two need different next steps from the operator.
+// reason the table is empty — no delegations at all versus a filter hiding
+// them — since only the latter has an action available here.
 func (m *Dashboard) emptyText() string {
 	if len(m.cache.Cache.Value) == 0 {
-		return "No threads yet — press n or click + New to start one."
+		return "No delegations yet."
 	}
-	return fmt.Sprintf("No %s threads — press a to show all.", strings.ToLower(m.filter.label()))
+	return fmt.Sprintf("No %s delegations — press a to show all.", strings.ToLower(m.filter.label()))
 }
 
 // indentRect insets a full-width row by one cell on each side, so text
@@ -391,7 +375,7 @@ func (m *Dashboard) drawRule(scr uv.Screen, rect uv.Rectangle) {
 // right-aligned on the same row.
 func (m *Dashboard) drawTitle(scr uv.Screen, rect uv.Rectangle) {
 	t := m.com.Styles
-	title := t.Threads.Title.Render("Threads")
+	title := t.Threads.Title.Render("Delegations")
 	count := t.Threads.Subtle.Render(fmt.Sprintf("  %d total", len(m.cache.Cache.Value)))
 	uv.NewStyledString(title+count).Draw(scr, indentRect(rect))
 
@@ -513,7 +497,7 @@ func shortHelpText(bindings []key.Binding, width int) string {
 	return ansi.Truncate(strings.Join(parts, "  •  "), width, "…")
 }
 
-// ApplyThreadsLoaded writes through an off-thread thread list fetch and
+// ApplyThreadsLoaded writes through an off-thread all-delegation result and
 // rebuilds the list items to reflect it.
 func (m *Dashboard) ApplyThreadsLoaded(msg LoadedMsg) []tea.Cmd {
 	cmds, _ := m.cache.ApplyLoaded(m.com, msg)
@@ -521,9 +505,9 @@ func (m *Dashboard) ApplyThreadsLoaded(msg LoadedMsg) []tea.Cmd {
 	return cmds
 }
 
-// ApplyThreadEvent reacts to a thread pubsub event: it write-throughs the
-// event into the cache, rebuilds the list, and — since applyThreadEvent
-// always invalidates the TTL — re-arms a refresh immediately while the
+// ApplyThreadEvent reacts to a delegation pubsub event: it writes the event
+// through to the all-kind cache, rebuilds the list, and, since ApplyEvent
+// invalidates the TTL, re-arms a refresh immediately while the
 // dashboard is active so the optimistic update is reconciled promptly.
 func (m *Dashboard) ApplyThreadEvent(evt pubsub.Event[proto.Thread]) tea.Cmd {
 	m.cache.ApplyEvent(evt)
@@ -549,10 +533,8 @@ func (m *Dashboard) InvalidateCache() {
 	m.cache.Invalidate()
 }
 
-// Refresh dispatches an off-thread thread list re-fetch, bypassing the TTL.
-// Exposed for the router (root.go) to call after an action (merge/remove)
-// that changes thread state out of band, without reaching into the
-// unexported cache field itself.
+// Refresh dispatches an off-thread delegation list re-fetch, bypassing the
+// TTL. The router calls it after cancel or cleanup changes state out of band.
 func (m *Dashboard) Refresh() tea.Cmd {
 	return m.cache.DispatchRefresh(m.com)
 }
@@ -565,8 +547,8 @@ func (m *Dashboard) Tick(active bool, com *common.Common) tea.Cmd {
 }
 
 // RebuildItems applies the active filter to the cache and converts the
-// surviving threads into list items. The selection is kept on the same
-// thread across rebuilds where possible — a list that jumps back to the
+// surviving delegations into list items. The selection is kept on the same
+// delegation across rebuilds where possible — a list that jumps back to the
 // top every time a status event lands is unusable while anything is
 // running.
 func (m *Dashboard) RebuildItems() {
@@ -637,7 +619,7 @@ func (m *Dashboard) HandleMouseMotion(msg tea.MouseMotionMsg) {
 
 // HandleMouseClick routes a click to a button, a tab, or a table row.
 // Clicking a row only selects it — the action buttons are how a click
-// acts, so a mis-aimed click can never merge or remove anything.
+// acts, so a mis-aimed click can never cancel or clean up anything.
 func (m *Dashboard) HandleMouseClick(msg tea.MouseClickMsg) (handled bool, cmd tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return false, nil
@@ -708,15 +690,13 @@ func (m *Dashboard) runAction(action threadAction) tea.Cmd {
 		return nil
 	}
 	switch action {
-	case actionNew:
-		return func() tea.Msg { return OpenCreateMsg{} }
 	case actionOpen:
 		id, sessionID, name := sel.ID, sel.SessionID, sel.Name
 		return func() tea.Msg { return EnterMsg{ID: id, SessionID: sessionID, Name: name} }
 	case actionCancel:
 		id, kind := sel.ID, sel.Kind
 		return func() tea.Msg { return CancelDelegationMsg{ID: id, Kind: kind} }
-	case actionRemove:
+	case actionCleanup:
 		id, name := sel.ID, sel.Name
 		return func() tea.Msg { return ConfirmRemoveMsg{ID: id, Name: name} }
 	case actionRefresh:
@@ -743,10 +723,8 @@ func (m *Dashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keyMap.Enter):
 		return true, m.runAction(actionOpen)
-	case key.Matches(msg, m.keyMap.New):
-		return true, m.runAction(actionNew)
-	case key.Matches(msg, m.keyMap.Remove):
-		return true, m.runAction(actionRemove)
+	case key.Matches(msg, m.keyMap.Cleanup):
+		return true, m.runAction(actionCleanup)
 	case key.Matches(msg, m.keyMap.Cancel):
 		return true, m.runAction(actionCancel)
 	case key.Matches(msg, m.keyMap.Reload):
@@ -773,10 +751,8 @@ func nextThreadsFilter(current threadsFilter, delta int) threadsFilter {
 	return filterAll
 }
 
-// threadItem renders a single row of the threads table: name, status,
-// branch, relative last-activity time, and goal, each in its own fixed
-// column so the table can be read down a column instead of parsed line by
-// line.
+// threadItem renders one delegation row: name, status, isolation, optional
+// branch, relative last-activity time, and goal in fixed columns.
 type threadItem struct {
 	*list.Versioned
 	thread  proto.Thread
@@ -839,6 +815,11 @@ func (it *threadItem) Render(width int) string {
 	b.WriteString("  ")
 	statusCell := presentation.PadTo(strings.ToUpper(s.Status), c.status)
 	b.WriteString(threadStatusStyle(it.sty, s.Status).Render(statusCell))
+	isolation := "no"
+	if proto.ThreadKind(s.Kind) == proto.ThreadKindThread || s.Kind == "" {
+		isolation = "yes"
+	}
+	b.WriteString("  " + presentation.PadTo(isolation, c.isolated))
 	if c.branch > 0 {
 		b.WriteString("  " + presentation.PadTo(s.Branch, c.branch))
 	}

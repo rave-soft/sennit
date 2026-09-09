@@ -10,13 +10,13 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 )
 
 // TestDashboardForwardsPermissionRequestToMain is the regression test for
 // the agent hang described in handleDashboardMsg's doc comment: a
-// permission request published while the threads dashboard is open used to
+// permission request published while the delegations dashboard is open used to
 // be dropped by handleDashboardMsg's final "anything else is dropped"
 // branch, so its dialog never opened and permission.Service — which does
 // not re-send — blocked forever waiting on an answer nothing could give.
@@ -28,7 +28,7 @@ func TestDashboardForwardsPermissionRequestToMain(t *testing.T) {
 	r := newTestRoot(t, true)
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 	r.dashboard.SetSize(120, 40)
 	r.active = screenDashboard
 
@@ -45,7 +45,7 @@ func TestDashboardForwardsPermissionRequestToMain(t *testing.T) {
 // regression test for the hole left by the first pass at this fix: the
 // dialog guard in handleDashboardMsg used to run before the forward-to-main
 // branch, so a non-input message reaching it while a dashboard dialog
-// (thread-create, remove-confirm) was open still fell into that guard's
+// (cleanup confirmation) was open still fell into that guard's
 // own "return r, nil" and was dropped — the exact permission-hang bug,
 // just with a dashboard dialog on screen instead of the bare dashboard.
 // The classification now happens first: non-input messages are forwarded
@@ -56,10 +56,10 @@ func TestDashboardForwardsPermissionRequestToMainWithDialogOpen(t *testing.T) {
 	r := newTestRoot(t, true)
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 	r.dashboard.SetSize(120, 40)
 	r.active = screenDashboard
-	r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
+	r.dashboardDialog.OpenDialog(dialog.NewDelegationCleanupConfirm(r.com, "thread-1", "test"))
 	require.True(t, r.dashboardDialog.HasDialogs(), "precondition: a dashboard dialog is open")
 
 	perm := permission.PermissionRequest{ID: "perm-1", ToolCallID: "tc-1", ToolName: "bash"}
@@ -84,7 +84,7 @@ func TestDashboardMouseClickStaysOnDashboard(t *testing.T) {
 	r := newTestRoot(t, true)
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 	r.dashboard.SetSize(120, 40)
 	r.active = screenDashboard
 
@@ -121,7 +121,7 @@ func TestDashboardMouseClickThroughOpenDialogDoesNotReachDashboard(t *testing.T)
 		model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 		r = model.(*Root)
 		r.main.threadList.Cache.Value = rows
-		r.dashboard = threads.New(r.com, &r.main.threadList)
+		r.dashboard = delegations.New(r.com, &r.main.threadList)
 		r.dashboard.SetSize(120, 40)
 		r.dashboard.RebuildItems()
 		r.active = screenDashboard
@@ -152,7 +152,7 @@ func TestDashboardMouseClickThroughOpenDialogDoesNotReachDashboard(t *testing.T)
 	// Dialog open: the same click must go to the dialog instead. Closing
 	// the dialog afterward reveals whether the selection moved.
 	throughDialog := newDashboardRoot(t)
-	throughDialog.dashboardDialog.OpenDialog(dialog.NewThreadCreate(throughDialog.com))
+	throughDialog.dashboardDialog.OpenDialog(dialog.NewDelegationCleanupConfirm(throughDialog.com, "thread-1", "test"))
 	model, _ = throughDialog.Update(rowClick)
 	throughDialog = model.(*Root)
 	throughDialog.dashboardDialog.CloseFrontDialog()
@@ -175,7 +175,7 @@ func TestDashboardForwardsUntaggedAsyncResultToMain(t *testing.T) {
 
 	ws := &countingWorkspace{ready: true}
 	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain, dashboardDialog: dialog.NewOverlay()}
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 
 	generation, started := r.main.modelOperation.begin()
 	require.True(t, started)
@@ -193,7 +193,7 @@ func TestDashboardForwardsUntaggedAsyncResultToMain(t *testing.T) {
 // fix in handleDashboardMsg relies on: leaveThread (the screenThread ->
 // screenDashboard transition) detaches the thread before switching
 // screens, and the other two entries into screenDashboard
-// (showThreadsDashboardMsg, the handleKeyPress toggle) are only reached
+// (showDelegationsDashboardMsg, the handleKeyPress toggle) are only reached
 // from screenMain, where nothing is attached. If this ever stops holding,
 // handleDashboardMsg's forward-to-main branch must fail safe (keep
 // dropping) rather than misdeliver to the wrong *UI — see its guard on

@@ -25,7 +25,7 @@ import (
 // persisted entry would be exactly the kind of workaround the "don't
 // fabricate a fake persisted chat message" guidance rules out. A toast is
 // the explicitly sanctioned fallback; the durable record remains the
-// /threads dashboard, which already shows terminal status per thread.
+// delegations dashboard, which already shows terminal status per row.
 
 // isTerminalThreadStatus reports whether status is a known finished state.
 // Unknown statuses deliberately remain neither active nor terminal, matching

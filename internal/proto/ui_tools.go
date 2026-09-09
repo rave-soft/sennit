@@ -46,6 +46,7 @@ type AgentParams struct {
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Description  string `json:"description,omitempty"`
+	Isolation    string `json:"isolation,omitempty"`
 }
 
 type AgentBackgroundResponseMetadata struct {

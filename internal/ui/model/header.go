@@ -137,9 +137,8 @@ func renderHeaderDetails(
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
 	}
 
-	// activeThreads counts pending/running/merging threads (see
-	// threads.ActiveCount in threads_cache.go); shown so a "ctrl+e" glance
-	// from the main chat confirms background threads are still alive
+	// activeThreads counts active isolated delegations; shown so a "ctrl+e"
+	// glance from the main chat confirms background work is still alive
 	// without switching screens.
 	if activeThreads > 0 {
 		parts = append(parts, t.Status.InfoMessage.Render(fmt.Sprintf("⋈ %d", activeThreads)))

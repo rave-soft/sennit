@@ -31,15 +31,15 @@ func TestConfirmDialogKeySemantics(t *testing.T) {
 		t.Fatal("ctrl+c must retain Quit's quit behavior")
 	}
 
-	remove := NewThreadRemoveConfirm(com, "thread-1", "test")
-	if action := remove.HandleMsg(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); action != nil {
-		t.Fatalf("ctrl+c must not confirm thread removal, got %T", action)
+	cleanup := NewDelegationCleanupConfirm(com, "thread-1", "test")
+	if action := cleanup.HandleMsg(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); action != nil {
+		t.Fatalf("ctrl+c must not confirm delegation cleanup, got %T", action)
 	}
-	if _, ok := remove.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEsc}).(ActionClose); !ok {
-		t.Fatal("Esc must cancel thread removal")
+	if _, ok := cleanup.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEsc}).(ActionClose); !ok {
+		t.Fatal("Esc must cancel delegation cleanup")
 	}
-	remove = NewThreadRemoveConfirm(com, "thread-1", "test")
-	if action, ok := remove.HandleMsg(tea.KeyPressMsg{Text: "y"}).(ActionRemoveThreadConfirmed); !ok || action.ID != "thread-1" {
-		t.Fatalf("y must confirm thread removal with its ID, got %#v", action)
+	cleanup = NewDelegationCleanupConfirm(com, "thread-1", "test")
+	if action, ok := cleanup.HandleMsg(tea.KeyPressMsg{Text: "y"}).(ActionCleanupDelegationConfirmed); !ok || action.ID != "thread-1" {
+		t.Fatalf("y must confirm delegation cleanup with its ID, got %#v", action)
 	}
 }

@@ -1,4 +1,4 @@
-package threads
+package delegations
 
 import (
 	"image"
@@ -65,9 +65,6 @@ func TestThreadItemRenderTruncatesGoal(t *testing.T) {
 	require.Contains(t, ansi.Strip(rendered), "…", "goal should be truncated with an ellipsis marker")
 }
 
-// TestThreadMergeableTaskAlwaysFalse proves a task never reports mergeable
-// regardless of status: it has no worktree/branch of its own to merge (see
-// TaskController's doc comment).
 func TestThreadStatusStyleIdleIsNeitherDoneNorError(t *testing.T) {
 	t.Parallel()
 
@@ -116,25 +113,12 @@ func TestThreadsDashboardHandleKeyEnter(t *testing.T) {
 	require.Equal(t, "s1", msg.ID)
 }
 
-func TestThreadsDashboardHandleKeyNew(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsTestWorkspace{supported: true}
-	m := newTestThreadsDashboard(t, ws)
-
-	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "n", Code: 'n'})
-	require.True(t, handled)
-	require.NotNil(t, cmd)
-	_, ok := cmd().(OpenCreateMsg)
-	require.True(t, ok)
-}
-
 func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.Cache.Value = []proto.Thread{{ID: "s1"}}
+	m.cache.Cache.Value = []proto.Thread{{ID: "s1", Kind: string(proto.ThreadKindThread)}}
 	m.RebuildItems()
 	m.list.SelectFirst()
 
@@ -146,8 +130,22 @@ func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
 	require.Equal(t, "s1", msg.ID)
 }
 
-// TestThreadsDashboardHandleKeyCancelTask proves the cancel key emits
-// CancelDelegationMsg for a non-terminal task row.
+// TestThreadsDashboardTaskCannotOpenOrCleanup pins the ordinary-task action
+// boundary: tasks can be cancelled while active but cannot be opened or
+// cleaned up from this dashboard.
+func TestThreadsDashboardTaskCannotOpenOrCleanup(t *testing.T) {
+	t.Parallel()
+
+	ws := &threadsTestWorkspace{supported: true}
+	m := newTestThreadsDashboard(t, ws)
+	m.cache.Cache.Value = []proto.Thread{{ID: "t1", Kind: "task", Status: "running"}}
+	m.RebuildItems()
+	m.list.SelectFirst()
+
+	require.Nil(t, m.runAction(actionOpen))
+	require.Nil(t, m.runAction(actionCleanup))
+}
+
 func TestThreadsDashboardHandleKeyCancelTask(t *testing.T) {
 	t.Parallel()
 
@@ -205,9 +203,6 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalTask(t *testing.T) {
 	require.Nil(t, cmd, "an already-terminal task should not re-trigger a cancel")
 }
 
-// TestThreadsDashboardHandleKeyCancelSkipsTerminalThread is
-// TestThreadsDashboardHandleKeyCancelSkipsTerminalTask's thread-kind
-// sibling.
 func TestThreadsDashboardHandleKeyReload(t *testing.T) {
 	t.Parallel()
 
@@ -300,10 +295,6 @@ func clickAt(m *Dashboard, pt image.Point) (bool, tea.Cmd) {
 	return m.HandleMouseClick(tea.MouseClickMsg{X: pt.X, Y: pt.Y, Button: tea.MouseLeft})
 }
 
-// TestThreadsToolbarEnablementFollowsSelection is the contract the toolbar
-// and the key bindings share: an action is offered exactly when it can
-// actually run. A dimmed button and a working shortcut (or the reverse)
-// would be the bug.
 func TestThreadsDashboardClickRunsAction(t *testing.T) {
 	t.Parallel()
 
@@ -319,9 +310,6 @@ func TestThreadsDashboardClickRunsAction(t *testing.T) {
 	require.Equal(t, "sess", msg.SessionID)
 }
 
-// TestThreadsDashboardClickDisabledButtonDoesNothing proves a dimmed
-// button is inert and — crucially — swallows the click rather than letting
-// it fall through to the row underneath.
 func TestThreadsDashboardClickRowSelectsOnly(t *testing.T) {
 	t.Parallel()
 
@@ -361,7 +349,7 @@ func TestThreadsDashboardSelectionSurvivesRefresh(t *testing.T) {
 
 // TestSelectedSurvivesConcurrentCacheDelete covers a regression: selected()
 // used to return &m.visible[idx], which under the All filter aliases the
-// ListCache's backing array directly (see filterThreads). applyEvent's
+// ListCache's backing array directly (see filterThreads). ApplyEvent's
 // DeletedEvent handler removes from that array in place with
 // append(value[:i], value[i+1:]...), which shifts every element after the
 // deleted one down by one slot — silently overwriting whatever a
@@ -435,9 +423,16 @@ func TestThreadsDashboardEmptyStateNamesTheReason(t *testing.T) {
 	t.Parallel()
 
 	m := dashboardWith(t)
-	require.Contains(t, m.emptyText(), "No threads yet")
+	empty := m.emptyText()
+	require.Equal(t, "No delegations yet.", empty)
+	require.NotContains(t, empty, "press n")
+	require.NotContains(t, empty, "+ New")
+	require.NotContains(t, strings.ToLower(empty), "create")
 
 	m = dashboardWith(t, proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"})
 	m.setFilter(filterFailed)
-	require.Contains(t, m.emptyText(), "failed")
+	filtered := m.emptyText()
+	require.Equal(t, "No failed delegations — press a to show all.", filtered)
+	require.NotContains(t, filtered, "press n")
+	require.NotContains(t, filtered, "+ New")
 }

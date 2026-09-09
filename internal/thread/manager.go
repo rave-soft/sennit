@@ -190,6 +190,11 @@ func (m *Manager) List(ctx context.Context) ([]Thread, error) {
 	return m.store.List(ctx)
 }
 
+// ListAll returns every delegation kind stored by the manager.
+func (m *Manager) ListAll(ctx context.Context) ([]Thread, error) {
+	return m.store.ListAll(ctx)
+}
+
 func (m *Manager) WorktreeDir() string {
 	return m.worktreeDir
 }
