@@ -21,6 +21,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/devtools"
 	sennitlog "github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -111,6 +112,9 @@ sennit --continue
 			}
 			sessionID = sess.ID
 		}
+
+		_, stopPprof := devtools.StartPprof()
+		defer stopPprof()
 
 		com := common.DefaultCommon(cmd.Context(), ws)
 		model := ui.NewRoot(com, sessionID, continueLast)
