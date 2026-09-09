@@ -89,6 +89,8 @@ type ManagerOptions struct {
 	ParentApp      Workspace
 	WorktreeRemove func(context.Context, string, string, bool) error
 	DeleteBranch   func(context.Context, string, string, bool) error
+	// ResolveParent returns the current fenced owner of a parent session.
+	ResolveParent func(string) Workspace
 }
 
 // Manager is the core of the threads feature: it drives thread creation,
@@ -110,6 +112,7 @@ type Manager struct {
 	parentApp      Workspace
 	worktreeRemove func(context.Context, string, string, bool) error
 	deleteBranch   func(context.Context, string, string, bool) error
+	resolveParent  func(string) Workspace
 
 	lc *lifecycle
 
@@ -159,6 +162,7 @@ func NewManager(opts ManagerOptions) *Manager {
 		parentApp:       opts.ParentApp,
 		worktreeRemove:  opts.WorktreeRemove,
 		deleteBranch:    opts.DeleteBranch,
+		resolveParent:   opts.ResolveParent,
 		shutdownStarted: make(chan struct{}),
 		shutdownDone:    make(chan struct{}),
 	}
@@ -1062,6 +1066,10 @@ func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st T
 		}
 		// Recovery has no runtime handle; live delivery keeps supporting test
 		// and alternate managers that do not configure ParentApp explicitly.
+		if m.resolveParent != nil {
+			owner := m.resolveParent(st.ParentSessionID)
+			return owner, st.ParentSessionID, owner != nil
+		}
 		if m.parentApp != nil {
 			return m.parentApp, st.ParentSessionID, true
 		}
@@ -1070,7 +1078,11 @@ func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st T
 		}
 		return handle.Workspace(), st.ParentSessionID, true
 	case KindThread:
-		if m.parentApp == nil {
+		parent := m.parentApp
+		if m.resolveParent != nil {
+			parent = m.resolveParent(st.ParentSessionID)
+		}
+		if parent == nil {
 			return nil, "", false
 		}
 		if st.ParentSessionID == "" {
@@ -1080,7 +1092,7 @@ func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st T
 			// status is still recorded and pollable via thread_status.
 			return nil, "", false
 		}
-		return m.parentApp, st.ParentSessionID, true
+		return parent, st.ParentSessionID, true
 	default:
 		return nil, "", false
 	}

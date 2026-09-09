@@ -671,6 +671,29 @@ type MCPController interface {
 	MCPAuthURL(name string) string
 }
 
+// WorktreeState describes where the session currently displayed lives.
+// Active is false at the main root, and the durable Name/Path survive a
+// round trip through ExitWorktree so a later re-entry reuses the same
+// worktree. Phase is the ownership-transfer phase recorded alongside it.
+type WorktreeState struct {
+	Name   string
+	Path   string
+	Phase  string
+	Active bool
+}
+
+// WorktreeController transfers the session currently displayed between the
+// main root and an isolated worktree. It is distinct from ThreadController:
+// neither operation creates a delegation or a child session — the same
+// session row changes owner, so the conversation is unchanged and only its
+// root moves. Both methods return the workspace that owns the session
+// afterwards plus a release callback, which the caller runs once it has
+// switched over and which reaps the app that no longer owns the session.
+type WorktreeController interface {
+	EnterWorktree(ctx context.Context, name string) (Workspace, func(), error)
+	ExitWorktree(ctx context.Context) (Workspace, func(), error)
+}
+
 // ThreadController manages a workspace's threads: parallel agent work
 // streams, each in its own git worktree/branch (see internal/thread).
 // SupportsThreads reports whether the workspace owns a thread manager at
@@ -775,6 +798,7 @@ type FrontendWorkspace interface {
 	ProjectLifecycle
 	MCPController
 	ThreadController
+	WorktreeController
 	TaskController
 	BackgroundJobs
 }

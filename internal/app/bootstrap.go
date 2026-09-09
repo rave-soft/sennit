@@ -68,6 +68,13 @@ type BootstrapOptions struct {
 	ResumeDelegationID string
 	ResumeSessionID    string
 
+	// ExistingSessionID prepares an App rooted at path for an already existing
+	// top-level session. Unlike ResumeSessionID it does not recover a
+	// delegation, create a row, or finalize an interrupted turn; ownership is
+	// transferred separately by the worktree controller after this bootstrap
+	// succeeds.
+	ExistingSessionID string
+
 	// WorkspaceLock enables a repository-scoped workspace lock. Git
 	// workspaces lock their canonical common directory; non-git
 	// workspaces lock their data directory.
@@ -219,6 +226,19 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		appInstance.Permissions().ConfineToWorkingDir()
 	}
 	appInstance.workspaceLockEnforced = opts.WorkspaceLock && wsLock.Enforced()
+	if opts.ExistingSessionID != "" {
+		sess, err := appInstance.Sessions().Get(ctx, opts.ExistingSessionID)
+		if err != nil {
+			appInstance.Shutdown()
+			return nil, fmt.Errorf("prepare existing session: %w", err)
+		}
+		if sess.ParentSessionID != "" {
+			appInstance.Shutdown()
+			return nil, fmt.Errorf("prepare existing session: child sessions cannot be transferred")
+		}
+		appInstance.ReportCurrentSession(opts.ExistingSessionID)
+		appInstance.ArmPreparedSession()
+	}
 
 	// Close out whatever a previous process was killed in the middle of,
 	// now — before anything of this project's is dispatched, which is what
@@ -233,6 +253,11 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	// streaming, so it must not perform this project-wide sweep; the parent
 	// performed it before dispatching any turn.
 	switch {
+	case opts.ExistingSessionID != "":
+		// This is a target-side prepare bootstrap. The caller transfers
+		// ownership only after this succeeds, so no recovery/finalization may
+		// run here against a live source owner.
+		slog.Debug("Prepared existing session workspace without recovery", "component", "app", "session_id", opts.ExistingSessionID)
 	case opts.ResumeDelegationID != "" || opts.ResumeSessionID != "":
 		if err := finalizeResumedDelegation(ctx, db.New(conn), projectPath, cfg.WorkingDir(), opts.ResumeDelegationID, opts.ResumeSessionID, appInstance.Messages()); err != nil {
 			slog.Warn("Skipping interrupted-turn cleanup for invalid resumed delegation",

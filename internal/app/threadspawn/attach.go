@@ -128,6 +128,13 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 		DataDir:     a.Config().Options.DataDirectory,
 		Context:     ctx,
 		ParentApp:   parentWorkspace,
+		ResolveParent: func(sessionID string) thread.Workspace {
+			owner := a.ResolveCurrentSessionOwner(ctx, sessionID)
+			if owner == nil {
+				return nil
+			}
+			return NewAppWorkspaceAdapter(owner)
+		},
 	})
 	// The hook's own context, not a fresh root: it is how long this
 	// caller waits, and thread.Manager.Shutdown counts its waiters -

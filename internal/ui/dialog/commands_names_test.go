@@ -18,7 +18,8 @@ import (
 // implementing what systemCommandItems reads (Config()).
 type commandsNamesTestWorkspace struct {
 	workspace.Workspace
-	cfg *config.Config
+	cfg           *config.Config
+	worktreeState workspace.WorktreeState
 }
 
 // KnownProviders mirrors what the UI used to compute for itself:
@@ -41,6 +42,10 @@ func (w *commandsNamesTestWorkspace) DockerMCPAvailable() (bool, bool) { return 
 
 func (w *commandsNamesTestWorkspace) Config() *config.Config {
 	return w.cfg
+}
+
+func (w *commandsNamesTestWorkspace) WorktreeState() workspace.WorktreeState {
+	return w.worktreeState
 }
 
 func newCommandsNamesTestCommon(t *testing.T) *common.Common {
@@ -128,6 +133,24 @@ func TestSystemCommandItems_CompactRunsSummarize(t *testing.T) {
 	action, ok := compact.Action().(ActionSummarize)
 	require.True(t, ok, "expected ActionSummarize, got %T", compact.Action())
 	require.Equal(t, "sess-42", action.SessionID)
+}
+
+func TestSystemCommandItems_WorktreeAvailabilityUsesDurableState(t *testing.T) {
+	com := newCommandsNamesTestCommon(t)
+	items := systemCommandItems(com, "12345678-rest", true, false, false, 200, nil)
+	enter := findByID(t, items, "worktree")
+	require.Equal(t, ActionEnterWorktree{Name: "session-12345678"}, enter.Action())
+	for _, item := range items {
+		require.NotEqual(t, "exit_worktree", item.ID())
+	}
+
+	ws := com.Workspace.(*commandsNamesTestWorkspace)
+	ws.worktreeState = workspace.WorktreeState{Name: "durable", Path: "/tmp/durable", Phase: "stable", Active: true}
+	items = systemCommandItems(com, "12345678-rest", true, false, false, 200, nil)
+	require.Equal(t, ActionExitWorktree{}, findByID(t, items, "exit_worktree").Action())
+	for _, item := range items {
+		require.NotEqual(t, "worktree", item.ID())
+	}
 }
 
 // TestSystemCommandItems_DoctorOpensDoctorDialog verifies "/doctor" fires

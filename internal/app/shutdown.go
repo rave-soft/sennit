@@ -263,6 +263,7 @@ func (p *shutdownPhases) Shutdown() {
 	if app.agentDispatcher != nil {
 		app.agentDispatcher.MarkClosing()
 	}
+	app.UnregisterSessionOwnership()
 
 	start := time.Now()
 	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()

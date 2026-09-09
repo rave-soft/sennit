@@ -361,6 +361,20 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 			WithDescription("monitor delegated work"))
 	}
 
+	if hasSession && com.Workspace != nil {
+		if stateful, ok := com.Workspace.(interface {
+			WorktreeState() workspace.WorktreeState
+		}); ok && stateful.WorktreeState().Active {
+			commands = append(commands, NewCommandItem(sty, "exit_worktree", "exit worktree", "", ActionExitWorktree{}).WithDescription("return to the main worktree"))
+		} else {
+			name := "session"
+			if len(sessionID) >= 8 {
+				name += "-" + sessionID[:8] // ok: ascii UUID prefix.
+			}
+			commands = append(commands, NewCommandItem(sty, "worktree", "worktree", "", ActionEnterWorktree{Name: name}).WithDescription("move this session into a worktree"))
+		}
+	}
+
 	// Only show compact command if there's an active session
 	if hasSession {
 		commands = append(commands, NewCommandItem(sty, "summarize", "compact", "", ActionSummarize{SessionID: sessionID}).

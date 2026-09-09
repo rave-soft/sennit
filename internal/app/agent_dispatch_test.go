@@ -29,6 +29,9 @@ type stubDispatchCoordinator struct {
 	runCount      atomic.Int32
 	entered       chan struct{}
 	release       chan struct{}
+	beginEntered  chan struct{}
+	beginRelease  chan struct{}
+	busy          atomic.Bool
 }
 
 func (c *stubDispatchCoordinator) Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
@@ -53,12 +56,20 @@ func (c *stubDispatchCoordinator) RunAccepted(ctx context.Context, accept *agent
 	return nil, c.err
 }
 
-func (c *stubDispatchCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
-func (c *stubDispatchCoordinator) Cancel(string)                                     {}
-func (c *stubDispatchCoordinator) CancelAll()                                        {}
-func (c *stubDispatchCoordinator) IsBusy() bool                                      { return false }
+func (c *stubDispatchCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
+	if c.beginEntered != nil {
+		close(c.beginEntered)
+	}
+	if c.beginRelease != nil {
+		<-c.beginRelease
+	}
+	return nil
+}
+func (c *stubDispatchCoordinator) Cancel(string) {}
+func (c *stubDispatchCoordinator) CancelAll()    {}
+func (c *stubDispatchCoordinator) IsBusy() bool  { return c.busy.Load() }
 
-func (c *stubDispatchCoordinator) IsSessionBusy(string) bool { return false }
+func (c *stubDispatchCoordinator) IsSessionBusy(string) bool { return c.busy.Load() }
 
 func (c *stubDispatchCoordinator) QueuedPrompts(string) int { return 0 }
 
@@ -238,6 +249,66 @@ func TestAgentDispatcher_SendValidatesCall(t *testing.T) {
 
 	d.Wait()
 	require.Equal(t, int32(0), coord.runCount.Load())
+}
+
+func TestAgentDispatcher_AcceptedSendLinearizesBeforeTransferGate(t *testing.T) {
+	coord := &stubDispatchCoordinator{
+		beginEntered: make(chan struct{}),
+		beginRelease: make(chan struct{}),
+		release:      make(chan struct{}),
+	}
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- d.Send("S1", "run-1", "hi", nil) }()
+	<-coord.beginEntered
+
+	transferEntered := make(chan struct{})
+	transferDone := make(chan error, 1)
+	go func() {
+		transferDone <- d.WithAdmissionClosed(func() error {
+			close(transferEntered)
+			return nil
+		})
+	}()
+	select {
+	case <-transferEntered:
+		t.Fatal("transfer passed a Send that was already accepted under the gate")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(coord.beginRelease)
+	require.NoError(t, <-sendDone)
+	require.NoError(t, <-transferDone)
+	close(coord.release)
+	d.Wait()
+}
+
+func TestAgentDispatcher_TransferGateBlocksNewAcceptedRun(t *testing.T) {
+	coord := &stubDispatchCoordinator{beginEntered: make(chan struct{})}
+	d := NewAgentDispatcher(t.Context(), func() AcceptedRunner { return coord }, pubsub.NewBroker[notify.Notification](), pubsub.NewBroker[notify.RunComplete]())
+	transferEntered := make(chan struct{})
+	transferRelease := make(chan struct{})
+	transferDone := make(chan error, 1)
+	go func() {
+		transferDone <- d.WithAdmissionClosed(func() error {
+			close(transferEntered)
+			<-transferRelease
+			return nil
+		})
+	}()
+	<-transferEntered
+
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- d.Send("S1", "run-1", "hi", nil) }()
+	select {
+	case <-coord.beginEntered:
+		t.Fatal("Send reserved a run while transfer held admission closed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(transferRelease)
+	require.NoError(t, <-transferDone)
+	require.NoError(t, <-sendDone)
+	<-coord.beginEntered
+	d.Wait()
 }
 
 // SetLiveSession is inert: this stub exists for dispatch bookkeeping.

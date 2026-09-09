@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/config"
@@ -19,6 +21,7 @@ import (
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/stats/gather"
@@ -63,6 +66,12 @@ type App struct {
 	// that is only safe under mutual exclusion - see
 	// WorkspaceLockEnforced.
 	workspaceLockEnforced bool
+
+	ownershipMu       sync.RWMutex
+	ownerID           string
+	ownerEpoch        int64
+	ownershipRequired bool
+	ownership         *sessionstore.OwnershipStore
 }
 
 // WorkspaceLockEnforced reports whether a second sennit is excluded from
@@ -141,6 +150,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 		globalCtx:   ctx,
 		projectPath: appOpts.projectPath,
+		ownerID:     uuid.NewString(),
+		ownership:   sessionstore.NewOwnershipStore(conn),
 	}
 	app.app = app
 
@@ -195,6 +206,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// dispatcher's lifetime tracks its owning App rather than any single
 	// request.
 	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() AcceptedRunner { return app.Coordinator() }, app.agentNotifications, app.runCompletions)
+	app.agentDispatcher.SetOwnershipCheck(app.checkSessionOwnership)
 
 	// Set up callback for LSP state updates.
 	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {

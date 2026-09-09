@@ -377,12 +377,23 @@ func (t *runTurn) foldCompletions(ctx context.Context, messages []fantasy.Messag
 		if completion.DelegationID != "" && !completion.TerminalAt.IsZero() {
 			id = fmt.Sprintf("delegation-report:%s:%s:%d", t.call.SessionID, completion.DelegationID, completion.TerminalAt.UnixNano())
 		}
-		reportMsg, err := t.agent.messages.Create(ctx, t.call.SessionID, message.CreateMessageParams{
-			ID:     id,
-			Role:   message.User,
-			Parts:  []message.ContentPart{message.TextContent{Text: joinTaskCompletions([]TaskCompletion{completion})}},
-			Origin: message.OriginAgent,
-		})
+		var reportMsg message.Message
+		persist := func() error {
+			var createErr error
+			reportMsg, createErr = t.agent.messages.Create(ctx, t.call.SessionID, message.CreateMessageParams{
+				ID:     id,
+				Role:   message.User,
+				Parts:  []message.ContentPart{message.TextContent{Text: joinTaskCompletions([]TaskCompletion{completion})}},
+				Origin: message.OriginAgent,
+			})
+			return createErr
+		}
+		var err error
+		if completion.Apply != nil {
+			err = completion.Apply(ctx, persist)
+		} else {
+			err = persist()
+		}
 		if err != nil {
 			return messages, completions, fmt.Errorf("failed to persist delegation report: %w", err)
 		}

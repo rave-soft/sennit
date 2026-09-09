@@ -83,6 +83,8 @@ type (
 	ActionInitializeProject           struct{}
 	// ActionOpenDelegationsDashboard requests the delegation dashboard.
 	ActionOpenDelegationsDashboard struct{}
+	ActionEnterWorktree            struct{ Name string }
+	ActionExitWorktree             struct{}
 	ActionSummarize                struct {
 		SessionID string
 	}

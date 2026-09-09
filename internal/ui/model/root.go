@@ -36,10 +36,34 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/uimsg"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // showDelegationsDashboardMsg requests the delegation dashboard.
-type showDelegationsDashboardMsg struct{}
+type (
+	showDelegationsDashboardMsg struct{}
+	enterWorktreeRequestedMsg   struct{ name string }
+	exitWorktreeRequestedMsg    struct{}
+	worktreeEventMsg            struct {
+		generation uint64
+		inner      tea.Msg
+	}
+)
+
+type worktreeTransferMsg struct {
+	generation uint64
+	name       string
+	ws         common.Workspace
+	release    func()
+	err        error
+	exit       bool
+}
+type worktreeAttachment struct {
+	name       string
+	stop       func()
+	release    func()
+	generation uint64
+}
 
 // screenID identifies which child owns the terminal right now.
 type screenID uint8
@@ -151,6 +175,9 @@ type Root struct {
 	dashboard       *delegations.Dashboard // lazily created on first ctrl+e
 	dashboardDialog *dialog.Overlay        // hosts delegation cleanup confirmation
 	attachment      threadAttachmentState
+	worktree        *worktreeAttachment
+	worktreeGen     uint64
+	worktreePending bool
 	active          screenID
 
 	// send delivers messages back into the Bubble Tea event loop from
@@ -260,6 +287,12 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return r.handleWindowSize(msg)
+	case worktreeEventMsg:
+		if r.worktree != nil && r.worktree.generation == msg.generation {
+			_, cmd := r.main.Update(msg.inner)
+			return r, cmd
+		}
+		return r, nil
 	case threadEventMsg:
 		// A message from an attached thread's own event pump. Racing a
 		// detach is expected (the pump's goroutine can't be joined
@@ -297,6 +330,12 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.dashboard.RebuildItems()
 		}
 		return r, tea.Batch(cmds...)
+	case enterWorktreeRequestedMsg:
+		return r, r.transferWorktreeCmd(msg.name, false)
+	case exitWorktreeRequestedMsg:
+		return r, r.transferWorktreeCmd("", true)
+	case worktreeTransferMsg:
+		return r.handleWorktreeTransfer(msg)
 	case tea.KeyPressMsg:
 		return r.handleKeyPress(msg)
 	case showDelegationsDashboardMsg:
@@ -450,6 +489,89 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd := r.main.Update(msg)
 		return r, cmd
 	}
+}
+
+func (r *Root) transferWorktreeCmd(name string, exit bool) tea.Cmd {
+	if r.worktreePending {
+		return nil
+	}
+	r.worktreePending = true
+	r.worktreeGen++
+	generation := r.worktreeGen
+	ws := r.com.Workspace
+	ctx := r.com.Context()
+	return func() tea.Msg {
+		var next workspace.Workspace
+		var release func()
+		var err error
+		if exit {
+			next, release, err = ws.ExitWorktree(ctx)
+		} else {
+			next, release, err = ws.EnterWorktree(ctx, name)
+		}
+		return worktreeTransferMsg{generation: generation, name: name, ws: next, release: release, err: err, exit: exit}
+	}
+}
+
+func (r *Root) handleWorktreeTransfer(msg worktreeTransferMsg) (tea.Model, tea.Cmd) {
+	if msg.generation != r.worktreeGen {
+		if msg.release == nil {
+			return r, nil
+		}
+		return r, func() tea.Msg { msg.release(); return nil }
+	}
+	r.worktreePending = false
+	if msg.err != nil {
+		return r, util.ReportError(msg.err)
+	}
+	previous := r.worktree
+	if previous != nil && previous.stop != nil {
+		previous.stop()
+	}
+	r.com.Workspace = msg.ws
+	r.com.SessionChanges, _ = msg.ws.(workspace.SessionChangePreparer)
+	r.main.com = r.com
+	r.main.wsCache.invalidateBusyCaches()
+	name := msg.name
+	if msg.exit {
+		name = ""
+	}
+	r.main.crumbRoot = name
+	stop := func() {}
+	if sub, ok := msg.ws.(threadEventSubscriber); ok {
+		generation := msg.generation
+		stop = sub.SubscribeWith(func(inner any) {
+			if r.send != nil {
+				r.send(worktreeEventMsg{generation: generation, inner: inner})
+			}
+		})
+	}
+	// The release callbacks reap whichever App no longer owns the session,
+	// so the one the previous attachment held is run here rather than
+	// dropped: after an exit it is what shuts the worktree App down, and
+	// nothing else would ever call it. Exit's own callback reaps the same
+	// App, so it is spent here too and not carried on the root attachment.
+	// Both are idempotent and both can block on a shutdown, hence the cmd.
+	spent := []func(){}
+	release := msg.release
+	if previous != nil && previous.release != nil {
+		spent = append(spent, previous.release)
+	}
+	if msg.exit && release != nil {
+		spent = append(spent, release)
+		release = nil
+	}
+	r.worktree = &worktreeAttachment{name: name, stop: stop, release: release, generation: msg.generation}
+	cmds := r.main.staleWorkspaceRefreshCmds()
+	if len(spent) > 0 {
+		cmds = append(cmds, func() tea.Msg {
+			for _, release := range spent {
+				release()
+			}
+			return nil
+		})
+	}
+	return r, tea.Batch(cmds...)
 }
 
 // handleWindowSize stores the new terminal size and broadcasts it to every
@@ -775,6 +897,15 @@ func (r *Root) cancelDelegationCmd(id, kind string) tea.Cmd {
 // further chance to surface an error through the (now-stopped) TUI.
 func (r *Root) Cleanup() {
 	r.attachment.cleanup()
+	if r.worktree != nil {
+		if r.worktree.stop != nil {
+			r.worktree.stop()
+		}
+		if r.worktree.release != nil {
+			r.worktree.release()
+		}
+		r.worktree = nil
+	}
 }
 
 // uiOwnedMsg marks the result of work a specific *UI started, so Root can

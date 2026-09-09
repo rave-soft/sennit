@@ -66,6 +66,8 @@ type TaskCompletion struct {
 	// to BuiltAt so every existing terminal-completion call site (all of
 	// internal/thread's lifecycle.deliverCompletion) needs no change.
 	TerminalAt time.Time
+	// Apply serializes transcript mutation with the current owner epoch.
+	Apply func(context.Context, func() error) error
 	// Acknowledge clears durable outbox state after successful model delivery.
 	Acknowledge func(context.Context) error
 	// IsMessage distinguishes a mid-run ask (SendToParent) from a

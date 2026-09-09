@@ -46,6 +46,8 @@ var refusedMethods = []string{
 	"DeleteSession",
 	"DisableDockerMCP",
 	"EnableDockerMCP",
+	"EnterWorktree",
+	"ExitWorktree",
 	"FileTrackerRecordRead",
 	"ImportCopilot",
 	"InitCoderAgent",
@@ -275,6 +277,14 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"EnableDockerMCP": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.EnableDockerMCP(t.Context())
+			require.True(t, IsReadOnlyError(err))
+		},
+		"EnterWorktree": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, _, err := ro.EnterWorktree(t.Context(), "name")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"ExitWorktree": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, _, err := ro.ExitWorktree(t.Context())
 			require.True(t, IsReadOnlyError(err))
 		},
 		"FileTrackerRecordRead": func(t *testing.T, ro *readOnlyWorkspace) {

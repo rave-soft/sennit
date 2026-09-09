@@ -45,6 +45,14 @@ type AppWorkspaceAdapter struct {
 	rc thread.RunCompletionBroker
 }
 
+// ApplyCompletion runs a delegation completion's transcript mutation under
+// this App's ownership fence, so a completion that lands while the session
+// is moving between worktrees is applied exactly once, by whichever App
+// owns the session when it is applied.
+func (a *AppWorkspaceAdapter) ApplyCompletion(ctx context.Context, sessionID string, fn func() error) error {
+	return a.App.WithOwnershipFence(ctx, sessionID, fn)
+}
+
 // Coordinator wraps a.App's current coordinator on every call rather than
 // caching it: a.App.Coordinator() is a single RWMutex read, cheap enough
 // that caching buys nothing, and caching cost correctness. An App that has

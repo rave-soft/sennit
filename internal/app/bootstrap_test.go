@@ -59,6 +59,33 @@ func TestWorkspaceLockHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestBootstrap_ExistingSessionPreparesSameTopLevelRow(t *testing.T) {
+	setBootstrapTestEnv(t)
+	projectPath := t.TempDir()
+	targetPath := t.TempDir()
+	dataDir := t.TempDir()
+
+	source, err := Bootstrap(t.Context(), projectPath, BootstrapOptions{DataDir: dataDir})
+	require.NoError(t, err)
+	sess, err := source.App.Sessions().Create(t.Context(), "transfer")
+	require.NoError(t, err)
+	source.App.Shutdown()
+
+	target, err := Bootstrap(t.Context(), targetPath, BootstrapOptions{DataDir: dataDir, ProjectPath: projectPath, ExistingSessionID: sess.ID, ConfineWrites: true})
+	require.NoError(t, err)
+	t.Cleanup(target.App.Shutdown)
+	require.Equal(t, sess.ID, target.App.CurrentSessionID())
+	ownerID, epoch := target.App.OwnerIdentity()
+	require.NotEmpty(t, ownerID)
+	require.Zero(t, epoch, "prepared target must remain fail-closed before commit")
+	listed, err := target.App.Sessions().List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, sess.ID, listed[0].ID)
+	require.Empty(t, listed[0].ParentSessionID)
+	require.ErrorIs(t, target.App.checkSessionOwnership(t.Context(), sess.ID), ErrSessionOwnershipLost)
+}
+
 func TestBootstrap_ProjectPathScopesDelegationsWithoutChangingWorkingDir(t *testing.T) {
 	setBootstrapTestEnv(t)
 	parentPath := t.TempDir()

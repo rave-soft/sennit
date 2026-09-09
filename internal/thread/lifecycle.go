@@ -1322,6 +1322,10 @@ func (l *lifecycle) deliverStoredCompletion(ctx context.Context, handle Handle, 
 	l.deliverCompletion(ctx, handle, st, depth, false)
 }
 
+type completionFence interface {
+	ApplyCompletion(context.Context, string, func() error) error
+}
+
 func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thread, depth int, intermediate bool) {
 	if l.resolveDelivery == nil {
 		return
@@ -1344,33 +1348,55 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 	priorReports := c.reports
 	c.reports++
 	c.mu.Unlock()
-	target.Coordinator().DeliverTaskCompletion(ctx, parentSessionID, TaskCompletion{
-		DelegationID:   st.ID,
-		PriorReports:   priorReports,
-		Kind:           string(st.Kind),
-		Name:           st.Name,
-		Goal:           st.Goal,
-		Status:         string(st.Status),
-		Intermediate:   intermediate,
-		ChildSessionID: st.SessionID,
-		ResultText:     st.ResultSummary,
-		Error:          st.Error,
-		Depth:          depth,
-		// Stamped once here, the single place every delivery path builds
-		// a TaskCompletion, so prepareStep's log can report delivery
-		// latency without a second clock reading elsewhere.
-		TerminalAt: terminalAt,
-		Acknowledge: func(ackCtx context.Context) error {
-			if st.Kind != KindTask || !st.CompletionPending {
-				return nil
-			}
-			store, ok := l.store.(TaskCompletionGenerationStore)
-			if !ok {
-				return fmt.Errorf("thread: completion store does not support generation acknowledgements")
-			}
-			return store.AcknowledgeTaskCompletionGeneration(ackCtx, st.ID, st.TerminalAt)
-		},
-	})
+	deliver := func() error {
+		target.Coordinator().DeliverTaskCompletion(ctx, parentSessionID, TaskCompletion{
+			DelegationID:   st.ID,
+			PriorReports:   priorReports,
+			Kind:           string(st.Kind),
+			Name:           st.Name,
+			Goal:           st.Goal,
+			Status:         string(st.Status),
+			Intermediate:   intermediate,
+			ChildSessionID: st.SessionID,
+			ResultText:     st.ResultSummary,
+			Error:          st.Error,
+			Depth:          depth,
+			// Stamped once here, the single place every delivery path builds
+			// a TaskCompletion, so prepareStep's log can report delivery
+			// latency without a second clock reading elsewhere.
+			TerminalAt: terminalAt,
+			Apply: func(applyCtx context.Context, mutate func() error) error {
+				if fence, ok := target.(completionFence); ok {
+					return fence.ApplyCompletion(applyCtx, parentSessionID, mutate)
+				}
+				return mutate()
+			},
+			Acknowledge: func(ackCtx context.Context) error {
+				ack := func() error {
+					if st.Kind != KindTask || !st.CompletionPending {
+						return nil
+					}
+					store, ok := l.store.(TaskCompletionGenerationStore)
+					if !ok {
+						return fmt.Errorf("thread: completion store does not support generation acknowledgements")
+					}
+					return store.AcknowledgeTaskCompletionGeneration(ackCtx, st.ID, st.TerminalAt)
+				}
+				if fence, ok := target.(completionFence); ok {
+					return fence.ApplyCompletion(ackCtx, parentSessionID, ack)
+				}
+				return ack()
+			},
+		})
+		return nil
+	}
+	if fence, ok := target.(completionFence); ok {
+		if err := fence.ApplyCompletion(ctx, parentSessionID, deliver); err != nil {
+			slog.Info("Delivery retained for current session owner", "id", st.ID, "error", err)
+		}
+		return
+	}
+	_ = deliver()
 }
 
 // recover reconciles store state against reality after a process restart:

@@ -600,7 +600,22 @@ func (w *readOnlyWorkspace) MCPAuthenticate(ctx context.Context, name string) er
 	return w.readOnlyError("MCPAuthenticate")
 }
 
-// -- ThreadController (mutations only) --
+// -- WorktreeController / ThreadController (mutations only) --
+
+func (w *readOnlyWorkspace) EnterWorktree(ctx context.Context, name string) (Workspace, func(), error) {
+	return nil, nil, w.readOnlyError("EnterWorktree")
+}
+
+func (w *readOnlyWorkspace) ExitWorktree(ctx context.Context) (Workspace, func(), error) {
+	return nil, nil, w.readOnlyError("ExitWorktree")
+}
+
+func (w *readOnlyWorkspace) WorktreeState() WorktreeState {
+	if state, ok := w.ws.(interface{ WorktreeState() WorktreeState }); ok {
+		return state.WorktreeState()
+	}
+	return WorktreeState{}
+}
 
 func (w *readOnlyWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
 	return proto.Thread{}, w.readOnlyError("CreateThread")
