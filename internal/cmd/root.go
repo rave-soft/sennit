@@ -314,11 +314,12 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	threadspawn.Attach(ctx, boot.App, cwd, threadspawn.NewLocalSpawner(
+	threadspawn.Attach(ctx, boot.App, cwd, threadspawn.NewLocalSpawnerWithProjectPath(
 		func() map[string]config.Agent { return boot.App.Config().UserAgents() },
 		func() []*skills.Skill { return skills.Inheritable(boot.App.Skills.AllSkills()) },
 		boot.App.PermissionsSkipFunc(),
 		func() config.SelectedModel { return boot.App.Config().Model },
+		boot.App.ProjectPath,
 		func(a *app.App) workspace.Workspace { return appws.NewAppWorkspace(a, a.Store()) },
 	))
 

@@ -38,8 +38,8 @@ type partialHandleSpawner struct {
 	partial bool
 }
 
-func (s *partialHandleSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
-	handle, err := s.Spawner.Spawn(ctx, path)
+func (s *partialHandleSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
+	handle, err := s.Spawner.Spawn(ctx, request)
 	if err == nil && s.partial {
 		return handle, errors.New("partial bootstrap failed")
 	}

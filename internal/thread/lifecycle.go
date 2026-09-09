@@ -764,7 +764,7 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		return disp, nil
 	}
 
-	handle, err := spawner.Spawn(bgCtx, spawnPath)
+	handle, err := spawner.Spawn(bgCtx, SpawnRequest{Path: spawnPath, DelegationID: id, SessionID: sessionID})
 	var rb unwinder
 	defer rb.unwind()
 	if handle != nil {

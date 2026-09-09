@@ -137,7 +137,7 @@ func TestParentAppSpawner_StableWorkspaceIdentity(t *testing.T) {
 	s := NewParentAppSpawner(parent)
 
 	for range 3 {
-		h, err := s.Spawn(context.Background(), "")
+		h, err := s.Spawn(context.Background(), thread.SpawnRequest{Path: ""})
 		require.NoError(t, err)
 		ws := h.Workspace()
 		require.Same(t, parent, ws,

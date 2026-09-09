@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/herdr"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/lsp"
@@ -52,6 +53,11 @@ type App struct {
 	// bypass both constructors.
 	agentDispatcher *AgentDispatcher
 
+	// projectPath scopes persisted sessions, messages, and threads. It is
+	// independent from config.WorkingDir(), which remains this App's physical
+	// workspace root for permissions, LSP, and git.
+	projectPath string
+
 	// workspaceLockEnforced records whether this App's bootstrap holds a
 	// workspace lock that actually excludes a second sennit. Read by work
 	// that is only safe under mutual exclusion - see
@@ -71,6 +77,15 @@ func (app *App) WorkspaceLockEnforced() bool {
 	return app != nil && app.workspaceLockEnforced
 }
 
+// ProjectPath returns the canonical project path used to scope this App's
+// persisted sessions, messages, and threads. It does not change WorkingDir.
+func (app *App) ProjectPath() string {
+	if app == nil {
+		return ""
+	}
+	return app.projectPath
+}
+
 // New initializes a new application instance. skillsMgr carries the
 // per-workspace skill discovery results computed by the caller; the
 // caller is responsible for constructing it (typically via
@@ -79,6 +94,7 @@ type Option func(*appOptions)
 
 type appOptions struct {
 	herdrClient func() *herdr.Client
+	projectPath string
 }
 
 func WithHerdrClient(client func() *herdr.Client) Option {
@@ -87,16 +103,31 @@ func WithHerdrClient(client func() *herdr.Client) Option {
 	}
 }
 
+// WithProjectPath scopes persisted sessions and messages without changing the
+// App's working directory, which remains the root for permissions and tools.
+func WithProjectPath(projectPath string) Option {
+	return func(options *appOptions) {
+		options.projectPath = projectPath
+	}
+}
+
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, options ...Option) (*App, error) {
-	appOpts := appOptions{herdrClient: func() *herdr.Client { return nil }}
+	appOpts := appOptions{
+		herdrClient: func() *herdr.Client { return nil },
+		projectPath: store.WorkingDir(),
+	}
 	for _, option := range options {
 		option(&appOpts)
 	}
+	if appOpts.projectPath == "" {
+		appOpts.projectPath = store.WorkingDir()
+	}
+	appOpts.projectPath = fsext.Canonical(appOpts.projectPath)
 	q := db.New(conn)
 	cfg := store.Config()
 
 	app := &App{
-		appServices: *newAppServices(q, conn, store, skillsMgr),
+		appServices: *newAppServices(q, conn, store, skillsMgr, appOpts.projectPath),
 		appEvents: appEvents{
 			events:             pubsub.NewBroker[any](),
 			serviceEventsWG:    &sync.WaitGroup{},
@@ -108,7 +139,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 			shutdownTimeout: defaultShutdownTimeout,
 		},
 
-		globalCtx: ctx,
+		globalCtx:   ctx,
+		projectPath: appOpts.projectPath,
 	}
 	app.app = app
 

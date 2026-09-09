@@ -250,7 +250,7 @@ func newFakeThreadSpawner(t *testing.T) *fakeThreadSpawner {
 	return &fakeThreadSpawner{t: t, byPath: make(map[string]*fakeThreadHandle)}
 }
 
-func (s *fakeThreadSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+func (s *fakeThreadSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -259,8 +259,8 @@ func (s *fakeThreadSpawner) Spawn(ctx context.Context, path string) (thread.Hand
 	a.SetSessionsForTest(newFakeThreadSessions())
 	a.SetAgentCoordinatorForTest(&fakeThreadCoordinator{})
 
-	h := &fakeThreadHandle{id: path, app: a}
-	s.byPath[path] = h
+	h := &fakeThreadHandle{id: request.Path, app: a}
+	s.byPath[request.Path] = h
 	return h, nil
 }
 

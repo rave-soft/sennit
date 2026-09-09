@@ -121,7 +121,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	}
 	parentWorkspace := NewAppWorkspaceAdapter(a)
 	mgr := deps.newManager(thread.ManagerOptions{
-		Store:       NewTransactionalStore(conn, a.Store().WorkingDir()),
+		Store:       NewTransactionalStore(conn, a.ProjectPath()),
 		Spawner:     spawner,
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
@@ -349,31 +349,9 @@ func threadSkillsConfig(threadApp *app.App, inherited []*skills.Skill) skills.Di
 //
 // Best-effort throughout: this repairs the record of work already over, and
 // nothing about it is worth failing an attach for.
-func finalizeThreadTurns(ctx context.Context, a *app.App, mgr *thread.Manager) {
-	// The paragraph above rests on the attached workspace holding the
-	// repository's lock. It may not: SENNIT_SKIP_DATADIR_LOCK makes
-	// acquisition a no-op that excludes nobody, and then a second sennit
-	// can be mid-turn in these very worktrees - where this would stamp
-	// error tool results and a canceled finish onto its live message.
-	if !a.WorkspaceLockEnforced() {
-		slog.Warn("Skipping interrupted-turn cleanup in thread worktrees: no enforced workspace lock")
-		return
-	}
-	threads, err := mgr.List(ctx)
-	if err != nil {
-		slog.Warn("Failed to list threads while closing out interrupted turns", "error", err)
-		return
-	}
-	for _, st := range threads {
-		// Kinds that share their parent's workspace (a task) have no
-		// worktree of their own, and their sessions are under the parent's
-		// project path, which Bootstrap already swept.
-		if st.WorktreePath == "" {
-			continue
-		}
-		if err := app.FinalizeInterruptedTurns(ctx, st.WorktreePath, a.Messages()); err != nil {
-			slog.Warn("Failed to close out interrupted turns in a thread worktree",
-				"thread", st.ID, "worktree", st.WorktreePath, "error", err)
-		}
-	}
-}
+// finalizeThreadTurns is intentionally a no-op. Thread sessions now share the
+// parent project's canonical path, so Bootstrap's project-wide sweep already
+// repairs abandoned thread turns before any new work is dispatched. A second
+// sweep during Attach would be unsafe because a parent or sibling delegation
+// can be live under that same path.
+func finalizeThreadTurns(context.Context, *app.App, *thread.Manager) {}

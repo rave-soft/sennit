@@ -223,17 +223,17 @@ func newAttachTestSpawner(t *testing.T) *attachTestSpawner {
 	}
 }
 
-func (s *attachTestSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+func (s *attachTestSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
 	a.SetSessionsForTest(&attachFakeSessions{})
 	coord := &attachFakeCoordinator{}
 	a.SetAgentCoordinatorForTest(coord)
 
-	h := &attachTestHandle{id: path, app: a}
+	h := &attachTestHandle{id: request.Path, app: a}
 	s.mu.Lock()
-	s.byPath[path] = h
-	s.coordByPath[path] = coord
+	s.byPath[request.Path] = h
+	s.coordByPath[request.Path] = coord
 	s.mu.Unlock()
 	return h, nil
 }

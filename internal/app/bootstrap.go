@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 	gitpkg "github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/herdr"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -57,6 +58,16 @@ type BootstrapOptions struct {
 	// and must not depend on a permission prompt nobody will see.
 	ConfineWrites bool
 
+	// ProjectPath overrides the project path recorded for sessions and
+	// messages. An empty value preserves the working-directory project path.
+	// It never changes the App's working directory.
+	ProjectPath string
+
+	// ResumeDelegationID and ResumeSessionID identify the persisted delegation
+	// being resumed. Recovery runs only after their ownership is validated.
+	ResumeDelegationID string
+	ResumeSessionID    string
+
 	// WorkspaceLock enables a repository-scoped workspace lock. Git
 	// workspaces lock their canonical common directory; non-git
 	// workspaces lock their data directory.
@@ -79,7 +90,7 @@ type BootstrapOptions struct {
 	OnAppInitFailure func(err error)
 	HerdrClient      func() *herdr.Client
 
-	newApp func(context.Context, *sql.DB, *config.ConfigStore, *skills.Manager) (*App, error)
+	newApp func(context.Context, *sql.DB, *config.ConfigStore, *skills.Manager, ...Option) (*App, error)
 }
 
 // BootstrapResult holds the pieces Bootstrap assembles, for callers that
@@ -182,17 +193,22 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	}
 	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates, skillOpts...)
 
+	projectPath := fsext.Canonical(cfg.WorkingDir())
+	if opts.ProjectPath != "" {
+		projectPath = fsext.Canonical(opts.ProjectPath)
+	}
+
 	newApp := opts.newApp
 	if newApp == nil {
 		herdrClient := opts.HerdrClient
 		if herdrClient == nil {
 			herdrClient = herdr.Init
 		}
-		newApp = func(ctx context.Context, conn *sql.DB, store *config.ConfigStore, manager *skills.Manager) (*App, error) {
-			return New(ctx, conn, store, manager, WithHerdrClient(herdrClient))
+		newApp = func(ctx context.Context, conn *sql.DB, store *config.ConfigStore, manager *skills.Manager, options ...Option) (*App, error) {
+			return New(ctx, conn, store, manager, append(options, WithHerdrClient(herdrClient))...)
 		}
 	}
-	appInstance, err := newApp(ctx, conn, cfg, skillsMgr)
+	appInstance, err := newApp(ctx, conn, cfg, skillsMgr, WithProjectPath(projectPath))
 	if err != nil {
 		if opts.OnAppInitFailure != nil {
 			opts.OnAppInitFailure(err)
@@ -212,21 +228,26 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	//
 	// Only under a lock that actually excludes a second process, though.
 	// "Unfinished" reads as "abandoned" solely because nobody else can be
-	// running turns against these sessions, and SENNIT_SKIP_DATADIR_LOCK
-	// makes Acquire hand back a lock that excludes nothing (see
-	// workspacelock.Lock.Enforced). Under it a second sennit would write
-	// tool-result errors and a canceled finish into the first one's turn
-	// while it is still streaming - repair for a crash, corruption for a
-	// live run. Leaving a stale spinner in that case is the cheaper wrong
-	// answer of the two.
+	// running turns against these sessions. A spawned child shares its
+	// parent's project path but can be bootstrapped while the parent is
+	// streaming, so it must not perform this project-wide sweep; the parent
+	// performed it before dispatching any turn.
 	switch {
+	case opts.ResumeDelegationID != "" || opts.ResumeSessionID != "":
+		if err := finalizeResumedDelegation(ctx, db.New(conn), projectPath, cfg.WorkingDir(), opts.ResumeDelegationID, opts.ResumeSessionID, appInstance.Messages()); err != nil {
+			slog.Warn("Skipping interrupted-turn cleanup for invalid resumed delegation",
+				"component", "app", "delegation_id", opts.ResumeDelegationID, "session_id", opts.ResumeSessionID, "error", err)
+		}
+	case opts.ConfineWrites && projectPath != fsext.Canonical(cfg.WorkingDir()):
+		slog.Debug("Skipping interrupted-turn cleanup in new spawned workspace: parent project may have live turns",
+			"component", "app", "project_path", projectPath, "working_dir", cfg.WorkingDir())
 	case !appInstance.WorkspaceLockEnforced():
 		slog.Warn("Skipping interrupted-turn cleanup: no enforced workspace lock, so another sennit may be running turns here",
-			"component", "app", "project_path", cfg.WorkingDir())
+			"component", "app", "project_path", projectPath)
 	default:
-		if err := finalizeInterruptedTurns(ctx, cfg.WorkingDir(), appInstance.Messages()); err != nil {
+		if err := finalizeInterruptedTurns(ctx, projectPath, appInstance.Messages()); err != nil {
 			slog.Error("Failed to close out interrupted turns from a previous run",
-				"component", "app", "project_path", cfg.WorkingDir(), "error", err)
+				"component", "app", "project_path", projectPath, "error", err)
 		}
 	}
 

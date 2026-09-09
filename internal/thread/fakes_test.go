@@ -692,7 +692,7 @@ func newFakeSpawner(t *testing.T) *fakeSpawner {
 	}
 }
 
-func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+func (s *fakeSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
 	if s.blockSpawn {
 		close(s.spawnEntered)
 		<-ctx.Done()
@@ -718,11 +718,11 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, er
 		a.SetAgentCoordinatorForTest(coord)
 	}
 
-	h := &fakeHandle{id: path, app: a}
-	s.byPath[path] = h
-	s.coordByPath[path] = coord
+	h := &fakeHandle{id: request.Path, app: a}
+	s.byPath[request.Path] = h
+	s.coordByPath[request.Path] = coord
 	if s.afterSpawn != nil {
-		s.afterSpawn(path)
+		s.afterSpawn(request.Path)
 	}
 	return h, nil
 }

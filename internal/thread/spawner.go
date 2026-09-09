@@ -20,10 +20,18 @@ type Handle interface {
 // lifecycle interacts with the rest of the process — the in-process CLI
 // case builds one in internal/app/threadspawn, keeping the app-specific
 // bootstrap out of this domain package.
+// SpawnRequest identifies the isolated workspace to bootstrap and, when
+// resuming, the persisted delegation and session ownership pair whose
+// abandoned turn may be repaired before new work is dispatched.
+type SpawnRequest struct {
+	Path         string
+	DelegationID string
+	SessionID    string
+}
+
 type Spawner interface {
-	// Spawn bootstraps a workspace rooted at path (a thread's git
-	// worktree) and returns a handle to it.
-	Spawn(ctx context.Context, path string) (Handle, error)
+	// Spawn bootstraps a workspace for request and returns a handle to it.
+	Spawn(ctx context.Context, request SpawnRequest) (Handle, error)
 	// Release tears the workspace identified by id (a value previously
 	// returned by Handle.ID) down. Idempotent: releasing an unknown or
 	// already-released id is a no-op.

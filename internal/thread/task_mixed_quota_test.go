@@ -22,7 +22,7 @@ func TestMixedTaskRuntimesShareAdmissionLimits(t *testing.T) {
 		}, nil, nil
 	}
 	tasks := thread.NewTaskManagerFromManager(manager, NewTestParentAppSpawner(parent), nil, func(ctx context.Context, args thread.TaskCreateArgs) (thread.TaskRuntime, error) {
-		handle, err := spawner.Spawn(ctx, args.WorktreePath)
+		handle, err := spawner.Spawn(ctx, thread.SpawnRequest{Path: args.WorktreePath})
 		return thread.TaskRuntime{Handle: handle, Spawner: spawner, Factory: factory}, err
 	})
 	for index := range 4 {

@@ -83,7 +83,7 @@ func (t *TaskManager) sendIsolated(ctx context.Context, st Thread, message strin
 	}()
 	prepared, err := buildRuntime(prepCtx, TaskCreateArgs{
 		Goal: message, ParentSessionID: st.ParentSessionID, SessionID: st.SessionID,
-		Isolation: isolation, Execution: st.Execution, Resume: true,
+		DelegationID: st.ID, Isolation: isolation, Execution: st.Execution, Resume: true,
 		WorktreePath: st.WorktreePath, Branch: st.Branch, BaseBranch: st.BaseBranch,
 	})
 	transferred := false

@@ -34,7 +34,9 @@ func isolatedTaskRuntime(repoRoot string, spawner thread.Spawner) thread.Isolate
 				return runtime, fmt.Errorf("create task worktree: %w", err)
 			}
 		}
-		handle, err := spawner.Spawn(ctx, path)
+		handle, err := spawner.Spawn(ctx, thread.SpawnRequest{
+			Path: path, DelegationID: args.DelegationID, SessionID: args.SessionID,
+		})
 		runtime.Handle = handle
 		if err != nil {
 			return runtime, err
@@ -75,7 +77,7 @@ func isolatedTaskRuntime(repoRoot string, spawner thread.Spawner) thread.Isolate
 
 func sharedTaskRuntime(owner func() agent.Coordinator, spawner thread.Spawner) thread.IsolatedTaskRuntime {
 	return func(ctx context.Context, args thread.TaskCreateArgs) (thread.TaskRuntime, error) {
-		handle, err := spawner.Spawn(ctx, "")
+		handle, err := spawner.Spawn(ctx, thread.SpawnRequest{Path: ""})
 		runtime := thread.TaskRuntime{Handle: handle, Spawner: spawner}
 		if err != nil {
 			return runtime, err

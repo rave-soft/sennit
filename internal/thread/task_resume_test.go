@@ -47,9 +47,10 @@ func TestIsolatedTaskSendRestoresRuntimeAndQueuesSpecializedFollowup(t *testing.
 		require.True(t, args.Resume)
 		require.Equal(t, path, args.WorktreePath)
 		require.Equal(t, "original-session", args.SessionID)
+		require.Equal(t, row.ID, args.DelegationID)
 		require.Equal(t, "frozen specialization", args.Execution)
 		require.Nil(t, args.Factory)
-		handle, err := spawner.Spawn(ctx, args.WorktreePath)
+		handle, err := spawner.Spawn(ctx, thread.SpawnRequest{Path: args.WorktreePath})
 		return thread.TaskRuntime{
 			Handle: handle, Spawner: spawner, Depth: 2, Factory: factory(args.Goal, true),
 			Followup: func(_ context.Context, goal string) (thread.TaskRunFactory, error) {

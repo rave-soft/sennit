@@ -57,6 +57,7 @@ type TaskCreateArgs struct {
 	Branch       string
 	BaseBranch   string
 	Resume       bool
+	DelegationID string
 	// SessionID, when set, is used verbatim as the child session's id
 	// instead of a generated one, so a delegation from a tool call can
 	// reuse the "<messageID>$$<toolCallID>" identity that makes it openable
@@ -243,7 +244,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (created 
 		args.Factory = runtime.Factory
 	} else {
 		var handle Handle
-		handle, err = t.spawner.Spawn(prepCtx, "")
+		handle, err = t.spawner.Spawn(prepCtx, SpawnRequest{})
 		runtime = TaskRuntime{Handle: handle, Spawner: t.spawner}
 	}
 	handle := runtime.Handle

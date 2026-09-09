@@ -339,7 +339,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		}
 	})
 
-	handle, err := m.spawner.Spawn(m.ctx, worktreePath)
+	handle, err := m.spawner.Spawn(m.ctx, SpawnRequest{Path: worktreePath})
 	if handle != nil {
 		rb.push(func() {
 			cleanupCtx, cancel := m.detachForRollback(ctx)
@@ -500,7 +500,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 		return Thread{}, fmt.Errorf("thread: worktree for %q is unavailable: %w", idOrName, err)
 	}
 
-	handle, err := m.spawner.Spawn(m.ctx, st.WorktreePath)
+	handle, err := m.spawner.Spawn(m.ctx, SpawnRequest{Path: st.WorktreePath, DelegationID: st.ID, SessionID: st.SessionID})
 	var rb unwinder
 	defer rb.unwind()
 	if handle != nil {
