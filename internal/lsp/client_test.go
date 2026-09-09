@@ -1480,28 +1480,39 @@ func TestClient_RestartRootMarkerOpensOnCandidate(t *testing.T) {
 	require.NoError(t, func() error { _, err := client.Initialize(ctx, dir); return err }())
 	require.NoError(t, client.WaitForServerReady(ctx))
 	oldGen := client.runtime.currentGeneration()
-	before, err := os.ReadFile(logPath)
-	require.NoError(t, err)
 	require.NoError(t, client.Restart())
 	newGen := client.runtime.currentGeneration()
 	require.NotSame(t, oldGen, newGen)
-	contents, err := os.ReadFile(logPath)
-	require.NoError(t, err)
-	restartLines := strings.Split(strings.TrimSpace(string(contents[len(before):])), "\n")
+
+	// Read the whole log and key off its last "initialize" — the candidate
+	// this restart started. Slicing from a snapshot taken before Restart
+	// instead would fold in the initial generation's own didOpen, which is
+	// a notification the fake server can log at any point after readiness,
+	// and then compare that line's pid against the candidate's.
+	//
+	// The candidate's didOpen is a notification too, so poll for it.
 	var initializePID, didOpenPID string
-	for _, line := range restartLines {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
+	require.Eventually(t, func() bool {
+		contents, readErr := os.ReadFile(logPath)
+		if readErr != nil {
+			return false
 		}
-		switch fields[1] {
-		case "initialize":
-			initializePID = fields[0]
-		case "textDocument/didOpen":
-			didOpenPID = fields[0]
+		initializePID, didOpenPID = "", ""
+		for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				continue
+			}
+			switch fields[1] {
+			case "initialize":
+				initializePID, didOpenPID = fields[0], ""
+			case "textDocument/didOpen":
+				didOpenPID = fields[0]
+			}
 		}
-	}
-	require.NotEmpty(t, initializePID)
+		return initializePID != "" && didOpenPID != ""
+	}, 5*time.Second, 10*time.Millisecond,
+		"the candidate never logged its root-marker didOpen")
 	require.Equal(t, initializePID, didOpenPID,
 		"restart root marker must be opened on the unpublished candidate process")
 	client.Shutdown()
@@ -1846,9 +1857,12 @@ func TestClient_DirectoryRootMarkerDoesNotFailReadiness(t *testing.T) {
 	require.Equal(t, StateReady, client.GetServerState(),
 		"an errored client is replaced on the next Start, which is what made this a restart loop")
 
-	contents, err := os.ReadFile(logPath)
-	require.NoError(t, err)
-	require.Contains(t, string(contents), "textDocument/didOpen",
+	// The didOpen is a notification: readiness does not wait on the child
+	// process having written it to the log, so poll rather than read once.
+	require.Eventually(t, func() bool {
+		contents, readErr := os.ReadFile(logPath)
+		return readErr == nil && strings.Contains(string(contents), "textDocument/didOpen")
+	}, 5*time.Second, 10*time.Millisecond,
 		"the file marker beside it must still be opened")
 	client.Shutdown()
 }

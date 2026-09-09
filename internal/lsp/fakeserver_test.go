@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/testenv"
 )
 
 // fakeLSPServerEnv, when set to "1" in the child process environment,
@@ -27,6 +29,10 @@ func TestMain(m *testing.M) {
 		runFakeLSPServer()
 		os.Exit(0)
 	}
+	// Every fake server below is this same race-instrumented binary, and
+	// each one would otherwise sleep a second on exit before the client
+	// sees it disconnect. See testenv.TrimChildRaceExitSleep.
+	testenv.TrimChildRaceExitSleep()
 	os.Exit(m.Run())
 }
 

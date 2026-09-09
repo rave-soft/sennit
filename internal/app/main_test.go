@@ -20,6 +20,10 @@ func TestMain(m *testing.M) {
 	// template rather than running the migration chain per test; see
 	// db.UseMigratedTemplate.
 	db.UseMigratedTemplate()
+	// The workspace-lock tests re-exec this binary as a helper process;
+	// under -race each helper would otherwise sleep a second on exit.
+	// See testenv.TrimChildRaceExitSleep.
+	testenv.TrimChildRaceExitSleep()
 	cleanup := testenv.IsolateGlobalProfile()
 	code := m.Run()
 	cleanup()
