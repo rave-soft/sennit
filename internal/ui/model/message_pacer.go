@@ -74,6 +74,24 @@ type messagePacer struct {
 	sessionIndex   map[string]int
 	timer          *time.Timer
 	stopped        bool
+	// delivering says a goroutine is inside deliver, handing batches to the
+	// program. At most one ever is, and that is the pacer's backpressure:
+	// the program's Send blocks once its message queue is full, and a
+	// blocked delivery must turn incoming load into more coalescing rather
+	// than into more goroutines waiting their turn to push the same
+	// superseded updates.
+	//
+	// Without it the timer did exactly that. takeLocked clears p.timer, so
+	// a delivery that blocked in Send left the pacer able to arm another
+	// one a frame later, and another, each on a goroutine of its own. A
+	// wedged UI was found holding 922 of them parked in Send — a queue of
+	// work that was, by then, mostly updates newer arrivals had already
+	// replaced.
+	delivering bool
+	// idle is broadcast when delivering goes back to false, so a caller
+	// that must deliver in order (see flushThen) can wait for its turn
+	// instead of racing the timer.
+	idle *sync.Cond
 }
 
 // PaceMessages wraps send with a pacer and returns the wrapped function,
@@ -87,6 +105,7 @@ func PaceMessages(send func(any)) (wrapped func(any), stop func()) {
 		index:        make(map[string]int),
 		sessionIndex: make(map[string]int),
 	}
+	p.idle = sync.NewCond(&p.mu)
 	return p.Send, p.Stop
 }
 
@@ -143,10 +162,12 @@ func (p *messagePacer) holdSession(event pubsub.Event[session.Session]) {
 	p.armLocked()
 }
 
-// armLocked starts the frame timer unless one is already running. Callers
-// hold p.mu.
+// armLocked starts the frame timer unless one is already running, or a
+// delivery is in flight — that one drains whatever arrives before it
+// finishes, so a timer for this event would only add a goroutine that
+// waits for it and then finds nothing to do. Callers hold p.mu.
 func (p *messagePacer) armLocked() {
-	if p.timer == nil {
+	if p.timer == nil && !p.delivering {
 		p.timer = time.AfterFunc(pacerFrameInterval, p.flush)
 	}
 }
@@ -155,25 +176,48 @@ func (p *messagePacer) armLocked() {
 // order, so nothing a later event implies is applied before the updates it
 // supersedes.
 func (p *messagePacer) flushThen(msg any) {
-	p.mu.Lock()
-	batch, sessions, stopped := p.takeLocked()
-	p.mu.Unlock()
-	if stopped {
+	if stopped := p.deliver(); stopped {
 		return
 	}
-	p.release(batch, sessions)
 	p.send(msg)
 }
 
 // flush is the timer's callback.
 func (p *messagePacer) flush() {
+	p.deliver()
+}
+
+// deliver hands held events to the program until nothing is left, and
+// reports whether the pacer was stopped. Only one goroutine runs it at a
+// time; a second waits for the first to finish rather than pushing a
+// second batch of its own, so however long the program takes to accept a
+// message, the pacer answers with one goroutine and a fuller batch instead
+// of many goroutines and the same work split between them.
+//
+// The loop re-reads what is pending after every send precisely so that
+// everything arriving while the program was busy is picked up here, by
+// this goroutine, already collapsed.
+func (p *messagePacer) deliver() (stopped bool) {
 	p.mu.Lock()
-	batch, sessions, stopped := p.takeLocked()
-	p.mu.Unlock()
-	if stopped {
-		return
+	defer p.mu.Unlock()
+	for p.delivering {
+		if p.stopped {
+			return true
+		}
+		p.idle.Wait()
 	}
-	p.release(batch, sessions)
+	p.delivering = true
+	for {
+		batch, sessions, stopped := p.takeLocked()
+		if stopped || (len(batch) == 0 && len(sessions) == 0) {
+			p.delivering = false
+			p.idle.Broadcast()
+			return stopped
+		}
+		p.mu.Unlock()
+		p.release(batch, sessions)
+		p.mu.Lock()
+	}
 }
 
 // release delivers one frame's held events: the message batch first, then
@@ -218,4 +262,8 @@ func (p *messagePacer) Stop() {
 	clear(p.index)
 	p.sessionPending = nil
 	clear(p.sessionIndex)
+	// Wake anyone waiting for a delivery that is no longer going to
+	// produce anything, so Stop cannot leave a goroutine parked for the
+	// life of the process.
+	p.idle.Broadcast()
 }
