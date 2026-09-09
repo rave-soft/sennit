@@ -471,7 +471,7 @@ func TestBuiltinDelegationSkillsDoNotReferenceRemovedThreadTools(t *testing.T) {
 	t.Parallel()
 
 	discovered := DiscoverBuiltin()
-	for _, name := range []string{"tasks", "threads"} {
+	for _, name := range []string{"tasks", "isolation"} {
 		var found *Skill
 		for _, skill := range discovered {
 			if skill.Name == name {

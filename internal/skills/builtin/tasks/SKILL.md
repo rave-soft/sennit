@@ -1,6 +1,6 @@
 ---
 name: tasks
-description: Use when deciding whether a request should run as an asynchronous task, be isolated in a worktree, or just happen directly in the current turn — including whenever an agent_* management tool (agent_list, agent_result, agent_send, agent_cancel, agent_output) is available and delegated work might apply. Every agent call starts an asynchronous task — cheap, no isolation, suited to read-only/research work. Do NOT reach for one just because work could run concurrently — most requests should run directly in the current turn. See the threads skill instead when the work needs real isolation (its own worktree and branch).
+description: Use when deciding whether a request should run as an asynchronous task, be isolated in a worktree, or just happen directly in the current turn — including whenever an agent_* management tool (agent_list, agent_result, agent_send, agent_cancel, agent_output) is available and delegated work might apply. Every agent call starts an asynchronous task — cheap, no isolation, suited to read-only/research work. Do NOT reach for one just because work could run concurrently — most requests should run directly in the current turn. See the isolation skill instead when the work needs real isolation (its own worktree and branch).
 ---
 
 # Background tasks
@@ -29,7 +29,7 @@ is no separate task-creation tool.
   isolation: its own git worktree, branch, app instance, and database. Clean
   results with no unique commits are removed automatically; retained work
   remains available for explicit removal. Use it only when the work would
-  otherwise collide with something already happening — see the `threads`
+  otherwise collide with something already happening — see the `isolation`
   skill.
 
 Rule of thumb: isolation → `isolation: worktree`; cheap parallel read-only

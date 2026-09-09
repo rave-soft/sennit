@@ -297,8 +297,8 @@ option reset <list-key>    # clear a list option back to empty
   disables metrics.
 - **String keys**: `data-directory`, `initialize-as`, `notifications`.
 - **Integer keys**: `history-retention-days` (age, in days, after which `sennit
-  gc` deletes old sessions/threads; default 90, 0 keeps history forever — see
-  [Maintenance](#maintenance)).
+  gc` deletes old sessions and finished delegations; default 90, 0 keeps
+  history forever — see [Maintenance](#maintenance)).
 - **Idle auto-summarize keys** (stored under `options.auto_summarize_idle`):
   `auto-summarize-idle` (boolean, default on), `auto-summarize-idle-tokens`
   (context size in prompt tokens a session must exceed, default 60000), and
