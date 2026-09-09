@@ -603,10 +603,8 @@ func TestGC_ReportOnly_OrphanedWorktree(t *testing.T) {
 	// fixture) does not exist on disk, so it must not be reported even
 	// though its row was eligible and deleted.
 	require.False(t, threadExists(t, dataDir, ids.ThreadOldDone))
-	// The gone-worktree and task-with-worktree rows were also deleted
-	// (both are eligible), but neither contributes an orphan path.
 	require.False(t, threadExists(t, dataDir, ids.WorktreeGone))
-	require.False(t, threadExists(t, dataDir, ids.TaskWithWorktree))
+	require.True(t, threadExists(t, dataDir, ids.TaskWithWorktree))
 }
 
 // TestGC_ReportsOrphanedWorktree_HumanOutput confirms the rendered text

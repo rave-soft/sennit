@@ -28,6 +28,8 @@ func (a *agentToolTaskManager) Create(ctx context.Context, args tools.TaskCreate
 		Depth:           args.Depth,
 		SessionTitle:    args.SessionTitle,
 		AgentID:         args.AgentID,
+		Isolation:       args.Isolation,
+		Execution:       args.Execution,
 		SessionID:       args.SessionID,
 		Factory:         adaptTaskFactory(args.Factory),
 	})

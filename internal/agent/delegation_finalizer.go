@@ -271,7 +271,21 @@ func (d *delegationFinalizer) newSubAgent(ctx context.Context, p *prompt.Prompt,
 }
 
 func (d *delegationFinalizer) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
-	primary, err := d.builder.buildAgentModel(ctx, agent, isSubAgent)
+	return d.buildAgentWithOptions(ctx, prompt, agent, isSubAgent, nil)
+}
+
+func (d *delegationFinalizer) buildAgentWithOptions(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, frozen *DelegationRuntimeOptions, selected ...config.SelectedModel) (SessionAgent, error) {
+	var primary Model
+	var err error
+	if len(selected) != 0 {
+		providerCfg, ok := d.cfg.Config().Providers.Get(selected[0].Provider)
+		if !ok {
+			return nil, errModelProviderNotConfigured
+		}
+		primary, err = d.builder.buildModel(ctx, providerCfg, selected[0], isSubAgent)
+	} else {
+		primary, err = d.builder.buildAgentModel(ctx, agent, isSubAgent)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -285,13 +299,20 @@ func (d *delegationFinalizer) buildAgent(ctx context.Context, prompt *prompt.Pro
 	}
 
 	providerCfg, _ := d.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
+	runtimeOptions := DelegationRuntimeOptions{
+		DisableAutoSummarize: d.cfg.Config().Options.DisableAutoSummarize,
+		AutoSummarizeAt:      d.cfg.Config().Options.AutoSummarizeAt,
+	}
+	if frozen != nil {
+		runtimeOptions = *frozen
+	}
 	result := NewSessionAgent(SessionAgentOptions{
 		Model:                primary,
 		SystemPromptPrefix:   providerCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
-		DisableAutoSummarize: d.cfg.Config().Options.DisableAutoSummarize,
-		AutoSummarizeAt:      d.cfg.Config().Options.AutoSummarizeAt,
+		DisableAutoSummarize: runtimeOptions.DisableAutoSummarize,
+		AutoSummarizeAt:      runtimeOptions.AutoSummarizeAt,
 		Sessions:             d.sessions,
 		Messages:             d.messages,
 		Tools:                nil,
@@ -576,33 +597,30 @@ func builtinDelegatePrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	return prompt.NewPrompt("task", string(taskPromptTmpl)+"\n\n"+delegatedAgentContract, append(opts, prompt.ForSubagent())...)
 }
 
-func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, title, childSessionID string, childDepth int) (fantasy.ToolResponse, error) {
+func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, title, childSessionID string, childDepth int, isolations ...string) (fantasy.ToolResponse, error) {
+	isolation := ""
+	if len(isolations) > 0 {
+		isolation = isolations[0]
+	}
 	if title == "" {
 		title = "New Agent Session"
 	}
-	return d.launchDelegation(ctx, tools.TaskCreateArgs{
+	agentCfg, ok := d.cfg.Config().Agents[config.AgentTask]
+	if !ok {
+		return fantasy.NewTextErrorResponse("task agent not configured"), nil
+	}
+	args := tools.TaskCreateArgs{
 		Goal:            delegatedPrompt,
 		ParentSessionID: sessionID,
 		SessionTitle:    title,
 		SessionID:       childSessionID,
-		Factory: func(ctx context.Context, childSessionID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
-			agentCfg, ok := d.cfg.Config().Agents[config.AgentTask]
-			if !ok {
-				return nil, nil, errors.New("task agent not configured")
-			}
-			p, err := builtinDelegatePrompt(prompt.WithWorkingDir(d.cfg.WorkingDir()))
-			if err != nil {
-				return nil, nil, err
-			}
-			agent, err := d.newSubAgent(ctx, p, agentCfg)
-			if err != nil {
-				return nil, nil, err
-			}
-			// Anonymous: this is the built-in `agent` tool's own
-			// stateless delegate, not a named agent - see subAgentTaskRun.
-			return d.subAgentTaskRun(sessionID, childSessionID, delegatedPrompt, agent, childDepth, ""), nil, nil
-		},
-	})
+		Isolation:       isolation,
+	}
+	args.Depth = childDepth
+	if err := d.snapshotDelegation(&args, &agentCfg, ctx); err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	return d.launchDelegation(ctx, args)
 }
 
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
@@ -780,6 +798,10 @@ func (d *delegationFinalizer) subAgentCarryOverMessages(ctx context.Context, par
 		systemPrompt, agentTools := snap.runtimeSnapshot(SessionAgentCall{SessionID: sessionID})
 		budgetIn.SystemPromptBytes = len(systemPrompt)
 		budgetIn.ToolSchemaBytes = toolSchemaBytes(agentTools)
+	}
+	if params.HistoryFrozen {
+		kept, _ := applyCarryOverBudget(params.History, carryOverBudget(budgetIn), trimCorr(params.SessionID, RunIDFromContext(ctx)))
+		return kept, nil
 	}
 	return d.carryOverMessages(ctx, budgetIn, params.SessionID, params.AgentID, sessionID)
 }
@@ -961,6 +983,9 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allo
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
+			if params.Isolation != "" && params.Isolation != "worktree" {
+				return fantasy.NewTextErrorResponse("isolation must be empty or worktree"), nil
+			}
 			sessionID := tools.GetSessionFromContext(ctx)
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
@@ -971,7 +996,7 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allo
 			// as the value. Route that value to the same built-in path
 			// instead of failing it in runNamedAgent.
 			if params.SubagentType == "" || params.SubagentType == "general-purpose" {
-				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, call.ID), delegationDepth(ctx))
+				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, call.ID), delegationDepth(ctx), params.Isolation)
 			}
 			if !allowNamedAgents {
 				return fantasy.NewTextErrorResponse(
@@ -1009,32 +1034,19 @@ func (d *delegationFinalizer) runNamedAgent(ctx context.Context, parentID string
 		title = latest.Name
 	}
 	childDepth := delegationDepth(ctx)
-	return d.launchDelegation(ctx, tools.TaskCreateArgs{
+	args := tools.TaskCreateArgs{
 		Goal:            params.Prompt,
 		ParentSessionID: parentID,
 		SessionTitle:    title,
 		AgentID:         id,
 		SessionID:       delegationSessionID(ctx, call.ID),
-		Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
-			definition, ok := d.cfg.Config().Agents[id]
-			if !ok {
-				return nil, nil, fmt.Errorf("agent %q is no longer configured", id)
-			}
-			systemPrompt, err := prompt.NewPrompt(id, delegatedAgentPrompt(definition.Prompt), prompt.WithWorkingDir(d.cfg.WorkingDir()), prompt.ForSubagent())
-			if err != nil {
-				return nil, nil, fmt.Errorf("parse prompt: %w", err)
-			}
-			agent, err := d.newSubAgent(ctx, systemPrompt, definition)
-			if err != nil {
-				return nil, nil, err
-			}
-			// Named: id is this delegation's target agent, so
-			// carryOverMessages can replay its earlier sessions under
-			// parentID - see subAgentTaskRun's doc comment for the cost
-			// this switches on.
-			return d.subAgentTaskRun(parentID, childID, params.Prompt, agent, childDepth, id), nil, nil
-		},
-	})
+		Isolation:       params.Isolation,
+	}
+	args.Depth = childDepth
+	if err := d.snapshotDelegation(&args, &latest, ctx); err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	return d.launchDelegation(ctx, args)
 }
 
 //nolint:unparam // matches the (tool, error) signature of the other buildTools helpers

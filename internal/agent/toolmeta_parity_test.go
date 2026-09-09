@@ -18,7 +18,6 @@ var expectedGateByName = map[toolmeta.Gate][]string{
 	},
 	toolmeta.GateAllowed:     {"agent", "agentic_fetch"},
 	toolmeta.GateNotSubAgent: {"ask_parent"},
-	toolmeta.GateThreads:     {"thread_create", "thread_merge", "thread_remove"},
 	toolmeta.GateDelegations: {"agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output"},
 	toolmeta.GateLSP:         {"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"},
 	toolmeta.GateMCP:         {"list_mcp_resources", "read_mcp_resource"},
@@ -108,7 +107,7 @@ func TestBuildToolsMatchesFrozenGateScenarios(t *testing.T) {
 			name:         "sub-agent gates disabled",
 			allowedTools: allNames,
 			isSubAgent:   true,
-			expected:     withoutGates(allNames, toolmeta.GateNotSubAgent, toolmeta.GateThreads, toolmeta.GateDelegations, toolmeta.GateInteractive),
+			expected:     withoutGates(allNames, toolmeta.GateNotSubAgent, toolmeta.GateDelegations, toolmeta.GateInteractive),
 		},
 		{
 			name:         "agent denied while agentic fetch allowed",

@@ -81,3 +81,28 @@ func TestDoctor_DoesNotWarnAboutALegacyToolName(t *testing.T) {
 	}
 	require.Empty(t, doctorToolNames(cfg))
 }
+
+func TestDiscoverMarkdownAgents_DropsObsoleteThreadToolsAndDoctorWarns(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, ".sennit", "agents")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte(`---
+name: reviewer
+tools: [thread_create, thread_merge, thread_remove, thread_list, thread_result, thread_cancel, thread_send, thread_output]
+---
+You review code.`), 0o644))
+	cfg := &Config{Options: &Options{}, workingDir: root}
+	cfg.SetupAgents()
+	require.Equal(t, []string{"agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output"}, cfg.Agents["reviewer"].AllowedTools)
+	problems := Doctor(cfg)
+	require.Len(t, problems, 3)
+	for _, problem := range problems {
+		require.Contains(t, problem.Message, "obsolete")
+	}
+
+	cfg.SetupAgents()
+	require.Len(t, Doctor(cfg), 3, "rebuilding agents must replace, not duplicate, obsolete-tool warnings")
+	clone := cfg.cloneForWrite()
+	require.Equal(t, Doctor(cfg), Doctor(clone), "doctor warnings must survive config snapshot cloning")
+}

@@ -1366,8 +1366,8 @@ func TestTaskManager_FailCreateRecordsFailureOnCancelledContext(t *testing.T) {
 	require.Len(t, all, 1)
 
 	got := all[0]
-	require.Equal(t, thread.StatusFailed, got.Status,
-		"the terminal failure must be recorded even though the context that caused it was already cancelled")
+	require.Equal(t, thread.StatusCancelled, got.Status,
+		"the terminal cancellation must be recorded even though its context was already cancelled")
 }
 
 // flakyGetStore wraps a real Store and fails the first failsLeft calls to

@@ -111,6 +111,8 @@ func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, 
 		MergePolicy:     string(mergePolicy),
 		Kind:            string(kind),
 		ParentSessionID: params.ParentSessionID,
+		Execution:       params.Execution,
+		CompletionDepth: int64(params.Depth),
 	})
 	if err != nil {
 		// Mirrors threadspawn.store.Create: this test double stands in
@@ -124,6 +126,16 @@ func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, 
 		return Thread{}, err
 	}
 	return testFromDBItem(dbThread), nil
+}
+
+func (s *testStoreDB) SetTaskPreparation(ctx context.Context, id, base, branch, path string) (Thread, error) {
+	item, err := s.q.SetTaskPreparation(ctx, db.SetTaskPreparationParams{
+		ID: id, BaseBranch: base, Branch: branch, WorktreePath: path,
+	})
+	if err != nil {
+		return Thread{}, err
+	}
+	return testFromDBItem(item), nil
 }
 
 func (s *testStoreDB) Get(ctx context.Context, id string) (Thread, error) {
@@ -213,7 +225,7 @@ func (s *testStoreDB) FinalizeTask(ctx context.Context, id string, params Finali
 		if err != nil {
 			return fmt.Errorf("load task for finalization: %w", err)
 		}
-		if st.Kind != string(KindTask) || st.Status != string(StatusRunning) {
+		if st.Kind != string(KindTask) || (st.Status != string(StatusRunning) && st.Status != string(StatusPending)) {
 			return nil
 		}
 		if _, err := q.AttributeTaskCostOnce(ctx, db.AttributeTaskCostOnceParams{
@@ -230,7 +242,15 @@ func (s *testStoreDB) FinalizeTask(ctx context.Context, id string, params Finali
 		if errors.Is(err, sql.ErrNoRows) {
 			return errTestFinalizeLost
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return q.InsertTaskCompletionOutbox(ctx, db.InsertTaskCompletionOutboxParams{
+			TaskID: finalized.ID, TerminalAt: finalized.TerminalAt.Int64,
+			Status: finalized.Status, Error: finalized.Error, ResultSummary: finalized.ResultSummary,
+			CompletionDepth: finalized.CompletionDepth, CompletedAt: finalized.CompletedAt,
+			Name: finalized.Name, Goal: finalized.Goal, SessionID: finalized.SessionID, ParentSessionID: finalized.ParentSessionID,
+		})
 	})
 	if errors.Is(err, errTestFinalizeLost) {
 		st, getErr := s.Get(ctx, id)
@@ -253,14 +273,19 @@ func (s *testStoreDB) ListPendingTaskCompletions(ctx context.Context) ([]Thread,
 	}
 	out := make([]Thread, len(rows))
 	for i, row := range rows {
-		out[i] = testFromDBItem(row)
+		out[i] = testFromPendingDBRow(row)
 	}
 	return out, nil
 }
 
-func (s *testStoreDB) MarkTaskCompletionDelivered(ctx context.Context, id string) error {
-	_, err := s.q.MarkTaskCompletionDelivered(ctx, id)
-	return err
+func (s *testStoreDB) AcknowledgeTaskCompletionGeneration(ctx context.Context, id string, terminalAt int64) error {
+	return db.InTx(ctx, s.conn, func(q *db.Queries) error {
+		if _, err := q.AcknowledgeTaskCompletionGeneration(ctx, db.AcknowledgeTaskCompletionGenerationParams{TaskID: id, TerminalAt: terminalAt}); err != nil {
+			return err
+		}
+		_, err := q.RefreshTaskCompletionPending(ctx, id)
+		return err
+	})
 }
 
 // sqlInt64 mirrors the threadspawn store's CompletedAt handling: zero leaves
@@ -271,6 +296,19 @@ func sqlInt64(v int64) sql.NullInt64 {
 
 // testFromDBItem mirrors threadspawn.fromDBItem (which cannot be imported
 // here); the field mapping is identical.
+func testFromPendingDBRow(item db.ListPendingTaskCompletionsRow) Thread {
+	return testFromDBItem(db.Thread{
+		ID: item.ID, Name: item.Name_2, ProjectPath: item.ProjectPath, Goal: item.Goal_2,
+		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
+		SessionID: item.SessionID_2, Status: item.Status_2, MergePolicy: item.MergePolicy,
+		ResultSummary: item.ResultSummary_2, Error: item.Error_2, CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt_2, Kind: item.Kind,
+		ParentSessionID: item.ParentSessionID_2, CompletionPending: 1,
+		CompletionDepth: item.CompletionDepth_2, TerminalAt: sql.NullInt64{Int64: item.TerminalAt_2, Valid: true},
+		CostAttributed: item.CostAttributed, Execution: item.Execution,
+	})
+}
+
 func testFromDBItem(item db.Thread) Thread {
 	return Thread{
 		Delegation: Delegation{
@@ -293,6 +331,7 @@ func testFromDBItem(item db.Thread) Thread {
 		BaseBranch:   item.BaseBranch,
 		Branch:       item.Branch,
 		WorktreePath: item.WorktreePath,
+		Execution:    item.Execution,
 		MergePolicy:  MergePolicy(item.MergePolicy),
 	}
 }

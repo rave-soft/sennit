@@ -2,7 +2,11 @@ package thread
 
 import (
 	"context"
+	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/rave-soft/sennit/internal/git"
 )
 
 // MaxActiveTasksPerWorkspaceForTest and MaxActiveTasksPerParentTurnForTest
@@ -36,8 +40,23 @@ const TaskIdleTimeoutForTest = taskIdleTimeout
 // It exists because NewTaskManager itself requires mgr's unexported
 // lc/ctx fields and so can only be called from within this package; every
 // other caller — production and test alike — goes through here.
-func NewTaskManagerFromManager(mgr *Manager, spawner Spawner, messages MessageService) *TaskManager {
-	return NewTaskManager(mgr.store, spawner, messages, mgr.lc, mgr.ctx)
+func NewTaskManagerFromManager(mgr *Manager, spawner Spawner, messages MessageService, isolated ...IsolatedTaskRuntime) *TaskManager {
+	t := NewTaskManager(mgr.store, spawner, messages, mgr.lc, mgr.ctx, isolated...)
+	if len(isolated) > 1 {
+		t.shared = isolated[1]
+	}
+	t.prepareIsolation = func(ctx context.Context, args *TaskCreateArgs) error {
+		base, err := git.CurrentBranch(ctx, mgr.repoRoot)
+		if err != nil {
+			return err
+		}
+		name := "task-" + uuid.NewString()
+		args.BaseBranch = base
+		args.Branch = "thread/" + name
+		args.WorktreePath = filepath.Join(mgr.worktreeDir, name)
+		return nil
+	}
+	return t
 }
 
 // PublishForTest emits a lifecycle event through the manager's own event

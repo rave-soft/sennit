@@ -2,4 +2,4 @@ Launch an agent to investigate the requested work, or perform it if `subagent_ty
 
 Omit `subagent_type` to get the general-purpose agent: it can search, read, fetch URLs, and inspect git history (`git_status`, `git_diff`, `git_log`), but has no `bash`, `edit`, `multiedit`, `write`, or language-server edit tools - it cannot change anything in the workspace. The right choice for investigation, or when no listed agent matches the work. Pass `subagent_type` to choose a specific listed agent instead; whether that agent can perform the work rather than only investigate it depends on its own configured tools (see its description below). `description` is a short label for the delegation and shows up as its session's title.
 
-A delegated agent that writes shares the workspace with you. Avoid concurrent edits to the same files unless the task is explicitly coordinated for that purpose.
+A delegated agent that writes shares the workspace with you. Avoid concurrent edits to the same files unless the task is explicitly coordinated for that purpose. Set `isolation` to `worktree` when a file-changing delegation must work independently of the current turn; omit it by default.

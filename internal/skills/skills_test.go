@@ -467,6 +467,27 @@ func TestDiscoverBuiltin(t *testing.T) {
 	require.True(t, foundHooks, "sennit-hooks builtin skill not found")
 }
 
+func TestBuiltinDelegationSkillsDoNotReferenceRemovedThreadTools(t *testing.T) {
+	t.Parallel()
+
+	discovered := DiscoverBuiltin()
+	for _, name := range []string{"tasks", "threads"} {
+		var found *Skill
+		for _, skill := range discovered {
+			if skill.Name == name {
+				found = skill
+				break
+			}
+		}
+		require.NotNilf(t, found, "builtin skill %q not found", name)
+		content := found.Description + "\n" + found.Instructions
+		for _, removed := range []string{"thread_create", "thread_merge", "thread_remove"} {
+			require.NotContains(t, content, removed, name)
+			require.NotContains(t, ToPromptXML([]*Skill{found}), removed, name+" available-skills XML")
+		}
+	}
+}
+
 func TestDeduplicate(t *testing.T) {
 	t.Parallel()
 

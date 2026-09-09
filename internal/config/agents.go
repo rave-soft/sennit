@@ -46,6 +46,8 @@ type Agent struct {
 
 	// Overrides the context paths for this agent
 	ContextPaths []string `json:"context_paths,omitempty"`
+
+	obsoleteTools []string
 }
 
 // SetupAgents discovers user-defined agents from .sennit/agents/*.md, merges
@@ -177,6 +179,7 @@ func cloneAgent(agent Agent) Agent {
 	agent.AllowedTools = slices.Clone(agent.AllowedTools)
 	agent.AllowedMCP = maps.Clone(agent.AllowedMCP)
 	agent.ContextPaths = slices.Clone(agent.ContextPaths)
+	agent.obsoleteTools = slices.Clone(agent.obsoleteTools)
 	return agent
 }
 
@@ -205,6 +208,9 @@ func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]s
 		case strings.TrimSpace(agent.Prompt) == "":
 			invalid[id] = "prompt is required for user-defined agents"
 		default:
+			for _, name := range agent.obsoleteTools {
+				c.addProblem(Problem{Severity: SeverityWarn, Area: AreaAgent, Subject: id, Message: fmt.Sprintf("agent %s: allowed_tools entry %q is obsolete and was ignored", id, name), Hint: "use the agent tool with isolation: worktree to create an isolated delegation"})
+			}
 			// A model string that does not resolve to a known provider/model
 			// is not worth rejecting the whole agent over; fall back to the
 			// empty default and say so, symmetric to the markdown agent

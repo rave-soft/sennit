@@ -36,12 +36,15 @@ func detachForTerminalWork(ctx context.Context) (context.Context, context.Cancel
 // via the wrong one can leak a workspace or tear down a task's parent
 // App), and the cancel func for its RunComplete watcher goroutine.
 type runtimeState struct {
-	handle      Handle
-	spawner     Spawner
-	watchCancel context.CancelFunc
-	runCancel   context.CancelFunc
-	runID       string
-	runIDs      map[string]struct{}
+	handle        Handle
+	spawner       Spawner
+	watchCancel   context.CancelFunc
+	runCancel     context.CancelFunc
+	releaseFailed bool
+	runID         string
+	runIDs        map[string]struct{}
+	followup      func(context.Context, string) (TaskRunFactory, error)
+	queuedRuns    []TaskRunFactory
 	// person marks runID as a turn the person is driving by hand, rather
 	// than one this package dispatched on a delegation's behalf. The two
 	// end very differently — see handleRunComplete — so the flag is set
@@ -87,10 +90,12 @@ type settledSetupFailure struct {
 }
 
 type threadControl struct {
-	opMu    sync.Mutex
-	mu      sync.Mutex
-	runtime *runtimeState
-	removed bool
+	opMu              sync.Mutex
+	mu                sync.Mutex
+	preparationCancel context.CancelFunc
+	cancelRequested   bool
+	runtime           *runtimeState
+	removed           bool
 	// depth is the background-delegation cascade depth stamped at Create
 	// (see TaskManager.Create/TaskCreateArgs.Depth); handleRunComplete reads
 	// it back to compute an auto-woken continuation's depth.
@@ -412,6 +417,10 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 // it. Callers must hold the entity's opMu, as startRun documents.
 func (l *lifecycle) startFactoryRun(ctx context.Context, handle Handle, spawner Spawner, id, sessionID string, factory TaskRunFactory) {
 	rt := l.installRuntime(ctx, handle, spawner, id)
+	l.dispatchFactoryRun(ctx, rt, id, sessionID, factory)
+}
+
+func (l *lifecycle) dispatchFactoryRun(ctx context.Context, rt *runtimeState, id, sessionID string, factory TaskRunFactory) {
 	c := l.control(id)
 	runID := uuid.NewString()
 	runCtx, runCancel := context.WithCancel(ctx)
@@ -440,7 +449,23 @@ func (l *lifecycle) startFactoryRun(ctx context.Context, handle Handle, spawner 
 			rc.Error = err.Error()
 			rc.Cancelled = errors.Is(err, context.Canceled)
 		}
-		l.handleRunComplete(runCtx, id, rc)
+		c.opMu.Lock()
+		c.mu.Lock()
+		if c.runtime == rt && rt.runID == runID && len(rt.queuedRuns) != 0 && runCtx.Err() == nil {
+			next := rt.queuedRuns[0]
+			rt.queuedRuns = rt.queuedRuns[1:]
+			c.mu.Unlock()
+			l.dispatchFactoryRun(ctx, rt, id, sessionID, next)
+			c.opMu.Unlock()
+			runCancel()
+			return
+		}
+		c.mu.Unlock()
+		terminalCtx, terminalCancel := detachForTerminalWork(runCtx)
+		l.handleRunCompleteLocked(terminalCtx, ctx, c, id, rc)
+		terminalCancel()
+		c.opMu.Unlock()
+		runCancel()
 	})
 }
 
@@ -674,6 +699,15 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		return SendDisposition{}, fmt.Errorf("thread: %q has been removed", id)
 	}
 
+	if rt != nil && rt.releaseFailed {
+		if err := releaseRuntime(ctx, rt, sessionID, true); err != nil {
+			return SendDisposition{}, fmt.Errorf("thread: release previous workspace: %w", err)
+		}
+		c.mu.Lock()
+		c.runtime = nil
+		c.mu.Unlock()
+		rt = nil
+	}
 	if rt != nil {
 		// The workspace is live: either a run is in flight, or the entity
 		// is idle. An agent's send dispatches the message as its own
@@ -731,26 +765,26 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	}
 
 	handle, err := spawner.Spawn(bgCtx, spawnPath)
+	var rb unwinder
+	defer rb.unwind()
+	if handle != nil {
+		rb.push(func() {
+			releaseCtx, cancel := detachForTerminalWork(ctx)
+			defer cancel()
+			if err := spawner.Release(releaseCtx, handle.ID()); err != nil {
+				c.mu.Lock()
+				c.runtime = &runtimeState{handle: handle, spawner: spawner, watchCancel: func() {}, releaseFailed: true}
+				c.mu.Unlock()
+				slog.Error("Failed to release resumed workspace", "id", id, "error", err)
+			}
+		})
+	}
 	if err != nil {
 		return SendDisposition{}, fmt.Errorf("thread: respawn workspace: %w", err)
 	}
 	if err := bgCtx.Err(); err != nil {
-		_ = spawner.Release(context.Background(), handle.ID()) // ok: detached - bgCtx is already done; this is the cleanup for that
 		return SendDisposition{}, err
 	}
-	// rb unwinds the freshly spawned handle if this returns before startRun
-	// installs it as the shared runtime — see [unwinder].
-	var rb unwinder
-	defer rb.unwind()
-	rb.push(func() {
-		// detachForTerminalWork, not ctx: setStatus below failed because
-		// ctx was already cancelled, and a Release built on that same
-		// dead ctx would fail too, leaking the handle for the life of the
-		// process.
-		releaseCtx, cancel := detachForTerminalWork(ctx)
-		defer cancel()
-		_ = spawner.Release(releaseCtx, handle.ID())
-	})
 
 	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
 		return SendDisposition{}, err
@@ -811,6 +845,14 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	defer releaseBookkeeping()
 
 	c := l.control(st.ID)
+	c.mu.Lock()
+	c.cancelRequested = true
+	if c.preparationCancel != nil {
+		c.preparationCancel()
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Unlock()
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.mu.Lock()
@@ -824,6 +866,10 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	}
 
 	if err := releaseRuntime(ctx, rt, st.SessionID, true); err != nil {
+		c.mu.Lock()
+		rt.releaseFailed = true
+		c.runtime = rt
+		c.mu.Unlock()
 		slog.Error("Failed to release cancelled workspace", "component", "thread", "id", st.ID, "kind", st.Kind, "error", err)
 	}
 
@@ -891,6 +937,10 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 
+	l.handleRunCompleteLocked(ctx, followUpCtx, c, id, rc)
+}
+
+func (l *lifecycle) handleRunCompleteLocked(ctx, followUpCtx context.Context, c *threadControl, id string, rc RunComplete) {
 	rt, matched := l.matchRunComplete(ctx, c, id, rc)
 	if !matched {
 		return
@@ -1068,6 +1118,10 @@ func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *thr
 	depth := c.depth
 	c.mu.Unlock()
 	if err := releaseRuntime(ctx, rt, "", false); err != nil {
+		c.mu.Lock()
+		rt.releaseFailed = true
+		c.runtime = rt
+		c.mu.Unlock()
 		slog.Error("Failed to release completed workspace", "component", "thread", "thread", id, "error", err)
 	}
 	st, err := l.store.Get(ctx, id)
@@ -1321,11 +1375,11 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 			if st.Kind != KindTask || !st.CompletionPending {
 				return nil
 			}
-			store, ok := l.store.(TaskFinalizationStore)
+			store, ok := l.store.(TaskCompletionGenerationStore)
 			if !ok {
-				return nil
+				return fmt.Errorf("thread: completion store does not support generation acknowledgements")
 			}
-			return store.MarkTaskCompletionDelivered(ackCtx, st.ID)
+			return store.AcknowledgeTaskCompletionGeneration(ackCtx, st.ID, st.TerminalAt)
 		},
 	})
 }

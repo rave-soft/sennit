@@ -200,6 +200,54 @@ func TestRun_OrphanedWorktrees_OnlyExistingPaths(t *testing.T) {
 // corrupt an in-flight background task. Run against unfixed selectSessions,
 // C (and transitively nothing beneath it) is swept because the BFS never
 // consults threads at all.
+func TestRunPreservesIsolatedTaskOwnership(t *testing.T) {
+	cutoff := time.Now().Unix()
+	queries, conn, _ := fixture(t, cutoff)
+	ctx := t.Context()
+	for _, id := range []string{"isolated-parent", "isolated-child"} {
+		_, err := queries.CreateSession(ctx, sennitdb.CreateSessionParams{ID: id, Title: id, ProjectPath: projectA})
+		require.NoError(t, err)
+		_, err = conn.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, cutoff-100, id)
+		require.NoError(t, err)
+	}
+	_, err := queries.CreateThread(ctx, sennitdb.CreateThreadParams{
+		ID: "isolated-owner", Name: "isolated-owner", Kind: "task", Status: "completed", ProjectPath: projectA,
+		SessionID: "isolated-child", ParentSessionID: "isolated-parent", WorktreePath: t.TempDir(),
+	})
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `UPDATE threads SET updated_at = ? WHERE id = ?`, cutoff-100, "isolated-owner")
+	require.NoError(t, err)
+	_, err = Run(ctx, Deps{Queries: queries, Conn: conn}, Policy{Cutoff: cutoff})
+	require.NoError(t, err)
+	require.True(t, threadExists(t, queries, "isolated-owner"))
+	require.True(t, sessionExists(t, queries, "isolated-parent"))
+	require.True(t, sessionExists(t, queries, "isolated-child"))
+}
+
+func TestRunPreservesPendingCompletionAndSessions(t *testing.T) {
+	cutoff := time.Now().Unix()
+	queries, conn, _ := fixture(t, cutoff)
+	ctx := t.Context()
+	for _, id := range []string{"pending-parent", "pending-child"} {
+		_, err := queries.CreateSession(ctx, sennitdb.CreateSessionParams{ID: id, Title: id, ProjectPath: projectA})
+		require.NoError(t, err)
+		_, err = conn.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, cutoff-100, id)
+		require.NoError(t, err)
+	}
+	_, err := queries.CreateThread(ctx, sennitdb.CreateThreadParams{
+		ID: "pending-completion", Name: "pending-completion", Kind: "task", Status: "completed", ProjectPath: projectA,
+		SessionID: "pending-child", ParentSessionID: "pending-parent",
+	})
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `UPDATE threads SET updated_at = ?, completion_pending = 1 WHERE id = ?`, cutoff-100, "pending-completion")
+	require.NoError(t, err)
+	_, err = Run(ctx, Deps{Queries: queries, Conn: conn}, Policy{Cutoff: cutoff})
+	require.NoError(t, err)
+	require.True(t, threadExists(t, queries, "pending-completion"))
+	require.True(t, sessionExists(t, queries, "pending-parent"))
+	require.True(t, sessionExists(t, queries, "pending-child"))
+}
+
 func TestRun_ProtectsSessionOfLiveDelegation(t *testing.T) {
 	cutoff := time.Now().Unix()
 	q, conn, ids := fixture(t, cutoff)

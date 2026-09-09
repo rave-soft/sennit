@@ -20,9 +20,13 @@ INSERT INTO threads (
     merge_policy,
     kind,
     parent_session_id,
+    execution,
+    completion_depth,
     updated_at,
     created_at
 ) VALUES (
+    ?,
+    ?,
     ?,
     ?,
     ?,
@@ -87,6 +91,12 @@ SET
 WHERE id = ?
 RETURNING *;
 
+-- name: SetTaskPreparation :one
+UPDATE threads
+SET base_branch = ?, branch = ?, worktree_path = ?
+WHERE id = ? AND kind = 'task' AND status = 'pending'
+RETURNING *;
+
 -- name: UpdateThreadSession :one
 UPDATE threads
 SET
@@ -111,34 +121,50 @@ WHERE sessions.id = sqlc.arg(parent_session_id)
   );
 
 -- name: FinalizeTask :one
--- This follows AttributeTaskCostOnce in one transaction, so terminal state,
--- attribution and the durable completion outbox become visible together.
 UPDATE threads
 SET
     status = sqlc.arg(status),
     error = sqlc.arg(error),
     result_summary = sqlc.arg(result_summary),
     completed_at = sqlc.narg(completed_at),
-    terminal_at = sqlc.arg(terminal_at),
+    terminal_at = MAX(sqlc.arg(terminal_at), COALESCE(terminal_at, 0) + 1),
     completion_depth = sqlc.arg(completion_depth),
     completion_pending = 1,
     cost_attributed = 1
 WHERE threads.id = sqlc.arg(id)
   AND threads.kind = 'task'
-  AND threads.status = 'running'
+  AND threads.status IN ('pending', 'running')
   AND threads.session_id = sqlc.arg(session_id)
   AND threads.parent_session_id = sqlc.arg(parent_session_id)
 RETURNING *;
 
--- name: ListPendingTaskCompletions :many
-SELECT * FROM threads
-WHERE project_path = ? AND kind = 'task' AND completion_pending = 1
-ORDER BY terminal_at, created_at, id;
+-- name: InsertTaskCompletionOutbox :exec
+INSERT INTO task_completion_outbox (
+    task_id, terminal_at, status, error, result_summary, completion_depth, completed_at,
+    name, goal, session_id, parent_session_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
--- name: MarkTaskCompletionDelivered :execrows
+-- name: ListPendingTaskCompletions :many
+SELECT threads.*, task_completion_outbox.status, task_completion_outbox.error,
+       task_completion_outbox.result_summary, task_completion_outbox.completion_depth,
+       task_completion_outbox.completed_at, task_completion_outbox.terminal_at,
+       task_completion_outbox.name, task_completion_outbox.goal,
+       task_completion_outbox.session_id, task_completion_outbox.parent_session_id
+FROM task_completion_outbox
+JOIN threads ON threads.id = task_completion_outbox.task_id
+WHERE threads.project_path = ?
+ORDER BY task_completion_outbox.terminal_at, task_completion_outbox.task_id;
+
+-- name: AcknowledgeTaskCompletionGeneration :execrows
+DELETE FROM task_completion_outbox
+WHERE task_id = ? AND terminal_at = ?;
+
+-- name: RefreshTaskCompletionPending :execrows
 UPDATE threads
-SET completion_pending = 0
-WHERE id = ? AND kind = 'task' AND completion_pending = 1;
+SET completion_pending = EXISTS (
+    SELECT 1 FROM task_completion_outbox WHERE task_id = threads.id
+)
+WHERE id = ? AND kind = 'task';
 
 -- name: DeleteThread :exec
 DELETE FROM threads
@@ -167,5 +193,5 @@ WHERE id = ?;
 -- completion into): selectSessions must never sweep either one, even
 -- when it belongs to an otherwise-old session tree, or a live delegation's
 -- writes hit sessions.id after the row is gone.
-SELECT id, project_path, status, updated_at, kind, worktree_path, branch, session_id, parent_session_id
+SELECT id, project_path, status, updated_at, kind, worktree_path, branch, session_id, parent_session_id, completion_pending
 FROM threads;

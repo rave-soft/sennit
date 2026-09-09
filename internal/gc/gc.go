@@ -176,7 +176,7 @@ func countDependents(ctx context.Context, q *sennitdb.Queries, sessionIDs []stri
 func protectedSessions(rows []sennitdb.ListThreadsForGCRow) map[string]bool {
 	protected := make(map[string]bool)
 	for _, r := range rows {
-		if persistedThreadStatus(r.Status).terminal() {
+		if r.CompletionPending == 0 && persistedThreadStatus(r.Status).terminal() && (r.Kind != "task" || r.WorktreePath == "") {
 			continue
 		}
 		if r.SessionID != "" {
@@ -334,6 +334,9 @@ func selectThreads(ctx context.Context, q *sennitdb.Queries, cutoff int64, proje
 			continue
 		}
 		if r.UpdatedAt >= cutoff {
+			continue
+		}
+		if r.CompletionPending != 0 || (r.Kind == "task" && r.WorktreePath != "") {
 			continue
 		}
 		ids = append(ids, r.ID)

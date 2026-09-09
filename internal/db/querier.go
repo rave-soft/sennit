@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	AcknowledgeTaskCompletionGeneration(ctx context.Context, arg AcknowledgeTaskCompletionGenerationParams) (int64, error)
 	// Called in the same transaction as FinalizeTask. A failed transaction rolls
 	// this increment back, while the running/marker predicates make retries safe.
 	AttributeTaskCostOnce(ctx context.Context, arg AttributeTaskCostOnceParams) (int64, error)
@@ -42,8 +43,6 @@ type Querier interface {
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	DeleteSessionReadFiles(ctx context.Context, sessionID string) error
 	DeleteThread(ctx context.Context, id string) error
-	// This follows AttributeTaskCostOnce in one transaction, so terminal state,
-	// attribution and the durable completion outbox become visible together.
 	FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thread, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
@@ -59,6 +58,7 @@ type Querier interface {
 	// ListThreads instead.
 	GetThread(ctx context.Context, id string) (Thread, error)
 	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
+	InsertTaskCompletionOutbox(ctx context.Context, arg InsertTaskCompletionOutboxParams) error
 	// The most recent write to any message in the session, as a Unix
 	// timestamp. Every streaming delta the assistant produces updates its
 	// message row (debounced by tens of milliseconds, see
@@ -97,7 +97,7 @@ type Querier interface {
 	ListLatencyEventsSince(ctx context.Context, arg ListLatencyEventsSinceParams) ([]ListLatencyEventsSinceRow, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error)
-	ListPendingTaskCompletions(ctx context.Context, projectPath string) ([]Thread, error)
+	ListPendingTaskCompletions(ctx context.Context, projectPath string) ([]ListPendingTaskCompletionsRow, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessionTreeAssistantMessages(ctx context.Context, id string) ([]ListSessionTreeAssistantMessagesRow, error)
 	// A session and every descendant of it (agent-tool sub-sessions, title
@@ -179,7 +179,6 @@ type Querier interface {
 	// order it happened.
 	ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]ListUnfinishedAssistantMessagesRow, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
-	MarkTaskCompletionDelivered(ctx context.Context, id string) (int64, error)
 	// Version numbers are allocated per path across every session, which is
 	// what makes ListFilesBySessionTree's cross-session ordering and the
 	// UI's first-to-latest diff meaningful. UNIQUE(path, version) is the key
@@ -201,6 +200,7 @@ type Querier interface {
 	// distribution (see internal/stats.ComputeLatency), and SQLite has no
 	// percentile aggregate to lean on anyway.
 	RecordLatencyEvent(ctx context.Context, arg RecordLatencyEventParams) error
+	RefreshTaskCompletionPending(ctx context.Context, id string) (int64, error)
 	RenameSession(ctx context.Context, arg RenameSessionParams) (int64, error)
 	// Pin the model a session runs on, so restoring it later restores the
 	// model it was working with rather than the instance's current selection.
@@ -213,6 +213,7 @@ type Querier interface {
 	// turn's own usage saves; a full-row write from either side carried a
 	// stale copy of what the other had just written.
 	SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) (int64, error)
+	SetTaskPreparation(ctx context.Context, arg SetTaskPreparationParams) (Thread, error)
 	// The cost of every session nested under a session, at any depth,
 	// excluding the root's own row.
 	// Cost is written once per session, never rolled up onto a parent, so a

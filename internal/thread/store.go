@@ -25,6 +25,8 @@ type CreateParams struct {
 	BaseBranch   string
 	Branch       string
 	WorktreePath string
+	Execution    string
+	Depth        int
 	SessionID    string
 	MergePolicy  MergePolicy
 	Kind         Kind
@@ -88,8 +90,15 @@ type Store interface {
 // TaskFinalizationStore is the transactional extension required by task
 // lifecycle finalization. It is separate from Store so lightweight thread
 // stores and test doubles that never finalize tasks remain valid.
+type TaskPreparationStore interface {
+	SetTaskPreparation(context.Context, string, string, string, string) (Thread, error)
+}
+
+type TaskCompletionGenerationStore interface {
+	AcknowledgeTaskCompletionGeneration(context.Context, string, int64) error
+}
+
 type TaskFinalizationStore interface {
 	FinalizeTask(ctx context.Context, id string, params FinalizeTaskParams) (st Thread, finalized bool, err error)
 	ListPendingTaskCompletions(ctx context.Context) ([]Thread, error)
-	MarkTaskCompletionDelivered(ctx context.Context, id string) error
 }

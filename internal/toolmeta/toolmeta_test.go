@@ -53,8 +53,7 @@ func TestFrozenAccessAndGateClassifications(t *testing.T) {
 		},
 		AccessWrite: {
 			"agent", "job_kill", "download", "edit", "multiedit", "lsp_restart", "lsp_rename",
-			"lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "thread_create",
-			"thread_merge", "thread_remove", "agent_cancel", "agent_send", "ask_parent",
+			"lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "agent_cancel", "agent_send", "ask_parent",
 		},
 	}
 	wantGate := map[Gate][]string{
@@ -64,7 +63,6 @@ func TestFrozenAccessAndGateClassifications(t *testing.T) {
 		},
 		GateAllowed:     {"agent", "agentic_fetch"},
 		GateNotSubAgent: {"ask_parent"},
-		GateThreads:     {"thread_create", "thread_merge", "thread_remove"},
 		GateDelegations: {"agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output"},
 		GateLSP:         {"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"},
 		GateMCP:         {"list_mcp_resources", "read_mcp_resource"},
@@ -92,8 +90,27 @@ func TestFrozenAccessAndGateClassifications(t *testing.T) {
 	}
 }
 
+func TestHistoricalThreadManagementAliasesResolve(t *testing.T) {
+	t.Parallel()
+
+	for alias, canonical := range map[string]string{
+		"thread_list":   "agent_list",
+		"thread_status": "agent_result",
+		"thread_result": "agent_result",
+		"thread_cancel": "agent_cancel",
+		"thread_send":   "agent_send",
+		"thread_output": "agent_output",
+	} {
+		require.Equalf(t, canonical, CanonicalName(alias), "alias %q", alias)
+	}
+	for _, removed := range []string{"thread_create", "thread_merge", "thread_remove"} {
+		_, found := Lookup(removed)
+		require.Falsef(t, found, "removed tool %q remains in the registry", removed)
+	}
+}
+
 func TestConfiguredSetsAreExact(t *testing.T) {
-	wantDefault := []string{"agent", "bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "agent_trace", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "question", "todos", "read", "multi_read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_merge", "thread_remove", "agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output", "ask_parent"}
+	wantDefault := []string{"agent", "bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "agent_trace", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "question", "todos", "read", "multi_read", "write", "list_mcp_resources", "read_mcp_resource", "agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output", "ask_parent"}
 	if !slices.Equal(DefaultNames(), wantDefault) {
 		t.Fatalf("defaults = %v", DefaultNames())
 	}
@@ -108,7 +125,7 @@ func TestDocsReferenceToolsParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	headings := map[string]DocsCategory{"Files": DocsFiles, "Shell": DocsShell, "Language servers": DocsLSP, "Network": DocsWeb, "Delegation": DocsDelegation, "Threads": DocsThreads, "MCP": DocsMCP, "Interaction and state": DocsInteraction, "Git": DocsShell}
+	headings := map[string]DocsCategory{"Files": DocsFiles, "Shell": DocsShell, "Language servers": DocsLSP, "Network": DocsWeb, "Delegation": DocsDelegation, "MCP": DocsMCP, "Interaction and state": DocsInteraction, "Git": DocsShell}
 	section := ""
 	documented := map[string]DocsCategory{}
 	tool := regexp.MustCompile("`([a-z][a-z0-9_]*)`")

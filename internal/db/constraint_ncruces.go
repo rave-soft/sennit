@@ -18,7 +18,7 @@ import (
 // connect_modernc.go) whose messages differ. Each driver gets its own
 // implementation, gated on the same build tags as its connect_*.go file.
 func IsUniqueConstraintError(err error) bool {
-	return errors.Is(err, sqlite3.CONSTRAINT_UNIQUE)
+	return errors.Is(err, sqlite3.CONSTRAINT_UNIQUE) || errors.Is(err, sqlite3.CONSTRAINT_PRIMARYKEY)
 }
 
 // IsForeignKeyConstraintError reports whether err is a FOREIGN KEY

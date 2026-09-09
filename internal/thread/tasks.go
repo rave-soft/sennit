@@ -2,6 +2,7 @@ package thread
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -50,6 +51,12 @@ type TaskCreateArgs struct {
 	// SessionTitle and AgentID preserve specialized delegation history.
 	SessionTitle string
 	AgentID      string
+	Isolation    string
+	Execution    string
+	WorktreePath string
+	Branch       string
+	BaseBranch   string
+	Resume       bool
 	// SessionID, when set, is used verbatim as the child session's id
 	// instead of a generated one, so a delegation from a tool call can
 	// reuse the "<messageID>$$<toolCallID>" identity that makes it openable
@@ -69,6 +76,17 @@ type TaskRunResult struct {
 // returned with an error and is called exactly once by the lifecycle.
 type TaskRunFactory func(context.Context, string) (run func(context.Context) (TaskRunResult, error), cleanup func(), err error)
 
+type TaskRuntime struct {
+	Handle   Handle
+	Spawner  Spawner
+	Cleanup  func(context.Context) error
+	Factory  TaskRunFactory
+	Depth    int
+	Followup func(context.Context, string) (TaskRunFactory, error)
+}
+
+type IsolatedTaskRuntime func(context.Context, TaskCreateArgs) (TaskRuntime, error)
+
 // TaskManager drives the task delegation kind: the same admission,
 // per-entity serialization, run dispatch, status transitions, recovery,
 // and shutdown as [Manager]'s threads, minus the git worktree/merge
@@ -82,16 +100,15 @@ type TaskRunFactory func(context.Context, string) (run func(context.Context) (Ta
 // thread-only method to guard against a task ID. What they share is the
 // [lifecycle] underneath both — see [NewTaskManager].
 type TaskManager struct {
-	store    Store
-	spawner  Spawner
-	messages MessageService
-	ctx      context.Context
-	lc       *lifecycle
+	store            Store
+	spawner          Spawner
+	messages         MessageService
+	isolated         IsolatedTaskRuntime
+	shared           IsolatedTaskRuntime
+	prepareIsolation func(context.Context, *TaskCreateArgs) error
+	ctx              context.Context
+	lc               *lifecycle
 
-	// createMu serializes Create end to end, so the concurrency-cap check
-	// and the create it gates run as one atomic step. Task creation isn't a
-	// hot path, so serializing all of it trades away nothing that matters
-	// for a correctness guarantee that does.
 	createMu sync.Mutex
 }
 
@@ -102,8 +119,11 @@ type TaskManager struct {
 // Manager.Shutdown unable to reach a task's in-flight run. spawner should
 // be a threadspawn ParentAppSpawner over the workspace's own App, and
 // messages that same App's message store.
-func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *lifecycle, ctx context.Context) *TaskManager {
+func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *lifecycle, ctx context.Context, isolated ...IsolatedTaskRuntime) *TaskManager {
 	t := &TaskManager{store: store, spawner: spawner, messages: messages, ctx: ctx, lc: lc}
+	if len(isolated) != 0 {
+		t.isolated = isolated[0]
+	}
 	// Started here, not left to the caller, so no construction site can
 	// silently omit the idle sweep. See watchdog.go.
 	t.startIdleWatchdog()
@@ -124,12 +144,18 @@ func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *l
 // maxActiveTasksPerParentTurn active tasks (see checkActiveCaps) rather
 // than queuing: a caller told "started" when the work was actually
 // deferred would go on to reason about a delegation that doesn't exist yet.
-func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, error) {
+func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (created Thread, createErr error) {
 	done, err := t.lc.beginOp()
 	if err != nil {
 		return Thread{}, err
 	}
 	defer done()
+	if args.Isolation != "" && args.Isolation != "worktree" {
+		return Thread{}, fmt.Errorf("thread: isolation must be empty or worktree")
+	}
+	if args.SessionID == "" {
+		args.SessionID = uuid.NewString()
+	}
 	if args.Goal == "" {
 		return Thread{}, fmt.Errorf("thread: task goal is required")
 	}
@@ -137,9 +163,13 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, fmt.Errorf("thread: task requires a parent session")
 	}
 
-	// Held for the rest of this call — see createMu's doc comment.
 	t.createMu.Lock()
-	defer t.createMu.Unlock()
+	admissionLocked := true
+	defer func() {
+		if admissionLocked {
+			t.createMu.Unlock()
+		}
+	}()
 	if err := t.checkActiveCaps(ctx, args.ParentSessionID, args.Goal); err != nil {
 		return Thread{}, err
 	}
@@ -148,12 +178,20 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		Name:            "task-" + uuid.NewString(),
 		Goal:            args.Goal,
 		Kind:            KindTask,
+		WorktreePath:    args.WorktreePath,
+		Branch:          args.Branch,
+		BaseBranch:      args.BaseBranch,
+		MergePolicy:     MergeManual,
+		Execution:       args.Execution,
+		Depth:           args.Depth,
+		SessionID:       args.SessionID,
 		ParentSessionID: args.ParentSessionID,
 	})
 	if err != nil {
 		return Thread{}, fmt.Errorf("thread: create task record: %w", err)
 	}
-	t.lc.publish(EventCreated, st)
+	t.createMu.Unlock()
+	admissionLocked = false
 
 	// deliverTaskCompletion reads the cascade depth back through this same
 	// control once the task finishes; checkActiveCaps reads the parent
@@ -164,20 +202,86 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, fmt.Errorf("thread: task %q was removed during creation", st.ID)
 	}
 
-	handle, err := t.spawner.Spawn(t.ctx, "")
+	prepCtx, cancelPreparation := context.WithCancel(ctx)
+	stopCaller := context.AfterFunc(t.ctx, cancelPreparation)
+	defer stopCaller()
+	defer cancelPreparation()
+	c.mu.Lock()
+	c.preparationCancel = cancelPreparation
+	if c.cancelRequested {
+		cancelPreparation()
+	}
+	c.mu.Unlock()
+	defer func() { c.mu.Lock(); c.preparationCancel = nil; c.mu.Unlock() }()
+	t.lc.publish(EventCreated, st)
+	if err := prepCtx.Err(); err != nil {
+		return Thread{}, t.failCreate(prepCtx, st, err)
+	}
+	if args.Isolation == "worktree" && t.prepareIsolation != nil {
+		if err := t.prepareIsolation(prepCtx, &args); err != nil {
+			return Thread{}, t.failCreate(prepCtx, st, err)
+		}
+		storage, ok := t.store.(TaskPreparationStore)
+		if !ok {
+			return Thread{}, t.failCreate(prepCtx, st, errors.New("thread: store cannot persist task preparation"))
+		}
+		prepared, err := storage.SetTaskPreparation(prepCtx, st.ID, args.BaseBranch, args.Branch, args.WorktreePath)
+		if err != nil {
+			return Thread{}, t.failCreate(prepCtx, st, err)
+		}
+		st = prepared
+	}
+	var runtime TaskRuntime
+	if args.Isolation == "worktree" {
+		if t.isolated == nil {
+			return Thread{}, t.failCreate(ctx, st, fmt.Errorf("thread: isolated task runtime is unavailable"))
+		}
+		isolatedArgs := args
+		isolatedArgs.Factory = nil
+		runtime, err = t.isolated(prepCtx, isolatedArgs)
+	} else if args.Execution != "" && t.shared != nil {
+		runtime, err = t.shared(prepCtx, args)
+		args.Factory = runtime.Factory
+	} else {
+		var handle Handle
+		handle, err = t.spawner.Spawn(prepCtx, "")
+		runtime = TaskRuntime{Handle: handle, Spawner: t.spawner}
+	}
+	handle := runtime.Handle
+	var rb unwinder
+	defer rb.unwind()
+	rb.push(func() {
+		cleanupCtx := context.WithoutCancel(ctx)
+		if handle != nil && runtime.Spawner != nil {
+			if err := runtime.Spawner.Release(cleanupCtx, handle.ID()); err != nil {
+				c.mu.Lock()
+				c.runtime = &runtimeState{handle: handle, spawner: runtime.Spawner, watchCancel: func() {}, releaseFailed: true}
+				c.mu.Unlock()
+				createErr = errors.Join(createErr, fmt.Errorf("release task runtime: %w", err))
+				return
+			}
+		}
+		if runtime.Cleanup != nil {
+			createErr = errors.Join(createErr, runtime.Cleanup(cleanupCtx))
+		}
+	})
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
-	// rb unwinds the spawned handle if Create returns before startRun
-	// installs it as the shared runtime — see [unwinder].
-	var rb unwinder
-	defer rb.unwind()
-	// ParentAppSpawner.Release is a no-op, but a future Spawner for this
-	// kind might not be.
-	rb.push(func() {
-		_ = t.spawner.Release(ctx, handle.ID())
-	})
+	if handle == nil || runtime.Spawner == nil {
+		return Thread{}, t.failCreate(ctx, st, fmt.Errorf("thread: task runtime is incomplete"))
+	}
+	if args.Isolation == "worktree" {
+		if runtime.Factory == nil {
+			return Thread{}, t.failCreate(ctx, st, fmt.Errorf("thread: isolated task runner is missing"))
+		}
+		args.Factory = runtime.Factory
+	}
 
+	if err := prepCtx.Err(); err != nil {
+		return Thread{}, t.failCreate(ctx, st, err)
+	}
+	ctx = prepCtx
 	title := args.SessionTitle
 	if title == "" {
 		title = args.Goal
@@ -214,6 +318,13 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
 	st = newSt
+	c.mu.Lock()
+	preparationErr := prepCtx.Err()
+	c.preparationCancel = nil
+	c.mu.Unlock()
+	if preparationErr != nil {
+		return Thread{}, t.failCreate(prepCtx, st, preparationErr)
+	}
 
 	// Into runningSt, not st: setStatus returns the zero Thread on error,
 	// and failCreate below needs st's real ID.
@@ -244,9 +355,12 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		Kind: string(st.Kind),
 	})
 	if args.Factory == nil {
-		t.lc.startRun(WithAgentDispatch(runCtx), handle, t.spawner, st.ID, st.SessionID, args.Goal)
+		t.lc.startRun(WithAgentDispatch(runCtx), handle, runtime.Spawner, st.ID, st.SessionID, args.Goal)
 	} else {
-		t.lc.startFactoryRun(runCtx, handle, t.spawner, st.ID, st.SessionID, args.Factory)
+		t.lc.startFactoryRun(runCtx, handle, runtime.Spawner, st.ID, st.SessionID, args.Factory)
+		c.mu.Lock()
+		c.runtime.followup = runtime.Followup
+		c.mu.Unlock()
 	}
 	rb.commit()
 
@@ -341,7 +455,11 @@ func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) er
 	// too. See [Manager.failCreate], which has the same problem.
 	writeCtx, cancel := detachForTerminalWork(ctx)
 	defer cancel()
-	failed, err := t.lc.setStatus(writeCtx, st.ID, StatusFailed, cause.Error(), "", 0)
+	status := StatusFailed
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) || ctx.Err() != nil {
+		status = StatusCancelled
+	}
+	failed, err := t.lc.setStatus(writeCtx, st.ID, status, cause.Error(), "", 0)
 	if err != nil {
 		slog.Error("Failed to record task create failure", "component", "thread", "task", st.ID, "error", err)
 		return cause
@@ -497,6 +615,9 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 	st, err := t.Get(ctx, id)
 	if err != nil {
 		return SendDisposition{}, err
+	}
+	if st.WorktreePath != "" || st.Execution != "" {
+		return t.sendIsolated(ctx, st, message)
 	}
 	if wasCancelled(st) {
 		return SendDisposition{}, fmt.Errorf("thread: task %q was cancelled (%s) and cannot be resumed; create a new task instead", id, st.Error)

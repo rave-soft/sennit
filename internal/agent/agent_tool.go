@@ -106,6 +106,7 @@ type AgentParams struct {
 	// session's title. Optional: an empty one falls back to the agent's
 	// own name.
 	Description string `json:"description,omitempty" description:"Short (3-5 word) label for this delegation"`
+	Isolation   string `json:"isolation,omitempty" description:"Use worktree to run in an isolated git worktree"`
 }
 
 const AgentToolName = "agent"

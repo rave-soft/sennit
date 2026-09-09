@@ -95,6 +95,7 @@ type runTurn struct {
 	currentSession session.Session
 
 	sanitizedToolCalls map[string]bool
+	historyMessageIDs  map[string]struct{}
 	shouldSummarize    bool
 	// haltedByTool records that this step's finish reason was rewritten
 	// from ToolUse to EndTurn because a tool result carried StopTurn (a
@@ -132,6 +133,7 @@ type runTurn struct {
 	// dispatch the same delegate a second time for work already
 	// reported on.
 	foldedCompletions []fantasy.Message
+	foldedReportIDs   []string
 	// pendingFoldedCount is how many of foldedCompletions belong to
 	// pendingCompletions, so a requeued batch takes its messages back
 	// out with it instead of being shown twice when it is folded again.
@@ -364,20 +366,38 @@ func (t *runTurn) foldCompletions(ctx context.Context, messages []fantasy.Messag
 	// than something the person typed, and the leading label in
 	// joinTaskCompletions keeps the model from reading it as user speech.
 	//
-	// Delivery stays at-least-once: a batch persisted here but rejected
-	// by a later failure goes back to the inbox and can be reported
-	// again. formatTaskCompletion's repeat notice already covers a
-	// delegation reporting more than once, and a duplicated report is a
-	// far smaller problem than a lost one.
-	reportMsg, err := t.agent.messages.Create(ctx, t.call.SessionID, message.CreateMessageParams{
-		Role:   message.User,
-		Parts:  []message.ContentPart{message.TextContent{Text: joinTaskCompletions(completions)}},
-		Origin: message.OriginAgent,
-	})
-	if err != nil {
-		return messages, completions, fmt.Errorf("failed to persist delegation report: %w", err)
+	var folded []fantasy.Message
+	var reportIDs []string
+	seen := make(map[string]struct{}, len(t.foldedReportIDs))
+	for _, id := range t.foldedReportIDs {
+		seen[id] = struct{}{}
 	}
-	folded := toAIMessage(&reportMsg)
+	for _, completion := range completions {
+		id := ""
+		if completion.DelegationID != "" && !completion.TerminalAt.IsZero() {
+			id = fmt.Sprintf("delegation-report:%s:%s:%d", t.call.SessionID, completion.DelegationID, completion.TerminalAt.UnixNano())
+		}
+		reportMsg, err := t.agent.messages.Create(ctx, t.call.SessionID, message.CreateMessageParams{
+			ID:     id,
+			Role:   message.User,
+			Parts:  []message.ContentPart{message.TextContent{Text: joinTaskCompletions([]TaskCompletion{completion})}},
+			Origin: message.OriginAgent,
+		})
+		if err != nil {
+			return messages, completions, fmt.Errorf("failed to persist delegation report: %w", err)
+		}
+		_, inHistory := t.historyMessageIDs[reportMsg.ID]
+		_, alreadyFolded := seen[reportMsg.ID]
+		if !inHistory && !alreadyFolded {
+			converted := toAIMessage(&reportMsg)
+			folded = append(folded, converted...)
+			for range converted {
+				reportIDs = append(reportIDs, reportMsg.ID)
+			}
+			seen[reportMsg.ID] = struct{}{}
+		}
+	}
+	t.foldedReportIDs = append(t.foldedReportIDs, reportIDs...)
 	t.foldedCompletions = append(t.foldedCompletions, folded...)
 	t.pendingFoldedCount = len(folded)
 	return append(messages, t.foldedCompletions...), completions, nil
@@ -404,6 +424,7 @@ func (t *runTurn) requeuePendingCompletions() {
 	// report twice once the requeued batch is folded again.
 	if t.pendingFoldedCount > 0 {
 		t.foldedCompletions = t.foldedCompletions[:len(t.foldedCompletions)-t.pendingFoldedCount]
+		t.foldedReportIDs = t.foldedReportIDs[:len(t.foldedReportIDs)-t.pendingFoldedCount]
 		t.pendingFoldedCount = 0
 	}
 	t.agent.requeueCompletions(t.call.SessionID, t.pendingCompletions)

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 // subAgentParams holds the parameters for running a sub-agent.
@@ -13,6 +14,8 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
+	History        [][]message.Message
+	HistoryFrozen  bool
 	// AgentID is the configured id of a *named* agent (a `.claude/agents`
 	// entry, or any config.Agents key other than coder/task). Setting it
 	// is what makes this delegation part of that agent's continuing

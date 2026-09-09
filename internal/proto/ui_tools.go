@@ -30,9 +30,6 @@ const (
 	SennitLogsToolName       = brand.ToolLogs
 	ListMCPResourcesToolName = "list_mcp_resources"
 	ReadMCPResourceToolName  = "read_mcp_resource"
-	ThreadCreateToolName     = "thread_create"
-	ThreadMergeToolName      = "thread_merge"
-	ThreadRemoveToolName     = "thread_remove"
 	AgentListToolName        = "agent_list"
 	AgentResultToolName      = "agent_result"
 	AgentCancelToolName      = "agent_cancel"

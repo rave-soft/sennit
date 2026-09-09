@@ -11,6 +11,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
@@ -324,7 +325,7 @@ func TestCompletionAckWaitsForSuccessfulProviderStep(t *testing.T) {
 	var mu sync.Mutex
 	acks := 0
 	sa.enqueueCompletion(sess.ID, TaskCompletion{
-		DelegationID: "durable-task", Kind: "task", Status: "completed", ResultText: "durable-result",
+		DelegationID: "durable-task", Kind: "task", Status: "completed", ResultText: "durable-result", TerminalAt: time.Unix(123, 456),
 		Acknowledge: func(context.Context) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -339,10 +340,9 @@ func TestCompletionAckWaitsForSuccessfulProviderStep(t *testing.T) {
 	mu.Unlock()
 	restored := sa.drainCompletionsForStep(sess.ID)
 	require.Len(t, restored, 1, "provider failure must restore the folded completion")
-	sa.requeueCompletions(sess.ID, restored)
-
 	model := &promptRecordingModel{text: "done"}
-	sa.SetModel(Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}})
+	sa = testSessionAgent(env, model, "system").(*sessionAgent)
+	sa.requeueCompletions(sess.ID, restored)
 	_, runErr = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "retry"})
 	require.NoError(t, runErr)
 	require.Eventually(t, func() bool {
@@ -350,6 +350,16 @@ func TestCompletionAckWaitsForSuccessfulProviderStep(t *testing.T) {
 		defer mu.Unlock()
 		return acks == 1
 	}, 2*time.Second, 5*time.Millisecond, "the replay is acknowledged only after the successful provider step")
+	persisted, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	reports := 0
+	for _, entry := range persisted {
+		if entry.Origin == message.OriginAgent && strings.Contains(entry.Content().String(), "durable-result") {
+			reports++
+		}
+	}
+	require.Equal(t, 1, reports)
+	require.Equal(t, 1, model.occurrences("durable-result"))
 }
 
 func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {

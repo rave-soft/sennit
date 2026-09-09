@@ -33,7 +33,7 @@ const (
 // implementation, gated on the same build tags as its connect_*.go file.
 func IsUniqueConstraintError(err error) bool {
 	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUnique
+	return errors.As(err, &sqliteErr) && (sqliteErr.Code() == sqliteConstraintUnique || sqliteErr.Code() == 1555)
 }
 
 // IsForeignKeyConstraintError reports whether err is a FOREIGN KEY

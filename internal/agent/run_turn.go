@@ -775,6 +775,10 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 	t = newRunTurn(a, call, ctx, genCtx, model, agentTools, promptPrefix, summarize, currentSession, userMsgCreated)
+	t.historyMessageIDs = make(map[string]struct{}, len(msgs))
+	for _, msg := range msgs {
+		t.historyMessageIDs[msg.ID] = struct{}{}
+	}
 
 	// Carried-over history goes in front of this session's own
 	// messages.

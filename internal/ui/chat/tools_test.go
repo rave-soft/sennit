@@ -38,14 +38,6 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.ListMCPResourcesToolName,
 	tools.ReadMCPResourceToolName,
 	"multi_read",
-	// The worktree lifecycle tools (internal/agent/tools/thread_*.go)
-	// don't have a dedicated renderer yet; they fall back to the generic
-	// one until the TUI grows one. The agent_* tools that replaced the
-	// rest of the thread surface do have one (see task.go), so they are
-	// not listed here.
-	tools.ThreadCreateToolName,
-	tools.ThreadMergeToolName,
-	tools.ThreadRemoveToolName,
 	// ask_parent (domain/agent/tools/ask_parent.go), same story: no
 	// dedicated renderer yet.
 	tools.AskParentToolName,

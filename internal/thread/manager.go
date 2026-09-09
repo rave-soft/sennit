@@ -182,6 +182,10 @@ func (m *Manager) List(ctx context.Context) ([]Thread, error) {
 	return m.store.List(ctx)
 }
 
+func (m *Manager) WorktreeDir() string {
+	return m.worktreeDir
+}
+
 // Get resolves idOrName (an ID or a name) to a thread.
 func (m *Manager) Get(ctx context.Context, idOrName string) (Thread, error) {
 	return m.resolve(ctx, idOrName)
@@ -302,6 +306,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	// the thread reaches somewhere safe to rest — see [unwinder].
 	var rb unwinder
 	defer rb.unwind()
+	released := true
 
 	if err := git.WorktreeAdd(ctx, m.repoRoot, worktreePath, branch, base); err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
@@ -310,23 +315,44 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	// creation step fails, remove both; leaving the branch behind makes a
 	// retry collide with stale state even though Create reported failure.
 	rb.push(func() {
+		if !released {
+			return
+		}
 		cleanupCtx, cancel := m.detachForRollback(ctx)
 		defer cancel()
-		m.removeWorktree(cleanupCtx, worktreePath)
+		dirty, err := git.IsDirty(cleanupCtx, worktreePath)
+		if err != nil || dirty {
+			return
+		}
+		contained, err := git.IsAncestor(cleanupCtx, m.repoRoot, branch, base)
+		if err != nil || !contained {
+			return
+		}
+		if err := git.WorktreeRemove(cleanupCtx, m.repoRoot, worktreePath, false); err != nil {
+			return
+		}
 		if err := git.DeleteBranch(cleanupCtx, m.repoRoot, branch, true); err != nil {
 			slog.Warn("Failed to remove branch after thread creation failure", "branch", branch, "error", err)
 		}
 	})
 
 	handle, err := m.spawner.Spawn(m.ctx, worktreePath)
+	if handle != nil {
+		rb.push(func() {
+			cleanupCtx, cancel := m.detachForRollback(ctx)
+			defer cancel()
+			if err := m.spawner.Release(cleanupCtx, handle.ID()); err != nil {
+				released = false
+				c.mu.Lock()
+				c.runtime = &runtimeState{handle: handle, spawner: m.spawner, watchCancel: func() {}, releaseFailed: true}
+				c.mu.Unlock()
+				slog.Error("Failed to release workspace during rollback", "thread", st.ID, "error", err)
+			}
+		})
+	}
 	if err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
-	rb.push(func() {
-		cleanupCtx, cancel := m.detachForRollback(ctx)
-		defer cancel()
-		m.releaseHandle(cleanupCtx, handle)
-	})
 	if err := m.ctx.Err(); err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
@@ -391,18 +417,6 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 // manager's configured timeout.
 func (m *Manager) detachForRollback(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), m.rollbackTimeout)
-}
-
-func (m *Manager) removeWorktree(ctx context.Context, worktreePath string) {
-	if err := git.WorktreeRemove(ctx, m.repoRoot, worktreePath, true); err != nil {
-		slog.Error("Failed to remove worktree during rollback", "component", "thread", "error", err)
-	}
-}
-
-func (m *Manager) releaseHandle(ctx context.Context, handle Handle) {
-	if err := m.spawner.Release(ctx, handle.ID()); err != nil {
-		slog.Error("Failed to release spawner handle during rollback", "component", "thread", "error", err)
-	}
 }
 
 // failCreate records cause as the thread's terminal failure and returns it
@@ -584,6 +598,15 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	if removed {
 		return Thread{}, fmt.Errorf("thread: %q has been removed", idOrName)
 	}
+	if rt != nil && rt.releaseFailed {
+		if err := releaseRuntime(ctx, rt, st.SessionID, true); err != nil {
+			return Thread{}, fmt.Errorf("thread: release previous workspace: %w", err)
+		}
+		c.mu.Lock()
+		c.runtime = nil
+		c.mu.Unlock()
+		rt = nil
+	}
 	if rt != nil {
 		return st, nil
 	}
@@ -597,18 +620,23 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	}
 
 	handle, err := m.spawner.Spawn(m.ctx, st.WorktreePath)
+	var rb unwinder
+	defer rb.unwind()
+	if handle != nil {
+		rb.push(func() {
+			cleanupCtx, cancel := m.detachForRollback(ctx)
+			defer cancel()
+			if err := m.spawner.Release(cleanupCtx, handle.ID()); err != nil {
+				c.mu.Lock()
+				c.runtime = &runtimeState{handle: handle, spawner: m.spawner, watchCancel: func() {}, releaseFailed: true}
+				c.mu.Unlock()
+				slog.Error("Failed to release activated workspace", "thread", st.ID, "error", err)
+			}
+		})
+	}
 	if err != nil {
 		return Thread{}, fmt.Errorf("thread: respawn workspace: %w", err)
 	}
-	// See Create's identical rb: unwinds the just-spawned workspace if
-	// Activate returns before the thread is resting live again.
-	var rb unwinder
-	defer rb.unwind()
-	rb.push(func() {
-		cleanupCtx, cancel := m.detachForRollback(ctx)
-		defer cancel()
-		m.releaseHandle(cleanupCtx, handle)
-	})
 	if err := m.ctx.Err(); err != nil {
 		return Thread{}, err
 	}
@@ -802,7 +830,7 @@ func (m *Manager) Merge(ctx context.Context, idOrName string) (Thread, error) {
 	if err != nil {
 		return Thread{}, err
 	}
-	if st.Kind != KindThread {
+	if st.Kind != KindThread && st.WorktreePath == "" {
 		return Thread{}, fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 	// A turn still in flight owns the worktree: merging under it commits
@@ -852,7 +880,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 	if err != nil {
 		return err
 	}
-	if st.Kind != KindThread {
+	if st.Kind != KindThread && st.WorktreePath == "" {
 		return fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 
@@ -897,7 +925,12 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 		// an unforced remove has already refused any active status above,
 		// so there is nothing left running to cancel.
 		if err := releaseRuntime(ctx, rt, st.SessionID, force); err != nil {
-			slog.Error("Failed to release spawner handle on remove", "component", "thread", "thread", st.ID, "error", err)
+			c.mu.Lock()
+			rt.releaseFailed = true
+			c.runtime = rt
+			c.removed = false
+			c.mu.Unlock()
+			return fmt.Errorf("thread: release workspace before removal: %w", err)
 		}
 	}
 
@@ -1047,6 +1080,27 @@ func (m *Manager) QuestionServices() []question.Service {
 // The cleanup below runs on its own context rather than ctx, since ctx
 // belongs to whichever caller happens to be waiting and m.ctx is already
 // cancelled by the time the goroutine starts.
+func (m *Manager) retryShutdownReleases(ctx context.Context) error {
+	var failures []error
+	for id, control := range m.lc.snapshotControls() {
+		control.opMu.Lock()
+		control.mu.Lock()
+		runtime := control.runtime
+		control.mu.Unlock()
+		if runtime != nil && runtime.releaseFailed {
+			if err := releaseRuntime(ctx, runtime, "", false); err != nil {
+				failures = append(failures, fmt.Errorf("release workspace %s: %w", id, err))
+			} else {
+				control.mu.Lock()
+				control.runtime = nil
+				control.mu.Unlock()
+			}
+		}
+		control.opMu.Unlock()
+	}
+	return errors.Join(failures...)
+}
+
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -1076,6 +1130,10 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 					// fallback for "cancel something, we don't know what".
 					st, getErr := m.store.Get(shutdownCtx, threadID)
 					if err := releaseRuntime(shutdownCtx, rt, st.SessionID, getErr == nil); err != nil {
+						c.mu.Lock()
+						rt.releaseFailed = true
+						c.runtime = rt
+						c.mu.Unlock()
 						slog.Error("Failed to release workspace on shutdown", "component", "thread", "error", err)
 					}
 					// The workspace DB remains live until this method returns
@@ -1115,7 +1173,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-m.shutdownDone:
-		return nil
+		return m.retryShutdownReleases(ctx)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -1154,13 +1212,23 @@ func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) 
 	// sense for a delegation kind with no worktree, and an empty
 	// WorktreePath would otherwise read as "missing" and get marked
 	// failed before the generic active-status sweep ever sees it.
-	if st.Kind != KindThread {
+	if st.Kind != KindThread && st.WorktreePath == "" {
 		return false, nil
 	}
 	if _, statErr := os.Stat(st.WorktreePath); !os.IsNotExist(statErr) {
 		return false, nil
 	}
 	if st.Status == StatusFailed || st.Status == StatusMerged {
+		return true, nil
+	}
+	if st.Kind == KindTask && st.Status.Active() {
+		final, err := m.lc.finalizeTask(ctx, st, StatusFailed, "worktree missing on recovery", "", 0, st.CompletionDepth)
+		if err != nil {
+			return false, err
+		}
+		if final.ID != "" {
+			m.lc.deliverStoredCompletion(ctx, nil, final, final.CompletionDepth)
+		}
 		return true, nil
 	}
 	if _, err := m.lc.setStatus(ctx, st.ID, StatusFailed, "worktree missing on recovery", "", 0); err != nil {

@@ -88,24 +88,17 @@ See [Steering, tasks and threads](../concepts/delegation.md).
 | `ask_parent` | Message the session that created this delegation, waking it if idle |
 
 The `agent_*` tools take a task's id or a thread's id or name, so one set
-addresses both kinds. The older per-kind names (`task_list`, `thread_send`,
-and the rest) still resolve to them in `tools:` lists and permission
-configs.
+addresses both kinds. The older management names (`task_list`, `task_result`,
+`task_cancel`, `task_send`, `task_output`, `thread_list`, `thread_status`,
+`thread_result`, `thread_cancel`, `thread_send`, and `thread_output`) still
+resolve to them in `tools:` lists and permission configs. The tools are
+available whenever either background tasks or workspace threads are available.
 
-They disappear when `options.background_agents` is `false`.
-
-## Threads
-
-| Tool | Does |
-|:--|:--|
-| `thread_create` | Create a thread: its own git worktree, branch, data directory and session |
-| `thread_merge` | Merge a thread's branch into its base |
-| `thread_remove` | Cancel it, remove the worktree, delete the record |
-
-Listing, inspecting, steering and stopping a thread are the `agent_*` tools
-above; only the worktree lifecycle is thread-specific. `agent_output` is the
-one that is not: a thread's transcript lives in its own worktree session and
-is not readable from the parent workspace.
+Listing, inspecting, steering and stopping a thread use the `agent_*` tools.
+`agent_output` is the exception: a thread's transcript lives in its own
+worktree session and is not readable from the parent workspace. Create an
+isolated delegation with `agent` and `isolation: worktree`; its merge and
+cleanup remain runtime and user-interface responsibilities, not model tools.
 
 > [!NOTE]
 > A thread that is mid-turn does not read a follow-up until that turn ends —

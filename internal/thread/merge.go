@@ -103,7 +103,11 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 			// unrelated work, so this stays correct if that guard is ever
 			// loosened.
 			if err := releaseRuntime(ctx, rt, st.SessionID, true); err != nil {
-				slog.Error("Failed to release merged workspace", "component", "thread", "thread", threadID, "error", err)
+				c.mu.Lock()
+				rt.releaseFailed = true
+				c.runtime = rt
+				c.mu.Unlock()
+				return fmt.Errorf("thread: release merged workspace: %w", err)
 			}
 		}
 	}
@@ -138,6 +142,22 @@ func (m *Manager) discardMerged(ctx context.Context, threadID string) {
 	// worktree — that is exactly where the user resolves it.
 	if st.Kind != KindThread || st.Status != StatusMerged {
 		return
+	}
+	if control := m.lc.existingControl(threadID); control != nil {
+		control.mu.Lock()
+		runtime := control.runtime
+		control.mu.Unlock()
+		if runtime != nil {
+			if err := releaseRuntime(ctx, runtime, st.SessionID, true); err != nil {
+				control.mu.Lock()
+				runtime.releaseFailed = true
+				control.mu.Unlock()
+				return
+			}
+			control.mu.Lock()
+			control.runtime = nil
+			control.mu.Unlock()
+		}
 	}
 
 	if err := git.WorktreeRemove(ctx, m.repoRoot, st.WorktreePath, true); err != nil {

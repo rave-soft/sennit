@@ -66,6 +66,20 @@ type Session struct {
 	ModelID          string         `json:"model_id"`
 }
 
+type TaskCompletionOutbox struct {
+	TaskID          string        `json:"task_id"`
+	TerminalAt      int64         `json:"terminal_at"`
+	Status          string        `json:"status"`
+	Name            string        `json:"name"`
+	Goal            string        `json:"goal"`
+	SessionID       string        `json:"session_id"`
+	ParentSessionID string        `json:"parent_session_id"`
+	Error           string        `json:"error"`
+	ResultSummary   string        `json:"result_summary"`
+	CompletionDepth int64         `json:"completion_depth"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
+}
+
 type Thread struct {
 	ID                string        `json:"id"`
 	Name              string        `json:"name"`
@@ -88,4 +102,5 @@ type Thread struct {
 	CompletionDepth   int64         `json:"completion_depth"`
 	TerminalAt        sql.NullInt64 `json:"terminal_at"`
 	CostAttributed    int64         `json:"cost_attributed"`
+	Execution         string        `json:"execution"`
 }

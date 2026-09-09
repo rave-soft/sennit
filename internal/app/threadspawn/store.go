@@ -70,6 +70,8 @@ func (s *store) Create(ctx context.Context, params thread.CreateParams) (thread.
 		MergePolicy:     string(mergePolicy),
 		Kind:            string(kind),
 		ParentSessionID: params.ParentSessionID,
+		Execution:       params.Execution,
+		CompletionDepth: int64(params.Depth),
 	})
 	if err != nil {
 		// Satisfy the thread.Store contract: Create must report a
@@ -151,6 +153,16 @@ func (s *store) SetStatus(ctx context.Context, id string, params thread.SetStatu
 	return fromDBItem(dbThread), nil
 }
 
+func (s *store) SetTaskPreparation(ctx context.Context, id, base, branch, path string) (thread.Thread, error) {
+	item, err := s.q.SetTaskPreparation(ctx, db.SetTaskPreparationParams{
+		ID: id, BaseBranch: base, Branch: branch, WorktreePath: path,
+	})
+	if err != nil {
+		return thread.Thread{}, err
+	}
+	return fromDBItem(item), nil
+}
+
 func (s *store) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
 	dbThread, err := s.q.UpdateThreadSession(ctx, db.UpdateThreadSessionParams{
 		ID:        id,
@@ -176,7 +188,7 @@ func (s *store) FinalizeTask(ctx context.Context, id string, params thread.Final
 		if err != nil {
 			return fmt.Errorf("load task for finalization: %w", err)
 		}
-		if st.Kind != string(thread.KindTask) || st.Status != string(thread.StatusRunning) {
+		if st.Kind != string(thread.KindTask) || (st.Status != string(thread.StatusRunning) && st.Status != string(thread.StatusPending)) {
 			return nil
 		}
 		if _, err := q.AttributeTaskCostOnce(ctx, db.AttributeTaskCostOnceParams{
@@ -191,11 +203,17 @@ func (s *store) FinalizeTask(ctx context.Context, id string, params thread.Final
 			ID: st.ID, SessionID: st.SessionID, ParentSessionID: st.ParentSessionID,
 		})
 		if errors.Is(err, sql.ErrNoRows) {
-			// Another terminal contender won after the initial read. Roll back
-			// this transaction's tentative cost increment and report a no-op.
 			return errFinalizeLost
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return q.InsertTaskCompletionOutbox(ctx, db.InsertTaskCompletionOutboxParams{
+			TaskID: finalized.ID, TerminalAt: finalized.TerminalAt.Int64,
+			Status: finalized.Status, Error: finalized.Error, ResultSummary: finalized.ResultSummary,
+			CompletionDepth: finalized.CompletionDepth, CompletedAt: finalized.CompletedAt,
+			Name: finalized.Name, Goal: finalized.Goal, SessionID: finalized.SessionID, ParentSessionID: finalized.ParentSessionID,
+		})
 	})
 	if errors.Is(err, errFinalizeLost) {
 		st, getErr := s.Get(ctx, id)
@@ -218,14 +236,35 @@ func (s *store) ListPendingTaskCompletions(ctx context.Context) ([]thread.Thread
 	}
 	out := make([]thread.Thread, len(rows))
 	for i, row := range rows {
-		out[i] = fromDBItem(row)
+		out[i] = fromPendingDBRow(row)
 	}
 	return out, nil
 }
 
-func (s *store) MarkTaskCompletionDelivered(ctx context.Context, id string) error {
-	_, err := s.q.MarkTaskCompletionDelivered(ctx, id)
-	return err
+func (s *store) AcknowledgeTaskCompletionGeneration(ctx context.Context, id string, terminalAt int64) error {
+	if s.conn == nil {
+		return errors.New("thread store does not support transactions")
+	}
+	return db.InTx(ctx, s.conn, func(q *db.Queries) error {
+		if _, err := q.AcknowledgeTaskCompletionGeneration(ctx, db.AcknowledgeTaskCompletionGenerationParams{TaskID: id, TerminalAt: terminalAt}); err != nil {
+			return err
+		}
+		_, err := q.RefreshTaskCompletionPending(ctx, id)
+		return err
+	})
+}
+
+func fromPendingDBRow(item db.ListPendingTaskCompletionsRow) thread.Thread {
+	return fromDBItem(db.Thread{
+		ID: item.ID, Name: item.Name_2, ProjectPath: item.ProjectPath, Goal: item.Goal_2,
+		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
+		SessionID: item.SessionID_2, Status: item.Status_2, MergePolicy: item.MergePolicy,
+		ResultSummary: item.ResultSummary_2, Error: item.Error_2, CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt_2, Kind: item.Kind,
+		ParentSessionID: item.ParentSessionID_2, CompletionPending: 1,
+		CompletionDepth: item.CompletionDepth_2, TerminalAt: sql.NullInt64{Int64: item.TerminalAt_2, Valid: true},
+		CostAttributed: item.CostAttributed, Execution: item.Execution,
+	})
 }
 
 func fromDBItem(item db.Thread) thread.Thread {
@@ -250,6 +289,7 @@ func fromDBItem(item db.Thread) thread.Thread {
 		BaseBranch:   item.BaseBranch,
 		Branch:       item.Branch,
 		WorktreePath: item.WorktreePath,
+		Execution:    item.Execution,
 		MergePolicy:  thread.MergePolicy(item.MergePolicy),
 	}
 }

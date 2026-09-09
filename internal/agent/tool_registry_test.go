@@ -4,11 +4,13 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/toolmeta"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,8 +25,7 @@ var pinTestAllowedTools = []string{
 	tools.DownloadToolName, tools.EditToolName, tools.MultiEditToolName, tools.FetchToolName, tools.WebFetchToolName,
 	tools.WebSearchToolName, tools.GlobToolName, tools.GrepToolName, tools.RipgrepToolName, tools.LSToolName,
 	tools.TodosToolName, tools.ReadToolName, tools.WriteToolName,
-	tools.ThreadCreateToolName, tools.AgentListToolName, tools.AgentResultToolName, tools.AgentSendToolName,
-	tools.ThreadMergeToolName, tools.ThreadRemoveToolName,
+	tools.AgentListToolName, tools.AgentResultToolName, tools.AgentSendToolName,
 	tools.AgentListToolName, tools.AgentResultToolName, tools.AgentCancelToolName, tools.AgentSendToolName, tools.AgentOutputToolName,
 	tools.AskParentToolName, tools.QuestionToolName,
 	tools.DiagnosticsToolName, tools.ReferencesToolName, tools.LSPRestartToolName, tools.SymbolsToolName,
@@ -35,7 +36,7 @@ var pinTestAllowedTools = []string{
 // pinTestCoordinator builds a coordinator with the minimal hermetic
 // config buildTools needs (see newAgentToolTestCoordinator), with no
 // thread manager, no task manager, and no MCP servers wired — so the
-// thread_*, task_*, and MCP-server-dependent tools never gate open here,
+// agent_*, and MCP-server-dependent tools never gate open here,
 // and the resulting set is driven only by isSubAgent/interactive/
 // AllowedTools, which is what these tests pin.
 func pinTestCoordinator(t *testing.T, interactive bool) *coordinator {
@@ -90,6 +91,23 @@ func searchToolName() string {
 // regression net for buildTools' registry table: dropping a row, or
 // loosening a gate, changes what the model is allowed to do — see
 // tool_registry.go's toolSpec doc comment.
+func TestGeneratedPromptAndToolsExcludeRemovedThreadCalls(t *testing.T) {
+	coord := pinTestCoordinator(t, false)
+	coord.cfg.Config().Options.DisabledSkills = nil
+
+	p, err := coderPrompt(prompt.WithWorkingDir(coord.cfg.WorkingDir()))
+	require.NoError(t, err)
+	systemPrompt, err := p.Build(t.Context(), "mock", "mock-model", coord.cfg)
+	require.NoError(t, err)
+	built, err := coord.builder.buildTools(t.Context(), config.Agent{Name: "coder", AllowedTools: toolmeta.NamesAll()}, false, coord.delegation.runtimeInputs())
+	require.NoError(t, err)
+
+	for _, removed := range []string{"thread_create", "thread_merge", "thread_remove"} {
+		require.NotContains(t, systemPrompt, removed)
+		require.NotContains(t, toolNames(t, built), removed)
+	}
+}
+
 func TestBuildToolsPinnedSet_Coder(t *testing.T) {
 	coord := pinTestCoordinator(t, false)
 	agent := config.Agent{Name: "coder", AllowedTools: pinTestAllowedTools}
@@ -107,7 +125,7 @@ func TestBuildToolsPinnedSet_Coder(t *testing.T) {
 		tools.DiagnosticsToolName, tools.ReferencesToolName, tools.LSPRestartToolName, tools.SymbolsToolName,
 		tools.DefinitionToolName, tools.CallHierarchyToolName, tools.RenameToolName, tools.ReplaceSymbolToolName,
 		// Absent despite being allowed: no thread manager, no task
-		// manager, and not interactive — question, thread_*, and task_*
+		// manager, and not interactive — question and agent_*
 		// all gate on those, not on AllowedTools.
 	}
 	slices.Sort(expected)
@@ -117,7 +135,7 @@ func TestBuildToolsPinnedSet_Coder(t *testing.T) {
 // TestBuildToolsPinnedSet_SubAgent pins the sub-agent build against the
 // exact same AllowedTools superset as the coder test above. The only
 // thing that can explain a difference between the two sets is
-// isSubAgent: ask_parent, question, thread_*, and task_* are gated on
+// isSubAgent: ask_parent, question and agent_* are gated on
 // !isSubAgent regardless of what AllowedTools says, which is the
 // coder/sub-agent split this task calls out as security-relevant.
 func TestBuildToolsPinnedSet_SubAgent(t *testing.T) {

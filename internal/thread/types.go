@@ -187,5 +187,6 @@ type Thread struct {
 	BaseBranch   string
 	Branch       string
 	WorktreePath string
+	Execution    string
 	MergePolicy  MergePolicy
 }
