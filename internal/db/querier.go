@@ -136,7 +136,12 @@ type Querier interface {
 	// asking for threads never sees another delegation kind sharing this
 	// table. The generic lifecycle recovery sweep must NOT use this query;
 	// see ListThreadsAll.
-	ListThreads(ctx context.Context, projectPath string) ([]Thread, error)
+	// execution is deliberately not selected: it holds the delegation
+	// snapshot, which embeds the full prior history of a delegated session and
+	// runs to tens of megabytes per row. No list caller reads it (only
+	// GetThread's single-row callers do, on resume), so selecting it here made
+	// every listing drag hundreds of megabytes through memory.
+	ListThreads(ctx context.Context, projectPath string) ([]ListThreadsRow, error)
 	// Every delegation kind sharing this table (threads today, tasks once
 	// they exist), scoped to project_path but not kind. This is the listing
 	// the generic lifecycle recovery sweep uses: recovery must reconcile
@@ -144,7 +149,12 @@ type Querier interface {
 	// "running" when the process died would never be caught and would sit
 	// displayed as active forever. Not for thread-facing callers; see
 	// ListThreads.
-	ListThreadsAll(ctx context.Context, projectPath string) ([]Thread, error)
+	// execution is deliberately not selected: it holds the delegation
+	// snapshot, which embeds the full prior history of a delegated session and
+	// runs to tens of megabytes per row. No list caller reads it (only
+	// GetThread's single-row callers do, on resume), so selecting it here made
+	// every listing drag hundreds of megabytes through memory.
+	ListThreadsAll(ctx context.Context, projectPath string) ([]ListThreadsAllRow, error)
 	// Every delegation across every project, trimmed to the columns `sennit
 	// gc` needs to pick finished ones older than the retention cutoff.
 	// Unscoped by project_path; the caller filters by project in Go for

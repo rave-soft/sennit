@@ -165,7 +165,7 @@ func (s *testStoreDB) List(ctx context.Context) ([]Thread, error) {
 	}
 	out := make([]Thread, len(rows))
 	for i, r := range rows {
-		out[i] = testFromDBItem(r)
+		out[i] = testFromListRow(db.ListThreadsAllRow(r))
 	}
 	return out, nil
 }
@@ -177,7 +177,7 @@ func (s *testStoreDB) ListAll(ctx context.Context) ([]Thread, error) {
 	}
 	out := make([]Thread, len(rows))
 	for i, r := range rows {
-		out[i] = testFromDBItem(r)
+		out[i] = testFromListRow(r)
 	}
 	return out, nil
 }
@@ -301,6 +301,21 @@ func testFromPendingDBRow(item db.ListPendingTaskCompletionsRow) Thread {
 		ParentSessionID: item.ParentSessionID_2, CompletionPending: 1,
 		CompletionDepth: item.CompletionDepth_2, TerminalAt: sql.NullInt64{Int64: item.TerminalAt_2, Valid: true},
 		CostAttributed: item.CostAttributed, Execution: item.Execution,
+	})
+}
+
+// testFromListRow mirrors threadspawn.fromListRow: listing rows carry no
+// execution snapshot, so Execution is left zero here too.
+func testFromListRow(item db.ListThreadsAllRow) Thread {
+	return testFromDBItem(db.Thread{
+		ID: item.ID, Name: item.Name, ProjectPath: item.ProjectPath, Goal: item.Goal,
+		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
+		SessionID: item.SessionID, Status: item.Status,
+		ResultSummary: item.ResultSummary, Error: item.Error, CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt, Kind: item.Kind,
+		ParentSessionID: item.ParentSessionID, CompletionPending: item.CompletionPending,
+		CompletionDepth: item.CompletionDepth, TerminalAt: item.TerminalAt,
+		CostAttributed: item.CostAttributed,
 	})
 }
 

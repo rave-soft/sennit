@@ -116,8 +116,13 @@ func TestAgentIsolationAdmissionMatrix(t *testing.T) {
 				require.Equal(t, thread.StatusCompleted, task.Status, task.Error)
 				require.Equal(t, parent.ID, task.ParentSessionID)
 				require.Equal(t, 1, task.CompletionDepth)
+				// The snapshot is read back through Get, not from the
+				// listing above: listings deliberately omit the execution
+				// column, which is only needed on resume.
+				stored, err := boot.App.TaskManager().Get(t.Context(), task.ID)
+				require.NoError(t, err)
 				var spec agent.DelegationExecution
-				require.NoError(t, json.Unmarshal([]byte(task.Execution), &spec))
+				require.NoError(t, json.Unmarshal([]byte(stored.Execution), &spec))
 				require.Equal(t, task.SessionID, spec.SessionID)
 				require.Equal(t, "Matrix child title", spec.SessionTitle)
 				require.Equal(t, 1, spec.Depth)

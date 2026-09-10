@@ -108,7 +108,7 @@ func (s *store) List(ctx context.Context) ([]thread.Thread, error) {
 	}
 	threads := make([]thread.Thread, len(dbThreads))
 	for i, dbThread := range dbThreads {
-		threads[i] = fromDBItem(dbThread)
+		threads[i] = fromListRow(db.ListThreadsAllRow(dbThread))
 	}
 	return threads, nil
 }
@@ -120,7 +120,7 @@ func (s *store) ListAll(ctx context.Context) ([]thread.Thread, error) {
 	}
 	threads := make([]thread.Thread, len(dbThreads))
 	for i, dbThread := range dbThreads {
-		threads[i] = fromDBItem(dbThread)
+		threads[i] = fromListRow(dbThread)
 	}
 	return threads, nil
 }
@@ -253,6 +253,27 @@ func fromPendingDBRow(item db.ListPendingTaskCompletionsRow) thread.Thread {
 		ParentSessionID: item.ParentSessionID_2, CompletionPending: 1,
 		CompletionDepth: item.CompletionDepth_2, TerminalAt: sql.NullInt64{Int64: item.TerminalAt_2, Valid: true},
 		CostAttributed: item.CostAttributed, Execution: item.Execution,
+	})
+}
+
+// fromListRow maps a listing row, which deliberately carries no execution
+// snapshot (see the ListThreads queries): the column runs to tens of
+// megabytes per row and no list caller reads it. The two listing queries
+// select identical columns, so ListThreadsRow converts to ListThreadsAllRow
+// directly and only one mapper is needed.
+//
+// Execution is left zero rather than faked, so a caller that ever does need
+// the snapshot gets it from Get, not silently from a listing.
+func fromListRow(item db.ListThreadsAllRow) thread.Thread {
+	return fromDBItem(db.Thread{
+		ID: item.ID, Name: item.Name, ProjectPath: item.ProjectPath, Goal: item.Goal,
+		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
+		SessionID: item.SessionID, Status: item.Status,
+		ResultSummary: item.ResultSummary, Error: item.Error, CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt, Kind: item.Kind,
+		ParentSessionID: item.ParentSessionID, CompletionPending: item.CompletionPending,
+		CompletionDepth: item.CompletionDepth, TerminalAt: item.TerminalAt,
+		CostAttributed: item.CostAttributed,
 	})
 }
 

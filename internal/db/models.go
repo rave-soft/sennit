@@ -66,6 +66,21 @@ type Session struct {
 	ModelID          string         `json:"model_id"`
 }
 
+type SessionWorktreeOwnership struct {
+	SessionID          string `json:"session_id"`
+	OwnerID            string `json:"owner_id"`
+	OwnerRoot          string `json:"owner_root"`
+	WorktreeName       string `json:"worktree_name"`
+	WorktreePath       string `json:"worktree_path"`
+	Phase              string `json:"phase"`
+	TargetOwnerID      string `json:"target_owner_id"`
+	TargetRoot         string `json:"target_root"`
+	TargetWorktreeName string `json:"target_worktree_name"`
+	TargetWorktreePath string `json:"target_worktree_path"`
+	Epoch              int64  `json:"epoch"`
+	UpdatedAt          int64  `json:"updated_at"`
+}
+
 type TaskCompletionOutbox struct {
 	TaskID          string        `json:"task_id"`
 	TerminalAt      int64         `json:"terminal_at"`

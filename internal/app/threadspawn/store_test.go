@@ -39,9 +39,14 @@ func TestStore_ExecutionSurvivesReopen(t *testing.T) {
 	require.Equal(t, "child", got.SessionID)
 	require.Equal(t, "parent", got.ParentSessionID)
 	require.Equal(t, "/isolated", got.WorktreePath)
+	// A listing does not carry the execution snapshot: the column holds a
+	// delegation's full prior history and is only ever read back through
+	// Get, on resume. Everything else about the row must still match.
 	rows, err := reopened.ListAll(ctx)
 	require.NoError(t, err)
-	require.Equal(t, []thread.Thread{got}, rows)
+	withoutExecution := got
+	withoutExecution.Execution = ""
+	require.Equal(t, []thread.Thread{withoutExecution}, rows)
 }
 
 func TestStore_CreateReturnsErrNameTakenOnDuplicateName(t *testing.T) {

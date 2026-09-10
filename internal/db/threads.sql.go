@@ -461,26 +461,57 @@ func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath st
 }
 
 const listThreads = `-- name: ListThreads :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ? AND kind = 'thread'
 ORDER BY created_at
 `
+
+type ListThreadsRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
 
 // Thread-facing: thread_list, the dashboard, and any other caller that
 // means "threads" specifically. Scoped to kind = 'thread' so a caller
 // asking for threads never sees another delegation kind sharing this
 // table. The generic lifecycle recovery sweep must NOT use this query;
 // see ListThreadsAll.
-func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread, error) {
+// execution is deliberately not selected: it holds the delegation
+// snapshot, which embeds the full prior history of a delegated session and
+// runs to tens of megabytes per row. No list caller reads it (only
+// GetThread's single-row callers do, on resume), so selecting it here made
+// every listing drag hundreds of megabytes through memory.
+func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]ListThreadsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreads, projectPath)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Thread{}
+	items := []ListThreadsRow{}
 	for rows.Next() {
-		var i Thread
+		var i ListThreadsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -502,7 +533,6 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 			&i.CompletionDepth,
 			&i.TerminalAt,
 			&i.CostAttributed,
-			&i.Execution,
 		); err != nil {
 			return nil, err
 		}
@@ -518,11 +548,37 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 }
 
 const listThreadsAll = `-- name: ListThreadsAll :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ?
 ORDER BY created_at
 `
+
+type ListThreadsAllRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
 
 // Every delegation kind sharing this table (threads today, tasks once
 // they exist), scoped to project_path but not kind. This is the listing
@@ -531,15 +587,20 @@ ORDER BY created_at
 // "running" when the process died would never be caught and would sit
 // displayed as active forever. Not for thread-facing callers; see
 // ListThreads.
-func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thread, error) {
+// execution is deliberately not selected: it holds the delegation
+// snapshot, which embeds the full prior history of a delegated session and
+// runs to tens of megabytes per row. No list caller reads it (only
+// GetThread's single-row callers do, on resume), so selecting it here made
+// every listing drag hundreds of megabytes through memory.
+func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]ListThreadsAllRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreadsAll, projectPath)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Thread{}
+	items := []ListThreadsAllRow{}
 	for rows.Next() {
-		var i Thread
+		var i ListThreadsAllRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -561,7 +622,6 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 			&i.CompletionDepth,
 			&i.TerminalAt,
 			&i.CostAttributed,
-			&i.Execution,
 		); err != nil {
 			return nil, err
 		}

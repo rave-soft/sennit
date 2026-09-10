@@ -61,7 +61,15 @@ WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1;
 -- asking for threads never sees another delegation kind sharing this
 -- table. The generic lifecycle recovery sweep must NOT use this query;
 -- see ListThreadsAll.
-SELECT *
+-- execution is deliberately not selected: it holds the delegation
+-- snapshot, which embeds the full prior history of a delegated session and
+-- runs to tens of megabytes per row. No list caller reads it (only
+-- GetThread's single-row callers do, on resume), so selecting it here made
+-- every listing drag hundreds of megabytes through memory.
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ? AND kind = 'thread'
 ORDER BY created_at;
@@ -74,7 +82,15 @@ ORDER BY created_at;
 -- "running" when the process died would never be caught and would sit
 -- displayed as active forever. Not for thread-facing callers; see
 -- ListThreads.
-SELECT *
+-- execution is deliberately not selected: it holds the delegation
+-- snapshot, which embeds the full prior history of a delegated session and
+-- runs to tens of megabytes per row. No list caller reads it (only
+-- GetThread's single-row callers do, on resume), so selecting it here made
+-- every listing drag hundreds of megabytes through memory.
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ?
 ORDER BY created_at;
