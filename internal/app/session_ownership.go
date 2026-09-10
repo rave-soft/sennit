@@ -7,6 +7,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/session"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 )
 
@@ -127,12 +128,25 @@ func (app *App) UnregisterSessionOwnership() {
 }
 
 // ResolveCurrentSessionOwner maps durable identity to a registered live App.
-// Missing or stale registrations resolve to nil so the outbox remains pending.
+// Stale registrations resolve to nil so the outbox remains pending.
+//
+// A session with no durable ownership row at all is a different case from a
+// stale one, and resolves to this App: the row is written by the worktree
+// transfer flow alone (ClaimSessionOwnership), so its absence means no
+// transfer has ever touched this session and nothing else can be its owner.
+// Treating that as unresolvable made every delegation completion in an
+// ordinary session undeliverable - thread.Manager.resolveDeliveryTarget asks
+// this and nothing else once a resolver is wired - so a finished delegation
+// was dropped with "no resolvable parent" and the parent session, waiting on
+// a report that would never arrive, simply stopped.
 func (app *App) ResolveCurrentSessionOwner(ctx context.Context, sessionID string) *App {
 	if app.ownership == nil {
 		return nil
 	}
 	o, err := app.ownership.Get(ctx, sessionID)
+	if errors.Is(err, session.ErrNotFound) {
+		return app
+	}
 	if err != nil {
 		return nil
 	}

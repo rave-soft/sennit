@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
+	"github.com/rave-soft/sennit/internal/session"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 )
@@ -232,4 +233,27 @@ func TestSessionTransferGateRejectsUnfinishedToolsWithoutMutation(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, "stable", got.Phase)
 	require.Equal(t, "main", got.OwnerID)
+}
+
+// A session nothing ever transferred has no ownership row at all, and must
+// still resolve to the App it is running in: this is what
+// thread.Manager.resolveDeliveryTarget asks before handing a finished
+// delegation's report to the parent session, and a nil answer there drops
+// the report entirely - leaving the parent waiting on an answer that never
+// comes.
+func TestResolveCurrentSessionOwnerResolvesUnclaimedSessionToItsOwnApp(t *testing.T) {
+	dataDir := t.TempDir()
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
+	sessions := sessionstore.NewService(db.New(conn), conn, dataDir)
+	sess, err := sessions.Create(t.Context(), "never transferred")
+	require.NoError(t, err)
+	owners := sessionstore.NewOwnershipStore(conn)
+	a := ownershipTestApp(t, "main", owners)
+	a.ReportCurrentSession(sess.ID)
+
+	_, err = owners.Get(t.Context(), sess.ID)
+	require.ErrorIs(t, err, session.ErrNotFound)
+	require.Same(t, a, a.ResolveCurrentSessionOwner(t.Context(), sess.ID))
 }
