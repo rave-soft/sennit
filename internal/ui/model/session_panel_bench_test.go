@@ -159,6 +159,26 @@ func BenchmarkSessionPanelUpdateTick(b *testing.B) {
 	}
 }
 
+// fastestFrameTime runs round and returns the cheapest result of rounds
+// attempts.
+//
+// A wall-clock ceiling on a shared CI runner does not fail when the draw
+// path regresses; it fails when the runner is descheduled mid-measurement.
+// This budget has been tripped by a 16ms reading of a frame whose real
+// cost is ~0.3ms — a 50x excursion that says nothing about the code. The
+// minimum across rounds is the robust estimator for that: noise only ever
+// adds time, so the cheapest round is the one least polluted by it, while
+// a genuine regression lifts every round, floor included.
+func fastestFrameTime(round func() time.Duration, rounds int) time.Duration {
+	best := round()
+	for range rounds - 1 {
+		if got := round(); got < best {
+			best = got
+		}
+	}
+	return best
+}
+
 // sessionPanelDrawBudget is the frame-time ceiling TestSessionPanelDrawFrameBudget
 // enforces. Measured Draw time against the fixture below is ~0.3ms; the
 // ceiling is set generously above that (not tight to the measurement) to
@@ -199,12 +219,14 @@ func TestSessionPanelDrawFrameBudget(t *testing.T) {
 	// are what must stay fast) before timing.
 	u.Draw(scr, area)
 
-	const iterations = 50
-	start := time.Now()
-	for range iterations {
-		u.Draw(scr, area)
-	}
-	elapsed := time.Since(start) / iterations
+	elapsed := fastestFrameTime(func() time.Duration {
+		const iterations = 50
+		start := time.Now()
+		for range iterations {
+			u.Draw(scr, area)
+		}
+		return time.Since(start) / iterations
+	}, 5)
 
 	require.Lessf(t, elapsed, sessionPanelDrawBudget,
 		"Draw() over a busy session panel averaged %s per frame, want < %s", elapsed, sessionPanelDrawBudget)

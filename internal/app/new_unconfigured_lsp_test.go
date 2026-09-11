@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config/configtest"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
@@ -43,7 +43,12 @@ func TestNewCanonicalizesDefaultAndOverriddenProjectPath(t *testing.T) {
 
 	defaultApp, err := New(t.Context(), conn, store, manager, WithProjectPath(""))
 	require.NoError(t, err)
-	require.Equal(t, workingDir, defaultApp.ProjectPath())
+	// The expected side is canonicalized, not the input: New is supposed to
+	// canonicalize what it is given, and t.TempDir hands back an aliased
+	// spelling on macOS (/var -> /private/var) and an 8.3 short name on
+	// Windows. Comparing against the raw temp dir asserted that New leaves
+	// those alone, which is the opposite of this test's point.
+	require.Equal(t, fsext.Canonical(workingDir), defaultApp.ProjectPath())
 	defaultApp.Shutdown()
 
 	conn, err = db.Connect(t.Context(), dataDir)
@@ -52,7 +57,7 @@ func TestNewCanonicalizesDefaultAndOverriddenProjectPath(t *testing.T) {
 	overridden, err := New(t.Context(), conn, store, manager, WithProjectPath(override))
 	require.NoError(t, err)
 	t.Cleanup(overridden.Shutdown)
-	require.Equal(t, filepath.Join(workingDir, "project"), overridden.ProjectPath())
+	require.Equal(t, fsext.Canonical(override), overridden.ProjectPath())
 }
 
 func TestNew_UnconfiguredProviderStillWiresLSPCallback(t *testing.T) {

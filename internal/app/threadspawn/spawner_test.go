@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -78,8 +79,11 @@ func TestLocalSpawnerResumeValidatesPersistedDelegationOwnership(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Cleanup(db.ResetPool)
 
-	project := t.TempDir()
-	worktree := t.TempDir()
+	// Canonical for the reason attach_test.go gives: the app canonicalizes
+	// these, and both are written into rows the assertions read back, so
+	// the test has to speak the same spelling the app stores.
+	project := fsext.Canonical(t.TempDir())
+	worktree := fsext.Canonical(t.TempDir())
 	spawner := NewLocalSpawnerWithProjectPath(nil, nil, nil, nil, func() string { return project })
 	first, err := spawner.Spawn(t.Context(), thread.SpawnRequest{Path: worktree})
 	require.NoError(t, err)

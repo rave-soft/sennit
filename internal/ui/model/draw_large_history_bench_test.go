@@ -100,12 +100,17 @@ func TestDrawFrameCostIsHistoryIndependent(t *testing.T) {
 		area := uv.Rectangle{Max: uv.Position{X: w, Y: h}}
 
 		u.Draw(scr, area) // fill the caches; the steady state is what matters
-		const frames = 50
-		start := time.Now()
-		for range frames {
-			u.Draw(scr, area)
-		}
-		return time.Since(start) / frames
+		// Built once, timed several times: the fixture is the expensive
+		// part, and only the cheapest timing round is kept (see
+		// fastestFrameTime).
+		return fastestFrameTime(func() time.Duration {
+			const frames = 50
+			start := time.Now()
+			for range frames {
+				u.Draw(scr, area)
+			}
+			return time.Since(start) / frames
+		}, 5)
 	}
 
 	small := measure(200)

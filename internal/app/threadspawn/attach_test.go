@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
@@ -45,7 +46,11 @@ func newAttachTestAppWithOptions(t *testing.T, path string, opts app.BootstrapOp
 
 func TestAttachUsesEffectiveParentProjectForThreadRows(t *testing.T) {
 	repo := initRepo(t)
-	parentProject := t.TempDir()
+	// Canonical, because the app canonicalizes the project path it is
+	// given and t.TempDir returns an aliased spelling on macOS and an
+	// 8.3 short name on Windows. This test is about which project a
+	// thread row is scoped to, not about path spelling.
+	parentProject := fsext.Canonical(t.TempDir())
 	a := newAttachTestAppWithOptions(t, repo, app.BootstrapOptions{ProjectPath: parentProject})
 	a.SetSessionsForTest(&attachFakeSessions{})
 	a.SetAgentCoordinatorForTest(&attachFakeCoordinator{})

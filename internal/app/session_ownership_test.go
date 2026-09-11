@@ -1,8 +1,12 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
+
+	"github.com/rave-soft/sennit/internal/fsext"
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/configtest"
@@ -149,18 +153,49 @@ func TestResolveCurrentSessionOwnerRejectsStaleRegistryEntry(t *testing.T) {
 	require.Same(t, second, first.ResolveCurrentSessionOwner(t.Context(), sess.ID))
 }
 
+// rootKind selects which of a test's two real directories a case means,
+// so the table can name roots without spelling out paths that only exist
+// once the subtest has created them.
+type rootKind int
+
+const (
+	rootUnset rootKind = iota
+	rootMain
+	rootWorktree
+)
+
 func TestRecoverSessionOwnershipCoversStableAndPreparingRoots(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		sourceRoot string
-		targetRoot string
+		name   string
+		source rootKind
+		target rootKind
 	}{
-		{name: "stable main restart", sourceRoot: "/repo"},
-		{name: "stable worktree restart", sourceRoot: "/repo/worktree"},
-		{name: "preparing enter rolls back to main", sourceRoot: "/repo", targetRoot: "/repo/worktree"},
-		{name: "preparing exit rolls back to worktree", sourceRoot: "/repo/worktree", targetRoot: "/repo"},
+		{name: "stable main restart", source: rootMain},
+		{name: "stable worktree restart", source: rootWorktree},
+		{name: "preparing enter rolls back to main", source: rootMain, target: rootWorktree},
+		{name: "preparing exit rolls back to worktree", source: rootWorktree, target: rootMain},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// Real directories rather than "/repo" literals: the app
+			// canonicalizes the working dir it is configured with, and on
+			// Windows a POSIX-looking literal canonicalizes to a
+			// drive-qualified path ("/repo" -> "d:\\repo"), so the literal
+			// could never equal what came back.
+			repoRoot := fsext.Canonical(t.TempDir())
+			worktreeRoot := filepath.Join(repoRoot, "worktree")
+			require.NoError(t, os.MkdirAll(worktreeRoot, 0o755))
+			resolveRoot := func(kind rootKind) string {
+				if kind == rootWorktree {
+					return worktreeRoot
+				}
+				return repoRoot
+			}
+			sourceRoot := resolveRoot(tc.source)
+			targetRoot := ""
+			if tc.target != rootUnset {
+				targetRoot = resolveRoot(tc.target)
+			}
+
 			dataDir := t.TempDir()
 			conn, err := db.Connect(t.Context(), dataDir)
 			require.NoError(t, err)
@@ -170,25 +205,25 @@ func TestRecoverSessionOwnershipCoversStableAndPreparingRoots(t *testing.T) {
 			require.NoError(t, err)
 			owners := sessionstore.NewOwnershipStore(conn)
 			first := NewForTest(t.Context())
-			first.SetConfigForTest(configtest.NewStore(t, &config.Config{}, configtest.WithWorkingDir(tc.sourceRoot)))
+			first.SetConfigForTest(configtest.NewStore(t, &config.Config{}, configtest.WithWorkingDir(sourceRoot)))
 			first.SetOwnershipForTest(owners, "dead")
 			first.ReportCurrentSession(sess.ID)
 			initial, err := first.ClaimSessionOwnership(t.Context(), sess.ID)
 			require.NoError(t, err)
-			if tc.targetRoot != "" {
-				require.NoError(t, owners.Prepare(t.Context(), sess.ID, initial.OwnerID, initial.Epoch, sessionstore.Ownership{OwnerID: "target", OwnerRoot: tc.targetRoot}))
+			if targetRoot != "" {
+				require.NoError(t, owners.Prepare(t.Context(), sess.ID, initial.OwnerID, initial.Epoch, sessionstore.Ownership{OwnerID: "target", OwnerRoot: targetRoot}))
 			}
 			first.UnregisterSessionOwnership()
 
 			restarted := NewForTest(t.Context())
 			t.Cleanup(restarted.ShutdownForTest)
-			restarted.SetConfigForTest(configtest.NewStore(t, &config.Config{}, configtest.WithWorkingDir(tc.sourceRoot)))
+			restarted.SetConfigForTest(configtest.NewStore(t, &config.Config{}, configtest.WithWorkingDir(sourceRoot)))
 			restarted.SetOwnershipForTest(owners, "restarted")
 			restarted.ReportCurrentSession(sess.ID)
 			recovered, err := restarted.RecoverSessionOwnership(t.Context(), sess.ID)
 			require.NoError(t, err)
 			require.Equal(t, "restarted", recovered.OwnerID)
-			require.Equal(t, tc.sourceRoot, recovered.OwnerRoot)
+			require.Equal(t, sourceRoot, recovered.OwnerRoot)
 			require.Equal(t, "stable", recovered.Phase)
 			require.Equal(t, initial.Epoch+1, recovered.Epoch)
 			var staleMutation atomic.Bool
