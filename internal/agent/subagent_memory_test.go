@@ -361,8 +361,7 @@ func TestRunNamedAgent_CarriesEarlierConversationThroughTheRealToolPath(t *testi
 
 	co := authTestCoordinator(t, withProvider(func(p *config.ProviderConfig) {
 		p.BaseURL = srv.URL + "/v1"
-	}))
-	co.cfg.Config().Agents["reviewer"] = config.Agent{
+	}), withAgent("reviewer", config.Agent{
 		ID: "reviewer", Name: "Reviewer", Description: "Reviews a diff.", Prompt: "You review.",
 		// A real user-defined agent has to declare its own tool access
 		// (filterToolsByAllowlist keeps only what AllowedTools names); an
@@ -370,7 +369,7 @@ func TestRunNamedAgent_CarriesEarlierConversationThroughTheRealToolPath(t *testi
 		// title-generation request below, which this test tells apart by
 		// whether "tools" is present.
 		AllowedTools: []string{"bash"},
-	}
+	}))
 	co.SetDelegationTools(nil, &factoryRunningTaskManager{sessions: co.sessions})
 
 	tool, err := co.delegation.agentTool(t.Context(), newAgentConfig(co.cfg.Config()), true)

@@ -42,9 +42,26 @@ type authCoordSettings struct {
 	globalDataJSON   string
 	providerID       string
 	accountsStore    accounts.Store
+	agents           map[string]config.Agent
 }
 
 type authCoordOpt func(*authCoordSettings)
+
+// withAgent installs an agent definition before the coordinator is built.
+//
+// A test must not write to cfg.Config().Agents after authTestCoordinator
+// returns: NewCoordinator launches the readiness goroutines that read that
+// map (delegationFinalizer.agentTool, through runtimeInputs), so a later
+// write is a data race — one the race detector caught in
+// TestRunNamedAgent_CarriesEarlierConversationThroughTheRealToolPath.
+func withAgent(id string, definition config.Agent) authCoordOpt {
+	return func(s *authCoordSettings) {
+		if s.agents == nil {
+			s.agents = make(map[string]config.Agent)
+		}
+		s.agents[id] = definition
+	}
+}
 
 // withNotify installs a notification publisher on the coordinator, e.g. a
 // recordingNotifier, so a test can assert on published notify.Notification
@@ -209,6 +226,11 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 	coderCfg := cfg.Config().Agents[config.AgentCoder]
 	coderCfg.AllowedTools = nil
 	cfg.Config().Agents[config.AgentCoder] = coderCfg
+
+	// Before NewCoordinator, for the reason withAgent documents.
+	for id, definition := range s.agents {
+		cfg.Config().Agents[id] = definition
+	}
 
 	var credOpts []credentials.Option
 	if s.exchangeToken != nil {
