@@ -25,25 +25,32 @@ func TestMixedTaskRuntimesShareAdmissionLimits(t *testing.T) {
 		handle, err := spawner.Spawn(ctx, thread.SpawnRequest{Path: args.WorktreePath})
 		return thread.TaskRuntime{Handle: handle, Spawner: spawner, Factory: factory}, err
 	})
-	for index := range 4 {
+	// Read off the caps rather than spelling them out: the point of this
+	// test is that both isolation modes draw on one budget, not what the
+	// budget currently is. Parents are filled one at a time, so the parent
+	// cap is reached first and the workspace cap exactly at the end.
+	perParent := thread.MaxActiveTasksPerParentTurnForTest
+	perWorkspace := thread.MaxActiveTasksPerWorkspaceForTest
+	for index := range perWorkspace {
 		isolation := ""
 		if index%2 == 1 {
 			isolation = "worktree"
 		}
-		_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: fmt.Sprintf("task %d", index), ParentSessionID: fmt.Sprintf("parent %d", index/2), Isolation: isolation, Factory: factory})
+		parent := fmt.Sprintf("parent %d", index/perParent)
+		_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: fmt.Sprintf("task %d", index), ParentSessionID: parent, Isolation: isolation, Factory: factory})
 		require.NoError(t, err)
-		if index == 1 {
+		if index == perParent-1 {
 			for _, mode := range []string{"", "worktree"} {
 				_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "parent overflow", ParentSessionID: "parent 0", Isolation: mode, Factory: factory})
-				require.ErrorContains(t, err, "limit 2")
+				require.ErrorContains(t, err, fmt.Sprintf("limit %d", perParent))
 			}
 		}
 	}
 	for _, mode := range []string{"", "worktree"} {
 		_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "workspace overflow", ParentSessionID: "another parent", Isolation: mode, Factory: factory})
-		require.ErrorContains(t, err, "limit 4")
+		require.ErrorContains(t, err, fmt.Sprintf("limit %d", perWorkspace))
 	}
 	rows, err := tasks.List(t.Context())
 	require.NoError(t, err)
-	require.Len(t, rows, 4)
+	require.Len(t, rows, perWorkspace, "every admitted task is stored, and nothing past the cap was")
 }

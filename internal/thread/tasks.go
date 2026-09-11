@@ -15,11 +15,13 @@ import (
 // maxActiveTasksPerWorkspace and maxActiveTasksPerParentTurn bound
 // concurrent task delegations. They are hard constants, not configuration:
 // every task shares its parent App's working directory and
-// permission.Service, so beyond a small number extra concurrency just
-// queues behind the same gate and contends for the same files rather than
-// getting more done. The cascade depth limit (maxTaskCascadeDepth,
-// internal/agent) bounds how deep a chain of delegations runs; these bound
-// how wide it gets at any one level.
+// permission.Service, so past some width extra concurrency stops buying
+// throughput: it queues behind the same gate and contends for the same
+// files. These bound that width rather than tune it — they sit well above
+// what a normal fan-out uses, so they act as a backstop against a runaway
+// cascade, not as a throttle on ordinary work. The cascade depth limit
+// (maxTaskCascadeDepth, internal/agent) bounds how deep a chain of
+// delegations runs; these bound how wide it gets at any one level.
 //
 // maxActiveTasksPerParentTurn is half of maxActiveTasksPerWorkspace so one
 // turn's fan-out can never claim the whole budget. Threads don't count
@@ -28,8 +30,8 @@ import (
 // is enforced simply by scope: the counts below are computed from List,
 // which is already Kind-scoped to tasks.
 const (
-	maxActiveTasksPerWorkspace  = 4
-	maxActiveTasksPerParentTurn = 2
+	maxActiveTasksPerWorkspace  = 20
+	maxActiveTasksPerParentTurn = 10
 )
 
 // TaskCreateArgs holds the inputs to [TaskManager.Create].
