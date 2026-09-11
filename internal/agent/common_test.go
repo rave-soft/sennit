@@ -28,6 +28,7 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 
 	_ "github.com/joho/godotenv/autoload"
@@ -104,7 +105,13 @@ func testEnvAt(t *testing.T, workingDir string) fakeEnv {
 	err := os.MkdirAll(workingDir, 0o755)
 	require.NoError(t, err)
 
-	conn, err := db.Connect(t.Context(), t.TempDir())
+	dataDir := t.TempDir()
+	// Registered before the cleanup below, so LIFO runs it after the
+	// release and just before TempDir's own RemoveAll: it reports a still
+	// open handle here on Linux, where the removal would otherwise succeed
+	// silently and only fail on Windows.
+	testenv.AssertRemovableOnWindows(t, dataDir)
+	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
 	q := db.New(conn)
@@ -125,7 +132,12 @@ func testEnvAt(t *testing.T, workingDir string) fakeEnv {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = messages.Close(closeCtx)
 		cancel()
-		_ = conn.Close()
+		// Release, not conn.Close: Connect hands out a refcounted pooled
+		// handle, and closing it directly leaves the pool holding an entry
+		// for a database that is already closed. Release is the counterpart
+		// that drops the entry and then closes, which is what actually lets
+		// Windows delete the file underneath it.
+		_ = db.Release(dataDir)
 		_ = os.RemoveAll(workingDir)
 	})
 

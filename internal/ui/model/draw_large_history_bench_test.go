@@ -82,6 +82,9 @@ func BenchmarkDrawLargeHistory(b *testing.B) {
 // frame — reaching for the whole item list to recompute a height or a
 // count — reintroduces it without looking wrong.
 func TestDrawFrameCostIsHistoryIndependent(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("wall-clock frame budget measures the race detector's 2-20x instrumentation, not the draw path")
+	}
 	measure := func(count int) time.Duration {
 		u := newSessionPanelBenchUI()
 		items := make([]chat.MessageItem, 0, count)

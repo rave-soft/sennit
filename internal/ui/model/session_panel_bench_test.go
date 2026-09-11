@@ -198,6 +198,9 @@ const sessionPanelDrawBudget = 8 * time.Millisecond
 // RunningDelegations O(N)-per-call regression this file's fix addresses.
 func TestSessionPanelDrawFrameBudget(t *testing.T) {
 	if raceDetectorEnabled {
+		t.Skip("wall-clock frame budget measures the race detector's 2-20x instrumentation, not the draw path")
+	}
+	if raceDetectorEnabled {
 		// The race detector instruments every memory access, adding a
 		// 2-20x slowdown that has nothing to do with Draw()'s own cost —
 		// asserting a wall-clock budget here would measure the detector,
