@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -70,9 +69,8 @@ func TestManager_CreateDispatchesGoalWithAgentOrigin(t *testing.T) {
 	mgr, spawner := newTestManager(t, repo)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "origin-goal",
-		Goal:        "implement the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "origin-goal",
+		Goal: "implement the thing",
 	})
 	require.NoError(t, err)
 
@@ -90,9 +88,8 @@ func TestManager_CreateHappyPath(t *testing.T) {
 	events := mgr.Subscribe(t.Context())
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "alpha",
-		Goal:        "implement the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "alpha",
+		Goal: "implement the thing",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "alpha", st.Name)
@@ -137,7 +134,7 @@ func TestManager_CreateWithoutGoalStaysIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "solo", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "solo"})
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusIdle, st.Status)
 	require.NotEmpty(t, st.SessionID)
@@ -164,7 +161,7 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "solo-send", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "solo-send"})
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusIdle, st.Status)
 
@@ -181,6 +178,7 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 
 	// The run completes normally, which means the RunComplete watcher was
 	// installed when the idle workspace was created, not only by startRun.
+	writeFile(t, st.WorktreePath, "retained.txt", "keep\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	got, err = mgr.Get(t.Context(), st.ID)
@@ -190,131 +188,11 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 
 // Activate respawns a finished thread's workspace without dispatching a
 // run, so a caller can attach and work in it by hand.
-func TestManager_ActivateFinishedThread(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "revive", Goal: "do it", MergePolicy: thread.MergeManual})
-	require.NoError(t, err)
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-	require.Nil(t, mgr.Handle(st.ID), "a completed thread releases its workspace")
-
-	completed, err := mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, "finished", completed.ResultSummary)
-
-	activated, err := mgr.Activate(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusIdle, activated.Status)
-	require.Equal(t, "finished", activated.ResultSummary, "the earlier run's result must survive")
-	require.NotNil(t, mgr.Handle(st.ID))
-
-	// Activation dispatches nothing on its own.
-	coord := spawner.coordFor(st.WorktreePath)
-	require.Never(t, func() bool { return coord.runCount() > 0 }, 200*time.Millisecond, 20*time.Millisecond)
-
-	// Activating a live thread is a no-op that reports its current state.
-	again, err := mgr.Activate(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusIdle, again.Status)
-}
-
-// A merge in flight, and a merge already landed, are the two states
-// there is nothing to reactivate into: the first holds the thread's opMu
-// for its whole duration, and the second has already been folded into
-// its base and is on its way to being discarded, worktree included.
-func TestManager_ActivateRefusesMergeInFlightAndMerged(t *testing.T) {
-	repo := initRepo(t)
-	store := thread.NewStoreForTest(t)
-	mgr := thread.NewManager(thread.ManagerOptions{
-		Store:       store,
-		Spawner:     newFakeSpawner(t),
-		RepoRoot:    repo,
-		WorktreeDir: t.TempDir(),
-	})
-	shutdownManagerOnCleanup(t, mgr)
-
-	for _, status := range []thread.Status{thread.StatusMerging, thread.StatusMerged} {
-		t.Run(string(status), func(t *testing.T) {
-			st, err := store.Create(t.Context(), thread.CreateParams{
-				Name: "merge-" + string(status), Goal: "x", BaseBranch: "main",
-				Branch: "thread/merge-" + string(status), WorktreePath: t.TempDir(),
-			})
-			require.NoError(t, err)
-			_, err = store.SetStatus(t.Context(), st.ID, thread.SetStatusParams{Status: status})
-			require.NoError(t, err)
-
-			_, err = mgr.Activate(t.Context(), st.ID)
-			require.Error(t, err)
-			require.Nil(t, mgr.Handle(st.ID), "a refused activation must not spawn a workspace")
-
-			got, err := store.Get(t.Context(), st.ID)
-			require.NoError(t, err)
-			require.Equal(t, status, got.Status, "a refused activation must not change status")
-		})
-	}
-}
-
-// A thread whose merge stopped on a conflict (or was blocked outright) is
-// exactly the one a person needs to open and work in: the half-finished
-// merge is still in its worktree, and resolving it by hand and merging
-// again is the recovery path mergeAttempt documents for itself. Refusing
-// it left that path reachable through Send but not through the TUI, which
-// attaches and so fell back to a read-only workspace.
-//
-// The status survives the activation. It describes the state of the merge
-// in the worktree, which attaching does not change — resetting it to idle
-// would drop the thread out of the dashboard's failed filter merely
-// because somebody looked at it.
-func TestManager_ActivateRestingMergeFlowKeepsStatus(t *testing.T) {
-	repo := initRepo(t)
-	store := thread.NewStoreForTest(t)
-	mgr := thread.NewManager(thread.ManagerOptions{
-		Store:       store,
-		Spawner:     newFakeSpawner(t),
-		RepoRoot:    repo,
-		WorktreeDir: t.TempDir(),
-	})
-	shutdownManagerOnCleanup(t, mgr)
-
-	for _, status := range []thread.Status{thread.StatusConflict, thread.StatusMergeBlocked} {
-		t.Run(string(status), func(t *testing.T) {
-			st, err := store.Create(t.Context(), thread.CreateParams{
-				Name: "rest-" + string(status), Goal: "x", BaseBranch: "main",
-				Branch: "thread/rest-" + string(status), WorktreePath: t.TempDir(),
-			})
-			require.NoError(t, err)
-			_, err = store.SetStatus(t.Context(), st.ID, thread.SetStatusParams{
-				Status: status, Error: "merge conflicts: a.go", ResultSummary: "did the work",
-			})
-			require.NoError(t, err)
-
-			activated, err := mgr.Activate(t.Context(), st.ID)
-			require.NoError(t, err)
-			require.NotNil(t, mgr.Handle(st.ID), "the workspace must be live so the person can work in it")
-			require.Equal(t, status, activated.Status, "attaching to a thread must not change what it is")
-			require.Equal(t, "merge conflicts: a.go", activated.Error, "the reason the merge stopped must survive")
-			require.Equal(t, "did the work", activated.ResultSummary, "the earlier run's result must survive")
-
-			got, err := store.Get(t.Context(), st.ID)
-			require.NoError(t, err)
-			require.Equal(t, status, got.Status)
-		})
-	}
-}
-
-// TestManager_CancelLeavesTerminalWithReasonAndKeepsWorktree is Cancel's
-// core contract: a running thread stops and rests at StatusCancelled with
-// reason recorded as its Error — a real status transition, not merely a
-// released runtime — while its worktree and branch stay on disk, unlike
-// Remove. Mirrors TaskManager's own
-// TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched.
 func TestManager_CancelLeavesTerminalWithReasonAndKeepsWorktree(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "stoppable", Goal: "do the thing", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "stoppable", Goal: "do the thing"})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
@@ -345,7 +223,7 @@ func TestManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "unreasoned", Goal: "do the thing", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "unreasoned", Goal: "do the thing"})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
@@ -358,50 +236,6 @@ func TestManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 	require.Equal(t, "cancelled", got.Error)
 }
 
-// TestManager_CancelRefusesMergeFlow proves the decision this step made
-// explicit: cancelling a thread already in the merge flow is refused for
-// all four statuses — by the time a thread has reached one of them there
-// is either nothing left running to stop, or a merge actively folding a
-// branch back that is not a step to interrupt partway.
-//
-// Cancel stays wider than Activate here, which reactivates the two
-// resting statuses (TestManager_ActivateRestingMergeFlowKeepsStatus). The
-// two answer different questions: Activate asks "may a person work in
-// this worktree", and for a stopped merge the answer is yes; Cancel asks
-// "is there a run in flight to stop", and for all four the answer is no.
-func TestManager_CancelRefusesMergeFlow(t *testing.T) {
-	repo := initRepo(t)
-	store := thread.NewStoreForTest(t)
-	mgr := thread.NewManager(thread.ManagerOptions{
-		Store:       store,
-		Spawner:     newFakeSpawner(t),
-		RepoRoot:    repo,
-		WorktreeDir: t.TempDir(),
-	})
-	shutdownManagerOnCleanup(t, mgr)
-
-	for _, status := range []thread.Status{thread.StatusMerging, thread.StatusMerged, thread.StatusConflict, thread.StatusMergeBlocked} {
-		t.Run(string(status), func(t *testing.T) {
-			st, err := store.Create(t.Context(), thread.CreateParams{
-				Name: "cancel-" + string(status), Goal: "x", BaseBranch: "main",
-				Branch: "thread/cancel-" + string(status), WorktreePath: t.TempDir(),
-			})
-			require.NoError(t, err)
-			_, err = store.SetStatus(t.Context(), st.ID, thread.SetStatusParams{Status: status})
-			require.NoError(t, err)
-
-			err = mgr.Cancel(t.Context(), st.ID, "stop")
-			require.Error(t, err)
-
-			got, err := store.Get(t.Context(), st.ID)
-			require.NoError(t, err)
-			require.Equal(t, status, got.Status, "a refused cancel must not change status")
-		})
-	}
-}
-
-// A vanished worktree cannot be reopened, and the failure must not leave
-// a half-installed runtime behind.
 func TestManager_ActivateRejectsMissingWorktree(t *testing.T) {
 	repo := initRepo(t)
 	store := thread.NewStoreForTest(t)
@@ -461,7 +295,6 @@ func TestManager_CreateMarksAgentThreadSessionAsChild(t *testing.T) {
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "child-session",
 		Goal:            "implement the thing",
-		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-session",
 	})
 	require.NoError(t, err)
@@ -478,10 +311,10 @@ func TestManager_CreateRejectsDuplicateName(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x", MergePolicy: thread.MergeManual})
+	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x"})
 	require.NoError(t, err)
 
-	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x", MergePolicy: thread.MergeManual})
+	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x"})
 	require.Error(t, err)
 }
 
@@ -521,7 +354,7 @@ func TestManager_CreateMapsRaceLostUniqueConstraintToFriendlyMessage(t *testing.
 	})
 	shutdownManagerOnCleanup(t, mgr)
 
-	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x", MergePolicy: thread.MergeManual})
+	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `name "dup" is already in use`)
 	require.NotContains(t, err.Error(), "UNIQUE constraint",
@@ -536,163 +369,11 @@ func TestManager_CreateRejectsInvalidName(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestManager_ManualPolicyCompleted(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "beta", Goal: "do it", MergePolicy: thread.MergeManual})
-	require.NoError(t, err)
-
-	writeFile(t, st.WorktreePath, "output.txt", "did the work\n")
-	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() >= 1 }, eventuallyTimeout, eventuallyTick)
-	coord.mu.Lock()
-	runID := coord.runs[0].runID
-	coord.mu.Unlock()
-	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: runID, Text: "finished"})
-
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusCompleted, st.Status)
-	require.Equal(t, "finished", st.ResultSummary)
-	require.NotZero(t, st.CompletedAt)
-	require.NoFileExists(t, filepath.Join(repo, "output.txt"))
-
-	_, mergeErr := mgr.Merge(t.Context(), st.ID)
-	require.NoError(t, mergeErr)
-
-	require.FileExists(t, filepath.Join(repo, "output.txt"))
-	requireDiscarded(t, mgr, repo, st)
-}
-
-func TestManager_RunCompleteSuccessAutoMerge(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-
-	// Default MergePolicy is auto.
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "gamma", Goal: "do it"})
-	require.NoError(t, err)
-	require.Equal(t, thread.MergeAuto, st.MergePolicy)
-
-	writeFile(t, st.WorktreePath, "output.txt", "auto merged\n")
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-
-	require.FileExists(t, filepath.Join(repo, "output.txt"))
-	require.Equal(t, "auto merged\n", runGit(t, repo, "show", "main:output.txt"),
-		"the thread's work must be on the base branch")
-	requireDiscardedEventually(t, mgr, repo, st)
-}
-
-func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "delta", Goal: "do it", MergePolicy: thread.MergeManual})
-	require.NoError(t, err)
-
-	// The base branch (main, checked out in repo itself) and the thread
-	// branch each edit README.md, guaranteeing a conflict on merge.
-	writeFile(t, repo, "README.md", "main version\n")
-	runGit(t, repo, "add", "-A")
-	runGit(t, repo, "commit", "-m", "edit on main")
-
-	writeFile(t, st.WorktreePath, "README.md", "thread version\n")
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-
-	_, mergeErr := mgr.Merge(t.Context(), st.ID)
-	require.NoError(t, mergeErr)
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusConflict, st.Status)
-	require.Contains(t, st.Error, "README.md")
-
-	// Resolve: write the merged content and stage it, but don't commit —
-	// Merge's own CommitAll step finishes the merge commit.
-	writeFile(t, st.WorktreePath, "README.md", "resolved version\n")
-	runGit(t, st.WorktreePath, "add", "README.md")
-
-	merged, mergeErr := mgr.Merge(t.Context(), st.ID)
-	require.NoError(t, mergeErr)
-	require.Equal(t, thread.StatusMerged, merged.Status,
-		"Merge must report the outcome itself; the row is gone by the time it returns")
-	requireDiscarded(t, mgr, repo, st)
-
-	content, err := os.ReadFile(filepath.Join(repo, "README.md"))
-	require.NoError(t, err)
-	// git, not sennit, owns line-ending translation on checkout: with
-	// core.autocrlf=true — the default on a lot of Windows git installs —
-	// the working-tree copy comes back CRLF even though writeFile wrote
-	// LF and sennit never touches the content in between. Normalize
-	// before comparing; what this test cares about is that the resolved
-	// content made it through the merge, not which EOL convention the
-	// local git config happens to apply on checkout.
-	require.Equal(t, "resolved version\n", strings.ReplaceAll(string(content), "\r\n", "\n"))
-}
-
-func TestManager_MergeBlockedWhenBaseCheckedOutAndDirty(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-
-	// main is checked out in repo (the primary worktree) throughout, so
-	// the fast-forward step must fall back to the ff-only merge path —
-	// which this test then blocks by leaving repo dirty.
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "epsilon", Goal: "do it", MergePolicy: thread.MergeManual})
-	require.NoError(t, err)
-
-	writeFile(t, st.WorktreePath, "output.txt", "content\n")
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-
-	writeFile(t, repo, "dirty.txt", "uncommitted\n")
-
-	_, mergeErr := mgr.Merge(t.Context(), st.ID)
-	require.NoError(t, mergeErr)
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusMergeBlocked, st.Status)
-	require.NotEmpty(t, st.Error)
-}
-
-func TestManager_FastForwardWhenBaseNotCheckedOut(t *testing.T) {
-	repo := initRepo(t)
-	// A base branch that is never checked out anywhere, so the
-	// push-based FastForward succeeds directly without falling back to
-	// the ff-only merge path.
-	runGit(t, repo, "branch", "other-base")
-
-	mgr, spawner := newTestManager(t, repo)
-
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "zeta",
-		Goal:        "do it",
-		BaseBranch:  "other-base",
-		MergePolicy: thread.MergeManual,
-	})
-	require.NoError(t, err)
-	require.Equal(t, "other-base", st.BaseBranch)
-
-	writeFile(t, st.WorktreePath, "output.txt", "content\n")
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-
-	_, mergeErr := mgr.Merge(t.Context(), st.ID)
-	require.NoError(t, mergeErr)
-
-	require.Equal(t, "content\n", runGit(t, repo, "show", "other-base:output.txt"),
-		"the thread's work must be on its own base branch, not on main")
-	requireDiscarded(t, mgr, repo, st)
-}
-
 func TestManager_WaitWakesOnCompletion(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "eta", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "eta", Goal: "do it"})
 	require.NoError(t, err)
 
 	done := make(chan error, 1)
@@ -716,72 +397,6 @@ func TestManager_WaitWakesOnCompletion(t *testing.T) {
 	}
 }
 
-func TestManager_Recover(t *testing.T) {
-	repo := initRepo(t)
-	store := thread.NewStoreForTest(t)
-	mgr := thread.NewManager(thread.ManagerOptions{
-		Store:       store,
-		Spawner:     newFakeSpawner(t),
-		RepoRoot:    repo,
-		WorktreeDir: t.TempDir(),
-	})
-	shutdownManagerOnCleanup(t, mgr)
-
-	running, err := store.Create(t.Context(), thread.CreateParams{
-		Name: "running-gone", Goal: "x", BaseBranch: "main",
-		Branch: "thread/running-gone", WorktreePath: filepath.Join(t.TempDir(), "missing"),
-	})
-	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), running.ID, thread.SetStatusParams{Status: thread.StatusRunning})
-	require.NoError(t, err)
-
-	presentWorktree := t.TempDir()
-	stillRunning, err := store.Create(t.Context(), thread.CreateParams{
-		Name: "running-present", Goal: "x", BaseBranch: "main",
-		Branch: "thread/running-present", WorktreePath: presentWorktree,
-	})
-	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), stillRunning.ID, thread.SetStatusParams{Status: thread.StatusRunning})
-	require.NoError(t, err)
-
-	merged, err := store.Create(t.Context(), thread.CreateParams{
-		Name: "already-merged", Goal: "x", BaseBranch: "main",
-		Branch: "thread/already-merged", WorktreePath: filepath.Join(t.TempDir(), "also-missing"),
-	})
-	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), merged.ID, thread.SetStatusParams{Status: thread.StatusMerged, CompletedAt: 1})
-	require.NoError(t, err)
-
-	require.NoError(t, mgr.Recover(t.Context()))
-
-	got, err := store.Get(t.Context(), running.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusFailed, got.Status)
-
-	got, err = store.Get(t.Context(), stillRunning.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusInterrupted, got.Status)
-
-	got, err = store.Get(t.Context(), merged.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusMerged, got.Status)
-}
-
-// TestManager_RecoverReconcilesNonThreadKinds guards the generic recovery
-// sweep against silently degrading into "threads only" at either layer it
-// could regress at: the query (Store.List is scoped to kind = 'thread',
-// so Recover must source its sweep from ListAll, not List) and the
-// git-overlay hook (recoverWorktree must decline anything that is not a
-// Kind: KindThread, or a worktree-less row reads as "worktree missing"
-// and gets marked failed before the generic sweep ever sees it). The
-// seeded row's WorktreePath is deliberately empty, matching what a real
-// task row will have — a non-empty path would silently avoid the
-// hook-level half of this bug. If either layer regresses, a non-thread
-// delegation left running when the process died would never be
-// reconciled to interrupted — it would sit displayed as running forever
-// with no goroutine behind it. Nothing creates task-kind rows yet, so
-// this seeds one directly through the store, the same seam a real task
-// store will use.
 func TestManager_RecoverReconcilesNonThreadKinds(t *testing.T) {
 	repo := initRepo(t)
 	store := thread.NewStoreForTest(t)
@@ -820,7 +435,7 @@ func TestManager_RemoveRefusesActiveWithoutForce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "theta", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "theta", Goal: "do it"})
 	require.NoError(t, err)
 
 	err = mgr.Remove(t.Context(), st.ID, false, false)
@@ -831,7 +446,7 @@ func TestManager_RemoveRefusesDirtyUnmergedWithoutForce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "iota", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "iota", Goal: "do it"})
 	require.NoError(t, err)
 
 	writeFile(t, st.WorktreePath, "uncommitted.txt", "x\n")
@@ -846,7 +461,7 @@ func TestManager_RemoveForce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "kappa", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "kappa", Goal: "do it"})
 	require.NoError(t, err)
 	worktreePath := st.WorktreePath
 
@@ -870,7 +485,7 @@ func TestManager_RemoveClearsARecordCleanedUpByHand(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "lambda", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "lambda", Goal: "do it"})
 	require.NoError(t, err)
 
 	runGit(t, repo, "worktree", "remove", "--force", st.WorktreePath)
@@ -886,7 +501,7 @@ func TestManager_SendRedispatches(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "lambda", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "lambda", Goal: "do it"})
 	require.NoError(t, err)
 
 	writeFile(t, st.WorktreePath, "output.txt", "content\n")
@@ -912,7 +527,7 @@ func TestManager_SendReportsQueuedBehindRunningTurn(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "busy", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "busy", Goal: "do it"})
 	require.NoError(t, err)
 
 	// The goal run is still in flight, with two follow-ups already waiting.
@@ -936,22 +551,6 @@ func TestManager_SendReportsQueuedBehindRunningTurn(t *testing.T) {
 // A thread whose workspace is no longer live is respawned by Send, and
 // that is never a queued delivery: the fresh workspace has no turn of its
 // own in flight for the message to wait behind.
-func TestManager_SendReportsResumeAsImmediate(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "resumed", Goal: "do it", MergePolicy: thread.MergeManual})
-	require.NoError(t, err)
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-	require.Nil(t, mgr.Handle(st.ID))
-
-	disp, err := mgr.Send(t.Context(), st.ID, "one more thing")
-	require.NoError(t, err)
-	require.True(t, disp.Resumed)
-	require.False(t, disp.Queued)
-}
-
 func TestManager_HandleAndWorkspaceID(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
@@ -960,7 +559,7 @@ func TestManager_HandleAndWorkspaceID(t *testing.T) {
 	require.Nil(t, mgr.Handle("no-such-id"))
 	require.Empty(t, mgr.WorkspaceID("no-such-id"))
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "mu", Goal: "do it", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "mu", Goal: "do it"})
 	require.NoError(t, err)
 
 	// fakeHandle.ID() is the worktree path (see fakeSpawner.Spawn).
@@ -980,98 +579,10 @@ func TestManager_HandleAndWorkspaceID(t *testing.T) {
 // the in-flight run's completion: ownership moves to the follow-up's
 // RunID, so only its own completion releases the workspace and settles
 // the thread's status.
-func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "owner", Goal: "go", MergePolicy: thread.MergeManual})
-	require.NoError(t, err)
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
-	require.Nil(t, mgr.Handle(st.ID))
-
-	// Respawn via Send: the workspace must stay alive after Send returns.
-	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "first")))
-	require.NotNil(t, mgr.Handle(st.ID))
-	require.Zero(t, spawner.releases(st.WorktreePath)-1) // only the goal run's release so far
-
-	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
-	coord.mu.Lock()
-	ownerRunID := coord.runs[0].runID
-	coord.mu.Unlock()
-
-	// Queue a follow-up while the first run is in flight.
-	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "second")))
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
-	coord.mu.Lock()
-	followUpRunID := coord.runs[1].runID
-	coord.mu.Unlock()
-	require.NotEmpty(t, followUpRunID)
-	require.NotEqual(t, ownerRunID, followUpRunID)
-
-	// The first run completing must neither release the workspace nor
-	// settle the thread: the queued follow-up still owns both.
-	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: ownerRunID, Text: "first done"})
-	require.Never(t, func() bool { return mgr.Handle(st.ID) == nil }, 100*time.Millisecond, 10*time.Millisecond)
-	got, err := mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, thread.StatusRunning, got.Status)
-
-	// The follow-up completing settles everything.
-	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: followUpRunID, Text: "second done"})
-	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, eventuallyTimeout, eventuallyTick)
-	require.Eventually(t, func() bool {
-		got, err := mgr.Get(t.Context(), st.ID)
-		return err == nil && got.Status == thread.StatusCompleted
-	}, eventuallyTimeout, eventuallyTick)
-}
-
-func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "once", Goal: "go", MergePolicy: thread.MergeManual})
-	require.NoError(t, err)
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
-
-	var wg sync.WaitGroup
-	for range 12 {
-		wg.Go(func() { require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "again"))) })
-	}
-	wg.Wait()
-	require.Equal(t, 2, spawner.spawns())
-	coord := spawner.coordFor(st.WorktreePath)
-	// coordFor returns the coordinator of the respawned workspace (each
-	// Spawn builds a fresh one): one respawned run from the first Send
-	// plus eleven queued follow-ups — each dispatched asynchronously, so
-	// wait for all of them to land before completing them.
-	require.Eventually(t, func() bool { return coord.runCount() == 12 }, eventuallyTimeout, eventuallyTick)
-	// Every dispatched turn eventually publishes its own RunComplete. The
-	// workspace is released only by the turn that currently owns the
-	// runtime (the last dispatched RunID) — completing all of them models
-	// that and asserts exactly one effective release.
-	coord.mu.Lock()
-	runIDs := make([]string, 0, len(coord.runs))
-	for _, r := range coord.runs {
-		runIDs = append(runIDs, r.runID)
-	}
-	coord.mu.Unlock()
-	for _, id := range runIDs {
-		spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: id, Text: "finished"})
-	}
-	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, eventuallyTimeout, eventuallyTick)
-	// Wait for the release rather than asserting it outright: the
-	// run-completion path clears c.runtime (which is what makes Handle
-	// return nil) and only then calls Spawner.Release, so a bare
-	// assertion here races that window and fails intermittently under
-	// -race.
-	require.Eventually(t, func() bool { return spawner.releases(st.WorktreePath) >= 2 }, eventuallyTimeout, eventuallyTick)
-}
-
 func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "cancel-error", Goal: "go", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "cancel-error", Goal: "go"})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
@@ -1113,7 +624,7 @@ func TestManager_CreateWithNilCoordinatorCompletesInsteadOfDeadlocking(t *testin
 	}
 	done := make(chan createResult, 1)
 	go func() {
-		st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "no-coordinator", Goal: "go", MergePolicy: thread.MergeManual})
+		st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "no-coordinator", Goal: "go"})
 		done <- createResult{st, err}
 	}()
 
@@ -1144,7 +655,7 @@ func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
 	// Configure the coordinator created by Spawn before Create dispatches.
 	// Its RunAccepted returns this error and deliberately publishes no event.
 	spawner.runErr = errors.New("boom")
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "immediate-error", Goal: "go", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "immediate-error", Goal: "go"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
@@ -1155,28 +666,12 @@ func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
 	require.NoError(t, mgr.Shutdown(t.Context()))
 }
 
-func TestManager_ConcurrentShutdownClosesMutations(t *testing.T) {
-	repo := initRepo(t)
-	mgr, _ := newTestManager(t, repo)
-	var wg sync.WaitGroup
-	for range 50 {
-		wg.Go(func() { require.NoError(t, mgr.Shutdown(t.Context())) })
-	}
-	wg.Wait()
-	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "closed", Goal: "go"})
-	require.ErrorIs(t, err, thread.ErrManagerClosed)
-	require.ErrorIs(t, sendErr(mgr.Send(t.Context(), "missing", "go")), thread.ErrManagerClosed)
-	_, mergeErr := mgr.Merge(t.Context(), "missing")
-	require.ErrorIs(t, mergeErr, thread.ErrManagerClosed)
-	require.ErrorIs(t, mgr.Remove(t.Context(), "missing", true, false), thread.ErrManagerClosed)
-	require.ErrorIs(t, mgr.Recover(t.Context()), thread.ErrManagerClosed)
-}
-
 func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "blocked", Goal: "go", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "blocked", Goal: "go"})
 	require.NoError(t, err)
+	writeFile(t, st.WorktreePath, "retained.txt", "keep\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
 
@@ -1206,7 +701,7 @@ func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
 func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "race-remove", Goal: "go", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "race-remove", Goal: "go"})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
@@ -1229,7 +724,7 @@ func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
 func TestManager_RemoveForceCancelsThreadOwnSession(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "force-cancel", Goal: "go", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "force-cancel", Goal: "go"})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -1245,34 +740,3 @@ func TestManager_RemoveForceCancelsThreadOwnSession(t *testing.T) {
 // new operations immediately: once Shutdown starts, Create/Send/Merge/Remove
 // return ErrManagerClosed even before the shutdown goroutine finishes its
 // cleanup work. Uses a controlled barrier (no Sleep) to synchronize.
-func TestManager_ShutdownBlocksAdmission(t *testing.T) {
-	repo := initRepo(t)
-	mgr, _ := newTestManager(t, repo)
-
-	// barrier: test signals shutdown to start, then waits for it to block,
-	// then releases it.
-	barrier := make(chan struct{})
-	go func() {
-		// Call Shutdown (sets closed=true inside sync.Once, then launches
-		// cleanup goroutine). This blocks until barrier is closed.
-		_ = mgr.Shutdown(context.Background())
-		close(barrier)
-	}()
-
-	// Yield to let the shutdown goroutine run and set closed=true.
-	time.Sleep(10 * time.Millisecond)
-
-	// Operations during shutdown should fail immediately.
-	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "blocked", Goal: "x"})
-	require.ErrorIs(t, err, thread.ErrManagerClosed)
-	err = sendErr(mgr.Send(t.Context(), "missing", "x"))
-	require.ErrorIs(t, err, thread.ErrManagerClosed)
-	_, err = mgr.Merge(t.Context(), "missing")
-	require.ErrorIs(t, err, thread.ErrManagerClosed)
-	err = mgr.Remove(t.Context(), "missing", true, false)
-	require.ErrorIs(t, err, thread.ErrManagerClosed)
-	err = mgr.Recover(t.Context())
-	require.ErrorIs(t, err, thread.ErrManagerClosed)
-
-	<-barrier
-}

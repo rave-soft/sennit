@@ -29,6 +29,10 @@ var (
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
+
+	worktreeRoot *AppWorkspace
+	worktreeName string
+	worktreePath string
 }
 
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app

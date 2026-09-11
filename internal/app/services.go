@@ -163,7 +163,7 @@ type appServices struct {
 // newAppServices builds the appServices grouping for New: the session/
 // message/permission/etc. services, this workspace's own LSP/MCP/skills
 // managers, and its config/credentials state.
-func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) *appServices {
+func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, projectPath string) *appServices {
 	cfg := store.Config()
 	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
@@ -174,8 +174,8 @@ func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skil
 		skipPermissionsRequests = skipPermissionsRequests || configBypass
 	}
 	return &appServices{
-		sessions:         sessionstore.NewService(q, conn, store.WorkingDir()),
-		messages:         messagestore.NewService(q, messagestore.WithProjectPath(store.WorkingDir())),
+		sessions:         sessionstore.NewService(q, conn, projectPath),
+		messages:         messagestore.NewService(q, messagestore.WithProjectPath(projectPath)),
 		queries:          q,
 		History:          historystore.NewService(q, conn),
 		permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),

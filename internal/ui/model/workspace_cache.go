@@ -30,8 +30,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/listcache"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -315,8 +315,8 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	// The threads dock's list and per-thread activity (step count, current
-	// tool) previously re-probed only on thread pubsub events; with the
+	// The shared delegation list and per-thread dock activity (step count,
+	// current tool) previously re-probed only on thread pubsub events; with the
 	// panel spinner ticking whenever a thread is live, this Update tail
 	// runs continuously, so their TTLs act as a real backstop and the
 	// "what is this thread doing" line stays fresh between events.
@@ -325,12 +325,12 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 	return cmds
 }
 
-// threadViewsRefreshCmds re-probes the shared thread list (feeding the
-// header badge, the dashboard, and the dock) and the dock's per-thread
+// threadViewsRefreshCmds re-probes the shared all-delegation list (feeding
+// the dashboard plus isolated-only header and dock views) and per-thread dock
 // activity wherever a TTL has expired or an invalidation demands it.
 // Shared by the thread-event handler and the Update-tail backstop so the
 // sequence exists exactly once. It never does IO itself, and it costs
-// nothing beyond time comparisons while the project has no threads.
+// nothing beyond time comparisons while the project has no delegations.
 //
 // The list refresh is unconditional (not gated on m.state) because the
 // header badge needs it current on every screen this UI ever draws, and
@@ -346,7 +346,7 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	if m.state == uiChat && len(m.threadList.Threads()) > 0 {
-		visible := threads.ActiveDockThreads(m.threadList.Threads())
+		visible := delegations.ActiveDockThreads(m.threadList.Threads())
 		cmds = append(cmds, m.threadsDock.StaleActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds

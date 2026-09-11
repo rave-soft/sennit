@@ -37,8 +37,10 @@ func slug(name string) string {
 // which a real store's own validation can't be made to fail any other way.
 type flakyStore struct {
 	thread.Store
-	failSetSession bool
-	failSetStatus  map[thread.Status]bool
+	failSetSession  bool
+	failSetStatus   map[thread.Status]bool
+	failDelete      bool
+	deleteThenError bool
 }
 
 func (s *flakyStore) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
@@ -46,6 +48,19 @@ func (s *flakyStore) SetSession(ctx context.Context, id, sessionID string) (thre
 		return thread.Thread{}, errors.New("flakyStore: forced SetSession failure")
 	}
 	return s.Store.SetSession(ctx, id, sessionID)
+}
+
+func (s *flakyStore) Delete(ctx context.Context, id string) error {
+	if s.deleteThenError {
+		if err := s.Store.Delete(ctx, id); err != nil {
+			return err
+		}
+		return errors.New("flakyStore: forced post-delete failure")
+	}
+	if s.failDelete {
+		return errors.New("flakyStore: forced Delete failure")
+	}
+	return s.Store.Delete(ctx, id)
 }
 
 func (s *flakyStore) SetStatus(ctx context.Context, id string, params thread.SetStatusParams) (thread.Thread, error) {
@@ -207,7 +222,7 @@ func TestManager_CreateRollsBackOnlyWhatSucceeded(t *testing.T) {
 			})
 			shutdownManagerOnCleanup(t, mgr)
 
-			args := thread.CreateArgs{Name: "rb-" + slug(tc.name), Goal: "go", MergePolicy: thread.MergeManual}
+			args := thread.CreateArgs{Name: "rb-" + slug(tc.name), Goal: "go"}
 			if tc.args != nil {
 				tc.args(&args)
 			}
@@ -251,7 +266,7 @@ func TestManager_CreateRollbackUsesBoundedDetachedContext(t *testing.T) {
 	})
 	shutdownManagerOnCleanup(t, mgr)
 
-	args := thread.CreateArgs{Name: "bounded-cleanup", Goal: "go", MergePolicy: thread.MergeManual}
+	args := thread.CreateArgs{Name: "bounded-cleanup", Goal: "go"}
 	worktreePath := filepath.Join(mgr.WorktreeDirForTest(), args.Name)
 	_, err := mgr.Create(requestCtx, args)
 	require.ErrorIs(t, err, spawner.sessionsErr)
@@ -281,7 +296,7 @@ func TestManager_CreateRollbackOrder_ReleasesBeforeRemovingWorktree(t *testing.T
 	})
 	shutdownManagerOnCleanup(t, mgr)
 
-	args := thread.CreateArgs{Name: "rollback-order", Goal: "go", MergePolicy: thread.MergeManual}
+	args := thread.CreateArgs{Name: "rollback-order", Goal: "go"}
 	worktreePath := filepath.Join(mgr.WorktreeDirForTest(), args.Name)
 
 	_, err := mgr.Create(context.Background(), args)
@@ -350,8 +365,9 @@ func TestManager_ActivateRollsBackOnlyWhatSucceeded(t *testing.T) {
 				WorktreeDir: worktreeDir,
 			})
 			shutdownManagerOnCleanup(t, setupMgr)
-			st, err := setupMgr.Create(context.Background(), thread.CreateArgs{Name: "act-" + slug(tc.name), Goal: "go", MergePolicy: thread.MergeManual})
+			st, err := setupMgr.Create(context.Background(), thread.CreateArgs{Name: "act-" + slug(tc.name), Goal: "go"})
 			require.NoError(t, err)
+			writeFile(t, st.WorktreePath, "retained.txt", "keep\n")
 			publishSuccess(t, setupSpawner.appFor(st.WorktreePath), st.SessionID)
 			require.NoError(t, setupMgr.Wait(context.Background(), []string{st.ID}, settleTimeout))
 
@@ -458,7 +474,7 @@ func TestManager_CreateFailureMarksTheRightRow(t *testing.T) {
 			})
 			shutdownManagerOnCleanup(t, mgr)
 
-			args := thread.CreateArgs{Name: "fc-" + slug(tc.name), Goal: "go", MergePolicy: thread.MergeManual}
+			args := thread.CreateArgs{Name: "fc-" + slug(tc.name), Goal: "go"}
 			if tc.args != nil {
 				tc.args(&args)
 			}

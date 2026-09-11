@@ -7,21 +7,6 @@ import (
 	"time"
 )
 
-// ThreadCreateArgs mirrors internal/thread.CreateArgs. It is declared here,
-// rather than imported, to keep this package free of a dependency on
-// internal/thread: internal/thread imports internal/app, which imports
-// internal/agent, which imports this package — importing internal/thread
-// from here would close that cycle. internal/thread/agenttool.go adapts
-// *thread.Manager to the [ThreadManager] interface below, converting
-// between the two packages' otherwise-identical types at the seam.
-type ThreadCreateArgs struct {
-	Name            string
-	Goal            string
-	BaseBranch      string
-	MergePolicy     string
-	ParentSessionID string
-}
-
 // ThreadInfo mirrors internal/thread.Thread, for the same reason.
 type ThreadInfo struct {
 	ID            string
@@ -32,7 +17,6 @@ type ThreadInfo struct {
 	WorktreePath  string
 	SessionID     string
 	Status        string
-	MergePolicy   string
 	ResultSummary string
 	Error         string
 	CreatedAt     int64
@@ -40,10 +24,8 @@ type ThreadInfo struct {
 	CompletedAt   int64
 }
 
-// ThreadManager is the subset of internal/thread.Manager's API the thread_*
-// tools need. The coordinator is only ever given one for the main agent of
-// a main (non-thread) workspace; it is nil everywhere else, and the
-// thread_* tools are omitted entirely when it is nil.
+// ThreadManager is the subset of internal/thread.Manager used by the agent_*
+// management tools.
 // ErrThreadNotFound reports that no thread matches the id or name given.
 // Callers should say more than "not found" when they surface it: a thread
 // is deleted once it merges, so a name that resolved a minute ago
@@ -99,7 +81,6 @@ func (o SendOutcome) Describe(kind, idOrName string) string {
 }
 
 type ThreadManager interface {
-	Create(ctx context.Context, args ThreadCreateArgs) (ThreadInfo, error)
 	List(ctx context.Context) ([]ThreadInfo, error)
 	// Get resolves a thread by id or name. It must report
 	// [ErrThreadNotFound] for an id that resolves to something which is
@@ -114,12 +95,7 @@ type ThreadManager interface {
 	// Cancel stops the thread's in-flight run, recording reason as its
 	// terminal error, for agent_cancel. The worktree and branch survive:
 	// a cancelled thread's work can still be read or resumed, and
-	// clearing it away is thread_remove's job.
+	// cleanup remains available through the internal manager APIs.
 	Cancel(ctx context.Context, idOrName, reason string) error
 	Wait(ctx context.Context, ids []string, timeout time.Duration) error
-	// Merge returns the thread as the attempt left it. A clean merge
-	// discards the thread, so there is nothing left to Get afterwards —
-	// this return value is the only report of the outcome.
-	Merge(ctx context.Context, idOrName string) (ThreadInfo, error)
-	Remove(ctx context.Context, idOrName string, force, deleteBranch bool) error
 }

@@ -81,10 +81,11 @@ type (
 	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
-	// ActionOpenThreadsDashboard requests switching to the threads
-	// dashboard screen (see internal/ui/model/root.go's screenDashboard).
-	ActionOpenThreadsDashboard struct{}
-	ActionSummarize            struct {
+	// ActionOpenDelegationsDashboard requests the delegation dashboard.
+	ActionOpenDelegationsDashboard struct{}
+	ActionEnterWorktree            struct{ Name string }
+	ActionExitWorktree             struct{}
+	ActionSummarize                struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

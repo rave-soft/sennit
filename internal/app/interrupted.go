@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 )
@@ -53,6 +56,41 @@ func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages 
 	if err != nil {
 		return err
 	}
+	return finalizeInterruptedMessages(ctx, unfinished, messages)
+}
+
+func finalizeResumedDelegation(ctx context.Context, queries *db.Queries, projectPath, workingDir, delegationID, sessionID string, messages messagestore.Service) error {
+	if delegationID == "" || sessionID == "" {
+		return fmt.Errorf("delegation and session IDs are required")
+	}
+	delegation, err := queries.GetThread(ctx, delegationID)
+	if err != nil {
+		return fmt.Errorf("get resumed delegation: %w", err)
+	}
+	if delegation.ProjectPath != projectPath || delegation.SessionID != sessionID || delegation.ParentSessionID == "" || fsext.Canonical(delegation.WorktreePath) != fsext.Canonical(workingDir) {
+		return fmt.Errorf("resumed delegation ownership does not match project, worktree, and session")
+	}
+	sess, err := queries.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("get resumed session: %w", err)
+	}
+	if sess.ProjectPath != projectPath || !sess.ParentSessionID.Valid || sess.ParentSessionID.String != delegation.ParentSessionID {
+		return fmt.Errorf("resumed session ownership does not match delegation")
+	}
+	all, err := messages.List(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	unfinished := make([]message.Message, 0, 1)
+	for _, msg := range all {
+		if msg.Role == message.Assistant && msg.FinishPart() == nil {
+			unfinished = append(unfinished, msg)
+		}
+	}
+	return finalizeInterruptedMessages(ctx, unfinished, messages)
+}
+
+func finalizeInterruptedMessages(ctx context.Context, unfinished []message.Message, messages messagestore.Service) error {
 	if len(unfinished) == 0 {
 		return nil
 	}
@@ -66,6 +104,7 @@ func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages 
 		calls := msg.ToolCalls()
 		seen, ok := answered[msg.SessionID]
 		if !ok {
+			var err error
 			seen, err = answeredToolCalls(ctx, messages, msg.SessionID)
 			if err != nil {
 				slog.Error("Failed to read a session while closing out an interrupted turn",
@@ -118,7 +157,7 @@ func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages 
 	}
 
 	slog.Debug("Closed out interrupted turns from a previous run",
-		"component", "app", "project_path", projectPath, "messages", len(unfinished))
+		"component", "app", "messages", len(unfinished))
 	return nil
 }
 
@@ -141,17 +180,4 @@ func answeredToolCalls(ctx context.Context, messages messagestore.Service, sessi
 		}
 	}
 	return answered, nil
-}
-
-// FinalizeInterruptedTurns is [finalizeInterruptedTurns] for callers
-// outside this package, which today means the thread wiring: a thread's
-// sessions are recorded under its own worktree, so the sweep Bootstrap
-// runs for the workspace being started never reaches them (see
-// threadspawn.finalizeThreadTurns, its only caller).
-//
-// The caller owns the judgement this rests on — that no turn of
-// projectPath's is running anywhere. Read that argument in
-// finalizeInterruptedTurns before adding a second caller.
-func FinalizeInterruptedTurns(ctx context.Context, projectPath string, messages messagestore.Service) error {
-	return finalizeInterruptedTurns(ctx, projectPath, messages)
 }

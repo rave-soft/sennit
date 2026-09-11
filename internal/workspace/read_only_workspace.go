@@ -600,7 +600,22 @@ func (w *readOnlyWorkspace) MCPAuthenticate(ctx context.Context, name string) er
 	return w.readOnlyError("MCPAuthenticate")
 }
 
-// -- ThreadController (mutations only) --
+// -- WorktreeController / ThreadController (mutations only) --
+
+func (w *readOnlyWorkspace) EnterWorktree(ctx context.Context, name string) (Workspace, func(), error) {
+	return nil, nil, w.readOnlyError("EnterWorktree")
+}
+
+func (w *readOnlyWorkspace) ExitWorktree(ctx context.Context) (Workspace, func(), error) {
+	return nil, nil, w.readOnlyError("ExitWorktree")
+}
+
+func (w *readOnlyWorkspace) WorktreeState() WorktreeState {
+	if state, ok := w.ws.(interface{ WorktreeState() WorktreeState }); ok {
+		return state.WorktreeState()
+	}
+	return WorktreeState{}
+}
 
 func (w *readOnlyWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
 	return proto.Thread{}, w.readOnlyError("CreateThread")
@@ -608,10 +623,6 @@ func (w *readOnlyWorkspace) CreateThread(ctx context.Context, req proto.CreateTh
 
 func (w *readOnlyWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
 	return proto.Thread{}, w.readOnlyError("ActivateThread")
-}
-
-func (w *readOnlyWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
-	return proto.Thread{}, w.readOnlyError("MergeThread")
 }
 
 func (w *readOnlyWorkspace) CancelThread(ctx context.Context, id, reason string) error {
@@ -720,10 +731,6 @@ func (w *readOnlyWorkspace) Config() *config.Config {
 
 func (w *readOnlyWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return w.ws.GetMCPPrompt(clientID, promptID, args)
-}
-
-func (w *readOnlyWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
-	return w.ws.GetThread(ctx, id)
 }
 
 func (w *readOnlyWorkspace) InitializePrompt() (string, error) {

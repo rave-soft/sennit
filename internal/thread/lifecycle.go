@@ -36,12 +36,15 @@ func detachForTerminalWork(ctx context.Context) (context.Context, context.Cancel
 // via the wrong one can leak a workspace or tear down a task's parent
 // App), and the cancel func for its RunComplete watcher goroutine.
 type runtimeState struct {
-	handle      Handle
-	spawner     Spawner
-	watchCancel context.CancelFunc
-	runCancel   context.CancelFunc
-	runID       string
-	runIDs      map[string]struct{}
+	handle        Handle
+	spawner       Spawner
+	watchCancel   context.CancelFunc
+	runCancel     context.CancelFunc
+	releaseFailed bool
+	runID         string
+	runIDs        map[string]struct{}
+	followup      func(context.Context, string) (TaskRunFactory, error)
+	queuedRuns    []TaskRunFactory
 	// person marks runID as a turn the person is driving by hand, rather
 	// than one this package dispatched on a delegation's behalf. The two
 	// end very differently — see handleRunComplete — so the flag is set
@@ -87,10 +90,12 @@ type settledSetupFailure struct {
 }
 
 type threadControl struct {
-	opMu    sync.Mutex
-	mu      sync.Mutex
-	runtime *runtimeState
-	removed bool
+	opMu              sync.Mutex
+	mu                sync.Mutex
+	preparationCancel context.CancelFunc
+	cancelRequested   bool
+	runtime           *runtimeState
+	removed           bool
 	// depth is the background-delegation cascade depth stamped at Create
 	// (see TaskManager.Create/TaskCreateArgs.Depth); handleRunComplete reads
 	// it back to compute an auto-woken continuation's depth.
@@ -124,15 +129,15 @@ type threadControl struct {
 var ErrManagerClosed = errors.New("thread: manager is closed")
 
 // ErrNotFound is returned when no delegation matches the id or name a
-// caller asked for — including one that already merged and was deleted
-// along with its worktree and branch, not only a name that never existed.
+// caller asked for, including one whose clean resources and record were
+// removed after completion, not only a name that never existed.
 var ErrNotFound = errors.New("thread: no such thread")
 
 // runCompleteHook lets an overlay intervene when a run finishes
 // successfully, before the generic lifecycle rests the entity at
 // StatusCompleted. Called with the entity's opMu held; a hook that needs
 // more work hands off to its own goroutine and re-acquires opMu there
-// (see [Manager.onAutoMerge]). Returning true means the hook took over
+// (see [Manager.onCompletedCleanup]). Returning true means the hook took over
 // the terminal transition and the generic StatusCompleted write must not
 // also run; false falls through to it.
 type runCompleteHook func(ctx context.Context, c *threadControl, st Thread, resultText string) (handled bool)
@@ -167,7 +172,7 @@ type deliveryResolver func(ctx context.Context, handle Handle, st Thread) (targe
 // every kind of background delegation this package drives: admission
 // control, per-entity serialization, worker tracking, run dispatch,
 // workspace release, and event plumbing. It has no notion of git
-// worktrees or merge policy — those live in the onRunSuccess/onRecover
+// worktrees or cleanup safety — those live in the onRunSuccess/onRecover
 // hooks an overlay such as [Manager] supplies. Each entity carries its
 // own Spawner in runtimeState rather than the lifecycle holding one,
 // since [Manager]'s threads and [TaskManager]'s tasks are spawned
@@ -412,6 +417,10 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 // it. Callers must hold the entity's opMu, as startRun documents.
 func (l *lifecycle) startFactoryRun(ctx context.Context, handle Handle, spawner Spawner, id, sessionID string, factory TaskRunFactory) {
 	rt := l.installRuntime(ctx, handle, spawner, id)
+	l.dispatchFactoryRun(ctx, rt, id, sessionID, factory)
+}
+
+func (l *lifecycle) dispatchFactoryRun(ctx context.Context, rt *runtimeState, id, sessionID string, factory TaskRunFactory) {
 	c := l.control(id)
 	runID := uuid.NewString()
 	runCtx, runCancel := context.WithCancel(ctx)
@@ -440,7 +449,23 @@ func (l *lifecycle) startFactoryRun(ctx context.Context, handle Handle, spawner 
 			rc.Error = err.Error()
 			rc.Cancelled = errors.Is(err, context.Canceled)
 		}
-		l.handleRunComplete(runCtx, id, rc)
+		c.opMu.Lock()
+		c.mu.Lock()
+		if c.runtime == rt && rt.runID == runID && len(rt.queuedRuns) != 0 && runCtx.Err() == nil {
+			next := rt.queuedRuns[0]
+			rt.queuedRuns = rt.queuedRuns[1:]
+			c.mu.Unlock()
+			l.dispatchFactoryRun(ctx, rt, id, sessionID, next)
+			c.opMu.Unlock()
+			runCancel()
+			return
+		}
+		c.mu.Unlock()
+		terminalCtx, terminalCancel := detachForTerminalWork(runCtx)
+		l.handleRunCompleteLocked(terminalCtx, c, id, rc)
+		terminalCancel()
+		c.opMu.Unlock()
+		runCancel()
 	})
 }
 
@@ -558,7 +583,7 @@ func (l *lifecycle) steerApplyDecision(bgCtx context.Context, c *threadControl, 
 	// It became the active turn and owns the workspace from here. Still
 	// under opMu, so the run it displaced (if any) hasn't been reacted to
 	// yet. Marked as the person's: it ends by resting at idle with its
-	// workspace intact, not by merging — see handleRunComplete.
+	// workspace intact, not by completion cleanup. See handleRunComplete.
 	c.mu.Lock()
 	rt.runID = runID
 	rt.runIDs = map[string]struct{}{runID: {}}
@@ -674,6 +699,15 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		return SendDisposition{}, fmt.Errorf("thread: %q has been removed", id)
 	}
 
+	if rt != nil && rt.releaseFailed {
+		if err := releaseRuntime(ctx, rt, sessionID, true); err != nil {
+			return SendDisposition{}, fmt.Errorf("thread: release previous workspace: %w", err)
+		}
+		c.mu.Lock()
+		c.runtime = nil
+		c.mu.Unlock()
+		rt = nil
+	}
 	if rt != nil {
 		// The workspace is live: either a run is in flight, or the entity
 		// is idle. An agent's send dispatches the message as its own
@@ -730,27 +764,27 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		return disp, nil
 	}
 
-	handle, err := spawner.Spawn(bgCtx, spawnPath)
+	handle, err := spawner.Spawn(bgCtx, SpawnRequest{Path: spawnPath, DelegationID: id, SessionID: sessionID})
+	var rb unwinder
+	defer rb.unwind()
+	if handle != nil {
+		rb.push(func() {
+			releaseCtx, cancel := detachForTerminalWork(ctx)
+			defer cancel()
+			if err := spawner.Release(releaseCtx, handle.ID()); err != nil {
+				c.mu.Lock()
+				c.runtime = &runtimeState{handle: handle, spawner: spawner, watchCancel: func() {}, releaseFailed: true}
+				c.mu.Unlock()
+				slog.Error("Failed to release resumed workspace", "id", id, "error", err)
+			}
+		})
+	}
 	if err != nil {
 		return SendDisposition{}, fmt.Errorf("thread: respawn workspace: %w", err)
 	}
 	if err := bgCtx.Err(); err != nil {
-		_ = spawner.Release(context.Background(), handle.ID()) // ok: detached - bgCtx is already done; this is the cleanup for that
 		return SendDisposition{}, err
 	}
-	// rb unwinds the freshly spawned handle if this returns before startRun
-	// installs it as the shared runtime — see [unwinder].
-	var rb unwinder
-	defer rb.unwind()
-	rb.push(func() {
-		// detachForTerminalWork, not ctx: setStatus below failed because
-		// ctx was already cancelled, and a Release built on that same
-		// dead ctx would fail too, leaking the handle for the life of the
-		// process.
-		releaseCtx, cancel := detachForTerminalWork(ctx)
-		defer cancel()
-		_ = spawner.Release(releaseCtx, handle.ID())
-	})
 
 	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
 		return SendDisposition{}, err
@@ -811,6 +845,14 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	defer releaseBookkeeping()
 
 	c := l.control(st.ID)
+	c.mu.Lock()
+	c.cancelRequested = true
+	if c.preparationCancel != nil {
+		c.preparationCancel()
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Unlock()
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.mu.Lock()
@@ -824,6 +866,10 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	}
 
 	if err := releaseRuntime(ctx, rt, st.SessionID, true); err != nil {
+		c.mu.Lock()
+		rt.releaseFailed = true
+		c.runtime = rt
+		c.mu.Unlock()
 		slog.Error("Failed to release cancelled workspace", "component", "thread", "id", st.ID, "kind", st.Kind, "error", err)
 	}
 
@@ -865,22 +911,14 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 // failed, or completed, unless onRunSuccess takes over.
 //
 // Once a terminal status is recorded, this delivers to the entity's
-// parent session (see deliverStoredCompletion), except a thread whose
-// successful run onRunSuccess (Manager's auto-merge overlay) takes over:
-// that returns before the delivery call, since an auto-merge thread's
-// useful terminal event is the merge outcome — see Manager.onAutoMerge
-// and Manager.deliverMergeOutcome.
+// parent session (see deliverStoredCompletion). A successful thread delegates
+// that write, delivery, and conservative resource cleanup to onRunSuccess.
 func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComplete) {
 	// See detachForTerminalWork: the contexts reaching here are exactly
 	// the ones a cancellation kills, so an interrupted run's own ctx
 	// would otherwise fail store.Get below, leaving the status stale and
 	// the parent never told.
 	//
-	// followUpCtx keeps the caller's own lifetime for the one branch that
-	// outlives this call: onRunSuccess hands an auto-merge thread to a
-	// worker goroutine that captures its context, so the bounded ctx
-	// below would cancel the merge the moment this function returns.
-	followUpCtx := ctx
 	ctx, cancel := detachForTerminalWork(ctx)
 	defer cancel()
 
@@ -891,6 +929,10 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 
+	l.handleRunCompleteLocked(ctx, c, id, rc)
+}
+
+func (l *lifecycle) handleRunCompleteLocked(ctx context.Context, c *threadControl, id string, rc RunComplete) {
 	rt, matched := l.matchRunComplete(ctx, c, id, rc)
 	if !matched {
 		return
@@ -910,7 +952,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 		return
 	}
 
-	l.finalizeRunComplete(ctx, followUpCtx, c, rt, id, rc)
+	l.finalizeRunComplete(ctx, c, rt, id, rc)
 }
 
 // matchRunComplete is handleRunComplete's first step: reads c's current
@@ -949,9 +991,8 @@ func (l *lifecycle) matchRunComplete(ctx context.Context, c *threadControl, id s
 	if rt.person {
 		// A hand-driven turn ends where it started: back to idle with
 		// the workspace still live, since the person is likely to type
-		// again. Releasing or merging here would pull the workspace out
-		// from under them; a thread revived by hand merges when they say
-		// so, not when they stop typing.
+		// again. Releasing or cleaning up here would pull the workspace
+		// out from under them.
 		rt.runID = ""
 		rt.person = false
 		c.mu.Unlock()
@@ -1058,16 +1099,18 @@ func (l *lifecycle) deliverIntermediateRunComplete(ctx context.Context, handle H
 // finalizeRunComplete is handleRunComplete's last step: release rt's
 // workspace, load the entity's current row, and — if the completion still
 // applies to the session this entity currently owns — record its
-// terminal status and deliver it to the parent. followUpCtx is passed
-// through only to onRunSuccess (see handleRunComplete's doc for why).
-// Called with c.opMu already held.
-func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) {
+// terminal status and deliver it to the parent. Called with c.opMu held.
+func (l *lifecycle) finalizeRunComplete(ctx context.Context, c *threadControl, rt *runtimeState, id string, rc RunComplete) {
 	c.mu.Lock()
 	l.clearPendingSetups(rt)
 	c.runtime = nil
 	depth := c.depth
 	c.mu.Unlock()
 	if err := releaseRuntime(ctx, rt, "", false); err != nil {
+		c.mu.Lock()
+		rt.releaseFailed = true
+		c.runtime = rt
+		c.mu.Unlock()
 		slog.Error("Failed to release completed workspace", "component", "thread", "thread", id, "error", err)
 	}
 	st, err := l.store.Get(ctx, id)
@@ -1085,7 +1128,7 @@ func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *thr
 		}
 	}
 	// Only react to the session this entity currently owns while a run is
-	// in flight: Remove or a completed merge can race a straggling
+	// in flight: Remove or completion cleanup can race a straggling
 	// RunComplete from a run that no longer matters.
 	if rc.SessionID != st.SessionID || st.Status != StatusRunning {
 		return
@@ -1098,7 +1141,7 @@ func (l *lifecycle) finalizeRunComplete(ctx, followUpCtx context.Context, c *thr
 	case rc.Error != "":
 		status, errText, result, completedAt = StatusFailed, rc.Error, "", 0
 	default:
-		if l.onRunSuccess != nil && l.onRunSuccess(followUpCtx, c, st, rc.Text) {
+		if l.onRunSuccess != nil && l.onRunSuccess(ctx, c, st, rc.Text) {
 			return
 		}
 	}
@@ -1279,6 +1322,10 @@ func (l *lifecycle) deliverStoredCompletion(ctx context.Context, handle Handle, 
 	l.deliverCompletion(ctx, handle, st, depth, false)
 }
 
+type completionFence interface {
+	ApplyCompletion(context.Context, string, func() error) error
+}
+
 func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thread, depth int, intermediate bool) {
 	if l.resolveDelivery == nil {
 		return
@@ -1301,33 +1348,55 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 	priorReports := c.reports
 	c.reports++
 	c.mu.Unlock()
-	target.Coordinator().DeliverTaskCompletion(ctx, parentSessionID, TaskCompletion{
-		DelegationID:   st.ID,
-		PriorReports:   priorReports,
-		Kind:           string(st.Kind),
-		Name:           st.Name,
-		Goal:           st.Goal,
-		Status:         string(st.Status),
-		Intermediate:   intermediate,
-		ChildSessionID: st.SessionID,
-		ResultText:     st.ResultSummary,
-		Error:          st.Error,
-		Depth:          depth,
-		// Stamped once here, the single place every delivery path builds
-		// a TaskCompletion, so prepareStep's log can report delivery
-		// latency without a second clock reading elsewhere.
-		TerminalAt: terminalAt,
-		Acknowledge: func(ackCtx context.Context) error {
-			if st.Kind != KindTask || !st.CompletionPending {
-				return nil
-			}
-			store, ok := l.store.(TaskFinalizationStore)
-			if !ok {
-				return nil
-			}
-			return store.MarkTaskCompletionDelivered(ackCtx, st.ID)
-		},
-	})
+	deliver := func() error {
+		target.Coordinator().DeliverTaskCompletion(ctx, parentSessionID, TaskCompletion{
+			DelegationID:   st.ID,
+			PriorReports:   priorReports,
+			Kind:           string(st.Kind),
+			Name:           st.Name,
+			Goal:           st.Goal,
+			Status:         string(st.Status),
+			Intermediate:   intermediate,
+			ChildSessionID: st.SessionID,
+			ResultText:     st.ResultSummary,
+			Error:          st.Error,
+			Depth:          depth,
+			// Stamped once here, the single place every delivery path builds
+			// a TaskCompletion, so prepareStep's log can report delivery
+			// latency without a second clock reading elsewhere.
+			TerminalAt: terminalAt,
+			Apply: func(applyCtx context.Context, mutate func() error) error {
+				if fence, ok := target.(completionFence); ok {
+					return fence.ApplyCompletion(applyCtx, parentSessionID, mutate)
+				}
+				return mutate()
+			},
+			Acknowledge: func(ackCtx context.Context) error {
+				ack := func() error {
+					if st.Kind != KindTask || !st.CompletionPending {
+						return nil
+					}
+					store, ok := l.store.(TaskCompletionGenerationStore)
+					if !ok {
+						return fmt.Errorf("thread: completion store does not support generation acknowledgements")
+					}
+					return store.AcknowledgeTaskCompletionGeneration(ackCtx, st.ID, st.TerminalAt)
+				}
+				if fence, ok := target.(completionFence); ok {
+					return fence.ApplyCompletion(ackCtx, parentSessionID, ack)
+				}
+				return ack()
+			},
+		})
+		return nil
+	}
+	if fence, ok := target.(completionFence); ok {
+		if err := fence.ApplyCompletion(ctx, parentSessionID, deliver); err != nil {
+			slog.Info("Delivery retained for current session owner", "id", st.ID, "error", err)
+		}
+		return
+	}
+	_ = deliver()
 }
 
 // recover reconciles store state against reality after a process restart:

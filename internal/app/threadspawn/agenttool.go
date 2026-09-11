@@ -11,7 +11,7 @@ import (
 )
 
 // agentToolManager adapts a *thread.Manager to tools.ThreadManager, the
-// interface the thread_* agent tools are built against. It exists because
+// interface the agent_* management tools are built against. It exists because
 // internal/agent/tools cannot import internal/thread (internal/thread
 // imports internal/app, which imports internal/agent, which imports
 // internal/agent/tools — a cycle), so the tool-facing types there are
@@ -24,20 +24,6 @@ type agentToolManager struct {
 // wiring into agent.CoordinatorOptions.
 func AsAgentToolManager(m *thread.Manager) tools.ThreadManager {
 	return &agentToolManager{m: m}
-}
-
-func (a *agentToolManager) Create(ctx context.Context, args tools.ThreadCreateArgs) (tools.ThreadInfo, error) {
-	st, err := a.m.Create(ctx, thread.CreateArgs{
-		Name:            args.Name,
-		Goal:            args.Goal,
-		BaseBranch:      args.BaseBranch,
-		MergePolicy:     thread.MergePolicy(args.MergePolicy),
-		ParentSessionID: args.ParentSessionID,
-	})
-	if err != nil {
-		return tools.ThreadInfo{}, err
-	}
-	return toToolInfo(st), nil
 }
 
 func (a *agentToolManager) List(ctx context.Context) ([]tools.ThreadInfo, error) {
@@ -101,18 +87,6 @@ func (a *agentToolManager) Wait(ctx context.Context, ids []string, timeout time.
 	return a.m.Wait(ctx, ids, timeout)
 }
 
-func (a *agentToolManager) Merge(ctx context.Context, idOrName string) (tools.ThreadInfo, error) {
-	st, err := a.m.Merge(ctx, idOrName)
-	if err != nil {
-		return tools.ThreadInfo{}, toolErr(err)
-	}
-	return toToolInfo(st), nil
-}
-
-func (a *agentToolManager) Remove(ctx context.Context, idOrName string, force, deleteBranch bool) error {
-	return a.m.Remove(ctx, idOrName, force, deleteBranch)
-}
-
 // toToolSendOutcome maps the domain's send disposition to the tools
 // package's identical spelling of it, the same one-to-one seam conversion
 // toToolInfo does for a thread — shared with the task adapter, since a
@@ -135,7 +109,6 @@ func toToolInfo(st thread.Thread) tools.ThreadInfo {
 		WorktreePath:  st.WorktreePath,
 		SessionID:     st.SessionID,
 		Status:        string(st.Status),
-		MergePolicy:   string(st.MergePolicy),
 		ResultSummary: st.ResultSummary,
 		Error:         st.Error,
 		CreatedAt:     st.CreatedAt,

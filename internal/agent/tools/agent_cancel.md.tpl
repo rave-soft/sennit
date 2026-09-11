@@ -8,8 +8,7 @@ failed) is not overwritten.
 Cancelling a task cancels the tasks it started too: work delegated by
 something you just stopped has nobody left to report to, and left running
 it would keep editing the workspace unsupervised. A cancelled thread keeps
-its worktree and branch, so its work can still be inspected or resumed;
-use `thread_remove` to clear it away.
+its worktree and branch, so its work can still be inspected or resumed. Cleanup remains available through the user-facing thread controls.
 
 You can only cancel a task you started (`agent_list` shows exactly those).
 Your own id is refused — stopping your own work means ending your turn

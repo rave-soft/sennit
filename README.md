@@ -151,15 +151,18 @@ hook add PreToolUse --matcher "^bash$" \
 See [docs/extending](docs/extending/hooks.md) for the payload format, exit codes and
 worked examples.
 
-## Steering, tasks and threads
+## Steering and delegation
 
-Three ways work happens alongside the current turn: a message sent
-mid-turn is **steered** into that turn rather than starting a new one; a
-**background task** is a delegation with no isolation, sharing the working
-directory and reporting back automatically; a **thread** is fully isolated —
-its own git worktree, branch, app instance and merge policy — for work that
-would otherwise collide with what's already running. `sennit threads` manages
-the last of these from the CLI. See
+Two ways work happens alongside the current turn: a message sent mid-turn is
+**steered** into that turn rather than starting a new one, and a
+**delegation** goes to a subagent that reports back automatically. A
+delegation shares your working directory unless it asks for
+`isolation: "worktree"`, which gives it a git worktree, branch and app
+instance of its own — for work that would otherwise collide with what's
+already running. Nothing is merged back: a clean worktree whose branch adds
+nothing is removed when it finishes, and anything else is left on disk. The
+`worktree` command moves the session you are in into a worktree and back,
+leaving the conversation itself unchanged. See
 [docs/concepts](docs/concepts/delegation.md) for the trade-offs and limits.
 
 ## Command line
@@ -171,7 +174,6 @@ earlier one and `--cwd` picks the project.
 sennit run "explain internal/agent"   # single non-interactive prompt (pipeable)
 sennit models [refresh]               # list models; re-discover custom providers
 sennit session list|show|last         # browse sessions
-sennit threads list|create|merge      # manage work threads
 sennit stat                           # usage statistics
 sennit doctor                         # check the loaded config for problems
 sennit dirs / projects / logs         # where things live, and what's in them

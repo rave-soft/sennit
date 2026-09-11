@@ -17,7 +17,7 @@ import (
 var ErrNameTaken = errors.New("thread: name already in use")
 
 // CreateParams holds the fields needed to create a new thread. Status
-// defaults to StatusPending, MergePolicy defaults to MergeAuto, and Kind
+// defaults to StatusPending, and Kind
 // defaults to KindThread when left unset.
 type CreateParams struct {
 	Name         string
@@ -25,8 +25,9 @@ type CreateParams struct {
 	BaseBranch   string
 	Branch       string
 	WorktreePath string
+	Execution    string
+	Depth        int
 	SessionID    string
-	MergePolicy  MergePolicy
 	Kind         Kind
 	// ParentSessionID is the session this delegation's own session nests
 	// under; see [Delegation.ParentSessionID]. It is persisted, and so
@@ -88,8 +89,15 @@ type Store interface {
 // TaskFinalizationStore is the transactional extension required by task
 // lifecycle finalization. It is separate from Store so lightweight thread
 // stores and test doubles that never finalize tasks remain valid.
+type TaskPreparationStore interface {
+	SetTaskPreparation(context.Context, string, string, string, string) (Thread, error)
+}
+
+type TaskCompletionGenerationStore interface {
+	AcknowledgeTaskCompletionGeneration(context.Context, string, int64) error
+}
+
 type TaskFinalizationStore interface {
 	FinalizeTask(ctx context.Context, id string, params FinalizeTaskParams) (st Thread, finalized bool, err error)
 	ListPendingTaskCompletions(ctx context.Context) ([]Thread, error)
-	MarkTaskCompletionDelivered(ctx context.Context, id string) error
 }

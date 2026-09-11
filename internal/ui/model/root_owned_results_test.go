@@ -42,7 +42,7 @@ func TestRootDeliversOwnedResultsToTheUIThatAskedForThem(t *testing.T) {
 	require.NotNil(t, cmd, "the main screen must have started a probe")
 	require.True(t, r.main.wsCache.busyFetchInFlight)
 
-	// …the user opens the threads dashboard before it lands…
+	// …the user opens the delegations dashboard before it lands…
 	r.active = screenDashboard
 
 	// …and the result arrives.
@@ -148,7 +148,7 @@ func TestRootDeliversEnvelopedResultToTheUIThatDispatchedIt(t *testing.T) {
 	require.NotNil(t, cmd)
 	require.False(t, r.main.status.InfoMsg().IsEmpty())
 
-	// The user opens the threads dashboard before the clear timer fires.
+	// The user opens the delegations dashboard before the clear timer fires.
 	r.active = screenDashboard
 
 	msg := cmd()

@@ -66,6 +66,35 @@ type Session struct {
 	ModelID          string         `json:"model_id"`
 }
 
+type SessionWorktreeOwnership struct {
+	SessionID          string `json:"session_id"`
+	OwnerID            string `json:"owner_id"`
+	OwnerRoot          string `json:"owner_root"`
+	WorktreeName       string `json:"worktree_name"`
+	WorktreePath       string `json:"worktree_path"`
+	Phase              string `json:"phase"`
+	TargetOwnerID      string `json:"target_owner_id"`
+	TargetRoot         string `json:"target_root"`
+	TargetWorktreeName string `json:"target_worktree_name"`
+	TargetWorktreePath string `json:"target_worktree_path"`
+	Epoch              int64  `json:"epoch"`
+	UpdatedAt          int64  `json:"updated_at"`
+}
+
+type TaskCompletionOutbox struct {
+	TaskID          string        `json:"task_id"`
+	TerminalAt      int64         `json:"terminal_at"`
+	Status          string        `json:"status"`
+	Name            string        `json:"name"`
+	Goal            string        `json:"goal"`
+	SessionID       string        `json:"session_id"`
+	ParentSessionID string        `json:"parent_session_id"`
+	Error           string        `json:"error"`
+	ResultSummary   string        `json:"result_summary"`
+	CompletionDepth int64         `json:"completion_depth"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
+}
+
 type Thread struct {
 	ID                string        `json:"id"`
 	Name              string        `json:"name"`
@@ -76,7 +105,6 @@ type Thread struct {
 	WorktreePath      string        `json:"worktree_path"`
 	SessionID         string        `json:"session_id"`
 	Status            string        `json:"status"`
-	MergePolicy       string        `json:"merge_policy"`
 	ResultSummary     string        `json:"result_summary"`
 	Error             string        `json:"error"`
 	CreatedAt         int64         `json:"created_at"`
@@ -88,4 +116,5 @@ type Thread struct {
 	CompletionDepth   int64         `json:"completion_depth"`
 	TerminalAt        sql.NullInt64 `json:"terminal_at"`
 	CostAttributed    int64         `json:"cost_attributed"`
+	Execution         string        `json:"execution"`
 }

@@ -9,11 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,9 +59,105 @@ func TestWorkspaceAdaptersAreOwnershipScoped(t *testing.T) {
 // on the BootstrapOptions LocalSpawner builds: HerdrClient must be set
 // (so Bootstrap never falls back to herdr.Init at all) and must yield
 // nil, which is what actually keeps a thread off the parent's client.
+func TestLocalSpawnerWithProjectPathReadsParentPathPerSpawn(t *testing.T) {
+	projectPath := "/parent/first"
+	spawner := NewLocalSpawnerWithProjectPath(nil, nil, nil, nil, func() string { return projectPath })
+
+	require.Equal(t, projectPath, spawner.bootstrapOptions("", "").ProjectPath)
+	projectPath = "/parent/second"
+	opts := spawner.bootstrapOptions("delegation", "resumed-child")
+	require.Equal(t, projectPath, opts.ProjectPath)
+	require.Equal(t, "delegation", opts.ResumeDelegationID)
+	require.Equal(t, "resumed-child", opts.ResumeSessionID)
+}
+
+func TestLocalSpawnerResumeValidatesPersistedDelegationOwnership(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(db.ResetPool)
+
+	project := t.TempDir()
+	worktree := t.TempDir()
+	spawner := NewLocalSpawnerWithProjectPath(nil, nil, nil, nil, func() string { return project })
+	first, err := spawner.Spawn(t.Context(), thread.SpawnRequest{Path: worktree})
+	require.NoError(t, err)
+	firstApp := first.(*localHandle).app
+	parent, err := firstApp.Sessions().Create(t.Context(), "parent")
+	require.NoError(t, err)
+	child, err := firstApp.Sessions().CreateTaskSession(t.Context(), uuid.NewString(), parent.ID, "child")
+	require.NoError(t, err)
+	root, err := firstApp.Sessions().Create(t.Context(), "same-project root")
+	require.NoError(t, err)
+
+	conn, err := db.Connect(t.Context(), config.GlobalDBDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Release(config.GlobalDBDir())) })
+	q := db.New(conn)
+	delegationID := uuid.NewString()
+	_, err = q.CreateThread(t.Context(), db.CreateThreadParams{
+		ID: delegationID, Name: "owned", ProjectPath: project, Goal: "goal",
+		BaseBranch: "main", Branch: "thread/owned", WorktreePath: worktree,
+		SessionID: child.ID, Status: string(thread.StatusInterrupted), Kind: string(thread.KindThread),
+		ParentSessionID: parent.ID,
+	})
+	require.NoError(t, err)
+	foreignSessions := sessionstore.NewService(q, conn, t.TempDir())
+	foreign, err := foreignSessions.Create(t.Context(), "foreign project")
+	require.NoError(t, err)
+	createUnfinished := func(sessionID, callID string) message.Message {
+		msg, createErr := firstApp.Messages().Create(t.Context(), sessionID, message.CreateMessageParams{
+			Role: message.Assistant,
+			Parts: []message.ContentPart{message.ToolCall{
+				ID: callID, Name: "read", Input: "{}",
+			}},
+		})
+		require.NoError(t, createErr)
+		return msg
+	}
+	childMsg := createUnfinished(child.ID, "child-call")
+	rootMsg := createUnfinished(root.ID, "root-call")
+	foreignMsg := createUnfinished(foreign.ID, "foreign-call")
+	require.NoError(t, firstApp.Messages().FlushAll(t.Context()))
+	require.NoError(t, spawner.Release(t.Context(), first.ID()))
+
+	spawnAndRelease := func(sessionID string) {
+		handle, spawnErr := spawner.Spawn(t.Context(), thread.SpawnRequest{
+			Path: worktree, DelegationID: delegationID, SessionID: sessionID,
+		})
+		require.NoError(t, spawnErr)
+		require.Equal(t, project, handle.(*localHandle).app.ProjectPath())
+		require.NoError(t, spawner.Release(t.Context(), handle.ID()))
+	}
+	spawnAndRelease(foreign.ID)
+	spawnAndRelease(root.ID)
+
+	messages := messagestore.NewService(q, messagestore.WithProjectPath(project))
+	assertFinished := func(sessionID, messageID string, want bool) {
+		rows, listErr := messages.List(t.Context(), sessionID)
+		require.NoError(t, listErr)
+		for i := range rows {
+			if rows[i].ID == messageID {
+				require.Equal(t, want, rows[i].FinishPart() != nil)
+				return
+			}
+		}
+		t.Fatalf("message %s not found", messageID)
+	}
+	assertFinished(foreign.ID, foreignMsg.ID, false)
+	assertFinished(root.ID, rootMsg.ID, false)
+	assertFinished(child.ID, childMsg.ID, false)
+
+	spawnAndRelease(child.ID)
+	assertFinished(child.ID, childMsg.ID, true)
+	assertFinished(root.ID, rootMsg.ID, false)
+	assertFinished(foreign.ID, foreignMsg.ID, false)
+}
+
 func TestLocalSpawnerDoesNotShareProcessHerdrClient(t *testing.T) {
 	spawner := NewLocalSpawner(nil, nil, nil, nil)
-	opts := spawner.bootstrapOptions()
+	opts := spawner.bootstrapOptions("", "")
 	require.NotNil(t, opts.HerdrClient, "a thread must set its own herdr client getter, not leave it nil")
 	require.Nil(t, opts.HerdrClient(), "a thread's herdr client getter must yield nil, never the process-wide client")
 }
@@ -69,7 +170,7 @@ func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 	t.Cleanup(func() { db.ResetPool() })
 
 	spawner := NewLocalSpawner(nil, nil, func() bool { return true }, nil)
-	handle, err := spawner.Spawn(context.Background(), t.TempDir())
+	handle, err := spawner.Spawn(context.Background(), thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
 
@@ -93,7 +194,7 @@ func TestLocalSpawnerDoesNotInheritProjectTrust(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(child, "sennit.json"), []byte(`{"env":{"SENNIT_THREAD_UNTRUSTED":"active"}}`), 0o600))
 
 	spawner := NewLocalSpawner(nil, nil, nil, nil)
-	handle, err := spawner.Spawn(t.Context(), child)
+	handle, err := spawner.Spawn(t.Context(), thread.SpawnRequest{Path: child})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
 
@@ -107,7 +208,7 @@ func TestLocalSpawnerConfinesWritesToWorktree(t *testing.T) {
 	repo := initRepo(t)
 	spawner := NewLocalSpawner(nil, nil, nil, nil)
 
-	handle, err := spawner.Spawn(t.Context(), repo)
+	handle, err := spawner.Spawn(t.Context(), thread.SpawnRequest{Path: repo})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
 
@@ -133,7 +234,7 @@ func TestLocalSpawnerInheritsParentSkills(t *testing.T) {
 	}
 	spawner := NewLocalSpawner(nil, func() []*skills.Skill { return []*skills.Skill{parentSkill} }, nil, nil)
 
-	handle, err := spawner.Spawn(context.Background(), t.TempDir())
+	handle, err := spawner.Spawn(context.Background(), thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
 
@@ -170,7 +271,7 @@ func TestForwardSkillsToThreadsPushesUpdateToLiveThread(t *testing.T) {
 	parent.Skills = skills.NewManager(nil, nil, nil)
 
 	spawner := NewLocalSpawner(nil, nil, nil, nil)
-	handle, err := spawner.Spawn(ctx, t.TempDir())
+	handle, err := spawner.Spawn(ctx, thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
 	lh, ok := handle.(*localHandle)
@@ -210,7 +311,7 @@ func TestLocalSpawnerInheritsParentModel(t *testing.T) {
 	parent := config.SelectedModel{Provider: "openai", Model: "gpt-5.6-sol"}
 	spawner := NewLocalSpawner(nil, nil, nil, func() config.SelectedModel { return parent })
 
-	handle, err := spawner.Spawn(context.Background(), t.TempDir())
+	handle, err := spawner.Spawn(context.Background(), thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
 
@@ -233,13 +334,13 @@ func TestLocalSpawnerReadsParentModelPerSpawn(t *testing.T) {
 	current := config.SelectedModel{Provider: "openai", Model: "first"}
 	spawner := NewLocalSpawner(nil, nil, nil, func() config.SelectedModel { return current })
 
-	first, err := spawner.Spawn(context.Background(), t.TempDir())
+	first, err := spawner.Spawn(context.Background(), thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), first.ID())) })
 	require.Equal(t, current, first.(*localHandle).app.Config().Model)
 
 	current = config.SelectedModel{Provider: "anthropic", Model: "second"}
-	second, err := spawner.Spawn(context.Background(), t.TempDir())
+	second, err := spawner.Spawn(context.Background(), thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), second.ID())) })
 	require.Equal(t, current, second.(*localHandle).app.Config().Model)
@@ -263,7 +364,7 @@ func TestForwardAgentsToThreadsPushesUpdateToLiveThread(t *testing.T) {
 	// A bootstrapped app stands in for the parent: forwardAgentsToThreads
 	// reads its Config and listens on its events, which NewForTest lacks.
 	parentSpawner := NewLocalSpawner(nil, nil, nil, nil)
-	parentHandle, err := parentSpawner.Spawn(ctx, t.TempDir())
+	parentHandle, err := parentSpawner.Spawn(ctx, thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, parentSpawner.Release(context.Background(), parentHandle.ID())) })
 	parent := parentHandle.(*localHandle).app
@@ -276,7 +377,7 @@ func TestForwardAgentsToThreadsPushesUpdateToLiveThread(t *testing.T) {
 	original := map[string]config.Agent{"reviewer": {ID: "reviewer", Name: "Reviewer", Prompt: "Review.", Description: "old"}}
 	spawner := NewLocalSpawner(func() map[string]config.Agent { return parent.Config().UserAgents() }, nil, nil, nil)
 	parent.Store().ReplaceInheritedAgents(original)
-	handle, err := spawner.Spawn(ctx, t.TempDir())
+	handle, err := spawner.Spawn(ctx, thread.SpawnRequest{Path: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
 	lh := handle.(*localHandle)

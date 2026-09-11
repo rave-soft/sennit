@@ -297,8 +297,8 @@ option reset <list-key>    # clear a list option back to empty
   disables metrics.
 - **String keys**: `data-directory`, `initialize-as`, `notifications`.
 - **Integer keys**: `history-retention-days` (age, in days, after which `sennit
-  gc` deletes old sessions/threads; default 90, 0 keeps history forever — see
-  [Maintenance](#maintenance)).
+  gc` deletes old sessions and finished delegations; default 90, 0 keeps
+  history forever — see [Maintenance](#maintenance)).
 - **Idle auto-summarize keys** (stored under `options.auto_summarize_idle`):
   `auto-summarize-idle` (boolean, default on), `auto-summarize-idle-tokens`
   (context size in prompt tokens a session must exceed, default 60000), and
@@ -646,9 +646,9 @@ sennit gc [--days N] [--dry-run] [--project] [--json]
 - Deleting a session also deletes any agent-tool/title sub-session parented
   to it, regardless of the sub-session's own age; old sub-sessions under a
   kept parent are deleted independently, on their own age.
-- Also deletes finished threads (`completed`, `merged`, `conflict`,
-  `merge_blocked`, `failed`, `interrupted`) past the same window —
-  `pending`/`running`/`merging` threads are never touched, regardless of age.
+- Also deletes finished delegation records (`completed`, `failed`,
+  `interrupted`, `cancelled`) past the same window. Thread records are retained
+  while their worktree still exists, and unknown statuses are never touched.
 - Runs `VACUUM` and a WAL checkpoint afterward to actually shrink
   `sennit.db` on disk.
 - Defaults to the entire shared database (every project); pass `--project`

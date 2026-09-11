@@ -104,9 +104,6 @@ var sequentialDenyList = []struct {
 	{QuestionToolName, "interactive prompt on the session"},
 	{JobOutputToolName, "background-shell manager state; wait=true blocks"},
 	{JobKillToolName, "kills background shell processes"},
-	{ThreadCreateToolName, "starts a thread"},
-	{ThreadMergeToolName, "merges a thread, git worktree"},
-	{ThreadRemoveToolName, "removes a thread"},
 	{AgentListToolName, "task and thread manager state"},
 	{AgentResultToolName, "task and thread manager state"},
 	{AgentOutputToolName, "task manager state"},
@@ -278,22 +275,16 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewRenameTool(nil, nil, &mockHistoryService{}, mockFileTrackerService{}, dir)
 	case ReplaceSymbolToolName:
 		return NewReplaceSymbolTool(nil, nil, &mockHistoryService{}, mockFileTrackerService{}, dir)
-	case ThreadCreateToolName:
-		return NewThreadCreateTool(panicThreadManager{}, nil)
-	case ThreadMergeToolName:
-		return NewThreadMergeTool(panicThreadManager{}, nil)
-	case ThreadRemoveToolName:
-		return NewThreadRemoveTool(panicThreadManager{}, nil)
 	case AgentListToolName:
-		return NewAgentListTool(panicTaskManager{}, panicThreadManager{})
+		return NewAgentListTool(panicTaskManager{}, nil)
 	case AgentResultToolName:
-		return NewAgentResultTool(panicTaskManager{}, panicThreadManager{})
+		return NewAgentResultTool(panicTaskManager{}, nil)
 	case AgentOutputToolName:
-		return NewAgentOutputTool(panicTaskManager{}, panicThreadManager{})
+		return NewAgentOutputTool(panicTaskManager{}, nil)
 	case AgentSendToolName:
-		return NewAgentSendTool(panicTaskManager{}, panicThreadManager{})
+		return NewAgentSendTool(panicTaskManager{}, nil)
 	case AgentCancelToolName:
-		return NewAgentCancelTool(panicTaskManager{}, panicThreadManager{}, nil)
+		return NewAgentCancelTool(panicTaskManager{}, nil, nil)
 	case AskParentToolName:
 		return NewAskParentTool(nil)
 	// Re-audited sequential network and MCP tools use test doubles because

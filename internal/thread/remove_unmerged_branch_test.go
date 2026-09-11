@@ -24,8 +24,7 @@ func TestManager_RemoveRefusesUnmergedBranchWithoutTearingDownTheRuntime(t *test
 	// An idle thread (no Goal) keeps its workspace live per Create's own
 	// doc comment - exactly the "attached screen" case this bug destroyed.
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "stuck",
-		MergePolicy: thread.MergeManual,
+		Name: "stuck",
 	})
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusIdle, st.Status)

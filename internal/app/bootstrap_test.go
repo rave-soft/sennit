@@ -59,6 +59,61 @@ func TestWorkspaceLockHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestBootstrap_ExistingSessionPreparesSameTopLevelRow(t *testing.T) {
+	setBootstrapTestEnv(t)
+	projectPath := t.TempDir()
+	targetPath := t.TempDir()
+	dataDir := t.TempDir()
+
+	source, err := Bootstrap(t.Context(), projectPath, BootstrapOptions{DataDir: dataDir})
+	require.NoError(t, err)
+	sess, err := source.App.Sessions().Create(t.Context(), "transfer")
+	require.NoError(t, err)
+	source.App.Shutdown()
+
+	target, err := Bootstrap(t.Context(), targetPath, BootstrapOptions{DataDir: dataDir, ProjectPath: projectPath, ExistingSessionID: sess.ID, ConfineWrites: true})
+	require.NoError(t, err)
+	t.Cleanup(target.App.Shutdown)
+	require.Equal(t, sess.ID, target.App.CurrentSessionID())
+	ownerID, epoch := target.App.OwnerIdentity()
+	require.NotEmpty(t, ownerID)
+	require.Zero(t, epoch, "prepared target must remain fail-closed before commit")
+	listed, err := target.App.Sessions().List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, sess.ID, listed[0].ID)
+	require.Empty(t, listed[0].ParentSessionID)
+	require.ErrorIs(t, target.App.checkSessionOwnership(t.Context(), sess.ID), ErrSessionOwnershipLost)
+}
+
+func TestBootstrap_ProjectPathScopesDelegationsWithoutChangingWorkingDir(t *testing.T) {
+	setBootstrapTestEnv(t)
+	parentPath := t.TempDir()
+	childPath := t.TempDir()
+	dataDir := t.TempDir()
+
+	parent, err := Bootstrap(t.Context(), parentPath, BootstrapOptions{DataDir: dataDir})
+	require.NoError(t, err)
+	t.Cleanup(parent.App.Shutdown)
+	root, err := parent.App.Sessions().Create(t.Context(), "parent")
+	require.NoError(t, err)
+
+	child, err := Bootstrap(t.Context(), childPath, BootstrapOptions{DataDir: dataDir, ProjectPath: parentPath})
+	require.NoError(t, err)
+	t.Cleanup(child.App.Shutdown)
+	require.Equal(t, childPath, child.Config.WorkingDir(), "project override must not change the child workspace root")
+	_, err = child.App.Sessions().CreateSubAgentSession(t.Context(), root.ID+"-child", root.ID, "delegation", "delegate")
+	require.NoError(t, err)
+
+	roots, err := parent.App.Sessions().List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, roots, 1, "delegations must not leak into root session listings")
+	require.Equal(t, root.ID, roots[0].ID)
+	children, err := parent.App.Sessions().ListSubAgentSessions(t.Context(), root.ID, "delegate", "")
+	require.NoError(t, err)
+	require.Len(t, children, 1, "delegations must remain visible in the parent tree")
+}
+
 func TestBootstrap_Success(t *testing.T) {
 	setBootstrapTestEnv(t)
 
@@ -354,7 +409,7 @@ func TestBootstrap_NewFailureReleasesPooledDB(t *testing.T) {
 	wantErr := errors.New("new failed")
 	_, err := Bootstrap(t.Context(), t.TempDir(), BootstrapOptions{
 		DataDir: t.TempDir(),
-		newApp: func(context.Context, *sql.DB, *config.ConfigStore, *skills.Manager) (*App, error) {
+		newApp: func(_ context.Context, _ *sql.DB, _ *config.ConfigStore, _ *skills.Manager, _ ...Option) (*App, error) {
 			return nil, wantErr
 		},
 	})
@@ -414,8 +469,8 @@ func TestBootstrap_LateFinalCleanupRegistrationFailureShutsDownAppAndReleasesDBO
 	var appInstance *App
 	_, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
 		DataDir: t.TempDir(),
-		newApp: func(ctx context.Context, conn *sql.DB, store *config.ConfigStore, mgr *skills.Manager) (*App, error) {
-			a, err := New(ctx, conn, store, mgr)
+		newApp: func(ctx context.Context, conn *sql.DB, store *config.ConfigStore, mgr *skills.Manager, options ...Option) (*App, error) {
+			a, err := New(ctx, conn, store, mgr, options...)
 			if err != nil {
 				return nil, err
 			}

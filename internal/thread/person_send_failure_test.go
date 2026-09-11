@@ -20,7 +20,7 @@ func TestManager_PersonSendThatNeverDispatchesRestsTheThread(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "typed-into", MergePolicy: thread.MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "typed-into"})
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusIdle, st.Status)
 

@@ -19,6 +19,7 @@ var fieldsExcludedFromDTOs = map[string]bool{
 	"CompletionPending": true,
 	"CompletionDepth":   true,
 	"TerminalAt":        true,
+	"Execution":         true,
 }
 
 // TestThreadFieldsCoveredByDTOs guards the three hand-written flattenings

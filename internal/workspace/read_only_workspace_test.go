@@ -87,8 +87,6 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	// Thread mutations denied.
 	_, err = ro.CreateThread(t.Context(), proto.CreateThreadRequest{Name: "x"})
 	require.True(t, IsReadOnlyError(err))
-	_, err = ro.MergeThread(t.Context(), "id")
-	require.True(t, IsReadOnlyError(err))
 	err = ro.RemoveThread(t.Context(), "id", proto.RemoveThreadOptions{})
 	require.True(t, IsReadOnlyError(err))
 	_, _, err = ro.AttachThread(t.Context(), "id")
@@ -214,8 +212,6 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	threads, err := ro.ListThreads(t.Context())
 	require.NoError(t, err)
 	require.Empty(t, threads)
-	_, err = ro.GetThread(t.Context(), "id")
-	require.NoError(t, err)
 
 	// SetCurrentSession only updates local UI state.
 	require.NoError(t, ro.SetCurrentSession(t.Context(), "sess-1"))
@@ -728,12 +724,15 @@ func (s *stubWorkspace) MCPPendingAuth() []MCPPendingAuthServer { return nil }
 func (s *stubWorkspace) MCPAuthURL(name string) string          { return "" }
 
 // ThreadController (query only for stub)
-func (s *stubWorkspace) SupportsThreads() bool                                   { return false }
-func (s *stubWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) { return nil, nil }
-func (s *stubWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
-	return proto.Thread{}, nil
+func (s *stubWorkspace) EnterWorktree(context.Context, string) (Workspace, func(), error) {
+	return nil, nil, nil
 }
 
+func (s *stubWorkspace) ExitWorktree(context.Context) (Workspace, func(), error) {
+	return nil, nil, nil
+}
+func (s *stubWorkspace) SupportsThreads() bool                                   { return false }
+func (s *stubWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) { return nil, nil }
 func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
 	s.track("CreateThread")
 	return proto.Thread{}, nil
@@ -741,11 +740,6 @@ func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThread
 
 func (s *stubWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
 	s.track("ActivateThread")
-	return proto.Thread{}, nil
-}
-
-func (s *stubWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
-	s.track("MergeThread")
 	return proto.Thread{}, nil
 }
 

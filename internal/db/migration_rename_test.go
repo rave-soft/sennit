@@ -31,10 +31,10 @@ func TestMigration_RenameStrandsToThreads(t *testing.T) {
 	_, err = conn.ExecContext(context.Background(), `
 		INSERT INTO strands (
 			id, name, goal, base_branch, branch, worktree_path,
-			session_id, status, merge_policy, created_at, updated_at
+			session_id, status, created_at, updated_at
 		) VALUES (
 			'st-1', 'alpha', 'do the thing', 'main', 'strand/alpha',
-			'/tmp/worktree', 'sess-1', 'running', 'auto', 1000, 1000
+			'/tmp/worktree', 'sess-1', 'running', 1000, 1000
 		)`)
 	require.NoError(t, err)
 
@@ -53,15 +53,15 @@ func TestMigration_RenameStrandsToThreads(t *testing.T) {
 	require.Equal(t, 1, exists, "threads table should exist")
 
 	var (
-		id, name, goal, baseBranch, branch, worktreePath, sessionID, status, mergePolicy string
-		createdAt, updatedAt                                                             int64
+		id, name, goal, baseBranch, branch, worktreePath, sessionID, status string
+		createdAt, updatedAt                                                int64
 	)
 	err = conn.QueryRowContext(context.Background(), `
 		SELECT id, name, goal, base_branch, branch, worktree_path,
-			session_id, status, merge_policy, created_at, updated_at
+			session_id, status, created_at, updated_at
 		FROM threads WHERE id = 'st-1'`).Scan(
 		&id, &name, &goal, &baseBranch, &branch, &worktreePath,
-		&sessionID, &status, &mergePolicy, &createdAt, &updatedAt,
+		&sessionID, &status, &createdAt, &updatedAt,
 	)
 	require.NoError(t, err, "row inserted into strands should be readable from threads")
 
@@ -73,7 +73,6 @@ func TestMigration_RenameStrandsToThreads(t *testing.T) {
 	require.Equal(t, "/tmp/worktree", worktreePath)
 	require.Equal(t, "sess-1", sessionID)
 	require.Equal(t, "running", status)
-	require.Equal(t, "auto", mergePolicy)
 	require.Equal(t, int64(1000), createdAt)
 	require.Equal(t, int64(1000), updatedAt)
 }

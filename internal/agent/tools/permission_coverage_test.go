@@ -1,12 +1,10 @@
 package tools
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
@@ -209,45 +207,6 @@ func toolClassifications() []toolClassification {
 		},
 		{name: ListMCPResourcesToolName, writes: false},
 		{name: ReadMCPResourceToolName, writes: false},
-		{
-			name: ThreadCreateToolName, writes: true,
-			run: func(t *testing.T, perms permission.Service, _, _ string) fantasy.ToolResponse {
-				tool := NewThreadCreateTool(panicThreadManager{}, perms)
-				resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
-					ID: "call-1", Name: ThreadCreateToolName,
-					Input: mustJSONInput(t, ThreadCreateParams{Name: "t1", Goal: "do a thing"}),
-				})
-				require.NoError(t, err)
-				return resp
-			},
-		},
-		{name: AgentListToolName, writes: false},
-		{name: AgentResultToolName, writes: false},
-		{name: AgentSendToolName, writes: false},
-		{
-			name: ThreadMergeToolName, writes: true,
-			run: func(t *testing.T, perms permission.Service, _, _ string) fantasy.ToolResponse {
-				tool := NewThreadMergeTool(panicThreadManager{}, perms)
-				resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
-					ID: "call-1", Name: ThreadMergeToolName,
-					Input: mustJSONInput(t, ThreadMergeParams{ID: "t1"}),
-				})
-				require.NoError(t, err)
-				return resp
-			},
-		},
-		{
-			name: ThreadRemoveToolName, writes: true,
-			run: func(t *testing.T, perms permission.Service, _, _ string) fantasy.ToolResponse {
-				tool := NewThreadRemoveTool(panicThreadManager{}, perms)
-				resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
-					ID: "call-1", Name: ThreadRemoveToolName,
-					Input: mustJSONInput(t, ThreadRemoveParams{ID: "t1"}),
-				})
-				require.NoError(t, err)
-				return resp
-			},
-		},
 		{name: AgentListToolName, writes: false},
 		{name: AgentResultToolName, writes: false},
 		{name: AgentCancelToolName, writes: false},
@@ -255,44 +214,6 @@ func toolClassifications() []toolClassification {
 		{name: AgentOutputToolName, writes: false},
 		{name: AskParentToolName, writes: false},
 	}
-}
-
-// panicThreadManager is a ThreadManager whose every method panics. It is
-// only ever handed to a tool alongside a permission service that denies the
-// request, so none of these should be reached — a panic here means the
-// tool under test called into the manager before honoring the denial.
-type panicThreadManager struct{}
-
-func (panicThreadManager) Create(context.Context, ThreadCreateArgs) (ThreadInfo, error) {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
-}
-
-func (panicThreadManager) List(context.Context) ([]ThreadInfo, error) {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
-}
-
-func (panicThreadManager) Get(context.Context, string) (ThreadInfo, error) {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
-}
-
-func (panicThreadManager) Send(context.Context, string, string) (SendOutcome, error) {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
-}
-
-func (panicThreadManager) Cancel(context.Context, string, string) error {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
-}
-
-func (panicThreadManager) Wait(context.Context, []string, time.Duration) error {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
-}
-
-func (panicThreadManager) Merge(context.Context, string) (ThreadInfo, error) {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
-}
-
-func (panicThreadManager) Remove(context.Context, string, bool, bool) error {
-	panic("permission_coverage_test: ThreadManager reached despite a denied request")
 }
 
 // denyingPermissions (filemutation_test.go) already refuses every request

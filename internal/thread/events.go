@@ -8,12 +8,8 @@ const (
 	// EventCreated fires once a thread row exists (before its worktree
 	// and workspace are set up), so subscribers see it immediately.
 	EventCreated EventType = "created"
-	// EventStatusChanged fires on every status transition, including
-	// the ones EventMerged and EventRemoved also fire for.
+	// EventStatusChanged fires on every persisted status transition.
 	EventStatusChanged EventType = "status_changed"
-	// EventMerged fires once a thread's branch has landed in its base
-	// branch.
-	EventMerged EventType = "merged"
 	// EventRemoved fires once a thread's worktree, branch (if
 	// requested), and store row have all been cleaned up.
 	EventRemoved EventType = "removed"

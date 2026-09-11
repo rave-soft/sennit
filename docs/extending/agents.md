@@ -82,6 +82,11 @@ tools: {read: true, bash: false} # enabled map (opencode style)
 Names come from the [tools reference](../reference/tools.md).
 Omit the field to give the agent the default set.
 
+`thread_create`, `thread_merge` and `thread_remove` are gone and have no
+replacement to alias to — isolation is a parameter of `agent` now, not a tool
+of its own. A file still listing one keeps working: the name is dropped and
+`sennit doctor` says which file it came from.
+
 > [!IMPORTANT]
 > Fields Sennit does not understand are ignored rather than rejected —
 > including opencode's `permission:` blocks, which are **not** enforced.
@@ -97,8 +102,8 @@ wrote.
 
 Continuity is scoped by *who* and *where*. Two named agents under one parent
 keep separate conversations, and the same agent keeps separate conversations
-under different parents — which is what keeps a thread's delegations inside
-that thread.
+under different parents — which is what keeps an isolated delegation's own
+delegations inside it.
 
 Each delegation still gets its own session, so each call is its own block in
 the transcript. The carried memory is bounded: once the replayed transcript
@@ -110,8 +115,8 @@ The anonymous delegations — `agent` with no `subagent_type`, and
 a time on unrelated work, and stitching them into one growing conversation
 would cost context without buying continuity.
 
-See [Steering, tasks and threads](../concepts/delegation.md)
-for how delegated work relates to background tasks and threads.
+See [Steering and delegation](../concepts/delegation.md)
+for what delegated work costs, isolated and not.
 
 ## Writing one that gets used
 

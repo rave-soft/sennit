@@ -37,7 +37,7 @@ func TestManager_FailCreateRecordsFailureOnCancelledContext(t *testing.T) {
 	})
 	shutdownManagerOnCleanup(t, mgr)
 
-	_, err := mgr.Create(ctx, thread.CreateArgs{Name: "beta", Goal: "go", MergePolicy: thread.MergeManual})
+	_, err := mgr.Create(ctx, thread.CreateArgs{Name: "beta", Goal: "go"})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "session boom")
 

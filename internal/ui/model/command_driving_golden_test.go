@@ -40,7 +40,7 @@ func renderCmdDrivenUI(m *UI) []byte {
 	return []byte(canvas.Render())
 }
 
-// renderDashboardScreen snapshots the threads dashboard screen straight
+// renderDashboardScreen snapshots the delegations dashboard straight
 // from a uv.ScreenBuffer, mirroring Root.dashboardView's buffer draw (the
 // test needs the raw buffer, not the normalized View string).
 func renderDashboardScreen(r *Root) []byte {
@@ -164,12 +164,10 @@ func TestCmdDrivingGolden(t *testing.T) {
 		ws := &cmdDrivingWorkspace{
 			agentReady:      true,
 			supportsThreads: true,
-			threads: []proto.Thread{{
-				ID:     "thread-golden",
-				Name:   "Golden coverage",
-				Status: "running",
-				Goal:   "render the threads panel",
-			}},
+			threads: []proto.Thread{
+				{ID: "thread-golden", Name: "Isolated work", Kind: "thread", Status: "running", Goal: "render isolated work"},
+				{ID: "task-golden", Name: "Ordinary task", Kind: "task", Status: "running", Goal: "render shared work"},
+			},
 		}
 		m := newCmdDrivenGoldenUI(ws)
 		m.lay.width, m.lay.height = 100, 24

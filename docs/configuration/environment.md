@@ -29,7 +29,7 @@ hand, and Sennit deliberately never discovers or executes a `sennitrc` from
 there.
 
 A project's `.sennit/` holds only that project's config overrides, its skills
-and agents, thread worktrees, and a single-instance lock file. Session history
+and agents, worktrees, and a single-instance lock file. Session history
 is **not** there; it lives in the shared database. See
 [Sessions and data storage](../concepts/sessions.md).
 

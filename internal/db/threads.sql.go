@@ -10,6 +10,24 @@ import (
 	"database/sql"
 )
 
+const acknowledgeTaskCompletionGeneration = `-- name: AcknowledgeTaskCompletionGeneration :execrows
+DELETE FROM task_completion_outbox
+WHERE task_id = ? AND terminal_at = ?
+`
+
+type AcknowledgeTaskCompletionGenerationParams struct {
+	TaskID     string `json:"task_id"`
+	TerminalAt int64  `json:"terminal_at"`
+}
+
+func (q *Queries) AcknowledgeTaskCompletionGeneration(ctx context.Context, arg AcknowledgeTaskCompletionGenerationParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, acknowledgeTaskCompletionGeneration, arg.TaskID, arg.TerminalAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const attributeTaskCostOnce = `-- name: AttributeTaskCostOnce :execrows
 UPDATE sessions
 SET cost = sessions.cost + COALESCE((SELECT child.cost FROM sessions child WHERE child.id = ?1), 0)
@@ -52,9 +70,10 @@ INSERT INTO threads (
     worktree_path,
     session_id,
     status,
-    merge_policy,
     kind,
     parent_session_id,
+    execution,
+    completion_depth,
     updated_at,
     created_at
 ) VALUES (
@@ -70,9 +89,10 @@ INSERT INTO threads (
     ?,
     ?,
     ?,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type CreateThreadParams struct {
@@ -85,9 +105,10 @@ type CreateThreadParams struct {
 	WorktreePath    string `json:"worktree_path"`
 	SessionID       string `json:"session_id"`
 	Status          string `json:"status"`
-	MergePolicy     string `json:"merge_policy"`
 	Kind            string `json:"kind"`
 	ParentSessionID string `json:"parent_session_id"`
+	Execution       string `json:"execution"`
+	CompletionDepth int64  `json:"completion_depth"`
 }
 
 // project_path is denormalized: once session_id is set, the project is
@@ -109,9 +130,10 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		arg.WorktreePath,
 		arg.SessionID,
 		arg.Status,
-		arg.MergePolicy,
 		arg.Kind,
 		arg.ParentSessionID,
+		arg.Execution,
+		arg.CompletionDepth,
 	)
 	var i Thread
 	err := row.Scan(
@@ -124,7 +146,6 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -136,6 +157,7 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
+		&i.Execution,
 	)
 	return i, err
 }
@@ -157,16 +179,16 @@ SET
     error = ?2,
     result_summary = ?3,
     completed_at = ?4,
-    terminal_at = ?5,
+    terminal_at = MAX(?5, COALESCE(terminal_at, 0) + 1),
     completion_depth = ?6,
     completion_pending = 1,
     cost_attributed = 1
 WHERE threads.id = ?7
   AND threads.kind = 'task'
-  AND threads.status = 'running'
+  AND threads.status IN ('pending', 'running')
   AND threads.session_id = ?8
   AND threads.parent_session_id = ?9
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type FinalizeTaskParams struct {
@@ -174,15 +196,13 @@ type FinalizeTaskParams struct {
 	Error           string        `json:"error"`
 	ResultSummary   string        `json:"result_summary"`
 	CompletedAt     sql.NullInt64 `json:"completed_at"`
-	TerminalAt      sql.NullInt64 `json:"terminal_at"`
+	TerminalAt      interface{}   `json:"terminal_at"`
 	CompletionDepth int64         `json:"completion_depth"`
 	ID              string        `json:"id"`
 	SessionID       string        `json:"session_id"`
 	ParentSessionID string        `json:"parent_session_id"`
 }
 
-// This follows AttributeTaskCostOnce in one transaction, so terminal state,
-// attribution and the durable completion outbox become visible together.
 func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thread, error) {
 	row := q.db.QueryRowContext(ctx, finalizeTask,
 		arg.Status,
@@ -206,7 +226,6 @@ func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thr
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -218,12 +237,13 @@ func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thr
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
+		&i.Execution,
 	)
 	return i, err
 }
 
 const getThread = `-- name: GetThread :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 FROM threads
 WHERE id = ? LIMIT 1
 `
@@ -245,7 +265,6 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -257,12 +276,13 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
+		&i.Execution,
 	)
 	return i, err
 }
 
 const getThreadByName = `-- name: GetThreadByName :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 FROM threads
 WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1
 `
@@ -285,7 +305,6 @@ func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -297,25 +316,104 @@ func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
+		&i.Execution,
 	)
 	return i, err
 }
 
-const listPendingTaskCompletions = `-- name: ListPendingTaskCompletions :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed FROM threads
-WHERE project_path = ? AND kind = 'task' AND completion_pending = 1
-ORDER BY terminal_at, created_at, id
+const insertTaskCompletionOutbox = `-- name: InsertTaskCompletionOutbox :exec
+INSERT INTO task_completion_outbox (
+    task_id, terminal_at, status, error, result_summary, completion_depth, completed_at,
+    name, goal, session_id, parent_session_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
-func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath string) ([]Thread, error) {
+type InsertTaskCompletionOutboxParams struct {
+	TaskID          string        `json:"task_id"`
+	TerminalAt      int64         `json:"terminal_at"`
+	Status          string        `json:"status"`
+	Error           string        `json:"error"`
+	ResultSummary   string        `json:"result_summary"`
+	CompletionDepth int64         `json:"completion_depth"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
+	Name            string        `json:"name"`
+	Goal            string        `json:"goal"`
+	SessionID       string        `json:"session_id"`
+	ParentSessionID string        `json:"parent_session_id"`
+}
+
+func (q *Queries) InsertTaskCompletionOutbox(ctx context.Context, arg InsertTaskCompletionOutboxParams) error {
+	_, err := q.db.ExecContext(ctx, insertTaskCompletionOutbox,
+		arg.TaskID,
+		arg.TerminalAt,
+		arg.Status,
+		arg.Error,
+		arg.ResultSummary,
+		arg.CompletionDepth,
+		arg.CompletedAt,
+		arg.Name,
+		arg.Goal,
+		arg.SessionID,
+		arg.ParentSessionID,
+	)
+	return err
+}
+
+const listPendingTaskCompletions = `-- name: ListPendingTaskCompletions :many
+SELECT threads.id, threads.name, threads.project_path, threads.goal, threads.base_branch, threads.branch, threads.worktree_path, threads.session_id, threads.status, threads.result_summary, threads.error, threads.created_at, threads.updated_at, threads.completed_at, threads.kind, threads.parent_session_id, threads.completion_pending, threads.completion_depth, threads.terminal_at, threads.cost_attributed, threads.execution, task_completion_outbox.status, task_completion_outbox.error,
+       task_completion_outbox.result_summary, task_completion_outbox.completion_depth,
+       task_completion_outbox.completed_at, task_completion_outbox.terminal_at,
+       task_completion_outbox.name, task_completion_outbox.goal,
+       task_completion_outbox.session_id, task_completion_outbox.parent_session_id
+FROM task_completion_outbox
+JOIN threads ON threads.id = task_completion_outbox.task_id
+WHERE threads.project_path = ?
+ORDER BY task_completion_outbox.terminal_at, task_completion_outbox.task_id
+`
+
+type ListPendingTaskCompletionsRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+	Execution         string        `json:"execution"`
+	Status_2          string        `json:"status_2"`
+	Error_2           string        `json:"error_2"`
+	ResultSummary_2   string        `json:"result_summary_2"`
+	CompletionDepth_2 int64         `json:"completion_depth_2"`
+	CompletedAt_2     sql.NullInt64 `json:"completed_at_2"`
+	TerminalAt_2      int64         `json:"terminal_at_2"`
+	Name_2            string        `json:"name_2"`
+	Goal_2            string        `json:"goal_2"`
+	SessionID_2       string        `json:"session_id_2"`
+	ParentSessionID_2 string        `json:"parent_session_id_2"`
+}
+
+func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath string) ([]ListPendingTaskCompletionsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listPendingTaskCompletions, projectPath)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Thread{}
+	items := []ListPendingTaskCompletionsRow{}
 	for rows.Next() {
-		var i Thread
+		var i ListPendingTaskCompletionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -326,7 +424,6 @@ func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath st
 			&i.WorktreePath,
 			&i.SessionID,
 			&i.Status,
-			&i.MergePolicy,
 			&i.ResultSummary,
 			&i.Error,
 			&i.CreatedAt,
@@ -338,6 +435,17 @@ func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath st
 			&i.CompletionDepth,
 			&i.TerminalAt,
 			&i.CostAttributed,
+			&i.Execution,
+			&i.Status_2,
+			&i.Error_2,
+			&i.ResultSummary_2,
+			&i.CompletionDepth_2,
+			&i.CompletedAt_2,
+			&i.TerminalAt_2,
+			&i.Name_2,
+			&i.Goal_2,
+			&i.SessionID_2,
+			&i.ParentSessionID_2,
 		); err != nil {
 			return nil, err
 		}
@@ -353,26 +461,57 @@ func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath st
 }
 
 const listThreads = `-- name: ListThreads :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ? AND kind = 'thread'
 ORDER BY created_at
 `
+
+type ListThreadsRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
 
 // Thread-facing: thread_list, the dashboard, and any other caller that
 // means "threads" specifically. Scoped to kind = 'thread' so a caller
 // asking for threads never sees another delegation kind sharing this
 // table. The generic lifecycle recovery sweep must NOT use this query;
 // see ListThreadsAll.
-func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread, error) {
+// execution is deliberately not selected: it holds the delegation
+// snapshot, which embeds the full prior history of a delegated session and
+// runs to tens of megabytes per row. No list caller reads it (only
+// GetThread's single-row callers do, on resume), so selecting it here made
+// every listing drag hundreds of megabytes through memory.
+func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]ListThreadsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreads, projectPath)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Thread{}
+	items := []ListThreadsRow{}
 	for rows.Next() {
-		var i Thread
+		var i ListThreadsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -383,7 +522,6 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 			&i.WorktreePath,
 			&i.SessionID,
 			&i.Status,
-			&i.MergePolicy,
 			&i.ResultSummary,
 			&i.Error,
 			&i.CreatedAt,
@@ -410,11 +548,37 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 }
 
 const listThreadsAll = `-- name: ListThreadsAll :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ?
 ORDER BY created_at
 `
+
+type ListThreadsAllRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
 
 // Every delegation kind sharing this table (threads today, tasks once
 // they exist), scoped to project_path but not kind. This is the listing
@@ -423,15 +587,20 @@ ORDER BY created_at
 // "running" when the process died would never be caught and would sit
 // displayed as active forever. Not for thread-facing callers; see
 // ListThreads.
-func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thread, error) {
+// execution is deliberately not selected: it holds the delegation
+// snapshot, which embeds the full prior history of a delegated session and
+// runs to tens of megabytes per row. No list caller reads it (only
+// GetThread's single-row callers do, on resume), so selecting it here made
+// every listing drag hundreds of megabytes through memory.
+func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]ListThreadsAllRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreadsAll, projectPath)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Thread{}
+	items := []ListThreadsAllRow{}
 	for rows.Next() {
-		var i Thread
+		var i ListThreadsAllRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -442,7 +611,6 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 			&i.WorktreePath,
 			&i.SessionID,
 			&i.Status,
-			&i.MergePolicy,
 			&i.ResultSummary,
 			&i.Error,
 			&i.CreatedAt,
@@ -469,20 +637,21 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 }
 
 const listThreadsForGC = `-- name: ListThreadsForGC :many
-SELECT id, project_path, status, updated_at, kind, worktree_path, branch, session_id, parent_session_id
+SELECT id, project_path, status, updated_at, kind, worktree_path, branch, session_id, parent_session_id, completion_pending
 FROM threads
 `
 
 type ListThreadsForGCRow struct {
-	ID              string `json:"id"`
-	ProjectPath     string `json:"project_path"`
-	Status          string `json:"status"`
-	UpdatedAt       int64  `json:"updated_at"`
-	Kind            string `json:"kind"`
-	WorktreePath    string `json:"worktree_path"`
-	Branch          string `json:"branch"`
-	SessionID       string `json:"session_id"`
-	ParentSessionID string `json:"parent_session_id"`
+	ID                string `json:"id"`
+	ProjectPath       string `json:"project_path"`
+	Status            string `json:"status"`
+	UpdatedAt         int64  `json:"updated_at"`
+	Kind              string `json:"kind"`
+	WorktreePath      string `json:"worktree_path"`
+	Branch            string `json:"branch"`
+	SessionID         string `json:"session_id"`
+	ParentSessionID   string `json:"parent_session_id"`
+	CompletionPending int64  `json:"completion_pending"`
 }
 
 // Every delegation across every project, trimmed to the columns `sennit
@@ -493,7 +662,7 @@ type ListThreadsForGCRow struct {
 // Deliberately unscoped by kind, unlike the display queries above. gc is
 // not a thread-facing caller -- it is the only thing that reclaims rows
 // here, and a task has nothing else that would: it is never merged (so
-// discardMerged cannot reach it) and the task API has no removal of its
+// automatic cleanup may retain it) and the task API has no removal of its
 // own. Scoping this to threads meant finished tasks accumulated for the
 // life of the database. A task carries no worktree, so reclaiming one is
 // the row and its retention alone, with nothing left orphaned on disk.
@@ -526,6 +695,7 @@ func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, 
 			&i.Branch,
 			&i.SessionID,
 			&i.ParentSessionID,
+			&i.CompletionPending,
 		); err != nil {
 			return nil, err
 		}
@@ -540,18 +710,68 @@ func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, 
 	return items, nil
 }
 
-const markTaskCompletionDelivered = `-- name: MarkTaskCompletionDelivered :execrows
+const refreshTaskCompletionPending = `-- name: RefreshTaskCompletionPending :execrows
 UPDATE threads
-SET completion_pending = 0
-WHERE id = ? AND kind = 'task' AND completion_pending = 1
+SET completion_pending = EXISTS (
+    SELECT 1 FROM task_completion_outbox WHERE task_id = threads.id
+)
+WHERE id = ? AND kind = 'task'
 `
 
-func (q *Queries) MarkTaskCompletionDelivered(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.ExecContext(ctx, markTaskCompletionDelivered, id)
+func (q *Queries) RefreshTaskCompletionPending(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, refreshTaskCompletionPending, id)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const setTaskPreparation = `-- name: SetTaskPreparation :one
+UPDATE threads
+SET base_branch = ?, branch = ?, worktree_path = ?
+WHERE id = ? AND kind = 'task' AND status = 'pending'
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+`
+
+type SetTaskPreparationParams struct {
+	BaseBranch   string `json:"base_branch"`
+	Branch       string `json:"branch"`
+	WorktreePath string `json:"worktree_path"`
+	ID           string `json:"id"`
+}
+
+func (q *Queries) SetTaskPreparation(ctx context.Context, arg SetTaskPreparationParams) (Thread, error) {
+	row := q.db.QueryRowContext(ctx, setTaskPreparation,
+		arg.BaseBranch,
+		arg.Branch,
+		arg.WorktreePath,
+		arg.ID,
+	)
+	var i Thread
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProjectPath,
+		&i.Goal,
+		&i.BaseBranch,
+		&i.Branch,
+		&i.WorktreePath,
+		&i.SessionID,
+		&i.Status,
+		&i.ResultSummary,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CompletedAt,
+		&i.Kind,
+		&i.ParentSessionID,
+		&i.CompletionPending,
+		&i.CompletionDepth,
+		&i.TerminalAt,
+		&i.CostAttributed,
+		&i.Execution,
+	)
+	return i, err
 }
 
 const updateThreadSession = `-- name: UpdateThreadSession :one
@@ -559,7 +779,7 @@ UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type UpdateThreadSessionParams struct {
@@ -580,7 +800,6 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -592,6 +811,7 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
+		&i.Execution,
 	)
 	return i, err
 }
@@ -604,7 +824,7 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
 `
 
 type UpdateThreadStatusParams struct {
@@ -634,7 +854,6 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		&i.WorktreePath,
 		&i.SessionID,
 		&i.Status,
-		&i.MergePolicy,
 		&i.ResultSummary,
 		&i.Error,
 		&i.CreatedAt,
@@ -646,6 +865,7 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
+		&i.Execution,
 	)
 	return i, err
 }

@@ -207,7 +207,12 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 	}
 
 	if meta.Tools != nil {
-		agent.AllowedTools = normalizeToolNames(meta.Tools)
+		agent.AllowedTools, agent.obsoleteTools = normalizeToolNames(meta.Tools)
+		// Preserve an explicitly empty tools: [] list. Nil means inherit the
+		// coder's tools; an empty but non-nil list deliberately grants none.
+		if agent.AllowedTools == nil {
+			agent.AllowedTools = []string{}
+		}
 	}
 
 	return id, agent, nil
@@ -218,16 +223,21 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 // (see import.go), it does not translate foreign tool names: .sennit/agents
 // is Sennit's own directory, so its files are expected to already name
 // Sennit's tools directly — only Sennit's own older names are accepted.
-func normalizeToolNames(names []string) []string {
-	out := make([]string, 0, len(names))
+var obsoleteThreadToolNames = map[string]bool{"thread_create": true, "thread_merge": true, "thread_remove": true}
+
+func normalizeToolNames(names []string) (out, obsolete []string) {
 	for _, name := range names {
-		name = CanonicalToolName(strings.TrimSpace(name))
-		if name == "" {
+		name = strings.TrimSpace(name)
+		if obsoleteThreadToolNames[name] {
+			if !slices.Contains(obsolete, name) {
+				obsolete = append(obsolete, name)
+			}
 			continue
 		}
-		if !slices.Contains(out, name) {
+		name = CanonicalToolName(name)
+		if name != "" && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
 	}
-	return out
+	return out, obsolete
 }

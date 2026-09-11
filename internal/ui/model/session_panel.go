@@ -30,21 +30,21 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // threadDockStatusText builds one thread's live status text for its
-// block's second row: threads.DockStatusLine over the thread's cached
+// block's second row: delegations.DockStatusLine over the thread's cached
 // activity, with the elapsed time measured from CreatedAt — not UpdatedAt,
 // which is bumped on every status transition (see thread/store.go
 // SetStatus), so it tracks "last activity", not "how long has this thread
 // been running"; the panel wants the latter.
-func threadDockStatusText(t proto.Thread, activity threads.DockActivity) string {
+func threadDockStatusText(t proto.Thread, activity delegations.DockActivity) string {
 	elapsed := time.Since(time.Unix(t.CreatedAt, 0))
-	return threads.DockStatusLine(proto.ThreadStatus(t.Status), activity, elapsed)
+	return delegations.DockStatusLine(proto.ThreadStatus(t.Status), activity, elapsed)
 }
 
 // panelSpinnerWanted reports whether the panel currently shows any live
@@ -62,7 +62,7 @@ func (m *UI) panelSpinnerWanted() bool {
 	}
 	for _, t := range m.threadList.Threads() {
 		switch proto.ThreadStatus(t.Status) {
-		case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
+		case proto.ThreadStatusRunning:
 			return true
 		}
 	}
@@ -321,13 +321,13 @@ func sessionPanelThreadsHeaderText(active int, expanded bool) string {
 // block's second row: its status word plus how long it has been going,
 // measured from CreatedAt — the same shape (and the same helper) as a
 // thread's line, minus the live activity. A task has no per-entity activity
-// probe behind it the way a thread does (threads.DockState.activity, paid
+// probe behind it the way a thread does (delegations.DockState.activity, paid
 // for with an AttachThread round trip into the thread's own workspace); a
 // delegation's own transcript is one drill-in away in this very workspace,
 // which is what the block's click is for.
 func delegationBlockStatusText(t proto.Thread) string {
 	elapsed := time.Since(time.Unix(t.CreatedAt, 0))
-	return threads.DockStatusLine(proto.ThreadStatus(t.Status), threads.DockActivity{}, elapsed)
+	return delegations.DockStatusLine(proto.ThreadStatus(t.Status), delegations.DockActivity{}, elapsed)
 }
 
 // delegationBlockName is the name a delegation's block carries. A task's
@@ -345,7 +345,7 @@ func (w *widgets) delegationBlockName(com *common.Common, t proto.Thread) string
 	if item == nil {
 		return defaultDelegationBlockName
 	}
-	if name, _, _, _, _ := delegationInfo(item); name != "" {
+	if name, _, _, _, _, _ := delegationInfo(item); name != "" {
 		return name
 	}
 	return defaultDelegationBlockName
@@ -368,7 +368,7 @@ func (w *widgets) delegationBlockTask(com *common.Common, t proto.Thread) string
 			}
 		}
 	}
-	return threads.DockGoalHeadline(w.delegationBlockName(com, t), t.Goal)
+	return delegations.DockGoalHeadline(w.delegationBlockName(com, t), t.Goal)
 }
 
 // delegationChatItem resolves the chat transcript item a delegation was
@@ -485,7 +485,7 @@ type sessionPanelPlan struct {
 
 	// agents are this session's live delegations (internal/thread's
 	// KindTask: the `agent` tool, the custom agent tools, agentic_fetch),
-	// drawn with the same two-line block shape as threads. Delegation is
+	// drawn with the same two-line block shape as delegations. Delegation is
 	// asynchronous, so the transcript's stub for one is finished the
 	// instant it is created — these blocks are the only live view of a
 	// delegation there is.
@@ -571,7 +571,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		// planPanelSection's doc comment — so shedPanelBlocks below is the
 		// only place either list gets trimmed, and only in a genuinely
 		// short terminal.
-		threads := planPanelSection(threads.ActiveDockThreads(m.threadList.Threads()), m.panel.threadsCollapsed)
+		threads := planPanelSection(delegations.ActiveDockThreads(m.threadList.Threads()), m.panel.threadsCollapsed)
 		plan.threadsActive = threads.active
 		plan.threadsExpanded = threads.expanded
 		plan.threads = threads.items
@@ -1063,11 +1063,11 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				}
 				return name
 			},
-			task: func(i int) string { return threads.DockGoalHeadline(plan.threads[i].Name, plan.threads[i].Goal) },
+			task: func(i int) string { return delegations.DockGoalHeadline(plan.threads[i].Name, plan.threads[i].Goal) },
 			line2: func(i int) string {
 				item := plan.threads[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
-				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning || status == proto.ThreadStatusMerging {
+				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning {
 					icon = m.panel.panelActivityIcon(m.com)
 				}
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.ActivityOf(item.ID)))

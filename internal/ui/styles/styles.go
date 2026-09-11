@@ -231,8 +231,8 @@ type Styles struct {
 		Line  lipgloss.Style
 	}
 
-	// Threads is the threads dashboard: an operations screen where the
-	// list is acted on, not just read. Status colors are per-class (not
+	// Threads styles the delegations dashboard: an operations screen where
+	// the list is acted on, not just read. Status colors are per-class (not
 	// the single muted tone Status.*Message uses) so a failed or running
 	// delegation is findable at a glance, and the toolbar buttons carry a
 	// fill so they read as pressable rather than as labels.

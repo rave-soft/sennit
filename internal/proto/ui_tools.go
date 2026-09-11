@@ -30,9 +30,6 @@ const (
 	SennitLogsToolName       = brand.ToolLogs
 	ListMCPResourcesToolName = "list_mcp_resources"
 	ReadMCPResourceToolName  = "read_mcp_resource"
-	ThreadCreateToolName     = "thread_create"
-	ThreadMergeToolName      = "thread_merge"
-	ThreadRemoveToolName     = "thread_remove"
 	AgentListToolName        = "agent_list"
 	AgentResultToolName      = "agent_result"
 	AgentCancelToolName      = "agent_cancel"
@@ -49,6 +46,7 @@ type AgentParams struct {
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Description  string `json:"description,omitempty"`
+	Isolation    string `json:"isolation,omitempty"`
 }
 
 type AgentBackgroundResponseMetadata struct {

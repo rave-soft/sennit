@@ -46,6 +46,8 @@ var refusedMethods = []string{
 	"DeleteSession",
 	"DisableDockerMCP",
 	"EnableDockerMCP",
+	"EnterWorktree",
+	"ExitWorktree",
 	"FileTrackerRecordRead",
 	"ImportCopilot",
 	"InitCoderAgent",
@@ -56,7 +58,6 @@ var refusedMethods = []string{
 	"MCPRefreshPrompts",
 	"MCPRefreshResources",
 	"MarkProjectInitialized",
-	"MergeThread",
 	"OverridePreferredModel",
 	"PermissionDeny",
 	"PermissionGrant",
@@ -119,7 +120,6 @@ var readOnlySafeMethods = []string{
 	"KnownProviders",
 	"GetMCPPrompt",
 	"GetSession",
-	"GetThread",
 	"InitializePrompt",
 	"LSPGetDiagnosticCounts",
 	"LSPGetStates",
@@ -279,6 +279,14 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			err := ro.EnableDockerMCP(t.Context())
 			require.True(t, IsReadOnlyError(err))
 		},
+		"EnterWorktree": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, _, err := ro.EnterWorktree(t.Context(), "name")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"ExitWorktree": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, _, err := ro.ExitWorktree(t.Context())
+			require.True(t, IsReadOnlyError(err))
+		},
 		"FileTrackerRecordRead": func(t *testing.T, ro *readOnlyWorkspace) {
 			ro.FileTrackerRecordRead(t.Context(), "sess-1", "/foo")
 		},
@@ -312,10 +320,6 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"MarkProjectInitialized": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.MarkProjectInitialized()
-			require.True(t, IsReadOnlyError(err))
-		},
-		"MergeThread": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, err := ro.MergeThread(t.Context(), "id")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"OverridePreferredModel": func(t *testing.T, ro *readOnlyWorkspace) {

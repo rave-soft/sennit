@@ -14,9 +14,8 @@ import (
 )
 
 // threadEventPubsubType maps a thread lifecycle event's semantic type
-// (created/status_changed/merged/removed, see thread.EventType) onto
-// the coarser pubsub.EventType the TUI's thread state machines
-// (threads_cache.go, threads_dock.go, thread_indicator.go) key their
+// (created/status_changed/removed, see thread.EventType) onto
+// the coarser pubsub.EventType the TUI delegation cache keys its
 // upsert/remove logic off. AppWorkspace.translateEvent funnels through
 // this so its mapping stays centralized.
 func threadEventPubsubType(t thread.EventType) pubsub.EventType {
@@ -25,7 +24,7 @@ func threadEventPubsubType(t thread.EventType) pubsub.EventType {
 		return pubsub.CreatedEvent
 	case thread.EventRemoved:
 		return pubsub.DeletedEvent
-	default: // status_changed, merged
+	default: // status_changed
 		return pubsub.UpdatedEvent
 	}
 }
@@ -49,7 +48,7 @@ func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) 
 	if !ok {
 		return nil, workspace.ErrThreadsNotSupported
 	}
-	sts, err := mgr.List(ctx)
+	sts, err := mgr.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -58,18 +57,6 @@ func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) 
 		result[i] = threadToProto(mgr, st)
 	}
 	return result, nil
-}
-
-func (w *AppWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
-	mgr, ok := w.threadManager()
-	if !ok {
-		return proto.Thread{}, workspace.ErrThreadsNotSupported
-	}
-	st, err := mgr.Get(ctx, id)
-	if err != nil {
-		return proto.Thread{}, err
-	}
-	return threadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
@@ -81,7 +68,6 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 		Name:            req.Name,
 		Goal:            req.Goal,
 		BaseBranch:      req.BaseBranch,
-		MergePolicy:     thread.MergePolicy(req.MergePolicy),
 		ParentSessionID: req.ParentSessionID,
 	})
 	if err != nil {
@@ -90,44 +76,12 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 	return threadToProto(mgr, st), nil
 }
 
-// SendThread is the person's own path into a thread's session (the TUI's
-// thread view), so it goes through SendFromPerson: the message is theirs,
-// and it reaches the turn the thread is already running rather than
-// waiting behind it (see thread.SenderPerson).
-//
-// It drops the disposition: whoever typed the message is looking at that
-// session's transcript and can see for themselves what became of it. Only
-// the agent-facing thread_send tool, which has no such view, reports it —
-// see tools.SendOutcome.
-func (w *AppWorkspace) SendThread(ctx context.Context, id, message string) error {
-	mgr, ok := w.threadManager()
-	if !ok {
-		return workspace.ErrThreadsNotSupported
-	}
-	_, err := mgr.SendFromPerson(ctx, id, message)
-	return err
-}
-
 func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
 		return proto.Thread{}, workspace.ErrThreadsNotSupported
 	}
 	st, err := mgr.Activate(ctx, id)
-	if err != nil {
-		return proto.Thread{}, err
-	}
-	return threadToProto(mgr, st), nil
-}
-
-func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
-	mgr, ok := w.threadManager()
-	if !ok {
-		return proto.Thread{}, workspace.ErrThreadsNotSupported
-	}
-	// Merge returns the outcome directly: a thread that merged cleanly is
-	// discarded, so re-fetching it here would find nothing.
-	st, err := mgr.Merge(ctx, id)
 	if err != nil {
 		return proto.Thread{}, err
 	}

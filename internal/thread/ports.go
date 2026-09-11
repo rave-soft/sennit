@@ -150,6 +150,7 @@ type TaskCompletion struct {
 	Error          string
 	Depth          int
 	TerminalAt     time.Time
+	Apply          func(context.Context, func() error) error
 	// PriorReports is how many terminal completions this same delegation
 	// has already delivered to this same parent - 0 for the ordinary
 	// case. See threadControl.reports for why it is ever anything else.

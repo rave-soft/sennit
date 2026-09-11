@@ -43,7 +43,7 @@ type parentAppTestSpawner struct {
 	app *app.App
 }
 
-func (s *parentAppTestSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+func (s *parentAppTestSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
 	return &parentAppTestHandle{app: s.app}, nil
 }
 

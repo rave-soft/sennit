@@ -5,49 +5,15 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/common"
-	"github.com/rave-soft/sennit/internal/ui/threads"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/stretchr/testify/require"
 )
 
 // TestEmbeddedThreadUI_ShowsNoThreadsInItsPanel: threads belong to the
 // workspace above a thread, not inside one. Listing a thread's siblings
 // while you are looking at its work says nothing about that work, and
-// offering to open them from there invites threads within threads.
-func TestEmbeddedThreadUI_ShowsNoThreadsInItsPanel(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-	u.threadList.Cache.Value = mkDockThreads(2)
-	require.Positive(t, u.sessionPanelPlan(100).threadsActive,
-		"precondition: the main screen does show them")
-
-	u.embedded = true
-	plan := u.sessionPanelPlan(100)
-	require.Zero(t, plan.threadsActive)
-	require.Empty(t, plan.threads)
-	require.Zero(t, plan.threadsRows)
-	require.Zero(t, plan.threadsHeaderRows, "not even the header, which is only there to expand them")
-}
-
-// TestEmbeddedThreadUI_ShowsNoThreadBadge: same reasoning as the panel —
-// the count in the header is about the workspace above this one.
-func TestEmbeddedThreadUI_ShowsNoThreadBadge(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-	u.threadList.Cache.Set([]proto.Thread{{ID: "s1", Status: "running"}, {ID: "s2", Status: "pending"}, {ID: "s3", Status: "merging"}})
-	require.Equal(t, 3, u.activeThreadBadgeCount())
-
-	u.embedded = true
-	require.Zero(t, u.activeThreadBadgeCount())
-}
-
-// TestEmbeddedThreadUI_StartsNoThreadRefreshes: it renders none of it, so
-// it pays for none of it. Attaching into each listed thread to read its
-// live activity is the expensive half, and doing it from inside a thread
-// buys nothing.
+// offering to open them from there invites threads within delegations.
 func TestEmbeddedThreadUI_StartsNoThreadRefreshes(t *testing.T) {
 	t.Parallel()
 
@@ -81,7 +47,7 @@ func TestRoot_MainScreenResultsArriveWhileAThreadIsOpen(t *testing.T) {
 	gen, started := r.main.threadList.Cache.Begin()
 	require.True(t, started)
 
-	r.Update(threads.LoadedMsg{Gen: gen, Threads: mkDockThreads(2)})
+	r.Update(delegations.LoadedMsg{Gen: gen, Threads: mkDockThreads(2)})
 
 	require.False(t, r.main.threadList.Cache.InFlight,
 		"the result must reach the screen that asked, or its next refresh never starts")
@@ -93,7 +59,7 @@ func TestRoot_MainScreenResultsArriveWhileAThreadIsOpen(t *testing.T) {
 // TestRoot_MainScreenResultsSurviveTheDashboardToo: the dashboard screen
 // must not drop the shared cache's result on the floor either — it is
 // explicitly routed to r.main regardless of which screen is on top (see
-// root.go's threads.LoadedMsg case), the same guarantee
+// root.go's delegations.LoadedMsg case), the same guarantee
 // TestRoot_MainScreenResultsArriveWhileAThreadIsOpen pins for screenThread.
 func TestRoot_MainScreenResultsSurviveTheDashboardToo(t *testing.T) {
 	t.Parallel()
@@ -104,7 +70,7 @@ func TestRoot_MainScreenResultsSurviveTheDashboardToo(t *testing.T) {
 	gen, started := r.main.threadList.Cache.Begin()
 	require.True(t, started)
 
-	r.Update(threads.LoadedMsg{Gen: gen, Threads: mkDockThreads(4)})
+	r.Update(delegations.LoadedMsg{Gen: gen, Threads: mkDockThreads(4)})
 
 	require.False(t, r.main.threadList.Cache.InFlight)
 	require.Len(t, r.main.threadList.Cache.Value, 4)

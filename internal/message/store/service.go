@@ -306,8 +306,12 @@ func (s *service) Create(ctx context.Context, sessionID string, params message.C
 	if origin == "" {
 		origin = message.OriginPerson
 	}
+	id := params.ID
+	if id == "" {
+		id = uuid.NewString()
+	}
 	dbMessage, err := s.q.CreateMessage(ctx, db.CreateMessageParams{
-		ID:               uuid.New().String(),
+		ID:               id,
 		SessionID:        sessionID,
 		Role:             string(params.Role),
 		Parts:            string(partsJSON),
@@ -317,6 +321,16 @@ func (s *service) Create(ctx context.Context, sessionID string, params message.C
 		Origin:           string(origin),
 	})
 	if err != nil {
+		if params.ID != "" && db.IsUniqueConstraintError(err) {
+			existing, loadErr := s.q.GetMessage(ctx, id)
+			if loadErr != nil {
+				return message.Message{}, loadErr
+			}
+			if existing.SessionID != sessionID || existing.Role != string(params.Role) || existing.Origin != string(origin) {
+				return message.Message{}, fmt.Errorf("message id belongs to a different operation")
+			}
+			return s.fromDBItem(existing)
+		}
 		return message.Message{}, err
 	}
 	msg, err := s.fromDBItem(dbMessage)

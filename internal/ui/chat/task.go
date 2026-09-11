@@ -35,7 +35,7 @@ func registerTaskToolRenderers() {
 		// keep rendering; the subject each one reads comes from metadata
 		// attached in the same shape.
 		"task_result", "task_output", "task_list", "task_cancel", "task_send",
-		"thread_list", "thread_status", "thread_send",
+		"thread_list", "thread_status", "thread_result", "thread_cancel", "thread_send", "thread_output",
 	} {
 		registerToolRenderer(name, &TaskToolRenderContext{})
 	}

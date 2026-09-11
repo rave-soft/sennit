@@ -1,10 +1,10 @@
 package model
 
 // Root is the top-level Bubble Tea model (see internal/cmd/root.go). It
-// routes between three screens — the main session UI, the threads
+// routes between three screens — the main session UI, the delegations
 // dashboard, and an attached thread's own embedded UI — and owns the pieces
-// that don't belong to any single screen: the thread cache/dashboard is
-// lazily created on first use, and an attached thread's workspace/event
+// that don't belong to any single screen: the all-delegation cache/dashboard
+// is lazily created on first use, and an attached thread's workspace/event
 // pump lives here rather than inside *UI, since only one *UI (main) is ever
 // the terminal's progress-bar owner.
 //
@@ -30,19 +30,40 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
 	"github.com/rave-soft/sennit/internal/ui/key"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/uimsg"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
-// showThreadsDashboardMsg requests switching to the threads dashboard
-// screen. Handled by the Root router below; a bare *UI has no dashboard
-// screen of its own, so this falls through Update's default case
-// harmlessly when UI is driven directly (e.g. in tests).
-type showThreadsDashboardMsg struct{}
+// showDelegationsDashboardMsg requests the delegation dashboard.
+type (
+	showDelegationsDashboardMsg struct{}
+	enterWorktreeRequestedMsg   struct{ name string }
+	exitWorktreeRequestedMsg    struct{}
+	worktreeEventMsg            struct {
+		generation uint64
+		inner      tea.Msg
+	}
+)
+
+type worktreeTransferMsg struct {
+	generation uint64
+	name       string
+	ws         common.Workspace
+	release    func()
+	err        error
+	exit       bool
+}
+type worktreeAttachment struct {
+	name       string
+	stop       func()
+	release    func()
+	generation uint64
+}
 
 // screenID identifies which child owns the terminal right now.
 type screenID uint8
@@ -53,9 +74,9 @@ const (
 	screenThread
 )
 
-// threadEventSubscriber is implemented by the concrete workspace types
-// returned from AttachThread (see internal/workspace/threads.go). It is not
-// part of workspace.Workspace itself — SubscribeWith is a second,
+// threadEventSubscriber is implemented by concrete workspaces returned from
+// AttachThread. It is not part of workspace.Workspace itself — SubscribeWith
+// is a second,
 // independently stoppable subscription, distinct from the primary
 // ws.Subscribe(program) pump cmd/root.go starts for the main workspace —
 // so a thread's own event stream can be torn down on detach without
@@ -151,9 +172,12 @@ func stopThreadTurnTimer(thread *threadAttachment) {
 type Root struct {
 	com             *common.Common
 	main            *UI
-	dashboard       *threads.Dashboard // lazily created on first ctrl+e
-	dashboardDialog *dialog.Overlay    // hosts the thread-create dialog while on the dashboard screen
+	dashboard       *delegations.Dashboard // lazily created on first ctrl+e
+	dashboardDialog *dialog.Overlay        // hosts delegation cleanup confirmation
 	attachment      threadAttachmentState
+	worktree        *worktreeAttachment
+	worktreeGen     uint64
+	worktreePending bool
 	active          screenID
 
 	// send delivers messages back into the Bubble Tea event loop from
@@ -199,23 +223,17 @@ type threadAttachedMsg struct {
 	// activateErr is set when ActivateThread failed to revive the thread.
 	// It does not abort the attach — msg.ws is still the read-only view
 	// AttachThread fell back to — but the reason is worth explaining to
-	// the user at open time (as a warning, not an error: the common case
-	// is a merged/merging thread, whose read-only state is correct and
-	// permanent) rather than leaving them to discover it only once they
+	// the user at open time (as a warning, not an error: completed work may
+	// only have a read-only fallback) rather than leaving them to discover it
+	// only once they
 	// try to type and are refused.
 	activateErr error
 }
 
-// threadActionDoneMsg delivers the result of an off-thread merge/remove
-// call; both actions only need pass/fail plus a dashboard refresh.
+// threadActionDoneMsg delivers the result of an off-thread cancellation or
+// cleanup; both actions only need pass/fail plus a dashboard refresh.
 type threadActionDoneMsg struct {
 	err error
-}
-
-// threadCreatedMsg delivers the result of an off-thread CreateThread call.
-type threadCreatedMsg struct {
-	thread proto.Thread
-	err    error
 }
 
 // Init implements tea.Model.
@@ -235,7 +253,7 @@ func (r *Root) View() tea.View {
 	}
 }
 
-// dashboardView builds the threads dashboard's screen from scratch — unlike
+// dashboardView builds the delegations dashboard screen from scratch — unlike
 // screenMain/screenThread, it has no *UI of its own to delegate to. String
 // hygiene (newline normalization, trailing-space trim) mirrors UI.View.
 func (r *Root) dashboardView() tea.View {
@@ -246,7 +264,7 @@ func (r *Root) dashboardView() tea.View {
 	v.KeyboardEnhancements.ReportAlternateKeys = true
 	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 	v.KeyboardEnhancements.ReportAssociatedText = true
-	v.WindowTitle = brand.Slug + " threads"
+	v.WindowTitle = brand.Slug + " delegations"
 
 	canvas := uv.NewScreenBuffer(r.width, r.height)
 	r.dashboard.Draw(canvas, canvas.Bounds())
@@ -269,6 +287,12 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return r.handleWindowSize(msg)
+	case worktreeEventMsg:
+		if r.worktree != nil && r.worktree.generation == msg.generation {
+			_, cmd := r.main.Update(msg.inner)
+			return r, cmd
+		}
+		return r, nil
 	case threadEventMsg:
 		// A message from an attached thread's own event pump. Racing a
 		// detach is expected (the pump's goroutine can't be joined
@@ -297,7 +321,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		if r.dashboard != nil {
 			// r.main.Update above already applied this event to the shared
-			// thread list cache both screens read (see threads_cache.go)
+			// all-delegation cache both screens read (see delegations/cache.go)
 			// and dispatched any re-fetch it needs — calling
 			// ApplyThreadEvent here too would apply the same event twice
 			// and, while the dashboard is active, dispatch a second,
@@ -306,19 +330,25 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.dashboard.RebuildItems()
 		}
 		return r, tea.Batch(cmds...)
+	case enterWorktreeRequestedMsg:
+		return r, r.transferWorktreeCmd(msg.name, false)
+	case exitWorktreeRequestedMsg:
+		return r, r.transferWorktreeCmd("", true)
+	case worktreeTransferMsg:
+		return r.handleWorktreeTransfer(msg)
 	case tea.KeyPressMsg:
 		return r.handleKeyPress(msg)
-	case showThreadsDashboardMsg:
+	case showDelegationsDashboardMsg:
 		if r.dashboard == nil {
-			r.dashboard = threads.New(r.com, &r.main.threadList)
+			r.dashboard = delegations.New(r.com, &r.main.threadList)
 			r.dashboard.SetSize(r.width, r.height)
 		}
 		cmd := r.dashboard.SetActive(true)
 		r.active = screenDashboard
 		return r, cmd
-	case threads.LoadedMsg:
-		// The shared cache (threads_cache.go) feeds the header badge and
-		// dock too, so the result always goes to the main screen first,
+	case delegations.LoadedMsg:
+		// The shared all-delegation cache (delegations/cache.go) feeds the
+		// header badge and dock too, so the result goes to the main screen first,
 		// regardless of which fetch — dashboard's or main's — actually
 		// started it; r.main.Update applies it to the cache exactly once
 		// (including any stale-generation re-dispatch). The dashboard only
@@ -331,7 +361,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.dashboard.RebuildItems()
 		}
 		return r, tea.Batch(cmds...)
-	case threads.EnterMsg:
+	case delegations.EnterMsg:
 		r.attachment.pendingID = msg.ID
 		return r, r.attachThreadCmd(msg.ID, msg.SessionID, msg.Name)
 	case leaveThreadRequestedMsg:
@@ -344,13 +374,11 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, r.leaveThreadToMain()
 	case threadAttachedMsg:
 		return r.handleThreadAttached(msg)
-	case threads.MergeMsg:
-		return r, r.mergeThreadCmd(msg.ID)
-	case threads.RemoveMsg:
+	case delegations.RemoveMsg:
 		return r, r.removeThreadCmd(msg.ID)
-	case threads.CancelDelegationMsg:
+	case delegations.CancelDelegationMsg:
 		return r, r.cancelDelegationCmd(msg.ID, msg.Kind)
-	case threads.LeaveMsg:
+	case delegations.LeaveMsg:
 		// The dashboard's Back button. Same transition esc takes (see
 		// handleKeyPress), raised as a message because the dashboard does
 		// not own the screen stack — the router does.
@@ -360,11 +388,8 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.active = screenMain
 		r.attachment.pendingID = ""
 		return r, r.dashboard.SetActive(false)
-	case threads.OpenCreateMsg:
-		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
-		return r, nil
-	case threads.ConfirmRemoveMsg:
-		r.dashboardDialog.OpenDialog(dialog.NewThreadRemoveConfirm(r.com, msg.ID, msg.Name))
+	case delegations.ConfirmRemoveMsg:
+		r.dashboardDialog.OpenDialog(dialog.NewDelegationCleanupConfirm(r.com, msg.ID, msg.Name))
 		return r, nil
 	case threadActionDoneMsg:
 		if msg.err != nil {
@@ -374,20 +399,9 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, r.dashboard.Refresh()
 		}
 		return r, nil
-	case threadCreatedMsg:
-		if msg.err != nil {
-			return r, util.ReportError(msg.err)
-		}
-		if r.dashboard != nil {
-			return r, r.dashboard.ApplyThreadEvent(pubsub.Event[proto.Thread]{
-				Type:    pubsub.CreatedEvent,
-				Payload: msg.thread,
-			})
-		}
-		return r, nil
 	case util.InfoMsg:
-		// Errors from thread actions (attach/merge/remove/create) surface
-		// here. Known limitation: the dashboard and thread screens have no
+		// Errors from delegation actions (open, cancel, cleanup) surface here.
+		// Known limitation: the dashboard and thread screens have no
 		// status line of their own yet, so these only become visible once
 		// the user returns to the main screen.
 		_, cmd := r.main.Update(msg)
@@ -477,6 +491,89 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (r *Root) transferWorktreeCmd(name string, exit bool) tea.Cmd {
+	if r.worktreePending {
+		return nil
+	}
+	r.worktreePending = true
+	r.worktreeGen++
+	generation := r.worktreeGen
+	ws := r.com.Workspace
+	ctx := r.com.Context()
+	return func() tea.Msg {
+		var next workspace.Workspace
+		var release func()
+		var err error
+		if exit {
+			next, release, err = ws.ExitWorktree(ctx)
+		} else {
+			next, release, err = ws.EnterWorktree(ctx, name)
+		}
+		return worktreeTransferMsg{generation: generation, name: name, ws: next, release: release, err: err, exit: exit}
+	}
+}
+
+func (r *Root) handleWorktreeTransfer(msg worktreeTransferMsg) (tea.Model, tea.Cmd) {
+	if msg.generation != r.worktreeGen {
+		if msg.release == nil {
+			return r, nil
+		}
+		return r, func() tea.Msg { msg.release(); return nil }
+	}
+	r.worktreePending = false
+	if msg.err != nil {
+		return r, util.ReportError(msg.err)
+	}
+	previous := r.worktree
+	if previous != nil && previous.stop != nil {
+		previous.stop()
+	}
+	r.com.Workspace = msg.ws
+	r.com.SessionChanges, _ = msg.ws.(workspace.SessionChangePreparer)
+	r.main.com = r.com
+	r.main.wsCache.invalidateBusyCaches()
+	name := msg.name
+	if msg.exit {
+		name = ""
+	}
+	r.main.crumbRoot = name
+	stop := func() {}
+	if sub, ok := msg.ws.(threadEventSubscriber); ok {
+		generation := msg.generation
+		stop = sub.SubscribeWith(func(inner any) {
+			if r.send != nil {
+				r.send(worktreeEventMsg{generation: generation, inner: inner})
+			}
+		})
+	}
+	// The release callbacks reap whichever App no longer owns the session,
+	// so the one the previous attachment held is run here rather than
+	// dropped: after an exit it is what shuts the worktree App down, and
+	// nothing else would ever call it. Exit's own callback reaps the same
+	// App, so it is spent here too and not carried on the root attachment.
+	// Both are idempotent and both can block on a shutdown, hence the cmd.
+	spent := []func(){}
+	release := msg.release
+	if previous != nil && previous.release != nil {
+		spent = append(spent, previous.release)
+	}
+	if msg.exit && release != nil {
+		spent = append(spent, release)
+		release = nil
+	}
+	r.worktree = &worktreeAttachment{name: name, stop: stop, release: release, generation: msg.generation}
+	cmds := r.main.staleWorkspaceRefreshCmds()
+	if len(spent) > 0 {
+		cmds = append(cmds, func() tea.Msg {
+			for _, release := range spent {
+				release()
+			}
+			return nil
+		})
+	}
+	return r, tea.Batch(cmds...)
+}
+
 // handleWindowSize stores the new terminal size and broadcasts it to every
 // screen that currently exists, so whichever one becomes active next is
 // already sized correctly.
@@ -541,10 +638,9 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleDashboardMsg routes the dashboard screen's own input: mouse, wheel
-// and paste, which the screen's toolbar, filter tabs, table and
-// create-thread dialog (open or not) all respond to. Root.Update's
-// fallback now routes by active screen only for these message types —
+// handleDashboardMsg routes pointer and paste input to the dashboard or its
+// cleanup confirmation. Root.Update's fallback routes by active screen only
+// for these message types —
 // everything else (a backend event, an owned async result) already went
 // to r.main before handleDashboardMsg is ever called, so this no longer
 // classifies input itself.
@@ -555,10 +651,7 @@ func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// An open dialog owns the pointer: clicking "through" a modal onto the
 	// toolbar behind it would act on a screen the user cannot see. Paste is
-	// forwarded too — the thread-create dialog's text inputs sit behind
-	// this same guard, and without it a pasted multi-line goal silently
-	// went nowhere while the main screen's dialogs kept receiving paste
-	// normally.
+	// Paste is forwarded too so modal dialogs retain ownership of all input.
 	if r.dashboardDialog.HasDialogs() {
 		action := r.dashboardDialog.Update(msg)
 		return r, r.handleDashboardDialogAction(action)
@@ -596,9 +689,8 @@ func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return r, nil
 }
 
-// handleDashboardKey routes a key press while the dashboard screen is
-// active: the create-thread dialog wins when open, otherwise the dashboard
-// list itself handles it.
+// handleDashboardKey routes a key press to an open cleanup confirmation or
+// to the dashboard list.
 func (r *Root) handleDashboardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if r.dashboardDialog.HasDialogs() {
 		action := r.dashboardDialog.Update(msg)
@@ -609,18 +701,14 @@ func (r *Root) handleDashboardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleDashboardDialogAction mirrors UI.handleDialogMsg's shape, but only
-// for the actions the dashboard's own dialogs (thread-create, thread-remove
-// confirmation) can produce.
+// for the actions the dashboard's cleanup confirmation can produce.
 func (r *Root) handleDashboardDialogAction(action dialog.Action) tea.Cmd {
 	switch action := action.(type) {
 	case dialog.ActionClose:
 		r.dashboardDialog.CloseFrontDialog()
 	case dialog.ActionCmd:
 		return action.Cmd
-	case dialog.ActionCreateThread:
-		r.dashboardDialog.CloseFrontDialog()
-		return r.createThreadCmd(action.Name, action.Goal)
-	case dialog.ActionRemoveThreadConfirmed:
+	case dialog.ActionCleanupDelegationConfirmed:
 		r.dashboardDialog.CloseFrontDialog()
 		return r.removeThreadCmd(action.ID)
 	}
@@ -639,8 +727,8 @@ func (r *Root) handleDashboardDialogAction(action dialog.Action) tea.Cmd {
 // does not abort: AttachThread still runs and hands back its read-only
 // fallback, so the user gets *something* to look at, with the reason
 // carried in activateErr for handleThreadAttached to explain to them —
-// most commonly a merged/merging thread, for which read-only is the
-// correct and permanent state, not a failure.
+// for example a completed delegation available only through the read-only
+// fallback, which is not an attachment failure.
 func (r *Root) attachThreadCmd(id, sessionID, name string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
@@ -660,9 +748,9 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 		return r, util.ReportError(msg.err)
 	}
 
-	// The result is wanted only if it answers the request the user is
-	// still waiting on — the most recent threads.EnterMsg (from the dashboard
-	// or the main screen's session panel; see pendingAttach) — or is a
+	// The result is wanted only if it answers the request the user is still
+	// waiting on — the most recent delegations.EnterMsg (from the dashboard or
+	// the main screen's session panel; see pendingAttach) — or is a
 	// duplicate response for the thread already attached (e.g. two Enter
 	// presses on the same dashboard row). Anything else means they've moved
 	// on since asking (left the dashboard, asked for a different thread):
@@ -718,10 +806,9 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	cmds = append(cmds, cmd)
 	if msg.activateErr != nil {
 		// The thread still opened (read-only, via AttachThread's
-		// fallback). This is not a failure to flag — the most common
-		// reason is a merged/merging thread, whose read-only state is
-		// correct and permanent, not something gone wrong — so it is a
-		// warning explaining what they're looking at, not an error, and
+		// fallback). This is not an attachment failure: completed work may
+		// intentionally be available only read-only. Report a warning that
+		// explains what opened rather than treating it as an error, and
 		// it says so rather than leaving them to discover it only once
 		// they try to type.
 		cmds = append(cmds, util.ReportWarn(fmt.Sprintf("Thread opened read-only: %s", msg.activateErr)))
@@ -738,7 +825,7 @@ func (r *Root) detachThread() tea.Cmd {
 
 // leaveThread tears down the attached thread and returns to the dashboard.
 // A thread reached via enterThreadMsg (e.g. the main screen's session panel)
-// never had a dashboard constructed for it — only showThreadsDashboardMsg
+// never had a dashboard constructed for it — only showDelegationsDashboardMsg
 // does that — so this lazily builds one here too, the same way that case
 // does, before switching screens; View()'s screenDashboard case draws
 // r.dashboard unconditionally and would otherwise panic on a nil dashboard.
@@ -746,7 +833,7 @@ func (r *Root) leaveThread() tea.Cmd {
 	cmd := r.detachThread()
 	built := r.dashboard == nil
 	if built {
-		r.dashboard = threads.New(r.com, &r.main.threadList)
+		r.dashboard = delegations.New(r.com, &r.main.threadList)
 		r.dashboard.SetSize(r.width, r.height)
 	}
 	r.active = screenDashboard
@@ -769,7 +856,7 @@ func (r *Root) leaveThread() tea.Cmd {
 
 // leaveThreadToMain tears down the attached thread and returns straight to
 // the main screen (alt+up at the top of a drilled-in thread — see
-// handleKeyPress), rather than the threads dashboard leaveThread goes to.
+// handleKeyPress), rather than the delegations dashboard leaveThread uses.
 // Skips the dashboard-refresh bits: the dashboard may not even be open, and
 // if it is, its own TTL backstop reconciles the thread's status change.
 func (r *Root) leaveThreadToMain() tea.Cmd {
@@ -777,15 +864,6 @@ func (r *Root) leaveThreadToMain() tea.Cmd {
 	r.active = screenMain
 	r.attachment.pendingID = ""
 	return cmd
-}
-
-func (r *Root) mergeThreadCmd(id string) tea.Cmd {
-	ctx := r.com.Context()
-	ws := r.com.Workspace
-	return func() tea.Msg {
-		_, err := ws.MergeThread(ctx, id)
-		return threadActionDoneMsg{err: err}
-	}
 }
 
 func (r *Root) removeThreadCmd(id string) tea.Cmd {
@@ -798,8 +876,8 @@ func (r *Root) removeThreadCmd(id string) tea.Cmd {
 }
 
 // cancelDelegationCmd calls CancelTask or CancelThread off-thread,
-// depending on kind — reuses threadActionDoneMsg so a successful cancel
-// gets the same dashboard refresh merge/remove already trigger.
+// depending on kind. It reuses threadActionDoneMsg so successful cancel and
+// cleanup share the same dashboard refresh.
 func (r *Root) cancelDelegationCmd(id, kind string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
@@ -814,36 +892,20 @@ func (r *Root) cancelDelegationCmd(id, kind string) tea.Cmd {
 	}
 }
 
-// createThreadCmd calls CreateThread off-thread with the dialog's validated
-// input, attributing the thread to the session it was started from.
-//
-// That attribution is what makes the thread's completion come back: a
-// thread reports to its parent session when it finishes, and one created
-// without a parent has nobody to tell, leaving its result discoverable
-// only by going and looking. Empty when the dashboard is open without a
-// session, which is the same "nobody is waiting" case the CLI creates.
-func (r *Root) createThreadCmd(name, goal string) tea.Cmd {
-	ctx := r.com.Context()
-	ws := r.com.Workspace
-	parentSessionID := ""
-	if r.main != nil && r.main.sess.hasSession() {
-		parentSessionID = r.main.sess.current.ID
-	}
-	return func() tea.Msg {
-		thread, err := ws.CreateThread(ctx, proto.CreateThreadRequest{
-			Name:            name,
-			Goal:            goal,
-			ParentSessionID: parentSessionID,
-		})
-		return threadCreatedMsg{thread: thread, err: err}
-	}
-}
-
 // Cleanup releases the attached thread's resources, if any. Called once by
 // cmd/root.go after program.Run() returns — best-effort, since there is no
 // further chance to surface an error through the (now-stopped) TUI.
 func (r *Root) Cleanup() {
 	r.attachment.cleanup()
+	if r.worktree != nil {
+		if r.worktree.stop != nil {
+			r.worktree.stop()
+		}
+		if r.worktree.release != nil {
+			r.worktree.release()
+		}
+		r.worktree = nil
+	}
 }
 
 // uiOwnedMsg marks the result of work a specific *UI started, so Root can
@@ -1010,7 +1072,7 @@ func ownResult(owner *UI, msg tea.Msg) tea.Msg {
 // is nothing further to assert per envelope-wrapped type, since the
 // wrapping — not the wrapped type — is what carries the ownership tag.
 var (
-	_ uimsg.MainScreenMsg = threads.DockActivityLoadedMsg{}
+	_ uimsg.MainScreenMsg = delegations.DockActivityLoadedMsg{}
 
 	_ uiOwnedMsg = busyStateMsg{}
 	_ uiOwnedMsg = promptQueueMsg{}

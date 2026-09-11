@@ -102,12 +102,14 @@ func TestDrawChildSessionPanel_ShowsModelEffortTokensAndNoNavigation(t *testing.
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
+	u.sess.navStack[len(u.sess.navStack)-1].isolated = true
 	u.wsCache.agentBusyCache.Set(true)
 
 	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	u.drawChildSessionPanel(scr, u.lay.layout.editor)
 	out := ansi.Strip(scr.Render())
 
+	require.Contains(t, out, "isolated")
 	require.Contains(t, out, "claude-sonnet-5")
 	require.Contains(t, out, "effort medium")
 	require.Contains(t, out, "800", "prompt token count must be shown")

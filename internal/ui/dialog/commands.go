@@ -354,12 +354,25 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 		NewCommandItem(sty, "select_theme", "theme", "", ActionOpenDialog{ThemeID}).WithAliases("switch theme", "colors", "palette").WithDescription("switch color theme"),
 	}
 
-	// Only offer the threads dashboard for workspaces that actually own a
-	// thread manager (see workspace.Workspace.SupportsThreads).
+	// Only offer the delegation dashboard when delegation storage exists.
 	if com.Workspace != nil && com.Workspace.SupportsThreads() {
-		commands = append(commands, NewCommandItem(sty, "threads", "threads", "ctrl+e", ActionOpenThreadsDashboard{}).
-			WithAliases("monitor work threads", "thread dashboard").
-			WithDescription("monitor work threads"))
+		commands = append(commands, NewCommandItem(sty, "delegations", "delegations", "ctrl+e", ActionOpenDelegationsDashboard{}).
+			WithAliases("threads", "monitor work", "delegation dashboard").
+			WithDescription("monitor delegated work"))
+	}
+
+	if hasSession && com.Workspace != nil {
+		if stateful, ok := com.Workspace.(interface {
+			WorktreeState() workspace.WorktreeState
+		}); ok && stateful.WorktreeState().Active {
+			commands = append(commands, NewCommandItem(sty, "exit_worktree", "exit worktree", "", ActionExitWorktree{}).WithDescription("return to the main worktree"))
+		} else {
+			name := "session"
+			if len(sessionID) >= 8 {
+				name += "-" + sessionID[:8] // ok: ascii UUID prefix.
+			}
+			commands = append(commands, NewCommandItem(sty, "worktree", "worktree", "", ActionEnterWorktree{Name: name}).WithDescription("move this session into a worktree"))
+		}
 	}
 
 	// Only show compact command if there's an active session

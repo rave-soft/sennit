@@ -13,15 +13,12 @@ package model
 // transcript is finished from that instant on — so liveness has to come from
 // the task record itself, which is what this cache holds.
 //
-// Deliberately separate from threads.ListCache rather than folded into it:
-// that cache is Kind-scoped to threads on both its fetch and its event path,
-// for good reasons documented there (a task has no worktree, is never
-// merged, and used to accumulate in the list and bury the threads). This is
-// the mirror image of it, scoped the other way. Both share the
-// dispatchRefresh/applyLoaded/applyEvent/staleRefreshCmd machinery in
-// list_cache.go; this file only supplies what's specific to delegations —
-// the ListTasks call, the SupportsTasks gate, the ThreadKindTask filter, and
-// the agentsLoadedMsg shape.
+// Deliberately separate from delegations.ListCache: that all-kind cache feeds
+// the dashboard plus isolated-only dock and header views, while this task-only
+// cache is scoped to a session panel and can also belong to an attached UI.
+// Both share the dispatch, apply, event, and backoff machinery in listcache;
+// this file supplies the ListTasks call, SupportsTasks gate, ThreadKindTask
+// filter, ownership tag, and agentsLoadedMsg shape.
 
 import (
 	"context"
@@ -32,8 +29,8 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/listcache"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 )
 
 // agentsCacheTTL bounds how long the memoized task list may go without a
@@ -113,8 +110,8 @@ func (c *agentListCache) applyLoaded(com *common.Common, owner *UI, msg agentsLo
 // change on the edge itself, then invalidates the TTL so a refresh
 // eventually reconciles with the authoritative list.
 //
-// Tasks only, the mirror of threads.ListCache.applyEvent's thread-only filter:
-// the two kinds share one table and one lifecycle publisher.
+// Tasks only: the session-panel cache ignores isolated rows, while the shared
+// delegations ListCache accepts every kind from the same lifecycle publisher.
 func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 	listcache.ApplyEvent(&c.cache, proto.ThreadKindTask, evt)
 }
@@ -124,8 +121,8 @@ func (c *agentListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 // IO itself.
 //
 // A fetched-and-empty list stops the polling until an event invalidates it
-// (the timestamp is zeroed then), the same way the thread list's backstop
-// does: a session that never delegates anything must not re-list forever,
+// (the timestamp is zeroed then), the same way the all-delegation cache's
+// backstop does: a session that never delegates anything must not re-list forever,
 // and a delegation's own create event is what starts the section moving.
 func (c *agentListCache) staleRefreshCmd(com *common.Common, owner *UI, active bool) tea.Cmd {
 	if com == nil || com.Workspace == nil {
@@ -137,7 +134,7 @@ func (c *agentListCache) staleRefreshCmd(com *common.Common, owner *UI, active b
 // sessionDelegations filters agents down to the live delegations of
 // parentSessionID — the ones worth a block in that session's panel: pending,
 // running or merging (proto.ThreadStatus.Active, mirroring
-// threads.ActiveDockThreads) plus idle, which is a delegation whose run is not in
+// delegations.ActiveDockThreads) plus idle, which is a delegation whose run is not in
 // flight this instant but which has not finished either and must not read as
 // done. Sorted stably by CreatedAt ascending, so the first one started leads
 // and the order does not shuffle under a refresh.
@@ -159,6 +156,6 @@ func sessionDelegations(agents []proto.Thread, parentSessionID string) []proto.T
 			live = append(live, a)
 		}
 	}
-	threads.SortByCreation(live)
+	delegations.SortByCreation(live)
 	return live
 }

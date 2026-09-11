@@ -2,19 +2,17 @@
 // DispatchRefresh fetches a []proto.Thread list off-thread, ApplyLoaded
 // writes it through on the Update goroutine (discarding and re-dispatching
 // stale generations, backing off after a failure), ApplyEvent reacts to a
-// pubsub thread event by upserting or removing its row, and StaleRefreshCmd
+// delegation lifecycle event by upserting or removing its row, and StaleRefreshCmd
 // is the TTL backstop.
 //
-// Its callers are internal/ui/model's threadListCache and agentListCache.
+// Its callers are the delegations ListCache and model's agentListCache.
 // They used to type the whole sequence out twice, differing only in which
 // off-thread call fetches the list, whether the workspace Supports it,
 // which proto.ThreadKind their own pubsub events belong to, and the Label
 // used in the "failed to list" log line — which is what Ops carries.
 //
-// It lives outside internal/ui/model because it is not about any one
-// screen: the threads dashboard, the delegations panel and the workspace
-// cache all use it, and a feature that wants to move to its own package
-// should not have to take this with it or leave it behind.
+// It lives outside internal/ui/model because both the delegations package
+// and model's inline-agent panel use it.
 package listcache
 
 import (
@@ -28,11 +26,8 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
-// Ops supplies what differs between the panel's two live thread-
-// list caches — see the package doc comment above. Built Fresh (cheaply: a
-// handful of function values and constants) on every call rather than
-// stored on the cache struct, so threadListCache/agentListCache stay
-// zero-Value-safe the way TTLCache itself is.
+// Ops supplies what differs between the cached delegation lists. It is built
+// fresh on every call so each cache stays zero-value safe like TTLCache.
 // RefreshBackoff is how long a failed list or activity refresh waits before being retried. Without it a refresh that fails every
 // time re-dispatches on every Update — and since the failure's own result
 // message is itself an Update, the loop feeds itself and pins the event
@@ -119,15 +114,15 @@ func ApplyLoaded[Msg any, Workspace any](cache *TTLCache[[]proto.Thread], ws Wor
 	return nil, true
 }
 
-// ApplyEvent reacts to a thread pubsub event belonging to Kind: it
-// upserts (Created, Updated) or removes (Deleted) the event's row in the
-// cached list, then invalidates the TTL so a background refresh eventually
-// reconciles with the authoritative list. An event for a different Kind is
-// ignored — see threadEventMatchesKind — except a Deleted event, which is
+// ApplyEvent reacts to a delegation event belonging to Kind, or to every kind
+// when Kind is empty. It upserts (Created, Updated) or removes (Deleted) the
+// event's row, then invalidates the TTL so a background refresh eventually
+// reconciles with the authoritative list. An event for a different non-empty
+// Kind is ignored (see threadEventMatchesKind), except a Deleted event, which is
 // never filtered: dropping a row this cache does not hold is already a
 // no-op, and refusing to drop one it somehow does hold would strand it.
 func ApplyEvent(cache *TTLCache[[]proto.Thread], Kind proto.ThreadKind, evt pubsub.Event[proto.Thread]) {
-	if evt.Type != pubsub.DeletedEvent && !threadEventMatchesKind(proto.ThreadKind(evt.Payload.Kind), Kind) {
+	if evt.Type != pubsub.DeletedEvent && Kind != "" && !threadEventMatchesKind(proto.ThreadKind(evt.Payload.Kind), Kind) {
 		return
 	}
 	switch evt.Type {

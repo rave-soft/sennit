@@ -95,7 +95,6 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 		WorktreePath: "/tmp/thread-1",
 		SessionID:    threadSession.ID,
 		Status:       "running",
-		MergePolicy:  "manual",
 	})
 	require.NoError(t, err)
 
@@ -121,6 +120,23 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 	require.Len(t, messages, 1)
 	require.Equal(t, root.ID, messages[0].SessionID)
 	require.Equal(t, "human prompt", messages[0].Content().String())
+}
+
+func TestCreateExplicitIDIsIdempotent(t *testing.T) {
+	t.Parallel()
+	service, sessionID := newTestService(t)
+	params := CreateMessageParams{ID: "completion-generation", Role: User, Origin: OriginAgent, Parts: []ContentPart{TextContent{Text: "report"}}}
+	first, err := service.Create(t.Context(), sessionID, params)
+	require.NoError(t, err)
+	second, err := service.Create(t.Context(), sessionID, params)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, second.ID)
+	messages, err := service.List(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	params.Origin = OriginPerson
+	_, err = service.Create(t.Context(), sessionID, params)
+	require.ErrorContains(t, err, "different operation")
 }
 
 func TestCreate_OriginDefaultsToPersonAndRoundTrips(t *testing.T) {

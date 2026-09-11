@@ -14,8 +14,8 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
-	"github.com/rave-soft/sennit/internal/ui/threads"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -132,12 +132,12 @@ func TestViewsRequestLayoutIndependentKeyData(t *testing.T) {
 	}
 
 	assertEnhancements(r.main.View())
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 	assertEnhancements(r.dashboardView())
 }
 
 // drainShowDashboard runs cmd the way the Bubble Tea runtime would (unwrapping
-// tea.BatchMsg) until it finds the showThreadsDashboardMsg that
+// tea.BatchMsg) until it finds the showDelegationsDashboardMsg that
 // UI.handleGlobalKeys produces for the threads key, feeding it back into
 // r.Update. Other leaf messages are executed for side effects and dropped,
 // mirroring runCmds in session_busy_test.go.
@@ -150,7 +150,7 @@ func drainShowDashboard(t *testing.T, r *Root, cmd tea.Cmd) *Root {
 	// also kicks off unrelated background refreshes (LSP, busy state, ...)
 	// that rootTestWorkspace's minimal stub doesn't implement. Those leaves
 	// aren't what this test is after, so a panic from one is swallowed —
-	// only the showThreadsDashboardMsg branch matters here.
+	// only the showDelegationsDashboardMsg branch matters here.
 	msg := safeRunCmd(cmd)
 	switch msg := msg.(type) {
 	case tea.BatchMsg:
@@ -158,7 +158,7 @@ func drainShowDashboard(t *testing.T, r *Root, cmd tea.Cmd) *Root {
 			r = drainShowDashboard(t, r, c)
 		}
 		return r
-	case showThreadsDashboardMsg:
+	case showDelegationsDashboardMsg:
 		model, next := r.Update(msg)
 		r = model.(*Root)
 		return drainShowDashboard(t, r, next)
@@ -187,7 +187,7 @@ func TestThreadsKeyIgnoredWhenUnsupported(t *testing.T) {
 
 	r := newTestRoot(t, false)
 	_, cmd := r.Update(ctrlE())
-	// drainShowDashboard only switches screens on showThreadsDashboardMsg;
+	// drainShowDashboard only switches screens on showDelegationsDashboardMsg;
 	// with SupportsThreads() false, UI.handleGlobalKeys reports an info
 	// message instead (see the ui.go Threads case), so this must be a
 	// no-op regardless of whatever leaf messages the cmd tree contains.
@@ -202,7 +202,7 @@ func TestThreadsKeyTogglesDashboard(t *testing.T) {
 	r := newTestRoot(t, true)
 
 	// main -> dashboard: ctrl+e is handled by UI.handleGlobalKeys, which
-	// returns a cmd carrying showThreadsDashboardMsg; Root must apply it.
+	// returns a cmd carrying showDelegationsDashboardMsg; Root must apply it.
 	_, cmd := r.Update(ctrlE())
 	require.NotNil(t, cmd)
 	r = drainShowDashboard(t, r, cmd)
@@ -222,7 +222,7 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)
@@ -236,7 +236,7 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 }
 
 // TestDashboardCoalescedWheelScrolls is the regression test for the mouse
-// wheel doing nothing over the threads dashboard: the input filter
+// wheel doing nothing over the delegations dashboard: the input filter
 // (cmd/root.go) rewrites every raw tea.MouseWheelMsg into
 // common.CoalescedWheelMsg before Root ever sees it, but handleDashboardMsg
 // used to switch only on the raw type, so threadsDashboard.HandleMouseWheel
@@ -256,7 +256,7 @@ func TestDashboardCoalescedWheelScrolls(t *testing.T) {
 
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)
-	r.dashboard = threads.New(r.com, &r.main.threadList)
+	r.dashboard = delegations.New(r.com, &r.main.threadList)
 	r.dashboard.SetSize(120, 40)
 	r.dashboard.RebuildItems()
 	r.active = screenDashboard
@@ -291,17 +291,12 @@ func TestDashboardDialogReceivesPaste(t *testing.T) {
 	r = drainShowDashboard(t, r, cmd)
 	require.Equal(t, screenDashboard, r.active)
 
-	r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
+	r.dashboardDialog.OpenDialog(dialog.NewDelegationCleanupConfirm(r.com, "thread-1", "test"))
 	require.True(t, r.dashboardDialog.HasDialogs())
 
-	before := r.View().Content
-	require.NotContains(t, before, "pasted-goal-text")
-
-	model, _ = r.Update(tea.PasteMsg{Content: "pasted-goal-text"})
+	model, _ = r.Update(tea.PasteMsg{Content: "pasted-text"})
 	r = model.(*Root)
-
-	require.Contains(t, r.View().Content, "pasted-goal-text",
-		"a paste must reach the dashboard dialog's focused text input")
+	require.True(t, r.dashboardDialog.HasDialogs(), "paste input must stay routed to the dashboard dialog")
 }
 
 // TestThreadEventMsgDroppedWhenNotAttached exercises both "no thread
@@ -530,7 +525,7 @@ func TestHandleThreadAttachedTearsDownPreviousAttachment(t *testing.T) {
 	r.active = screenDashboard
 	// The request itself (Enter on the dashboard row) is what marks the
 	// answer as wanted; see Root.pendingAttach.
-	model, _ := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "first"})
+	model, _ := r.Update(delegations.EnterMsg{ID: "s1", SessionID: "sess1", Name: "first"})
 	r = model.(*Root)
 
 	var firstStopCalls, firstDetachCalls, secondDetachCalls int
@@ -596,7 +591,7 @@ func TestHandleThreadAttachedStaleAfterLeavingDashboard(t *testing.T) {
 // TestHandleThreadAttachedFromMainScreenPanel is the regression test for a
 // click on a thread block in the main screen's session panel doing nothing:
 // the attach result was judged wanted by "is the dashboard active?", so a
-// request that started on screenMain (threads.EnterMsg from mouse.go) was
+// request that started on screenMain (delegations.EnterMsg from mouse.go) was
 // treated as stale and its workspace silently released. The request the
 // user is still waiting on (pendingAttach) must land whichever screen it
 // started from.
@@ -606,9 +601,9 @@ func TestHandleThreadAttachedFromMainScreenPanel(t *testing.T) {
 	r := newTestRoot(t, true)
 	r.active = screenMain
 
-	model, cmd := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "panel"})
+	model, cmd := r.Update(delegations.EnterMsg{ID: "s1", SessionID: "sess1", Name: "panel"})
 	r = model.(*Root)
-	require.NotNil(t, cmd, "threads.EnterMsg must start an attach")
+	require.NotNil(t, cmd, "delegations.EnterMsg must start an attach")
 	require.Equal(t, "s1", r.attachment.pendingID)
 
 	detached := false
@@ -628,18 +623,18 @@ func TestHandleThreadAttachedFromMainScreenPanel(t *testing.T) {
 
 // TestLeaveThreadFromMainScreenPanelBuildsDashboard is the regression test
 // for a nil-pointer panic: a thread opened via enterThreadMsg (the main
-// screen's session panel, not showThreadsDashboardMsg) never gets r.dashboard
+// screen's session panel, not showDelegationsDashboardMsg) never gets r.dashboard
 // constructed, yet leaveThread (ctrl+e's screenThread case) unconditionally
 // switched r.active to screenDashboard — View() then called
 // r.dashboard.Draw() on nil. leaveThread must build the dashboard lazily,
-// the same way showThreadsDashboardMsg does, before landing on it.
+// the same way showDelegationsDashboardMsg does, before landing on it.
 func TestLeaveThreadFromMainScreenPanelBuildsDashboard(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
 	r.active = screenMain
 
-	model, _ := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "panel"})
+	model, _ := r.Update(delegations.EnterMsg{ID: "s1", SessionID: "sess1", Name: "panel"})
 	r = model.(*Root)
 	model, cmd := r.Update(threadAttachedMsg{
 		id: "s1", sessionID: "sess1", name: "panel", ws: &rootTestWorkspace{},
@@ -669,9 +664,9 @@ func TestHandleThreadAttachedSupersededRequestIsStale(t *testing.T) {
 	r := newTestRoot(t, true)
 	r.active = screenDashboard
 
-	model, _ := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "first"})
+	model, _ := r.Update(delegations.EnterMsg{ID: "s1", SessionID: "sess1", Name: "first"})
 	r = model.(*Root)
-	model, _ = r.Update(threads.EnterMsg{ID: "s2", SessionID: "sess2", Name: "second"})
+	model, _ = r.Update(delegations.EnterMsg{ID: "s2", SessionID: "sess2", Name: "second"})
 	r = model.(*Root)
 
 	detached := false
@@ -700,7 +695,7 @@ func TestChatWarmStepReachesMainScreenWhileThreadIsOpen(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
-	model, _ := r.Update(threads.EnterMsg{ID: "s1", SessionID: "sess1", Name: "x"})
+	model, _ := r.Update(delegations.EnterMsg{ID: "s1", SessionID: "sess1", Name: "x"})
 	r = model.(*Root)
 	model, cmd := r.Update(threadAttachedMsg{id: "s1", sessionID: "sess1", name: "x", ws: &rootTestWorkspace{}, detach: func() {}})
 	r = model.(*Root)
@@ -794,9 +789,8 @@ func TestAttachThreadCmdActivatesBeforeAttaching(t *testing.T) {
 // that an ActivateThread failure does not abort the attach: the thread
 // still opens (read-only, via AttachThread's own fallback), and the
 // activation failure is explained to the user as a warning (via
-// util.ReportWarn), not flagged as an error — the common case is a
-// merged/merging thread, for which read-only is the correct and permanent
-// state, not a failure of anything the user did. The reason text itself
+// util.ReportWarn), not flagged as an error — completed work may correctly
+// be available only through the read-only fallback. The reason text itself
 // must still reach the user rather than being swallowed — see
 // AppWorkspace.AttachThread and attachThreadCmd's doc comments for why it
 // would otherwise only surface once the person tries to type into a

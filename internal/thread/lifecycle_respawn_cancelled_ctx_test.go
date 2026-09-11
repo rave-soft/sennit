@@ -32,7 +32,6 @@ func TestManager_Send_ReleasesRespawnedHandleOnCancelledContext(t *testing.T) {
 	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:            "cancel-on-resume",
 		Goal:            "do it",
-		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)

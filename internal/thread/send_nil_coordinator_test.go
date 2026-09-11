@@ -36,7 +36,7 @@ func TestManager_SendWithNilCoordinatorFailsWithoutStrandingStatus(t *testing.T)
 			repo := initRepo(t)
 			mgr, spawner := newTestManager(t, repo)
 
-			st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "nil-coord-" + tc.name, Goal: "do it", MergePolicy: thread.MergeManual})
+			st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "nil-coord-" + tc.name, Goal: "do it"})
 			require.NoError(t, err)
 
 			coord := spawner.coordFor(st.WorktreePath)

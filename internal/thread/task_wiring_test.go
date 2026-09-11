@@ -45,7 +45,7 @@ type stableParentAppSpawner struct {
 	ws thread.Workspace
 }
 
-func (s stableParentAppSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+func (s stableParentAppSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
 	return &stableParentAppHandle{ws: s.ws}, nil
 }
 func (s stableParentAppSpawner) Release(ctx context.Context, id string) error { return nil }

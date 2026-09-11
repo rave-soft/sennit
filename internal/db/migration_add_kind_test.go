@@ -54,10 +54,10 @@ func TestMigration_AddKindToThreads(t *testing.T) {
 	_, err = conn.ExecContext(context.Background(), `
 		INSERT INTO threads (
 			id, name, project_path, goal, base_branch, branch, worktree_path,
-			session_id, status, merge_policy, kind, created_at, updated_at
+			session_id, status, kind, created_at, updated_at
 		) VALUES (
 			'th-2', 'beta', '', 'do another thing', 'main', 'thread/beta',
-			'/tmp/worktree2', 'sess-2', 'running', 'auto', 'task', 1000, 1000
+			'/tmp/worktree2', 'sess-2', 'running', 'task', 1000, 1000
 		)`)
 	require.NoError(t, err)
 	err = conn.QueryRowContext(context.Background(),

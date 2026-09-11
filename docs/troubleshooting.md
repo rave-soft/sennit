@@ -232,18 +232,19 @@ model — those rows are marked with `~`. Message counts and time are exact. The
 
 By design. A message sent mid-turn is *steered* into the running turn, not
 treated as an interrupt. Press <kbd>Esc</kbd> twice to actually stop. See
-[Steering, tasks and threads](concepts/delegation.md).
+[Steering and delegation](concepts/delegation.md).
 
 ### It started work I didn't ask for, in the background
 
-That is a background task. Turn dispatch off entirely:
+That is a delegation the agent started for itself. Turn dispatch off
+entirely:
 
 ```jsonc
 // sennit.json
 { "options": { "background_agents": false } }
 ```
 
-A task already running keeps running; the switch only blocks new dispatch.
+One already running keeps running; the switch only blocks new dispatch.
 
 ### Conversations get truncated
 

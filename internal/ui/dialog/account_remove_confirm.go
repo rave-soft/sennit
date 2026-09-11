@@ -14,7 +14,7 @@ import (
 const AccountRemoveConfirmID = "account-remove-confirm"
 
 // AccountRemoveConfirm is a Yes/No confirmation dialog guarding account
-// removal, mirroring [ThreadRemoveConfirm]. It does no IO itself: on
+// removal. It does no IO itself: on
 // confirmation it returns [ActionRemoveAccountConfirmed], and the caller
 // (ui.go) performs the actual RemoveAccount call in a tea.Cmd.
 type AccountRemoveConfirm struct {

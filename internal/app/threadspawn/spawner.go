@@ -29,12 +29,13 @@ func (h *localHandle) Workspace() thread.Workspace { return h.workspace }
 // concurrently alongside the top-level workspace's app in the same
 // process.
 type LocalSpawner struct {
-	apps         *csync.Map[string, *app.App]
-	parentAgents func() map[string]config.Agent
-	parentSkills func() []*skills.Skill
-	parentYOLO   func() bool
-	parentModel  func() config.SelectedModel
-	frontend     func(*app.App) workspace.Workspace
+	apps              *csync.Map[string, *app.App]
+	parentAgents      func() map[string]config.Agent
+	parentSkills      func() []*skills.Skill
+	parentYOLO        func() bool
+	parentModel       func() config.SelectedModel
+	parentProjectPath func() string
+	frontend          func(*app.App) workspace.Workspace
 }
 
 // NewLocalSpawner returns a ready-to-use LocalSpawner. parentSkills, when
@@ -50,17 +51,43 @@ func NewLocalSpawner(
 	parentModel func() config.SelectedModel,
 	frontend ...func(*app.App) workspace.Workspace,
 ) *LocalSpawner {
+	return newLocalSpawner(parentAgents, parentSkills, parentYOLO, parentModel, nil, frontend...)
+}
+
+// NewLocalSpawnerWithProjectPath creates a LocalSpawner that records every
+// spawned thread under its parent's project path. parentProjectPath is read on
+// every Spawn, so a restarted thread uses the parent's current path.
+func NewLocalSpawnerWithProjectPath(
+	parentAgents func() map[string]config.Agent,
+	parentSkills func() []*skills.Skill,
+	parentYOLO func() bool,
+	parentModel func() config.SelectedModel,
+	parentProjectPath func() string,
+	frontend ...func(*app.App) workspace.Workspace,
+) *LocalSpawner {
+	return newLocalSpawner(parentAgents, parentSkills, parentYOLO, parentModel, parentProjectPath, frontend...)
+}
+
+func newLocalSpawner(
+	parentAgents func() map[string]config.Agent,
+	parentSkills func() []*skills.Skill,
+	parentYOLO func() bool,
+	parentModel func() config.SelectedModel,
+	parentProjectPath func() string,
+	frontend ...func(*app.App) workspace.Workspace,
+) *LocalSpawner {
 	var frontendFactory func(*app.App) workspace.Workspace
 	if len(frontend) != 0 {
 		frontendFactory = frontend[0]
 	}
 	return &LocalSpawner{
-		apps:         csync.NewMap[string, *app.App](),
-		parentAgents: parentAgents,
-		parentSkills: parentSkills,
-		parentYOLO:   parentYOLO,
-		parentModel:  parentModel,
-		frontend:     frontendFactory,
+		apps:              csync.NewMap[string, *app.App](),
+		parentAgents:      parentAgents,
+		parentSkills:      parentSkills,
+		parentYOLO:        parentYOLO,
+		parentModel:       parentModel,
+		parentProjectPath: parentProjectPath,
+		frontend:          frontendFactory,
 	}
 }
 
@@ -79,7 +106,7 @@ func (s *LocalSpawner) Apps() []*app.App {
 // uses. Split out from Spawn so tests can inspect those options without
 // driving a full Bootstrap. It reads only the parent's state, not the
 // spawn path, which Bootstrap takes separately.
-func (s *LocalSpawner) bootstrapOptions() app.BootstrapOptions {
+func (s *LocalSpawner) bootstrapOptions(delegationID, sessionID string) app.BootstrapOptions {
 	var inheritedAgents map[string]config.Agent
 	if s.parentAgents != nil {
 		inheritedAgents = s.parentAgents()
@@ -101,13 +128,20 @@ func (s *LocalSpawner) bootstrapOptions() app.BootstrapOptions {
 			model = &m
 		}
 	}
+	var projectPath string
+	if s.parentProjectPath != nil {
+		projectPath = s.parentProjectPath()
+	}
 	return app.BootstrapOptions{
-		WorkspaceLock:   true,
-		InheritedAgents: inheritedAgents,
-		InheritedSkills: inheritedSkills,
-		PreferredModel:  model,
-		YOLO:            yolo,
-		ConfineWrites:   true,
+		WorkspaceLock:      true,
+		ProjectPath:        projectPath,
+		InheritedAgents:    inheritedAgents,
+		InheritedSkills:    inheritedSkills,
+		PreferredModel:     model,
+		YOLO:               yolo,
+		ConfineWrites:      true,
+		ResumeDelegationID: delegationID,
+		ResumeSessionID:    sessionID,
 		// A thread reports into its own workspace, not the user's pane:
 		// the pane belongs to the top-level session, and falling back to
 		// the process-wide herdr client here would make the thread's App
@@ -119,8 +153,8 @@ func (s *LocalSpawner) bootstrapOptions() app.BootstrapOptions {
 }
 
 // Spawn implements thread.Spawner.
-func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
-	boot, err := app.Bootstrap(ctx, path, s.bootstrapOptions())
+func (s *LocalSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
+	boot, err := app.Bootstrap(ctx, request.Path, s.bootstrapOptions(request.DelegationID, request.SessionID))
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +218,7 @@ func NewParentAppSpawner(workspace thread.Workspace) *ParentAppSpawner {
 }
 
 // Spawn implements thread.Spawner.
-func (s *ParentAppSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
+func (s *ParentAppSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
 	return &parentHandle{id: uuid.New().String(), workspace: s.workspace}, nil
 }
 

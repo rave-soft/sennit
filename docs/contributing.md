@@ -72,7 +72,7 @@ matter and link fixes applied:
 |:--|:--|
 | [sennitrc reference](configuration/sennitrc.md) | `docs/config/README.md` |
 | [Hooks](extending/hooks.md) | `docs/hooks/README.md` |
-| [Steering, tasks and threads](concepts/delegation.md) | `docs/delegation/README.md` |
+| [Steering and delegation](concepts/delegation.md) | `docs/delegation/README.md` |
 
 Edit those on `main` and re-import, rather than editing both copies.
 

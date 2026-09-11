@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -29,6 +30,31 @@ import (
 // model, network access, or an actual LSP binary: TrackConfigured
 // announces configured-but-not-started servers via callback(name, nil),
 // which updateLSPState records as StateUnstarted.
+func TestNewCanonicalizesDefaultAndOverriddenProjectPath(t *testing.T) {
+	setBootstrapTestEnv(t)
+	dataDir := config.GlobalDBDir()
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	workingDir := t.TempDir()
+	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig](), Options: &config.Options{DataDirectory: t.TempDir()}}
+	store := configtest.NewStore(t, cfg, configtest.WithWorkingDir(workingDir))
+	manager := skills.NewManager(nil, nil, nil)
+
+	defaultApp, err := New(t.Context(), conn, store, manager, WithProjectPath(""))
+	require.NoError(t, err)
+	require.Equal(t, workingDir, defaultApp.ProjectPath())
+	defaultApp.Shutdown()
+
+	conn, err = db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	override := workingDir + "/nested/../project"
+	overridden, err := New(t.Context(), conn, store, manager, WithProjectPath(override))
+	require.NoError(t, err)
+	t.Cleanup(overridden.Shutdown)
+	require.Equal(t, filepath.Join(workingDir, "project"), overridden.ProjectPath())
+}
+
 func TestNew_UnconfiguredProviderStillWiresLSPCallback(t *testing.T) {
 	setBootstrapTestEnv(t)
 

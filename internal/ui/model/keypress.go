@@ -25,15 +25,12 @@ func (m *UI) openExternalEditorGuarded(cmds []tea.Cmd) (out []tea.Cmd, started b
 	return append(cmds, m.editor.openEditor(editorValue, m)), true
 }
 
-// openThreadsDashboardGuarded appends the command that opens the threads
-// dashboard, or an info message instead when the workspace doesn't support
-// threads at all. Shared by the Threads key binding and the commands
-// palette's ActionOpenThreadsDashboard.
-func openThreadsDashboardGuarded(com *common.Common, cmds []tea.Cmd) []tea.Cmd {
+// openDelegationsDashboardGuarded opens the delegation dashboard when supported.
+func openDelegationsDashboardGuarded(com *common.Common, cmds []tea.Cmd) []tea.Cmd {
 	if !com.Workspace.SupportsThreads() {
-		return append(cmds, util.ReportInfo("This workspace doesn't support threads."))
+		return append(cmds, util.ReportInfo("This workspace doesn't support delegations."))
 	}
-	return append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
+	return append(cmds, util.CmdHandler(showDelegationsDashboardMsg{}))
 }
 
 // scrollChatUpAndKeepSelectionVisible scrolls the chat up one line,
@@ -174,7 +171,7 @@ func (m *UI) handleGlobalKeys(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cmd, b
 		}
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Threads):
-		cmds = openThreadsDashboardGuarded(m.com, cmds)
+		cmds = openDelegationsDashboardGuarded(m.com, cmds)
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Chat.Details) && m.lay.isCompact:
 		m.lay.detailsOpen = !m.lay.detailsOpen

@@ -629,6 +629,7 @@ func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.RecentModels = slices.Clone(c.RecentModels)
 	nc.MCP = maps.Clone(c.MCP)
+	nc.Agents = cloneAgents(c.Agents)
 	// Problems is rewritten in place by setupAgents (it deletes the agent
 	// entries and re-adds the current ones), so sharing the published
 	// config's slice let that rewrite reach a Config other goroutines are

@@ -68,7 +68,7 @@ option skill-path ~/work/shared-skills
 > `.sennit/skills`, or point at the directory with `skill-path`.
 
 Sennit also ships builtin skills: `sennit-config` (it can configure itself),
-`sennit-hooks`, `threads`, `tasks` and `jq`. Hide one you don't want:
+`sennit-hooks`, `isolation`, `tasks` and `jq`. Hide one you don't want:
 
 ```bash
 option disable-skill jq

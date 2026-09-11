@@ -70,8 +70,6 @@ func gateAllows(g toolmeta.Gate, name string, b *buildToolsCtx) bool {
 		return slices.Contains(b.agent.AllowedTools, name)
 	case toolmeta.GateNotSubAgent:
 		return !b.isSubAgent
-	case toolmeta.GateThreads:
-		return !b.isSubAgent && b.threads != nil
 	case toolmeta.GateTasks:
 		return !b.isSubAgent && b.backgroundAgentsOn && b.taskManager != nil
 	case toolmeta.GateDelegations:
@@ -169,20 +167,6 @@ func toolSpecs() []toolSpec {
 				tools.NewReadTool(f.lspManager, f.permissions, f.filetracker, b.skillTracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
 				tools.NewMultiReadTool(f.permissions, f.filetracker, b.runtimeCfg.workingDir, b.cfg.SkillsPaths()...),
 				tools.NewWriteTool(f.lspManager, f.permissions, f.fileHistory, f.filetracker, b.runtimeCfg.workingDir),
-			}, nil
-		}},
-
-		// Worktree lifecycle: top-level agent of the workspace owning the
-		// thread manager only — sub-agents nesting workspace ownership
-		// isn't supported, and non-git/thread-spawned workspaces have no
-		// manager. Creating, merging and removing a worktree have no task
-		// equivalent, so these three stayed thread-specific when the rest
-		// of the delegation surface merged into the agent_* tools.
-		{[]string{"thread_create", "thread_merge", "thread_remove"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
-			return []fantasy.AgentTool{
-				tools.NewThreadCreateTool(b.threads, b.inputs.permissions),
-				tools.NewThreadMergeTool(b.threads, b.inputs.permissions),
-				tools.NewThreadRemoveTool(b.threads, b.inputs.permissions),
 			}, nil
 		}},
 

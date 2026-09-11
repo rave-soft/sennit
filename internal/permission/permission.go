@@ -458,14 +458,11 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 // requests from drifting apart.
 var KnownActions = []string{
 	"cancel",
-	"create",
 	"download",
 	"execute",
 	"fetch",
 	"list",
-	"merge",
 	"read",
-	"remove",
 	"rename",
 	"search",
 	"write",

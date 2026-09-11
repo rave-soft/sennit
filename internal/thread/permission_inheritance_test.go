@@ -28,7 +28,6 @@ func TestManager_CreateInheritsAutoApprovalFromApprovedParent(t *testing.T) {
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "alpha",
 		Goal:            "do the thing",
-		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
@@ -59,7 +58,6 @@ func TestManager_CreateDoesNotInheritAutoApprovalFromOrdinaryParent(t *testing.T
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "alpha",
 		Goal:            "do the thing",
-		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "ordinary-parent-sess",
 	})
 	require.NoError(t, err)
@@ -107,68 +105,6 @@ func TestManager_CreateDoesNotInheritAutoApprovalFromOrdinaryParent(t *testing.T
 // with a fresh, ungranted permission.Service, so the follow-up's first
 // permission request blocked forever with no UI to answer it. Send must
 // re-grant on every respawn, not just at Create.
-func TestManager_SendReGrantsAutoApprovalAfterRuntimeRelease(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
-
-	parentApp.Permissions().AutoApproveSession("parent-sess")
-
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:            "alpha",
-		Goal:            "do the thing",
-		MergePolicy:     thread.MergeManual,
-		ParentSessionID: "parent-sess",
-	})
-	require.NoError(t, err)
-
-	// Complete the run so the runtime — and the App carrying the grant —
-	// is released, mirroring the respawn that follows an interrupted or
-	// merge-blocked headless thread being resumed.
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-
-	_, err = mgr.Send(t.Context(), st.ID, "keep going")
-	require.NoError(t, err)
-
-	respawnedPerms := spawner.appFor(st.WorktreePath).Permissions()
-	require.True(t, respawnedPerms.IsAutoApproveSession(st.SessionID),
-		"a thread respawned by Send must still carry the auto-approval grant its parent session held")
-}
-
-// TestManager_SendDoesNotGrantAutoApprovalFromOrdinaryParent pins the other
-// half: a thread whose parent session was never auto-approved must not
-// come back from a respawn with a grant it was never given.
-func TestManager_SendDoesNotGrantAutoApprovalFromOrdinaryParent(t *testing.T) {
-	repo := initRepo(t)
-	mgr, spawner, _ := newTestManagerWithParentApp(t, repo)
-
-	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:            "alpha",
-		Goal:            "do the thing",
-		MergePolicy:     thread.MergeManual,
-		ParentSessionID: "ordinary-parent-sess",
-	})
-	require.NoError(t, err)
-
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
-
-	_, err = mgr.Send(t.Context(), st.ID, "keep going")
-	require.NoError(t, err)
-
-	respawnedPerms := spawner.appFor(st.WorktreePath).Permissions()
-	require.False(t, respawnedPerms.IsAutoApproveSession(st.SessionID),
-		"a thread under an ordinary parent session must not be auto-approved after a respawn")
-}
-
-// TestTaskManager_CreateInheritsAutoApprovalFromApprovedParent is the
-// regression test for the headless-delegation deadlock: a non-interactive
-// run auto-approves its own session (permission.Service.AutoApproveSession),
-// but a delegation launched from it used to run under a fresh child session
-// id that carried no such grant, so its first permission request blocked
-// forever with nothing able to answer it. Create must now extend the same
-// grant to the child session it creates, whenever the parent already has
-// it.
 func TestTaskManager_CreateInheritsAutoApprovalFromApprovedParent(t *testing.T) {
 	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)

@@ -47,16 +47,6 @@ func (s *store) Create(ctx context.Context, params thread.CreateParams) (thread.
 	if kind == "" {
 		kind = thread.KindThread
 	}
-	// MergePolicy is a Thread-overlay concept: defaulting it for every
-	// kind would leave a non-thread row reading MergeAuto, which used to
-	// be enough on its own to send a task into Manager's merge flow (see
-	// onAutoMerge, which now also guards on Kind directly). Only a thread
-	// gets the default; every other kind's column stays "".
-	mergePolicy := params.MergePolicy
-	if mergePolicy == "" && kind == thread.KindThread {
-		mergePolicy = thread.MergeAuto
-	}
-
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
 		ID:              uuid.New().String(),
 		Name:            params.Name,
@@ -67,9 +57,10 @@ func (s *store) Create(ctx context.Context, params thread.CreateParams) (thread.
 		WorktreePath:    params.WorktreePath,
 		SessionID:       params.SessionID,
 		Status:          string(thread.StatusPending),
-		MergePolicy:     string(mergePolicy),
 		Kind:            string(kind),
 		ParentSessionID: params.ParentSessionID,
+		Execution:       params.Execution,
+		CompletionDepth: int64(params.Depth),
 	})
 	if err != nil {
 		// Satisfy the thread.Store contract: Create must report a
@@ -117,7 +108,7 @@ func (s *store) List(ctx context.Context) ([]thread.Thread, error) {
 	}
 	threads := make([]thread.Thread, len(dbThreads))
 	for i, dbThread := range dbThreads {
-		threads[i] = fromDBItem(dbThread)
+		threads[i] = fromListRow(db.ListThreadsAllRow(dbThread))
 	}
 	return threads, nil
 }
@@ -129,7 +120,7 @@ func (s *store) ListAll(ctx context.Context) ([]thread.Thread, error) {
 	}
 	threads := make([]thread.Thread, len(dbThreads))
 	for i, dbThread := range dbThreads {
-		threads[i] = fromDBItem(dbThread)
+		threads[i] = fromListRow(dbThread)
 	}
 	return threads, nil
 }
@@ -149,6 +140,16 @@ func (s *store) SetStatus(ctx context.Context, id string, params thread.SetStatu
 		return thread.Thread{}, err
 	}
 	return fromDBItem(dbThread), nil
+}
+
+func (s *store) SetTaskPreparation(ctx context.Context, id, base, branch, path string) (thread.Thread, error) {
+	item, err := s.q.SetTaskPreparation(ctx, db.SetTaskPreparationParams{
+		ID: id, BaseBranch: base, Branch: branch, WorktreePath: path,
+	})
+	if err != nil {
+		return thread.Thread{}, err
+	}
+	return fromDBItem(item), nil
 }
 
 func (s *store) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
@@ -176,7 +177,7 @@ func (s *store) FinalizeTask(ctx context.Context, id string, params thread.Final
 		if err != nil {
 			return fmt.Errorf("load task for finalization: %w", err)
 		}
-		if st.Kind != string(thread.KindTask) || st.Status != string(thread.StatusRunning) {
+		if st.Kind != string(thread.KindTask) || (st.Status != string(thread.StatusRunning) && st.Status != string(thread.StatusPending)) {
 			return nil
 		}
 		if _, err := q.AttributeTaskCostOnce(ctx, db.AttributeTaskCostOnceParams{
@@ -191,11 +192,17 @@ func (s *store) FinalizeTask(ctx context.Context, id string, params thread.Final
 			ID: st.ID, SessionID: st.SessionID, ParentSessionID: st.ParentSessionID,
 		})
 		if errors.Is(err, sql.ErrNoRows) {
-			// Another terminal contender won after the initial read. Roll back
-			// this transaction's tentative cost increment and report a no-op.
 			return errFinalizeLost
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return q.InsertTaskCompletionOutbox(ctx, db.InsertTaskCompletionOutboxParams{
+			TaskID: finalized.ID, TerminalAt: finalized.TerminalAt.Int64,
+			Status: finalized.Status, Error: finalized.Error, ResultSummary: finalized.ResultSummary,
+			CompletionDepth: finalized.CompletionDepth, CompletedAt: finalized.CompletedAt,
+			Name: finalized.Name, Goal: finalized.Goal, SessionID: finalized.SessionID, ParentSessionID: finalized.ParentSessionID,
+		})
 	})
 	if errors.Is(err, errFinalizeLost) {
 		st, getErr := s.Get(ctx, id)
@@ -218,14 +225,56 @@ func (s *store) ListPendingTaskCompletions(ctx context.Context) ([]thread.Thread
 	}
 	out := make([]thread.Thread, len(rows))
 	for i, row := range rows {
-		out[i] = fromDBItem(row)
+		out[i] = fromPendingDBRow(row)
 	}
 	return out, nil
 }
 
-func (s *store) MarkTaskCompletionDelivered(ctx context.Context, id string) error {
-	_, err := s.q.MarkTaskCompletionDelivered(ctx, id)
-	return err
+func (s *store) AcknowledgeTaskCompletionGeneration(ctx context.Context, id string, terminalAt int64) error {
+	if s.conn == nil {
+		return errors.New("thread store does not support transactions")
+	}
+	return db.InTx(ctx, s.conn, func(q *db.Queries) error {
+		if _, err := q.AcknowledgeTaskCompletionGeneration(ctx, db.AcknowledgeTaskCompletionGenerationParams{TaskID: id, TerminalAt: terminalAt}); err != nil {
+			return err
+		}
+		_, err := q.RefreshTaskCompletionPending(ctx, id)
+		return err
+	})
+}
+
+func fromPendingDBRow(item db.ListPendingTaskCompletionsRow) thread.Thread {
+	return fromDBItem(db.Thread{
+		ID: item.ID, Name: item.Name_2, ProjectPath: item.ProjectPath, Goal: item.Goal_2,
+		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
+		SessionID: item.SessionID_2, Status: item.Status_2,
+		ResultSummary: item.ResultSummary_2, Error: item.Error_2, CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt_2, Kind: item.Kind,
+		ParentSessionID: item.ParentSessionID_2, CompletionPending: 1,
+		CompletionDepth: item.CompletionDepth_2, TerminalAt: sql.NullInt64{Int64: item.TerminalAt_2, Valid: true},
+		CostAttributed: item.CostAttributed, Execution: item.Execution,
+	})
+}
+
+// fromListRow maps a listing row, which deliberately carries no execution
+// snapshot (see the ListThreads queries): the column runs to tens of
+// megabytes per row and no list caller reads it. The two listing queries
+// select identical columns, so ListThreadsRow converts to ListThreadsAllRow
+// directly and only one mapper is needed.
+//
+// Execution is left zero rather than faked, so a caller that ever does need
+// the snapshot gets it from Get, not silently from a listing.
+func fromListRow(item db.ListThreadsAllRow) thread.Thread {
+	return fromDBItem(db.Thread{
+		ID: item.ID, Name: item.Name, ProjectPath: item.ProjectPath, Goal: item.Goal,
+		BaseBranch: item.BaseBranch, Branch: item.Branch, WorktreePath: item.WorktreePath,
+		SessionID: item.SessionID, Status: item.Status,
+		ResultSummary: item.ResultSummary, Error: item.Error, CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt, CompletedAt: item.CompletedAt, Kind: item.Kind,
+		ParentSessionID: item.ParentSessionID, CompletionPending: item.CompletionPending,
+		CompletionDepth: item.CompletionDepth, TerminalAt: item.TerminalAt,
+		CostAttributed: item.CostAttributed,
+	})
 }
 
 func fromDBItem(item db.Thread) thread.Thread {
@@ -250,6 +299,6 @@ func fromDBItem(item db.Thread) thread.Thread {
 		BaseBranch:   item.BaseBranch,
 		Branch:       item.Branch,
 		WorktreePath: item.WorktreePath,
-		MergePolicy:  thread.MergePolicy(item.MergePolicy),
+		Execution:    item.Execution,
 	}
 }

@@ -22,6 +22,10 @@ import (
 )
 
 func newAttachTestApp(t *testing.T, path string) *app.App {
+	return newAttachTestAppWithOptions(t, path, app.BootstrapOptions{})
+}
+
+func newAttachTestAppWithOptions(t *testing.T, path string, opts app.BootstrapOptions) *app.App {
 	t.Helper()
 	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", t.TempDir())
 	// WorkspaceLock mirrors both production callers (cmd/root.go and
@@ -29,13 +33,38 @@ func newAttachTestApp(t *testing.T, path string) *app.App {
 	// running turns here - finalizing interrupted turns, above all - asks
 	// whether the lock was actually enforced, so a fixture without one
 	// would exercise a configuration production never has.
-	boot, err := app.Bootstrap(t.Context(), path, app.BootstrapOptions{WorkspaceLock: true})
+	opts.WorkspaceLock = true
+	boot, err := app.Bootstrap(t.Context(), path, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		boot.App.Shutdown()
 		db.ResetPool()
 	})
 	return boot.App
+}
+
+func TestAttachUsesEffectiveParentProjectForThreadRows(t *testing.T) {
+	repo := initRepo(t)
+	parentProject := t.TempDir()
+	a := newAttachTestAppWithOptions(t, repo, app.BootstrapOptions{ProjectPath: parentProject})
+	a.SetSessionsForTest(&attachFakeSessions{})
+	a.SetAgentCoordinatorForTest(&attachFakeCoordinator{})
+	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
+
+	created, err := a.ThreadManager().Create(t.Context(), thread.CreateArgs{Name: "parent-scoped", Goal: ""})
+	require.NoError(t, err)
+	conn, err := db.Connect(t.Context(), config.GlobalDBDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Release(config.GlobalDBDir())) })
+	row, err := db.New(conn).GetThread(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, parentProject, row.ProjectPath)
+	require.NotEqual(t, repo, row.ProjectPath)
+
+	listed, err := a.ThreadManager().List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, created.ID, listed[0].ID)
 }
 
 func TestAttachOnlyAtRepositoryRoot(t *testing.T) {
@@ -248,7 +277,7 @@ func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, a, parentWorkspace.App)
 
-	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: thread.MergeManual})
+	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go"})
 	require.NoError(t, err)
 
 	// Leave both dispatched runs in flight (no RunComplete published for
@@ -289,7 +318,7 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 
 	taskSt, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: thread.MergeManual})
+	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go"})
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool { return taskCoord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -321,7 +350,11 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 // so the parent's own sweep walks straight past them and a thread killed
 // mid-run keeps a transcript of tool calls that never came back — which
 // the UI reads as still running, forever.
-func TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees(t *testing.T) {
+// TestAttachDoesNotSweepSharedProjectTurns proves Attach cannot repair turns
+// itself now that threads share their parent project path. The parent may be
+// streaming while a thread is attached, so only Bootstrap sweeps the project
+// before it dispatches work.
+func TestAttachDoesNotSweepSharedProjectTurns(t *testing.T) {
 	repo := initRepo(t)
 	a := newAttachTestApp(t, repo)
 
@@ -330,21 +363,8 @@ func TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Release(config.GlobalDBDir())) })
 	q := db.New(conn)
 
-	// A thread of this project's, and a session belonging to its worktree
-	// holding exactly what a killed process leaves behind: an assistant
-	// turn with no Finish and a tool call with no result.
-	worktree := t.TempDir()
-	sessions := sessionstore.NewService(q, conn, worktree)
+	sessions := sessionstore.NewService(q, conn, a.ProjectPath())
 	sess, err := sessions.Create(t.Context(), "thread session")
-	require.NoError(t, err)
-	_, err = NewStore(q, a.Store().WorkingDir()).Create(t.Context(), thread.CreateParams{
-		Name:         "interrupted-thread",
-		Goal:         "do the thing",
-		BaseBranch:   "main",
-		Branch:       "thread/interrupted-thread",
-		WorktreePath: worktree,
-		SessionID:    sess.ID,
-	})
 	require.NoError(t, err)
 	msg, err := a.Messages().Create(t.Context(), sess.ID, message.CreateMessageParams{
 		Role: message.Assistant,
@@ -355,28 +375,14 @@ func TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees(t *testing.T) {
 	require.NoError(t, err)
 
 	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
-
 	require.NoError(t, a.Messages().FlushAll(t.Context()))
 	msgs, err := a.Messages().List(t.Context(), sess.ID)
 	require.NoError(t, err)
-
-	var answered bool
-	var closed *message.Message
-	for i, m := range msgs {
-		if m.ID == msg.ID {
-			closed = &msgs[i]
-		}
-		for _, tr := range m.ToolResults() {
-			if tr.ToolCallID == "call-1" {
-				answered = true
-				require.True(t, tr.IsError, "an abandoned call must be recorded as an error, not an empty success")
-			}
+	for _, got := range msgs {
+		if got.ID == msg.ID {
+			require.Nil(t, got.FinishPart())
 		}
 	}
-	require.NotNil(t, closed, "the assistant message should still be there")
-	require.NotNil(t, closed.FinishPart(), "the interrupted turn must be closed out")
-	require.Equal(t, message.FinishReasonCanceled, closed.FinishReason())
-	require.True(t, answered, "the dangling tool call must be answered")
 }
 
 // TestAttach_SetPermissionsSkipReachesLiveThread pins the wiring
@@ -400,9 +406,8 @@ func TestAttach_SetPermissionsSkipReachesLiveThread(t *testing.T) {
 	require.NotNil(t, mgr)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "yolo-follower",
-		Goal:        "implement the thing",
-		MergePolicy: thread.MergeManual,
+		Name: "yolo-follower",
+		Goal: "implement the thing",
 	})
 	require.NoError(t, err)
 

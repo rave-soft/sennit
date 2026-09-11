@@ -60,7 +60,7 @@ nav:
       - LSP: extending/lsp.md
   - Concepts:
       - concepts/index.md
-      - Steering, tasks and threads: concepts/delegation.md
+      - Steering and delegation: concepts/delegation.md
       - Sessions and data storage: concepts/sessions.md
   - Reference:
       - reference/index.md

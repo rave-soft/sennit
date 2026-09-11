@@ -31,7 +31,7 @@ sennit run "explain internal/agent"     # one non-interactive prompt
 | write a specialised role it can delegate to | [Agents](extending/agents.md) |
 | package a repeatable procedure it can load on demand | [Skills](extending/skills.md) |
 | gate or rewrite what it is allowed to run | [Hooks](extending/hooks.md) and [Permissions](configuration/permissions.md) |
-| understand when work runs in parallel, and where | [Steering, tasks and threads](concepts/delegation.md) |
+| understand when work runs in parallel, and where | [Steering and delegation](concepts/delegation.md) |
 | look up a flag, a slash command, or a tool | [Reference](reference/index.md) |
 
 ## The shape of the thing
@@ -48,11 +48,12 @@ secret is `$(op read …)`, and a machine-specific setting is an `if`. See
 agent gains a `reviewer` tool it can delegate to, with the body of the file as
 its system prompt. See [Agents](extending/agents.md).
 
-**Work can run beside the current turn — three different ways.** A message
-sent mid-turn is *steered* into that turn; a *background task* is a cheap
-delegation sharing your working directory; a *thread* gets its own git branch
-and worktree. They trade cost against isolation very differently. See
-[Steering, tasks and threads](concepts/delegation.md).
+**Work can run beside the current turn — two different ways.** A message
+sent mid-turn is *steered* into that turn; anything else goes to a
+*delegation*, which shares your working directory unless you ask for
+`isolation: "worktree"` and it gets a git branch and worktree of its own.
+Those two trade cost against isolation very differently. See
+[Steering and delegation](concepts/delegation.md).
 
 **History is one database.** Sessions, messages and file history for every
 project live in a single SQLite database under your config directory, tagged by

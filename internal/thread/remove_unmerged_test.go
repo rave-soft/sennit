@@ -16,9 +16,8 @@ func TestManager_RemoveUnmergedBranchWithoutForcePreservesThread(t *testing.T) {
 	mgr, _ := newTestManager(t, repo)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name:        "unmerged",
-		Goal:        "",
-		MergePolicy: thread.MergeManual,
+		Name: "unmerged",
+		Goal: "",
 	})
 	require.NoError(t, err)
 	writeFile(t, st.WorktreePath, "unmerged.txt", "keep me\n")

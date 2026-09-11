@@ -1,9 +1,9 @@
- [38;2;228;235;243;1mThreads[38;2;126;139;153;22m  1 total[m                                                                          [48;2;30;36;43m [38;2;228;235;243m← Back[39m [m 
- [48;2;30;36;43m [38;2;228;235;243m+ New[39m [m [48;2;30;36;43m [38;2;228;235;243mOpen[39m [m [48;2;30;36;43m [38;2;228;235;243mMerge[39m [m [48;2;30;36;43m [38;2;228;235;243mCancel[39m [m [48;2;30;36;43m [38;2;228;235;243mRemove[39m [m [48;2;30;36;43m [38;2;228;235;243mRefresh[39m [m                                                 
- [48;2;74;143;168m [38;2;8;19;26mAll 1[39m [m  [38;2;126;139;153mRunning 1[m   [38;2;126;139;153mIdle 0[m   [38;2;126;139;153mDone 0[m   [38;2;126;139;153mFailed 0[m                                                    
- [38;2;87;98;110mNAME                    STATUS      BRANCH                      UPDATED         GOAL              [m 
- [38;2;228;235;243;48;2;34;40;49mGolden coverage         [38;2;95;179;196mRUNNING   [m                              a long while …  render the thread… 
-                                                                                                    
+ [38;2;228;235;243;1mDelegations[38;2;126;139;153;22m  2 total[m                                                                      [48;2;30;36;43m [38;2;228;235;243m← Back[39m [m 
+ [48;2;30;36;43m [38;2;228;235;243mOpen[39m [m [48;2;30;36;43m [38;2;228;235;243mCancel[39m [m [48;2;30;36;43m [38;2;228;235;243mCleanup[39m [m [48;2;30;36;43m [38;2;228;235;243mRefresh[39m [m                                                                
+ [48;2;74;143;168m [38;2;8;19;26mAll 2[39m [m  [38;2;126;139;153mRunning 2[m   [38;2;126;139;153mIdle 0[m   [38;2;126;139;153mDone 0[m   [38;2;126;139;153mFailed 0[m                                                    
+ [38;2;87;98;110mNAME                    STATUS      ISOLATED  UPDATED         GOAL                                [m 
+ [38;2;228;235;243;48;2;34;40;49mIsolated work           [38;2;95;179;196mRUNNING   [m  yes       a long while …  render isolated work                 
+ [38;2;228;235;243mOrdinary task           [38;2;95;179;196mRUNNING   [m  no        a long while …  render shared work                   
                                                                                                     
                                                                                                     
                                                                                                     
@@ -18,7 +18,7 @@
                                                                                                     
                                                                                                     
 [38;2;35;42;50m────────────────────────────────────────────────────────────────────────────────────────────────────[m
- [38;2;87;98;110mgoal      [m [38;2;228;235;243mrender the threads panel[m                                                                
+ [38;2;87;98;110mgoal      [m [38;2;228;235;243mrender isolated work[m                                                                    
  [38;2;87;98;110mtiming    [m [38;2;228;235;243mcreated a long while ago, updated a long while ago[m                                      
 [38;2;35;42;50m────────────────────────────────────────────────────────────────────────────────────────────────────[m
- [38;2;126;139;153menter open  •  n new  •  m merge  •  c cancel  •  x/d remove  •  r refresh  •  tab filter[m          
+ [38;2;126;139;153menter open  •  c cancel  •  x/d cleanup  •  r refresh  •  tab filter[m                               

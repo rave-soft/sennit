@@ -24,6 +24,9 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 		Options: &Options{
 			TUI: &TUIOptions{CompactMode: false},
 		},
+		Agents: map[string]Agent{
+			"reviewer": {AllowedTools: []string{"read"}, obsoleteTools: []string{"thread_create"}},
+		},
 	}
 
 	clone := orig.cloneForWrite()
@@ -33,6 +36,7 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	clone.RecentModels[0] = SelectedModel{Provider: "anthropic", Model: "claude"}
 	clone.MCP["b"] = MCPConfig{}
 	clone.Options.TUI.CompactMode = true
+	clone.Agents["reviewer"] = Agent{AllowedTools: []string{"write"}, obsoleteTools: []string{"thread_remove"}}
 	provider, ok := clone.Providers.Get("openai")
 	require.True(t, ok)
 	provider.APIKey = "new"
@@ -53,4 +57,6 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	require.Equal(t, "old", originalProvider.OAuthToken.Client.ClientID)
 	require.False(t, orig.Options.TUI.CompactMode, "Options.TUI.CompactMode leaked")
 	require.Nil(t, orig.Options.TUI.Transparent, "Options.TUI.Transparent leaked")
+	require.Equal(t, []string{"read"}, orig.Agents["reviewer"].AllowedTools, "Agents leaked")
+	require.Equal(t, []string{"thread_create"}, orig.Agents["reviewer"].obsoleteTools, "Agent obsolete tools leaked")
 }

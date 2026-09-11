@@ -24,7 +24,7 @@ func TestManager_ShutdownCancelsReleaseWhenCallerGivesUp(t *testing.T) {
 	spawner.blockReleaseUntilCtxDone = true
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name: "hung-release", Goal: "go", MergePolicy: thread.MergeManual,
+		Name: "hung-release", Goal: "go",
 	})
 	require.NoError(t, err)
 	_, live := mgr.RuntimeForTest(st.ID)
@@ -54,7 +54,7 @@ func TestManager_ConcurrentShutdownKeepsCleanupAliveForRemainingCaller(t *testin
 	spawner.releaseBlock = make(chan struct{})
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name: "concurrent-shutdown", Goal: "go", MergePolicy: thread.MergeManual,
+		Name: "concurrent-shutdown", Goal: "go",
 	})
 	require.NoError(t, err)
 
@@ -86,7 +86,7 @@ func TestManager_ShutdownReleasesOnLiveContextWhenCallerWaits(t *testing.T) {
 	mgr, spawner := newTestManager(t, repo)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
-		Name: "clean-release", Goal: "go", MergePolicy: thread.MergeManual,
+		Name: "clean-release", Goal: "go",
 	})
 	require.NoError(t, err)
 

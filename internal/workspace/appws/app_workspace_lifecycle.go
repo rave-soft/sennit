@@ -31,9 +31,9 @@ func (w *AppWorkspace) Subscribe(send func(any)) {
 // pubsub.Event[thread.Event] the Manager itself publishes, because
 // ForwardEvents is generic over T and has no way to convert on the way
 // in. Convert here, at the UI-facing boundary, into
-// pubsub.Event[proto.Thread] so threads_dock.go, thread_indicator.go,
-// thread_completion.go and threads.go (the dashboard) see live updates
-// instead of relying solely on their TTL-poll fallback. Any other
+// pubsub.Event[proto.Thread] so the delegation cache, isolated-work dock,
+// completion handling, and dashboard see live updates instead of relying
+// solely on their TTL-poll fallback. Any other
 // message passes through unchanged.
 func (w *AppWorkspace) translateEvent(msg any) any {
 	switch e := msg.(type) {

@@ -12,6 +12,8 @@ type TaskCreateArgs struct {
 	// specialized delegation. Empty values retain the built-in task defaults.
 	SessionTitle string
 	AgentID      string
+	Isolation    string
+	Execution    string
 	// SessionID is the id to give the task's child session. Delegations
 	// launched from a tool call pass the "<messageID>$$<toolCallID>"
 	// identity the UI derives from the call itself, so the delegation can

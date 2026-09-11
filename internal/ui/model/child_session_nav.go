@@ -103,7 +103,7 @@ func captureDelegationRef(item chat.ToolMessageItem) childSessionRef {
 		toolCallID: item.ToolCall().ID,
 		label:      childSessionLabel(item),
 	}
-	ref.agentName, ref.model, ref.effort, ref.delegationStart, ref.delegationDuration = delegationInfo(item)
+	ref.agentName, ref.model, ref.effort, ref.isolated, ref.delegationStart, ref.delegationDuration = delegationInfo(item)
 	return ref
 }
 

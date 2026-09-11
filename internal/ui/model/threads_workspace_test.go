@@ -7,13 +7,13 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
-// threadsTestWorkspace is internal/ui/threads' fake of the same name.
+// threadsTestWorkspace is internal/ui/delegations' fake of the same name.
 // Test files are not importable, so the copy is the only way to share a
 // fixture across the two packages; each is free to grow only what its
 // own tests need.
 
 // threadsTestWorkspace is a minimal workspace.Workspace stub for exercising
-// the thread list cache, following the testWorkspace pattern above (embed
+// the all-delegation cache, following the testWorkspace pattern above (embed
 // the full interface, override only what's exercised).
 type threadsTestWorkspace struct {
 	workspace.Workspace
@@ -73,18 +73,13 @@ func (w *threadsTestWorkspace) CancelThread(_ context.Context, id, _ string) err
 }
 
 // The following ThreadController methods round out threadsTestWorkspace for
-// root_test.go, which drives the router through attach/merge/remove/create
-// rather than just ListThreads.
+// root tests that drive open, cancel, and cleanup rather than just listing.
 
 func (w *threadsTestWorkspace) AttachThread(context.Context, string) (workspace.Workspace, func(), error) {
 	return w.attachWS, func() { w.detachCalls++ }, w.attachErr
 }
 
 func (w *threadsTestWorkspace) CreateThread(context.Context, proto.CreateThreadRequest) (proto.Thread, error) {
-	return proto.Thread{}, w.err
-}
-
-func (w *threadsTestWorkspace) MergeThread(context.Context, string) (proto.Thread, error) {
 	return proto.Thread{}, w.err
 }
 

@@ -24,10 +24,6 @@ import (
 // and internal/thread for that).
 type noopThreadManager struct{}
 
-func (noopThreadManager) Create(context.Context, tools.ThreadCreateArgs) (tools.ThreadInfo, error) {
-	return tools.ThreadInfo{}, nil
-}
-
 func (noopThreadManager) List(context.Context) ([]tools.ThreadInfo, error) { return nil, nil }
 
 func (noopThreadManager) Get(context.Context, string) (tools.ThreadInfo, error) {
@@ -44,25 +40,9 @@ func (noopThreadManager) Wait(context.Context, []string, time.Duration) error {
 	return nil
 }
 
-func (noopThreadManager) Merge(context.Context, string) (tools.ThreadInfo, error) {
-	return tools.ThreadInfo{}, nil
-}
-
-func (noopThreadManager) Remove(context.Context, string, bool, bool) error {
-	return nil
-}
-
-// threadToolNames lists the tools a workspace with a thread manager
-// expects under the coder agent's *default* AllowedTools: the worktree
-// lifecycle, plus the agent_* tools that answer for threads as well as
-// background tasks.
+// threadToolNames lists the agent_* management tools available when a workspace has threads.
 var threadToolNames = []string{
-	tools.ThreadCreateToolName,
-	tools.AgentListToolName,
-	tools.AgentResultToolName,
-	tools.AgentSendToolName,
-	tools.ThreadMergeToolName,
-	tools.ThreadRemoveToolName,
+	tools.AgentListToolName, tools.AgentResultToolName, tools.AgentCancelToolName, tools.AgentSendToolName, tools.AgentOutputToolName,
 }
 
 // newThreadsTestCoordinator builds a coordinator with the minimal
@@ -117,7 +97,7 @@ func toolNames(t *testing.T, agentTools []fantasy.AgentTool) []string {
 	return names
 }
 
-func TestBuildTools_ThreadToolsPresentForMainAgentWithManager(t *testing.T) {
+func TestBuildTools_DelegationToolsPresentForMainAgentWithManager(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
 	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
@@ -129,7 +109,7 @@ func TestBuildTools_ThreadToolsPresentForMainAgentWithManager(t *testing.T) {
 	}
 }
 
-func TestBuildTools_ThreadToolsAbsentWhenManagerNil(t *testing.T) {
+func TestBuildTools_DelegationToolsAbsentWhenManagerNil(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, nil)
 
 	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
@@ -141,7 +121,7 @@ func TestBuildTools_ThreadToolsAbsentWhenManagerNil(t *testing.T) {
 	}
 }
 
-func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
+func TestBuildTools_DelegationToolsAbsentForSubAgent(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
 	// isSubAgent=true mirrors how the coordinator builds the "agent"
@@ -196,13 +176,13 @@ func TestCoordinator_SetDelegationToolsThreadTakesEffectOnNextBuild(t *testing.T
 
 	built, err := coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
-	require.NotContains(t, toolNames(t, built), tools.ThreadCreateToolName)
+	require.NotContains(t, toolNames(t, built), tools.AgentListToolName)
 
 	coord.SetDelegationTools(noopThreadManager{}, nil)
 
 	built, err = coord.builder.buildTools(t.Context(), agentCfg, false, coord.delegation.runtimeInputs())
 	require.NoError(t, err)
-	require.Contains(t, toolNames(t, built), tools.ThreadCreateToolName)
+	require.Contains(t, toolNames(t, built), tools.AgentListToolName)
 }
 
 // TestCoordinator_SetDelegationToolsPublishesOneAdapterGeneration verifies
@@ -300,10 +280,6 @@ func TestCoordinator_SetDelegationToolsPublishesOneAdapterGeneration(t *testing.
 }
 
 type fakeSnapshotThreadManager struct{ id int }
-
-func (*fakeSnapshotThreadManager) Create(context.Context, tools.ThreadCreateArgs) (tools.ThreadInfo, error) {
-	return tools.ThreadInfo{}, nil
-}
 
 func (*fakeSnapshotThreadManager) List(context.Context) ([]tools.ThreadInfo, error) { return nil, nil }
 

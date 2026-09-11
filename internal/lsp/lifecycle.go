@@ -204,8 +204,11 @@ func (r *runtime) waitForServerReady(ctx context.Context, gen *clientGeneration,
 	// Set initial state
 	r.reportState(StateStarting)
 
-	// Try to ping the server with a simple request
-	ticker := time.NewTicker(500 * time.Millisecond)
+	// Poll for readiness, starting with an immediate check: Initialize has
+	// already returned by the time we get here, so a healthy server is
+	// usually running on the first look and waiting out a tick before
+	// checking would add that delay to every single server start.
+	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 
 	if r.debug {
@@ -213,19 +216,7 @@ func (r *runtime) waitForServerReady(ctx context.Context, gen *clientGeneration,
 	}
 
 	for {
-		select {
-		case <-ctx.Done():
-			r.reportState(StateError)
-			return fmt.Errorf("timeout waiting for LSP server to be ready")
-		case <-ticker.C:
-			// Check if client is running
-			if !gen.client.IsRunning() {
-				if r.debug {
-					slog.Debug("LSP server not ready yet", "server", r.name)
-				}
-				continue
-			}
-
+		if gen.client.IsRunning() {
 			// Initial startup publishes readiness directly. Restart keeps the
 			// candidate unpublished and reports Ready only in publishSwap.
 			if publishReady {
@@ -235,6 +226,15 @@ func (r *runtime) waitForServerReady(ctx context.Context, gen *clientGeneration,
 				slog.Debug("LSP server is ready")
 			}
 			return nil
+		}
+		if r.debug {
+			slog.Debug("LSP server not ready yet", "server", r.name)
+		}
+		select {
+		case <-ctx.Done():
+			r.reportState(StateError)
+			return fmt.Errorf("timeout waiting for LSP server to be ready")
+		case <-ticker.C:
 		}
 	}
 }

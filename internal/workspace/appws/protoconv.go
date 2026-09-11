@@ -21,7 +21,6 @@ func toProto(st thread.Thread, workspaceID string) proto.Thread {
 		SessionID:       st.SessionID,
 		Status:          string(st.Status),
 		Kind:            string(st.Kind),
-		MergePolicy:     string(st.MergePolicy),
 		ResultSummary:   st.ResultSummary,
 		Error:           st.Error,
 		CreatedAt:       st.CreatedAt,

@@ -106,7 +106,7 @@ prompt and send it. A few things worth knowing on the first run:
   [`permissions allow`](configuration/permissions.md).
 - **Sending a message while it works does not interrupt it.** The message is
   folded into the running turn. To actually stop, press <kbd>Esc</kbd> twice.
-  See [Steering, tasks and threads](concepts/delegation.md).
+  See [Steering and delegation](concepts/delegation.md).
 - **`ctrl+s` switches sessions**, and every session is saved. From the shell,
   `sennit --continue` resumes the most recent one.
 

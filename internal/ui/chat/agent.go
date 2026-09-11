@@ -297,6 +297,7 @@ type AgentToolMessageItem struct {
 	// per render: every view that shows a delegation wants it, and the
 	// session panel redraws on every animation tick.
 	headline string
+	isolated bool
 }
 
 var (
@@ -360,6 +361,7 @@ func (t *AgentToolMessageItem) resolveIdentity(tc message.ToolCall) {
 	var params tools.AgentParams
 	_ = json.Unmarshal([]byte(tc.Input), &params)
 	t.headline = delegationLabel(t.displayName, params.Description, params.Prompt)
+	t.isolated = params.Isolation == "worktree"
 	t.model, t.effort = "", ""
 	if t.cfg == nil {
 		return
@@ -417,7 +419,7 @@ type DelegationInfoProvider interface {
 	// see AgentToolMessageItem's duration field doc); callers wanting a
 	// running delegation's live elapsed time should compute
 	// time.Since(startTime) themselves rather than trust duration.
-	DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration)
+	DelegationInfo() (displayName, model, effort string, isolated bool, startTime time.Time, duration time.Duration)
 }
 
 // DelegationTimingRestorer is implemented by delegation items whose
@@ -435,8 +437,8 @@ var (
 )
 
 // DelegationInfo implements [DelegationInfoProvider].
-func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration) {
-	return a.displayName, a.model, a.effort, a.startTime, a.duration
+func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort string, isolated bool, startTime time.Time, duration time.Duration) {
+	return a.displayName, a.model, a.effort, a.isolated, a.startTime, a.duration
 }
 
 // AgentToolRenderContext renders agent tool messages.
@@ -567,8 +569,8 @@ const agenticFetchDisplayName = "fetch"
 
 // DelegationInfo implements [DelegationInfoProvider]. agentic_fetch has no
 // cfg.Agents entry, so it never has a model/effort override to report.
-func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration) {
-	return agenticFetchDisplayName, "", "", r.startTime, r.duration
+func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effort string, isolated bool, startTime time.Time, duration time.Duration) {
+	return agenticFetchDisplayName, "", "", false, r.startTime, r.duration
 }
 
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].

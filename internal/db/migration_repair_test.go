@@ -131,8 +131,8 @@ func TestMigration_RepairThreadNameUniquePerKind(t *testing.T) {
 		_, err := conn.ExecContext(ctx, `
 			INSERT INTO threads (
 				id, name, project_path, goal, base_branch, branch, worktree_path,
-				session_id, status, merge_policy, kind, created_at, updated_at
-			) VALUES (?, ?, '/proj', 'goal', 'main', 'thread/x', '/wt', '', 'idle', 'auto', ?, 1000, 1000)`,
+				session_id, status, kind, created_at, updated_at
+			) VALUES (?, ?, '/proj', 'goal', 'main', 'thread/x', '/wt', '', 'idle', ?, 1000, 1000)`,
 			id, name, kind)
 		return err
 	}
@@ -162,9 +162,9 @@ func TestMigration_RepairClearsDanglingReferences(t *testing.T) {
 	_, err = conn.ExecContext(ctx, `
 		INSERT INTO threads (
 			id, name, project_path, goal, base_branch, branch, worktree_path,
-			session_id, status, merge_policy, kind, parent_session_id, created_at, updated_at
+			session_id, status, kind, parent_session_id, created_at, updated_at
 		) VALUES ('th-1', 'alpha', '/proj', 'goal', 'main', 'thread/alpha', '/wt',
-			'sess-a', 'idle', 'auto', 'thread', 'sess-b', 1000, 1000)`)
+			'sess-a', 'idle', 'thread', 'sess-b', 1000, 1000)`)
 	require.NoError(t, err)
 
 	// Deleting the summary message clears the pointer to it instead of
@@ -201,9 +201,9 @@ func TestMigration_RepairDownUp(t *testing.T) {
 	_, err = conn.ExecContext(ctx, `
 		INSERT INTO threads (
 			id, name, project_path, goal, base_branch, branch, worktree_path,
-			session_id, status, merge_policy, kind, created_at, updated_at
+			session_id, status, kind, created_at, updated_at
 		) VALUES ('th-1', 'alpha', '/proj', 'goal', 'main', 'thread/alpha', '/wt',
-			'', 'idle', 'auto', 'thread', 1000, 1000)`)
+			'', 'idle', 'thread', 1000, 1000)`)
 	require.NoError(t, err)
 
 	require.NoError(t, goose.Up(conn, "migrations"))

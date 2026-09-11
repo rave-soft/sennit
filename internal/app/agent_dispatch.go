@@ -17,6 +17,10 @@ import (
 // new runs.
 var ErrDispatcherClosed = errors.New("agent dispatcher closed")
 
+// ErrSessionOwnershipLost is returned when this App's persisted owner epoch
+// no longer authorizes it to start a turn for the session.
+var ErrSessionOwnershipLost = errors.New("session ownership moved to another workspace")
+
 // ErrCoordinatorNotInitialized is returned by [AgentDispatcher.Send]
 // when its coordinator getter yields nil, i.e. the owner has not
 // initialized an agent.Coordinator yet.
@@ -56,6 +60,7 @@ type AgentDispatcher struct {
 	coordinator    func() AcceptedRunner
 	notifications  *pubsub.Broker[notify.Notification]
 	runCompletions *pubsub.Broker[notify.RunComplete]
+	ownershipCheck func(context.Context, string) error
 
 	// mu guards closing and gates dispatch of new runs. closing is set
 	// by MarkClosing so no new runs are accepted once teardown has
@@ -86,6 +91,15 @@ func NewAgentDispatcher(ctx context.Context, coordinator func() AcceptedRunner, 
 	}
 }
 
+// SetOwnershipCheck installs the durable owner/epoch fence consulted before
+// every accepted run. Nil disables fencing for apps not participating in a
+// worktree transfer.
+func (d *AgentDispatcher) SetOwnershipCheck(check func(context.Context, string) error) {
+	d.mu.Lock()
+	d.ownershipCheck = check
+	d.mu.Unlock()
+}
+
 // Send validates and accepts a prompt for the coordinator, then
 // dispatches the run on a goroutine bound to the dispatcher's context
 // and returns immediately. It does not wait for the LLM turn to
@@ -109,14 +123,25 @@ func (d *AgentDispatcher) Send(sessionID, runID, prompt string, attachments []me
 		return err
 	}
 
+	d.mu.Lock()
+	if d.closing {
+		d.mu.Unlock()
+		return ErrDispatcherClosed
+	}
+	if d.ownershipCheck != nil {
+		if err := d.ownershipCheck(d.ctx, sessionID); err != nil {
+			d.mu.Unlock()
+			return err
+		}
+	}
+
 	coordinator := d.coordinator()
 	if coordinator == nil {
+		d.mu.Unlock()
 		return ErrCoordinatorNotInitialized
 	}
 
 	accept := coordinator.BeginAccepted(sessionID)
-
-	d.mu.Lock()
 	if d.closing {
 		d.mu.Unlock()
 		accept.Close()
@@ -208,4 +233,16 @@ func (d *AgentDispatcher) MarkClosing() {
 // observe cancellation instead of running to completion.
 func (d *AgentDispatcher) Wait() {
 	d.wg.Wait()
+}
+
+// WithAdmissionClosed serializes an ownership transfer with Send through the
+// same gate that reserves accepted runs. The callback must be bounded and
+// must not call Send on this dispatcher.
+func (d *AgentDispatcher) WithAdmissionClosed(fn func() error) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closing {
+		return ErrDispatcherClosed
+	}
+	return fn()
 }

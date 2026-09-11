@@ -92,9 +92,12 @@ internal/
     `internal/pubsub` channels, not over a wire. Read any "wire contract"
     language in `proto`'s own comments as historical. Audited 2026-09-02.
   - `proto.Thread` is the one live DTO. It is a real struct, named
-    throughout `Workspace`'s thread methods, and
-    `internal/app/threadspawn/protoconv.go` converts `thread.Thread` into
-    it for `internal/workspace/appws`. Keep it.
+    throughout `Workspace`'s thread and task methods, and
+    `internal/workspace/appws/protoconv.go` converts `thread.Thread` into
+    it. It carries both delegation kinds — `Kind` discriminates the
+    isolated one from a background task — and no merge state: merging was
+    replaced by cleanup, so a thread reaching a terminal status leaves
+    nothing to report but its worktree and branch. Keep it.
   - `tools.*PermissionsParams` **stays aliased, but the direction is
     `proto` → `tools`, not the other way round.** These structs are defined
     in `proto` (a leaf package with a light dependency graph) and

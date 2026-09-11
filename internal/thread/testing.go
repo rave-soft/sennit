@@ -2,7 +2,11 @@ package thread
 
 import (
 	"context"
+	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/rave-soft/sennit/internal/git"
 )
 
 // MaxActiveTasksPerWorkspaceForTest and MaxActiveTasksPerParentTurnForTest
@@ -36,8 +40,23 @@ const TaskIdleTimeoutForTest = taskIdleTimeout
 // It exists because NewTaskManager itself requires mgr's unexported
 // lc/ctx fields and so can only be called from within this package; every
 // other caller — production and test alike — goes through here.
-func NewTaskManagerFromManager(mgr *Manager, spawner Spawner, messages MessageService) *TaskManager {
-	return NewTaskManager(mgr.store, spawner, messages, mgr.lc, mgr.ctx)
+func NewTaskManagerFromManager(mgr *Manager, spawner Spawner, messages MessageService, isolated ...IsolatedTaskRuntime) *TaskManager {
+	t := NewTaskManager(mgr.store, spawner, messages, mgr.lc, mgr.ctx, isolated...)
+	if len(isolated) > 1 {
+		t.shared = isolated[1]
+	}
+	t.prepareIsolation = func(ctx context.Context, args *TaskCreateArgs) error {
+		base, err := git.CurrentBranch(ctx, mgr.repoRoot)
+		if err != nil {
+			return err
+		}
+		name := "task-" + uuid.NewString()
+		args.BaseBranch = base
+		args.Branch = "thread/" + name
+		args.WorktreePath = filepath.Join(mgr.worktreeDir, name)
+		return nil
+	}
+	return t
 }
 
 // PublishForTest emits a lifecycle event through the manager's own event
@@ -106,25 +125,16 @@ func (m *Manager) AwaitingDelegationsForTest(id string) bool {
 // ResolveDeliveryTargetForTest exposes resolveDeliveryTarget — the
 // lifecycle's deliveryResolver hook — for tests outside this package that
 // need to exercise its branches directly rather than through a full
-// run/merge flow.
+// completion flow.
 func (m *Manager) ResolveDeliveryTargetForTest(ctx context.Context, handle Handle, st Thread) (Workspace, string, bool) {
 	return m.resolveDeliveryTarget(ctx, handle, st)
 }
 
 // SetStatusForTest forces a delegation's status through the lifecycle,
 // exactly as a real transition would, for tests outside this package that
-// need to put a row into a state no ordinary Manager call reaches (for
-// example: a merged status with no completed merge behind it, to drive
-// discardMerged in isolation).
+// need to put a row into a state no ordinary Manager call reaches.
 func (m *Manager) SetStatusForTest(ctx context.Context, id string, status Status, errText, resultSummary string, completedAt int64) (Thread, error) {
 	return m.lc.setStatus(ctx, id, status, errText, resultSummary, completedAt)
-}
-
-// DiscardMergedForTest exposes discardMerged for tests outside this
-// package that need to drive it directly, independent of the merge flow
-// that ordinarily triggers it.
-func (m *Manager) DiscardMergedForTest(ctx context.Context, threadID string) {
-	m.discardMerged(ctx, threadID)
 }
 
 // WorktreeDirForTest exposes the resolved worktree directory NewManager

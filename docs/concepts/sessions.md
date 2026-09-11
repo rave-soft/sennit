@@ -18,7 +18,7 @@ concatenated logs stay readable. Logs untouched for 30 days are swept on
 startup; panic dumps are left alone.
 
 A project's own `.sennit/` directory holds only its config overrides, its
-agents and skills, thread worktrees, and a single-instance lock file. No
+agents and skills, worktrees, and a single-instance lock file. No
 history.
 
 > [!IMPORTANT]
@@ -146,9 +146,9 @@ sennit gc --project           # only this project, not the whole database
 ```
 
 It deletes sessions (with their messages, files and read-file records) whose
-last activity is older than the window, deletes finished threads of the same
-age — completed, merged, conflict, merge_blocked, failed, interrupted, never
-pending/running/merging — then `VACUUM`s the database and checkpoints its WAL.
+last activity is older than the window, deletes finished delegations of the
+same age — completed, failed, interrupted, cancelled, never
+pending/running/idle — then `VACUUM`s the database and checkpoints its WAL.
 
 The window defaults to `options.history_retention_days`, 90 days when unset. `0`
 means keep forever and makes `sennit gc` a no-op.
@@ -165,12 +165,14 @@ because that is what reclaiming disk space means when the database is shared.
 Running it from cron is the intended pattern; nothing enforces retention on its
 own.
 
-## Threads on disk
+## Worktrees on disk
 
-A [thread](delegation.md) gets a real git worktree
-and branch. Worktrees default to `<repo>/.sennit/threads/<name>`, which the
-repository's own git ignores, so a thread is not mistaken for a second copy of
-the project.
+An [isolated delegation](delegation.md) gets a real git worktree and branch,
+and so does the `worktree` command when it takes your own session out of the
+main tree. A delegation's worktree defaults to `<repo>/.sennit/threads/<name>`
+and the command's lands in `<repo>/.sennit/worktrees/<name>`; both are under
+`.sennit/`, which the repository's own git ignores, so neither is mistaken for
+a second copy of the project.
 
 ```jsonc
 // sennit.json
@@ -180,8 +182,10 @@ the project.
 A relative path there resolves against the *parent of the repository root*, not
 the working directory; an absolute path is used as-is.
 
-Cancelling a thread leaves its worktree and branch on disk so you can still
-inspect or resume the work. `sennit threads remove <name>` tears it down.
+Cancelling an isolated delegation leaves its worktree and branch on disk so
+you can still inspect or resume the work, and so does finishing with changes
+or unique commits in it. Removing one is a `git worktree remove` and a branch
+delete like any other.
 
 ## Finding things
 

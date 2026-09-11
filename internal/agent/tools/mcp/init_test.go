@@ -1571,6 +1571,10 @@ func TestMain(m *testing.M) {
 		runMCPStdioServerHelper()
 		os.Exit(0)
 	}
+	// Both helpers above are this same race-instrumented binary; without
+	// this each spawned child sleeps a second on exit. See
+	// testenv.TrimChildRaceExitSleep.
+	testenv.TrimChildRaceExitSleep()
 	os.Exit(m.Run())
 }
 

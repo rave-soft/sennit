@@ -595,9 +595,15 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, disableDockerMCPCmd(m.com))
-	case dialog.ActionOpenThreadsDashboard:
+	case dialog.ActionOpenDelegationsDashboard:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = openThreadsDashboardGuarded(m.com, cmds)
+		cmds = openDelegationsDashboardGuarded(m.com, cmds)
+	case dialog.ActionEnterWorktree:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, util.CmdHandler(enterWorktreeRequestedMsg{name: msg.Name}))
+	case dialog.ActionExitWorktree:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, util.CmdHandler(exitWorktreeRequestedMsg{}))
 
 	case dialog.ActionFilePickerSelected:
 		m.dialog.CloseDialog(dialog.FilePickerID)

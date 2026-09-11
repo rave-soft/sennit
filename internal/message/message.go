@@ -7,6 +7,7 @@ import (
 )
 
 type CreateMessageParams struct {
+	ID               string
 	Role             MessageRole
 	Parts            []ContentPart
 	Model            string
