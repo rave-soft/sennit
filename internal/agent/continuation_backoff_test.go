@@ -57,11 +57,9 @@ func TestANewCompletionGivesTheWakePathItsAttemptsBack(t *testing.T) {
 // TestASucceedingContinuationClearsTheFailureCount covers the ordinary
 // recovery: one good turn and the budget is whole again.
 //
-// The queued completion is what keeps the dispatch state alive across the
-// calls — a state with nothing pending is removed as soon as the last
-// reference goes, and the count goes with it. That is the right
-// semantics, and it is also the loop's own shape: a continuation that
-// fails without draining leaves the inbox exactly this full.
+// A nonzero count keeps the dispatch state alive on its own (see
+// TestFailureCountSurvivesTheEmptyInboxOfAFailedTurn); once the count is
+// clear, a state with nothing pending is free to go.
 func TestASucceedingContinuationClearsTheFailureCount(t *testing.T) {
 	d := newDispatcher()
 	d.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})
@@ -114,4 +112,22 @@ func TestDropCompletionsClearsAnUndeliverableInbox(t *testing.T) {
 
 	require.Empty(t, d.drainCompletionsForStep("s1"))
 	require.False(t, d.wakeEligible("s1"))
+}
+
+// TestFailureCountSurvivesTheEmptyInboxOfAFailedTurn pins why the cap never
+// engaged in the wild. A failed turn clears its active slot before its
+// deferred cleanup puts the drained report back, so the state is briefly
+// empty; removing it there took the count with it and every retry started
+// from zero.
+func TestFailureCountSurvivesTheEmptyInboxOfAFailedTurn(t *testing.T) {
+	d := newDispatcher()
+	d.enqueueCompletion("s1", TaskCompletion{DelegationID: "d1"})
+	d.noteContinuationOutcome("s1", errors.New("unauthorized"))
+
+	drained := d.drainCompletionsForStep("s1")
+	require.Len(t, drained, 1)
+	d.clearActiveIfMatch("s1", nil)
+	d.requeueCompletions("s1", drained)
+
+	require.Equal(t, 1, d.continuationFailureCount("s1"))
 }

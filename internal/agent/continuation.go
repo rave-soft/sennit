@@ -119,6 +119,14 @@ func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason 
 			case <-runCtx.Done():
 				return
 			}
+			// The wake that started this attempt ran in the previous
+			// attempt's exit hook, before that attempt's failure was
+			// counted, so it read the count one short. The backoff has
+			// given that count time to land: ask again, or the attempt
+			// cap lets one attempt too many through.
+			if !a.wakeEligible(sessionID) {
+				return
+			}
 		}
 		var err error
 		if a.continuationRunner != nil {

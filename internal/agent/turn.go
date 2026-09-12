@@ -461,6 +461,7 @@ func (t *runTurn) acknowledgePendingCompletions() {
 		}
 	}
 	t.pendingCompletions = nil
+	t.agent.clearContinuationFailures(t.call.SessionID)
 	slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions), "waited_ms", waitedMS)
 }
 

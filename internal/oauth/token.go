@@ -87,7 +87,24 @@ func (e *TokenExchangeError) Error() string {
 // IsRefreshTokenRevoked reports whether the exchange failed because the
 // refresh token was revoked or invalidated by the provider. This indicates
 // that interactive re-authentication is required.
+//
+// OpenAI reports a dead refresh token with codes of its own rather than
+// invalid_grant - most often refresh_token_reused, once a rotated token
+// has been spent - and missing them left the agent retrying a credential
+// no retry can fix instead of asking the person to sign in again.
 func (e *TokenExchangeError) IsRefreshTokenRevoked() bool {
-	return strings.Contains(e.Body, "revoked") ||
-		strings.Contains(e.Body, "invalid_grant")
+	for _, marker := range refreshTokenDeadMarkers {
+		if strings.Contains(e.Body, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+var refreshTokenDeadMarkers = []string{
+	"revoked",
+	"invalid_grant",
+	"refresh_token_reused",
+	"refresh_token_expired",
+	"refresh_token_invalidated",
 }

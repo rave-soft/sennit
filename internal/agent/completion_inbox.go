@@ -218,6 +218,20 @@ func (d *dispatcher) noteContinuationOutcome(sessionID string, err error) int {
 	return s.continuationFailures
 }
 
+// clearContinuationFailures resets the failure count once a turn has
+// actually delivered what was queued, whichever turn that was. A person's
+// own turn delivering the reports ends the failing streak just as a
+// successful continuation does, and a count left behind would keep the
+// session's dispatch state from ever being released (see
+// sessionState.idle).
+func (d *dispatcher) clearContinuationFailures(sessionID string) {
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.continuationFailures = 0
+}
+
 // continuationFailureCount reports the consecutive failure count, for the
 // backoff a retry waits out before it starts.
 func (d *dispatcher) continuationFailureCount(sessionID string) int {

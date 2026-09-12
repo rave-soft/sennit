@@ -74,13 +74,21 @@ type sessionState struct {
 // flight for sessionID (accepted asks the ledger, which owns that
 // bookkeeping and its own lock).
 //
+// A nonzero continuationFailures is also worth keeping. A failed turn
+// clears its active slot before its deferred cleanup puts the drained
+// report back in the inbox, so for that instant the state looks empty;
+// removing it there threw the count away, every retry started from zero,
+// and the attempt cap never engaged - a dead OAuth token turned into a
+// provider request every second and a half for as long as the process
+// lived.
+//
 // Called only from dispatcher's release, under statesMu, so the fields
 // read directly here are safe without mu: refs == 0 at that point means
 // no other caller can be holding or about to lock mu (see
 // dispatcher.session).
 func (s *sessionState) idle(accepted *acceptLedger, sessionID string) bool {
 	return len(s.messageQueue) == 0 && s.active == nil && len(s.completionInbox) == 0 &&
-		!s.cancelled && accepted.idle(sessionID)
+		!s.cancelled && s.continuationFailures == 0 && accepted.idle(sessionID)
 }
 
 // acceptLedger tracks, for every session, how many dispatched-but-not-
