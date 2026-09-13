@@ -156,3 +156,33 @@ func TestToAIMessage_ResponsesDataConvertsToProviderType(t *testing.T) {
 	require.Equal(t, &encrypted, data.EncryptedContent)
 	require.Equal(t, []string{"summary line"}, data.Summary)
 }
+
+// TestToAIMessage_TruncatedToolCallInputIsReplayedAsEmptyObject covers a
+// stream cut off mid-arguments: the fragment it left in history made a
+// llama.cpp server reject every later request for that session ("Failed to
+// parse tool call arguments as JSON"), including each idle summarize.
+func TestToAIMessage_TruncatedToolCallInputIsReplayedAsEmptyObject(t *testing.T) {
+	t.Parallel()
+
+	msg := &message.Message{
+		ID:   "msg-1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call_cut", Name: "edit", Input: `{"file_path":"a.go","old_string":"handler := requestTimeout`},
+			message.ToolCall{ID: "call_ok", Name: "view", Input: `{"file_path":"a.go"}`, Finished: true},
+		},
+	}
+
+	messages := toAIMessage(msg)
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 2)
+
+	cut, ok := messages[0].Content[0].(fantasy.ToolCallPart)
+	require.True(t, ok)
+	require.Equal(t, "call_cut", cut.ToolCallID)
+	require.Equal(t, "{}", cut.Input)
+
+	intact, ok := messages[0].Content[1].(fantasy.ToolCallPart)
+	require.True(t, ok)
+	require.Equal(t, `{"file_path":"a.go"}`, intact.Input)
+}

@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
@@ -102,7 +104,7 @@ func toAIMessage(m *message.Message) []fantasy.Message {
 			parts = append(parts, fantasy.ToolCallPart{
 				ToolCallID:       call.ID,
 				ToolName:         call.Name,
-				Input:            call.Input,
+				Input:            replayableToolInput(m.ID, call),
 				ProviderExecuted: call.ProviderExecuted,
 			})
 		}
@@ -145,4 +147,26 @@ func toAIMessage(m *message.Message) []fantasy.Message {
 		})
 	}
 	return messages
+}
+
+// replayableToolInput returns the arguments a persisted tool call is replayed
+// with. A stream cut off while the model was still writing a call's
+// arguments leaves them as a JSON fragment in history, and servers that parse
+// the arguments of every call they are sent (llama.cpp templates them, for
+// one) reject the whole request over it - every later turn and summarize of
+// that session, for good. Such a call never ran and gets a synthetic
+// "interrupted" result either way (see syntheticToolResultsForOrphanedCalls),
+// so empty arguments lose nothing the model could use.
+func replayableToolInput(messageID string, call message.ToolCall) string {
+	if json.Valid([]byte(call.Input)) {
+		return call.Input
+	}
+	if call.Input == "" {
+		// Cut off before the first byte of arguments: the same fragment,
+		// only too short to be worth a log line.
+		return "{}"
+	}
+	slog.Warn("Replacing unparseable tool call arguments in history",
+		"message_id", messageID, "tool_call_id", call.ID, "tool", call.Name, "input_bytes", len(call.Input))
+	return "{}"
 }
