@@ -90,6 +90,27 @@ func estimateStepCompletionTokens(step fantasy.StepResult) int64 {
 	return tokens
 }
 
+// estimateStepHistoryTokens is how much a finished step adds to the history
+// a summary would replace: everything the model produced plus the results of
+// the tools it called, which come back into the next request whether the
+// provider ran them or this process did.
+func estimateStepHistoryTokens(step fantasy.StepResult) int64 {
+	tokens := estimateStepCompletionTokens(step)
+	for _, content := range step.Content {
+		switch c := content.(type) {
+		case fantasy.ToolResultContent:
+			if !c.ProviderExecuted {
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+			}
+		case *fantasy.ToolResultContent:
+			if !c.ProviderExecuted {
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+			}
+		}
+	}
+	return tokens
+}
+
 func estimateMessagePartTokens(part fantasy.MessagePart) int64 {
 	switch p := part.(type) {
 	case fantasy.TextPart:

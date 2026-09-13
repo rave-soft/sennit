@@ -108,9 +108,10 @@ type runTurn struct {
 	// "session was interrupted" prompt the halting tool never asked for.
 	haltedByTool bool
 	// historyTokens is the part of the prompt a summary would replace:
-	// this session's own history as it stood when the run started,
-	// excluding everything a summary cannot touch (system prompt, skills,
-	// carried sub-agent history). See stopOnContextWindow.
+	// this session's own history, excluding everything a summary cannot
+	// touch (system prompt, skills, carried sub-agent history). Measured
+	// when the run starts and grown by every step it finishes (see
+	// onStepFinish); zero means unknown. See stopOnContextWindow.
 	historyTokens int64
 	// currentAssistant is the in-flight step's assistant message;
 	// PrepareStep (re)assigns it once per streaming step. It's the turn's
@@ -883,6 +884,15 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 		}
 	}
 	t.currentAssistant.AddFinish(finishReason, time.Now().Unix(), "", "")
+	// The step's output and tool results are history from here on. Without
+	// this the estimate stayed at what the run started with: a long run that
+	// began right after a summary measured a couple of thousand tokens of
+	// history at every step while its context filled to the window, so
+	// stopOnContextWindow kept declining to summarize until the provider cut
+	// the turn off at its limit.
+	if t.historyTokens > 0 {
+		t.historyTokens += estimateStepHistoryTokens(stepResult)
+	}
 	// The provider request's "finished" line is logged by the instrumented
 	// model that performed this step's Stream (it is the 1:1 counterpart of
 	// the "started" line, and it is what carries finish_reason + usage). We

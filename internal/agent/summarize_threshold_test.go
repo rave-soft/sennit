@@ -1,13 +1,19 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
+	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/stretchr/testify/require"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/fantasy"
 )
 
 // TestSummarizeBuffer_LeavesRoomForTheSummaryItself is the regression test
@@ -190,4 +196,56 @@ func TestStopOnContextWindow_NegativeContextWindowNeverSummarizes(t *testing.T) 
 	turn := newThresholdTurn(-1, 10_000, 0, 5_000)
 	require.False(t, turn.stopOnContextWindow(nil))
 	require.False(t, turn.shouldSummarize)
+}
+
+// TestStopOnContextWindow_HistoryGrownDuringTheRunIsReclaimable is the
+// regression test for a run that stopped dead after a compact. It started
+// on a freshly summarized session - under 3k tokens of history - and ran
+// two hundred steps, filling a 262k window with its own tool output. The
+// history estimate never moved from what the run started with, so every
+// step declined to summarize as if there were nothing to reclaim, until the
+// provider cut the turn off at its limit.
+func TestStopOnContextWindow_HistoryGrownDuringTheRunIsReclaimable(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	dataDir := t.TempDir()
+	conn, err := db.Connect(ctx, dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Release(dataDir) })
+
+	q := db.New(conn)
+	messages := messagestore.NewService(q, messagestore.WithDebounce(0))
+	sessions := sessionstore.NewService(q, conn, "/test/project")
+	sess, err := sessions.Create(ctx, "grown")
+	require.NoError(t, err)
+	assistant, err := messages.Create(ctx, sess.ID, message.CreateMessageParams{Role: message.Assistant})
+	require.NoError(t, err)
+
+	turn := newThresholdTurn(262_144, 0, 0, 2_787)
+	turn.agent = &sessionAgent{sessions: sessions, messages: messages}
+	turn.ctx, turn.genCtx = ctx, ctx
+	turn.currentAssistant = &assistant
+	turn.currentSession = sess
+	turn.call = SessionAgentCall{SessionID: sess.ID}
+
+	require.NoError(t, turn.onStepFinish(fantasy.StepResult{
+		Response: fantasy.Response{
+			FinishReason: fantasy.FinishReasonToolCalls,
+			Usage:        fantasy.Usage{InputTokens: 240_000, OutputTokens: 1_000},
+			Content: fantasy.ResponseContent{
+				fantasy.ToolCallContent{ToolCallID: "c1", ToolName: "bash", Input: `{"command":"cat big.log"}`},
+				fantasy.ToolResultContent{
+					ToolCallID: "c1",
+					ToolName:   "bash",
+					Result:     fantasy.ToolResultOutputContentText{Text: strings.Repeat("log line\n", 40_000)},
+				},
+			},
+		},
+	}))
+
+	require.Greater(t, turn.historyTokens, summarizeBuffer(262_144, 32_768),
+		"a finished step's tool output is history a summary can reclaim")
+	require.True(t, turn.stopOnContextWindow(nil))
+	require.True(t, turn.shouldSummarize)
 }
