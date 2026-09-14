@@ -42,7 +42,7 @@ type Service interface {
 	// SetModel, SetTodos, ...) touches only the columns it owns for the
 	// same reason - a wide write like this one collides with whatever
 	// else is concurrently updating the row (see SaveUsage's comment
-	// below, and G3 in REFACTORING.md, which closed exactly this as a UI
+	// below, and audit 11's G3, which closed exactly this as a UI
 	// write path). Save survives only because tests want a one-call way
 	// to fabricate a fully-populated session row; it must not grow a
 	// production caller again.

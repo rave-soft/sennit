@@ -257,6 +257,68 @@ used to describe do not exist.)
 - Try to keep commits to one line, not including your attribution. Only use
   multi-line commits when additional context is truly necessary.
 
+## Reviewing and fixing
+
+Distilled from thirteen audits of this tree (2026-09-02 … 09-04) and their
+re-checks. The audits themselves are in git history: `git log -- REFACTORING.md`.
+Every rule below was paid for by a defect that reached `main`.
+
+**Enumerate every surface before calling an item closed.** Roughly half the
+findings in every re-check were "the invariant is closed on one path of two" —
+five times in a row, and repeatedly in the fix that the *previous* audit had
+just landed. A fix closes the path the finding was presented on; the
+neighbouring paths stay open until someone lists them. So: list every route to
+the same state, show that each is either closed or unreachable, and ask the
+reverse question too — did this fix create the mirror-image defect on a path
+the finding never mentioned?
+
+**A test you have not seen fail is not evidence.** Re-introduce the defect on a
+copy of the tree and watch the test go red. Three defects were found only
+because someone did this.
+
+**Check a metric-derived finding by reading the consumers before booking work
+on it.** Of seventeen findings derived from file size, import counts, naming,
+comment ratio and linter hits, nine did not survive first contact with the
+code; everything found by reading held. The check is cheap and usually teaches
+more than the finding did.
+
+**A wrapper that returns `bool` or an empty result where the operation can fail
+is lying to its caller.** `BranchExists`, `IsRepo` and a directory walk each hit
+this. For any wrapper over a subprocess or a filesystem walk, ask whether it can
+say "I don't know", and whether the caller turns that into "no".
+
+**A dead mechanism with a live description is worse than no mechanism.**
+`AddCost` misled `ComputeTotals` and cost a user the whole price of their
+delegations. The question that catches these is "is there a caller outside the
+tests?" — `check_deadcode.sh` deliberately asks a different one (unreachable
+*including* tests, otherwise it reports 85 live symbols) and answers
+"reachable" for a branch sixteen tests cover. Grep the exact call form
+(`.Method(`); a substring search false-positives across name families
+(`GetFile` vs `GetFileRead`, `GetFileByPathAndSession`).
+
+**Text has no compiler.** Tool descriptions, prompts and docs drift from the
+code silently, for as long as nobody re-reads them — the audit that read only
+non-code had the highest confirmed-finding rate of all thirteen. Verify a
+description the way you verify code: against its consumer, which here is the
+model.
+
+**A fix must not reach past its assignment.** Three fixes were sent back for
+this, none of them for wrong logic: a truncation removed wholesale instead of
+being moved to the new resolution (which would have reintroduced the same bug
+mirrored), a pure helper left in `internal/shell` so that `internal/env` began
+importing an interpreter, and a refusal to run something permitted defended as
+a "safe refusal" (it is not: `0750` with a group owner is ordinary).
+
+**Log capture is process-global.** `captureLogs`/`captureJSONLogs` replace
+`slog.SetDefault`; a parallel test that captures nothing still writes into your
+buffer. Select the line by an identifier you own (session, run), never by
+message text, and keep "the line never appeared" distinguishable from "a line
+appeared, but not mine". See `captureLogs`'s doc comment.
+
+**Never run an unscoped `git stash` here.** One agent's stash swept its
+neighbours' work out of a shared tree. Nothing was lost that time; the check
+took an afternoon.
+
 ## Working on the TUI (UI)
 
 Anytime you need to work on the TUI, read `internal/ui/AGENTS.md` before

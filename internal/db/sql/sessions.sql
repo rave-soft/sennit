@@ -90,7 +90,7 @@ RETURNING *;
 -- Rename). Save also writes title, but has no production caller of its
 -- own: it exists for tests that need to fabricate a session row directly,
 -- not as a second write path from the UI (that wide, whole-row write is
--- exactly what G3 closed off - see REFACTORING.md).
+-- exactly what audit 11's G3 closed off; see git log -- REFACTORING.md).
 UPDATE sessions
 SET
     prompt_tokens = ?,
