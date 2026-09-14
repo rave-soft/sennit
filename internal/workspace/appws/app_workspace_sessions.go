@@ -30,7 +30,16 @@ func (w *AppWorkspace) RenameSession(ctx context.Context, sessionID string, titl
 }
 
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
-	return w.app.Sessions().Delete(ctx, sessionID)
+	if err := w.app.Sessions().Delete(ctx, sessionID); err != nil {
+		return err
+	}
+	// The session is gone; so must be what the permission service still
+	// remembers about it. Nothing else removes those entries — see
+	// permission.Controller.ForgetSession.
+	if perms := w.app.Permissions(); perms != nil {
+		perms.ForgetSession(sessionID)
+	}
+	return nil
 }
 
 // SetCurrentSession reports the active session to herdr so the pane

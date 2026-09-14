@@ -328,6 +328,13 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 		// AgentRunStream's doc comment in workspace.go) because it has
 		// no UI to answer a prompt with.
 		w.app.Permissions().AutoApproveSession(sessionID)
+		// "No UI to answer a prompt with" is also true of the one
+		// request auto-approval deliberately does not answer: a
+		// RequireExplicit one, which waits for a person. Say so, or the
+		// first deny-listed command the turn tries parks the run
+		// forever with nothing on stdout. See
+		// permission.Controller.SetUnattended.
+		w.app.Permissions().SetUnattended(true)
 	}
 
 	// Report session identity to herdr. Local mode's Messages/RunComplete

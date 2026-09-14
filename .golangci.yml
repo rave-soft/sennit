@@ -17,6 +17,10 @@ linters:
     - whitespace
     - depguard
     - forbidigo
+    # Was explicitly disabled, carried over from the upstream Crush/Braid
+    # config with no rationale on record. The tree is clean against it,
+    # so the disable was costing a check and buying nothing.
+    - ineffassign
   settings:
     forbidigo:
       forbid:
@@ -73,10 +77,6 @@ linters:
             - pkg: github.com/rave-soft/sennit/internal/session/store
             - pkg: github.com/rave-soft/sennit/internal/stats/gather
             - pkg: github.com/rave-soft/sennit/internal/history/store
-  disable:
-    # Disabled since this config was inherited wholesale from the upstream
-    # Crush/Braid config; no rationale for disabling it is on record.
-    - ineffassign
   exclusions:
     generated: lax
     presets:

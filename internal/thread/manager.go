@@ -1233,6 +1233,14 @@ func (m *Manager) registerThreadParent(handle Handle, st Thread) {
 		if parentPerms := m.parentApp.Permissions(); parentPerms != nil && parentPerms.IsAutoApproveSession(st.ParentSessionID) {
 			if perms := handle.Workspace().Permissions(); perms != nil {
 				perms.AutoApproveSession(st.SessionID)
+				// A thread started by a headless run has no dialog
+				// either - its App instance is a second one in the same
+				// process, and that process has no UI at all. Carrying
+				// the flag over is what keeps a deny-listed command in a
+				// thread from parking the whole run.
+				if parentPerms.Unattended() {
+					perms.SetUnattended(true)
+				}
 			}
 		}
 	}

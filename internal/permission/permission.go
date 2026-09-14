@@ -229,6 +229,38 @@ type Controller interface {
 	// prompt.
 	IsAutoApproveSession(sessionID string) bool
 	SetSkipRequests(skip bool)
+	// SetUnattended declares that no person is watching this service:
+	// nothing will ever answer a published request. A headless run
+	// (`sennit run`) is the case — it auto-approves everything precisely
+	// because it has no dialog to ask with.
+	//
+	// It changes one thing: a RequireExplicit request, which by design
+	// refuses every blanket approval and waits for a person, is denied
+	// at once instead of waiting for an answer that cannot come. Waiting
+	// there is not caution, it is a hang with no output — the deny-list
+	// floor would turn `sennit run` into a process that sits forever on
+	// the first `curl`. Denied, the tool hands the model the command to
+	// give back to the user, which is the same outcome a person choosing
+	// "no" produces.
+	//
+	// Every other path is untouched: a PreToolUse hook still allows a
+	// deny-listed command per call, and an ordinary request is still
+	// answered by the auto-approval the headless run installed.
+	SetUnattended(unattended bool)
+	// Unattended reports what SetUnattended last set, so a delegation's
+	// launch site can pass it to the child service the way it passes an
+	// auto-approved session (see IsAutoApproveSession).
+	Unattended() bool
+	// ForgetSession drops everything this service remembers about
+	// sessionID: its auto-approval and every persistent grant recorded
+	// against it. Both are keyed by session id and nothing else ever
+	// removes them, so a long-lived TUI accumulates an entry per session
+	// and per "always" the user ever gave, for the life of the process.
+	//
+	// Session ids are UUIDs, so this is memory and not correctness — a
+	// deleted session's grants can never be reached again by a new one.
+	// Call it where a session stops existing.
+	ForgetSession(sessionID string)
 	// ConfineToWorkingDir marks this workspace as one that may not write
 	// outside its working directory at all. See Requester.ConfinedDir.
 	ConfineToWorkingDir()
@@ -267,7 +299,10 @@ type permissionService struct {
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
-	allowedTools          []string
+	// unattended marks a service nobody is watching; see
+	// Controller.SetUnattended.
+	unattended   atomic.Bool
+	allowedTools []string
 
 	// dialogMu guards current and queue below, which together implement
 	// a one-at-a-time dispatch of permission requests to the UI. The UI
@@ -589,6 +624,19 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
+	// Nobody is watching, so publishing this would block the caller on an
+	// answer that cannot arrive. Only a RequireExplicit request reaches
+	// here unattended — every other one was already answered by the
+	// blanket approvals above — and for it a denial is the honest
+	// outcome: see Controller.SetUnattended.
+	if opts.RequireExplicit && s.unattended.Load() {
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - as above
+			ToolCallID: opts.ToolCallID,
+			Denied:     true,
+		})
+		return false, nil
+	}
+
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
 
@@ -700,6 +748,31 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
+}
+
+func (s *permissionService) SetUnattended(unattended bool) {
+	s.unattended.Store(unattended)
+}
+
+func (s *permissionService) Unattended() bool {
+	return s.unattended.Load()
+}
+
+func (s *permissionService) ForgetSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.autoApproveSessionsMu.Lock()
+	delete(s.autoApproveSessions, sessionID)
+	s.autoApproveSessionsMu.Unlock()
+
+	// Seq2 walks a snapshot, so deleting as we go is safe; the grants of
+	// one session are a handful of entries, not a hot path.
+	for key := range s.sessionPermissions.Seq2() {
+		if key.SessionID == sessionID {
+			s.sessionPermissions.Del(key)
+		}
+	}
 }
 
 // ConfineToWorkingDir implements Service.

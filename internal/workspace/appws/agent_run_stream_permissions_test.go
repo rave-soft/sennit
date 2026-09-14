@@ -41,10 +41,15 @@ func (c *immediateCoordinator) SetLiveSession(string) {}
 type recordingAutoApprovePermissions struct {
 	permission.Service
 	autoApprovedSessions []string
+	unattended           []bool
 }
 
 func (p *recordingAutoApprovePermissions) AutoApproveSession(sessionID string) {
 	p.autoApprovedSessions = append(p.autoApprovedSessions, sessionID)
+}
+
+func (p *recordingAutoApprovePermissions) SetUnattended(unattended bool) {
+	p.unattended = append(p.unattended, unattended)
 }
 
 // TestAppWorkspace_AgentRunStream_AutoApprovePermissionsOptIn proves the
@@ -75,10 +80,16 @@ func TestAppWorkspace_AgentRunStream_AutoApprovePermissionsOptIn(t *testing.T) {
 	for range out {
 	}
 	require.Empty(t, perms.autoApprovedSessions, "AgentRunStream must not auto-approve permissions unless asked to")
+	require.Empty(t, perms.unattended, "an attended run must not be marked unattended")
 
 	out, err = aw.AgentRunStream(t.Context(), sess.ID, "hello", workspace.AgentRunOptions{AutoApprovePermissions: true})
 	require.NoError(t, err)
 	for range out {
 	}
 	require.Equal(t, []string{sess.ID}, perms.autoApprovedSessions, "AgentRunStream must auto-approve permissions when asked to")
+	// The same "no UI to ask with" that justifies auto-approval also has
+	// to cover the one request auto-approval refuses to answer, or a
+	// deny-listed command parks the run forever. See
+	// permission.Controller.SetUnattended.
+	require.Equal(t, []bool{true}, perms.unattended, "a run with no UI must say so, not wait for a person")
 }

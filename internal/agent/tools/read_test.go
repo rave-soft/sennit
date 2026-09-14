@@ -238,6 +238,12 @@ func (m *mockReadPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockReadPermissionService) SetUnattended(bool) {}
+
+func (m *mockReadPermissionService) Unattended() bool { return false }
+
+func (m *mockReadPermissionService) ForgetSession(string) {}
+
 func (m *mockReadPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }

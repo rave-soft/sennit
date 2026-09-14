@@ -1626,6 +1626,75 @@ func TestPermissionService_PersistentGrantKeyIsPathScoped(t *testing.T) {
 // a RequireExplicit request is answered by a person or not at all. Yolo, an
 // auto-approved session and an allowed-tools entry naming the tool all grant
 // an ordinary request without a prompt, and none of them may grant this one.
+// TestPermissionService_ForgetSession covers the two things a session
+// leaves behind on the permission service. Nothing else removes them, so
+// without this a long-lived TUI holds an entry per session and per
+// "always" the user ever gave for the life of the process.
+func TestPermissionService_ForgetSession(t *testing.T) {
+	t.Parallel()
+
+	service := NewPermissionService("/tmp", false, nil)
+	service.AutoApproveSession("s1")
+	service.AutoApproveSession("s2")
+
+	grant := func(sessionID string) {
+		events := service.Subscribe(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ev := <-events
+			service.GrantPersistent(ev.Payload)
+		}()
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:       sessionID,
+			ToolCallID:      "call-" + sessionID,
+			ToolName:        "bash",
+			Action:          "execute",
+			Path:            "/tmp",
+			RequireExplicit: true,
+		})
+		require.NoError(t, err)
+		require.True(t, granted)
+		<-done
+	}
+	grant("s1")
+	grant("s2")
+
+	service.ForgetSession("s1")
+
+	assert.False(t, service.IsAutoApproveSession("s1"), "the deleted session's auto-approval is gone")
+	assert.True(t, service.IsAutoApproveSession("s2"), "a live session's auto-approval is untouched")
+
+	// s1's recorded grant is gone too: the next RequireExplicit request
+	// for it has nobody to answer, so it ends with the context rather
+	// than being granted from memory.
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	granted, err := service.Request(ctx, CreatePermissionRequest{
+		SessionID:       "s1",
+		ToolCallID:      "call-after",
+		ToolName:        "bash",
+		Action:          "execute",
+		Path:            "/tmp",
+		RequireExplicit: true,
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.False(t, granted)
+
+	// s2's grant still answers, so ForgetSession removed one session's
+	// entries and not the map.
+	granted, err = service.Request(t.Context(), CreatePermissionRequest{
+		SessionID:       "s2",
+		ToolCallID:      "call-s2-again",
+		ToolName:        "bash",
+		Action:          "execute",
+		Path:            "/tmp",
+		RequireExplicit: true,
+	})
+	require.NoError(t, err)
+	assert.True(t, granted)
+}
+
 func TestPermissionService_RequireExplicit(t *testing.T) {
 	t.Parallel()
 
@@ -1724,5 +1793,72 @@ func TestPermissionService_RequireExplicit(t *testing.T) {
 		granted, err = service.Request(t.Context(), second)
 		require.NoError(t, err)
 		assert.True(t, granted)
+	})
+
+	// An unattended service is the headless run (`sennit run`), which
+	// auto-approves everything precisely because it has no dialog. Before
+	// SetUnattended, the one request auto-approval does not answer waited
+	// for a person who could never arrive: the run hung on the first
+	// deny-listed command with nothing on stdout and no timeout but the
+	// user's own ^C.
+	t.Run("unattended", func(t *testing.T) {
+		t.Parallel()
+
+		newUnattended := func() Service {
+			s := NewPermissionService("/tmp", false, nil)
+			s.AutoApproveSession("s1")
+			s.SetUnattended(true)
+			return s
+		}
+
+		t.Run("denies a RequireExplicit request instead of waiting", func(t *testing.T) {
+			t.Parallel()
+			service := newUnattended()
+			notifications := service.SubscribeNotifications(t.Context())
+
+			done := make(chan bool, 1)
+			go func() {
+				granted, err := service.Request(t.Context(), req(true))
+				assert.NoError(t, err)
+				done <- granted
+			}()
+
+			select {
+			case granted := <-done:
+				assert.False(t, granted, "nobody can answer, so the honest outcome is a denial")
+			case <-time.After(5 * time.Second):
+				t.Fatal("the request waited for an answer that cannot come")
+			}
+
+			// The tool call's notification must terminate too, or a
+			// subscriber (herdr, an audit log) is left holding a request
+			// that never resolves.
+			deadline := time.After(5 * time.Second)
+			for {
+				select {
+				case ev := <-notifications:
+					if ev.Payload.Denied {
+						return
+					}
+				case <-deadline:
+					t.Fatal("no terminal notification for the denied request")
+				}
+			}
+		})
+
+		t.Run("still grants an ordinary request", func(t *testing.T) {
+			t.Parallel()
+			granted, err := newUnattended().Request(t.Context(), req(false))
+			require.NoError(t, err)
+			assert.True(t, granted, "unattended narrows only the RequireExplicit path")
+		})
+
+		t.Run("a PreToolUse hook still allows a RequireExplicit request", func(t *testing.T) {
+			t.Parallel()
+			ctx := WithHookApproval(t.Context(), "call-1")
+			granted, err := newUnattended().Request(ctx, req(true))
+			require.NoError(t, err)
+			assert.True(t, granted, "a hook decides per call, which is what unattended runs have instead of a person")
+		})
 	})
 }

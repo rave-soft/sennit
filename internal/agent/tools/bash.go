@@ -267,7 +267,15 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 			// command" prompt rather than preceding it - a deny-listed
 			// command is never read-only, so both would otherwise fire and
 			// the user would answer twice for one command.
-			blocked := shell.BlockedBy(command, blockFuncs())
+			//
+			// Matched against params.Command, not the sandboxed command:
+			// a confined workspace wraps it as `bwrap ... -- sh -c "<cmd>"`
+			// (see confinedBashCommand), whose only CallExpr is bwrap
+			// itself - BlockedBy does not descend into a command's words,
+			// so every deny-listed command inside the wrapper read as not
+			// blocked and the floor was absent in exactly the workspaces
+			// that run unattended.
+			blocked := shell.BlockedBy(params.Command, blockFuncs())
 			execBlockFuncs := blockFuncs()
 			if blocked {
 				execBlockFuncs = nil
