@@ -9,32 +9,51 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// NewMCPToolMessageItem creates a new MCP tool message item.
+// NewMCPToolMessageItem creates a new MCP tool message item. cfg supplies
+// the configured MCP server names, without which the composite tool name
+// can only be split at the first underscore; it may be nil.
 func NewMCPToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	cfg CustomAgentConfig,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &MCPToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &MCPToolRenderContext{cfg: cfg}, canceled)
 }
 
 // MCPToolRenderContext renders MCP tool messages.
-type MCPToolRenderContext struct{}
+type MCPToolRenderContext struct {
+	// cfg names the configured MCP servers, read once per render rather
+	// than captured at construction: a server added, renamed or removed
+	// while the transcript is on screen has to change how the rows
+	// already in it split their names.
+	cfg CustomAgentConfig
+}
+
+// knownServers returns the configured MCP server names, or nil when this
+// renderer was built without config (a test, or an item constructed before
+// the workspace was wired up). nil is a valid input to
+// proto.SplitMCPToolName — it just falls back to the naive split.
+func (b *MCPToolRenderContext) knownServers() []string {
+	if b.cfg == nil {
+		return nil
+	}
+	return b.cfg.MCPServerNames()
+}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	// This renderer has no config in hand (ToolRenderOpts carries only the
-	// call/result, not the app's MCP server list), so it can only use
-	// [proto.SplitMCPToolName]'s naive fallback — the same "first
-	// underscore" split as before, still wrong for a server name that
-	// itself contains an underscore. See internal/ui/dialog/permissions.go
-	// for the version that resolves this correctly against config. What
-	// changed here is the failure mode: a name this can't split at all no
-	// longer renders as a header-less error block with no tool call shown
-	// at all — it falls back to the raw tool name, same as an unrecognized
+	// Split against the configured server names, so a server whose own
+	// name contains an underscore ("my_server_tool") lands on the real
+	// boundary — the transcript used to pass nil here and split at the
+	// first underscore, disagreeing with the permission dialog about the
+	// same call. A name that matches no configured server still splits
+	// naively rather than erroring: an old session's call can name a
+	// server since renamed or removed, and a name this cannot split at
+	// all falls back to the raw tool name, the same as an unrecognized
 	// tool anywhere else in the transcript.
-	mcpServer, mcpTool, ok := proto.SplitMCPToolName(opts.ToolCall.Name, nil)
+	mcpServer, mcpTool, ok := proto.SplitMCPToolName(opts.ToolCall.Name, b.knownServers())
 	var name string
 	if ok {
 		mcpName := sty.Tool.MCPName.Render(humanizedToolName(mcpServer))

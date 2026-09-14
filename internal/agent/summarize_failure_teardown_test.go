@@ -108,13 +108,8 @@ func TestFinishTurn_SummarizeFailureStillNotifiesAndDrainsQueue(t *testing.T) {
 
 	// The AgentFinished notification must still fire for the turn whose
 	// summarize failed.
-	select {
-	case evt := <-notifications:
-		require.Equal(t, notify.TypeAgentFinished, evt.Payload.Type)
-		require.Equal(t, sess.ID, evt.Payload.SessionID)
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for AgentFinished after a failed summarize")
-	}
+	finished := awaitNotification(t, ctx, notifications, notify.TypeAgentFinished)
+	require.Equal(t, sess.ID, finished.SessionID)
 
 	// "first"'s own terminal RunComplete must report the summarize
 	// failure rather than looking like an ordinary success.

@@ -143,17 +143,24 @@ type blockingNotificationPublisher struct {
 	blocked   atomic.Bool
 }
 
-// Publish blocks only on the first call - the parked run's own
-// TypeAgentFinished notification, which these tests use to land a
-// simulated concurrent dispatch precisely at that pause point. Now that
-// queue mutations (e.g. ClearQueue) also publish their own
-// notify.TypeQueueChanged notification (see sessionAgent.
-// publishQueueChanged), a second call can legitimately arrive while the
-// first is still parked here; sync.Once would serialize that second
-// call behind the first's in-flight block, deadlocking the two, so this
-// uses a CompareAndSwap instead: only the call that wins it blocks,
-// every other caller returns immediately.
-func (p *blockingNotificationPublisher) Publish(pubsub.EventType, notify.Notification) {
+// Publish blocks only on the first TypeAgentFinished call - the parked
+// run's own, which these tests use to land a simulated concurrent
+// dispatch precisely at that pause point. Other notification types pass
+// straight through: queue mutations publish notify.TypeQueueChanged and
+// every turn publishes notify.TypeTurnStarted before it finishes, so
+// blocking on "whichever came first" parks somewhere else entirely and
+// deadlocks the package (it did, for the full test timeout, when
+// TypeTurnStarted was added).
+//
+// Among TypeAgentFinished calls a second can still legitimately arrive
+// while the first is parked here; sync.Once would serialize it behind
+// the first's in-flight block, deadlocking the two, so this uses a
+// CompareAndSwap instead: only the call that wins it blocks, every
+// other caller returns immediately.
+func (p *blockingNotificationPublisher) Publish(_ pubsub.EventType, n notify.Notification) {
+	if n.Type != notify.TypeAgentFinished {
+		return
+	}
 	if p.blocked.CompareAndSwap(false, true) {
 		close(p.published)
 		<-p.release

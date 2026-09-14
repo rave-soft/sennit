@@ -119,13 +119,8 @@ func TestRunTurn_StreamErrorStillDrainsQueue(t *testing.T) {
 	// change: completeTurn's drainNext hand-off dequeues "queued" to
 	// become the next turn, and only that turn's later success (below)
 	// earns an AgentFinished of its own.
-	select {
-	case evt := <-notifications:
-		require.Equal(t, notify.TypeQueueChanged, evt.Payload.Type)
-		require.Equal(t, sess.ID, evt.Payload.SessionID)
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for the queue-changed notification from the hand-off")
-	}
+	queueChanged := awaitNotification(t, ctx, notifications, notify.TypeQueueChanged)
+	require.Equal(t, sess.ID, queueChanged.SessionID)
 
 	// "first"'s own terminal RunComplete must report the Stream failure.
 	select {
@@ -149,11 +144,6 @@ func TestRunTurn_StreamErrorStillDrainsQueue(t *testing.T) {
 	// And its own turn finishes cleanly, so AgentFinished does fire once
 	// for this session - just for the successful hand-off, not the
 	// failed turn it followed.
-	select {
-	case evt := <-notifications:
-		require.Equal(t, notify.TypeAgentFinished, evt.Payload.Type)
-		require.Equal(t, sess.ID, evt.Payload.SessionID)
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for AgentFinished after the queued turn's own success")
-	}
+	handoffFinished := awaitNotification(t, ctx, notifications, notify.TypeAgentFinished)
+	require.Equal(t, sess.ID, handoffFinished.SessionID)
 }

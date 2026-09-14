@@ -269,16 +269,28 @@ type blockingNotifier struct {
 	blocked   atomic.Bool
 }
 
-// Publish blocks only on the first call (the parked main turn's own
-// TypeAgentFinished notification). The follow-up turn Steer starts while
-// the main turn is parked here publishes its own TypeAgentFinished
-// notification too and must not block on it - sync.Once would still
-// serialize that second call behind the first's in-flight (blocked)
-// invocation, deadlocking the two turns against each other, so this
-// uses a CompareAndSwap instead: only the call that wins it blocks:
-// every other caller, including one arriving while the winner is still
-// parked, returns immediately.
-func (p *blockingNotifier) Publish(pubsub.EventType, notify.Notification) {
+// Publish blocks only on the first TypeAgentFinished call (the parked
+// main turn's own). The follow-up turn Steer starts while the main turn
+// is parked here publishes its own TypeAgentFinished notification too
+// and must not block on it - sync.Once would still serialize that second
+// call behind the first's in-flight (blocked) invocation, deadlocking
+// the two turns against each other, so this uses a CompareAndSwap
+// instead: only the call that wins it blocks: every other caller,
+// including one arriving while the winner is still parked, returns
+// immediately.
+//
+// The type filter is the load-bearing half, not decoration. This used to
+// block on whichever notification came first and relied on that being
+// TypeAgentFinished; when the agent gained TypeTurnStarted - published
+// from runTurn's decision point, strictly before any turn finishes -
+// the park moved to the start of the first turn and the whole package
+// deadlocked for the full test timeout. Park on the event this test
+// names in its own doc comment, not on whichever one happens to be
+// first.
+func (p *blockingNotifier) Publish(_ pubsub.EventType, n notify.Notification) {
+	if n.Type != notify.TypeAgentFinished {
+		return
+	}
 	if p.blocked.CompareAndSwap(false, true) {
 		close(p.published)
 		<-p.release

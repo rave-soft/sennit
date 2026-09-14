@@ -147,11 +147,10 @@ func TestRunTurn_CancelDuringAutoSummarizeReportsCancelled(t *testing.T) {
 	// on a non-nil, non-cancel error) owns turns that genuinely failed,
 	// and a canceled summarize is neither a finish nor a failure worth
 	// announcing twice.
-	select {
-	case n := <-notifications:
-		t.Fatalf("unexpected notification published: %+v", n.Payload)
-	case <-time.After(200 * time.Millisecond):
-	}
+	// A turn still announces its own start (notify.TypeTurnStarted); it
+	// is the terminal pair that must stay silent.
+	requireNoNotificationOfType(t, notifications, 200*time.Millisecond,
+		notify.TypeAgentFinished, notify.TypeAgentError)
 }
 
 // TestRunTurn_CancelDuringAutoSummarizeWithQueuedPromptReportsCancelled is

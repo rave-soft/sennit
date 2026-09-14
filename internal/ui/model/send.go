@@ -116,10 +116,11 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		// into one already running (steering) — see
 		// attachedThreadWorkspace.AgentRun's doc. Calling StartTurn
 		// unconditionally reset an in-flight turn's elapsed time on every
-		// follow-up message sent while it was still running, and the
-		// symmetric miss — nothing starting the clock when the agent's own
-		// queue later hands a folded prompt to its own next turn — remains
-		// open: no event today tells this client that happened.
+		// follow-up message sent while it was still running. The
+		// symmetric case — the agent's own queue later handing a folded
+		// prompt to its own next turn, which this client cannot see
+		// coming — is covered by AgentNotificationTurnStarted, published
+		// from the agent's own decision point; see handleAgentNotification.
 		if !ws.AgentIsSessionBusy(sessionID) {
 			common.StartTurn(sessionID)
 		}

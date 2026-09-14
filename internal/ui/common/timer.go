@@ -27,6 +27,28 @@ func StartTurn(sessionID string) {
 	turnTimers.start[sessionID] = time.Now()
 }
 
+// StartTurnIfIdle begins tracking a turn for sessionID only when no turn
+// is already being tracked for it.
+//
+// It exists for the agent's own turn-started event, which announces every
+// turn including the one a client asked for and has therefore already
+// timed: starting unconditionally there would reset the clock a few
+// milliseconds into each turn the user began themselves. "No entry in the
+// table" is the right test rather than asking whether the session is
+// busy — the entry is exactly what Elapsed reads, and StopTurn removing
+// it is what makes the next turn's start count.
+func StartTurnIfIdle(sessionID string) {
+	turnTimers.mu.Lock()
+	defer turnTimers.mu.Unlock()
+	if turnTimers.start == nil {
+		turnTimers.start = make(map[string]time.Time)
+	}
+	if _, running := turnTimers.start[sessionID]; running {
+		return
+	}
+	turnTimers.start[sessionID] = time.Now()
+}
+
 // StopTurn stops tracking the turn for sessionID.
 func StopTurn(sessionID string) {
 	turnTimers.mu.Lock()

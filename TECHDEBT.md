@@ -32,44 +32,29 @@ intentional, but the identity mismatch remains.
 Next step: either register a Sennit-owned GitHub OAuth application and use an honest
 user agent, if GitHub permits Copilot API access for it, or remove the provider.
 
-## Windows does not kill the process tree
+## The Windows process tree escapes the job for an instant
 
-`interp.DefaultExecHandler`, which `internal/shell/exec_windows.go` uses
-unchanged, sets no `SysProcAttr` at all: it signals one process and never sets
-`WaitDelay`. Grandchildren outlive a cancelled command, and `Wait` can hang
-while one of them holds the output pipe open. Unix closes exactly this through
-`Setsid` and killing the group by negative PID.
+`internal/shell/exec_windows.go` now mirrors the Unix handler: the child
+runs in a process group of its own, a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` holds the tree, cancellation sends
+CTRL_BREAK and then terminates the job, and `WaitDelay` bounds a `Wait`
+that a lingering grandchild would otherwise hang forever.
 
-The comment that used to promise `CREATE_NEW_PROCESS_GROUP` coverage was
-corrected to the truth in `9364e2c87`; the implementation was deliberately not
-written. Its first execution anywhere would be CI's Windows runner, and a
-mistake in the order of job assignment only shows up at runtime.
+What is left is the gap that cannot be closed through `os/exec`: the
+child is assigned to the job immediately after `CreateProcess` returns,
+not before it runs, because Go does not hand back the main thread handle
+a `CREATE_SUSPENDED` start would need resuming. A grandchild spawned in
+the first instants of the child's life escapes the job. The window is
+microseconds.
 
-Next step: a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, assigning
-the process at launch via `CREATE_SUSPENDED`. Separate work, on a real Windows
-machine.
+Next step: only worth closing by enumerating the new process's threads
+(`CreateToolhelp32Snapshot`/`ResumeThread`) and starting suspended —
+more Windows-specific syscall code, for a window that needs a process to
+fork within microseconds of starting. Recorded rather than scheduled.
 
-## The transcript still splits MCP tool names naively
-
-`internal/ui/chat/mcp.go:37` calls `proto.SplitMCPToolName(name, nil)` — the
-naive "first underscore wins" fallback — while the permission dialog passes the
-real server list (`internal/ui/dialog/permissions.go:643`). A server whose name
-contains an underscore is rendered wrong in the transcript and right in the
-dialog.
-
-Next step: the chat renderer has no access to the server list, and threading it
-through means changing the `ToolRenderOpts` contract. Do that deliberately, not
-as a drive-by.
-
-## There is no "turn started" event
-
-The turn timer does not start when the queue hands a prompt to the next turn,
-because nothing in the system announces that a turn began — the UI infers it
-from the first thing the turn emits, and a queued prompt emits nothing until
-the model answers.
-
-Next step: closes only together with such an event. Adding one touches the
-agent's dispatch path, so it is its own piece of work.
+Also open: none of this has run on a real Windows machine. CI's Windows
+runner executes `internal/shell/isolation_windows_test.go`, which is its
+first execution anywhere.
 
 ## Docker MCP rendering is spread across the UI
 

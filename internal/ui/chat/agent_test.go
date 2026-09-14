@@ -880,7 +880,10 @@ func TestAgentToolRender_HiddenBumpsVersion(t *testing.T) {
 
 // stubAgentConfig is a CustomAgentConfig with one named agent carrying a
 // model/effort override, for the identity tests below.
-type stubAgentConfig struct{ id, model, effort string }
+type stubAgentConfig struct {
+	id, model, effort string
+	mcpServers        []string
+}
 
 func (c stubAgentConfig) AgentOverride(name string) (string, string, bool) {
 	if name != c.id {
@@ -888,6 +891,8 @@ func (c stubAgentConfig) AgentOverride(name string) (string, string, bool) {
 	}
 	return c.model, c.effort, true
 }
+
+func (c stubAgentConfig) MCPServerNames() []string { return c.mcpServers }
 
 // TestAgentToolMessageItem_IdentityFollowsStreamedInput is the regression
 // test for a delegation block stuck on the wrong name. The identity moved

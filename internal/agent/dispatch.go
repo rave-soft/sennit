@@ -1182,6 +1182,25 @@ func (a *sessionAgent) publishQueueChanged(sessionID string) {
 	})
 }
 
+// publishTurnStarted announces that call has become its session's active
+// run. Published from runTurn's one decision point rather than from any
+// entry path, so a turn the session queued for itself is announced on the
+// same terms as one a client sent - see notify.TypeTurnStarted.
+//
+// Lossy by the same reasoning as publishQueueChanged above: the event
+// drives a display, never a decision, and every consumer has a terminal
+// event that clears it regardless.
+func (a *sessionAgent) publishTurnStarted(call SessionAgentCall) {
+	if a.notify == nil {
+		return
+	}
+	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		SessionID: call.SessionID,
+		Type:      notify.TypeTurnStarted,
+		RunID:     call.RunID,
+	})
+}
+
 // persistCanceledTurn, Cancel, ClearQueue, and CancelAll live in cancel.go:
 // like the methods above, they carry real sessionAgent-level logic
 // (persistence, pubsub) that must stay off *dispatcher itself (see its own

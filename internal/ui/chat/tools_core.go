@@ -241,16 +241,19 @@ func newRegisteredToolMessageItem(sty *styles.Styles, toolCall message.ToolCall,
 	return newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)
 }
 
-// CustomAgentConfig is the narrow config capability tool renderers need to
-// recognize a user-defined agent tool and read its model/effort override —
+// CustomAgentConfig is the narrow config capability tool renderers need —
 // nothing more, so this package never has to import internal/config or name
-// its Agent type. *config.Config already implements this via AgentOverride,
-// which excludes the built-in "coder"/"task" roles this package treats
-// specially.
+// its Agent type. *config.Config already implements it.
 type CustomAgentConfig interface {
 	// AgentOverride reports whether name is a user-defined agent tool and,
-	// if so, its configured model/reasoning-effort override.
+	// if so, its configured model/reasoning-effort override. It excludes
+	// the built-in "coder"/"task" roles this package treats specially.
 	AgentOverride(name string) (model, effort string, ok bool)
+	// MCPServerNames returns every configured MCP server name, so an MCP
+	// tool's composite "mcp_<server>_<tool>" name can be split at the
+	// real boundary rather than at the first underscore. See
+	// proto.SplitMCPToolName (imported here as tools).
+	MCPServerNames() []string
 }
 
 // NewToolMessageItem creates a new [ToolMessageItem] based on the tool call name.
@@ -275,8 +278,8 @@ func NewToolMessageItem(
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled, cfg)
 	case IsDockerMCPTool(toolCall.Name):
 		item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
-	case strings.HasPrefix(toolCall.Name, "mcp_"):
-		item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
+	case strings.HasPrefix(toolCall.Name, tools.MCPToolNamePrefix):
+		item = NewMCPToolMessageItem(sty, toolCall, result, canceled, cfg)
 	case isCustomAgentTool(cfg, toolCall.Name):
 		// User-defined agents (.sennit/agents, config.Agents) are
 		// delegations of the same shape as the built-in "agent" tool —

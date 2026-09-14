@@ -822,6 +822,24 @@ func (c *Config) AgentOverride(name string) (model, effort string, ok bool) {
 	return a.Model, a.ReasoningEffort, true
 }
 
+// MCPServerNames returns the names of every configured MCP server,
+// disabled ones included. It exists so a caller that needs to split an
+// MCP tool's composite "mcp_<server>_<tool>" name (see
+// proto.SplitMCPToolName) can resolve the boundary against real server
+// names instead of guessing at the first underscore — a disabled server
+// still owns the names of the tool calls already in a transcript, which
+// is why the filter is on existence and not on Disabled.
+func (c *Config) MCPServerNames() []string {
+	if c == nil {
+		return nil
+	}
+	names := make([]string, 0, len(c.MCP))
+	for name := range c.MCP {
+		names = append(names, name)
+	}
+	return names
+}
+
 // GetProviderForModel returns the provider configured for c.Model.
 func (c *Config) GetProviderForModel() *ProviderConfig {
 	if providerConfig, ok := c.Providers.Get(c.Model.Provider); ok {

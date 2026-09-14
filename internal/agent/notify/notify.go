@@ -25,6 +25,18 @@ const (
 	// finished. Message carries the error text when it failed, empty on
 	// success.
 	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
+	// TypeTurnStarted indicates a turn has genuinely become a session's
+	// active run. It is published from the one point that decides that
+	// (see sessionAgent.runTurn), so it covers the turn a client asked
+	// for and equally the one the session's own queue handed to itself
+	// after the previous turn ended - which no client can see coming and
+	// which therefore had nothing to start a turn clock with.
+	//
+	// Lossy and best-effort, like TypeQueueChanged: a dropped event costs
+	// an elapsed-time display for one turn, and the next terminal event
+	// still clears it. Nothing may treat this as the authority on whether
+	// a session is busy - ask the dispatcher for that.
+	TypeTurnStarted Type = "turn_started"
 	// TypeQueueChanged indicates a session's queued-follow-up count may
 	// have changed (a call was enqueued, drained, requeued, canceled, or
 	// cleared). It carries no payload beyond SessionID; observers re-probe

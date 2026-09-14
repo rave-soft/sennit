@@ -652,6 +652,9 @@ func (p *Permissions) renderToolName(width int) string {
 // (see renderToolName). Returns nil when no config is wired up (e.g. a
 // dialog built directly in a test), which is a valid input to
 // [proto.SplitMCPToolName] — it just falls back to the naive split.
+//
+// The transcript reads the same list through chat.CustomAgentConfig, so
+// both sides of a permission prompt split one call's name the same way.
 func (p *Permissions) knownMCPServerNames() []string {
 	// Config() panics on a zero-value Common (Workspace unset) — tests
 	// build the dialog directly without one, so guard the same way
@@ -659,15 +662,7 @@ func (p *Permissions) knownMCPServerNames() []string {
 	if p.com == nil || p.com.Workspace == nil {
 		return nil
 	}
-	cfg := p.com.Config()
-	if cfg == nil {
-		return nil
-	}
-	names := make([]string, 0, len(cfg.MCP))
-	for name := range cfg.MCP {
-		names = append(names, name)
-	}
-	return names
+	return p.com.Config().MCPServerNames()
 }
 
 // prettyName converts snake_case or kebab-case to Title Case.

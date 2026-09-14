@@ -639,6 +639,15 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	}
 	genCtx, cancel, ac := decision.genCtx, decision.cancel, decision.ac
 
+	// Announce the turn from the same point that just decided it is one.
+	// This is the only place in the system that knows a turn began, and
+	// the only one that knows it for the turn a client never asked for:
+	// the session's own queue handing a folded prompt to the next turn
+	// after this one ends. A client watching from outside sees the
+	// prompt it sent and nothing else, which is why its turn clock used
+	// to stay dark for exactly those turns.
+	a.publishTurnStarted(call)
+
 	// Record the model this turn is about to run on, so restoring the
 	// session later restores the model it was working with rather than
 	// whatever the instance has selected then. Stamped here, from the one

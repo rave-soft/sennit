@@ -217,6 +217,14 @@ func (w *widgets) handlePermissionNotification(notification permission.Permissio
 func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
+	case workspace.AgentNotificationTurnStarted:
+		// The agent announcing a turn it just made active. For a prompt
+		// the user sent from here the clock is already running and this
+		// is a no-op (see StartTurnIfIdle); what it is here for is the
+		// turn the session's own queue handed to itself, which this
+		// client cannot see coming and which therefore used to run with
+		// no elapsed time at all.
+		common.StartTurnIfIdle(n.SessionID)
 	case workspace.AgentNotificationFinished:
 		common.StopTurn(n.SessionID)
 		cmds = append(cmds, m.sendNotification(notification.Notification{

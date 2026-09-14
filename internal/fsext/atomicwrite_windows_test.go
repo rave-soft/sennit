@@ -34,7 +34,7 @@ func TestAtomicWriteFile_RetriesWhileDestinationHandleOpen(t *testing.T) {
 	require.NoError(t, err)
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		windows.CloseHandle(h)
+		_ = windows.CloseHandle(h)
 	}()
 
 	require.NoError(t, AtomicWriteFile(path, []byte(`{"v":2}`), 0o600))

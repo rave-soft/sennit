@@ -15,6 +15,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
@@ -26,6 +27,7 @@ import (
 	"github.com/rave-soft/sennit/internal/lsp"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	sessionstore "github.com/rave-soft/sennit/internal/session/store"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/testenv"
@@ -333,4 +335,51 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 	}
 
 	return testSessionAgent(env, model, systemPrompt, allTools...), nil
+}
+
+// awaitNotification reads from notifications until one of type typ
+// arrives, and returns it. Anything else that turns up first is skipped,
+// not failed on.
+//
+// Every test that wanted a particular notification used to read the
+// channel once and assert on whatever came out, which held only while
+// the type it wanted happened to be the first the agent published. It
+// stopped holding twice: once when queue mutations gained
+// notify.TypeQueueChanged, and again when every turn gained
+// notify.TypeTurnStarted, published before the turn does anything else.
+// Say which event you are waiting for.
+func awaitNotification(t *testing.T, ctx context.Context, notifications <-chan pubsub.Event[notify.Notification], typ notify.Type) notify.Notification {
+	t.Helper()
+	for {
+		select {
+		case evt := <-notifications:
+			if evt.Payload.Type == typ {
+				return evt.Payload
+			}
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for a %s notification", typ)
+			return notify.Notification{}
+		}
+	}
+}
+
+// requireNoNotificationOfType fails if a notification of any type in
+// types arrives within window. Use it for "this turn must not announce
+// X" — a bare "nothing at all arrives" assertion is wrong now that a
+// turn announces its own start.
+func requireNoNotificationOfType(t *testing.T, notifications <-chan pubsub.Event[notify.Notification], window time.Duration, types ...notify.Type) {
+	t.Helper()
+	deadline := time.After(window)
+	for {
+		select {
+		case evt := <-notifications:
+			for _, typ := range types {
+				if evt.Payload.Type == typ {
+					t.Fatalf("unexpected %s notification published: %+v", typ, evt.Payload)
+				}
+			}
+		case <-deadline:
+			return
+		}
+	}
 }

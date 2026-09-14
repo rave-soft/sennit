@@ -96,6 +96,10 @@ const (
 	AgentNotificationAWSSSOAuth     AgentNotificationType = "aws_sso_auth"
 	AgentNotificationAWSSSOResult   AgentNotificationType = "aws_sso_auth_result"
 	AgentNotificationQueueChanged   AgentNotificationType = "queue_changed"
+	// AgentNotificationTurnStarted mirrors notify.TypeTurnStarted - a
+	// turn became a session's active run. See that constant for what it
+	// does and does not promise.
+	AgentNotificationTurnStarted AgentNotificationType = "turn_started"
 	// AgentNotificationAccountRotated and AgentNotificationAccountRotationExhausted
 	// mirror notify.TypeAccountRotated / notify.TypeAccountRotationExhausted
 	// (internal/agent/notify) - see those for what triggers each.
