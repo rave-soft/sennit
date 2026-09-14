@@ -1054,3 +1054,36 @@ func TestFastForward_LeadingDashBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, newHead, tip)
 }
+
+// TestUncommittedPaths pins what the session panel relies on: only the
+// asked-about paths come back, spelled as asked, and a file outside the
+// repository is left out rather than failing the whole question.
+func TestUncommittedPaths(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	writeFile(t, repo, "clean.txt", "committed\n")
+	_, err := run(ctx, repo, "add", "-A")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "commit", "-m", "clean")
+	require.NoError(t, err)
+
+	writeFile(t, repo, "README.md", "changed\n")
+	writeFile(t, repo, "untracked.txt", "new\n")
+	writeFile(t, repo, "noise.txt", "never asked about\n")
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("x"), 0o644))
+
+	modified := filepath.Join(repo, "README.md")
+	untracked := filepath.Join(repo, "untracked.txt")
+	got, err := UncommittedPaths(ctx, repo, []string{modified, untracked, filepath.Join(repo, "clean.txt"), outside})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{modified, untracked}, got)
+}
+
+func TestUncommittedPaths_NotARepo(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	_, err := UncommittedPaths(context.Background(), dir, []string{filepath.Join(dir, "a.txt")})
+	require.ErrorIs(t, err, ErrNotARepo)
+}

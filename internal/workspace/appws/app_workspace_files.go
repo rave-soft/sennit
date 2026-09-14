@@ -12,7 +12,9 @@ import (
 // -- FileTracker --
 
 func (w *AppWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {
-	return workspace.PrepareSessionChangesUsing(ctx, sessionID, w.ListSessionHistory, w.UncommittedFiles)
+	return workspace.PrepareSessionChangesUsing(ctx, sessionID, w.ListSessionHistory, func(ctx context.Context, paths []string) ([]string, error) {
+		return git.UncommittedPaths(ctx, w.store.WorkingDir(), paths)
+	})
 }
 
 func (w *AppWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {

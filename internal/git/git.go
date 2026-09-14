@@ -277,6 +277,81 @@ func UncommittedFiles(ctx context.Context, dir string) ([]FileChange, error) {
 	return result, nil
 }
 
+// uncommittedPathsBatch bounds how many pathspecs one git status call
+// carries, keeping the command line well inside every platform's limit.
+const uncommittedPathsBatch = 500
+
+// UncommittedPaths reports which of paths have uncommitted changes -
+// staged, unstaged or untracked - in dir's repository, returned spelled
+// exactly as they were passed in. Paths outside the repository are left
+// out. A directory outside a Git repository returns ErrNotARepo.
+//
+// It asks git about those paths and nothing else, and reads no file
+// contents. UncommittedFiles answers for the whole working tree and counts
+// the lines of every untracked file by reading it, which is what a caller
+// that only needs to mark a handful of files must not pay for: one project
+// kept a 5GB untracked build cache of 57k files, and every session load
+// read all of it to mark the dozen files the session had touched.
+func UncommittedPaths(ctx context.Context, dir string, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	isRepo, err := IsRepo(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if !isRepo {
+		return nil, ErrNotARepo
+	}
+	repo, err := TopLevel(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	canonicalRepo := fsext.Canonical(repo)
+
+	// Pathspecs are repository-relative; each one maps back to every
+	// spelling it was asked for under.
+	asked := make(map[string][]string, len(paths))
+	specs := make([]string, 0, len(paths))
+	for _, path := range paths {
+		abs := path
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(dir, abs)
+		}
+		rel, relErr := filepath.Rel(canonicalRepo, fsext.Canonical(abs))
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		if _, seen := asked[rel]; !seen {
+			specs = append(specs, rel)
+		}
+		asked[rel] = append(asked[rel], path)
+	}
+
+	var uncommitted []string
+	for start := 0; start < len(specs); start += uncommittedPathsBatch {
+		batch := specs[start:min(start+uncommittedPathsBatch, len(specs))]
+		args := append([]string{"--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--"}, batch...)
+		status, err := runRaw(ctx, repo, args...)
+		if err != nil {
+			return nil, fmt.Errorf("git: uncommitted paths: %w", err)
+		}
+		entries := strings.Split(status, "\x00")
+		for i := 0; i < len(entries); i++ {
+			entry := entries[i]
+			if len(entry) < 4 {
+				continue
+			}
+			uncommitted = append(uncommitted, asked[entry[3:]]...)
+			if entry[0] == 'R' || entry[0] == 'C' || entry[1] == 'R' || entry[1] == 'C' {
+				i++ // Porcelain -z includes the original path as the next field.
+			}
+		}
+	}
+	return uncommitted, nil
+}
+
 // BranchExists reports whether a local branch named name exists in repo.
 // err is non-nil when the existence of the branch could not be determined —
 // callers must not read that as "the branch is gone".

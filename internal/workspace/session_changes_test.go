@@ -73,7 +73,7 @@ func TestPrepareSessionChangesOutsideARepoLeavesGitUnknown(t *testing.T) {
 	historyFiles := []history.File{{Path: "main.go", Version: 1, Content: "before\n"}, {Path: "main.go", Version: 2, Content: "after\n"}}
 	files, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
 		return historyFiles, nil
-	}, func(context.Context) ([]git.FileChange, error) {
+	}, func(context.Context, []string) ([]string, error) {
 		return nil, git.ErrNotARepo
 	})
 
@@ -89,7 +89,7 @@ func TestPrepareSessionChangesDegradesWhenGitFails(t *testing.T) {
 	historyFiles := []history.File{{Path: "main.go", Version: 1, Content: "before\n"}, {Path: "main.go", Version: 2, Content: "after\n"}}
 	files, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
 		return historyFiles, nil
-	}, func(context.Context) ([]git.FileChange, error) {
+	}, func(context.Context, []string) ([]string, error) {
 		return nil, errors.New("git unavailable")
 	})
 
@@ -107,10 +107,52 @@ func TestPrepareSessionChangesPropagatesHistoryError(t *testing.T) {
 	expected := errors.New("history unavailable")
 	_, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
 		return nil, expected
-	}, func(context.Context) ([]git.FileChange, error) {
+	}, func(context.Context, []string) ([]string, error) {
 		t.Fatal("git must not be called after a history error")
 		return nil, nil
 	})
 
 	require.ErrorIs(t, err, expected)
+}
+
+// TestPrepareSessionChangesAsksGitOnlyAboutSessionFiles is the regression
+// test for a session load that took seconds: the whole working tree was
+// listed, and every untracked file in it read, to mark the few files the
+// session had touched.
+func TestPrepareSessionChangesAsksGitOnlyAboutSessionFiles(t *testing.T) {
+	t.Parallel()
+
+	historyFiles := []history.File{
+		{Path: "/repo/a.go", Version: 1, Content: "one\n"},
+		{Path: "/repo/b.go", Version: 1, Content: "one\n"},
+	}
+	var asked []string
+	files, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
+		return historyFiles, nil
+	}, func(_ context.Context, paths []string) ([]string, error) {
+		asked = append(asked, paths...)
+		return []string{"/repo/b.go"}, nil
+	})
+
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"/repo/a.go", "/repo/b.go"}, asked)
+	require.Len(t, files, 2)
+	for _, file := range files {
+		require.True(t, file.GitKnown)
+		require.Equal(t, file.FirstVersion.Path == "/repo/b.go", file.Uncommitted, file.FirstVersion.Path)
+	}
+}
+
+func TestPrepareSessionChangesSkipsGitWithoutFiles(t *testing.T) {
+	t.Parallel()
+
+	files, err := PrepareSessionChangesUsing(t.Context(), "session", func(context.Context, string) ([]history.File, error) {
+		return nil, nil
+	}, func(context.Context, []string) ([]string, error) {
+		t.Fatal("a session with no files has nothing to ask git about")
+		return nil, nil
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, files)
 }

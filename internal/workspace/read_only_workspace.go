@@ -371,7 +371,9 @@ func (w *readOnlyWorkspace) PrepareSessionChanges(ctx context.Context, sessionID
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return PrepareSessionChangesUsing(ctx, sessionID, w.ListSessionHistory, w.UncommittedFiles)
+	return PrepareSessionChangesUsing(ctx, sessionID, w.ListSessionHistory, func(ctx context.Context, paths []string) ([]string, error) {
+		return git.UncommittedPaths(ctx, w.workingDir, paths)
+	})
 }
 
 // UncommittedFiles must not forward to the embedded Workspace: that

@@ -79,14 +79,23 @@ func PrepareSessionChangesUsing(
 	ctx context.Context,
 	sessionID string,
 	listHistory func(context.Context, string) ([]history.File, error),
-	uncommittedFiles func(context.Context) ([]git.FileChange, error),
+	uncommittedPaths func(context.Context, []string) ([]string, error),
 ) ([]SessionFile, error) {
 	historyFiles, err := listHistory(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	files := AggregateSessionFiles(historyFiles)
-	uncommitted, err := uncommittedFiles(ctx)
+	if len(files) == 0 {
+		return files, nil
+	}
+	// Only the session's own files are asked about: the whole working tree
+	// can hold anything, and nothing outside this list is marked anyway.
+	paths := make([]string, len(files))
+	for i, file := range files {
+		paths[i] = file.FirstVersion.Path
+	}
+	uncommittedList, err := uncommittedPaths(ctx, paths)
 	if err != nil {
 		// Outside a repository there is nothing to have committed to, so
 		// this is the ordinary case rather than a fault; anything else is
@@ -96,6 +105,10 @@ func PrepareSessionChangesUsing(
 			slog.Warn("Failed to load uncommitted files for session", "session_id", sessionID, "error", err)
 		}
 		return files, nil
+	}
+	uncommitted := make([]git.FileChange, len(uncommittedList))
+	for i, path := range uncommittedList {
+		uncommitted[i] = git.FileChange{Path: path}
 	}
 	return MarkUncommittedSessionFiles(files, uncommitted), nil
 }
