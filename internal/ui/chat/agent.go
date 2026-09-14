@@ -38,6 +38,15 @@ type NestedToolReleaser interface {
 	NestedToolsReleased() bool
 }
 
+// BackgroundTaskTracker takes word of whether the task a background dispatch
+// started has finished. The dispatch's own tool result is only an
+// acknowledgement, so the task record is the only thing that can say so; a
+// finished one lets go of its nested tools like any other finished
+// delegation (see NestedToolReleaser) and stops its live clock.
+type BackgroundTaskTracker interface {
+	SetBackgroundTaskDone(done bool)
+}
+
 // ChildSessionTokenTracker lets the live-update path
 // (handleChildSessionUpdate in internal/ui/model/ui.go) push a running
 // child-session token count onto a delegation's status line, without this
@@ -66,6 +75,10 @@ type delegationToolMessageItem struct {
 	// the collapsed block leaves it out rather than showing zero.
 	releasedSteps int
 	stepsKnown    bool
+
+	// backgroundTaskDone records that the task a background dispatch started
+	// has reached a terminal status; see BackgroundTaskTracker.
+	backgroundTaskDone bool
 
 	// startTime and the token counters back the running status line (see
 	// renderAgentStatusLine): without it, a long delegation would render as
@@ -173,7 +186,19 @@ func (a *delegationToolMessageItem) NestedToolsReleased() bool {
 	if a.status == ToolStatusCanceled {
 		return true
 	}
-	return a.result != nil && backgroundDispatchTaskID(a.result) == ""
+	return a.result != nil && (a.backgroundTaskDone || backgroundDispatchTaskID(a.result) == "")
+}
+
+// SetBackgroundTaskDone implements BackgroundTaskTracker. A task that becomes
+// active again (resumed) reports into this block afresh.
+func (a *delegationToolMessageItem) SetBackgroundTaskDone(done bool) {
+	if a.backgroundTaskDone == done {
+		return
+	}
+	a.backgroundTaskDone = done
+	a.releaseNestedToolsIfFinished()
+	a.clearCache()
+	a.Bump()
 }
 
 // releaseNestedToolsIfFinished trades a finished delegation's nested tools
@@ -404,7 +429,7 @@ func NewAgentToolMessageItem(
 		if state.IsCanceled() {
 			return false
 		}
-		return !state.HasResult() || backgroundDispatchTaskID(state.Result) != ""
+		return !state.HasResult() || (backgroundDispatchTaskID(state.Result) != "" && !t.backgroundTaskDone)
 	}
 	return t
 }
@@ -582,6 +607,11 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if opts.Result != nil {
 		var bgMeta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &bgMeta); err == nil && bgMeta.TaskID != "" {
+			if r.agent.backgroundTaskDone {
+				content := renderFinishedBackgroundDispatch(sty, width, r.agent.displayName, opts, r.agent.headline,
+					r.agent.collapsedSteps(), r.agent.promptTokens, r.agent.completionTokens)
+				return clickableItemHover(sty, content, width, opts.Hovered)
+			}
 			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, r.agent.headline,
 				r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
 			return clickableItemHover(sty, content, width, opts.Hovered)
@@ -659,7 +689,7 @@ func NewAgenticFetchToolMessageItem(
 		if state.IsCanceled() {
 			return false
 		}
-		return !state.HasResult() || backgroundDispatchTaskID(state.Result) != ""
+		return !state.HasResult() || (backgroundDispatchTaskID(state.Result) != "" && !t.backgroundTaskDone)
 	}
 	return t
 }
@@ -712,6 +742,11 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	if opts.Result != nil {
 		var meta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.TaskID != "" {
+			if r.fetch.backgroundTaskDone {
+				content := renderFinishedBackgroundDispatch(sty, width, agenticFetchDisplayName, opts, prompt,
+					r.fetch.collapsedSteps(), r.fetch.promptTokens, r.fetch.completionTokens)
+				return clickableItemHover(sty, content, width, opts.Hovered)
+			}
 			content := renderBackgroundDispatch(sty, width, agenticFetchDisplayName, opts, prompt,
 				r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens)
 			return clickableItemHover(sty, content, width, opts.Hovered)
@@ -789,6 +824,31 @@ func renderCollapsedDelegation(
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// renderFinishedBackgroundDispatch renders a background dispatch whose task
+// has finished: the header and an outcome line, with no live clock. The
+// acknowledgement is all the result the tool call itself has - the task's
+// report reaches the transcript on its own - so there is nothing to preview.
+func renderFinishedBackgroundDispatch(
+	sty *styles.Styles,
+	width int,
+	name string,
+	opts *ToolRenderOpts,
+	headline string,
+	steps int,
+	promptTokens, completionTokens int64,
+) string {
+	header := toolHeader(sty, opts.Status, name, width, opts, headline)
+	if opts.Compact {
+		return header
+	}
+	const indent = "  "
+	line := renderDelegationOutcomeLine(sty, max(0, width-len(indent)), opts.Status, steps, 0, promptTokens, completionTokens)
+	if line == "" {
+		return header
+	}
+	return header + "\n" + indent + line
 }
 
 // renderBackgroundDispatch renders a background agent-tool dispatch: the

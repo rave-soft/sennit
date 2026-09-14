@@ -259,6 +259,16 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
 	items, lastUserMessageTime := sessionMessageItems(r.styles, r.config, msgs)
+	// Which background dispatches have finished decides whose child
+	// transcripts loadNestedToolCalls reads: nearly every delegation is one,
+	// and a finished one holds none of it (see chat.NestedToolReleaser).
+	if tasks, ok := r.workspace.(taskListWorkspace); ok && tasks.SupportsTasks() {
+		if list, err := tasks.ListTasks(r.ctx); err != nil {
+			slog.Debug("Failed to list tasks for a session load", "session_id", sessionID, "error", err)
+		} else {
+			markBackgroundDelegations(items, taskStatesByToolCall(list))
+		}
+	}
 	if err := loadNestedToolCalls(r.ctx, r.workspace, r.styles, r.config, sessionID, gen, items); err != nil {
 		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}

@@ -1046,3 +1046,30 @@ func TestAgentToolRestoredFinishedOmitsUnknownSteps(t *testing.T) {
 	require.NotContains(t, out, "step")
 	require.Contains(t, out, "done")
 }
+
+// TestAgentToolBackgroundTaskDoneReleasesNestedTools: nearly every delegation
+// is a background dispatch, whose tool result is only an acknowledgement.
+// Its task finishing is what finishes it - releasing its nested tools and
+// stopping its live clock - and a task resumed afterwards reports again.
+func TestAgentToolBackgroundTaskDoneReleasesNestedTools(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: true}
+	ack := &message.ToolResult{ToolCallID: "agent-parent", Content: "dispatched", Metadata: `{"task_id":"task-1"}`}
+	item := NewAgentToolMessageItem(&sty, parent, ack, false, nil)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"x"}`))
+	require.False(t, item.NestedToolsReleased())
+	require.True(t, item.isSpinning())
+
+	item.SetBackgroundTaskDone(true)
+
+	require.True(t, item.NestedToolsReleased())
+	require.Empty(t, item.NestedTools())
+	require.False(t, item.isSpinning(), "a finished task's block has no clock to tick")
+	require.Contains(t, ansi.Strip(item.Render(120)), "step 1")
+
+	item.SetBackgroundTaskDone(false)
+	require.False(t, item.NestedToolsReleased(), "a resumed task reports into its block again")
+	require.True(t, item.isSpinning())
+}

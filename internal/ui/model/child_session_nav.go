@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/rave-soft/sennit/internal/proto"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -116,6 +118,57 @@ func captureDelegationRef(item chat.ToolMessageItem) childSessionRef {
 func (m *UI) refreshDelegationBlocks() {
 	m.chat.SetDelegationsHidden(m.panelledDelegations())
 	m.chat.SetDelegationsUnopenable(m.unstartedDelegations())
+	m.chat.SetBackgroundDelegationsDone(m.backgroundDelegationStates())
+}
+
+// backgroundDelegationStates reports, by the id of the tool call that
+// started each, whether the listed tasks have finished (true) or are still
+// going (false). Nil until the list has been fetched at all.
+func (m *UI) backgroundDelegationStates() map[string]bool {
+	if m.agentList.cache.Timestamp.IsZero() {
+		return nil
+	}
+	return taskStatesByToolCall(m.agentList.cache.Value)
+}
+
+// taskStatesByToolCall maps each task that names a delegation's child
+// session to whether it has finished. Tasks in neither an active nor a
+// terminal status (idle) are left out, as are tasks with no such session.
+func taskStatesByToolCall(tasks []proto.Thread) map[string]bool {
+	var states map[string]bool
+	for _, task := range tasks {
+		_, toolCallID, ok := session.ParseAgentToolSessionID(task.SessionID)
+		if !ok {
+			continue
+		}
+		status := proto.ThreadStatus(task.Status)
+		if !status.Terminal() && !status.Active() {
+			continue
+		}
+		if states == nil {
+			states = make(map[string]bool)
+		}
+		states[toolCallID] = status.Terminal()
+	}
+	return states
+}
+
+// markBackgroundDelegations applies task states to freshly built items,
+// before loadNestedToolCalls decides whose child transcripts to read.
+func markBackgroundDelegations(items []chat.MessageItem, states map[string]bool) {
+	for _, item := range items {
+		tracker, ok := item.(chat.BackgroundTaskTracker)
+		if !ok {
+			continue
+		}
+		toolItem, ok := item.(chat.ToolMessageItem)
+		if !ok {
+			continue
+		}
+		if done, known := states[toolItem.ToolCall().ID]; known {
+			tracker.SetBackgroundTaskDone(done)
+		}
+	}
 }
 
 // unstartedDelegations names the loaded delegations that cannot be opened

@@ -1141,6 +1141,28 @@ func (m *Chat) SetDelegationsUnopenable(unopenable map[string]bool) {
 	}
 }
 
+// SetBackgroundDelegationsDone tells each loaded delegation whether the
+// background task it dispatched has finished, keyed by the id of the tool
+// call that started it. A delegation missing from states is left alone: no
+// record of its task is no reason to tell a finished block it is running.
+// See chat.BackgroundTaskTracker.
+func (m *Chat) SetBackgroundDelegationsDone(states map[string]bool) {
+	for i := range m.list.Len() {
+		item := m.list.ItemAt(i)
+		tracker, ok := item.(chat.BackgroundTaskTracker)
+		if !ok {
+			continue
+		}
+		toolItem, ok := item.(chat.ToolMessageItem)
+		if !ok {
+			continue
+		}
+		if done, known := states[toolItem.ToolCall().ID]; known {
+			tracker.SetBackgroundTaskDone(done)
+		}
+	}
+}
+
 // IsSelectedShellItem returns true if the currently selected item is a
 // ShellItem (bang-mode result).
 func (m *Chat) IsSelectedShellItem() bool {
