@@ -253,37 +253,23 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 			}
 
 			// The command may be on the deny list (e.g. go install,
-			// apt-get install, sudo, curl). The deny list is not a
-			// silent refusal: prompt the user, and on denial hand the
-			// model the exact command so the user can run it manually.
-			// On approval, the command runs with an empty deny list
-			// (execBlockFuncs) for this one user-approved run.
+			// apt-get install, sudo, curl). The deny list is not a silent
+			// refusal: the user is asked, and on denial the model is handed
+			// the exact command so the user can run it manually. On
+			// approval the command runs with an empty deny list
+			// (execBlockFuncs) for this one approved run.
+			//
+			// That ask is the only thing standing between the deny list and
+			// the command, so it is RequireExplicit: yolo, an auto-approved
+			// session and an --allowed-tools entry naming bash must not
+			// answer it, or the deny list would be off by default in every
+			// unattended session. It replaces the ordinary "Execute
+			// command" prompt rather than preceding it - a deny-listed
+			// command is never read-only, so both would otherwise fire and
+			// the user would answer twice for one command.
+			blocked := shell.BlockedBy(command, blockFuncs())
 			execBlockFuncs := blockFuncs()
-			if shell.BlockedBy(command, blockFuncs()) {
-				sessionID := GetSessionFromContext(ctx)
-				if sessionID == "" {
-					return fantasy.ToolResponse{}, missingSessionID("executing shell command")
-				}
-				_, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        execWorkingDir,
-					ToolCallID:  call.ID,
-					ToolName:    BashToolName,
-					Action:      "execute",
-					Description: fmt.Sprintf("Execute deny-listed command: %s", params.Command),
-					Params:      BashPermissionsParams(params),
-				})
-				if err != nil {
-					return fantasy.ToolResponse{}, err
-				}
-				if denied {
-					deniedResp := fantasy.NewTextErrorResponse(
-						"User denied permission. This command is on the deny list and will not run. " +
-							"If you still need it, ask the user to run it manually: " + params.Command,
-					)
-					deniedResp.StopTurn = true
-					return deniedResp, nil
-				}
+			if blocked {
 				execBlockFuncs = nil
 			}
 
@@ -293,24 +279,36 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, missingSessionID("executing shell command")
 			}
-			if !isSafeReadOnly || permissionRequired {
+			if blocked || !isSafeReadOnly || permissionRequired {
 				description := fmt.Sprintf("Execute command: %s", params.Command)
-				if permissionRequired {
+				switch {
+				case blocked:
+					description = fmt.Sprintf("Execute deny-listed command: %s", params.Command)
+				case permissionRequired:
 					description += " (workspace path check is best-effort; dynamic shell expansion requires approval)"
 				}
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        execWorkingDir,
-					ToolCallID:  call.ID,
-					ToolName:    BashToolName,
-					Action:      "execute",
-					Description: description,
-					Params:      BashPermissionsParams(params),
+					SessionID:       sessionID,
+					Path:            execWorkingDir,
+					ToolCallID:      call.ID,
+					ToolName:        BashToolName,
+					Action:          "execute",
+					Description:     description,
+					Params:          BashPermissionsParams(params),
+					RequireExplicit: blocked,
 				})
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
 				if denied {
+					if blocked {
+						deniedResp := fantasy.NewTextErrorResponse(
+							"User denied permission. This command is on the deny list and will not run. " +
+								"If you still need it, ask the user to run it manually: " + params.Command,
+						)
+						deniedResp.StopTurn = true
+						return deniedResp, nil
+					}
 					return resp, nil
 				}
 			}

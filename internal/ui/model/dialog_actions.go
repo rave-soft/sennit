@@ -400,21 +400,6 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// immediately, and the account list is reloaded so the "Active"
 		// marker moves to the right row.
 		cmds = append(cmds, reloadAccountsCmd(m.com, msg.ProviderID), refreshAccountLabelCmd(m.com, m, msg.ProviderID))
-	case dialog.ActionRefreshTokens:
-		ws := m.com.Workspace
-		ctx := m.com.Context()
-		providerID := msg.ProviderID
-		cmds = append(cmds, func() tea.Msg {
-			err := ws.RefreshOAuthToken(ctx, config.ScopeGlobal, providerID)
-			if err != nil {
-				return dialog.ActionRefreshTokensResult{ProviderID: providerID, Err: err}
-			}
-			accs, err := ws.ListAccounts(providerID)
-			if err != nil {
-				return dialog.ActionRefreshTokensResult{ProviderID: providerID, Err: err}
-			}
-			return dialog.ActionAccountsLoaded{ProviderID: providerID, Accounts: accs}
-		})
 	case dialog.ActionRefreshAccountTokens:
 		ws := m.com.Workspace
 		ctx := m.com.Context()

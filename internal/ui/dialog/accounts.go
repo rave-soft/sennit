@@ -110,13 +110,18 @@ func NewAccounts(com *common.Common, providerID string) (*Accounts, tea.Cmd) {
 	// precedent ctrl+r/ctrl+y already set here and in select_dialog.go
 	// for their own globally-bound chords.
 	m.keyMap.Refresh = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "refresh limits"))
-	// r for "refresh tokens": the accounts dialog's filter input only
-	// claims bare letters when it has focus, and while a dialog is open
-	// every keypress is routed to the dialog stack before the global
-	// bindings (see internal/ui/model/keypress.go), so a bare "r" is
-	// safe. It is only offered for OAuth providers (m.caps.OAuth), since
-	// API-key providers have no token to refresh.
-	m.keyMap.RefreshTokens = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh tokens"))
+	// ctrl+t for "refresh token" (t for token), on the selected account.
+	// It must be a chord, not a bare letter: every key this dialog does
+	// not claim is fed to the filterable list's filter input (see
+	// selectDialog.handleNavigation), so a bare letter is one the user can
+	// no longer type while filtering - and these rows are email addresses.
+	// ctrl+t is free in textinput.DefaultKeyMap and in select_dialog.go,
+	// on top of the ctrl+r/ctrl+x/ctrl+l this file claims above; it is
+	// bound globally to "toggle todos" (model/keys.go), which is
+	// unreachable while a dialog is open for the same reason ctrl+l's
+	// global binding is. Only offered for OAuth providers (m.caps.OAuth),
+	// since API-key providers have no token to refresh.
+	m.keyMap.RefreshTokens = key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "refresh token"))
 	// ctrl+a for "add account" / sign-in: the same chord the account edit
 	// form uses, so the muscle memory carries between the two. It is
 	// checked before the selectDialog (whose filter input claims ctrl+a
@@ -173,16 +178,10 @@ type ActionAddAccount struct {
 	ProviderID string
 }
 
-// ActionRefreshTokens is sent when the "refresh tokens" shortcut is
-// triggered from the accounts list, to refresh the provider's stored
-// OAuth token off the Update loop.
-type ActionRefreshTokens struct {
-	ProviderID string
-}
-
 // ActionRefreshTokensResult carries the outcome of the async
-// RefreshOAuthToken call. It round-trips back to the Accounts dialog via
-// the DialogAddressed mechanism.
+// per-account token refresh (see [ActionRefreshAccountTokens]). It
+// round-trips back to the Accounts dialog via the DialogAddressed
+// mechanism.
 type ActionRefreshTokensResult struct {
 	ProviderID string
 	Err        error
@@ -313,7 +312,10 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 				m.state = accountsStateLoading
 				return ActionCmd{tea.Batch(m.spinner.Tick, m.refreshLimitsCmd())}
 			case m.caps.OAuth && key.Matches(msg, m.keyMap.RefreshTokens):
-				return ActionRefreshTokens{ProviderID: m.providerID}
+				if a, ok := m.selectedAccount(); ok {
+					return ActionRefreshAccountTokens{ProviderID: m.providerID, AccountID: a.ID}
+				}
+				return nil
 			}
 			return m.sd.HandleMsg(msg)
 		}

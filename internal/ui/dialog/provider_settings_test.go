@@ -2,12 +2,15 @@ package dialog
 
 import (
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -330,4 +333,63 @@ func TestProviderSettings_CtrlADoesNotSignIn(t *testing.T) {
 	_, isAdd := action.(ActionAddAccount)
 	require.False(t, isAdd, "ctrl+a must not trigger sign-in in provider settings")
 	require.Empty(t, m.proxy.Value(), "ctrl+a must not type into the field either")
+}
+
+// TestProviderAuthState covers the classification the badge renders, which
+// the badge tests above deliberately bypass by injecting a state. It reads
+// the provider's live credential - the one requests go out with - and the
+// four answers it can give are each a different thing to tell the user.
+func TestProviderAuthState(t *testing.T) {
+	t.Parallel()
+
+	expired := &oauth.Token{AccessToken: "at", RefreshToken: "rt", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
+	valid := &oauth.Token{AccessToken: "at", RefreshToken: "rt", ExpiresAt: time.Now().Add(time.Hour).Unix()}
+
+	tests := []struct {
+		name string
+		// runtime is the provider's live credential; nil means the
+		// provider has no runtime entry at all.
+		runtime *providerstate.Provider
+		want    providerSettingsAuthState
+	}{
+		{
+			name:    "a valid OAuth token is signed in",
+			runtime: &providerstate.Provider{ID: "codex", OAuthToken: valid},
+			want:    providerSettingsAuthOK,
+		},
+		{
+			name:    "an expired OAuth token needs a refresh",
+			runtime: &providerstate.Provider{ID: "codex", OAuthToken: expired},
+			want:    providerSettingsAuthExpired,
+		},
+		{
+			// Nothing to say: an API key has no expiry, and the key is
+			// already visible in the settings themselves.
+			name:    "an API key reports nothing",
+			runtime: &providerstate.Provider{ID: "codex", APIKey: "sk-test"},
+			want:    providerSettingsAuthUnknown,
+		},
+		{
+			name:    "no credential at all is not signed in",
+			runtime: &providerstate.Provider{ID: "codex"},
+			want:    providerSettingsAuthMissing,
+		},
+		{
+			name:    "a provider with no runtime entry reports nothing",
+			runtime: nil,
+			want:    providerSettingsAuthUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
+			com.Config().RuntimeProviders = csync.NewMap[string, providerstate.Provider]()
+			if tt.runtime != nil {
+				com.Config().SetRuntimeProvider("codex", *tt.runtime)
+			}
+			require.Equal(t, tt.want, providerAuthState(com, "codex"))
+		})
+	}
 }

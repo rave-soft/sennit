@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
@@ -179,6 +180,73 @@ func shortHelpLine(h *help.Model, bindings []key.Binding, width int) string {
 		b.WriteString(seg)
 	}
 	return b.String()
+}
+
+// promptCursor places an input's cursor onto the rendered dialog by
+// finding the line the input is drawn on, rather than deriving the offset
+// from style getters the way [InputCursor] does. A dialog whose layout has
+// anything the getters under-report between the title and the field - a
+// header, a blank-line margin, a wrapped description - cannot use the
+// getters without the cursor drifting away from the field; searching what
+// was actually rendered cannot drift by construction.
+//
+// cur is the cursor as the input itself reports it: relative to the start
+// of its own render, which begins at the prompt. view is the full rendered
+// dialog. prompt is the input's own Prompt, which is the leftmost thing it
+// draws, so a line is the field's when the prompt is the first thing on it
+// after the frame - and the prompt's offset within that line is what the
+// input's own coordinates are measured from.
+//
+// occurrence disambiguates fields sharing a prompt (three inputs all
+// prompted "> ", say): 0 is the first such line in the view, 1 the second.
+// Render order is what it counts, so callers pass the focused field's
+// index among the inputs they actually rendered.
+//
+// The returned cursor is a copy; cur is not modified. A view with no
+// matching line yields nil - the cursor is dropped rather than guessed at.
+func promptCursor(view, prompt string, occurrence int, cur *tea.Cursor) *tea.Cursor {
+	if cur == nil || view == "" || prompt == "" || occurrence < 0 {
+		return nil
+	}
+	seen := 0
+	for y, line := range strings.Split(view, "\n") {
+		plain := ansi.Strip(line)
+		x := strings.Index(plain, prompt)
+		if x < 0 || !isDialogFrame(plain[:x]) {
+			continue
+		}
+		if seen < occurrence {
+			seen++
+			continue
+		}
+		placed := *cur
+		placed.X += ansi.StringWidth(plain[:x])
+		placed.Y += y
+		return &placed
+	}
+	return nil
+}
+
+// isDialogFrame reports whether s is only what a dialog draws to the left
+// of a field on the field's own line: padding and border.
+//
+// It tests the character ranges rather than a literal set of runes,
+// because the border is the theme's to choose: rounded, thick, doubled and
+// block borders each draw a different left edge, and a hardcoded set
+// silently stops matching - and so drops the cursor - the moment a theme
+// picks one that is not in it.
+func isDialogFrame(s string) bool {
+	for _, r := range s {
+		switch {
+		case r == ' ' || r == '\t':
+		// Box Drawing (U+2500-U+257F) and Block Elements (U+2580-U+259F):
+		// between them, every border lipgloss draws.
+		case r >= 0x2500 && r <= 0x259F:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // InputCursor adjusts the cursor position for an input field within a dialog.

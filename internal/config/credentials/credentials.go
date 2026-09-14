@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -390,20 +391,48 @@ func (m *Manager) usableDiskToken(scope config.Scope, providerID string, entryTo
 // RefreshOAuthTokenForAccount refreshes the OAuth token of one stored
 // account (providerID/accountID) off the shared exchange machinery.
 //
-// The exchange itself is the same single-flighted, cross-process-locked
-// operation RefreshOAuthToken runs for the provider's active credential
-// (refreshSF is keyed by account, not provider, so a concurrent refresh of
-// the active account and a refresh of another account never double-spend
-// the same refresh token), but the token is persisted back to the named
-// account in the account store rather than published to the active
-// credential: refreshing a non-active account must not make it live, and
-// the active account keeps its own token until it is selected.
+// For an account that is not the live one, the exchange is the same
+// single-flighted, cross-process-locked operation RefreshOAuthToken runs
+// (refreshSF is keyed by account here, not by provider, so a concurrent
+// refresh of the active account and a refresh of another account never
+// double-spend the same refresh token) and the result is persisted back to
+// the named account in the account store: refreshing a stored account must
+// not make it live.
+//
+// The active account is a different shape and is delegated to
+// RefreshOAuthToken. Its token lives in two places - the account store
+// entry and the live provider credential - and exchanging against the
+// account-store copy alone would leave the live credential holding a
+// refresh token the provider has just spent, so the next ordinary refresh
+// would fail with invalid_grant and take the session's auth down with it.
+// RefreshOAuthToken owns that path, including adopting a peer process's
+// token instead of exchanging; the account-store copy is brought level
+// with the live one afterwards.
 func (m *Manager) RefreshOAuthTokenForAccount(ctx context.Context, scope config.Scope, providerID, accountID string) error {
+	if cred, ok := m.store.Config().RuntimeProvider(providerID); ok && cred.Account != "" && cred.Account == accountID {
+		if err := m.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+			return err
+		}
+		return m.syncActiveAccountToken(providerID, accountID)
+	}
 	key := fmt.Sprintf("%d\x00%s\x00%s", scope, providerID, accountID)
 	_, err, _ := m.refreshSF.Do(key, func() (any, error) {
 		return nil, m.refreshOAuthTokenForAccountLocked(ctx, providerID, accountID)
 	})
 	return err
+}
+
+// syncActiveAccountToken copies the live provider credential's token into
+// the named account's entry in the account store, so the two copies of the
+// active account's token do not drift after a refresh. A missing account
+// entry is not an error: the account store is a convenience over the live
+// credential, not its source of truth.
+func (m *Manager) syncActiveAccountToken(providerID, accountID string) error {
+	cred, ok := m.store.Config().RuntimeProvider(providerID)
+	if !ok || cred.OAuthToken == nil {
+		return nil
+	}
+	return m.persistAccountToken(providerID, accountID, cred.OAuthToken, false)
 }
 
 // refreshOAuthTokenForAccountLocked performs the single account's exchange.
@@ -453,31 +482,39 @@ func (m *Manager) refreshOAuthTokenForAccountLocked(ctx context.Context, provide
 	}
 	refreshedToken.SetExpiresAt()
 
-	// Persist the refreshed token back to the named account. The store is
-	// re-read inside the write so a concurrent limit-refresh of the same
-	// account is not clobbered.
+	return m.persistAccountToken(providerID, accountID, refreshedToken, true)
+}
+
+// persistAccountToken writes token into the named account's entry in the
+// account store, retrying a transient write failure the same number of
+// times the provider-credential path does. The store is re-read inside
+// each attempt so a concurrent limit-refresh of the same account keeps its
+// other fields.
+//
+// mustExist says what a missing account entry means. It is an error after
+// an exchange - the refresh token has been spent and there is nowhere to
+// put what it bought - and merely nothing to do when the write is only
+// mirroring a token that is already live elsewhere.
+func (m *Manager) persistAccountToken(providerID, accountID string, token *oauth.Token, mustExist bool) error {
 	var persistErr error
 	for attempt := 1; attempt <= refreshPersistAttempts; attempt++ {
 		updated, err := m.store.ListAccounts(providerID)
 		if err != nil {
 			return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
 		}
-		idx := -1
-		for i, a := range updated {
-			if a.ID == accountID {
-				idx = i
-				break
-			}
-		}
+		idx := slices.IndexFunc(updated, func(a accounts.Account) bool { return a.ID == accountID })
 		if idx < 0 {
-			return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
-		}
-		updated[idx].Token = refreshedToken
-		if persistErr = m.store.UpsertAccount(providerID, updated[idx]); persistErr == nil {
-			slog.Info("Successfully refreshed OAuth token for account", "provider", providerID, "account", accountID)
+			if mustExist {
+				return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
+			}
 			return nil
 		}
-		slog.Warn("Failed to persist refreshed account OAuth token, retrying",
+		updated[idx].Token = token
+		if persistErr = m.store.UpsertAccount(providerID, updated[idx]); persistErr == nil {
+			slog.Info("Successfully persisted OAuth token for account", "provider", providerID, "account", accountID)
+			return nil
+		}
+		slog.Warn("Failed to persist account OAuth token, retrying",
 			"provider", providerID, "account", accountID, "attempt", attempt, "error", persistErr)
 	}
 	return persistErr

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -31,6 +32,11 @@ type fakeStore struct {
 	// exercise refreshOAuthTokenLocked's persist-retry path.
 	persistFailures  int
 	persistCallCount int
+
+	// accountStore is the in-memory stand-in for the global accounts
+	// file, keyed by provider ID. RefreshOAuthTokenForAccount is the only
+	// thing that reads and writes it.
+	accountStore map[string][]accounts.Account
 }
 
 var errPersistFailed = fmt.Errorf("simulated persist failure")
@@ -122,11 +128,25 @@ func (f *fakeStore) PersistRefreshedToken(_ config.Scope, providerID string, _ c
 	return f.writeFields(providerID, config.ProviderConfig{APIKey: token.AccessToken, OAuthToken: token})
 }
 
-func (f *fakeStore) ListAccounts(_ string) ([]accounts.Account, error) {
-	return nil, nil
+func (f *fakeStore) ListAccounts(providerID string) ([]accounts.Account, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.accountStore[providerID]), nil
 }
 
-func (f *fakeStore) UpsertAccount(_ string, _ accounts.Account) error {
+func (f *fakeStore) UpsertAccount(providerID string, a accounts.Account) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.accountStore == nil {
+		f.accountStore = map[string][]accounts.Account{}
+	}
+	list := f.accountStore[providerID]
+	if i := slices.IndexFunc(list, func(e accounts.Account) bool { return e.ID == a.ID }); i >= 0 {
+		list[i] = a
+	} else {
+		list = append(list, a)
+	}
+	f.accountStore[providerID] = list
 	return nil
 }
 

@@ -395,6 +395,75 @@ func TestAgentTool_DelegatedCallerCannotPickAnAgent(t *testing.T) {
 	require.False(t, resp.IsError, resp.Content)
 }
 
+// TestAgentTool_GeneralPurposeAlias covers both halves of the alias: a
+// model that spells out the built-in's name instead of omitting
+// subagent_type gets the built-in, and the enum admits that spelling
+// exactly once so a strict-schema provider does not reject the tool.
+func TestAgentTool_GeneralPurposeAlias(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	coord.cfg.Config().Agents["reviewer"] = config.Agent{ID: "reviewer", Name: "Reviewer", Prompt: "You review."}
+
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
+	require.NoError(t, err)
+	require.Equal(t, 1, countEnumValue(t, tool, generalPurposeAgentID),
+		"the alias belongs in the enum once")
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: `{"prompt":"x","subagent_type":"general-purpose"}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.Empty(t, lastCreate(t, fake).AgentID, "the alias runs the built-in, not a named agent")
+}
+
+// TestAgentTool_ConfiguredGeneralPurposeAgentWinsOverTheAlias pins what a
+// workspace that names one of its own agents "general-purpose" gets: its
+// own agent. The alias exists so a model's wording does not dead-end, and
+// it must not swallow a real agent of the same name - nor put that name in
+// the schema enum twice.
+func TestAgentTool_ConfiguredGeneralPurposeAgentWinsOverTheAlias(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	coord.cfg.Config().Agents[generalPurposeAgentID] = config.Agent{
+		ID: generalPurposeAgentID, Name: "General Purpose", Prompt: "You do anything.",
+	}
+
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
+	require.NoError(t, err)
+	require.Equal(t, 1, countEnumValue(t, tool, generalPurposeAgentID),
+		"a configured agent already puts the name in the enum; the alias must not duplicate it")
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: `{"prompt":"x","subagent_type":"general-purpose"}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.Equal(t, generalPurposeAgentID, lastCreate(t, fake).AgentID,
+		"the workspace's own agent is what the user meant")
+}
+
+// countEnumValue reports how many times want appears in the subagent_type
+// enum of tool's advertised input schema.
+func countEnumValue(t *testing.T, tool fantasy.AgentTool, want string) int {
+	t.Helper()
+	raw, err := json.Marshal(tool.Info().InputSchema)
+	require.NoError(t, err)
+	var schema struct {
+		Properties struct {
+			SubagentType struct {
+				Enum []string `json:"enum"`
+			} `json:"subagent_type"`
+		} `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &schema))
+	n := 0
+	for _, v := range schema.Properties.SubagentType.Enum {
+		if v == want {
+			n++
+		}
+	}
+	return n
+}
+
 // lastCreate returns the args of the most recent Create, failing the test
 // if nothing was dispatched.
 func lastCreate(t *testing.T, fake *fakeTaskManager) tools.TaskCreateArgs {

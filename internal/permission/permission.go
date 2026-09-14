@@ -45,6 +45,19 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	// RequireExplicit marks a request that only a person may answer, and
+	// only for this exact operation. The blanket approvals - yolo
+	// (SetSkipRequests), an auto-approved session, and an allowed-tools
+	// entry naming the tool or tool:action - are all ignored for it,
+	// because none of them is a decision about *this* operation: they
+	// were given before it was known. A persistent grant recorded from a
+	// real answer to this same request still applies, since that answer
+	// named these exact Params.
+	//
+	// It exists for the bash deny list (go install, apt, sudo, curl, ...),
+	// which is a floor rather than a default: the tool offers the user a
+	// way through it, and that way has to be an actual person saying yes.
+	RequireExplicit bool `json:"require_explicit"`
 }
 
 type PermissionNotification struct {
@@ -474,22 +487,33 @@ func IsKnownAction(action string) bool {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip.Load() {
-		return true, nil
-	}
+	// A RequireExplicit request skips every blanket approval below (see
+	// the field's own comment) and goes straight to the prompt - or, if
+	// the user has already answered this exact request with "always", to
+	// the persistent grant lookup further down.
+	if !opts.RequireExplicit {
+		if s.skip.Load() {
+			return true, nil
+		}
 
-	// Check if the tool/action combination is in the allowlist. The
-	// action half is one of KnownActions, never free text: an allowlist
-	// entry of "bash:npm run build" matches nothing and grants nothing.
-	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
-		return true, nil
+		// Check if the tool/action combination is in the allowlist. The
+		// action half is one of KnownActions, never free text: an allowlist
+		// entry of "bash:npm run build" matches nothing and grants nothing.
+		commandKey := opts.ToolName + ":" + opts.Action
+		if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+			return true, nil
+		}
 	}
 
 	// A PreToolUse hook that returned decision=allow stamps the context
 	// with the tool call ID. Treat that as a pre-approval and skip the
 	// prompt entirely. We still publish a granted notification so the UI
 	// and audit subscribers see the outcome.
+	//
+	// This one also answers a RequireExplicit request, unlike the blanket
+	// approvals above: a PreToolUse hook is handed the tool's actual input
+	// and decides per call, so allowing a deny-listed command there is a
+	// decision about that command and not a standing default.
 	if hookApproved(ctx, opts.ToolCallID) {
 		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - the outcome must reach the UI even if the caller's context dies mid-publish
 			ToolCallID: opts.ToolCallID,
@@ -507,7 +531,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	autoApprove := s.autoApproveSessions[opts.SessionID]
 	s.autoApproveSessionsMu.RUnlock()
 
-	if autoApprove {
+	if autoApprove && !opts.RequireExplicit {
 		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{ // ok: detached - as above
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,

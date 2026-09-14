@@ -292,10 +292,11 @@ type (
 	ActionAccountActivated struct {
 		ProviderID string
 	}
-	// ActionRefreshAccountTokens is sent when the user selects an account
-	// from the list (Enter on a non-active row) to refresh that specific
-	// account's OAuth token. The caller runs the refresh off the Update
-	// loop and reloads the account list when done.
+	// ActionRefreshAccountTokens is sent when the "refresh token"
+	// shortcut is pressed over an account row, to refresh that one
+	// account's OAuth token without changing which account is live. The
+	// caller runs the refresh off the Update loop and reloads the account
+	// list when done.
 	ActionRefreshAccountTokens struct {
 		ProviderID string
 		AccountID  string

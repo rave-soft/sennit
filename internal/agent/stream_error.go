@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"net/http"
 	"strings"
 
 	"charm.land/fantasy"
@@ -22,6 +23,14 @@ const (
 	// typed ProviderQuotaError instead of a generic finish reason so the
 	// TUI can render its own styled hyperlink.
 	classModelNotEnabled
+	// classRateLimited means the provider answered 429 and kept answering
+	// it until the step's retry budget ran out - with account rotation, if
+	// the provider rotates, having already had its turn from inside that
+	// budget. The turn is over either way; this only decides what the user
+	// is told, because a provider's own 429 body is usually empty or
+	// unhelpful ("too many requests") and reads as a bug rather than as
+	// "wait a while".
+	classRateLimited
 )
 
 // modelNotEnabledPhrases are lowercase substrings known to appear in a
@@ -52,6 +61,9 @@ var modelNotEnabledPhrases = []string{
 func classifyStreamError(providerErr *fantasy.ProviderError) streamErrorClass {
 	if providerErr == nil {
 		return classGenericProviderError
+	}
+	if providerErr.StatusCode == http.StatusTooManyRequests {
+		return classRateLimited
 	}
 	msg := strings.ToLower(providerErr.Message)
 	for _, phrase := range modelNotEnabledPhrases {

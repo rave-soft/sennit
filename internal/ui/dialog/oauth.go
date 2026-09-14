@@ -11,7 +11,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
@@ -565,52 +564,16 @@ func (m *OAuth) innerContent() string {
 // drift from what the user sees, whatever moves above it; when the anchor
 // is not found the cursor is dropped rather than guessed at.
 //
-// The search anchor is the prompt, not the value. The value can be empty
+// The search anchor is the prompt, not the value: the value can be empty
 // (the field is prefilled asynchronously and may not have landed yet),
-// which leaves nothing to search for. The prompt is always present, and
-// it is the leftmost thing the input renders, so the first line whose
-// visible text, trimmed of the frame padding and border, begins with the
-// prompt is the field.
+// which leaves nothing to search for. See [promptCursor], which this
+// shares with the provider settings dialog. This dialog renders one input,
+// so its prompt line is the first one.
 func (m *OAuth) proxyCursor(view string) *tea.Cursor {
 	if m.proxyInput == nil {
 		return nil
 	}
-	cur := m.proxyInput.Cursor()
-	if cur == nil {
-		return nil
-	}
-
-	// The field line is the one whose visible text, trimmed of the frame
-	// padding and the dialog's border, begins with the prompt. The prompt
-	// is the leftmost thing the input renders, and nothing else in the
-	// dialog does, so the first such line is the field.
-	//
-	// The offset within it is the visible width of the text before the
-	// field on that line. The input reports its cursor relative to the
-	// start of its own render, which begins at the prompt, so the prompt
-	// is the reference the position is measured from. When the prompt is
-	// styled with a background, the input renders it padded to its width,
-	// but the cursor is still counted from where the prompt starts.
-	//
-	// The trimmed text is used as the anchor so the match is the field's
-	// own prompt, not a stray occurrence of the prompt string elsewhere
-	// on the line. The width before it is measured on the original line
-	// so the frame padding is counted, not dropped.
-	for y, line := range strings.Split(view, "\n") {
-		plain := ansi.Strip(line)
-		trimmed := strings.TrimLeft(plain, "│╭╰ ")
-		if !strings.HasPrefix(trimmed, m.proxyInput.Prompt) {
-			continue
-		}
-		x := strings.Index(plain, trimmed)
-		if x < 0 {
-			continue
-		}
-		cur.X += ansi.StringWidth(plain[:x])
-		cur.Y += y
-		return cur
-	}
-	return nil
+	return promptCursor(view, m.proxyInput.Prompt, 0, m.proxyInput.Cursor())
 }
 
 // FullHelp returns the full help view.

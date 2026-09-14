@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/proxyhttp"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -42,9 +41,13 @@ const (
 	providerSettingsFieldCooldown
 )
 
-// providerSettingsAuthState describes the active account's credential
-// state for a provider that uses OAuth tokens. It is read-only display
-// state, not a focusable field.
+// providerSettingsAuthState describes the state of the provider's live
+// credential - the one requests actually go out with - for a provider that
+// uses OAuth tokens. It is read-only display state, not a focusable field.
+//
+// This is a provider-level dialog and this is the provider-level
+// credential: which of several stored accounts is live, and what shape each
+// of the others is in, is the accounts dialog's subject, not this one's.
 type providerSettingsAuthState int
 
 const (
@@ -55,9 +58,9 @@ const (
 )
 
 // providerSettingsAuthLoadedMsg carries the result of the async
-// ListAccounts + RuntimeProvider read kicked off by NewProviderSettings.
-// It round-trips back into this same dialog's HandleMsg via the
-// DialogAddressed mechanism, the same way ActionAccountsLoaded does.
+// credential read kicked off by NewProviderSettings. It round-trips back
+// into this same dialog's HandleMsg via the DialogAddressed mechanism, the
+// same way ActionAccountsLoaded does.
 type providerSettingsAuthLoadedMsg struct {
 	providerID string
 	state      providerSettingsAuthState
@@ -89,10 +92,9 @@ type ProviderSettings struct {
 	threshold textinput.Model
 	cooldown  textinput.Model
 
-	// authState reflects the active account's credential state, populated
-	// by loadAuthStateCmd from ListAccounts + RuntimeProvider. It is only
-	// meaningful for providers that use OAuth tokens; API-key providers
-	// keep it at providerSettingsAuthUnknown.
+	// authState reflects the provider's live credential, populated by
+	// loadAuthStateCmd. It is only meaningful for providers that use OAuth
+	// tokens; API-key providers keep it at providerSettingsAuthUnknown.
 	authState providerSettingsAuthState
 
 	// order is the account order the config already carried, kept verbatim
@@ -132,9 +134,9 @@ var _ Dialog = (*ProviderSettings)(nil)
 // cooldown instead — never both, and never a field config validation
 // would reject (see providerload's rotation validation).
 //
-// The returned tea.Cmd kicks off the async auth-state read (ListAccounts +
-// RuntimeProvider) that populates m.authState; run it alongside the
-// dialog to have the auth badge visible on first frame.
+// The returned tea.Cmd kicks off the async credential read that populates
+// m.authState; run it alongside the dialog to have the auth badge visible
+// on first frame.
 func NewProviderSettings(com *common.Common, providerID string) (*ProviderSettings, tea.Cmd) {
 	m := newProviderSettings(com, providerID, com.Workspace.AccountCapabilities(providerID))
 	return m, m.loadAuthStateCmd()
@@ -226,25 +228,40 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 	return m
 }
 
-// loadAuthStateCmd reads the active account's credential state off the
-// Update loop. It is a no-op for providers whose accounts use API keys
-// (authState stays providerSettingsAuthUnknown and the badge is not
-// rendered). com and providerID are captured by value so the closure
-// doesn't race with the dialog being mutated concurrently.
+// loadAuthStateCmd reads the provider's live credential off the Update
+// loop. It reports nothing (providerSettingsAuthUnknown, and no badge) for
+// a provider that is not configured at all, and for one authenticating
+// with an API key, which has no expiry to report on. com and providerID
+// are captured by value so the closure doesn't race with the dialog being
+// mutated concurrently.
 func (m *ProviderSettings) loadAuthStateCmd() tea.Cmd {
 	com := m.com
 	providerID := m.providerID
 	return func() tea.Msg {
-		state := providerSettingsAuthUnknown
-		if pc, ok := com.Config().RuntimeProvider(providerID); ok && pc.OAuthToken != nil {
-			state = providerSettingsAuthOK
-			if pc.OAuthToken.IsExpired() {
-				state = providerSettingsAuthExpired
-			}
-		} else if pc, ok := com.Config().RuntimeProvider(providerID); ok && pc.APIKey == "" {
-			state = providerSettingsAuthMissing
+		return providerSettingsAuthLoadedMsg{
+			providerID: providerID,
+			state:      providerAuthState(com, providerID),
 		}
-		return providerSettingsAuthLoadedMsg{providerID: providerID, state: state}
+	}
+}
+
+// providerAuthState classifies the provider's live credential.
+func providerAuthState(com *common.Common, providerID string) providerSettingsAuthState {
+	pc, ok := com.Config().RuntimeProvider(providerID)
+	switch {
+	case !ok:
+		return providerSettingsAuthUnknown
+	case pc.OAuthToken != nil:
+		if pc.OAuthToken.IsExpired() {
+			return providerSettingsAuthExpired
+		}
+		return providerSettingsAuthOK
+	case pc.APIKey != "":
+		// An API key carries no expiry, so there is nothing to report
+		// that the user cannot already see in the settings themselves.
+		return providerSettingsAuthUnknown
+	default:
+		return providerSettingsAuthMissing
 	}
 }
 
@@ -410,68 +427,60 @@ func (m *ProviderSettings) submit() Action {
 	return ActionSubmitProviderSettings{ProviderID: m.providerID, Proxy: proxy, Rotation: rotation}
 }
 
-// Cursor returns the cursor position relative to the dialog by searching
-// the rendered view for the focused field's prompt. Deriving the offset
+// Cursor returns the cursor position relative to the dialog by finding
+// the focused field's prompt in the rendered view. Deriving the offset
 // from style getters (the old fieldRow approach) drifts from what is
 // actually rendered when the layout includes blank-line margins around
 // InputPrompt-styled inputs, which added a phantom row that pushed the
-// cursor one line too low. Searching for the prompt in the rendered view
-// cannot drift: the first line whose visible text, trimmed of frame
-// padding and border, begins with the field's prompt is the field.
+// cursor one line too low. See [promptCursor] for how the search works.
 //
-// All three fields share the same prompt ("> "), so the search skips
-// lines rendered by a different field. When the focused field has a
-// value, the line must contain that value. When it is empty, the line
-// must contain this field's placeholder (distinct from the other fields'
-// placeholders).
+// All three inputs share the same prompt ("> "), so the field is picked by
+// position: inputIndex counts the inputs rendered before the focused one,
+// and Draw renders them in m.fields order, which is the order they are
+// focused in. Matching on the field's value or placeholder instead would
+// be ambiguous the moment two fields held the same text.
 //
-// view is the full rendered dialog string (what Draw renders). It is nil
-// when the caller does not yet have a view, in which case the cursor is
-// dropped rather than guessed at.
+// view is the full rendered dialog string (what Draw renders); an empty
+// one, or a focused field with no input, drops the cursor rather than
+// guessing at it.
 func (m *ProviderSettings) Cursor(view string) *tea.Cursor {
-	var input textinput.Model
+	input, ok := m.focusedInput()
+	if !ok {
+		return nil
+	}
+	return promptCursor(view, input.Prompt, m.inputIndex(), input.Cursor())
+}
+
+// focusedInput returns the text input of the field that currently has
+// focus. The Enabled field is not a text input, so it reports false.
+func (m *ProviderSettings) focusedInput() (textinput.Model, bool) {
 	switch m.currentField() {
 	case providerSettingsFieldProxy:
-		input = m.proxy
+		return m.proxy, true
 	case providerSettingsFieldThreshold:
-		input = m.threshold
+		return m.threshold, true
 	case providerSettingsFieldCooldown:
-		input = m.cooldown
+		return m.cooldown, true
 	default:
-		return nil
+		return textinput.Model{}, false
 	}
+}
 
-	cur := input.Cursor()
-	if cur == nil || view == "" {
-		return nil
-	}
-
-	value := input.Value()
-	// The anchor distinguishes this field's line from the other fields'
-	// lines: the value when non-empty, the placeholder when empty.
-	anchor := value
-	if anchor == "" {
-		anchor = input.Placeholder
-	}
-
-	for y, line := range strings.Split(view, "\n") {
-		plain := ansi.Strip(line)
-		trimmed := strings.TrimLeft(plain, "│╭╰ ")
-		if !strings.HasPrefix(trimmed, input.Prompt) {
-			continue
+// inputIndex reports how many text inputs Draw renders before the focused
+// one. Draw walks m.fields in order and the Enabled field draws no input,
+// so counting the text-input fields ahead of the focused one gives the
+// focused input's position among the prompt lines in the rendered view.
+func (m *ProviderSettings) inputIndex() int {
+	n := 0
+	for _, f := range m.fields {
+		if f == m.currentField() {
+			break
 		}
-		if anchor != "" && !strings.Contains(plain, anchor) {
-			continue
+		if f != providerSettingsFieldEnabled {
+			n++
 		}
-		x := strings.Index(plain, trimmed)
-		if x < 0 {
-			continue
-		}
-		cur.X += ansi.StringWidth(plain[:x])
-		cur.Y += y
-		return cur
 	}
-	return nil
+	return n
 }
 
 // Draw implements [Dialog].
@@ -557,17 +566,17 @@ func (m *ProviderSettings) enabledView() string {
 	return style.Render(fmt.Sprintf("‹ %s ›", value))
 }
 
-// authBadge renders the active account's credential state as a short
-// status line. It returns "" when the provider uses API keys (authState
-// stays providerSettingsAuthUnknown) so the badge is invisible for
-// non-OAuth providers.
+// authBadge renders the provider's credential state as a short status
+// line. It returns "" when there is nothing to report (authState stays
+// providerSettingsAuthUnknown), so the badge is invisible for API-key
+// providers.
 func (m *ProviderSettings) authBadge() string {
 	t := m.com.Styles
 	label, style := m.authStateLabel()
 	if label == "" {
 		return ""
 	}
-	return t.Dialog.SecondaryText.Render("Active account: ") + style.Render(label)
+	return t.Dialog.SecondaryText.Render("Credentials: ") + style.Render(label)
 }
 
 // authStateLabel returns the display text and style for m.authState.

@@ -1621,3 +1621,108 @@ func TestPermissionService_PersistentGrantKeyIsPathScoped(t *testing.T) {
 		assert.True(t, granted, "a repeat command in the same working directory must still auto-approve")
 	})
 }
+
+// TestPermissionService_RequireExplicit covers the bash deny list's floor:
+// a RequireExplicit request is answered by a person or not at all. Yolo, an
+// auto-approved session and an allowed-tools entry naming the tool all grant
+// an ordinary request without a prompt, and none of them may grant this one.
+func TestPermissionService_RequireExplicit(t *testing.T) {
+	t.Parallel()
+
+	req := func(explicit bool) CreatePermissionRequest {
+		return CreatePermissionRequest{
+			SessionID:       "s1",
+			ToolCallID:      "call-1",
+			ToolName:        "bash",
+			Action:          "execute",
+			Description:     "sudo rm -rf /",
+			Path:            "/tmp",
+			RequireExplicit: explicit,
+		}
+	}
+
+	// blanketApprovals are the three ways a request is granted with nobody
+	// looking. Each is asserted twice: it grants an ordinary request (so the
+	// setup is real) and does not grant a RequireExplicit one.
+	blanketApprovals := map[string]func() Service{
+		"yolo":          func() Service { return NewPermissionService("/tmp", true, nil) },
+		"allowed tools": func() Service { return NewPermissionService("/tmp", false, []string{"bash"}) },
+		"auto-approved session": func() Service {
+			s := NewPermissionService("/tmp", false, nil)
+			s.AutoApproveSession("s1")
+			return s
+		},
+	}
+
+	for name, newService := range blanketApprovals {
+		t.Run(name+" grants an ordinary request", func(t *testing.T) {
+			t.Parallel()
+			granted, err := newService().Request(t.Context(), req(false))
+			require.NoError(t, err)
+			assert.True(t, granted)
+		})
+
+		t.Run(name+" does not answer a RequireExplicit request", func(t *testing.T) {
+			t.Parallel()
+			service := newService()
+			// Nobody answers, so the request blocks until the context
+			// expires - which is the point: it waited for a person.
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			defer cancel()
+			granted, err := service.Request(ctx, req(true))
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			assert.False(t, granted)
+		})
+	}
+
+	t.Run("a person can still answer it", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", true, []string{"bash"})
+
+		events := service.Subscribe(t.Context())
+		done := make(chan bool, 1)
+		go func() {
+			granted, err := service.Request(t.Context(), req(true))
+			assert.NoError(t, err)
+			done <- granted
+		}()
+
+		select {
+		case ev := <-events:
+			assert.True(t, service.Grant(ev.Payload))
+		case <-time.After(5 * time.Second):
+			t.Fatal("the request was never published to the UI")
+		}
+
+		select {
+		case granted := <-done:
+			assert.True(t, granted, "an explicit grant answers a RequireExplicit request")
+		case <-time.After(5 * time.Second):
+			t.Fatal("the request was never answered")
+		}
+	})
+
+	t.Run("a persistent grant for the same operation answers it", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		events := service.Subscribe(t.Context())
+		go func() {
+			ev := <-events
+			service.GrantPersistent(ev.Payload)
+		}()
+
+		granted, err := service.Request(t.Context(), req(true))
+		require.NoError(t, err)
+		require.True(t, granted)
+
+		// The second ask is answered from the recorded grant: the user
+		// already said "always" to this exact command, which is a decision
+		// about this operation and not a standing default.
+		second := req(true)
+		second.ToolCallID = "call-2"
+		granted, err = service.Request(t.Context(), second)
+		require.NoError(t, err)
+		assert.True(t, granted)
+	})
+}

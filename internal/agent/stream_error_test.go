@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"net/http"
 	"testing"
 
 	"charm.land/fantasy"
@@ -36,8 +37,22 @@ func TestClassifyStreamError(t *testing.T) {
 			want: classModelNotEnabled,
 		},
 		{
-			name: "unrelated provider error",
-			err:  &fantasy.ProviderError{Message: "rate limit exceeded, please retry later"},
+			// The status code decides, not the prose: a provider whose
+			// 429 body says nothing useful still classifies.
+			name: "429 with a message",
+			err:  &fantasy.ProviderError{StatusCode: http.StatusTooManyRequests, Message: "rate limit exceeded, please retry later"},
+			want: classRateLimited,
+		},
+		{
+			name: "429 with an empty body",
+			err:  &fantasy.ProviderError{StatusCode: http.StatusTooManyRequests},
+			want: classRateLimited,
+		},
+		{
+			// Prose alone is not enough: plenty of 400s mention rate
+			// limits without being one.
+			name: "rate-limit wording without the status code",
+			err:  &fantasy.ProviderError{StatusCode: http.StatusBadRequest, Message: "rate limit exceeded, please retry later"},
 			want: classGenericProviderError,
 		},
 		{

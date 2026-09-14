@@ -791,11 +791,11 @@ func TestAccounts_RefreshLimitsError_KeepsLastLoadedAccounts(t *testing.T) {
 	require.Equal(t, original, dlg.accs, "a failed refresh must not wipe the last successfully loaded accounts")
 }
 
-// TestAccounts_RefreshTokensKey_ReturnsActionForOAuthProvider verifies
-// that pressing "r" in the accounts dialog for an OAuth provider returns
-// ActionRefreshTokens, and that the key is not offered for API-key
-// providers.
-func TestAccounts_RefreshTokensKey_ReturnsActionForOAuthProvider(t *testing.T) {
+// TestAccounts_RefreshTokenKey_ReturnsActionForOAuthProvider verifies
+// that ctrl+t in the accounts dialog for an OAuth provider returns
+// ActionRefreshAccountTokens naming the selected account, and that the
+// key is not offered for API-key providers.
+func TestAccounts_RefreshTokenKey_ReturnsActionForOAuthProvider(t *testing.T) {
 	t.Parallel()
 
 	// "codex" is an OAuth provider in the capabilities registry.
@@ -808,16 +808,17 @@ func TestAccounts_RefreshTokensKey_ReturnsActionForOAuthProvider(t *testing.T) {
 	dlg := loadedAccounts(t, com, providerID)
 	require.True(t, dlg.caps.OAuth, "codex should report OAuth capability")
 
-	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'r'})
-	refreshAction, ok := action.(ActionRefreshTokens)
-	require.True(t, ok, "expected ActionRefreshTokens, got %#v", action)
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	refreshAction, ok := action.(ActionRefreshAccountTokens)
+	require.True(t, ok, "expected ActionRefreshAccountTokens, got %#v", action)
 	require.Equal(t, providerID, refreshAction.ProviderID)
+	require.Equal(t, "acct-1", refreshAction.AccountID, "the refresh must name the row the user was on")
 }
 
-// TestAccounts_RefreshTokensKey_IgnoredForAPIKeyProvider verifies that
-// the "r" key does not trigger a refresh for a provider whose accounts
-// use API keys.
-func TestAccounts_RefreshTokensKey_IgnoredForAPIKeyProvider(t *testing.T) {
+// TestAccounts_RefreshTokenKey_IgnoredForAPIKeyProvider verifies that
+// ctrl+t does not trigger a refresh for a provider whose accounts use API
+// keys.
+func TestAccounts_RefreshTokenKey_IgnoredForAPIKeyProvider(t *testing.T) {
 	t.Parallel()
 
 	// "openai" is not in the capabilities registry, so it falls back to
@@ -831,11 +832,33 @@ func TestAccounts_RefreshTokensKey_IgnoredForAPIKeyProvider(t *testing.T) {
 	dlg := loadedAccounts(t, com, providerID)
 	require.False(t, dlg.caps.OAuth, "openai should not report OAuth capability")
 
-	// "r" should be forwarded to the select dialog's filter input,
-	// not trigger ActionRefreshTokens.
-	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 'r'})
-	_, isRefresh := action.(ActionRefreshTokens)
-	require.False(t, isRefresh, "'r' on an API-key provider must not trigger a token refresh")
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	_, isRefresh := action.(ActionRefreshAccountTokens)
+	require.False(t, isRefresh, "ctrl+t on an API-key provider must not trigger a token refresh")
+}
+
+// TestAccounts_BareLettersReachTheFilter is the regression guard for the
+// shortcut this dialog must not claim: every key it does not handle goes
+// to the filterable list's filter input, and the rows here are email
+// addresses. A shortcut on a bare letter silently makes that letter
+// untypable while filtering, which is why Edit/Delete/Refresh are chords.
+func TestAccounts_BareLettersReachTheFilter(t *testing.T) {
+	t.Parallel()
+
+	providerID := "codex"
+	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
+	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+		{ID: "acct-1", Label: "rob@example.com"},
+		{ID: "acct-2", Label: "dana@example.com"},
+	}
+
+	dlg := loadedAccounts(t, com, providerID)
+	for _, r := range "abcdefghijklmnopqrstuvwxyz" {
+		dlg.HandleMsg(tea.KeyPressMsg{Code: r, Text: string(r)})
+		require.Equal(t, string(r), dlg.sd.input.Value(),
+			"a bare %q must reach the filter input rather than being claimed as a shortcut", string(r))
+		dlg.sd.input.SetValue("")
+	}
 }
 
 // TestAccounts_TokenStatusShownForOAuthAccounts verifies that the token

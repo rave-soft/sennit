@@ -139,11 +139,13 @@ func TestBashTool_RunInBackgroundReportsCompletionWithoutSleeping(t *testing.T) 
 type recordingPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	requestCount int
+	requests     []permission.CreatePermissionRequest
 	allow        bool
 }
 
 func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
 	m.requestCount++
+	m.requests = append(m.requests, req)
 	return m.allow, nil
 }
 
@@ -195,6 +197,7 @@ func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
 
 	require.False(t, resp.IsError)
 	require.Equal(t, 1, perms.requestCount, "chained command should trigger permission request")
+	require.False(t, perms.requests[0].RequireExplicit, "an ordinary command's prompt stays answerable by the usual blanket approvals")
 
 	// Plain ls should NOT trigger permission check.
 	perms.requestCount = 0
@@ -235,7 +238,9 @@ func TestBashTool_DenyListedCommandPromptsAndRuns(t *testing.T) {
 		Command:     "curl --version",
 	})
 
-	require.Equal(t, 2, perms.requestCount, "deny-listed command should prompt the user")
+	require.Equal(t, 1, perms.requestCount, "a deny-listed command asks once, not once for the deny list and again for being non-read-only")
+	require.True(t, perms.requests[0].RequireExplicit, "the deny-list prompt must not be answerable by yolo or an allowed-tools entry")
+	require.Contains(t, perms.requests[0].Description, "deny-listed")
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "curl", "approved deny-listed command should execute and return its output")
 }
@@ -254,6 +259,7 @@ func TestBashTool_DenyListedCommandDenied(t *testing.T) {
 	})
 
 	require.Equal(t, 1, perms.requestCount)
+	require.True(t, perms.requests[0].RequireExplicit)
 	require.Contains(t, resp.Content, "User denied permission")
 	require.Contains(t, resp.Content, "run it manually")
 	require.Contains(t, resp.Content, "curl https://example.com")
