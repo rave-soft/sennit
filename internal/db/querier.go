@@ -43,7 +43,7 @@ type Querier interface {
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	DeleteSessionReadFiles(ctx context.Context, sessionID string) error
 	DeleteThread(ctx context.Context, id string) error
-	FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thread, error)
+	FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (FinalizeTaskRow, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
 	// The most recently updated top-level session in a project: same scope as
@@ -56,8 +56,16 @@ type Querier interface {
 	// that hold an id already know what they asked for (id-or-name resolution,
 	// RunComplete matching). A kind-scoped caller uses GetThreadByName or
 	// ListThreads instead.
-	GetThread(ctx context.Context, id string) (Thread, error)
-	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
+	// execution is deliberately not selected: it holds the delegation
+	// snapshot, which embeds the full prior history of a delegated session and
+	// runs to tens of megabytes per row. Only resuming a task reads it, through
+	// GetThreadExecution; the dashboard dock alone used to read every running
+	// delegation's snapshot through here every eight seconds.
+	GetThread(ctx context.Context, id string) (GetThreadRow, error)
+	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (GetThreadByNameRow, error)
+	// The delegation snapshot on its own, for the one caller that needs it:
+	// resuming a task rebuilds its runtime from it.
+	GetThreadExecution(ctx context.Context, id string) (string, error)
 	InsertTaskCompletionOutbox(ctx context.Context, arg InsertTaskCompletionOutboxParams) error
 	// The most recent write to any message in the session, as a Unix
 	// timestamp. Every streaming delta the assistant produces updates its
@@ -138,9 +146,9 @@ type Querier interface {
 	// see ListThreadsAll.
 	// execution is deliberately not selected: it holds the delegation
 	// snapshot, which embeds the full prior history of a delegated session and
-	// runs to tens of megabytes per row. No list caller reads it (only
-	// GetThread's single-row callers do, on resume), so selecting it here made
-	// every listing drag hundreds of megabytes through memory.
+	// runs to tens of megabytes per row. No list caller reads it (resuming a
+	// task does, through GetThreadExecution), so selecting it here made every
+	// listing drag hundreds of megabytes through memory.
 	ListThreads(ctx context.Context, projectPath string) ([]ListThreadsRow, error)
 	// Every delegation kind sharing this table (threads today, tasks once
 	// they exist), scoped to project_path but not kind. This is the listing
@@ -151,9 +159,9 @@ type Querier interface {
 	// ListThreads.
 	// execution is deliberately not selected: it holds the delegation
 	// snapshot, which embeds the full prior history of a delegated session and
-	// runs to tens of megabytes per row. No list caller reads it (only
-	// GetThread's single-row callers do, on resume), so selecting it here made
-	// every listing drag hundreds of megabytes through memory.
+	// runs to tens of megabytes per row. No list caller reads it (resuming a
+	// task does, through GetThreadExecution), so selecting it here made every
+	// listing drag hundreds of megabytes through memory.
 	ListThreadsAll(ctx context.Context, projectPath string) ([]ListThreadsAllRow, error)
 	// Every delegation across every project, trimmed to the columns `sennit
 	// gc` needs to pick finished ones older than the retention cutoff.
@@ -223,7 +231,7 @@ type Querier interface {
 	// turn's own usage saves; a full-row write from either side carried a
 	// stale copy of what the other had just written.
 	SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) (int64, error)
-	SetTaskPreparation(ctx context.Context, arg SetTaskPreparationParams) (Thread, error)
+	SetTaskPreparation(ctx context.Context, arg SetTaskPreparationParams) (SetTaskPreparationRow, error)
 	// The cost of every session nested under a session, at any depth,
 	// excluding the root's own row.
 	// Cost is written once per session, never rolled up onto a parent, so a
@@ -250,8 +258,8 @@ type Querier interface {
 	// not as a second write path from the UI (that wide, whole-row write is
 	// exactly what G3 closed off - see REFACTORING.md).
 	UpdateSessionUsage(ctx context.Context, arg UpdateSessionUsageParams) (Session, error)
-	UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (Thread, error)
-	UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (Thread, error)
+	UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (UpdateThreadSessionRow, error)
+	UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (UpdateThreadStatusRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

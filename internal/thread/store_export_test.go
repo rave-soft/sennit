@@ -72,6 +72,14 @@ type storeWithoutTaskFinalization struct {
 	Store
 }
 
+// Execution is forwarded rather than hidden with the finalization methods:
+// every production store reads snapshots separately (see ExecutionStore), so
+// a store without it would model nothing real and resuming a task through it
+// would find no snapshot to resume from.
+func (s storeWithoutTaskFinalization) Execution(ctx context.Context, id string) (string, error) {
+	return s.Store.(ExecutionStore).Execution(ctx, id)
+}
+
 // testStoreDB is a minimal Store over the sqlc queries, mirroring the
 // threadspawn implementation (which cannot be imported here).
 type testStoreDB struct {
@@ -130,7 +138,7 @@ func (s *testStoreDB) SetTaskPreparation(ctx context.Context, id, base, branch, 
 	if err != nil {
 		return Thread{}, err
 	}
-	return testFromDBItem(item), nil
+	return testFromListRow(db.ListThreadsAllRow(item)), nil
 }
 
 func (s *testStoreDB) Get(ctx context.Context, id string) (Thread, error) {
@@ -141,7 +149,17 @@ func (s *testStoreDB) Get(ctx context.Context, id string) (Thread, error) {
 		}
 		return Thread{}, err
 	}
-	return testFromDBItem(dbThread), nil
+	return testFromListRow(db.ListThreadsAllRow(dbThread)), nil
+}
+
+// Execution mirrors threadspawn.store.Execution: the snapshot no other read
+// carries.
+func (s *testStoreDB) Execution(ctx context.Context, id string) (string, error) {
+	execution, err := s.q.GetThreadExecution(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	return execution, err
 }
 
 func (s *testStoreDB) GetByName(ctx context.Context, name string) (Thread, error) {
@@ -155,7 +173,7 @@ func (s *testStoreDB) GetByName(ctx context.Context, name string) (Thread, error
 		}
 		return Thread{}, err
 	}
-	return testFromDBItem(dbThread), nil
+	return testFromListRow(db.ListThreadsAllRow(dbThread)), nil
 }
 
 func (s *testStoreDB) List(ctx context.Context) ([]Thread, error) {
@@ -193,7 +211,7 @@ func (s *testStoreDB) SetStatus(ctx context.Context, id string, params SetStatus
 	if err != nil {
 		return Thread{}, err
 	}
-	return testFromDBItem(dbThread), nil
+	return testFromListRow(db.ListThreadsAllRow(dbThread)), nil
 }
 
 func (s *testStoreDB) SetSession(ctx context.Context, id, sessionID string) (Thread, error) {
@@ -204,7 +222,7 @@ func (s *testStoreDB) SetSession(ctx context.Context, id, sessionID string) (Thr
 	if err != nil {
 		return Thread{}, err
 	}
-	return testFromDBItem(dbThread), nil
+	return testFromListRow(db.ListThreadsAllRow(dbThread)), nil
 }
 
 func (s *testStoreDB) Delete(ctx context.Context, id string) error {
@@ -214,7 +232,7 @@ func (s *testStoreDB) Delete(ctx context.Context, id string) error {
 var errTestFinalizeLost = errors.New("task finalization lost race")
 
 func (s *testStoreDB) FinalizeTask(ctx context.Context, id string, params FinalizeTaskParams) (Thread, bool, error) {
-	var finalized db.Thread
+	var finalized db.FinalizeTaskRow
 	err := db.InTx(ctx, s.conn, func(q *db.Queries) error {
 		st, err := q.GetThread(ctx, id)
 		if err != nil {
@@ -258,7 +276,7 @@ func (s *testStoreDB) FinalizeTask(ctx context.Context, id string, params Finali
 		st, err := s.Get(ctx, id)
 		return st, false, err
 	}
-	return testFromDBItem(finalized), true, nil
+	return testFromListRow(db.ListThreadsAllRow(finalized)), true, nil
 }
 
 func (s *testStoreDB) ListPendingTaskCompletions(ctx context.Context) ([]Thread, error) {

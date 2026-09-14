@@ -46,12 +46,30 @@ INSERT INTO threads (
 -- that hold an id already know what they asked for (id-or-name resolution,
 -- RunComplete matching). A kind-scoped caller uses GetThreadByName or
 -- ListThreads instead.
-SELECT *
+-- execution is deliberately not selected: it holds the delegation
+-- snapshot, which embeds the full prior history of a delegated session and
+-- runs to tens of megabytes per row. Only resuming a task reads it, through
+-- GetThreadExecution; the dashboard dock alone used to read every running
+-- delegation's snapshot through here every eight seconds.
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
+FROM threads
+WHERE id = ? LIMIT 1;
+
+-- name: GetThreadExecution :one
+-- The delegation snapshot on its own, for the one caller that needs it:
+-- resuming a task rebuilds its runtime from it.
+SELECT execution
 FROM threads
 WHERE id = ? LIMIT 1;
 
 -- name: GetThreadByName :one
-SELECT *
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1;
 
@@ -63,9 +81,9 @@ WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1;
 -- see ListThreadsAll.
 -- execution is deliberately not selected: it holds the delegation
 -- snapshot, which embeds the full prior history of a delegated session and
--- runs to tens of megabytes per row. No list caller reads it (only
--- GetThread's single-row callers do, on resume), so selecting it here made
--- every listing drag hundreds of megabytes through memory.
+-- runs to tens of megabytes per row. No list caller reads it (resuming a
+-- task does, through GetThreadExecution), so selecting it here made every
+-- listing drag hundreds of megabytes through memory.
 SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
     session_id, status, result_summary, error, created_at, updated_at,
     completed_at, kind, parent_session_id, completion_pending,
@@ -84,9 +102,9 @@ ORDER BY created_at;
 -- ListThreads.
 -- execution is deliberately not selected: it holds the delegation
 -- snapshot, which embeds the full prior history of a delegated session and
--- runs to tens of megabytes per row. No list caller reads it (only
--- GetThread's single-row callers do, on resume), so selecting it here made
--- every listing drag hundreds of megabytes through memory.
+-- runs to tens of megabytes per row. No list caller reads it (resuming a
+-- task does, through GetThreadExecution), so selecting it here made every
+-- listing drag hundreds of megabytes through memory.
 SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
     session_id, status, result_summary, error, created_at, updated_at,
     completed_at, kind, parent_session_id, completion_pending,
@@ -103,20 +121,29 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING *;
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed;
 
 -- name: SetTaskPreparation :one
 UPDATE threads
 SET base_branch = ?, branch = ?, worktree_path = ?
 WHERE id = ? AND kind = 'task' AND status = 'pending'
-RETURNING *;
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed;
 
 -- name: UpdateThreadSession :one
 UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING *;
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed;
 
 -- name: AttributeTaskCostOnce :execrows
 -- Called in the same transaction as FinalizeTask. A failed transaction rolls
@@ -150,7 +177,10 @@ WHERE threads.id = sqlc.arg(id)
   AND threads.status IN ('pending', 'running')
   AND threads.session_id = sqlc.arg(session_id)
   AND threads.parent_session_id = sqlc.arg(parent_session_id)
-RETURNING *;
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed;
 
 -- name: InsertTaskCompletionOutbox :exec
 INSERT INTO task_completion_outbox (

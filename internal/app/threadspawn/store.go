@@ -84,7 +84,16 @@ func (s *store) Get(ctx context.Context, id string) (thread.Thread, error) {
 	if err != nil {
 		return thread.Thread{}, err
 	}
-	return fromDBItem(dbThread), nil
+	return fromListRow(db.ListThreadsAllRow(dbThread)), nil
+}
+
+// Execution reads id's delegation snapshot, which no other read carries.
+func (s *store) Execution(ctx context.Context, id string) (string, error) {
+	execution, err := s.q.GetThreadExecution(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: %q", thread.ErrNotFound, id)
+	}
+	return execution, err
 }
 
 func (s *store) GetByName(ctx context.Context, name string) (thread.Thread, error) {
@@ -98,7 +107,7 @@ func (s *store) GetByName(ctx context.Context, name string) (thread.Thread, erro
 	if err != nil {
 		return thread.Thread{}, err
 	}
-	return fromDBItem(dbThread), nil
+	return fromListRow(db.ListThreadsAllRow(dbThread)), nil
 }
 
 func (s *store) List(ctx context.Context) ([]thread.Thread, error) {
@@ -139,7 +148,7 @@ func (s *store) SetStatus(ctx context.Context, id string, params thread.SetStatu
 	if err != nil {
 		return thread.Thread{}, err
 	}
-	return fromDBItem(dbThread), nil
+	return fromListRow(db.ListThreadsAllRow(dbThread)), nil
 }
 
 func (s *store) SetTaskPreparation(ctx context.Context, id, base, branch, path string) (thread.Thread, error) {
@@ -149,7 +158,7 @@ func (s *store) SetTaskPreparation(ctx context.Context, id, base, branch, path s
 	if err != nil {
 		return thread.Thread{}, err
 	}
-	return fromDBItem(item), nil
+	return fromListRow(db.ListThreadsAllRow(item)), nil
 }
 
 func (s *store) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
@@ -160,7 +169,7 @@ func (s *store) SetSession(ctx context.Context, id, sessionID string) (thread.Th
 	if err != nil {
 		return thread.Thread{}, err
 	}
-	return fromDBItem(dbThread), nil
+	return fromListRow(db.ListThreadsAllRow(dbThread)), nil
 }
 
 func (s *store) Delete(ctx context.Context, id string) error {
@@ -171,7 +180,7 @@ func (s *store) FinalizeTask(ctx context.Context, id string, params thread.Final
 	if s.conn == nil {
 		return thread.Thread{}, false, errors.New("thread store does not support transactions")
 	}
-	var finalized db.Thread
+	var finalized db.FinalizeTaskRow
 	err := db.InTx(ctx, s.conn, func(q *db.Queries) error {
 		st, err := q.GetThread(ctx, id)
 		if err != nil {
@@ -215,7 +224,7 @@ func (s *store) FinalizeTask(ctx context.Context, id string, params thread.Final
 		st, err := s.Get(ctx, id)
 		return st, false, err
 	}
-	return fromDBItem(finalized), true, nil
+	return fromListRow(db.ListThreadsAllRow(finalized)), true, nil
 }
 
 func (s *store) ListPendingTaskCompletions(ctx context.Context) ([]thread.Thread, error) {
@@ -263,7 +272,9 @@ func fromPendingDBRow(item db.ListPendingTaskCompletionsRow) thread.Thread {
 // directly and only one mapper is needed.
 //
 // Execution is left zero rather than faked, so a caller that ever does need
-// the snapshot gets it from Get, not silently from a listing.
+// the snapshot reads it through Execution, not silently from a listing.
+// Single-row reads and the RETURNING clauses select the same columns and
+// convert to this row type too.
 func fromListRow(item db.ListThreadsAllRow) thread.Thread {
 	return fromDBItem(db.Thread{
 		ID: item.ID, Name: item.Name, ProjectPath: item.ProjectPath, Goal: item.Goal,

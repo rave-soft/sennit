@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/thread"
@@ -116,13 +117,16 @@ func TestAgentIsolationAdmissionMatrix(t *testing.T) {
 				require.Equal(t, thread.StatusCompleted, task.Status, task.Error)
 				require.Equal(t, parent.ID, task.ParentSessionID)
 				require.Equal(t, 1, task.CompletionDepth)
-				// The snapshot is read back through Get, not from the
-				// listing above: listings deliberately omit the execution
+				// The snapshot is read on its own: every other read,
+				// listing or single row, deliberately omits the execution
 				// column, which is only needed on resume.
-				stored, err := boot.App.TaskManager().Get(t.Context(), task.ID)
+				conn, err := db.Connect(t.Context(), config.GlobalDBDir())
+				require.NoError(t, err)
+				stored, err := db.New(conn).GetThreadExecution(t.Context(), task.ID)
+				require.NoError(t, db.Release(config.GlobalDBDir()))
 				require.NoError(t, err)
 				var spec agent.DelegationExecution
-				require.NoError(t, json.Unmarshal([]byte(stored.Execution), &spec))
+				require.NoError(t, json.Unmarshal([]byte(stored), &spec))
 				require.Equal(t, task.SessionID, spec.SessionID)
 				require.Equal(t, "Matrix child title", spec.SessionTitle)
 				require.Equal(t, 1, spec.Depth)

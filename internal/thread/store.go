@@ -93,6 +93,16 @@ type TaskPreparationStore interface {
 	SetTaskPreparation(context.Context, string, string, string, string) (Thread, error)
 }
 
+// ExecutionStore reads a delegation's snapshot on its own. Every other store
+// read leaves Thread.Execution empty: the snapshot embeds a delegated
+// session's whole prior history and runs to tens of megabytes, and the
+// reads that do not need it - the dashboard's, above all - are frequent.
+// Separate from Store for the same reason as the interfaces below: test
+// doubles that keep Execution on the Thread itself remain valid.
+type ExecutionStore interface {
+	Execution(ctx context.Context, id string) (string, error)
+}
+
 type TaskCompletionGenerationStore interface {
 	AcknowledgeTaskCompletionGeneration(context.Context, string, int64) error
 }

@@ -493,6 +493,20 @@ func (t *TaskManager) List(ctx context.Context) ([]Thread, error) {
 	return tasks, nil
 }
 
+// execution returns st's delegation snapshot, which store reads leave out
+// (see [ExecutionStore]). A store that keeps it on the Thread has already
+// supplied it.
+func (t *TaskManager) execution(ctx context.Context, st Thread) (string, error) {
+	if st.Execution != "" {
+		return st.Execution, nil
+	}
+	store, ok := t.store.(ExecutionStore)
+	if !ok {
+		return "", nil
+	}
+	return store.Execution(ctx, st.ID)
+}
+
 // Get resolves id to a task. Unlike [Manager.Get], there is no
 // resolve-by-name fallback: a task's Name is generated, not user-chosen.
 //
@@ -616,6 +630,9 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 	defer done()
 	st, err := t.Get(ctx, id)
 	if err != nil {
+		return SendDisposition{}, err
+	}
+	if st.Execution, err = t.execution(ctx, st); err != nil {
 		return SendDisposition{}, err
 	}
 	if st.WorktreePath != "" || st.Execution != "" {

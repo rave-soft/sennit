@@ -188,7 +188,10 @@ WHERE threads.id = ?7
   AND threads.status IN ('pending', 'running')
   AND threads.session_id = ?8
   AND threads.parent_session_id = ?9
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 `
 
 type FinalizeTaskParams struct {
@@ -203,7 +206,30 @@ type FinalizeTaskParams struct {
 	ParentSessionID string        `json:"parent_session_id"`
 }
 
-func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thread, error) {
+type FinalizeTaskRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
+
+func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (FinalizeTaskRow, error) {
 	row := q.db.QueryRowContext(ctx, finalizeTask,
 		arg.Status,
 		arg.Error,
@@ -215,7 +241,7 @@ func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thr
 		arg.SessionID,
 		arg.ParentSessionID,
 	)
-	var i Thread
+	var i FinalizeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -237,24 +263,54 @@ func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thr
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
-		&i.Execution,
 	)
 	return i, err
 }
 
 const getThread = `-- name: GetThread :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE id = ? LIMIT 1
 `
+
+type GetThreadRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
 
 // Unfiltered by kind: entries are addressed by primary key, and callers
 // that hold an id already know what they asked for (id-or-name resolution,
 // RunComplete matching). A kind-scoped caller uses GetThreadByName or
 // ListThreads instead.
-func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
+// execution is deliberately not selected: it holds the delegation
+// snapshot, which embeds the full prior history of a delegated session and
+// runs to tens of megabytes per row. Only resuming a task reads it, through
+// GetThreadExecution; the dashboard dock alone used to read every running
+// delegation's snapshot through here every eight seconds.
+func (q *Queries) GetThread(ctx context.Context, id string) (GetThreadRow, error) {
 	row := q.db.QueryRowContext(ctx, getThread, id)
-	var i Thread
+	var i GetThreadRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -276,13 +332,15 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
-		&i.Execution,
 	)
 	return i, err
 }
 
 const getThreadByName = `-- name: GetThreadByName :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1
 `
@@ -292,9 +350,32 @@ type GetThreadByNameParams struct {
 	ProjectPath string `json:"project_path"`
 }
 
-func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error) {
+type GetThreadByNameRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
+
+func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (GetThreadByNameRow, error) {
 	row := q.db.QueryRowContext(ctx, getThreadByName, arg.Name, arg.ProjectPath)
-	var i Thread
+	var i GetThreadByNameRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -316,9 +397,23 @@ func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
-		&i.Execution,
 	)
 	return i, err
+}
+
+const getThreadExecution = `-- name: GetThreadExecution :one
+SELECT execution
+FROM threads
+WHERE id = ? LIMIT 1
+`
+
+// The delegation snapshot on its own, for the one caller that needs it:
+// resuming a task rebuilds its runtime from it.
+func (q *Queries) GetThreadExecution(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getThreadExecution, id)
+	var execution string
+	err := row.Scan(&execution)
+	return execution, err
 }
 
 const insertTaskCompletionOutbox = `-- name: InsertTaskCompletionOutbox :exec
@@ -500,9 +595,9 @@ type ListThreadsRow struct {
 // see ListThreadsAll.
 // execution is deliberately not selected: it holds the delegation
 // snapshot, which embeds the full prior history of a delegated session and
-// runs to tens of megabytes per row. No list caller reads it (only
-// GetThread's single-row callers do, on resume), so selecting it here made
-// every listing drag hundreds of megabytes through memory.
+// runs to tens of megabytes per row. No list caller reads it (resuming a
+// task does, through GetThreadExecution), so selecting it here made every
+// listing drag hundreds of megabytes through memory.
 func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]ListThreadsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreads, projectPath)
 	if err != nil {
@@ -589,9 +684,9 @@ type ListThreadsAllRow struct {
 // ListThreads.
 // execution is deliberately not selected: it holds the delegation
 // snapshot, which embeds the full prior history of a delegated session and
-// runs to tens of megabytes per row. No list caller reads it (only
-// GetThread's single-row callers do, on resume), so selecting it here made
-// every listing drag hundreds of megabytes through memory.
+// runs to tens of megabytes per row. No list caller reads it (resuming a
+// task does, through GetThreadExecution), so selecting it here made every
+// listing drag hundreds of megabytes through memory.
 func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]ListThreadsAllRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreadsAll, projectPath)
 	if err != nil {
@@ -730,7 +825,10 @@ const setTaskPreparation = `-- name: SetTaskPreparation :one
 UPDATE threads
 SET base_branch = ?, branch = ?, worktree_path = ?
 WHERE id = ? AND kind = 'task' AND status = 'pending'
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 `
 
 type SetTaskPreparationParams struct {
@@ -740,14 +838,37 @@ type SetTaskPreparationParams struct {
 	ID           string `json:"id"`
 }
 
-func (q *Queries) SetTaskPreparation(ctx context.Context, arg SetTaskPreparationParams) (Thread, error) {
+type SetTaskPreparationRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
+
+func (q *Queries) SetTaskPreparation(ctx context.Context, arg SetTaskPreparationParams) (SetTaskPreparationRow, error) {
 	row := q.db.QueryRowContext(ctx, setTaskPreparation,
 		arg.BaseBranch,
 		arg.Branch,
 		arg.WorktreePath,
 		arg.ID,
 	)
-	var i Thread
+	var i SetTaskPreparationRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -769,7 +890,6 @@ func (q *Queries) SetTaskPreparation(ctx context.Context, arg SetTaskPreparation
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
-		&i.Execution,
 	)
 	return i, err
 }
@@ -779,7 +899,10 @@ UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 `
 
 type UpdateThreadSessionParams struct {
@@ -787,9 +910,32 @@ type UpdateThreadSessionParams struct {
 	ID        string `json:"id"`
 }
 
-func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (Thread, error) {
+type UpdateThreadSessionRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
+
+func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (UpdateThreadSessionRow, error) {
 	row := q.db.QueryRowContext(ctx, updateThreadSession, arg.SessionID, arg.ID)
-	var i Thread
+	var i UpdateThreadSessionRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -811,7 +957,6 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
-		&i.Execution,
 	)
 	return i, err
 }
@@ -824,7 +969,10 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed, execution
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path,
+    session_id, status, result_summary, error, created_at, updated_at,
+    completed_at, kind, parent_session_id, completion_pending,
+    completion_depth, terminal_at, cost_attributed
 `
 
 type UpdateThreadStatusParams struct {
@@ -835,7 +983,30 @@ type UpdateThreadStatusParams struct {
 	ID            string        `json:"id"`
 }
 
-func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (Thread, error) {
+type UpdateThreadStatusRow struct {
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProjectPath       string        `json:"project_path"`
+	Goal              string        `json:"goal"`
+	BaseBranch        string        `json:"base_branch"`
+	Branch            string        `json:"branch"`
+	WorktreePath      string        `json:"worktree_path"`
+	SessionID         string        `json:"session_id"`
+	Status            string        `json:"status"`
+	ResultSummary     string        `json:"result_summary"`
+	Error             string        `json:"error"`
+	CreatedAt         int64         `json:"created_at"`
+	UpdatedAt         int64         `json:"updated_at"`
+	CompletedAt       sql.NullInt64 `json:"completed_at"`
+	Kind              string        `json:"kind"`
+	ParentSessionID   string        `json:"parent_session_id"`
+	CompletionPending int64         `json:"completion_pending"`
+	CompletionDepth   int64         `json:"completion_depth"`
+	TerminalAt        sql.NullInt64 `json:"terminal_at"`
+	CostAttributed    int64         `json:"cost_attributed"`
+}
+
+func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (UpdateThreadStatusRow, error) {
 	row := q.db.QueryRowContext(ctx, updateThreadStatus,
 		arg.Status,
 		arg.Error,
@@ -843,7 +1014,7 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		arg.CompletedAt,
 		arg.ID,
 	)
-	var i Thread
+	var i UpdateThreadStatusRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -865,7 +1036,6 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		&i.CompletionDepth,
 		&i.TerminalAt,
 		&i.CostAttributed,
-		&i.Execution,
 	)
 	return i, err
 }

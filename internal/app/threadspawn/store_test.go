@@ -33,20 +33,27 @@ func TestStore_ExecutionSurvivesReopen(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
 	reopened := NewStore(db.New(conn), dataDir)
+	execution, err := reopened.(thread.ExecutionStore).Execution(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "immutable selected execution", execution)
+	// No other read carries the snapshot: the column holds a delegation's
+	// full prior history, and the dashboard dock used to drag every running
+	// delegation's through Get every eight seconds. Everything else about
+	// the row must still come back.
 	got, err := reopened.Get(ctx, created.ID)
 	require.NoError(t, err)
-	require.Equal(t, "immutable selected execution", got.Execution)
+	require.Empty(t, got.Execution)
 	require.Equal(t, "child", got.SessionID)
 	require.Equal(t, "parent", got.ParentSessionID)
 	require.Equal(t, "/isolated", got.WorktreePath)
-	// A listing does not carry the execution snapshot: the column holds a
-	// delegation's full prior history and is only ever read back through
-	// Get, on resume. Everything else about the row must still match.
 	rows, err := reopened.ListAll(ctx)
 	require.NoError(t, err)
-	withoutExecution := got
-	withoutExecution.Execution = ""
-	require.Equal(t, []thread.Thread{withoutExecution}, rows)
+	require.Equal(t, []thread.Thread{got}, rows)
+	updated, err := reopened.SetStatus(ctx, created.ID, thread.SetStatusParams{Status: thread.StatusRunning})
+	require.NoError(t, err)
+	require.Empty(t, updated.Execution)
+	_, err = reopened.(thread.ExecutionStore).Execution(ctx, "missing")
+	require.ErrorIs(t, err, thread.ErrNotFound)
 }
 
 func TestStore_CreateReturnsErrNameTakenOnDuplicateName(t *testing.T) {
