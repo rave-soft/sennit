@@ -70,7 +70,13 @@ func TestProviderStall_FirstPart(t *testing.T) {
 func TestProviderStall_MidStream(t *testing.T) {
 	t.Parallel()
 
-	corr := providerCorrelation{sessionID: "sess-mid", turnID: "turn-mid", attempt: 1, reason: reasonTurn}
+	// Session and turn ids unique to this test: the instrumented model
+	// logs into the process-global logger, and a parallel test in this
+	// package that reads captured logs selects its lines by session id
+	// (see allProviderLogLines). Sharing an id makes this test's lines
+	// look like that one's. "sess-mid"/"turn-mid" did exactly that to
+	// TestInstrumentedModel_Retry.
+	corr := providerCorrelation{sessionID: "sess-stall-mid", turnID: "turn-stall-mid", attempt: 1, reason: reasonTurn}
 	inner := &silentModel{beforeSilence: []fantasy.StreamPart{
 		{Type: fantasy.StreamPartTypeTextDelta, Delta: "partial"},
 	}}
@@ -116,7 +122,10 @@ func TestProviderStall_Retryable(t *testing.T) {
 func TestProviderStall_HealthyStreamNotTripped(t *testing.T) {
 	t.Parallel()
 
-	corr := providerCorrelation{sessionID: "sess-ok", turnID: "turn-ok", attempt: 1, reason: reasonTurn}
+	// Unique ids, for the reason spelled out in TestProviderStall_MidStream:
+	// "sess-ok"/"turn-ok" belong to TestInstrumentedModel_Success, whose
+	// "exactly one started line" assertion this test's own line broke.
+	corr := providerCorrelation{sessionID: "sess-stall-healthy", turnID: "turn-stall-healthy", attempt: 1, reason: reasonTurn}
 	inner := &steadyModel{parts: 12, gap: 5 * time.Millisecond}
 	// A gap budget many times the inter-part delay, but far below the
 	// stream's total duration: this fails if the budget is ever treated
