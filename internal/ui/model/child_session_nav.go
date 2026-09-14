@@ -388,6 +388,11 @@ func (w *widgets) handleChildSessionMessage(com *common.Common, event pubsub.Eve
 	if agentItem == nil {
 		return nil
 	}
+	// A late event from a delegation that has already finished must not
+	// rebuild the nested tools it let go of; see chat.NestedToolReleaser.
+	if releaser, ok := agentItem.(chat.NestedToolReleaser); ok && releaser.NestedToolsReleased() {
+		return nil
+	}
 
 	// Get existing nested tools.
 	nestedTools := agentItem.NestedTools()

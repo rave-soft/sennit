@@ -973,3 +973,76 @@ func TestAgentToolMessageItem_LabelPrefersTheCallersDescription(t *testing.T) {
 	})
 	require.Equal(t, "Do the thing", partial.DelegationLabel())
 }
+
+// TestAgentToolFinishReleasesNestedTools pins the memory side of a finished
+// delegation: its collapsed block needs only how many steps it took, so the
+// nested tool items - a child transcript each, hundreds of them in a long
+// session - are dropped the moment the result lands, and the count stays.
+func TestAgentToolFinishReleasesNestedTools(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: true}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"x"}`))
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "c2", "view", `{"file_path":"a.go"}`))
+	require.False(t, item.NestedToolsReleased())
+
+	item.SetResult(&message.ToolResult{ToolCallID: "agent-parent", Content: "done"})
+
+	require.True(t, item.NestedToolsReleased())
+	require.Empty(t, item.NestedTools(), "a finished delegation must not hold its nested tools")
+	require.Contains(t, ansi.Strip(item.Render(120)), "step 2", "the step count survives the release")
+
+	item.SetNestedTools([]ToolMessageItem{mkNestedToolCall(t, &sty, "c3", "bash", `{"command":"ls"}`)})
+	require.Empty(t, item.NestedTools(), "nothing can hand a finished delegation its nested tools back")
+}
+
+// TestAgentToolBackgroundDispatchKeepsNestedTools: a background dispatch's
+// ack is a result, but the work behind it is still running and reporting.
+func TestAgentToolBackgroundDispatchKeepsNestedTools(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: true}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"x"}`))
+
+	item.SetResult(&message.ToolResult{ToolCallID: "agent-parent", Content: "dispatched", Metadata: `{"task_id":"task-1"}`})
+
+	require.False(t, item.NestedToolsReleased())
+	require.Len(t, item.NestedTools(), 1)
+}
+
+// TestAgentToolCancelReleasesNestedTools: a canceled delegation is as
+// finished as one that answered.
+func TestAgentToolCancelReleasesNestedTools(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: true}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"x"}`))
+
+	item.SetStatus(ToolStatusCanceled)
+
+	require.True(t, item.NestedToolsReleased())
+	require.Empty(t, item.NestedTools())
+}
+
+// TestAgentToolRestoredFinishedOmitsUnknownSteps: a delegation rebuilt
+// finished from history never loads its child transcript, so it cannot say
+// how many steps it took - and must not claim zero.
+func TestAgentToolRestoredFinishedOmitsUnknownSteps(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: true}
+	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
+	item := NewAgentToolMessageItem(&sty, parent, result, false, nil)
+
+	require.True(t, item.NestedToolsReleased())
+	out := ansi.Strip(item.Render(120))
+	require.NotContains(t, out, "step")
+	require.Contains(t, out, "done")
+}

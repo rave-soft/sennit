@@ -97,6 +97,12 @@ func loadNestedToolCalls(ctx context.Context, ws workspace.SessionStore, sty *st
 		if !ok {
 			continue
 		}
+		// A finished delegation shows only a summary and holds no nested
+		// tools, so its child transcript is not read at all - in a long
+		// session that transcript is most of what opening it used to load.
+		if releaser, ok := item.(chat.NestedToolReleaser); ok && releaser.NestedToolsReleased() {
+			continue
+		}
 		tc := toolItem.ToolCall()
 		children = append(children, childLoad{
 			sessionID: session.CreateAgentToolSessionID(toolItem.MessageID(), tc.ID),

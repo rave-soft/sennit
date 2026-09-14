@@ -27,6 +27,17 @@ type NestedToolContainer interface {
 	SetNestedTools(tools []ToolMessageItem)
 }
 
+// NestedToolReleaser reports whether a delegation has let go of its nested
+// tool items. A finished delegation renders as a collapsed summary that needs
+// only how many steps it took, so it keeps that count and drops the items: a
+// long session carries hundreds of finished delegations, and holding every
+// one's child transcript cost gigabytes. Their child sessions are neither
+// loaded when the session opens nor refilled by late child events; the full
+// transcript is read only when the person opens the delegation itself.
+type NestedToolReleaser interface {
+	NestedToolsReleased() bool
+}
+
 // ChildSessionTokenTracker lets the live-update path
 // (handleChildSessionUpdate in internal/ui/model/ui.go) push a running
 // child-session token count onto a delegation's status line, without this
@@ -47,6 +58,14 @@ type delegationToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
+
+	// releasedSteps is how many nested tools a finished delegation had when
+	// it let go of them (see NestedToolReleaser); stepsKnown says whether it
+	// ever had any to count. A delegation restored finished from history
+	// never loads its child transcript, so its step count is unknown and
+	// the collapsed block leaves it out rather than showing zero.
+	releasedSteps int
+	stepsKnown    bool
 
 	// startTime and the token counters back the running status line (see
 	// renderAgentStatusLine): without it, a long delegation would render as
@@ -134,6 +153,7 @@ func (a *delegationToolMessageItem) SetResult(res *message.ToolResult) {
 		a.duration = time.Since(a.startTime)
 	}
 	a.baseToolMessageItem.SetResult(res)
+	a.releaseNestedToolsIfFinished()
 }
 
 // SetStatus freezes duration on cancellation too — a canceled delegation
@@ -143,6 +163,39 @@ func (a *delegationToolMessageItem) SetStatus(status ToolStatus) {
 		a.duration = time.Since(a.startTime)
 	}
 	a.baseToolMessageItem.SetStatus(status)
+	a.releaseNestedToolsIfFinished()
+}
+
+// NestedToolsReleased implements NestedToolReleaser: a delegation holds no
+// nested tools once it has finished. A background-dispatch ack is not a
+// finish - the work it started is still running and still reporting.
+func (a *delegationToolMessageItem) NestedToolsReleased() bool {
+	if a.status == ToolStatusCanceled {
+		return true
+	}
+	return a.result != nil && backgroundDispatchTaskID(a.result) == ""
+}
+
+// releaseNestedToolsIfFinished trades a finished delegation's nested tools
+// for their count. See NestedToolReleaser.
+func (a *delegationToolMessageItem) releaseNestedToolsIfFinished() {
+	if !a.NestedToolsReleased() || a.nestedTools == nil {
+		return
+	}
+	a.releasedSteps += len(a.nestedTools)
+	a.stepsKnown = true
+	a.nestedTools = nil
+	a.clearCache()
+	a.Bump()
+}
+
+// collapsedSteps is the step count a finished delegation's collapsed block
+// shows, or -1 when it is unknown.
+func (a *delegationToolMessageItem) collapsedSteps() int {
+	if !a.stepsKnown && len(a.nestedTools) == 0 {
+		return -1
+	}
+	return a.releasedSteps + len(a.nestedTools)
 }
 
 // ToggleExpanded is a no-op: a finished delegation renders as a compact
@@ -259,6 +312,16 @@ func (a *delegationToolMessageItem) NestedTools() []ToolMessageItem {
 // event; in the rare case the slice is truly unchanged the worst case is
 // one extra parent re-render while every child cache hit stays warm.
 func (a *delegationToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
+	if a.NestedToolsReleased() {
+		// Replacing, not adding: the count is what these tools would have
+		// been, and nothing of them is kept.
+		a.nestedTools = nil
+		a.releasedSteps = len(tools)
+		a.stepsKnown = true
+		a.clearCache()
+		a.Bump()
+		return
+	}
 	a.nestedTools = tools
 	a.clearCache()
 	a.Bump()
@@ -266,6 +329,13 @@ func (a *delegationToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 
 // AddNestedTool adds a nested tool.
 func (a *delegationToolMessageItem) AddNestedTool(tool ToolMessageItem) {
+	if a.NestedToolsReleased() {
+		a.releasedSteps++
+		a.stepsKnown = true
+		a.clearCache()
+		a.Bump()
+		return
+	}
 	if s, ok := tool.(Compactable); ok {
 		s.SetCompact(true)
 	}
@@ -529,7 +599,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// it), so this is really just "!opts.Compact": a nested (compact)
 	// delegation falls through to the bare header below instead.
 	if !opts.Compact {
-		content := renderCollapsedDelegation(sty, width, r.agent.displayName, opts, r.agent.headline, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
+		content := renderCollapsedDelegation(sty, width, r.agent.displayName, opts, r.agent.headline, r.agent.collapsedSteps(), r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
@@ -657,7 +727,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		if headerParam == "" {
 			headerParam = prompt
 		}
-		content := renderCollapsedDelegation(sty, width, agenticFetchDisplayName, opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens, "", "")
+		content := renderCollapsedDelegation(sty, width, agenticFetchDisplayName, opts, headerParam, r.fetch.collapsedSteps(), r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens, "", "")
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
@@ -697,7 +767,7 @@ func renderCollapsedDelegation(
 	name string,
 	opts *ToolRenderOpts,
 	headline string,
-	nestedTools []ToolMessageItem,
+	steps int,
 	duration time.Duration,
 	promptTokens, completionTokens int64,
 	model, effort string,
@@ -708,7 +778,7 @@ func renderCollapsedDelegation(
 		lines = append(lines, subtitle)
 	}
 
-	if line := renderDelegationOutcomeLine(sty, width, opts.Status, len(nestedTools), duration, promptTokens, completionTokens); line != "" {
+	if line := renderDelegationOutcomeLine(sty, width, opts.Status, steps, duration, promptTokens, completionTokens); line != "" {
 		lines = append(lines, line)
 	}
 
@@ -774,12 +844,17 @@ func appendDelegationLiveLine(
 // renderDelegationOutcomeLine renders the collapsed block's second line,
 // e.g. `step 12 · 45s · 3.2k tok`. Duration is omitted when unknown (see
 // the duration field doc on AgentToolMessageItem) rather than showing a
-// misleading value. Returns "" if width leaves no room.
+// misleading value, and so is a negative step count, which means the
+// delegation's child transcript was never loaded (see NestedToolReleaser).
+// Returns "" if width leaves no room.
 func renderDelegationOutcomeLine(sty *styles.Styles, width int, status ToolStatus, steps int, duration time.Duration, promptTokens, completionTokens int64) string {
 	if width <= 0 {
 		return ""
 	}
-	parts := []string{fmt.Sprintf("step %d", steps)}
+	var parts []string
+	if steps >= 0 {
+		parts = append(parts, fmt.Sprintf("step %d", steps))
+	}
 	if duration > 0 {
 		parts = append(parts, presentation.FormatElapsed(duration))
 	}
