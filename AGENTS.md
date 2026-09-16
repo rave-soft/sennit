@@ -364,3 +364,21 @@ func CharmtonePantera() Styles {
 result of `quickStyle` with a `quickStyleOpts` palette (plus any needed
 overrides), then wire it into `ThemeForProvider`.
 - Pre-commit hook: `git config core.hooksPath .githooks` (fmt, tidy, build, lint; full -race suite runs in CI only).
+
+## Response and report style
+
+Applies to chat responses, subagent reports, issue comments and commit messages.
+
+Write in plain technical language. Avoid:
+
+- antitheses: "not X, but Y", "this isn't A — it's B", "the point isn't A, it's B"
+  (in Russian: «не X, а Y», «это не A — это B»);
+- intensifiers: "exactly", "precisely", "fundamentally", "honestly"
+  («именно», «ровно», «как раз», «принципиально», «вовсе», «поимённо», «честно»);
+- aphoristic closers — a short punchy sentence summing up a paragraph that already explained itself;
+- lead-ins: "In short:", "The point is that", "It's worth noting", "An important consequence"
+  («Коротко:», «Суть в том, что», «Стоит отметить», «Важное следствие»);
+- an em dash where a colon, a comma or a full stop would do.
+
+Instead: state things directly, give facts, keep lists flat. Explain a reason once, in ordinary
+words, without restating it inverted.
