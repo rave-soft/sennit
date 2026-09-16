@@ -66,7 +66,7 @@ a second profile — without touching your real configuration.
 | `SENNIT_DISABLE_ANTHROPIC_CACHE` | disable Anthropic prompt caching |
 | `SENNIT_CORE_UTILS` | use Go implementations of core shell utilities instead of the system ones. Defaults to on for Windows, off elsewhere |
 | `SENNIT_SKIP_DATADIR_LOCK` | skip the single-instance lock on the data directory |
-| `SENNIT_PROFILE` | serve pprof at `localhost:6060` |
+| `SENNIT_PPROF` | address for the profiling server, e.g. `localhost:6060`; unset means nothing listens |
 | `SENNIT_UI_DEBUG` | set to `true` for TUI layout debugging |
 
 ### Set by Sennit

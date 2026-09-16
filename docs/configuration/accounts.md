@@ -89,6 +89,12 @@ for an account you haven't used in a while. In the TUI's accounts dialog,
 provider has more than one account, the sidebar's plan line also names
 which account the current numbers belong to.
 
+`ctrl+t` in the same dialog refreshes the OAuth token of the selected
+account, without switching to it. It appears only for OAuth providers, since
+an API-key account has no token to refresh. Refreshing the account that is
+currently active goes through the live credential, so the stored copy and the
+one in use stay level.
+
 ## Rotation
 
 Once a provider has more than one account, Sennit can switch between them

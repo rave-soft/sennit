@@ -36,4 +36,55 @@
   snapshot. The snapshot embeds the full prior history of a delegated
   session and runs to tens of megabytes per row, so listings — which happen
   on every dispatch and every cancel — were dragging hundreds of megabytes
-  through memory and burning CPU on the garbage that made.
+  through memory and burning CPU on the garbage that made. Reading a single
+  delegation is the same story: the dashboard dock refreshed each running
+  one every eight seconds, and the snapshot is now loaded only where it is
+  needed, when a task is resumed.
+- `ctrl+t` in the accounts dialog refreshes the selected account's OAuth
+  token, without switching to it. It replaces the `r` binding, which
+  refreshed the provider's active credential instead; a bare letter could
+  not stay, because the rows are email addresses and every unclaimed key
+  goes to the filter input.
+- Security: the bash deny list (`sudo`, `curl`, `apt`, `go install`, …) is a
+  floor again. It was matched against the sandboxed command rather than the
+  one the model asked for, so inside a confined workspace — a worktree
+  delegation running unattended, among others — nothing in the wrapper was
+  ever recognised as deny-listed. Yolo, an auto-approved session and an
+  `--allowed-tools` entry naming `bash` also answered that prompt without a
+  person seeing it; they no longer do. A `PreToolUse` hook still decides per
+  call, and headless `sennit run`, which has no one to ask, denies such a
+  command at once instead of waiting forever for an answer.
+- Fixed: a delegation that finished while the provider's OAuth token was
+  dead left its parent retrying a continuation every second and a half, over
+  1600 failed requests in one session. The attempt cap engages now, and
+  OpenAI's `refresh_token_reused` family of codes opens the
+  re-authentication prompt the way `invalid_grant` already did.
+- Fixed: a stream cut off while the model was writing a tool call's
+  arguments left a JSON fragment in the session's history, and llama.cpp
+  rejected every later request for that session because of it. Such a call
+  never ran, so its arguments are replayed as `{}`.
+- Fixed: a long run counts its own steps toward the history it can reclaim.
+  One that started just after a compact measured 3k tokens and never updated
+  the figure, so it declined to summarize while filling a 262k window with
+  its own tool output, until the provider cut the turn off mid tool call.
+- Fixed: rate limiting. A 429 now ends the turn with words you can act on
+  instead of an empty provider body.
+- Fixed: `general-purpose` is no longer appended to the `subagent_type`
+  options when the workspace defines an agent of that name. The duplicate
+  value was rejected by strict-schema providers, and the alias shadowed your
+  own agent.
+- Fixed: an MCP tool whose server name contains an underscore is named the
+  same way in the transcript and in the permission prompt.
+- Fixed: opening a session, a delegation included, no longer hangs for
+  seconds in a repository with a large untracked tree. Marking the session's
+  uncommitted files listed the whole working tree and read every untracked
+  file to count its lines; it now asks git about the session's own files
+  alone.
+- Fixed: opening a long session no longer reads every finished delegation's
+  child transcript into memory. One session's 160 children came to 292MB of
+  JSON, held for as long as the session stayed open, to render collapsed
+  blocks that need only a step count. The full transcript is still one click
+  away.
+- Fixed: on Windows, cancelling a command kills the whole process tree.
+  Grandchildren outlived the command, and the wait could hang on a pipe one
+  of them held.

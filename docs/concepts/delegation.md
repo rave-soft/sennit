@@ -61,12 +61,14 @@ The session you are in does keep working while you watch it, and that is the
 point; press Esc twice to stop it, or turn delegation off entirely with
 `options.background_agents: false`.
 
-A workspace allows at most 4 unisolated delegations running at once, and at
-most 2 of those started by any one turn — past either limit, starting
-another is refused rather than queued. Isolated ones count toward neither:
-they spawn an app of their own and never touch the resources those limits
-protect. A chain of delegations starting further delegations is capped at 3
-levels deep either way.
+A workspace allows at most 20 unisolated delegations running at once, and at
+most 10 of those started by any one turn — past either limit, starting
+another is refused rather than queued. Those numbers are a backstop against
+a runaway cascade, not a throttle on ordinary fan-out; a turn's own limit is
+half the workspace's so one turn can never claim the whole budget. Isolated
+ones count toward neither: they spawn an app of their own and never touch
+the resources those limits protect. A chain of delegations starting further
+delegations is capped at 3 levels deep either way.
 
 ## Every delegation tool answers from where you stand
 

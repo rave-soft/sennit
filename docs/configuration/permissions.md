@@ -68,6 +68,31 @@ The same warning applies, more so: it survives across restarts until you turn
 it back off. `sennit doctor` flags it as a standing problem for exactly this
 reason.
 
+## The bash deny list is a floor
+
+A fixed set of commands always asks a person, whatever else is configured:
+network and download tools (`curl`, `wget`, `nc`, `ssh`, `scp`, browsers),
+privilege escalation (`sudo`, `su`, `doas`), system and network
+administration (`systemctl`, `mount`, `crontab`, `iptables`, `ip`), every
+system package manager, a package manager's install subcommand (`apt-get
+install`, `brew install`, `go install`, `npm install -g`, `pip install
+--user`, and so on), and `go test -exec`. The list is built in; there is no
+config key that adds to it or takes from it.
+
+Yolo mode, `permissions.bypass`, an auto-approved session and an
+`--allowed-tools` entry naming `bash` do **not** answer this prompt. None of
+them is a decision about the command in front of you: they were given before
+it was known. Two things do get through — a `PreToolUse` hook, which sees
+the actual command and decides per call, and an "always" you gave to this
+same command yourself. The prompt replaces the ordinary "Execute command"
+one rather than preceding it, so a deny-listed command is still one dialog.
+
+Because nobody is there to answer, a headless `sennit run` denies these
+commands immediately instead of waiting. The model is handed the command
+back to pass on to you, which is what a person choosing "no" produces. A
+delegation started under a headless run inherits this the same way it
+inherits the auto-approval.
+
 ## Hooks decide too
 
 `permissions allow/deny` is a static list. A [hook](../extending/hooks.md)
