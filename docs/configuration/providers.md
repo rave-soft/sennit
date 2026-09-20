@@ -47,9 +47,19 @@ has since produced over spending the refresh token itself. Which models the acco
 the Codex backend at sign-in and written to `providers.codex.models`; re-run
 `sennit login codex -f` to refresh that list after a plan change.
 
-Signing in again adds another Codex account rather than replacing the
-current one; see [Accounts](accounts.md) for managing several, switching
-between them, and per-account proxies.
+That shortcut is also why `sennit login codex` is not the way to reach a
+*second* ChatGPT account: the login on disk is one specific account, so
+re-running it re-authenticates that one. Adding an account is a separate
+action, and it always opens the browser:
+
+```sh
+sennit accounts add codex            # or "Login account…" in the TUI's accounts dialog
+```
+
+Either way, signing in as an account already on file updates that account in
+place rather than growing a duplicate — accounts are matched by the ChatGPT
+account the token names. See [Accounts](accounts.md) for managing several,
+switching between them, and per-account proxies.
 
 Because the plan is flat-rate, the sidebar shows what it costs you instead
 of a running total: the tier and how much of the current allowance is gone,

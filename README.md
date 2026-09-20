@@ -179,6 +179,7 @@ sennit doctor                         # check the loaded config for problems
 sennit dirs / projects / logs         # where things live, and what's in them
 sennit gc                             # purge old history, reclaim database space
 sennit login|logout [platform]        # provider credentials
+sennit accounts list|use|add          # several logins or keys per provider
 sennit import claude|opencode         # bring in another tool's agents/skills
 ```
 

@@ -171,12 +171,24 @@ Existing destination files are left alone unless `--force`.
 ## `login` / `logout`
 
 ```
-sennit login [platform] [-f]
+sennit login [platform] [-f] [--proxy <url>]
 sennit logout [platform] [-f]
 ```
 
-Available platform: `copilot`. `logout` with no argument lists what you are
-logged in to.
+Available platforms: `copilot` and `codex`. `logout` with no argument lists
+what you are logged in to.
+
+| Flag | Meaning |
+|:--|:--|
+| `-f`, `--force` | re-authenticate even when already logged in |
+| `--proxy` | Codex only: the proxy to reach OpenAI through, saved with the provider so model requests take the same route (`none` forces a direct connection) |
+
+`login` re-authenticates the account a provider already uses; it is not how
+you add a second one. For Codex it also reuses an existing Codex CLI login
+on disk when there is one, so the browser step is skipped — which means it
+always lands on whichever account that CLI is signed in as. To sign in as a
+different account, use `sennit accounts add codex`, which always opens the
+browser. See [Accounts](../configuration/accounts.md).
 
 ## `accounts` — manage a provider's stored credentials
 

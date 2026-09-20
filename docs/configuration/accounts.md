@@ -17,12 +17,23 @@ sennit accounts add openai         # omit --api-key and you're prompted for one
 ```
 
 For an OAuth provider (Codex, Copilot today) this is the same sign-in flow
-as `sennit login`, run again — it always attempts a fresh sign-in rather
-than reusing whatever is already active, and the result is added as another
-account rather than replacing the current one. For everything else, the key
-you type or pass is stored exactly as given: if it's a `$VAR`-style
-template, the template is what gets stored, and it's resolved at the moment
-the account is actually used, not when the account is added.
+as `sennit login`, run again — with one difference that matters for Codex:
+it always opens the browser. An ordinary `sennit login codex` skips that
+step when the Codex CLI has a login on disk, and that login is one specific
+account, so reusing it here would re-authenticate the account already on
+file instead of the one you are trying to add.
+
+What decides add-versus-update once you have signed in is the identity of
+the account itself, not the command you used: a Codex token names the
+ChatGPT account it belongs to, so signing in as an account already on file
+updates that account in place, and signing in as a different one adds it.
+Copilot's token names no account, which is why `sennit accounts add` has to
+say so explicitly there.
+
+For everything else, the key you type or pass is stored exactly as given: if
+it's a `$VAR`-style template, the template is what gets stored, and it's
+resolved at the moment the account is actually used, not when the account is
+added.
 
 ## Managing them
 
@@ -93,7 +104,35 @@ which account the current numbers belong to.
 account, without switching to it. It appears only for OAuth providers, since
 an API-key account has no token to refresh. Refreshing the account that is
 currently active goes through the live credential, so the stored copy and the
-one in use stay level.
+one in use stay level. For Codex it spends that account's own refresh token
+unless the Codex CLI happens to hold a newer token **for the same account**,
+which is adopted instead — a login on disk belonging to some other account is
+never used.
+
+## The accounts dialog
+
+Open it with the `providers` command and pick a provider that already has
+credentials — a provider with none starts its sign-in flow instead. The
+dialog answers to:
+
+| Key | Action |
+|:--|:--|
+| `enter` | make the highlighted account active |
+| `ctrl+a` | **Login account…** — sign in another account |
+| `ctrl+r` | edit the highlighted account (label, proxy, enabled) |
+| `ctrl+x` | remove it |
+| `ctrl+l` | re-read every account's usage limits |
+| `ctrl+t` | refresh the highlighted account's OAuth token |
+
+`ctrl+a` and `ctrl+l`/`ctrl+t` only appear where they mean something: the
+first two entries below the list are **Login account…** and **Provider
+settings…**, and the limit/token keys are offered only for providers that
+report usage and hold OAuth tokens.
+
+A sign-in's success screen names the account it signed in as, and says when
+the login was adopted from the Codex CLI rather than performed in the
+browser — for Codex the two can land on different accounts, so "signed in"
+alone is not an answer.
 
 ## Rotation
 
