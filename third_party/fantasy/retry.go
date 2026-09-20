@@ -114,7 +114,9 @@ type RetryOptions struct {
 	// If it returns an error, the retry pass proceeds exactly as it would
 	// with OnRateLimit unset: normal backoff, and OnRetry (if set) fires for
 	// that attempt, with the eventual error being the original 429 chain
-	// rather than the hook's error.
+	// rather than the hook's error. The one exception is an error wrapping
+	// ErrStopRetrying, which ends the pass immediately and is itself
+	// returned to the caller — see that variable.
 	//
 	// At most one call is made per retry pass, regardless of outcome — a
 	// further 429 in the same pass always falls through to the normal
@@ -137,6 +139,17 @@ type RetryOptions struct {
 // limit) response. Sennit fork addition; see RetryOptions.OnRateLimit for
 // the full contract.
 type OnRateLimitFunc func(ctx context.Context, err *ProviderError) error
+
+// ErrStopRetrying, wrapped in the error an OnRateLimit hook returns, tells
+// the retry pass that waiting cannot help: the hook knows the refusal will
+// stand until some point in the future that backoff will not reach — a
+// subscription window that resets in hours, say. The pass then stops at
+// once and returns the hook's own error, so the caller can report what the
+// hook knows instead of the provider's bare 429.
+//
+// Sennit fork addition. Without it the only way to say "this 429 is not
+// worth retrying" would be to spend the whole backoff budget first.
+var ErrStopRetrying = errors.New("retrying will not help")
 
 // OnRetryCallback is called before each retry attempt, after the retry
 // delay is chosen but before it elapses. err is the failure that triggered
@@ -197,8 +210,16 @@ func retryWithExponentialBackoff[T any](ctx context.Context, fn RetryFn[T], opti
 		// a budget sized for a single account. See RetryOptions.OnRateLimit.
 		if options.OnRateLimit != nil && !options.rateLimitHookFired && providerErr != nil && isRateLimitError(providerErr) {
 			newOptions.rateLimitHookFired = true
-			if hookErr := options.OnRateLimit(ctx, providerErr); hookErr == nil {
+			hookErr := options.OnRateLimit(ctx, providerErr)
+			if hookErr == nil {
 				return retryWithExponentialBackoff(ctx, fn, newOptions, newErrors)
+			}
+			if errors.Is(hookErr, ErrStopRetrying) {
+				// The hook knows this refusal outlasts the backoff
+				// budget. Its error carries that knowledge (and the
+				// original 429 through its own Unwrap), so return it
+				// rather than burning the remaining attempts.
+				return zero, hookErr
 			}
 			// Rotation failed: fall through to the normal backoff path
 			// below with the original 429 chain intact.

@@ -45,6 +45,10 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 // Cancel cancels sessionID's active run (if any) and any accepted or
 // queued follow-ups. See dispatcher.cancel.
 func (a *sessionAgent) Cancel(sessionID string) {
+	// A cancel is the person saying this session is not to run on its
+	// own; a resume parked by a usage limit would do exactly that hours
+	// later, so it goes with the queue.
+	a.limitResumes.disarm(sessionID)
 	drops := a.cancel(sessionID)
 	a.publishCanceledQueueDrops(drops)
 }
@@ -57,6 +61,7 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 }
 
 func (a *sessionAgent) CancelAll() {
+	a.limitResumes.disarmAll()
 	if !a.IsBusy() {
 		return
 	}

@@ -280,6 +280,14 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		// surfaced through the normal error path) is what actually
 		// ends the turn, this just explains why rotation couldn't help.
 		return util.ReportWarn(n.Message)
+	case workspace.AgentNotificationUsageLimitWaiting:
+		// The turn is over, but the session is not: it restarts itself
+		// once the window resets (see the agent's scheduleLimitResume).
+		// Reported as a warning, since the person may well want to
+		// switch accounts or models rather than wait it out.
+		return util.ReportWarn(n.Message)
+	case workspace.AgentNotificationUsageLimitResumed:
+		return util.ReportInfo(n.Message)
 	case workspace.AgentNotificationQueueChanged:
 		// Not a busy→idle edge (the session may still be busy, or may
 		// never have been) - only the queue pill is stale, so refresh

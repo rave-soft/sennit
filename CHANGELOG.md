@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- A Codex turn refused for a spent subscription window now says which window
+  is spent and when it comes back ("Codex plus: the 5h limit is spent (100%
+  used), resets at 19:42 (in 1h 12m)") instead of "Rate limited", and stops
+  there rather than spending three backoff attempts on a refusal that stands
+  for hours. Both plan shapes are read as the backend reports them: a 5h
+  window plus a weekly one, or a weekly one alone.
+- A session stopped by such a limit picks its own work back up once the
+  window resets — no prompt needed. Sending a prompt yourself, or cancelling,
+  drops the parked resume.
+- Rotation holds a rate-limited account down until its window actually
+  resets, instead of the flat ten-minute cooldown, when the provider quoted
+  no Retry-After.
+- Fixed: the sidebar kept showing the previous account's name after an
+  automatic account switch.
+
 ## 0.11.2
 
 - Fixed: signing in from the Codex accounts dialog can reach an account other

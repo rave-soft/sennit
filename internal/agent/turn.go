@@ -1109,9 +1109,21 @@ func (t *runTurn) closeUnfinishedToolCalls(cleanupCtx context.Context, toolCalls
 func (t *runTurn) finishAssistantOnStreamError(err error, isCancelErr bool) error {
 	var fantasyErr *fantasy.Error
 	var providerErr *fantasy.ProviderError
+	var limitErr *ProviderLimitError
 	const defaultTitle = "Provider Error"
 	if isCancelErr {
 		t.currentAssistant.AddFinish(message.FinishReasonCanceled, time.Now().Unix(), "User canceled request", "")
+	} else if errors.As(err, &limitErr) {
+		// A 429 the provider's own usage headers explain: the plan
+		// window is spent and the headers say when it rolls over. That
+		// is checked before the generic 429 branch below, which knows
+		// none of it and can only say "wait a while".
+		t.currentAssistant.AddFinish(
+			message.FinishReasonError,
+			time.Now().Unix(),
+			"Usage limit reached",
+			limitErr.Error(),
+		)
 	} else if errors.As(err, &providerErr) {
 		// classModelNotEnabled is a generic "model not enabled" signal
 		// from classifyStreamError; only Copilot's rejection actually

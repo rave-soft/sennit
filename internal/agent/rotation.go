@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -335,9 +336,21 @@ func (b *runtimeBuilder) makeSubAgentRateLimitCallback(providerCfg config.Provid
 // rateLimitCallback holds the rotation decision both makeRateLimitCallback
 // and makeSubAgentRateLimitCallback share; only the rebuild strategy
 // differs between them (see runtimeRebuild).
+//
+// It is wired for two overlapping reasons, and returns nil only when
+// neither applies. Rotation is the first: a 429 marks the account and
+// moves the turn to the next usable one. Usage reporting is the second: a
+// provider that quotes its own windows (Codex) can tell a spent
+// subscription window from a passing burst, and a spent window is worth
+// ending the turn over instead of spending three backoff attempts on a
+// refusal that stands for hours. A provider with neither gets no hook at
+// all, exactly as before.
 func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cred providerstate.Provider, active *activeRuntime, rebuild runtimeRebuild) fantasy.OnRateLimitFunc {
+	caps := accounts.CapabilitiesOf(providerCfg.ID)
 	rotator := b.rotatorFor(providerCfg)
-	if rotator == nil || !accounts.CapabilitiesOf(providerCfg.ID).RotateOn.RotatesOnRateLimit() {
+	rotates := rotator != nil && caps.RotateOn.RotatesOnRateLimit()
+	reportsUsage := caps.Usage && b.codexUsage != nil
+	if !rotates && !reportsUsage {
 		return nil
 	}
 	return func(ctx context.Context, providerErr *fantasy.ProviderError) error {
@@ -348,7 +361,16 @@ func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cr
 		// 429 on the newly-picked account would mark the WRONG account
 		// rate-limited and hot-loop retrying on the still-limited one.
 		account := currentRotationAccount(providerCfg, cred, active)
-		rotator.MarkRateLimited(account, retryAfterFromHeaders(providerErr))
+		usage := b.usageFor(account)
+		if !rotates {
+			// No rotation configured for this provider: the only thing
+			// left to decide is whether the refusal is worth retrying.
+			if limit := providerLimitFromUsage(providerCfg, usage, providerErr, time.Now()); limit != nil {
+				return limit
+			}
+			return providerErr
+		}
+		rotator.MarkRateLimited(account, rateLimitCooldown(providerErr, usage, time.Now()))
 
 		all, err := b.accountsStore.List(providerCfg.ID)
 		if err != nil {
@@ -358,16 +380,24 @@ func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cr
 		picked, err := rotator.Pick(providerCfg.ID, account, all)
 		if err != nil {
 			var exhausted *accounts.ErrAllExhausted
-			if errors.As(err, &exhausted) && b.notify != nil {
-				msg := fmt.Sprintf("%s: all accounts exhausted", providerCfg.Name)
-				if !exhausted.ResetsAt.IsZero() {
-					msg = fmt.Sprintf("%s, resets at %s", msg, exhausted.ResetsAt.Format("15:04"))
+			if errors.As(err, &exhausted) {
+				if b.notify != nil {
+					msg := fmt.Sprintf("%s: all accounts exhausted", providerCfg.Name)
+					if !exhausted.ResetsAt.IsZero() {
+						msg = fmt.Sprintf("%s, resets at %s", msg, exhausted.ResetsAt.Format("15:04"))
+					}
+					b.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+						Type:       notify.TypeAccountRotationExhausted,
+						ProviderID: providerCfg.ID,
+						Message:    msg,
+					})
 				}
-				b.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-					Type:       notify.TypeAccountRotationExhausted,
-					ProviderID: providerCfg.ID,
-					Message:    msg,
-				})
+				// Every account is spent and Pick knows the earliest
+				// any of them comes back: that is a limit the turn
+				// should be ended on, not retried through.
+				if limit := providerLimitExhausted(providerCfg, usage, exhausted, providerErr); limit != nil {
+					return limit
+				}
 			}
 			return err
 		}
@@ -381,10 +411,13 @@ func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cr
 			// rotated, retry immediately" (RetryOptions.OnRateLimit),
 			// which fires the very next attempt at the still-limited
 			// account with no delay at all, burning a retry for
-			// nothing. Return ErrAllExhausted instead - Pick's own
-			// verdict for "no usable account right now" - so
-			// OnRateLimit's error path takes over and normal backoff
-			// applies before the retry.
+			// nothing. Return the limit this account is under when it
+			// is known, and Pick's own verdict for "no usable account
+			// right now" otherwise - either way OnRateLimit's error
+			// path takes over instead of an immediate retry.
+			if limit := providerLimitFromUsage(providerCfg, usage, providerErr, time.Now()); limit != nil {
+				return limit
+			}
 			return &accounts.ErrAllExhausted{ProviderID: providerCfg.ID}
 		}
 		if err := b.applyRotationPick(ctx, providerCfg.ID, picked, active, rebuild); err != nil {
@@ -400,6 +433,86 @@ func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cr
 		}
 		return nil
 	}
+}
+
+// usageFor reads accountID's last recorded usage snapshot through the
+// injected lookup, reporting the zero Usage when no lookup is wired or the
+// account has no snapshot yet. Both mean the same thing to every caller
+// here: nothing is known about this account's windows.
+func (b *runtimeBuilder) usageFor(accountID string) codex.Usage {
+	if b.codexUsage == nil {
+		return codex.Usage{}
+	}
+	usage, ok := b.codexUsage(accountID)
+	if !ok {
+		return codex.Usage{}
+	}
+	return usage
+}
+
+// providerLimitFromUsage turns a 429 into a ProviderLimitError when the
+// account's own usage snapshot explains it: a window the plan actually has
+// is spent, and its reset still lies ahead. It reports nil otherwise, which
+// leaves the caller on the ordinary rate-limit path - a passing burst, or a
+// provider that quotes no windows, must keep retrying as it always did.
+func providerLimitFromUsage(providerCfg config.ProviderConfig, usage codex.Usage, providerErr *fantasy.ProviderError, now time.Time) *ProviderLimitError {
+	window, ok := spentWindow(usage, now)
+	if !ok {
+		return nil
+	}
+	return &ProviderLimitError{
+		Provider:      providerCfg.ID,
+		ProviderName:  providerCfg.Name,
+		Plan:          usage.Plan,
+		WindowMinutes: window.WindowMinutes,
+		UsedPercent:   window.UsedPercent,
+		ResetsAt:      window.ResetsAt,
+		err:           providerErr,
+	}
+}
+
+// providerLimitExhausted is providerLimitFromUsage for the case where every
+// configured account is spent.
+//
+// It still requires the active account's own snapshot to show a spent
+// window: that snapshot is the only evidence that this 429 is a
+// subscription limit rather than a passing burst, and Pick reports "all
+// exhausted" for its own cooldown bookkeeping as well, which says nothing
+// about the provider's plan. Without that evidence the caller keeps the
+// unchanged *accounts.ErrAllExhausted it always returned.
+//
+// Given the evidence, Pick's ResetsAt is the better time to quote: it is
+// the earliest moment ANY account comes back, which is when the work can
+// actually go on, and that is usually earlier than the window the turn's
+// own account is waiting on.
+func providerLimitExhausted(providerCfg config.ProviderConfig, usage codex.Usage, exhausted *accounts.ErrAllExhausted, providerErr *fantasy.ProviderError) *ProviderLimitError {
+	limit := providerLimitFromUsage(providerCfg, usage, providerErr, time.Now())
+	if limit == nil {
+		return nil
+	}
+	limit.AllAccounts = true
+	if !exhausted.ResetsAt.IsZero() {
+		limit.ResetsAt = exhausted.ResetsAt
+	}
+	return limit
+}
+
+// rateLimitCooldown is how long MarkRateLimited should hold the account
+// that just answered 429. A Retry-After header is the provider speaking
+// about this very refusal and wins outright; with none, a spent
+// subscription window is the next best thing, and it is a far better
+// answer than the policy's flat default - a weekly window resets in days,
+// and a rotator that tries the account again ten minutes later just
+// collects another 429. Zero (let the policy decide) when neither is
+// known.
+func rateLimitCooldown(providerErr *fantasy.ProviderError, usage codex.Usage, now time.Time) time.Duration {
+	if after := retryAfterFromHeaders(providerErr); after > 0 {
+		return after
+	}
+	if window, ok := spentWindow(usage, now); ok {
+		return window.ResetsAt.Add(resumeGrace).Sub(now)
+	}
+	return 0
 }
 
 // retryAfterFromHeaders extracts the Retry-After delay from a

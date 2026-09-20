@@ -59,6 +59,15 @@ const (
 	// carries a human-readable summary, including the reset time when
 	// known.
 	TypeAccountRotationExhausted Type = "account_rotation_exhausted"
+	// TypeUsageLimitWaiting indicates a turn ended because the provider's
+	// subscription window is spent, and the session has been parked until
+	// that window resets: it picks its own work back up then, with no
+	// prompt from the user. Message carries which limit was hit and when
+	// the session will continue.
+	TypeUsageLimitWaiting Type = "usage_limit_waiting"
+	// TypeUsageLimitResumed indicates a parked session's limit has reset
+	// and its continuation turn is starting. Message names the provider.
+	TypeUsageLimitResumed Type = "usage_limit_resumed"
 )
 
 // Notification represents a domain event published by the agent.

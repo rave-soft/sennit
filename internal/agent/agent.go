@@ -138,6 +138,10 @@ type sessionAgent struct {
 	// callers leave it zero and get the package default.
 	titleTimeout time.Duration
 
+	// limitResumes holds the pending "continue once the provider's usage
+	// window resets" timers, one per session. See scheduleLimitResume.
+	limitResumes *limitResumes
+
 	// dispatcher owns the accept/queue/cancel protocol state shared by Run
 	// and Summarize's dispatch handoffs. Embedded so dispatcher's pure
 	// pass-through methods are promoted onto SessionAgent's method set
@@ -191,6 +195,7 @@ func NewSessionAgent(
 		lifecycle:            opts.Lifecycle,
 		titleTimeout:         opts.TitleTimeout,
 		dispatcher:           newDispatcher(),
+		limitResumes:         newLimitResumes(),
 	}
 	// Wired after construction since the hook closes over a: dispatch
 	// itself must stay free of any dependency on a or on pubsub (see

@@ -3,6 +3,7 @@ package fantasy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -302,4 +303,32 @@ func TestRetryOnRateLimitNilHookIsNoOp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ok", result)
 	assert.Equal(t, 2, *calls)
+}
+
+// TestRetryOnRateLimitHookStopRetryingEndsPass covers ErrStopRetrying: a
+// hook that knows the refusal outlasts the backoff budget ends the pass at
+// once, the request is not sent again, and the hook's own error (not a
+// RetryError over the 429 chain) is what the caller gets.
+func TestRetryOnRateLimitHookStopRetryingEndsPass(t *testing.T) {
+	calls, fn := countingFn(3, rateLimitErr())
+	stop := fmt.Errorf("weekly limit spent: %w", ErrStopRetrying)
+	var onRetryCalls int
+
+	opts := RetryOptions{
+		MaxRetries:     3,
+		InitialDelayIn: time.Millisecond,
+		BackoffFactor:  2.0,
+		OnRetry: func(_ *ProviderError, _ time.Duration) {
+			onRetryCalls++
+		},
+		OnRateLimit: func(_ context.Context, _ *ProviderError) error {
+			return stop
+		},
+	}
+
+	_, err := retryWithExponentialBackoff(context.Background(), fn, opts, nil)
+	require.ErrorIs(t, err, ErrStopRetrying)
+	assert.Same(t, stop, err, "the hook's own error is what the caller must see")
+	assert.Equal(t, 1, *calls, "the request must not be sent again")
+	assert.Equal(t, 0, onRetryCalls, "a stopped pass has no retry to announce")
 }

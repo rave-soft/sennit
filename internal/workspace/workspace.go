@@ -105,6 +105,13 @@ const (
 	// (internal/agent/notify) - see those for what triggers each.
 	AgentNotificationAccountRotated           AgentNotificationType = "account_rotated"
 	AgentNotificationAccountRotationExhausted AgentNotificationType = "account_rotation_exhausted"
+	// AgentNotificationUsageLimitWaiting and
+	// AgentNotificationUsageLimitResumed mirror
+	// notify.TypeUsageLimitWaiting / notify.TypeUsageLimitResumed - a
+	// session parked until a provider's subscription window resets, and
+	// the same session picking its work back up once it has.
+	AgentNotificationUsageLimitWaiting AgentNotificationType = "usage_limit_waiting"
+	AgentNotificationUsageLimitResumed AgentNotificationType = "usage_limit_resumed"
 )
 
 type AgentNotification struct {

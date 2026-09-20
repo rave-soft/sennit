@@ -506,6 +506,12 @@ func (a *sessionAgent) completeTurn(
 	a.clearActiveIfMatch(call.SessionID, ac)
 	cancel()
 
+	// A turn that ended because the provider's subscription window is
+	// spent is not finished work: it is work with a known restart time.
+	// Park the session until then. Every other failure ends here as it
+	// always did. See scheduleLimitResume.
+	a.scheduleLimitResume(ctx, call, err)
+
 	// summarizeFailed's context.Canceled case is a user Escape landing
 	// mid-auto-summarize (summarize's own genCtx is derived from this
 	// turn's genCtx - see finishTurn), not a failure this turn should
@@ -638,6 +644,12 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		return decision.steer, decision.result, nil, decision.err
 	}
 	genCtx, cancel, ac := decision.genCtx, decision.cancel, decision.ac
+
+	// A turn of this session's own is now running, so whatever it was
+	// parked waiting for no longer decides when it continues: drop any
+	// pending usage-limit resume (see scheduleLimitResume). A turn that
+	// runs into the limit again arms a new one on its way out.
+	a.limitResumes.disarm(call.SessionID)
 
 	// Announce the turn from the same point that just decided it is one.
 	// This is the only place in the system that knows a turn began, and
