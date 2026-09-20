@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.2
+
+- Fixed: signing in from the Codex accounts dialog can reach an account other
+  than the one the Codex CLI is signed in as. "Login account…" reused the
+  CLI's login on disk whenever it could, so it refreshed the account already
+  on file, made that one active and reported a successful sign-in — while the
+  account you meant to add or re-authenticate was never touched.
+  `sennit accounts add codex` was a no-op for the same reason.
+- Fixed: `ctrl+t` on an account no longer writes another account's token into
+  it. The refresh matched the Codex CLI's login on disk against the
+  provider's *active* account instead of the one being refreshed, so
+  refreshing a second account while the first was live copied the first
+  account's credential into the second's entry.
+- A sign-in's success screen names the account it signed in as, and says when
+  the login was adopted from the Codex CLI instead of the browser.
+  "Authentication successful!" on its own answered neither question.
+
 ## 0.11.1
 
 - Security: the bash deny list (`sudo`, `curl`, `apt`, `go install`, …) is a
