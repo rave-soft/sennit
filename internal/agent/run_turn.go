@@ -859,7 +859,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
-		Headers:          sessionHeaders(call.SessionID),
+		Headers:          sessionHeaders(call.SessionID, t.model.ModelCfg.Provider),
 		ProviderOptions:  call.ProviderOptions,
 		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,

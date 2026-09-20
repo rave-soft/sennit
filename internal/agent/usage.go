@@ -315,7 +315,7 @@ func (a *sessionAgent) streamSummary(genCtx, ctx context.Context, sessionID stri
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
-		Headers:         sessionHeaders(sessionID),
+		Headers:         sessionHeaders(sessionID, model.ModelCfg.Provider),
 		ProviderOptions: opts,
 		OnAuthRefresh:   summaryOnAuthRefresh,
 		OnRateLimit:     summaryOnRateLimit,

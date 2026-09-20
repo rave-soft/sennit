@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Codex requests now carry the `session_id` header its own CLI sends, and
+  the backend routes on it. Without it every request landed on whichever
+  machine took it, found no prefix cached there, and the whole conversation
+  was charged again: measured live against a 20k-token prompt repeated
+  unchanged, five requests in a row reported zero cached tokens, while the
+  same requests carrying the header reported 19840 of 20035 cached. A
+  session's steps now pay for what they add rather than for everything
+  said so far — the difference between a few thousand tokens a step and a
+  few hundred thousand.
+
 - A Codex turn refused for a spent subscription window now says which window
   is spent and when it comes back ("Codex plus: the 5h limit is spent (100%
   used), resets at 19:42 (in 1h 12m)") instead of "Rate limited", and stops

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/stringext"
 )
@@ -237,12 +239,40 @@ func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs 
 //
 // We use the session hash is used instead of the raw UUID so the header
 // value is deterministic and opaque.
-func sessionHeaders(sessionID string) map[string]string {
+//
+// Codex additionally gets session_id, the header its own CLI sends, and it
+// is not decoration: the ChatGPT backend routes on it. Measured against
+// the live endpoint with a 20k-token prompt repeated unchanged, requests
+// without it came back with zero cached tokens every time, while the same
+// requests carrying it reported 19840 of 20035 cached from the second one
+// on (see TestLiveCodexPromptCache). Without the header each request lands
+// on whichever machine takes it, finds no prefix there, and the whole
+// conversation is charged again - which is how a five-hour allowance goes
+// in a few minutes of ordinary work.
+func sessionHeaders(sessionID, providerID string) map[string]string {
 	hash := session.HashID(sessionID)
-	return map[string]string{
+	headers := map[string]string{
 		"x-session-id":       hash,
 		"x-session-affinity": hash,
 	}
+	if providerID == codex.ProviderID {
+		headers["session_id"] = sessionUUID(sessionID)
+	}
+	return headers
+}
+
+// sessionUUID renders a session as the UUID shape the Codex backend's
+// session_id header is spelled in, without handing it the session's own
+// id: the value is a digest of that id, formatted as a v8 (custom) UUID.
+// Stable for one session, opaque, and the same for every request that
+// session makes - which is all the routing needs.
+func sessionUUID(sessionID string) string {
+	sum := sha256.Sum256([]byte(sessionID))
+	var b [16]byte
+	copy(b[:], sum[:16])
+	b[6] = (b[6] & 0x0f) | 0x80 // version 8: custom
+	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.

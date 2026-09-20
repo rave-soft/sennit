@@ -135,7 +135,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	streamCall := fantasy.AgentStreamCall{
 		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
-		Headers: sessionHeaders(sessionID),
+		Headers: sessionHeaders(sessionID, model.ModelCfg.Provider),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
 			if systemPromptPrefix != "" {
