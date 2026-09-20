@@ -25,6 +25,15 @@
 - A session parked on a spent window is left alone until it comes back: no
   idle summarize, no delegation-completion wake. Both used to spend another
   request each, and get another 429.
+- Fixed: an account whose window had already reset stayed unusable for the
+  rest of the session. Its usage snapshot still read 100% — a snapshot is
+  only refreshed by a request — and rotation read that figure without
+  looking at the reset time beside it, so the account that had just come
+  back was never rotated to and the work stayed on the one still spent.
+- Fixed: a session parked on a reset time that had already passed retried
+  every thirty seconds for as long as it was open. Such a reset is no
+  longer quoted at all, and a resume that finds nothing ahead to wait for
+  backs off (30s, doubling, capped at 15m).
 - Fixed: the sidebar kept showing the previous account's name after an
   automatic account switch.
 

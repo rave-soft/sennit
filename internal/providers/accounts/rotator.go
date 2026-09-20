@@ -139,6 +139,25 @@ func NewRotator(cfg RotationPolicy, opts ...RotatorOption) *Rotator {
 	return r
 }
 
+// windowSpent reports whether w says the account is out of allowance AT
+// now: a known window at or over limit whose reset has not yet arrived.
+//
+// The reset check is what keeps a stale snapshot from stranding an
+// account. A snapshot is only refreshed by a request, so an account that
+// was left at 100% keeps saying 100% for as long as nothing asks it
+// anything - including long after its window rolled over. Read without
+// the reset time, that snapshot made the account permanently unusable:
+// the rotation that should have gone back to it once its window returned
+// never happened, and the caller was told everything was still exhausted.
+// Past its reset, a spent window tells us nothing, which is the same
+// answer as no window at all (see Pick's doc comment on unknown usage).
+func windowSpent(w UsageWindow, limit int, now time.Time) bool {
+	if !w.Known() || w.UsedPercent < limit {
+		return false
+	}
+	return w.ResetsAt.IsZero() || w.ResetsAt.After(now)
+}
+
 // ShouldRotate reports whether active has fallen below the configured
 // threshold on at least one KNOWN usage window (plan Р6: either window,
 // not both). It is meaningful only for RotateThreshold providers — a
@@ -161,8 +180,9 @@ func (r *Rotator) ShouldRotate(active Account, all []Account) bool {
 		return false
 	}
 	limit := r.cfg.threshold()
+	now := r.now()
 	for _, w := range []UsageWindow{active.Usage.Primary, active.Usage.Secondary} {
-		if w.Known() && w.UsedPercent >= limit {
+		if windowSpent(w, limit, now) {
 			return true
 		}
 	}
@@ -269,7 +289,7 @@ func (r *Rotator) Pick(providerID, currentID string, candidates []Account) (Acco
 		if a.Disabled {
 			continue
 		}
-		if reset := earliestResetFor(a, r.cooldowns); !reset.IsZero() {
+		if reset := earliestResetFor(a, r.cooldowns, r.now()); !reset.IsZero() {
 			if earliestReset.IsZero() || reset.Before(earliestReset) {
 				earliestReset = reset
 			}
@@ -307,8 +327,9 @@ func (r *Rotator) usableLocked(a Account, limit int) bool {
 	if r.coolingDown(a.ID) {
 		return false
 	}
+	now := r.now()
 	for _, w := range []UsageWindow{a.Usage.Primary, a.Usage.Secondary} {
-		if w.Known() && w.UsedPercent >= limit {
+		if windowSpent(w, limit, now) {
 			return false
 		}
 	}
@@ -317,10 +338,16 @@ func (r *Rotator) usableLocked(a Account, limit int) bool {
 
 // earliestResetFor returns the soonest time a's exhaustion (threshold or
 // cooldown) is known to clear, or the zero time if that's unknown.
-func earliestResetFor(a Account, cooldowns map[string]time.Time) time.Time {
+//
+// A time already past is not a reset the caller can wait for - it is a
+// stale snapshot saying an old window ended - so it is skipped rather than
+// reported. Quoting one told the caller to come back at a moment that had
+// already been and gone, which is how a retry loop ends up asking again
+// every thirty seconds forever.
+func earliestResetFor(a Account, cooldowns map[string]time.Time, now time.Time) time.Time {
 	var earliest time.Time
 	consider := func(t time.Time) {
-		if t.IsZero() {
+		if t.IsZero() || !t.After(now) {
 			return
 		}
 		if earliest.IsZero() || t.Before(earliest) {

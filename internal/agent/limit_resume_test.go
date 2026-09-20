@@ -160,3 +160,36 @@ func TestResumeAfterLimit_StopsOnShutdown(t *testing.T) {
 	a.resumeAfterLimit(ctx, "sess-1", limitErrorIn(-time.Minute))
 	require.Zero(t, ran)
 }
+
+func TestResumeBackoff(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, resumeGrace, resumeBackoff(1))
+	require.Equal(t, 2*resumeGrace, resumeBackoff(2))
+	require.Equal(t, 4*resumeGrace, resumeBackoff(3))
+	require.Equal(t, maxResumeBackoff, resumeBackoff(20), "the doubling is capped")
+	require.Equal(t, resumeGrace, resumeBackoff(0), "an attempt count that was never raised still waits the grace")
+}
+
+// TestScheduleLimitResume_BacksOffWhenTheResetIsAlreadyPast is the loop the
+// logs showed: a reset quoted in the past parked the session for the grace,
+// the resume failed on the same stale figures, and the whole thing went
+// round again every thirty seconds. Each such resume must now wait longer
+// than the last.
+func TestScheduleLimitResume_BacksOffWhenTheResetIsAlreadyPast(t *testing.T) {
+	t.Parallel()
+
+	a := resumeTestAgent(&recordingNotifier{})
+	call := SessionAgentCall{SessionID: "sess-1"}
+
+	for i := 1; i <= 3; i++ {
+		a.scheduleLimitResume(t.Context(), call, limitErrorIn(-time.Hour))
+		require.Equal(t, i, a.limitResumes.failures["sess-1"])
+		a.limitResumes.disarm("sess-1")
+	}
+
+	// A limit with a real reset ahead is not a failed resume: the run
+	// resets, so a later stale one starts from the grace again.
+	a.scheduleLimitResume(t.Context(), call, limitErrorIn(2*time.Hour))
+	require.Zero(t, a.limitResumes.failures["sess-1"])
+}

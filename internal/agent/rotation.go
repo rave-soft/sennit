@@ -549,7 +549,11 @@ func providerLimitExhausted(providerCfg config.ProviderConfig, usage codex.Usage
 		return nil
 	}
 	limit.AllAccounts = true
-	if !exhausted.ResetsAt.IsZero() {
+	if exhausted.ResetsAt.After(time.Now()) {
+		// Only a reset still ahead is worth quoting: one already past
+		// describes a window that has rolled over, and telling the
+		// caller to come back then is telling it to come back now, over
+		// and over.
 		limit.ResetsAt = exhausted.ResetsAt
 	}
 	return limit

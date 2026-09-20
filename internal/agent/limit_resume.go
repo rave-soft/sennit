@@ -19,6 +19,9 @@ import (
 // weeks would be worse than reporting the failure and stopping.
 const maxLimitResumeWait = 8 * 24 * time.Hour
 
+// maxResumeBackoff caps resumeBackoff's doubling.
+const maxResumeBackoff = 15 * time.Minute
+
 // limitResumes holds the pending "pick this session back up when the
 // provider's window resets" timers, one per session.
 //
@@ -30,10 +33,14 @@ const maxLimitResumeWait = 8 * 24 * time.Hour
 type limitResumes struct {
 	mu     sync.Mutex
 	timers map[string]*time.Timer
+	// failures counts, per session, how many resumes in a row were
+	// scheduled off a reset time that had already passed - see
+	// noteFailure and resumeBackoff.
+	failures map[string]int
 }
 
 func newLimitResumes() *limitResumes {
-	return &limitResumes{timers: make(map[string]*time.Timer)}
+	return &limitResumes{timers: make(map[string]*time.Timer), failures: make(map[string]int)}
 }
 
 // Every method below tolerates a nil receiver: an agent assembled as a
@@ -54,6 +61,33 @@ func (l *limitResumes) arm(sessionID string, timer *time.Timer) {
 		old.Stop()
 	}
 	l.timers[sessionID] = timer
+}
+
+// noteFailure records one more resume for sessionID that had no future
+// reset to wait for, and returns the new count.
+func (l *limitResumes) noteFailure(sessionID string) int {
+	if l == nil {
+		return 1
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.failures == nil {
+		l.failures = make(map[string]int)
+	}
+	l.failures[sessionID]++
+	return l.failures[sessionID]
+}
+
+// clearFailures forgets sessionID's run of failed resumes. Called when a
+// turn finally succeeds, and when a resume is scheduled off a reset that
+// genuinely lies ahead.
+func (l *limitResumes) clearFailures(sessionID string) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.failures, sessionID)
 }
 
 // disarm drops sessionID's pending resume, if any. Safe to call for a
@@ -121,6 +155,22 @@ func (a *sessionAgent) scheduleLimitResume(ctx context.Context, call SessionAgen
 			"session_id", call.SessionID, "provider", limit.Provider, "resets_at", limit.ResetsAt)
 		return
 	}
+	sessionID := call.SessionID
+	if wait > resumeGrace {
+		a.limitResumes.clearFailures(sessionID)
+	} else {
+		// Nothing ahead to wait for: the reset quoted has already been
+		// and gone, which means the figures behind it are stale (a
+		// snapshot is only refreshed by a request). Retrying on the
+		// grace alone turns that into a request every thirty seconds
+		// for as long as the session is open, so each such resume in a
+		// row waits longer than the last.
+		attempt := a.limitResumes.noteFailure(sessionID)
+		wait = resumeBackoff(attempt)
+		slog.Warn("Usage-limit resume has no future reset to wait for, backing off",
+			"session_id", sessionID, "provider", limit.Provider,
+			"resets_at", limit.ResetsAt, "attempt", attempt, "wait", wait)
+	}
 
 	// The wait outlives the turn that scheduled it by hours, so it must
 	// not hang off that turn's context; the coordinator's lifecycle
@@ -131,7 +181,6 @@ func (a *sessionAgent) scheduleLimitResume(ctx context.Context, call SessionAgen
 	if a.continuationContext != nil {
 		runCtx = a.continuationContext()
 	}
-	sessionID := call.SessionID
 	a.limitResumes.arm(sessionID, time.AfterFunc(wait, func() {
 		a.resumeAfterLimit(runCtx, sessionID, limit)
 	}))
@@ -165,6 +214,21 @@ func limitResumeWait(resetsAt, now time.Time) (time.Duration, bool) {
 		return 0, false
 	}
 	return max(wait, resumeGrace), true
+}
+
+// resumeBackoff is how long the attempt-th consecutive resume with no
+// future reset to wait for holds off: the grace, doubling, capped. The cap
+// keeps a session that is genuinely waiting on something checking back
+// often enough to be useful without becoming a poll.
+func resumeBackoff(attempt int) time.Duration {
+	wait := resumeGrace
+	for range max(attempt-1, 0) {
+		wait *= 2
+		if wait >= maxResumeBackoff {
+			return maxResumeBackoff
+		}
+	}
+	return wait
 }
 
 // resumeAfterLimit runs the parked session's next turn once the limit has

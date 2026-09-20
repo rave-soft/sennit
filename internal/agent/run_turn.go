@@ -511,6 +511,11 @@ func (a *sessionAgent) completeTurn(
 	// Park the session until then. Every other failure ends here as it
 	// always did. See scheduleLimitResume.
 	a.scheduleLimitResume(ctx, call, err)
+	if err == nil {
+		// A turn that went through ends whatever run of failed resumes
+		// preceded it: the next limit starts counting from zero.
+		a.limitResumes.clearFailures(call.SessionID)
+	}
 
 	// summarizeFailed's context.Canceled case is a user Escape landing
 	// mid-auto-summarize (summarize's own genCtx is derived from this

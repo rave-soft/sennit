@@ -199,7 +199,10 @@ func TestRotator_Pick_OrderPreference(t *testing.T) {
 func TestRotator_Pick_ExhaustedReturnsEarliestReset(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	r := NewRotator(RotationPolicy{})
+	// The clock is pinned to base: a window's reset is now read
+	// against the current time (see windowSpent), so a fixture dated
+	// in the past would describe windows that have all rolled over.
+	r := NewRotator(RotationPolicy{}, WithClock(func() time.Time { return base }))
 
 	a1 := acct("a1")
 	a1.Usage = Usage{Primary: UsageWindow{UsedPercent: 95, WindowMinutes: 60, ResetsAt: base.Add(2 * time.Hour)}}
@@ -223,7 +226,10 @@ func TestRotator_Pick_ExhaustedReturnsEarliestReset(t *testing.T) {
 func TestRotator_Pick_ExhaustedIgnoresDisabledAccountReset(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	r := NewRotator(RotationPolicy{})
+	// The clock is pinned to base: a window's reset is now read
+	// against the current time (see windowSpent), so a fixture dated
+	// in the past would describe windows that have all rolled over.
+	r := NewRotator(RotationPolicy{}, WithClock(func() time.Time { return base }))
 
 	// a1 is disabled and would reset first, but must never be reflected in
 	// ResetsAt - it stays exhausted forever regardless of the clock.
@@ -358,4 +364,65 @@ func TestRotator_MarkRateLimited_FallsBackToConfiguredCooldown(t *testing.T) {
 	got, err = r.Pick("prov", "a2", []Account{a1, a2})
 	require.NoError(t, err)
 	require.Equal(t, "a1", got.ID)
+}
+
+// TestRotator_Pick_StaleSpentWindowIsUsableAgain is the reported case: two
+// accounts, both left at 100%, one of them with a window that has since
+// rolled over. A snapshot is only refreshed by a request, so the account
+// whose limit came back still reads 100% - and used to be skipped for it,
+// forever, which meant the rotation that should have gone back to it never
+// happened and every attempt kept running on the account that was still
+// spent.
+func TestRotator_Pick_StaleSpentWindowIsUsableAgain(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 20, 22, 23, 34, 0, time.UTC)
+	r := NewRotator(RotationPolicy{}, WithClock(func() time.Time { return now }))
+
+	// back's window rolled over an hour ago; its snapshot is simply old.
+	back := acct("back")
+	back.Usage = Usage{Primary: UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: now.Add(-time.Hour)}}
+	// spent is genuinely out until later tonight.
+	spent := acct("spent")
+	spent.Usage = Usage{Primary: UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: now.Add(3 * time.Hour)}}
+
+	picked, err := r.Pick("prov", "spent", []Account{back, spent})
+	require.NoError(t, err)
+	require.Equal(t, "back", picked.ID)
+}
+
+// TestRotator_Pick_ExhaustedIgnoresAPastReset: with every account spent,
+// the reset quoted must be one that has not already happened. A past one
+// tells the caller to come back at a moment already gone, which turns a
+// wait-and-retry into a loop.
+func TestRotator_Pick_ExhaustedIgnoresAPastReset(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 20, 22, 23, 34, 0, time.UTC)
+	r := NewRotator(RotationPolicy{}, WithClock(func() time.Time { return now }))
+
+	spent := acct("spent")
+	spent.Usage = Usage{Primary: UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: now.Add(3 * time.Hour)}}
+	disabled := acct("disabled")
+	disabled.Disabled = true
+	disabled.Usage = Usage{Primary: UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: now.Add(-time.Hour)}}
+
+	_, err := r.Pick("prov", "spent", []Account{spent, disabled})
+	var exhausted *ErrAllExhausted
+	require.ErrorAs(t, err, &exhausted)
+	require.True(t, exhausted.ResetsAt.Equal(now.Add(3*time.Hour)))
+}
+
+// TestRotator_ShouldRotate_StaleSpentWindow: the proactive trigger reads
+// the same rule, so a session does not rotate away from an account whose
+// window has already come back.
+func TestRotator_ShouldRotate_StaleSpentWindow(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 20, 22, 23, 34, 0, time.UTC)
+	r := NewRotator(RotationPolicy{}, WithClock(func() time.Time { return now }))
+
+	active := acct("active")
+	active.Usage = Usage{Primary: UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: now.Add(-time.Minute)}}
+	require.False(t, r.ShouldRotate(active, []Account{active, acct("other")}))
+
+	active.Usage.Primary.ResetsAt = now.Add(time.Minute)
+	require.True(t, r.ShouldRotate(active, []Account{active, acct("other")}))
 }
