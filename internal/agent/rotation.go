@@ -228,15 +228,19 @@ func (b *runtimeBuilder) thresholdRotateCallback(providerCfg config.ProviderConf
 		if b.codexUsage == nil {
 			return
 		}
-		usage, ok := b.codexUsage(account)
-		if !ok {
-			return
-		}
+		// The account list is read before the usage lookup because the
+		// lookup needs it: the snapshot store is keyed by the provider's
+		// own account id, not by Sennit's (see usageFor).
 		all, err := b.accountsStore.List(providerCfg.ID)
 		if err != nil {
 			slog.Warn("Threshold rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
 			return
 		}
+		usage, ok := b.usageFor(account, all)
+		if !ok {
+			return
+		}
+		all = b.freshenUsage(all)
 		acct := accounts.Account{ID: account, Usage: usage.Snapshot()}
 		for i, a := range all {
 			if a.ID == account {
@@ -361,7 +365,16 @@ func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cr
 		// 429 on the newly-picked account would mark the WRONG account
 		// rate-limited and hot-loop retrying on the still-limited one.
 		account := currentRotationAccount(providerCfg, cred, active)
-		usage := b.usageFor(account)
+		all, err := b.accountsStore.List(providerCfg.ID)
+		if err != nil {
+			slog.Warn("Rate-limit rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
+			if !rotates {
+				return providerErr
+			}
+			return err
+		}
+		usage, _ := b.usageFor(account, all)
+		all = b.freshenUsage(all)
 		if !rotates {
 			// No rotation configured for this provider: the only thing
 			// left to decide is whether the refusal is worth retrying.
@@ -371,12 +384,6 @@ func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cr
 			return providerErr
 		}
 		rotator.MarkRateLimited(account, rateLimitCooldown(providerErr, usage, time.Now()))
-
-		all, err := b.accountsStore.List(providerCfg.ID)
-		if err != nil {
-			slog.Warn("Rate-limit rotation: failed to list accounts", "provider", providerCfg.ID, "error", err)
-			return err
-		}
 		picked, err := rotator.Pick(providerCfg.ID, account, all)
 		if err != nil {
 			var exhausted *accounts.ErrAllExhausted
@@ -435,19 +442,70 @@ func (b *runtimeBuilder) rateLimitCallback(providerCfg config.ProviderConfig, cr
 	}
 }
 
-// usageFor reads accountID's last recorded usage snapshot through the
-// injected lookup, reporting the zero Usage when no lookup is wired or the
-// account has no snapshot yet. Both mean the same thing to every caller
-// here: nothing is known about this account's windows.
-func (b *runtimeBuilder) usageFor(accountID string) codex.Usage {
+// usageFor reads accountID's last recorded usage snapshot, translating
+// Sennit's own account id into the one the snapshot is filed under.
+//
+// The translation is the whole point. The usage store is keyed by the
+// PROVIDER's account id - the chatgpt-account-id header the usage
+// transport reads off the request it is holding (internal/oauth/codex) -
+// while every id on this path is Sennit's own record id
+// ("acc_<uuid>" against the provider's bare "<uuid>"). Looking the
+// snapshot up under the record id found nothing, ever: threshold rotation
+// never fired for Codex, and a spent window could not be recognized when
+// a 429 arrived. all is the account list to translate through; an account
+// that is not in it, or a provider whose accounts carry no id of their
+// own, falls back to the id as given, which is right for a plan whose
+// responses carry no account header at all (the store files those under
+// the empty id, exactly as Account.AccountID is empty for them).
+//
+// Reports false when no lookup is wired or the account has no snapshot
+// yet - both mean nothing is known about this account's windows.
+func (b *runtimeBuilder) usageFor(accountID string, all []accounts.Account) (codex.Usage, bool) {
 	if b.codexUsage == nil {
-		return codex.Usage{}
+		return codex.Usage{}, false
 	}
+	for _, a := range all {
+		if a.ID != accountID {
+			continue
+		}
+		if usage, ok := b.codexUsage(a.AccountID); ok {
+			return usage, true
+		}
+		break
+	}
+	// No record, or nothing filed under the provider's id for it: try the
+	// id as given. A provider whose accounts carry no id of their own is
+	// keyed by whatever the caller names them by, and this is also what
+	// keeps a store written before the translation existed readable.
 	usage, ok := b.codexUsage(accountID)
 	if !ok {
-		return codex.Usage{}
+		return codex.Usage{}, false
 	}
-	return usage
+	return usage, true
+}
+
+// freshenUsage overlays this process's own usage snapshots onto the stored
+// account list, so Pick judges every candidate on what the provider said
+// last rather than on whatever was last written to accounts.json.
+//
+// Without it a rotation walks straight into an account whose window is
+// just as spent as the one it is leaving - which is what the reported case
+// did: two accounts, both at 100%, and the turn spent its retry budget
+// bouncing between them. An account with no snapshot is left exactly as
+// stored: "not known to be spent" is what lets a freshly added account be
+// used at all (see Rotator.Pick).
+func (b *runtimeBuilder) freshenUsage(all []accounts.Account) []accounts.Account {
+	if b.codexUsage == nil {
+		return all
+	}
+	freshened := make([]accounts.Account, len(all))
+	copy(freshened, all)
+	for i, a := range freshened {
+		if usage, ok := b.usageFor(a.ID, all); ok {
+			freshened[i].Usage = usage.Snapshot()
+		}
+	}
+	return freshened
 }
 
 // providerLimitFromUsage turns a 429 into a ProviderLimitError when the

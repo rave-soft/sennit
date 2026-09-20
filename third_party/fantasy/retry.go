@@ -118,20 +118,27 @@ type RetryOptions struct {
 	// ErrStopRetrying, which ends the pass immediately and is itself
 	// returned to the caller — see that variable.
 	//
-	// At most one call is made per retry pass, regardless of outcome — a
-	// further 429 in the same pass always falls through to the normal
-	// backoff path, since a credential still rate-limited immediately after
-	// rotating would not fare better a second time. OnRetry does NOT fire
-	// for the attempt OnRateLimit handles successfully: there is no delay
-	// and nothing to report.
+	// A hook that returns an error is not asked again in the same pass:
+	// whatever it could not do the first time (no account to rotate to,
+	// say) it will not manage a moment later, and every further 429 falls
+	// through to the normal backoff path. A hook that succeeds, on the
+	// other hand, is asked again on the next 429, because it answered the
+	// previous one by changing which credential is in use: with several
+	// accounts to work through, the second one's refusal is as much its
+	// business as the first one's was, and not asking meant the rest of
+	// the pass ran blind against accounts it had already rotated into.
+	// MaxRetries bounds the chain either way. OnRetry does NOT fire for
+	// the attempt OnRateLimit handles successfully: there is no delay and
+	// nothing to report.
 	OnRateLimit OnRateLimitFunc
 
 	// rateLimitHookFired tracks, within a single retry pass, whether
-	// OnRateLimit has already been called. It is unexported so it cannot be
-	// set from outside the package by a struct literal; the recursive calls
-	// in retryWithExponentialBackoff carry it forward the same way
-	// InitialDelayIn already is. Sennit fork addition; DefaultRetryOptions
-	// leaves it at its zero value (false).
+	// OnRateLimit has already been called AND failed - a successful call
+	// clears it again, so the next 429 reaches the hook (see OnRateLimit).
+	// It is unexported so it cannot be set from outside the package by a
+	// struct literal; the recursive calls in retryWithExponentialBackoff
+	// carry it forward the same way InitialDelayIn already is. Sennit fork
+	// addition; DefaultRetryOptions leaves it at its zero value (false).
 	rateLimitHookFired bool
 }
 
@@ -209,11 +216,14 @@ func retryWithExponentialBackoff[T any](ctx context.Context, fn RetryFn[T], opti
 		// can rotate accounts and retry immediately instead of waiting out
 		// a budget sized for a single account. See RetryOptions.OnRateLimit.
 		if options.OnRateLimit != nil && !options.rateLimitHookFired && providerErr != nil && isRateLimitError(providerErr) {
-			newOptions.rateLimitHookFired = true
 			hookErr := options.OnRateLimit(ctx, providerErr)
 			if hookErr == nil {
+				// Rotated: the next attempt runs on a different
+				// credential, so the next 429 is a new question and the
+				// hook stays eligible to answer it.
 				return retryWithExponentialBackoff(ctx, fn, newOptions, newErrors)
 			}
+			newOptions.rateLimitHookFired = true
 			if errors.Is(hookErr, ErrStopRetrying) {
 				// The hook knows this refusal outlasts the backoff
 				// budget. Its error carries that knowledge (and the

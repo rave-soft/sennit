@@ -90,6 +90,16 @@ const continuationPromptPlaceholder = "(background delegation continuation)"
 // (wakeFromInboxIfIdle) will retry it automatically once this failed
 // attempt goes idle.
 func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason string) {
+	// A session parked on a spent usage window has a turn scheduled
+	// already - the resume (see scheduleLimitResume) - and its inbox is
+	// drained by that turn when it runs. Waking it now only spends
+	// another 429 and counts another continuation failure.
+	if a.limitResumes.pending(sessionID) {
+		slog.Info("Continuation deferred: session is waiting on a usage limit",
+			"session", sessionID, "reason", reason)
+		return
+	}
+
 	call := SessionAgentCall{
 		SessionID:    sessionID,
 		Prompt:       continuationPromptPlaceholder,

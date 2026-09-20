@@ -165,9 +165,12 @@ func TestOnAuthRefreshStillFiresOn401AndNotOn429(t *testing.T) {
 	})
 }
 
-func TestRetryOnRateLimitHookFiresAtMostOncePerPass(t *testing.T) {
-	// Three consecutive 429s, budget of 3 retries: the hook is offered only
-	// the first one; the second and third fall through to normal backoff.
+// TestRetryOnRateLimitHookFiresAgainAfterRotation: each 429 that the hook
+// answered by rotating is a question about a different credential, so the
+// next one reaches the hook too. Rotation across several accounts depends
+// on this - with one call per pass, everything after the first rotation
+// ran blind.
+func TestRetryOnRateLimitHookFiresAgainAfterRotation(t *testing.T) {
 	calls, fn := countingFn(3, rateLimitErr())
 	var hookCalls int
 
@@ -178,6 +181,30 @@ func TestRetryOnRateLimitHookFiresAtMostOncePerPass(t *testing.T) {
 		OnRateLimit: func(_ context.Context, _ *ProviderError) error {
 			hookCalls++
 			return nil // pretend rotation always "succeeds"
+		},
+	}
+
+	result, err := retryWithExponentialBackoff(context.Background(), fn, opts, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", result)
+	assert.Equal(t, 3, hookCalls)
+	assert.Equal(t, 4, *calls)
+}
+
+// TestRetryOnRateLimitHookFiresOnceAfterFailure is the other half of that
+// rule: a hook with nothing left to rotate to is not asked again, and the
+// rest of the pass is ordinary backoff.
+func TestRetryOnRateLimitHookFiresOnceAfterFailure(t *testing.T) {
+	calls, fn := countingFn(3, rateLimitErr())
+	var hookCalls int
+
+	opts := RetryOptions{
+		MaxRetries:     3,
+		InitialDelayIn: time.Millisecond,
+		BackoffFactor:  2.0,
+		OnRateLimit: func(_ context.Context, _ *ProviderError) error {
+			hookCalls++
+			return errors.New("no accounts left")
 		},
 	}
 

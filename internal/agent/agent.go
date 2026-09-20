@@ -44,6 +44,11 @@ type SessionAgent interface {
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
+	// WaitingOnUsageLimit reports whether sessionID is parked waiting for
+	// a provider's usage window to reset (see scheduleLimitResume). Such a
+	// session is idle, but nothing should send a request for it until the
+	// window is back - every one of them is another 429.
+	WaitingOnUsageLimit(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string

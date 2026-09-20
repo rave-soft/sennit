@@ -156,6 +156,25 @@ func TestIdleSweep_SkipsABusySession(t *testing.T) {
 	require.Equal(t, []string{sess.ID}, f.summarized, "and it is picked up once the turn is done")
 }
 
+// TestIdleSweep_SkipsASessionWaitingOnAUsageLimit: a parked session is as
+// idle as an abandoned one, and a summarize is its most expensive request.
+// Sent against a spent window it can only come back 429 - which is what
+// the logs from the reported case are full of.
+func TestIdleSweep_SkipsASessionWaitingOnAUsageLimit(t *testing.T) {
+	f, sess := newIdleSweepFixture(t, idleConfig, 80_000)
+	f.dispatcher.markActivity(sess.ID)
+
+	f.agent.scheduleLimitResume(t.Context(), SessionAgentCall{SessionID: sess.ID}, &ProviderLimitError{
+		Provider: "codex", ResetsAt: time.Now().Add(2 * time.Hour),
+	})
+	f.dispatcher.sweepIdleSessions(t.Context(), time.Now().Add(time.Hour))
+	require.Empty(t, f.summarized, "nothing may be sent for a session waiting on a spent window")
+
+	f.agent.limitResumes.disarm(sess.ID)
+	f.dispatcher.sweepIdleSessions(t.Context(), time.Now().Add(time.Hour))
+	require.Equal(t, []string{sess.ID}, f.summarized, "and it is picked up once the window is back")
+}
+
 // TestIdleSweep_ForgetsADeletedSession: a session that no longer exists must
 // not be retried on every tick for the rest of the process's life.
 func TestIdleSweep_ForgetsADeletedSession(t *testing.T) {

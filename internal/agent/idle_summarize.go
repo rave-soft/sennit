@@ -133,6 +133,16 @@ func (d *turnDispatcher) summarizeIfIdle(ctx context.Context, sessionID string, 
 	if agent == nil || agent.IsSessionBusy(sessionID) {
 		return
 	}
+	// A session parked on a spent usage window looks as idle as one whose
+	// person walked away, and a summarize is a full replay of the whole
+	// conversation - the most expensive request the session has. Sent
+	// against a spent window it can only come back 429, so the pass waits
+	// for the window instead; the session is over the threshold either
+	// way and the next sweep after the reset picks it up.
+	if agent.WaitingOnUsageLimit(sessionID) {
+		slog.Debug("Idle summarize skipped: session is waiting on a usage limit", "session_id", sessionID)
+		return
+	}
 	sess, err := d.sessions.Get(ctx, sessionID)
 	if err != nil {
 		// A session that no longer exists (deleted while this process

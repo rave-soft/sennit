@@ -213,3 +213,8 @@ func (a *sessionAgent) resumeAfterLimit(ctx context.Context, sessionID string, l
 		slog.Error("Usage-limit resume failed", "session_id", sessionID, "error", err)
 	}
 }
+
+// WaitingOnUsageLimit implements SessionAgent.
+func (a *sessionAgent) WaitingOnUsageLimit(sessionID string) bool {
+	return a.limitResumes.pending(sessionID)
+}

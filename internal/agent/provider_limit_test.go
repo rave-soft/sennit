@@ -268,3 +268,70 @@ func TestRateLimitCallback_BurstKeepsRetrying(t *testing.T) {
 	require.False(t, errors.As(err, &limit))
 	require.NotErrorIs(t, err, fantasy.ErrStopRetrying)
 }
+
+// TestRateLimitCallback_UsageKeyedByProviderAccountID is the defect the
+// logs showed: the snapshot store is keyed by the provider's own account
+// id (the chatgpt-account-id header), while the rotation path names
+// accounts by Sennit's record id ("acc_<uuid>"). Filed under the provider
+// id and looked up under the record id, the snapshot was never found, so a
+// spent window could not be recognized and the turn spent its whole retry
+// budget on a refusal that stood for hours.
+func TestRateLimitCallback_UsageKeyedByProviderAccountID(t *testing.T) {
+	resets := time.Now().Add(90 * time.Minute).Truncate(time.Second)
+	codex.RecordUsageFor("7b9ad59c-uuid", codex.Usage{
+		Plan:    "plus",
+		Primary: codex.UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: resets},
+	})
+
+	providerCfg := codexProviderConfig("acc_7b9ad59c-uuid", false)
+	account := accounts.Account{
+		ID:        "acc_7b9ad59c-uuid",
+		Label:     "someone@example.com",
+		AccountID: "7b9ad59c-uuid",
+		APIKey:    "key-a",
+	}
+	b := codexLimitBuilder(t, providerCfg, account)
+	cred, ok := b.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+
+	err := b.makeRateLimitCallback(providerCfg, cred, nil, runtimeOperationPort{})(t.Context(), rateLimitErr(nil))
+	var limit *ProviderLimitError
+	require.ErrorAs(t, err, &limit)
+	require.Equal(t, resets, limit.ResetsAt)
+}
+
+// TestRateLimitCallback_DoesNotRotateIntoASpentAccount is what the logs
+// showed happening: two accounts, both at 100%, and the 429 rotated into
+// the second one and kept going. Fresh snapshots are overlaid on the
+// stored list before Pick sees it, so a spent candidate is not picked and
+// the limit is reported with the earliest reset among them.
+func TestRateLimitCallback_DoesNotRotateIntoASpentAccount(t *testing.T) {
+	soon := time.Now().Add(40 * time.Minute).Truncate(time.Second)
+	later := time.Now().Add(4 * time.Hour).Truncate(time.Second)
+	codex.RecordUsageFor("uuid-a", codex.Usage{
+		Plan:    "plus",
+		Primary: codex.UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: later},
+	})
+	codex.RecordUsageFor("uuid-b", codex.Usage{
+		Plan:    "plus",
+		Primary: codex.UsageWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: soon},
+	})
+
+	providerCfg := codexProviderConfig("acc_a", true)
+	b := codexLimitBuilder(t, providerCfg,
+		accounts.Account{ID: "acc_a", AccountID: "uuid-a", APIKey: "key-a"},
+		accounts.Account{ID: "acc_b", AccountID: "uuid-b", APIKey: "key-b"},
+	)
+	cred, ok := b.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+
+	err := b.makeRateLimitCallback(providerCfg, cred, nil, runtimeOperationPort{})(t.Context(), rateLimitErr(nil))
+	var limit *ProviderLimitError
+	require.ErrorAs(t, err, &limit)
+	require.True(t, limit.AllAccounts, "both accounts are spent, and that is what the message must say")
+	require.Equal(t, soon, limit.ResetsAt, "the earliest window back is when the work can go on")
+
+	after, ok := b.cfg.Config().RuntimeProvider(codex.ProviderID)
+	require.True(t, ok)
+	require.Equal(t, "acc_a", after.Account, "no rotation into an account that is just as spent")
+}

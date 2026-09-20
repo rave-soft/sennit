@@ -13,7 +13,18 @@
   drops the parked resume.
 - Rotation holds a rate-limited account down until its window actually
   resets, instead of the flat ten-minute cooldown, when the provider quoted
-  no Retry-After.
+  no Retry-After, and no longer rotates into an account whose window is just
+  as spent: every candidate is judged on the last figures the provider
+  quoted, not on what was last written to accounts.json.
+- Fixed: Codex usage snapshots were filed under the provider's account id
+  and looked up under Sennit's own, so they were never found. Threshold
+  rotation for Codex never fired because of it.
+- Fixed: a 429 after a successful account rotation was never shown to the
+  rotation hook again, so the rest of the retry pass ran blind against
+  accounts it had already switched into.
+- A session parked on a spent window is left alone until it comes back: no
+  idle summarize, no delegation-completion wake. Both used to spend another
+  request each, and get another 429.
 - Fixed: the sidebar kept showing the previous account's name after an
   automatic account switch.
 
