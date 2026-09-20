@@ -109,7 +109,7 @@ type stubOAuthFlow struct {
 func (f *stubOAuthFlow) Wait(context.Context) (*oauth.Token, error) { return f.token, f.err }
 func (f *stubOAuthFlow) Cancel()                                    { f.cancelled++ }
 
-func (w *codexLoginWorkspaceFake) StartOAuth(_ context.Context, providerID, proxyURL string) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+func (w *codexLoginWorkspaceFake) StartOAuth(_ context.Context, providerID, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	w.calls = append(w.calls, "StartOAuth:"+providerID)
 	w.startProxies = append(w.startProxies, proxyURL)
 	if w.startErr != nil {
@@ -172,7 +172,7 @@ func TestLoginCodex_StartsThenCompletesSignIn(t *testing.T) {
 		[]accounts.Account{{ID: "existing"}, {ID: "new"}},
 	)
 
-	require.NoError(t, loginCodex(ws, true, ""))
+	require.NoError(t, loginCodex(ws, true, false, ""))
 	require.Equal(t, []string{
 		"StartOAuth:codex", "ListAccounts:codex", "CompleteOAuth:codex", "ListAccounts:codex",
 	}, ws.calls)
@@ -191,7 +191,7 @@ func TestLoginCodex_FirstAccountListingFailureDoesNotComplete(t *testing.T) {
 	ws := newCodexLoginFake(nil, nil)
 	ws.listResults = []codexLoginListResult{{err: listErr}}
 
-	err := loginCodex(ws, true, "")
+	err := loginCodex(ws, true, false, "")
 	require.ErrorIs(t, err, listErr)
 	require.Equal(t, []string{"StartOAuth:codex", "ListAccounts:codex"}, ws.calls)
 	require.Empty(t, ws.completed)
@@ -206,7 +206,7 @@ func TestLoginCodex_SecondAccountListingFailureKeepsSuccessfulLogin(t *testing.T
 	ws := newCodexLoginFake(nil, nil)
 	ws.listResults = []codexLoginListResult{{}, {err: errors.New("account store unavailable")}}
 
-	require.NoError(t, loginCodex(ws, true, ""))
+	require.NoError(t, loginCodex(ws, true, false, ""))
 	require.Len(t, ws.completed, 1, "the account is persisted before the summary re-list")
 }
 
@@ -223,7 +223,7 @@ func TestLoginCodex_ModelFetchFailureIsNotFatal(t *testing.T) {
 		ModelsError: errors.New("model list unavailable"),
 	}
 
-	require.NoError(t, loginCodex(ws, true, ""))
+	require.NoError(t, loginCodex(ws, true, false, ""))
 	require.Len(t, ws.completed, 1)
 }
 
@@ -236,7 +236,7 @@ func TestLoginCodex_CompleteFailureIsFatal(t *testing.T) {
 	ws := newCodexLoginFake(nil, nil)
 	ws.completeErr = completeErr
 
-	require.ErrorIs(t, loginCodex(ws, true, ""), completeErr)
+	require.ErrorIs(t, loginCodex(ws, true, false, ""), completeErr)
 }
 
 // TestLoginCodex_ProxyWriteFailureIsFatal pins the other non-fatal field's
@@ -257,7 +257,7 @@ func TestLoginCodex_ProxyWriteFailureIsFatal(t *testing.T) {
 		ProxyError: proxyErr,
 	}
 
-	require.ErrorIs(t, loginCodex(ws, true, ""), proxyErr)
+	require.ErrorIs(t, loginCodex(ws, true, false, ""), proxyErr)
 }
 
 // TestLoginCodex_ProxyResolutionOrder pins flag > configured > the Codex
@@ -270,7 +270,7 @@ func TestLoginCodex_ProxyResolutionOrder(t *testing.T) {
 		t.Parallel()
 		ws := newCodexLoginFake(nil, nil)
 		ws.configuredProxy = "socks5://from-cli:1080"
-		require.NoError(t, loginCodex(ws, true, "http://flag:8080"))
+		require.NoError(t, loginCodex(ws, true, false, "http://flag:8080"))
 		require.Equal(t, []string{"http://flag:8080"}, ws.startProxies)
 		require.Equal(t, "http://flag:8080", ws.completed[0].proxyURL)
 	})
@@ -294,7 +294,7 @@ func TestLoginCodex_ProxyResolutionOrder(t *testing.T) {
 		t.Parallel()
 		ws := newCodexLoginFake(nil, nil)
 		ws.configuredProxy = "socks5://from-cli:1080"
-		require.NoError(t, loginCodex(ws, true, ""))
+		require.NoError(t, loginCodex(ws, true, false, ""))
 		require.Equal(t, []string{"socks5://from-cli:1080"}, ws.startProxies)
 	})
 }
@@ -316,7 +316,7 @@ func (w *codexLoginConfiguredProxyFake) Config() *config.Config {
 
 func loginCodexWithConfiguredProxy(t *testing.T, ws *codexLoginWorkspaceFake, proxyURL string) error {
 	t.Helper()
-	return loginCodex(&codexLoginConfiguredProxyFake{codexLoginWorkspaceFake: ws, proxyURL: proxyURL}, true, "")
+	return loginCodex(&codexLoginConfiguredProxyFake{codexLoginWorkspaceFake: ws, proxyURL: proxyURL}, true, false, "")
 }
 
 // TestLoginCodex_AlreadyLoggedInShortCircuits keeps the --force contract:
@@ -327,7 +327,7 @@ func TestLoginCodex_AlreadyLoggedInShortCircuits(t *testing.T) {
 	inner := newCodexLoginFake(nil, nil)
 	ws := &codexLoginTokenFake{codexLoginWorkspaceFake: inner}
 
-	require.NoError(t, loginCodex(ws, false, ""))
+	require.NoError(t, loginCodex(ws, false, false, ""))
 	require.Empty(t, inner.calls, "an existing login must not start a new sign-in")
 }
 
@@ -354,6 +354,6 @@ func TestLoginCodex_RejectsBadProxy(t *testing.T) {
 	t.Parallel()
 
 	ws := newCodexLoginFake(nil, nil)
-	require.Error(t, loginCodex(ws, true, "bad-proxy"))
+	require.Error(t, loginCodex(ws, true, false, "bad-proxy"))
 	require.Empty(t, ws.calls)
 }

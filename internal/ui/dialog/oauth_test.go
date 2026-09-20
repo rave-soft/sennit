@@ -36,6 +36,7 @@ type completeOAuthTestWorkspace struct {
 	lastStartProviderID string
 	lastStartProxy      string
 	startResult         workspace.OAuthStartResult
+	lastStartForceNew   bool
 	startFlow           *stubDialogOAuthFlow
 	startErr            error
 
@@ -383,12 +384,13 @@ func (f *stubDialogOAuthFlow) cancelCount() int {
 
 // StartOAuth on completeOAuthTestWorkspace hands back whatever the test
 // staged: a token won without an interactive step, or a flow to wait on.
-func (w *completeOAuthTestWorkspace) StartOAuth(_ context.Context, providerID, proxyURL string) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+func (w *completeOAuthTestWorkspace) StartOAuth(_ context.Context, providerID, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.startCalls++
 	w.lastStartProviderID = providerID
 	w.lastStartProxy = proxyURL
+	w.lastStartForceNew = forceNewAccount
 	if w.startErr != nil {
 		return workspace.OAuthStartResult{}, nil, w.startErr
 	}

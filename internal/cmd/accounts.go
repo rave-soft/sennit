@@ -279,16 +279,22 @@ func findAuthAccount(ws workspace.AccountLister, providerID, account string) (ac
 	return accounts.Account{}, fmt.Errorf("no account %q found for provider %s", account, providerID)
 }
 
-// authAddOAuth runs the existing OAuth login flow with force semantics
-// that skip its "already logged in" short-circuit: RecordAccount's own
-// AccountID-matching is what decides add-vs-update for these providers
-// (see config.RecordAccount), not the force flag, so forcing here is what
-// makes "add" actually attempt a fresh sign-in instead of bailing out
-// early because one account already exists.
+// authAddOAuth runs the existing OAuth login flow with both force flags
+// set. The first skips the flow's "already logged in" short-circuit, so
+// "add" attempts a sign-in at all instead of bailing out early because one
+// account already exists. The second says this sign-in is meant to reach
+// an account other than the configured one, which is what keeps Codex from
+// short-circuiting the browser with the CLI's login on disk — that login
+// is one specific account, and adopting it would make "add" a no-op that
+// reports success (see workspace.OAuthController.StartOAuth).
+//
+// What decides add-vs-update once a token is in hand is still
+// RecordAccount's own AccountID matching (see config.RecordAccount), not
+// either flag: two sign-ins to the literal same account stay one account.
 func authAddOAuth(ws loginAccountWorkspace, providerID string) error {
 	switch providerID {
 	case "codex":
-		return loginCodex(ws, true, "")
+		return loginCodex(ws, true, true, "")
 	case "copilot":
 		return loginCopilot(ws, true, true)
 	default:

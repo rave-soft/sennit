@@ -36,7 +36,7 @@ var oauthPlatforms = []oauthPlatform{
 	{
 		ID: "codex", DisplayName: "OpenAI Codex", Aliases: []string{"chatgpt", "openai-codex"},
 		Login: func(ws workspace.Workspace, force bool, proxyURL string) error {
-			return loginCodex(ws, force, proxyURL)
+			return loginCodex(ws, force, false, proxyURL)
 		},
 		Logout: func(ws workspace.Workspace) error { return logoutCodex(ws) },
 	},

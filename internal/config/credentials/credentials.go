@@ -103,7 +103,7 @@ type Manager struct {
 	// It is a field so tests can substitute a fake exchange without making
 	// real network calls. Production code leaves it nil, and exchange falls
 	// back to the real provider clients.
-	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
+	exchangeToken func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error)
 
 	// authSignalMu guards authSignals, which maps provider IDs to
 	// channels that WaitForTokenChange blocks on. SignalAuthComplete
@@ -121,7 +121,7 @@ type Option func(*Manager)
 // Manager through a real refresh without making a network call; production
 // callers must not pass this and should leave exchange on the real
 // provider clients (see exchange).
-func WithExchangeToken(exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) Option {
+func WithExchangeToken(exchange func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error)) Option {
 	return func(m *Manager) { m.exchangeToken = exchange }
 }
 
@@ -223,7 +223,7 @@ func (m *Manager) refreshOAuthTokenLocked(ctx context.Context, scope config.Scop
 
 	// Disk still holds our token (or no newer peer token exists) and we hold
 	// the lock, so we are the sole exchanger. Perform the exchange.
-	refreshedToken, refreshErr := m.exchange(ctx, providerID, entryToken.RefreshToken)
+	refreshedToken, refreshErr := m.exchange(ctx, providerID, m.providerAccount(providerID), entryToken.RefreshToken)
 	if refreshErr != nil {
 		// The exchange may have failed because a peer rotated the refresh
 		// token in a window we did not cover. Re-check disk: adopt a usable
@@ -235,7 +235,7 @@ func (m *Manager) refreshOAuthTokenLocked(ctx context.Context, scope config.Scop
 				return nil
 			}
 			slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
-			refreshedToken, refreshErr = m.exchange(ctx, providerID, diskToken.RefreshToken)
+			refreshedToken, refreshErr = m.exchange(ctx, providerID, m.providerAccount(providerID), diskToken.RefreshToken)
 		}
 	}
 	if refreshErr != nil {
@@ -447,7 +447,10 @@ func (m *Manager) refreshOAuthTokenForAccountLocked(ctx context.Context, provide
 	if err != nil {
 		return fmt.Errorf("listing accounts for provider %s: %w", providerID, err)
 	}
-	var entryToken *oauth.Token
+	var (
+		entryToken    *oauth.Token
+		entryIdentity string
+	)
 	for _, a := range accs {
 		if a.ID != accountID {
 			continue
@@ -456,6 +459,10 @@ func (m *Manager) refreshOAuthTokenForAccountLocked(ctx context.Context, provide
 			return fmt.Errorf("account %s for provider %s does not have an OAuth token", accountID, providerID)
 		}
 		entryToken = a.Token
+		// The identity of THIS account, not the provider's active one:
+		// see exchange's doc comment for what reading the active account
+		// here used to cost.
+		entryIdentity = accountIdentity(providerID, a)
 		break
 	}
 	if entryToken == nil {
@@ -476,7 +483,7 @@ func (m *Manager) refreshOAuthTokenForAccountLocked(ctx context.Context, provide
 	}
 	defer release()
 
-	refreshedToken, refreshErr := m.exchange(ctx, providerID, entryToken.RefreshToken)
+	refreshedToken, refreshErr := m.exchange(ctx, providerID, entryIdentity, entryToken.RefreshToken)
 	if refreshErr != nil {
 		return fmt.Errorf("failed to refresh OAuth token for account %s of provider %s: %w", accountID, providerID, refreshErr)
 	}
@@ -520,12 +527,23 @@ func (m *Manager) persistAccountToken(providerID, accountID string, token *oauth
 	return persistErr
 }
 
-// exchange performs the provider-specific OAuth token exchange. Tests may
-// override it via the exchangeToken field; production uses the real
-// provider clients.
-func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+// exchange performs the provider-specific OAuth token exchange for the
+// credential identified by accountID — the provider's own identifier for
+// the account whose refresh token this is, "" when there is none to name.
+// Tests may override it via the exchangeToken field; production uses the
+// real provider clients.
+//
+// accountID is what keeps a multi-account provider's refresh from landing
+// on the wrong account: the Codex branch below may answer with a token it
+// found on disk instead of performing an exchange, and a disk token
+// belongs to exactly one account. Reading the identity off the provider's
+// *active* credential here (as this did before) meant that refreshing any
+// other account, while the CLI on disk happened to hold the active one's
+// login, adopted the active account's token and persisted it into the
+// other account's entry.
+func (m *Manager) exchange(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error) {
 	if m.exchangeToken != nil {
-		return m.exchangeToken(ctx, providerID, refreshToken)
+		return m.exchangeToken(ctx, providerID, accountID, refreshToken)
 	}
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
@@ -539,9 +557,18 @@ func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string)
 		// refreshes on its own schedule, so adopt a newer token it has
 		// already produced for this account rather than taking its last
 		// one.
-		if token, ok := codex.TokenFromDiskFor(m.providerAccount(providerID)); ok {
-			slog.Debug("Adopted a Codex token from the CLI instead of spending the refresh token")
-			return token, nil
+		//
+		// An unnamed account ("") deliberately skips the shortcut rather
+		// than accepting whatever login is on disk: TokenFromDiskFor
+		// treats "" as "any account", which is the one answer that cannot
+		// be checked against the credential being refreshed. Spending the
+		// refresh token is the safe direction to be wrong in.
+		if accountID != "" {
+			if token, ok := codex.TokenFromDiskFor(accountID); ok {
+				slog.Debug("Adopted a Codex token from the CLI instead of spending the refresh token",
+					"account", accountID)
+				return token, nil
+			}
 		}
 		// Codex is reachable only through a proxy for some users, and a
 		// refresh that ignored the one the provider is configured with
@@ -550,6 +577,27 @@ func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
+}
+
+// accountIdentity is the provider's own identifier for a stored account —
+// what exchange matches a token found on disk against. Only Codex has such
+// an identifier today; every other provider reports "", which exchange
+// reads as "nothing to match on".
+//
+// The stored AccountID is authoritative, and deriving it from the access
+// token is only a fallback for an entry written before the identity was
+// recorded (see internal/config's Codex identity backfill).
+func accountIdentity(providerID string, a accounts.Account) string {
+	if providerID != codex.ProviderID {
+		return ""
+	}
+	if a.AccountID != "" {
+		return a.AccountID
+	}
+	if a.Token == nil {
+		return ""
+	}
+	return codex.AccountID(a.Token.AccessToken)
 }
 
 // providerAccount is the account the provider's current credential belongs
@@ -654,7 +702,7 @@ func (m *Manager) ImportCopilot() (*oauth.Token, bool) {
 	// GitHub's real endpoint.
 	ctx, cancel := context.WithTimeout(context.Background(), importCopilotTimeout)
 	defer cancel()
-	token, err := m.exchange(ctx, string(catwalk.InferenceProviderCopilot), diskToken)
+	token, err := m.exchange(ctx, string(catwalk.InferenceProviderCopilot), "", diskToken)
 	if err != nil {
 		slog.Error("Unable to import GitHub Copilot token", "error", err)
 		return nil, false

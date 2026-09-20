@@ -485,9 +485,11 @@ type OAuthStartResult struct {
 
 	// ReusedExistingLogin/RefreshedExistingLogin/ExistingLoginFailure
 	// narrate how Token came to be set, or why a login found on disk was
-	// abandoned in favor of an interactive flow — purely for a CLI's
-	// console narration (see internal/cmd/login_codex.go's existing
-	// printfs); a UI ignores them.
+	// abandoned in favor of an interactive flow. The CLI prints them as
+	// they happen (see internal/cmd/login_codex.go); the TUI dialog
+	// carries the first two onto its success screen, where a sign-in that
+	// never opened a browser would otherwise read as an unexplained
+	// "Authentication successful!".
 	ReusedExistingLogin    bool
 	RefreshedExistingLogin bool
 	ExistingLoginFailure   string
@@ -536,7 +538,16 @@ type OAuthCompletion struct {
 type OAuthController interface {
 	// StartOAuth begins providerID's sign-in flow using proxyURL ("" for
 	// none).
-	StartOAuth(ctx context.Context, providerID, proxyURL string) (OAuthStartResult, OAuthFlow, error)
+	//
+	// forceNewAccount says the caller deliberately asked to sign in an
+	// account ("Add account…", `sennit accounts add`) rather than to
+	// (re-)authenticate whatever account the provider already uses. A
+	// provider that can short-circuit the flow with a sibling CLI's login
+	// found on disk (Codex) must not do so then: that login is one
+	// specific account, so reusing it would report a successful sign-in
+	// for an account the user never chose — and silently make it the
+	// active one — while the account they meant to add is never reached.
+	StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (OAuthStartResult, OAuthFlow, error)
 	// CompleteOAuth persists token as a new/updated account of providerID
 	// (scope is always global, matching RecordAccount) and performs
 	// whatever the provider needs done afterward.

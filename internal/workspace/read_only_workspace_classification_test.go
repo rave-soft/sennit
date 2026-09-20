@@ -408,7 +408,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.True(t, IsReadOnlyError(err))
 		},
 		"StartOAuth": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, _, err := ro.StartOAuth(t.Context(), "provider", "")
+			_, _, err := ro.StartOAuth(t.Context(), "provider", "", false)
 			require.True(t, IsReadOnlyError(err))
 		},
 		"CompleteOAuth": func(t *testing.T, ro *readOnlyWorkspace) {

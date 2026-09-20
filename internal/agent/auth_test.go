@@ -36,7 +36,7 @@ const (
 // authCoordSettings collects authTestCoordinator's optional dependencies.
 type authCoordSettings struct {
 	notify           pubsub.Publisher[notify.Notification]
-	exchangeToken    func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
+	exchangeToken    func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error)
 	configureProv    func(*config.ProviderConfig)
 	globalConfigJSON string
 	globalDataJSON   string
@@ -74,7 +74,7 @@ func withNotify(n pubsub.Publisher[notify.Notification]) authCoordOpt {
 // given OAuth token exchange override (see credentials.WithExchangeToken),
 // so a refresh test can drive a real Manager.RefreshOAuthToken call
 // without making a network request.
-func withExchangeToken(exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) authCoordOpt {
+func withExchangeToken(exchange func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error)) authCoordOpt {
 	return func(s *authCoordSettings) { s.exchangeToken = exchange }
 }
 
@@ -264,8 +264,8 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 // always answers with result/err, regardless of provider or refresh
 // token, so a test can drive a real credentials.Manager.RefreshOAuthToken
 // call without a network request.
-func fakeExchange(result *oauth.Token, err error) func(context.Context, string, string) (*oauth.Token, error) {
-	return func(context.Context, string, string) (*oauth.Token, error) {
+func fakeExchange(result *oauth.Token, err error) func(context.Context, string, string, string) (*oauth.Token, error) {
+	return func(context.Context, string, string, string) (*oauth.Token, error) {
 		return result, err
 	}
 }

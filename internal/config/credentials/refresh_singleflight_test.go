@@ -51,7 +51,7 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 // parity with the original ConfigStore-based test, though nothing here
 // depends on the embedded catalog: the fake Store's PersistRefreshedToken
 // always persists the credential fields regardless of catalog membership.
-func newRefreshTestManager(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) *Manager {
+func newRefreshTestManager(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error)) *Manager {
 	t.Helper()
 	m, _ := newRefreshTestManagerWithStore(t, configPath, exchange)
 	return m
@@ -60,7 +60,7 @@ func newRefreshTestManager(t *testing.T, configPath string, exchange func(ctx co
 // newRefreshTestManagerWithStore is newRefreshTestManager, but also returns
 // the backing *fakeStore so a test can reach into it (e.g. to force
 // PersistRefreshedToken to fail via persistFailures).
-func newRefreshTestManagerWithStore(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) (*Manager, *fakeStore) {
+func newRefreshTestManagerWithStore(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error)) (*Manager, *fakeStore) {
 	t.Helper()
 
 	expired := &oauth.Token{
@@ -99,7 +99,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "sennit.json")
 
 	var exchanges atomic.Int64
-	mgr := newRefreshTestManager(t, configPath, func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	mgr := newRefreshTestManager(t, configPath, func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error) {
 		exchanges.Add(1)
 		time.Sleep(50 * time.Millisecond) // hold the flight open so peers join
 		return &oauth.Token{
@@ -150,7 +150,7 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 		exchanges   atomic.Int64
 		reuseErrors atomic.Int64
 	)
-	exchange := func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	exchange := func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if refreshToken != current {
@@ -207,13 +207,13 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 // live refresh token fails the way a real reuse-detecting server would.
 // Tokens are handed out as at<n>/rt<n> starting at next. The returned
 // counters report successful exchanges and reuse attempts.
-func rotatingExchange(live string, next int) (exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error), exchanges, reuse *atomic.Int64) {
+func rotatingExchange(live string, next int) (exchange func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error), exchanges, reuse *atomic.Int64) {
 	var (
 		mu        sync.Mutex
 		exchanged atomic.Int64
 		reused    atomic.Int64
 	)
-	return func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	return func(ctx context.Context, providerID, accountID, refreshToken string) (*oauth.Token, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if refreshToken != live {

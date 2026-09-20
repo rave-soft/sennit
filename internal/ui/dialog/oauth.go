@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -85,6 +86,15 @@ type OAuth struct {
 	expiresIn       int
 	interval        int
 	token           *oauth.Token
+
+	// completionNote explains a sign-in that completed without the user
+	// doing anything (ActionCompleteOAuth.Note), and signedInAs names the
+	// account it landed on. Both are shown on the success screen: a flow
+	// that never opened a browser has to say whose login it used, and a
+	// provider that can hold several accounts has to say which one this
+	// was — "Authentication successful!" on its own answers neither.
+	completionNote string
+	signedInAs     string
 }
 
 var _ Dialog = (*OAuth)(nil)
@@ -253,6 +263,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		// work behind a keypress.
 		m.State = OAuthStateSaving
 		m.token = msg.Token
+		m.completionNote = msg.Note
 		return ActionCmd{tea.Batch(
 			m.oAuthProvider.stopPolling,
 			m.spinner.Tick,
@@ -280,6 +291,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		// screen; the actual model selection happens when the user
 		// acknowledges it (fast, since the work is already done).
 		m.State = OAuthStateSuccess
+		m.signedInAs = msg.account
 		return nil
 
 	case oauthSaveErrMsg:
@@ -344,7 +356,13 @@ type oauthProxyPrefillMsg struct {
 // oauthSaveDoneMsg is emitted by the background save command once the
 // credential has been persisted and models fetched. The model-selection
 // details are read from the dialog's own fields when the user confirms.
-type oauthSaveDoneMsg struct{}
+//
+// account is how the saved credential identifies itself (an email, a
+// label), for the success screen to name. It is empty for a provider that
+// reports nothing to name it by.
+type oauthSaveDoneMsg struct {
+	account string
+}
 
 // DialogID implements [DialogAddressed]: the save runs while the dialog is
 // open and anything may have opened over it by the time it lands.
@@ -527,10 +545,17 @@ func (m *OAuth) innerContent() string {
 		)
 
 	case OAuthStateSuccess:
+		lines := []string{"Authentication successful!"}
+		if m.signedInAs != "" {
+			lines = append(lines, "Signed in as "+m.signedInAs+".")
+		}
+		if m.completionNote != "" {
+			lines = append(lines, m.completionNote)
+		}
 		return successStyle.
 			Width(innerWidth).
 			Padding(1).
-			Render("Authentication successful!")
+			Render(strings.Join(lines, "\n"))
 
 	case OAuthStateSaving:
 		return lipgloss.NewStyle().
@@ -719,7 +744,7 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		if completion.ModelsError != nil {
 			return oauthSaveErrMsg{err: completion.ModelsError}
 		}
-		return oauthSaveDoneMsg{}
+		return oauthSaveDoneMsg{account: cmp.Or(completion.Account.Email, completion.Account.Label)}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // The three OAuth-style dialogs (OAuth, MCPAuth, AWSSSO) share a look —
@@ -45,4 +46,25 @@ func oauthDialogHeader(t *styles.Styles, width int, title string) string {
 // Initializing/Saving states render only the body).
 func oauthDialogContent(t *styles.Styles, h *help.Model, km help.KeyMap, header, inner string, innerWidth int) string {
 	return strings.Join([]string{header, inner, renderDialogHelp(t, h, km, innerWidth)}, "\n")
+}
+
+// existingLoginNote describes a sign-in the backend completed without
+// asking the user anything, by reusing a login another tool left on disk.
+// It is "" for a flow that actually went through the browser, which needs
+// no explanation.
+//
+// The CLI narrates the same two cases as they happen
+// (internal/cmd/login_codex.go); the dialog has no running commentary, so
+// it carries the line to the success screen instead.
+func existingLoginNote(result workspace.OAuthStartResult) string {
+	switch {
+	case result.RefreshedExistingLogin:
+		// Refreshing spends the CLI's single-use refresh token, so say
+		// what it cost the other tool — same warning the CLI prints.
+		return "Reused the Codex CLI login found on disk and refreshed it;\nthe CLI may ask you to sign in again the next time you use it."
+	case result.ReusedExistingLogin:
+		return "Reused the Codex CLI login found on disk."
+	default:
+		return ""
+	}
 }

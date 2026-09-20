@@ -571,7 +571,7 @@ func (s *stubWorkspace) VerifyProviderAPIKey(ctx context.Context, providerID, ap
 	return nil
 }
 
-func (s *stubWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string) (OAuthStartResult, OAuthFlow, error) {
+func (s *stubWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (OAuthStartResult, OAuthFlow, error) {
 	s.track("StartOAuth")
 	return OAuthStartResult{}, nil, nil
 }

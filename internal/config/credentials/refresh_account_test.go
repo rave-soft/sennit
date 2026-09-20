@@ -41,7 +41,7 @@ func TestRefreshOAuthTokenForAccount_StoredAccount(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "sennit.json")
 
 	var presented atomic.Value
-	mgr, store := newRefreshTestManagerWithStore(t, configPath, func(_ context.Context, _, refreshToken string) (*oauth.Token, error) {
+	mgr, store := newRefreshTestManagerWithStore(t, configPath, func(_ context.Context, _, _, refreshToken string) (*oauth.Token, error) {
 		presented.Store(refreshToken)
 		return freshToken("at-stored", "rt-stored-new"), nil
 	})
@@ -79,7 +79,7 @@ func TestRefreshOAuthTokenForAccount_ActiveAccount(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "sennit.json")
 
 	var exchanges atomic.Int64
-	mgr, store := newRefreshTestManagerWithStore(t, configPath, func(_ context.Context, _, _ string) (*oauth.Token, error) {
+	mgr, store := newRefreshTestManagerWithStore(t, configPath, func(_ context.Context, _, _, _ string) (*oauth.Token, error) {
 		exchanges.Add(1)
 		return freshToken("at-new", "rt-new"), nil
 	})
@@ -106,7 +106,7 @@ func TestRefreshOAuthTokenForAccount_ActiveAccount(t *testing.T) {
 func TestRefreshOAuthTokenForAccount_UnknownAccount(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "sennit.json")
 
-	mgr, store := newRefreshTestManagerWithStore(t, configPath, func(_ context.Context, _, _ string) (*oauth.Token, error) {
+	mgr, store := newRefreshTestManagerWithStore(t, configPath, func(_ context.Context, _, _, _ string) (*oauth.Token, error) {
 		t.Fatal("no exchange should be attempted for an unknown account")
 		return nil, nil
 	})

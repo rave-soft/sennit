@@ -192,6 +192,11 @@ type (
 	// ActionCompleteOAuth is sent when the device flow completes successfully.
 	ActionCompleteOAuth struct {
 		Token *oauth.Token
+		// Note explains a sign-in that completed without the user doing
+		// anything — a login reused from another tool's disk state (see
+		// existingLoginNote). It is empty for a flow the user actually
+		// walked through, and reaches the success screen verbatim.
+		Note string
 	}
 
 	// ActionOAuthErrored is sent when the device flow encounters an error.

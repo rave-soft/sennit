@@ -22,13 +22,21 @@ import (
 // proxyURL is optional, and routes both halves of the sign-in as well as the
 // model requests that follow: for a user who can only reach OpenAI through a
 // proxy, a token exchange that ignored it would fail on its own.
+//
+// force and forceNewAccount are two different questions, mirroring
+// loginCopilot's pair. force only waives the "you are already logged in"
+// bail-out. forceNewAccount says the caller means to sign in an account
+// other than the one already configured (`sennit accounts add codex`, via
+// authAddOAuth): that is the case where reusing the Codex CLI's login on
+// disk would defeat the whole command, since that login is one specific
+// account — see workspace.OAuthController.StartOAuth.
 type codexLoginWorkspace interface {
 	workspace.ConfigReader
 	workspace.AccountLister
 	workspace.OAuthController
 }
 
-func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
+func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL string) error {
 	loginCtx, stop := getLoginContext()
 	defer stop()
 
@@ -64,7 +72,7 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 		}
 	}
 
-	result, flow, err := ws.StartOAuth(loginCtx, codex.ProviderID, proxyURL)
+	result, flow, err := ws.StartOAuth(loginCtx, codex.ProviderID, proxyURL, forceNewAccount)
 	if err != nil {
 		return err
 	}
@@ -116,7 +124,7 @@ func loginCodex(ws codexLoginWorkspace, force bool, proxyURL string) error {
 		return fmt.Errorf("listing existing Codex accounts: %w", err)
 	}
 
-	completion, err := ws.CompleteOAuth(loginCtx, codex.ProviderID, proxyURL, token, false)
+	completion, err := ws.CompleteOAuth(loginCtx, codex.ProviderID, proxyURL, token, forceNewAccount)
 	if err != nil {
 		return err
 	}

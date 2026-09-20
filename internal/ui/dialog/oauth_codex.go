@@ -46,12 +46,18 @@ func NewOAuthCodex(
 	model *config.SelectedModel,
 	forceNewAccount bool,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, &OAuthCodex{com: com}, forceNewAccount)
+	return newOAuth(com, isOnboarding, provider, model, &OAuthCodex{com: com, forceNewAccount: forceNewAccount}, forceNewAccount)
 }
 
 type OAuthCodex struct {
 	com   *common.Common
 	proxy string
+
+	// forceNewAccount mirrors the dialog's own OAuth.ForceNewAccount. It
+	// is kept here as well because initiateAuth needs it, and it runs off
+	// a tea.Cmd goroutine that must not reach back into the dialog —
+	// see internal/ui/AGENTS.md's rule on capturing fields by value.
+	forceNewAccount bool
 
 	// flow/cancelFunc/stopped are touched from tea.Cmd goroutines
 	// (initiateAuth binds the flow, startPolling waits on it, stopPolling
@@ -120,14 +126,19 @@ func (m *OAuthCodex) setProxyURL(proxyURL string) error {
 // redirect.
 //
 // An existing Codex CLI login short-circuits the browser entirely: the
-// backend reports the token it could reuse or refresh instead of a URL.
+// backend reports the token it could reuse or refresh instead of a URL —
+// except for a deliberate "login account", where that login is the one
+// account the user is trying to get away from (see StartOAuth's contract).
 func (m *OAuthCodex) initiateAuth() tea.Msg {
-	result, flow, err := m.com.Workspace.StartOAuth(m.com.Context(), CodexProviderID, m.proxy)
+	result, flow, err := m.com.Workspace.StartOAuth(m.com.Context(), CodexProviderID, m.proxy, m.forceNewAccount)
 	if err != nil {
 		return ActionOAuthErrored{Error: err}
 	}
 	if result.Token != nil {
-		return ActionCompleteOAuth{Token: result.Token}
+		// Nothing was asked of the user, so the success screen has to say
+		// where this token came from — otherwise a sign-in that quietly
+		// adopted another tool's login reads as "it just worked".
+		return ActionCompleteOAuth{Token: result.Token, Note: existingLoginNote(result)}
 	}
 
 	m.mu.Lock()

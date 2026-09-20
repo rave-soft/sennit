@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -343,4 +344,92 @@ func TestOAuthCodexInitiateAuthReportsURL(t *testing.T) {
 
 	provider.stopPolling()
 	require.Equal(t, 1, flow.cancelCount(), "closing the dialog must release the callback port")
+}
+
+// TestOAuthCodexLoginAccountSkipsDiskReuse: a dialog opened as a deliberate
+// "login account" must tell the backend so. Otherwise the sign-in is served
+// from the Codex CLI's login on disk — one specific account — and the user
+// is never asked which account they meant (see
+// workspace.OAuthController.StartOAuth).
+func TestOAuthCodexLoginAccountSkipsDiskReuse(t *testing.T) {
+	t.Parallel()
+
+	flow := &stubDialogOAuthFlow{}
+	ws := &completeOAuthTestWorkspace{
+		startResult: workspace.OAuthStartResult{AuthorizationURL: "https://auth.openai.com/oauth/authorize"},
+		startFlow:   flow,
+	}
+	s := styles.SennitDark()
+	com := &common.Common{Styles: &s, Workspace: ws}
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider(CodexProviderID), Name: codexProviderName}
+	dlg, _ := NewOAuthCodex(com, false, provider, nil, true)
+
+	codexProvider, ok := dlg.oAuthProvider.(*OAuthCodex)
+	require.True(t, ok)
+	_ = codexProvider.initiateAuth()
+
+	require.True(t, ws.lastStartForceNew, "an add-account session must reach StartOAuth as one")
+	codexProvider.stopPolling()
+}
+
+// TestOAuthCodexRoutineLoginAllowsDiskReuse is the other side of the same
+// switch: an ordinary sign-in still gets the short-circuit, which is what
+// spares a user who is already signed in to the Codex CLI a second trip
+// through the browser.
+func TestOAuthCodexRoutineLoginAllowsDiskReuse(t *testing.T) {
+	t.Parallel()
+
+	ws := &completeOAuthTestWorkspace{
+		startResult: workspace.OAuthStartResult{
+			Token:               &oauth.Token{AccessToken: "from-disk"},
+			ReusedExistingLogin: true,
+		},
+	}
+	dlg := newCodexDialogWith(t, ws)
+	codexProvider, ok := dlg.oAuthProvider.(*OAuthCodex)
+	require.True(t, ok)
+
+	msg := codexProvider.initiateAuth()
+	complete, ok := msg.(ActionCompleteOAuth)
+	require.True(t, ok, "expected ActionCompleteOAuth, got %#v", msg)
+	require.False(t, ws.lastStartForceNew)
+	require.Equal(t, "Reused the Codex CLI login found on disk.", complete.Note,
+		"a sign-in the user did nothing for has to say where the login came from")
+}
+
+// TestOAuthCodexSuccessScreenNamesAccount: "Authentication successful!" on
+// its own says nothing about WHICH account was signed in, which is the
+// whole question for a provider that holds several — and nothing about a
+// login that was adopted rather than performed.
+func TestOAuthCodexSuccessScreenNamesAccount(t *testing.T) {
+	t.Parallel()
+
+	ws := &completeOAuthTestWorkspace{
+		startResult: workspace.OAuthStartResult{
+			Token:               &oauth.Token{AccessToken: "from-disk"},
+			ReusedExistingLogin: true,
+		},
+		completion: workspace.OAuthCompletion{
+			Account: accounts.Account{ID: "acc_1", Email: "someone@example.com"},
+		},
+	}
+	dlg := newCodexDialogWith(t, ws)
+	codexProvider, ok := dlg.oAuthProvider.(*OAuthCodex)
+	require.True(t, ok)
+
+	action := dlg.HandleMsg(codexProvider.initiateAuth())
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected ActionCmd carrying the async save, got %#v", action)
+	done := findMsg(t, cmdAction.Cmd, oauthSaveDoneMsgFilter)
+	require.NotNil(t, done)
+	dlg.HandleMsg(done)
+
+	require.Equal(t, OAuthStateSuccess, dlg.State)
+
+	area := image.Rect(0, 0, 100, 40)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	dlg.Draw(scr, area)
+	rendered := scr.Render()
+	require.Contains(t, rendered, "someone@example.com")
+	require.Contains(t, rendered, "Reused the Codex CLI login found on disk.")
 }

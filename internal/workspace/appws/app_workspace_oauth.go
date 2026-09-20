@@ -54,11 +54,14 @@ func previousCodexProxyURL(w *AppWorkspace) string {
 // -- OAuthController --
 
 // StartOAuth implements workspace.OAuthController.
-func (w *AppWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+func (w *AppWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	switch providerID {
 	case codex.ProviderID:
-		return w.startCodexOAuth(ctx, proxyURL)
+		return w.startCodexOAuth(ctx, proxyURL, forceNewAccount)
 	case copilotProviderID:
+		// Copilot has no login of its own to reuse, so a deliberate
+		// "add an account" needs nothing skipped: its flow always goes
+		// through GitHub's device code.
 		return w.startCopilotOAuth(ctx, proxyURL)
 	default:
 		return workspace.OAuthStartResult{}, nil, fmt.Errorf("oauth: unsupported provider %q", providerID)
@@ -135,7 +138,19 @@ func (a *codexFlowAdapter) Cancel() {
 // startCodexOAuth reimplements the disk-reuse/refresh-then-browser-flow
 // dance formerly duplicated between oauth_codex.go's initiateAuth and
 // login_codex.go's codexToken.
-func (w *AppWorkspace) startCodexOAuth(ctx context.Context, proxyURL string) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+//
+// forceNewAccount skips the disk reuse entirely — see StartOAuth's doc
+// comment on the contract, and note what the shortcut would otherwise do
+// to the one caller that has to reach a *different* account than the one
+// already signed in: the CLI's auth.json holds exactly one account, so
+// reuse hands back that account's token, RecordAccount matches it by
+// AccountID and updates it in place, and the sign-in reports success
+// having touched nothing the user asked for.
+func (w *AppWorkspace) startCodexOAuth(ctx context.Context, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+	if forceNewAccount {
+		return w.startCodexBrowserFlow(proxyURL)
+	}
+
 	if disk, ok := codex.TokensFromDisk(); ok {
 		// Prefer the access token the CLI already holds: refreshing spends
 		// its single-use refresh token and logs it out, which is not

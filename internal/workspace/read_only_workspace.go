@@ -505,7 +505,7 @@ func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID
 // RefreshAccountLimits and VerifyProviderAPIKey are: both are live network
 // calls made — and CompleteOAuth persists a credential — in the parent
 // workspace's name, which a read-only thread view exists to avoid doing.
-func (w *readOnlyWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string) (OAuthStartResult, OAuthFlow, error) {
+func (w *readOnlyWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (OAuthStartResult, OAuthFlow, error) {
 	return OAuthStartResult{}, nil, w.readOnlyError("StartOAuth")
 }
 

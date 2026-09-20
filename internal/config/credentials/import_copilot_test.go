@@ -57,7 +57,7 @@ func TestImportCopilot_BoundsTheExchange(t *testing.T) {
 
 	m := New(store)
 	exchangeStarted := make(chan struct{})
-	m.exchangeToken = func(ctx context.Context, _, _ string) (*oauth.Token, error) {
+	m.exchangeToken = func(ctx context.Context, _, _, _ string) (*oauth.Token, error) {
 		close(exchangeStarted)
 		<-ctx.Done()
 		return nil, ctx.Err()

@@ -102,7 +102,9 @@ func (m *OAuthCopilot) initiateAuth() tea.Msg {
 
 	// The device-code request's own timeout lives with the flow, in the
 	// workspace implementation; this context only carries cancellation.
-	result, flow, err := m.com.Workspace.StartOAuth(ctx, CopilotProviderID, m.proxy)
+	// Copilot has no login on disk to reuse, so there is nothing for a
+	// deliberate "login account" to skip: false, always.
+	result, flow, err := m.com.Workspace.StartOAuth(ctx, CopilotProviderID, m.proxy, false)
 
 	m.mu.Lock()
 	m.initiateCancel = nil

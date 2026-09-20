@@ -19,12 +19,13 @@ import (
 
 // fakeCodexJWT mirrors internal/oauth/codex/codex_test.go's fakeJWT: an
 // unsigned token carrying the chatgpt_account_id claim AccountID reads, and
-// an expiry codex.Usable checks.
-func fakeCodexJWT(t *testing.T, accountID string, life time.Duration) string {
+// an expiry codex.Usable checks. Every caller wants a token that is simply
+// usable, so the lifetime is fixed here rather than passed in.
+func fakeCodexJWT(t *testing.T, accountID string) string {
 	t.Helper()
 	claims := map[string]any{
 		"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": accountID},
-		"exp":                         time.Now().Add(life).Unix(),
+		"exp":                         time.Now().Add(10 * 24 * time.Hour).Unix(),
 	}
 	payload, err := json.Marshal(claims)
 	require.NoError(t, err)
@@ -64,7 +65,7 @@ func TestAppWorkspace_StartOAuthCodex_ReusesDiskLogin(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 
-	accessToken := fakeCodexJWT(t, "acct-disk-1", 10*24*time.Hour)
+	accessToken := fakeCodexJWT(t, "acct-disk-1")
 	auth := map[string]any{
 		"tokens": map[string]any{
 			"access_token":  accessToken,
@@ -76,7 +77,7 @@ func TestAppWorkspace_StartOAuthCodex_ReusesDiskLogin(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "auth.json"), data, 0o600))
 
 	w := newOAuthTestWorkspace(t)
-	result, flow, err := w.StartOAuth(t.Context(), codex.ProviderID, "")
+	result, flow, err := w.StartOAuth(t.Context(), codex.ProviderID, "", false)
 	require.NoError(t, err)
 	require.Nil(t, flow)
 	require.NotNil(t, result.Token)
@@ -84,6 +85,38 @@ func TestAppWorkspace_StartOAuthCodex_ReusesDiskLogin(t *testing.T) {
 	require.True(t, result.ReusedExistingLogin)
 	require.False(t, result.RefreshedExistingLogin)
 	require.Empty(t, result.AuthorizationURL)
+}
+
+// TestAppWorkspace_StartOAuthCodex_ForceNewAccountSkipsDiskLogin covers
+// the reason the disk short-circuit has an exception: "login account" has
+// to be able to reach an account other than the one the Codex CLI is
+// signed in as. Reusing the disk login there would re-record that one
+// account and report a successful sign-in the user never asked for.
+func TestAppWorkspace_StartOAuthCodex_ForceNewAccountSkipsDiskLogin(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	auth := map[string]any{
+		"tokens": map[string]any{
+			"access_token":  fakeCodexJWT(t, "acct-disk-1"),
+			"refresh_token": "rt-disk",
+		},
+	}
+	data, err := json.Marshal(auth)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "auth.json"), data, 0o600))
+
+	w := newOAuthTestWorkspace(t)
+	result, flow, err := w.StartOAuth(t.Context(), codex.ProviderID, "", true)
+	require.NoError(t, err)
+	require.NotNil(t, flow)
+	t.Cleanup(flow.Cancel)
+
+	require.Nil(t, result.Token, "a usable disk login must not be adopted for a deliberate sign-in")
+	require.NotEmpty(t, result.AuthorizationURL)
+	require.False(t, result.ReusedExistingLogin)
+	require.False(t, result.RefreshedExistingLogin)
 }
 
 // TestAppWorkspace_StartOAuthCodex_FallsBackToBrowserFlow covers the other
@@ -95,7 +128,7 @@ func TestAppWorkspace_StartOAuthCodex_FallsBackToBrowserFlow(t *testing.T) {
 	t.Setenv("CODEX_HOME", home)
 
 	w := newOAuthTestWorkspace(t)
-	result, flow, err := w.StartOAuth(t.Context(), codex.ProviderID, "")
+	result, flow, err := w.StartOAuth(t.Context(), codex.ProviderID, "", false)
 	require.NoError(t, err)
 	require.NotNil(t, flow)
 	t.Cleanup(flow.Cancel)
@@ -185,7 +218,7 @@ func TestAppWorkspace_OAuthValidateProxy(t *testing.T) {
 func TestAppWorkspace_CompleteOAuthCodex_RecordsAccountAndProxy_ModelFetchFails(t *testing.T) {
 	w := newOAuthTestWorkspace(t)
 
-	token := &oauth.Token{AccessToken: fakeCodexJWT(t, "acct-complete-1", 10*24*time.Hour)}
+	token := &oauth.Token{AccessToken: fakeCodexJWT(t, "acct-complete-1")}
 	// Port 1 is never listening; routing the model fetch's HTTPS request
 	// through it as an http proxy fails on the CONNECT immediately rather
 	// than timing out.
@@ -240,7 +273,7 @@ func persistedCodexProxy(t *testing.T) string {
 // ever happened.
 func establishExistingCodexLogin(t *testing.T, w *AppWorkspace, accountID, proxyURL string) *oauth.Token {
 	t.Helper()
-	token := &oauth.Token{AccessToken: fakeCodexJWT(t, accountID, 10*24*time.Hour)}
+	token := &oauth.Token{AccessToken: fakeCodexJWT(t, accountID)}
 	_, err := w.CompleteOAuth(t.Context(), codex.ProviderID, proxyURL, token, false)
 	require.NoError(t, err)
 	require.Equal(t, proxyURL, persistedCodexProxy(t))
@@ -357,7 +390,7 @@ func TestAppWorkspace_CompleteOAuthCopilot_RecordsAccountWithNoIdentity(t *testi
 func TestAppWorkspace_OAuth_UnsupportedProvider(t *testing.T) {
 	w := newOAuthTestWorkspace(t)
 
-	_, _, err := w.StartOAuth(t.Context(), "anthropic", "")
+	_, _, err := w.StartOAuth(t.Context(), "anthropic", "", false)
 	require.Error(t, err)
 
 	_, err = w.CompleteOAuth(t.Context(), "anthropic", "", &oauth.Token{}, false)
