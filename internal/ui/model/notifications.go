@@ -268,7 +268,13 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		// Informational only, not a busy->idle edge: the turn keeps
 		// running on the newly activated account, so there is nothing
 		// here for the busy/queue caches below to re-probe.
-		return util.ReportInfo(n.Message)
+		//
+		// The sidebar's account label is a different matter: rotation
+		// activated another account behind the UI's back, and the label
+		// cache is only refreshed from the dialogs that switch accounts
+		// by hand (account_label.go), so without this the sidebar keeps
+		// naming the account the turn has already left.
+		return tea.Batch(util.ReportInfo(n.Message), refreshAccountLabelCmd(m.com, m, n.ProviderID))
 	case workspace.AgentNotificationAccountRotationExhausted:
 		// Also informational: the original provider error (already
 		// surfaced through the normal error path) is what actually

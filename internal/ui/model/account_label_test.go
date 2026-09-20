@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
@@ -140,4 +141,36 @@ func TestApplyAccountLabelsLoaded_BumpsVersionAndStores(t *testing.T) {
 	require.Equal(t, 2, u.labelsVersion)
 	require.Equal(t, "Личный Plus", u.accountLabelFor("codex"), "an unrelated provider's refresh must not touch this one's cached label")
 	require.Empty(t, u.accountLabelFor("openai"))
+}
+
+// TestHandleAgentNotification_AccountRotated_RefreshesLabel covers the
+// automatic path: rotation activates another account without the UI
+// touching a dialog, so the notification itself has to refresh the label
+// cache or the sidebar keeps naming the account the turn has left.
+func TestHandleAgentNotification_AccountRotated_RefreshesLabel(t *testing.T) {
+	u, _ := newAccountLabelTestUI(t, "acct-2", []accounts.Account{
+		{ID: "acct-1", Label: "first@example.com"},
+		{ID: "acct-2", Label: "second@example.com"},
+	})
+
+	cmd := u.handleAgentNotification(workspace.AgentNotification{
+		Type:       workspace.AgentNotificationAccountRotated,
+		ProviderID: "codex",
+		Message:    "Codex: switched to \"second@example.com\"",
+	})
+	require.NotNil(t, cmd)
+	batch, ok := cmd().(tea.BatchMsg)
+	require.True(t, ok)
+
+	var loaded *accountLabelsLoadedMsg
+	for _, c := range batch {
+		if msg, ok := c().(accountLabelsLoadedMsg); ok {
+			loaded = &msg
+			break
+		}
+	}
+	require.NotNil(t, loaded, "no account label refresh was scheduled")
+	require.Equal(t, "codex", loaded.providerID)
+	require.True(t, loaded.info.multiple)
+	require.Equal(t, "second@example.com", loaded.info.label)
 }
