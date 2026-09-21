@@ -175,6 +175,21 @@ func TestChangedLineSpan(t *testing.T) {
 	require.Equal(t, 3, start)
 	require.Equal(t, 3, end)
 
+	// An append lands past the last line. strings.Split on a file that
+	// ends in a newline yields a trailing empty element, and anchoring
+	// there would name a line no read can ever serve.
+	start, end, ok = changedLineSpan(before, before+"six\n")
+	require.True(t, ok)
+	require.Equal(t, 5, start, "an append anchors on the last real line")
+	require.Equal(t, 5, end)
+
+	// The same file without a trailing newline already anchored on the
+	// last line; it must keep doing so.
+	start, end, ok = changedLineSpan("one\ntwo", "one\ntwo\nthree")
+	require.True(t, ok)
+	require.Equal(t, 2, start)
+	require.Equal(t, 2, end)
+
 	_, _, ok = changedLineSpan(before, before)
 	require.False(t, ok, "identical content is not a change")
 }
@@ -247,6 +262,77 @@ func TestReplaceContentAllowsEditInsideReadWindow(t *testing.T) {
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
 	require.Contains(t, string(content), "LINE 190\n")
+}
+
+// TestReplaceContentAllowsAppendAfterReadingTheTail covers appending to
+// the end of a file read in windows. The changed span used to be anchored
+// on the empty element strings.Split leaves after the final newline — a
+// line number one past the end of the file, which no read can cover, so
+// every append was refused however much of the file had been read, and
+// the write went to an unguarded path instead.
+func TestReplaceContentAllowsAppendAfterReadingTheTail(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "long.txt")
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 150, 200)
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+
+	resp, err := replaceContent(edit, filePath, "line 200\n", "line 200\nline 201\n", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "content: %s", resp.Content)
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(string(content), "line 200\nline 201\n"), "content tail: %q", string(content)[len(content)-40:])
+}
+
+// TestReplaceContentRejectsAppendWithoutReadingTheTail is the mirror of
+// the test above: clamping the span onto the last real line must not turn
+// an append into an edit nobody has to read for. The last line still has
+// to have been seen.
+func TestReplaceContentRejectsAppendWithoutReadingTheTail(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "long.txt")
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 1, 50)
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+
+	resp, err := replaceContent(edit, filePath, "line 200\n", "line 200\nline 201\n", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "an append whose anchor was never read must be refused")
+	require.Contains(t, resp.Content, "lines 200-200")
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.False(t, strings.Contains(string(content), "line 201"), "the file is untouched")
 }
 
 // TestEditDoesNotWidenCoverageToWholeFile guards the trap in recording

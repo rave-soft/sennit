@@ -188,8 +188,24 @@ func changedLineSpan(oldContent, newContent string) (start, end int, ok bool) {
 		// lands against so the check still asks for context.
 		end = start
 	}
-	if start > len(oldLines) {
-		start = len(oldLines)
+	// Splitting content that ends in a newline leaves a trailing empty
+	// element that is not a line of the file, and an append anchors on
+	// it. A span one past the end makes requireReadCoverage
+	// unsatisfiable: no read serves that line, so every append is
+	// refused however much of the file was read, and the write goes to
+	// an unguarded path instead. Clamp onto the last real line, which an
+	// append does still have to have seen.
+	lineCount := len(oldLines)
+	if lineCount > 1 && oldLines[lineCount-1] == "" {
+		lineCount--
+	}
+	if start > lineCount {
+		start = lineCount
+	}
+	if end > lineCount {
+		end = lineCount
+	}
+	if end < start {
 		end = start
 	}
 	return start, end, true

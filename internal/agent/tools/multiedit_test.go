@@ -350,3 +350,47 @@ func (m *mockPermissionService) AwaitingAnswer(string) bool { return false }
 
 func (*mockPermissionService) ConfineToWorkingDir() {}
 func (*mockPermissionService) ConfinedDir() string  { return "" }
+
+// TestProcessMultiEditAppendAfterReadingTheTail closes the same append
+// surface on the batch path: multiedit shares requireReadCoverage, so an
+// append at the end of a file read in windows used to be refused here
+// too, whatever the batch had read.
+func TestProcessMultiEditAppendAfterReadingTheTail(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "long.txt")
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 150, 200)
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+	params := MultiEditParams{
+		FilePath: filePath,
+		Edits: []MultiEditOperation{
+			// Append only: a batch that also changes an existing line
+			// anchors the span on that line and never reaches the
+			// element past the end, so it would pass either way.
+			{OldString: "line 200\n", NewString: "line 200\nline 201\n"},
+		},
+	}
+
+	resp, err := processMultiEditExistingFile(edit, params, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "content: %s", resp.Content)
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(string(content), "line 200\nline 201\n"),
+		"content tail: %q", string(content)[len(content)-40:])
+}
