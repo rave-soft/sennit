@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -106,14 +107,14 @@ func (q Question) Validate() error {
 	if q.Text == "" {
 		return fmt.Errorf("%s: question text is required", label)
 	}
-	if len(q.Text) > MaxQuestionLength {
-		return fmt.Errorf("%s: text exceeds %d characters (got %d)", label, MaxQuestionLength, len(q.Text))
+	if n := utf8.RuneCountInString(q.Text); n > MaxQuestionLength {
+		return fmt.Errorf("%s: text exceeds %d characters (got %d)", label, MaxQuestionLength, n)
 	}
 	if q.Description == "" {
 		return fmt.Errorf("%s: description is required", label)
 	}
-	if len(q.Description) > MaxDescriptionLength {
-		return fmt.Errorf("%s: description exceeds %d characters (got %d)", label, MaxDescriptionLength, len(q.Description))
+	if n := utf8.RuneCountInString(q.Description); n > MaxDescriptionLength {
+		return fmt.Errorf("%s: description exceeds %d characters (got %d)", label, MaxDescriptionLength, n)
 	}
 	switch q.Type {
 	case TypeYesNo, TypeFreeText:
@@ -137,11 +138,11 @@ func (q Question) Validate() error {
 			if c.Label == "" {
 				return fmt.Errorf("%s: choice %d (%s) must have a \"label\" field", label, i+1, c.ID)
 			}
-			if len(c.Label) > MaxChoiceLabelLength {
-				return fmt.Errorf("%s: choice %d label exceeds %d characters (got %d)", label, i+1, MaxChoiceLabelLength, len(c.Label))
+			if n := utf8.RuneCountInString(c.Label); n > MaxChoiceLabelLength {
+				return fmt.Errorf("%s: choice %d label exceeds %d characters (got %d)", label, i+1, MaxChoiceLabelLength, n)
 			}
-			if len(c.Description) > MaxChoiceDescriptionLength {
-				return fmt.Errorf("%s: choice %d description exceeds %d characters (got %d)", label, i+1, MaxChoiceDescriptionLength, len(c.Description))
+			if n := utf8.RuneCountInString(c.Description); n > MaxChoiceDescriptionLength {
+				return fmt.Errorf("%s: choice %d description exceeds %d characters (got %d)", label, i+1, MaxChoiceDescriptionLength, n)
 			}
 		}
 	default:
@@ -158,16 +159,32 @@ func (q Question) identifier() string {
 	}
 	if q.Text != "" {
 		t := q.Text
-		if len(t) > 40 {
-			t = t[:40] + "…"
+		if r := []rune(t); len(r) > 40 {
+			// Cut by runes: slicing bytes lands mid-character in any
+			// non-ASCII text and puts a replacement glyph in the error.
+			t = string(r[:40]) + "…"
 		}
 		return fmt.Sprintf("[%s]", t)
 	}
 	return "[unnamed question]"
 }
 
+// The limits below are counted in characters, not bytes (see Validate's
+// use of utf8.RuneCountInString). Counted in bytes, as they were, any
+// non-Latin script got roughly half the allowance the message quoted:
+// a 240-character question in Russian is around 400 bytes and was
+// rejected as "exceeds 240 characters".
+//
+// They exist to keep a question readable in the terminal rather than to
+// save space. The form wraps and scrolls whatever it is given (see
+// internal/ui/dialog's choiceList), so the ceiling is about how much a
+// person should have to read before answering, not about what renders.
 const (
-	MaxQuestionLength          = 240
+	// MaxQuestionLength is the question itself. 500 characters is around
+	// five wrapped lines at a usual terminal width - long enough for a
+	// question that has to name what it is choosing between, short
+	// enough that the choices stay on screen with it.
+	MaxQuestionLength          = 500
 	MaxDescriptionLength       = 600
 	MaxChoiceLabelLength       = 200
 	MaxChoiceDescriptionLength = 200

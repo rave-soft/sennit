@@ -9,7 +9,8 @@ confirmation screen at the end.
 
 Every question MUST include:
 - `type` — `yes_no`, `single_choice`, `multi_choice`, or `free_text`
-- `question` — a short, direct question (one line), under {{ .MaxQuestionLength }} chars
+- `question` — a direct question, under {{ .MaxQuestionLength }} characters; keep it to
+  a line or two, since the choices have to fit on screen beneath it
 - `description` — markdown context shown below the question with details,
   tradeoffs, or examples. **Always required.** Omitting it causes an error.
 
@@ -19,9 +20,10 @@ Every question MUST include:
 - `single_choice`/`multi_choice` require `choices` (a single_choice without
   choices is an error), and every choice needs a unique `id` — a repeated
   `id` within the same question is an error.
-- `description` required on every question, under {{ .MaxDescriptionLength }} chars.
-  Choice `label` under {{ .MaxChoiceLabelLength }} chars, choice `description`
-  under {{ .MaxChoiceDescriptionLength }} chars each.
+- `description` required on every question, under {{ .MaxDescriptionLength }} characters.
+  Choice `label` under {{ .MaxChoiceLabelLength }} characters, choice `description`
+  under {{ .MaxChoiceDescriptionLength }} characters each. Every limit counts characters, so a
+  question in a non-Latin script gets the same allowance as one in English.
 - Max {{ .MaxQuestions }} questions per batch — split into multiple batches and tell the
   user there will be follow-ups if you need more.
 

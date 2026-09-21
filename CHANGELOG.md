@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- The question tool takes 500 characters of question text, up from 240, and
+  every one of its limits now counts characters rather than bytes. Counted
+  in bytes, any non-Latin script got about half the allowance the error
+  message quoted: a 240-character question in Russian measured around 400
+  bytes and came back as "text exceeds 240 characters". The form wraps and
+  scrolls whatever it is given, so the ceiling is about how much there is
+  to read before answering, not about what fits.
+
 ## 0.12.0
 
 - Codex requests now carry the `session_id` header its own CLI sends, and

@@ -21,15 +21,15 @@ import (
 func TestQuestionDescriptionMatchesEnforcedLimits(t *testing.T) {
 	desc := questionDescription()
 	require.NotEmpty(t, desc)
-	require.Contains(t, desc, fmt.Sprintf("under %d chars", question.MaxDescriptionLength))
-	require.Contains(t, desc, fmt.Sprintf("under %d chars", question.MaxChoiceLabelLength))
-	require.Contains(t, desc, fmt.Sprintf("under %d chars", question.MaxChoiceDescriptionLength))
-	require.Contains(t, desc, fmt.Sprintf("under %d chars", question.MaxQuestionLength))
+	require.Contains(t, desc, fmt.Sprintf("under %d characters", question.MaxDescriptionLength))
+	require.Contains(t, desc, fmt.Sprintf("under %d characters", question.MaxChoiceLabelLength))
+	require.Contains(t, desc, fmt.Sprintf("under %d characters", question.MaxChoiceDescriptionLength))
+	require.Contains(t, desc, fmt.Sprintf("under %d characters", question.MaxQuestionLength))
 	require.Contains(t, desc, fmt.Sprintf("Max %d choices", question.MaxChoices))
 	require.Contains(t, desc, fmt.Sprintf("Max %d questions", question.MaxQuestions))
 	require.Contains(t, desc, "unique", "must document that a repeated choice id is an error")
-	require.NotContains(t, desc, "under 300 chars", "must not still carry the stale hard-coded limit")
-	require.NotContains(t, desc, "under 100 chars", "must not still carry the stale hard-coded limit")
+	require.NotContains(t, desc, "under 300 characters", "must not still carry the stale hard-coded limit")
+	require.NotContains(t, desc, "under 100 characters", "must not still carry the stale hard-coded limit")
 }
 
 func TestQuestionItemGetChoicesPrefersNonEmptyChoicesAlias(t *testing.T) {
