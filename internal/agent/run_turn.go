@@ -535,6 +535,7 @@ func (a *sessionAgent) completeTurn(
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: t.currentSession.Title,
+			ChildSession: t.currentSession.ParentSessionID != "",
 			Type:         notify.TypeAgentFinished,
 		})
 	}

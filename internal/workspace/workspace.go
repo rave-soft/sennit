@@ -117,6 +117,8 @@ const (
 type AgentNotification struct {
 	SessionID    string
 	SessionTitle string
+	// ChildSession mirrors notify.Notification.ChildSession.
+	ChildSession bool
 	Type         AgentNotificationType
 	ProviderID   string
 	RunID        string

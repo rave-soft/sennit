@@ -74,6 +74,11 @@ const (
 type Notification struct {
 	SessionID    string
 	SessionTitle string
+	// ChildSession is set on TypeAgentFinished when the session nests
+	// under a parent (a delegated task or thread). Observers still need
+	// the busy->idle edge for it, but the person did not start that turn
+	// and should not get a desktop notification for it.
+	ChildSession bool
 	Type         Type
 	ProviderID   string
 	// RunID, when non-empty, is the caller-supplied correlator for the run

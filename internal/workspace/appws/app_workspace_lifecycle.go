@@ -38,7 +38,7 @@ func (w *AppWorkspace) Subscribe(send func(any)) {
 func (w *AppWorkspace) translateEvent(msg any) any {
 	switch e := msg.(type) {
 	case pubsub.Event[notify.Notification]:
-		return pubsub.Event[workspace.AgentNotification]{Type: e.Type, Payload: workspace.AgentNotification{SessionID: e.Payload.SessionID, SessionTitle: e.Payload.SessionTitle, Type: workspace.AgentNotificationType(e.Payload.Type), ProviderID: e.Payload.ProviderID, RunID: e.Payload.RunID, Message: e.Payload.Message, AWSSOCommand: e.Payload.AWSSOCommand, AWSSOURL: e.Payload.AWSSOURL}}
+		return pubsub.Event[workspace.AgentNotification]{Type: e.Type, Payload: workspace.AgentNotification{SessionID: e.Payload.SessionID, SessionTitle: e.Payload.SessionTitle, ChildSession: e.Payload.ChildSession, Type: workspace.AgentNotificationType(e.Payload.Type), ProviderID: e.Payload.ProviderID, RunID: e.Payload.RunID, Message: e.Payload.Message, AWSSOCommand: e.Payload.AWSSOCommand, AWSSOURL: e.Payload.AWSSOURL}}
 	case pubsub.Event[mcptools.Event]:
 		var eventType workspace.MCPEventType
 		switch e.Payload.Type {

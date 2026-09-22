@@ -227,10 +227,15 @@ func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 		common.StartTurnIfIdle(n.SessionID)
 	case workspace.AgentNotificationFinished:
 		common.StopTurn(n.SessionID)
-		cmds = append(cmds, m.sendNotification(notification.Notification{
-			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
-			Message: notificationBodyTaskFinished(n.SessionTitle),
-		}))
+		// A delegated task or thread finishing is reported to its parent
+		// session, which notifies once its own turn ends. A desktop
+		// notification per child turn only repeats that.
+		if !n.ChildSession {
+			cmds = append(cmds, m.sendNotification(notification.Notification{
+				Title:   notificationTitle(m.com.Workspace.WorkingDir()),
+				Message: notificationBodyTaskFinished(n.SessionTitle),
+			}))
+		}
 	case workspace.AgentNotificationError:
 		// Terminal edge like TypeAgentFinished, but the turn ended with an
 		// error rather than a normal completion — surface it too instead of

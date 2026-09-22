@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/ui/notification"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -95,4 +96,52 @@ func TestAgentFinishedNotificationReportsNothing(t *testing.T) {
 	var infos []util.InfoMsg
 	collectInfoMsgs(cmd, &infos)
 	require.Empty(t, infos, "a normally finished turn must not raise an in-app report")
+}
+
+// recordingNotifyBackend records every desktop notification it is asked
+// to send.
+type recordingNotifyBackend struct {
+	sent []notification.Notification
+}
+
+func (b *recordingNotifyBackend) Send(n notification.Notification) tea.Cmd {
+	b.sent = append(b.sent, n)
+	return nil
+}
+
+// TestAgentFinishedNotificationSkipsChildSessions pins that a delegated
+// task or thread finishing a turn raises no desktop notification, while a
+// top-level session still does. The child's result reaches its parent,
+// which notifies when its own turn ends.
+func TestAgentFinishedNotificationSkipsChildSessions(t *testing.T) {
+	pinTTLs(t)
+
+	for _, tc := range []struct {
+		name  string
+		child bool
+		want  int
+	}{
+		{name: "top-level", child: false, want: 1},
+		{name: "child", child: true, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &countingWorkspace{ready: true}
+			m := newBusyUI(ws)
+			warmCaches(m, true)
+			backend := &recordingNotifyBackend{}
+			m.notifyBackend = backend
+			m.caps.ReportFocusEvents = true
+
+			m.Update(pubsub.Event[workspace.AgentNotification]{
+				Type: pubsub.CreatedEvent,
+				Payload: workspace.AgentNotification{
+					Type:         workspace.AgentNotificationFinished,
+					SessionID:    "s1",
+					SessionTitle: "Title",
+					ChildSession: tc.child,
+				},
+			})
+			require.Len(t, backend.sent, tc.want)
+		})
+	}
 }
