@@ -114,6 +114,10 @@ type cmdDrivingWorkspace struct {
 	setProviderProxyCalls int
 	lastSetProviderProxy  string
 	setProviderProxyErr   error
+	refreshModelsCalls    int
+	lastRefreshProvider   string
+	refreshModelsResults  []workspace.ModelRefreshResult
+	refreshModelsErr      error
 }
 
 // KnownProviders mirrors what the UI used to compute for itself: the
@@ -142,6 +146,12 @@ func (w *cmdDrivingWorkspace) Config() *config.Config {
 		Providers: providers,
 		Options:   &config.Options{TUI: &config.TUIOptions{}},
 	}
+}
+
+func (w *cmdDrivingWorkspace) RefreshProviderModels(ctx context.Context, providerID string) ([]workspace.ModelRefreshResult, error) {
+	w.refreshModelsCalls++
+	w.lastRefreshProvider = providerID
+	return w.refreshModelsResults, w.refreshModelsErr
 }
 
 func (w *cmdDrivingWorkspace) WorkingDir() string                { return "/tmp" }

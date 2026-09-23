@@ -561,6 +561,11 @@ func (s *stubWorkspace) SetProviderProxy(providerID, proxy string) error {
 	return nil
 }
 
+func (s *stubWorkspace) RefreshProviderModels(ctx context.Context, providerID string) ([]ModelRefreshResult, error) {
+	s.track("RefreshProviderModels")
+	return nil, nil
+}
+
 func (s *stubWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
 	s.track("RefreshAccountLimits")
 	return nil, nil

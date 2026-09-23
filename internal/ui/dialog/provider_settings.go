@@ -113,14 +113,23 @@ type ProviderSettings struct {
 	submitting bool
 	errMsg     string
 
+	// canRefresh reports whether the provider is a custom one with a
+	// base_url, the only kind a model refresh applies to.
+	canRefresh bool
+	// refreshing is set while a model refresh is in flight. Unlike
+	// submitting, it still lets the dialog close.
+	refreshing bool
+	refreshMsg string
+
 	help help.Model
 
 	keyMap struct {
-		Next   key.Binding
-		Prev   key.Binding
-		Toggle key.Binding
-		Submit key.Binding
-		Close  key.Binding
+		Next    key.Binding
+		Prev    key.Binding
+		Toggle  key.Binding
+		Submit  key.Binding
+		Refresh key.Binding
+		Close   key.Binding
 	}
 }
 
@@ -157,6 +166,7 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 		providerID: providerID,
 		caps:       caps,
 		fields:     []providerSettingsField{providerSettingsFieldProxy},
+		canRefresh: isCustomProvider(com, providerID, pc),
 	}
 
 	m.proxy = textinput.New()
@@ -223,6 +233,7 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 	m.keyMap.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous field"))
 	m.keyMap.Toggle = key.NewBinding(key.WithKeys("left", "right", "space"), key.WithHelp("←/→", "toggle rotation"))
 	m.keyMap.Submit = key.NewBinding(key.WithKeys("enter", "ctrl+y"), key.WithHelp("enter", "submit"))
+	m.keyMap.Refresh = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh models"))
 	m.keyMap.Close = CloseKey
 
 	return m
@@ -291,8 +302,31 @@ func (m *ProviderSettings) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionProviderSettingsSaved{ProviderID: msg.ProviderID}
+	case ActionRefreshModelsResult:
+		if msg.ProviderID != m.providerID {
+			return nil
+		}
+		m.refreshing = false
+		m.refreshMsg = ""
+		err := msg.Err
+		if err == nil && len(msg.Results) > 0 {
+			err = msg.Results[0].Err
+		}
+		if err != nil {
+			m.errMsg = err.Error()
+			return nil
+		}
+		m.errMsg = ""
+		m.refreshMsg = formatModelRefreshStatus(msg.Results)
+		return nil
 	case tea.KeyPressMsg:
 		if m.submitting {
+			return nil
+		}
+		if m.refreshing {
+			if key.Matches(msg, m.keyMap.Close) {
+				return ActionClose{}
+			}
 			return nil
 		}
 		switch {
@@ -306,6 +340,11 @@ func (m *ProviderSettings) HandleMsg(msg tea.Msg) Action {
 			m.enabled = !m.enabled
 		case key.Matches(msg, m.keyMap.Submit):
 			return m.submit()
+		case m.refreshAvailable() && key.Matches(msg, m.keyMap.Refresh):
+			m.refreshing = true
+			m.errMsg = ""
+			m.refreshMsg = ""
+			return ActionRefreshModels{ProviderID: m.providerID}
 		default:
 			return m.updateFocusedInput(msg)
 		}
@@ -540,8 +579,12 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	switch {
 	case m.submitting:
 		rc.AddPart(t.Dialog.SecondaryText.Render("Saving…"))
+	case m.refreshing:
+		rc.AddPart(t.Dialog.SecondaryText.Render("Refreshing models…"))
 	case m.errMsg != "":
 		rc.AddPart(t.Dialog.TitleError.Render(m.errMsg))
+	case m.refreshMsg != "":
+		rc.AddPart(t.Dialog.SecondaryText.Render(m.refreshMsg))
 	}
 
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
@@ -550,6 +593,41 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	cur := m.Cursor(view)
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
+}
+
+// isCustomProvider reports whether providerID is a custom provider with a
+// base_url: not in the catalog, so its models come from discovery.
+func isCustomProvider(com *common.Common, providerID string, pc config.ProviderConfig) bool {
+	if pc.BaseURL == "" {
+		return false
+	}
+	for _, p := range com.Workspace.KnownProviders() {
+		if string(p.ID) == providerID {
+			return false
+		}
+	}
+	return true
+}
+
+// refreshAvailable reports whether the refresh key applies now. It is
+// bound to the Enabled field because the text fields would take "r" as
+// input.
+func (m *ProviderSettings) refreshAvailable() bool {
+	return m.canRefresh && m.currentField() == providerSettingsFieldEnabled
+}
+
+// formatModelRefreshStatus summarizes the refresh of the one provider the
+// dialog requested. A failed refresh never reaches it: HandleMsg shows the
+// error instead.
+func formatModelRefreshStatus(results []workspace.ModelRefreshResult) string {
+	if len(results) == 0 {
+		return "No models were eligible for refresh"
+	}
+	result := results[0]
+	if result.Skipped {
+		return "Refresh skipped: " + result.SkipReason
+	}
+	return fmt.Sprintf("Refreshed: %d models (+%d new, -%d removed)", result.Models, result.Added, result.Removed)
 }
 
 // enabledView renders the current Enabled value with toggle-hint arrows,
@@ -600,6 +678,9 @@ func (m *ProviderSettings) ShortHelp() []key.Binding {
 	h := []key.Binding{m.keyMap.Next}
 	if m.currentField() == providerSettingsFieldEnabled {
 		h = append(h, m.keyMap.Toggle)
+	}
+	if m.refreshAvailable() {
+		h = append(h, m.keyMap.Refresh)
 	}
 	return append(h, m.keyMap.Submit, m.keyMap.Close)
 }

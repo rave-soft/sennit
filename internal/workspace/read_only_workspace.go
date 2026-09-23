@@ -497,6 +497,10 @@ func (w *readOnlyWorkspace) SetProviderProxy(providerID, proxy string) error {
 	return w.readOnlyError("SetProviderProxy")
 }
 
+func (w *readOnlyWorkspace) RefreshProviderModels(ctx context.Context, providerID string) ([]ModelRefreshResult, error) {
+	return nil, w.readOnlyError("RefreshProviderModels")
+}
+
 func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
 	return nil, w.readOnlyError("RefreshAccountLimits")
 }

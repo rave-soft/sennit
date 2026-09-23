@@ -438,6 +438,16 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			}
 			return dialog.ActionProviderSettingsResult{ProviderID: providerID}
 		})
+	case dialog.ActionRefreshModels:
+		ws := m.com.Workspace
+		ctx := m.com.Context()
+		providerID := msg.ProviderID
+		cmds = append(cmds, func() tea.Msg {
+			results, err := ws.RefreshProviderModels(ctx, providerID)
+			return dialog.ActionRefreshModelsResult{
+				ProviderID: providerID, Results: results, Err: err,
+			}
+		})
 	case dialog.ActionProviderSettingsSaved:
 		m.dialog.CloseDialog(dialog.ProviderSettingsID)
 	case dialog.ActionSubmitCustomProvider:

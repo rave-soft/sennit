@@ -18,8 +18,8 @@ import (
 // before discovery runs:
 //
 //  1. Marks ModelsSource — config.ModelsSourceConfig for a provider that already
-//     has a non-empty, hand-written Models list, so later code (`sennit
-//     models refresh`'s explicit-config guard, in internal/cmd/models.go)
+//     has a non-empty, hand-written Models list, so later code (the
+//     model refresh's explicit-config guard, in internal/modelsrefresh)
 //     can tell "the user wrote these" apart from "these came from
 //     discovery" without re-deriving it. This must run before the cache
 //     fill below, since that fill only ever touches providers with an

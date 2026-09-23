@@ -381,6 +381,28 @@ type ProviderProxySetter interface {
 	SetProviderProxy(providerID, proxy string) error
 }
 
+// ModelRefreshResult is the outcome of refreshing one provider's models.
+type ModelRefreshResult struct {
+	ID string
+	// Models is the size of the refreshed list.
+	Models         int
+	Added, Removed int
+	Skipped        bool
+	SkipReason     string
+	Err            error
+}
+
+// ModelsRefresher refreshes custom provider model lists.
+type ModelsRefresher interface {
+	// RefreshProviderModels re-runs model discovery for providerID, or
+	// for every enabled custom provider with a base_url when providerID
+	// is empty, and returns one result per provider. The error is set
+	// when the request itself is invalid (a catalog or unknown provider)
+	// or the config reload after the refresh fails; a single provider's
+	// discovery failure is reported in its result.
+	RefreshProviderModels(ctx context.Context, providerID string) ([]ModelRefreshResult, error)
+}
+
 type AccountsPurger interface {
 	PurgeAccounts(scope config.Scope, providerID string) error
 }
@@ -819,6 +841,7 @@ type FrontendWorkspace interface {
 	CustomProviderConfigurer
 	ProviderCatalog
 	ProviderProxySetter
+	ModelsRefresher
 	ProjectLifecycle
 	MCPController
 	ThreadController

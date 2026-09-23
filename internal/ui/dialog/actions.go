@@ -337,6 +337,18 @@ type (
 	ActionProviderSettingsSaved struct {
 		ProviderID string
 	}
+	// ActionRefreshModels requests an asynchronous refresh of providerID's
+	// custom model list.
+	ActionRefreshModels struct {
+		ProviderID string
+	}
+	// ActionRefreshModelsResult carries the outcome of ActionRefreshModels
+	// back to the open provider settings dialog.
+	ActionRefreshModelsResult struct {
+		ProviderID string
+		Results    []workspace.ModelRefreshResult
+		Err        error
+	}
 )
 
 // ActionCmd represents an action that carries a [tea.Cmd] to be passed to the
@@ -406,6 +418,9 @@ func (ActionAccountFormResult) DialogID() string { return AccountFormID }
 
 // DialogID implements [DialogAddressed].
 func (ActionProviderSettingsResult) DialogID() string { return ProviderSettingsID }
+
+// DialogID implements [DialogAddressed].
+func (ActionRefreshModelsResult) DialogID() string { return ProviderSettingsID }
 
 // DialogID implements [DialogAddressed].
 func (ActionMCPAuthComplete) DialogID() string { return MCPAuthID }

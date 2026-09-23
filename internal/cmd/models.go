@@ -1,21 +1,17 @@
 package cmd
 
 import (
-	"cmp"
-	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/mattn/go-isatty"
-	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/discover"
-	"github.com/rave-soft/sennit/internal/modelcache"
+	"github.com/rave-soft/sennit/internal/modelsrefresh"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/spf13/cobra"
 )
@@ -178,11 +174,6 @@ sennit models refresh codex`,
 			return err
 		}
 
-		knownIDs := make(map[string]bool)
-		for _, kp := range cfg.KnownProviders() {
-			knownIDs[string(kp.ID)] = true
-		}
-
 		baseCtx := cmdContext(cmd)
 
 		// Codex is a catalog provider, so it is not discovered against a
@@ -200,31 +191,16 @@ sennit models refresh codex`,
 			refreshCodex = codexConfigured(cfg)
 		}
 
-		var targets []string
+		providerID := ""
 		if len(args) == 1 {
-			id := args[0]
-			if knownIDs[id] {
-				return fmt.Errorf("provider %q is a known catalog provider; refresh only applies to custom providers", id)
-			}
-			pc, ok := cfg.Config().Providers.Get(id)
-			if !ok {
-				return fmt.Errorf("provider %q not found in config", id)
-			}
-			if pc.BaseURL == "" {
-				return fmt.Errorf("provider %q has no base_url configured", id)
-			}
-			targets = []string{id}
-		} else {
-			for id, pc := range cfg.Config().Providers.Seq2() {
-				if knownIDs[id] || pc.BaseURL == "" || pc.Disable {
-					continue
-				}
-				targets = append(targets, id)
-			}
-			sort.Strings(targets)
+			providerID = args[0]
+		}
+		results, err := modelsrefresh.Refresh(baseCtx, cfg, providerID)
+		if err != nil {
+			return err
 		}
 
-		if len(targets) == 0 && !refreshCodex {
+		if len(results) == 0 && !refreshCodex {
 			cmd.Println("no custom providers to refresh")
 			return nil
 		}
@@ -236,76 +212,19 @@ sennit models refresh codex`,
 				cmd.PrintErrf("%s: refresh failed: %v\n", codex.ProviderID, err)
 			}
 		}
-		for _, id := range targets {
-			pc, _ := cfg.Config().Providers.Get(id)
-
-			// discover_models: false is a hard stop, matching the guard
-			// discoverCustomProviderModels applies at load time (see
-			// load.go) — refresh must not second-guess an explicit opt-out.
-			if pc.AutoDiscoverModels != nil && !*pc.AutoDiscoverModels {
+		for _, r := range results {
+			switch {
+			case errors.Is(r.Err, modelsrefresh.ErrDiscoveryDisabled):
 				hadFailure = true
-				cmd.PrintErrf("discovery disabled for %s (discover_models: false); define models in the config\n", id)
-				continue
-			}
-
-			// A hand-written models list must never be silently clobbered
-			// by a refresh. discover_models: true is the explicit escape
-			// hatch — it already means "always refresh, my models win on
-			// ID conflicts" at load time, so it overrides this guard too.
-			wantsDiscovery := pc.AutoDiscoverModels != nil && *pc.AutoDiscoverModels
-			if pc.ModelsSource == config.ModelsSourceConfig && !wantsDiscovery {
-				cmd.Printf("%s: models are explicitly defined in config; refresh skipped\n", id)
-				continue
-			}
-
-			discoverCtx, cancel := context.WithTimeout(baseCtx, 3*time.Second)
-			dcfg := discover.Config{
-				ID:             id,
-				BaseURL:        pc.BaseURL,
-				APIKey:         pc.APIKey,
-				ExtraHeaders:   pc.ExtraHeaders,
-				ExistingModels: nil,
-				ProxyURL:       pc.ProxyURL,
-			}
-			providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
-
-			models, discErr := discover.DiscoverModels(discoverCtx, dcfg, cfg.Resolver())
-			if discErr == nil && len(models) > 0 {
-				if enricher := discover.GetEnricher(string(providerType)); enricher != nil {
-					models = enricher.EnrichModels(discoverCtx, dcfg, cfg.Resolver(), models)
-				}
-			}
-			cancel()
-
-			if discErr != nil {
+				cmd.PrintErrf("discovery disabled for %s (discover_models: false); define models in the config\n", r.ID)
+			case r.Err != nil:
 				hadFailure = true
-				cmd.PrintErrf("%s: refresh failed: %v\n", id, discErr)
-				continue
+				cmd.PrintErrf("%s: refresh failed: %v\n", r.ID, r.Err)
+			case r.Skipped:
+				cmd.Printf("%s: %s; refresh skipped\n", r.ID, r.SkipReason)
+			default:
+				cmd.Printf("%s: %d models (+%d new, -%d removed)\n", r.ID, r.Models, r.Added, r.Removed)
 			}
-			if len(models) == 0 {
-				hadFailure = true
-				cmd.PrintErrf("%s: refresh failed: no models returned\n", id)
-				continue
-			}
-
-			added, removed := diffModelIDs(pc.Models, models)
-
-			// Discovered models live in the global model-discovery cache,
-			// not providers.<id>.models in sennit.json — see
-			// validateCustomProviders in internal/config/load.go.
-			globalDataPath, err := cfg.ConfigPath(config.ScopeGlobal)
-			if err != nil {
-				hadFailure = true
-				cmd.PrintErrf("%s: refresh failed: %v\n", id, err)
-				continue
-			}
-			if err := modelcache.New(globalDataPath).Save(id, models); err != nil {
-				hadFailure = true
-				cmd.PrintErrf("%s: refresh failed: %v\n", id, err)
-				continue
-			}
-
-			cmd.Printf("%s: %d models (+%d new, -%d removed)\n", id, len(models), added, removed)
 		}
 
 		if hadFailure {
@@ -313,31 +232,6 @@ sennit models refresh codex`,
 		}
 		return nil
 	},
-}
-
-// diffModelIDs compares a provider's currently configured model list against
-// a freshly discovered/fetched one and reports how many IDs are new and how
-// many dropped out. It only compares by ID; a caller that also cares about
-// per-model field changes (Codex's context-window updates, for instance)
-// walks the fresh list itself and uses this just for the counts.
-func diffModelIDs(existing, fresh []catwalk.Model) (added, removed int) {
-	existingIDs := make(map[string]bool, len(existing))
-	for _, m := range existing {
-		existingIDs[m.ID] = true
-	}
-	freshIDs := make(map[string]bool, len(fresh))
-	for _, m := range fresh {
-		freshIDs[m.ID] = true
-		if !existingIDs[m.ID] {
-			added++
-		}
-	}
-	for id := range existingIDs {
-		if !freshIDs[id] {
-			removed++
-		}
-	}
-	return added, removed
 }
 
 func init() {

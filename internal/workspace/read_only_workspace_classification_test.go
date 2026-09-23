@@ -67,6 +67,7 @@ var refusedMethods = []string{
 	"QuestionCancel",
 	"RecordAccount",
 	"RefreshAccountLimits",
+	"RefreshProviderModels",
 	"RefreshMCPTools",
 	"RefreshOAuthToken",
 	"RefreshOAuthTokenForAccount",
@@ -401,6 +402,10 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"SetProviderProxy": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.SetProviderProxy("provider", "http://proxy.example:8080")
+			require.True(t, IsReadOnlyError(err))
+		},
+		"RefreshProviderModels": func(t *testing.T, ro *readOnlyWorkspace) {
+			_, err := ro.RefreshProviderModels(t.Context(), "provider")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"RefreshAccountLimits": func(t *testing.T, ro *readOnlyWorkspace) {

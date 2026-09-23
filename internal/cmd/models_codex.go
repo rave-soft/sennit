@@ -6,6 +6,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/modelsrefresh"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
@@ -57,9 +58,9 @@ func refreshCodexModels(ctx context.Context, cmd *cobra.Command, cfg *config.Con
 		return err
 	}
 
-	added, removed := diffModelIDs(pc.Models, models)
+	added, removed := modelsrefresh.DiffModelIDs(pc.Models, models)
 
-	// diffModelIDs only tracks IDs; a context-window change lands as neither
+	// DiffModelIDs only tracks IDs; a context-window change lands as neither
 	// an add nor a remove, so it needs its own pass over the full values.
 	existing := make(map[string]catwalk.Model, len(pc.Models))
 	for _, m := range pc.Models {
