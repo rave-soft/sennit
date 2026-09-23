@@ -591,15 +591,48 @@ func (m *Chat) Animate(msg spin.StepMsg) tea.Cmd {
 // returned), or an off-screen spinner would tick at the retry cadence for
 // the rest of the session.
 //
-// Nested tools answer through their container, whose index their id maps
-// to and which is unfinished for as long as any of them is.
+// A nested tool's id maps to its container's index, but the container stays
+// unfinished for as long as the delegation runs, so it cannot answer for
+// the tool: every nested tool that ever spun would keep retrying until the
+// delegation ended. A nested tool lives only while both it and its
+// top-level container are unfinished. A finished delegation also releases
+// its nested tools (chat.NestedToolReleaser), which ends their chains on
+// its own; the container check keeps that from being the only guard.
 func (m *Chat) AnimationLives(id string) bool {
 	idx, ok := m.idInxMap[id]
 	if !ok {
 		return false
 	}
-	item := m.list.ItemAt(idx)
-	return item != nil && !item.Finished()
+	item, ok := m.list.ItemAt(idx).(chat.MessageItem)
+	if !ok || item.Finished() {
+		return false
+	}
+	if item.ID() == id {
+		return true
+	}
+	nested := findNestedTool(item, id, 0)
+	return nested != nil && !nested.Finished()
+}
+
+// findNestedTool returns the tool with the given id from item's nested-tool
+// tree, at any depth up to maxNestedToolRegistrationDepth, or nil.
+func findNestedTool(item chat.MessageItem, id string, depth int) chat.ToolMessageItem {
+	if depth >= maxNestedToolRegistrationDepth {
+		return nil
+	}
+	container, ok := item.(chat.NestedToolContainer)
+	if !ok {
+		return nil
+	}
+	for _, nested := range container.NestedTools() {
+		if nested.ID() == id {
+			return nested
+		}
+		if found := findNestedTool(nested, id, depth+1); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 // RestartPausedVisibleAnimations restarts animations for items that were paused
