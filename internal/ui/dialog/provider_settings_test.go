@@ -79,9 +79,13 @@ func ctrlAMsg() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
 }
 
+func ctrlRMsg() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
+}
+
 // customProviderSettings opens the dialog for a custom provider with a
-// base_url, the only kind a model refresh applies to, focused on the
-// Enabled field where the refresh key is bound.
+// base_url, a kind a model refresh applies to, focused on the Enabled
+// field.
 func customProviderSettings(t *testing.T) *ProviderSettings {
 	t.Helper()
 	com := newProviderSettingsTestCommon(t, "custom", config.ProviderConfig{BaseURL: "http://127.0.0.1:9/v1"})
@@ -105,11 +109,11 @@ func TestProviderSettings_RefreshModelsReturnsActionWithoutWorkspaceIO(t *testin
 
 	m := customProviderSettings(t)
 
-	action := m.HandleMsg(keyMsg('r'))
+	action := m.HandleMsg(ctrlRMsg())
 	refresh, ok := action.(ActionRefreshModels)
 	require.True(t, ok, "expected ActionRefreshModels, got %#v", action)
 	require.Equal(t, "custom", refresh.ProviderID)
-	require.Nil(t, m.HandleMsg(keyMsg('r')), "busy refresh must not trigger twice")
+	require.Nil(t, m.HandleMsg(ctrlRMsg()), "busy refresh must not trigger twice")
 	require.Contains(t, drawProviderSettings(m), "Refreshing models…")
 
 	require.Nil(t, m.HandleMsg(ActionRefreshModelsResult{
@@ -118,6 +122,43 @@ func TestProviderSettings_RefreshModelsReturnsActionWithoutWorkspaceIO(t *testin
 	}))
 	require.False(t, m.refreshing)
 	require.Contains(t, drawProviderSettings(m), "Refreshed: 5 models (+2 new, -1 removed)")
+}
+
+// TestProviderSettings_RefreshFromTextField pins that ctrl+r refreshes
+// while the proxy field has focus and leaves its text alone: unlike a
+// plain letter, the chord is not text input.
+func TestProviderSettings_RefreshFromTextField(t *testing.T) {
+	t.Parallel()
+
+	com := newProviderSettingsTestCommon(t, "custom", config.ProviderConfig{BaseURL: "http://127.0.0.1:9/v1"})
+	m := newProviderSettings(com, "custom", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
+	require.Equal(t, providerSettingsFieldProxy, m.currentField())
+	require.Contains(t, m.ShortHelp(), m.keyMap.Refresh)
+
+	_, ok := m.HandleMsg(ctrlRMsg()).(ActionRefreshModels)
+	require.True(t, ok)
+	require.Empty(t, m.proxy.Value())
+}
+
+// TestProviderSettings_RefreshOfferedForCodex pins that Codex, a catalog
+// provider with no base_url, still gets the refresh: its list comes from
+// its own backend, and the status reports context-window updates.
+func TestProviderSettings_RefreshOfferedForCodex(t *testing.T) {
+	t.Parallel()
+
+	com := newProviderSettingsTestCommon(t, CodexProviderID, config.ProviderConfig{})
+	m := newProviderSettings(com, CodexProviderID, workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
+	require.Contains(t, m.ShortHelp(), m.keyMap.Refresh)
+
+	refresh, ok := m.HandleMsg(ctrlRMsg()).(ActionRefreshModels)
+	require.True(t, ok)
+	require.Equal(t, CodexProviderID, refresh.ProviderID)
+
+	require.Nil(t, m.HandleMsg(ActionRefreshModelsResult{
+		ProviderID: CodexProviderID,
+		Results:    []workspace.ModelRefreshResult{{ID: CodexProviderID, Models: 7, Added: 1, Updated: 2}},
+	}))
+	require.Contains(t, drawProviderSettings(m), "Refreshed: 7 models (+1 new, -0 removed, 2 updated)")
 }
 
 // TestProviderSettings_SaveShowsSavingNotRefreshing pins the status line
@@ -153,7 +194,7 @@ func TestProviderSettings_RefreshNotOfferedForCatalogProvider(t *testing.T) {
 			m := newProviderSettings(com, tc.id, workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
 			m.advanceFocus(1)
 
-			require.Nil(t, m.HandleMsg(keyMsg('r')))
+			require.Nil(t, m.HandleMsg(ctrlRMsg()))
 			require.False(t, m.refreshing)
 			require.NotContains(t, m.ShortHelp(), m.keyMap.Refresh)
 		})
@@ -166,7 +207,7 @@ func TestProviderSettings_CloseDuringRefresh(t *testing.T) {
 	t.Parallel()
 
 	m := customProviderSettings(t)
-	_, ok := m.HandleMsg(keyMsg('r')).(ActionRefreshModels)
+	_, ok := m.HandleMsg(ctrlRMsg()).(ActionRefreshModels)
 	require.True(t, ok)
 
 	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}), "save must wait for the refresh")
@@ -180,7 +221,7 @@ func TestProviderSettings_RefreshFailureShowsError(t *testing.T) {
 	t.Parallel()
 
 	m := customProviderSettings(t)
-	m.HandleMsg(keyMsg('r'))
+	m.HandleMsg(ctrlRMsg())
 	require.Nil(t, m.HandleMsg(ActionRefreshModelsResult{
 		ProviderID: "custom",
 		Results:    []workspace.ModelRefreshResult{{ID: "custom", Err: errors.New("endpoint down")}},

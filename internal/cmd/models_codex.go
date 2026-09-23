@@ -2,14 +2,10 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/modelsrefresh"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
-	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/spf13/cobra"
 )
 
@@ -17,94 +13,23 @@ import (
 // for. Refresh is about re-reading a list that already exists; signing in is
 // `sennit login codex`.
 func codexConfigured(cfg *config.ConfigStore) bool {
-	current := cfg.Config()
-	if current == nil {
-		return false
-	}
-	pc, ok := current.RuntimeProvider(codex.ProviderID)
-	return ok && pc.OAuthToken != nil
+	return modelsrefresh.CodexConfigured(cfg)
 }
 
-// refreshCodexModels re-reads the Codex model list and overwrites
-// providers.codex.models in the global config.
-//
-// Codex is not a custom provider — it has no /models endpoint of the
-// OpenAI-compatible kind the rest of refresh discovers against, and its list
-// is written into the config at sign-in rather than into the model-discovery
-// cache. Without this path the only way to pick up a changed list (a new
-// model on the account, or a field Sennit has started reading, as
-// max_context_window was) is to sign in again.
+// refreshCodexModels re-reads the Codex model list through
+// modelsrefresh.RefreshCodex and prints the outcome.
 func refreshCodexModels(ctx context.Context, cmd *cobra.Command, cfg *config.ConfigStore) error {
-	current := cfg.Config()
-	// Models comes off the disk-shaped entry (what refresh is about to
-	// diff against and overwrite); the credential and effective proxy
-	// come off the runtime provider, the only view that carries them.
-	pc, ok := current.Providers.Get(codex.ProviderID)
-	if !ok {
-		return fmt.Errorf("not signed in to Codex; run `sennit login codex`")
-	}
-	cred, ok := current.RuntimeProvider(codex.ProviderID)
-	if !ok || cred.OAuthToken == nil {
-		return fmt.Errorf("not signed in to Codex; run `sennit login codex`")
-	}
-
-	token, err := codexRefreshToken(ctx, cfg, cred)
+	result, err := modelsrefresh.RefreshCodex(ctx, cfg)
 	if err != nil {
 		return err
 	}
-
-	models, err := codex.FetchModels(ctx, cred.ProxyURL, token.AccessToken, codex.AccountID(token.AccessToken))
-	if err != nil {
-		return err
+	if result.Err != nil {
+		return result.Err
 	}
-
-	added, removed := modelsrefresh.DiffModelIDs(pc.Models, models)
-
-	// DiffModelIDs only tracks IDs; a context-window change lands as neither
-	// an add nor a remove, so it needs its own pass over the full values.
-	existing := make(map[string]catwalk.Model, len(pc.Models))
-	for _, m := range pc.Models {
-		existing[m.ID] = m
-	}
-	var changed int
-	for _, m := range models {
-		if old, known := existing[m.ID]; known && old.ContextWindow != m.ContextWindow {
-			changed++
-			cmd.Printf("  %s: context window %d → %d\n", m.ID, old.ContextWindow, m.ContextWindow)
-		}
-	}
-
-	if err := cfg.SetConfigField(config.ScopeGlobal, "providers."+codex.ProviderID+".models", models); err != nil {
-		return err
+	for _, c := range result.ContextWindowChanges {
+		cmd.Printf("  %s: context window %d → %d\n", c.ID, c.Old, c.New)
 	}
 	cmd.Printf("%s: %d models (+%d new, -%d removed, %d updated)\n",
-		codex.ProviderID, len(models), added, removed, changed)
+		codex.ProviderID, result.Models, result.Added, result.Removed, len(result.ContextWindowChanges))
 	return nil
-}
-
-// codexRefreshToken returns an access token usable for the model-list call.
-//
-// The stored one is used while it is valid. Past that, the Codex CLI's own
-// token is preferred over an exchange: Codex refresh tokens are single-use,
-// so spending ours to list models would log out whichever tool holds the
-// older one. An exchange is the last resort, and its result is persisted —
-// a rotation that is not written down strands the next refresh.
-func codexRefreshToken(ctx context.Context, cfg *config.ConfigStore, cred providerstate.Provider) (*oauth.Token, error) {
-	if !cred.OAuthToken.IsExpired() {
-		return cred.OAuthToken, nil
-	}
-	if token, ok := codex.TokenFromDiskFor(codex.AccountID(cred.APIKey)); ok && !token.IsExpired() {
-		return token, nil
-	}
-	if cred.OAuthToken.RefreshToken == "" {
-		return nil, fmt.Errorf("the Codex login has expired and cannot be refreshed; run `sennit login codex -f`")
-	}
-	token, err := codex.RefreshToken(ctx, cred.ProxyURL, cred.OAuthToken.RefreshToken)
-	if err != nil {
-		return nil, fmt.Errorf("could not refresh the Codex login: %w", err)
-	}
-	if err := cfg.SetProviderAPIKey(config.ScopeGlobal, codex.ProviderID, token); err != nil {
-		return nil, err
-	}
-	return token, nil
 }

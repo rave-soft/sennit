@@ -26,6 +26,7 @@ func (w *AppWorkspace) RefreshProviderModels(ctx context.Context, providerID str
 		converted[i] = workspace.ModelRefreshResult{
 			ID: result.ID, Models: result.Models,
 			Added: result.Added, Removed: result.Removed,
+			Updated: len(result.ContextWindowChanges),
 			Skipped: result.Skipped, SkipReason: result.SkipReason,
 			Err: result.Err,
 		}

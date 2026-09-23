@@ -113,8 +113,8 @@ type ProviderSettings struct {
 	submitting bool
 	errMsg     string
 
-	// canRefresh reports whether the provider is a custom one with a
-	// base_url, the only kind a model refresh applies to.
+	// canRefresh reports whether the provider's model list can be
+	// refreshed: a custom one with a base_url, or Codex.
 	canRefresh bool
 	// refreshing is set while a model refresh is in flight. Unlike
 	// submitting, it still lets the dialog close.
@@ -166,7 +166,7 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 		providerID: providerID,
 		caps:       caps,
 		fields:     []providerSettingsField{providerSettingsFieldProxy},
-		canRefresh: isCustomProvider(com, providerID, pc),
+		canRefresh: providerID == CodexProviderID || isCustomProvider(com, providerID, pc),
 	}
 
 	m.proxy = textinput.New()
@@ -233,7 +233,7 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 	m.keyMap.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous field"))
 	m.keyMap.Toggle = key.NewBinding(key.WithKeys("left", "right", "space"), key.WithHelp("←/→", "toggle rotation"))
 	m.keyMap.Submit = key.NewBinding(key.WithKeys("enter", "ctrl+y"), key.WithHelp("enter", "submit"))
-	m.keyMap.Refresh = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh models"))
+	m.keyMap.Refresh = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh models"))
 	m.keyMap.Close = CloseKey
 
 	return m
@@ -340,7 +340,7 @@ func (m *ProviderSettings) HandleMsg(msg tea.Msg) Action {
 			m.enabled = !m.enabled
 		case key.Matches(msg, m.keyMap.Submit):
 			return m.submit()
-		case m.refreshAvailable() && key.Matches(msg, m.keyMap.Refresh):
+		case m.canRefresh && key.Matches(msg, m.keyMap.Refresh):
 			m.refreshing = true
 			m.errMsg = ""
 			m.refreshMsg = ""
@@ -609,13 +609,6 @@ func isCustomProvider(com *common.Common, providerID string, pc config.ProviderC
 	return true
 }
 
-// refreshAvailable reports whether the refresh key applies now. It is
-// bound to the Enabled field because the text fields would take "r" as
-// input.
-func (m *ProviderSettings) refreshAvailable() bool {
-	return m.canRefresh && m.currentField() == providerSettingsFieldEnabled
-}
-
 // formatModelRefreshStatus summarizes the refresh of the one provider the
 // dialog requested. A failed refresh never reaches it: HandleMsg shows the
 // error instead.
@@ -627,7 +620,11 @@ func formatModelRefreshStatus(results []workspace.ModelRefreshResult) string {
 	if result.Skipped {
 		return "Refresh skipped: " + result.SkipReason
 	}
-	return fmt.Sprintf("Refreshed: %d models (+%d new, -%d removed)", result.Models, result.Added, result.Removed)
+	status := fmt.Sprintf("Refreshed: %d models (+%d new, -%d removed", result.Models, result.Added, result.Removed)
+	if result.Updated > 0 {
+		status += fmt.Sprintf(", %d updated", result.Updated)
+	}
+	return status + ")"
 }
 
 // enabledView renders the current Enabled value with toggle-hint arrows,
@@ -679,7 +676,7 @@ func (m *ProviderSettings) ShortHelp() []key.Binding {
 	if m.currentField() == providerSettingsFieldEnabled {
 		h = append(h, m.keyMap.Toggle)
 	}
-	if m.refreshAvailable() {
+	if m.canRefresh {
 		h = append(h, m.keyMap.Refresh)
 	}
 	return append(h, m.keyMap.Submit, m.keyMap.Close)

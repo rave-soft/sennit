@@ -387,19 +387,24 @@ type ModelRefreshResult struct {
 	// Models is the size of the refreshed list.
 	Models         int
 	Added, Removed int
-	Skipped        bool
-	SkipReason     string
-	Err            error
+	// Updated counts kept models whose context window changed. Only a
+	// Codex refresh reports it.
+	Updated    int
+	Skipped    bool
+	SkipReason string
+	Err        error
 }
 
-// ModelsRefresher refreshes custom provider model lists.
+// ModelsRefresher refreshes custom provider and Codex model lists.
 type ModelsRefresher interface {
 	// RefreshProviderModels re-runs model discovery for providerID, or
 	// for every enabled custom provider with a base_url when providerID
-	// is empty, and returns one result per provider. The error is set
-	// when the request itself is invalid (a catalog or unknown provider)
-	// or the config reload after the refresh fails; a single provider's
-	// discovery failure is reported in its result.
+	// is empty, and returns one result per provider. A providerID of
+	// "codex" re-reads the Codex model list from its backend. The error
+	// is set when the request itself is invalid (another catalog
+	// provider, an unknown one, or Codex without a login) or the config
+	// reload after the refresh fails; a single provider's discovery
+	// failure is reported in its result.
 	RefreshProviderModels(ctx context.Context, providerID string) ([]ModelRefreshResult, error)
 }
 

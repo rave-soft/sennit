@@ -1,5 +1,5 @@
-// Package modelsrefresh refreshes custom provider model-discovery caches.
-// It is shared by `sennit models refresh` and the TUI's provider settings
+// Package modelsrefresh refreshes custom provider model-discovery caches
+// and the Codex model list. It is shared by `sennit models refresh` and the TUI's provider settings
 // dialog.
 package modelsrefresh
 
@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/modelcache"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 )
 
 // discoverTimeout bounds one provider's discovery and enrichment.
@@ -36,11 +37,25 @@ type Result struct {
 	Added, Removed int
 	Skipped        bool
 	SkipReason     string
-	Err            error
+	// ContextWindowChanges lists models kept across the refresh whose
+	// context window changed. Only a Codex refresh fills it: discovery
+	// results are not compared field by field.
+	ContextWindowChanges []ContextWindowChange
+	Err                  error
 }
 
 // Refresh refreshes custom provider models using the standard discoverer.
+// A providerID of "codex" re-reads the Codex model list instead; the
+// empty-ID sweep never includes Codex, so a caller that wants it there
+// calls RefreshCodex itself.
 func Refresh(ctx context.Context, cfg *config.ConfigStore, providerID string) ([]Result, error) {
+	if providerID == codex.ProviderID {
+		result, err := RefreshCodex(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return []Result{result}, nil
+	}
 	return RefreshWith(ctx, cfg, providerID, discover.DiscoverModels)
 }
 

@@ -336,3 +336,21 @@ func TestDiffModelIDsCountsDuplicateIDsOnce(t *testing.T) {
 	require.Equal(t, 1, added)
 	require.Equal(t, 1, removed)
 }
+
+// TestRefreshCodexSignedOut pins that Refresh routes "codex" to the Codex
+// path rather than rejecting it as a catalog provider, and that without a
+// login the request fails before any network call.
+func TestRefreshCodexSignedOut(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
+	seedGlobalConfig(t, globalDir, `{"providers": {"codex": {"proxy_url": "http://127.0.0.1:9"}}}`)
+
+	store, err := configruntime.Load(t.TempDir(), "", false)
+	require.NoError(t, err)
+	require.False(t, CodexConfigured(store))
+
+	results, err := Refresh(t.Context(), store, "codex")
+	require.ErrorIs(t, err, ErrCodexSignedOut)
+	require.Nil(t, results)
+}
