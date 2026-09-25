@@ -41,8 +41,8 @@ func (w agentSessionWorkspace) AgentIsSessionBusy(sessionID string) bool {
 // handleChildSessionMessage's NewToolMessageItem call can probe it for
 // custom-agent tool names (config.Config.AgentOverride) without a nil
 // pointer dereference.
-func (agentSessionWorkspace) Config() *config.Config {
-	return &config.Config{}
+func (agentSessionWorkspace) Config() *workspace.FrontendConfig {
+	return &workspace.FrontendConfig{}
 }
 
 func (agentSessionWorkspace) SupportsThreads() bool { return false }

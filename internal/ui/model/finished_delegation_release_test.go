@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
@@ -44,7 +43,7 @@ func TestLoadNestedToolCallsSkipsFinishedDelegations(t *testing.T) {
 	running.SetMessageID("msg-running")
 
 	recorder := &nestedLoadRecorder{}
-	err := loadNestedToolCalls(t.Context(), recorder, u.com.Styles, &config.Config{}, "root", 1,
+	err := loadNestedToolCalls(t.Context(), recorder, u.com.Styles, &workspace.FrontendConfig{}, "root", 1,
 		[]chat.MessageItem{finished, running})
 	require.NoError(t, err)
 

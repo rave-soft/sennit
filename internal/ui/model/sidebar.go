@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -146,7 +145,7 @@ func (m *UI) computeSidebarSig() sidebarSig {
 	sig.reasoningLevels = len(model.CatalogCfg.ReasoningLevels)
 	sig.think = model.ModelCfg.Think
 	sig.reasoningEffort = model.ModelCfg.ReasoningEffort
-	if providerConfig, ok := m.com.Config().Providers.Get(model.ModelCfg.Provider); ok {
+	if providerConfig, ok := m.com.Config().Provider(model.ModelCfg.Provider); ok {
 		sig.providerName = providerConfig.Name
 	}
 
@@ -187,7 +186,7 @@ func (m *UI) modelInfo(width int) string {
 	providerName := ""
 
 	if model != nil {
-		providerConfig, ok := m.com.Config().Providers.Get(model.ModelCfg.Provider)
+		providerConfig, ok := m.com.Config().Provider(model.ModelCfg.Provider)
 		if ok {
 			providerName = providerConfig.Name
 
@@ -323,7 +322,7 @@ func (m *UI) updateSidebarScrollState() {
 
 	// Render all items without truncation; virtual scrolling handles overflow.
 	lspSection := m.lsp.lspInfo(m.com, contentWidth, len(m.lsp.states), true)
-	mcpSection := m.mcpInfo(m.com, contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
+	mcpSection := m.mcpInfo(m.com, contentWidth, mcpCount(m.com.Config().MCPNames, m.mcpStates), true)
 	skillsSection := m.skillsInfo(m.com, contentWidth, len(m.skillStatusItems(m.com)), true)
 	filesSection := m.sess.filesInfo(m.com, m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sess.files), true)
 
@@ -458,10 +457,10 @@ func truncatedMoreCount(total, maxItems int) int {
 }
 
 // mcpCount returns the number of MCP servers that have a state entry.
-func mcpCount(mcpCfgs []config.MCP, states map[string]mcp.MCPClientInfo) int {
+func mcpCount(mcpNames []string, states map[string]mcp.MCPClientInfo) int {
 	count := 0
-	for _, cfg := range mcpCfgs {
-		if _, ok := states[cfg.Name]; ok {
+	for _, name := range mcpNames {
+		if _, ok := states[name]; ok {
 			count++
 		}
 	}

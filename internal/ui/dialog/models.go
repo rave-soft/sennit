@@ -238,7 +238,7 @@ func (m *Models) isSelectedConfigured() bool {
 		return false
 	}
 	providerID := string(modelItem.prov.ID)
-	_, isConfigured := m.com.Config().Providers.Get(providerID)
+	_, isConfigured := m.com.Config().Provider(providerID)
 	return isConfigured
 }
 
@@ -270,7 +270,7 @@ func (m *Models) setProviderItems() tea.Cmd {
 	// itemsMap contains the keys of added model items.
 	itemsMap := make(map[string]*ModelItem)
 	groups := []ModelGroup{}
-	for id, p := range cfg.Providers.Seq2() {
+	for id, p := range cfg.ProvidersSeq() {
 		if p.Disable {
 			continue
 		}
@@ -311,7 +311,7 @@ func (m *Models) setProviderItems() tea.Cmd {
 		// dialog only ever lists models for providers the user already
 		// configured, so an unconfigured or disabled catalog provider is
 		// skipped entirely rather than shown as a dead end into auth.
-		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
+		providerConfig, providerConfigured := cfg.Provider(providerID)
 		if !providerConfigured || providerConfig.Disable {
 			continue
 		}

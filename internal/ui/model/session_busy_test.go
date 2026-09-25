@@ -200,7 +200,7 @@ func (w *countingWorkspace) InitializePrompt() (string, error) {
 
 func (w *countingWorkspace) LSPStart(context.Context, string) error { return nil }
 
-func (w *countingWorkspace) Config() *config.Config { return nil }
+func (w *countingWorkspace) Config() *workspace.FrontendConfig { return nil }
 
 // WorkingDir is called when formatting desktop notification titles; it's
 // not part of the synchronous-probe invariant this stub otherwise pins, so

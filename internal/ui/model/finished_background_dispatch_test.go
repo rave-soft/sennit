@@ -3,11 +3,11 @@ package model
 import (
 	"testing"
 
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +49,7 @@ func TestLoadNestedToolCallsSkipsFinishedBackgroundDispatch(t *testing.T) {
 	markBackgroundDelegations(items, map[string]bool{"tc-finished": true, "tc-running": false})
 
 	recorder := &nestedLoadRecorder{}
-	require.NoError(t, loadNestedToolCalls(t.Context(), recorder, u.com.Styles, &config.Config{}, "root", 1, items))
+	require.NoError(t, loadNestedToolCalls(t.Context(), recorder, u.com.Styles, &workspace.FrontendConfig{}, "root", 1, items))
 
 	require.Equal(t, []string{
 		session.CreateAgentToolSessionID("msg-running", "tc-running"),

@@ -58,7 +58,7 @@ func (m *UI) updateCoderModelCmd(extraGuard func() tea.Cmd, mutate func(*config.
 	if cfg == nil {
 		return util.ReportError(errors.New("configuration not found")), false
 	}
-	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
+	if !cfg.HasCoderAgent() {
 		return util.ReportError(errors.New("agent configuration not found")), false
 	}
 
@@ -357,7 +357,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// between its stored accounts instead of starting the auth flow
 		// over again. Both checks are pure in-memory reads, so onboarding
 		// and a fresh (never-configured) provider are unaffected.
-		if pc, ok := m.com.Config().RuntimeProvider(msg.ProviderID); ok && (pc.APIKey != "" || pc.OAuthToken != nil) {
+		if auth := m.com.Config().ProviderAuth(msg.ProviderID); auth.Known && (auth.HasAPIKey || auth.HasOAuth) {
 			if cmd := m.openAccountsDialog(m.com, msg.ProviderID); cmd != nil {
 				cmds = append(cmds, cmd)
 			}

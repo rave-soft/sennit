@@ -63,7 +63,7 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 	}
 
 	if !force {
-		if cfg := ws.Config(); cfg != nil {
+		if cfg := serverConfig(ws); cfg != nil {
 			if pc, ok := cfg.RuntimeProvider(codex.ProviderID); ok && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to OpenAI Codex.")
 				fmt.Println("Use --force to re-authenticate.")
@@ -186,7 +186,7 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 // would rewrite a "$VAR" template to its resolved literal even though
 // nothing asked for a proxy change at all.
 func configuredCodexProxy(ws workspace.ConfigReader) string {
-	cfg := ws.Config()
+	cfg := serverConfig(ws)
 	if cfg == nil {
 		return ""
 	}

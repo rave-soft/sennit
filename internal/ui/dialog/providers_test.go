@@ -26,7 +26,7 @@ type providersTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w providersTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -37,8 +37,11 @@ func (w providersTestWorkspace) BuiltinSkills() []*skills.Skill    { return skil
 
 func (w *providersTestWorkspace) SupportsThreads() bool { return false }
 
-func (w *providersTestWorkspace) Config() *config.Config {
-	return w.cfg
+func (w *providersTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
 }
 
 func newProvidersTestCommon(t *testing.T) *common.Common {
@@ -63,7 +66,7 @@ func TestNewProviders_ListsCatalogAndCustomEntry(t *testing.T) {
 	providers, err := NewProviders(com, false)
 	require.NoError(t, err)
 
-	knownProviders := providerruntime.Providers(com.Config().Options.DisableDefaultProviders)
+	knownProviders := com.Workspace.KnownProviders()
 	require.NotEmpty(t, knownProviders)
 
 	items := providers.list.FilteredItems()
@@ -98,7 +101,7 @@ func TestNewProviders_ConfiguredProvidersFirst(t *testing.T) {
 
 	// The base fixture already configures Anthropic. Configure OpenAI
 	// too so the configured group has two members.
-	com.Config().Providers.Set(string(catwalk.InferenceProviderOpenAI), config.ProviderConfig{
+	com.Workspace.(*providersTestWorkspace).cfg.Providers.Set(string(catwalk.InferenceProviderOpenAI), config.ProviderConfig{
 		ID: string(catwalk.InferenceProviderOpenAI),
 	})
 

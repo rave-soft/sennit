@@ -20,7 +20,12 @@ type configOnlyWorkspace struct {
 	cfg *config.Config
 }
 
-func (w configOnlyWorkspace) Config() *config.Config { return w.cfg }
+func (w configOnlyWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, nil)
+}
 
 // TestPermissions_MCPToolNameResolvesServerWithUnderscore pins Audit 12
 // finding 5 for the permission dialog: the tool header used to split an

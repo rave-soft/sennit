@@ -29,8 +29,8 @@ func (w attachedSessionChangesWorkspace) BuiltinSkills() []*skills.Skill {
 	return skills.DiscoverBuiltin()
 }
 
-func (w *attachedSessionChangesWorkspace) Config() *config.Config {
-	return &config.Config{}
+func (w *attachedSessionChangesWorkspace) Config() *workspace.FrontendConfig {
+	return &workspace.FrontendConfig{}
 }
 
 func (w *attachedSessionChangesWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {

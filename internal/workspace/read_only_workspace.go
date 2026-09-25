@@ -735,7 +735,7 @@ func (w *readOnlyWorkspace) AccountCapabilities(providerID string) AccountCapabi
 	return w.ws.AccountCapabilities(providerID)
 }
 
-func (w *readOnlyWorkspace) Config() *config.Config {
+func (w *readOnlyWorkspace) Config() *FrontendConfig {
 	return w.ws.Config()
 }
 

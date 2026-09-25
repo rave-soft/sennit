@@ -3,7 +3,6 @@ package dialog
 import (
 	"errors"
 
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -63,7 +62,7 @@ func NewReasoning(com *common.Common) (*Reasoning, error) {
 // of the currently active effort.
 func reasoningItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	cfg := com.Config()
-	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
+	if !cfg.HasCoderAgent() {
 		return nil, 0, errors.New("agent configuration not found")
 	}
 

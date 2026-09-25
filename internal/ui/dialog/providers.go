@@ -72,7 +72,7 @@ func providerItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	providers := com.Workspace.KnownProviders()
 
 	isConfigured := func(p catwalk.Provider) bool {
-		_, ok := cfg.Providers.Get(string(p.ID))
+		_, ok := cfg.Provider(string(p.ID))
 		return ok
 	}
 
@@ -96,7 +96,7 @@ func providerItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	})
 
 	for _, p := range sorted {
-		_, configured := cfg.Providers.Get(string(p.ID))
+		_, configured := cfg.Provider(string(p.ID))
 		items = append(items, &ProviderItem{
 			BaseItem:   list.NewBaseItem(),
 			id:         string(p.ID),

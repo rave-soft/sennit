@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
@@ -392,7 +391,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 	cfg := com.Config()
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
-	if _, ok := cfg.Agents[config.AgentCoder]; ok {
+	if cfg.HasCoderAgent() {
 		providerCfg := cfg.GetProviderForModel()
 		model := cfg.SelectedCatalogModel()
 		if providerCfg != nil && model != nil && model.CanReason {

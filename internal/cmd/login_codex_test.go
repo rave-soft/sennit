@@ -23,12 +23,23 @@ type codexProviderConfigAccessor struct {
 	provider config.ProviderConfig
 }
 
-func (s *codexProviderConfigAccessor) Config() *config.Config {
+func (s *codexProviderConfigAccessor) rawConfig() *config.Config {
 	return &config.Config{
 		Providers: csync.NewMap(map[string]config.ProviderConfig{
 			codex.ProviderID: s.provider,
 		}),
 	}
+}
+
+func (s *codexProviderConfigAccessor) Config() *workspace.FrontendConfig {
+	return workspace.NewFrontendConfig(s.rawConfig(), nil)
+}
+
+// ServerConfig satisfies workspace.ServerConfigReader, which
+// configuredCodexProxy (serverConfig in server_config.go) type-asserts
+// for.
+func (s *codexProviderConfigAccessor) ServerConfig() *config.Config {
+	return s.rawConfig()
 }
 
 // TestConfiguredCodexProxy_UsesConfiguredNotEffective guards the fix for a
@@ -312,12 +323,22 @@ type codexLoginConfiguredProxyFake struct {
 	proxyURL string
 }
 
-func (w *codexLoginConfiguredProxyFake) Config() *config.Config {
+func (w *codexLoginConfiguredProxyFake) rawConfig() *config.Config {
 	return &config.Config{
 		Providers: csync.NewMap(map[string]config.ProviderConfig{
 			codex.ProviderID: {ID: codex.ProviderID, ProxyURL: w.proxyURL},
 		}),
 	}
+}
+
+func (w *codexLoginConfiguredProxyFake) Config() *workspace.FrontendConfig {
+	return workspace.NewFrontendConfig(w.rawConfig(), nil)
+}
+
+// ServerConfig satisfies workspace.ServerConfigReader, which loginCodex
+// (serverConfig in server_config.go) type-asserts for.
+func (w *codexLoginConfiguredProxyFake) ServerConfig() *config.Config {
+	return w.rawConfig()
 }
 
 func loginCodexWithConfiguredProxy(t *testing.T, ws *codexLoginWorkspaceFake, proxyURL string) error {
@@ -343,7 +364,7 @@ type codexLoginTokenFake struct {
 	*codexLoginWorkspaceFake
 }
 
-func (w *codexLoginTokenFake) Config() *config.Config {
+func (w *codexLoginTokenFake) rawConfig() *config.Config {
 	return &config.Config{
 		Providers: csync.NewMap(map[string]config.ProviderConfig{
 			codex.ProviderID: {ID: codex.ProviderID},
@@ -352,6 +373,16 @@ func (w *codexLoginTokenFake) Config() *config.Config {
 			codex.ProviderID: {ID: codex.ProviderID, OAuthToken: &oauth.Token{AccessToken: "existing"}},
 		}),
 	}
+}
+
+func (w *codexLoginTokenFake) Config() *workspace.FrontendConfig {
+	return workspace.NewFrontendConfig(w.rawConfig(), nil)
+}
+
+// ServerConfig satisfies workspace.ServerConfigReader, which loginCodex
+// (serverConfig in server_config.go) type-asserts for.
+func (w *codexLoginTokenFake) ServerConfig() *config.Config {
+	return w.rawConfig()
 }
 
 // TestLoginCodex_RejectsBadProxy: validation happens before anything goes

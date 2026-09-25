@@ -32,7 +32,16 @@ type realConfigAccessor struct {
 	credentials *credentials.Manager
 }
 
-func (a *realConfigAccessor) Config() *config.Config            { return a.store.Config() }
+func (a *realConfigAccessor) Config() *workspace.FrontendConfig {
+	return workspace.NewFrontendConfig(a.store.Config(), a.store.KnownProviders())
+}
+
+// ServerConfig satisfies workspace.ServerConfigReader, which serverConfig
+// (server_config.go) type-asserts for: authListAll/printAccountList need
+// the full config (RuntimeProvider, Providers.Seq2), which FrontendConfig
+// deliberately drops.
+func (a *realConfigAccessor) ServerConfig() *config.Config { return a.store.Config() }
+
 func (a *realConfigAccessor) WorkingDir() string                { return a.store.WorkingDir() }
 func (a *realConfigAccessor) Resolver() config.VariableResolver { return a.store.Resolver() }
 
@@ -242,7 +251,7 @@ func TestAuthUse_DisabledAccountRefused(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "disabled")
 
-	pc, ok := ws.Config().RuntimeProvider(providerID)
+	pc, ok := ws.ServerConfig().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, second.ID, pc.Account, "the active account must not have changed")
 }
@@ -283,7 +292,7 @@ func TestAuthProxy_ProviderLevelVsAccountLevel(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
-	pc, ok := ws.Config().RuntimeProvider(providerID)
+	pc, ok := ws.ServerConfig().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider-proxy.example:8080", pc.ConfiguredProxyURL)
 
@@ -295,7 +304,7 @@ func TestAuthProxy_ProviderLevelVsAccountLevel(t *testing.T) {
 	require.Len(t, accts, 1)
 	require.Equal(t, "http://account-proxy.example:9090", accts[0].ProxyURL)
 
-	pc, ok = ws.Config().RuntimeProvider(providerID)
+	pc, ok = ws.ServerConfig().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, "http://provider-proxy.example:8080", pc.ConfiguredProxyURL, "the provider-level proxy must be untouched by the account-level set")
 }
@@ -311,12 +320,12 @@ func TestAuthProxy_DashClearsNoneStaysLiteral(t *testing.T) {
 	require.NoError(t, ws.SetProviderProxy(providerID, "http://provider-proxy.example:8080"))
 
 	require.NoError(t, runAuthProxy(ws, providerID, "", "none"))
-	pc, ok := ws.Config().RuntimeProvider(providerID)
+	pc, ok := ws.ServerConfig().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Equal(t, "none", pc.ConfiguredProxyURL, `"none" must be stored literally, not collapsed to empty`)
 
 	require.NoError(t, runAuthProxy(ws, providerID, "", "-"))
-	pc, ok = ws.Config().RuntimeProvider(providerID)
+	pc, ok = ws.ServerConfig().RuntimeProvider(providerID)
 	require.True(t, ok)
 	require.Empty(t, pc.ConfiguredProxyURL, `"-" must clear back to empty (inherit)`)
 }

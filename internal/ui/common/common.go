@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/clipboard"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -50,7 +49,7 @@ type Common struct {
 }
 
 // Config returns the pure-data configuration associated with this [Common] instance.
-func (c *Common) Config() *config.Config {
+func (c *Common) Config() *workspace.FrontendConfig {
 	return c.Workspace.Config()
 }
 

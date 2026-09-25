@@ -159,7 +159,7 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 	// sign-in that ignored it would fail while the provider looked
 	// correctly configured.
 	var proxyURL string
-	cfg := ws.Config()
+	cfg := serverConfig(ws)
 	if cfg != nil {
 		if pc, ok := cfg.RuntimeProvider("copilot"); ok {
 			proxyURL = pc.ProxyURL

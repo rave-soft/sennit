@@ -385,7 +385,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cfg := m.com.Config()
 		ws := m.com.Workspace
 		isConfigured := func() bool {
-			_, ok := cfg.Providers.Get(msg.providerID)
+			_, ok := cfg.Provider(msg.providerID)
 			return ok
 		}
 		if !isConfigured() {

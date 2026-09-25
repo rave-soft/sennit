@@ -27,7 +27,7 @@ type notificationsTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w notificationsTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -36,7 +36,12 @@ func (w notificationsTestWorkspace) SkillStates() []*skills.SkillState { return 
 func (w notificationsTestWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w notificationsTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *notificationsTestWorkspace) Config() *config.Config { return w.cfg }
+func (w *notificationsTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
+}
 
 // newNotificationsTestCommon builds a [common.Common] whose configured
 // notification style is currentStyle. An empty currentStyle produces a

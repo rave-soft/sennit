@@ -157,7 +157,7 @@ func (fileHistoryWorkspace) PrepareSessionChanges(context.Context, string) ([]wo
 	return nil, nil
 }
 
-func (fileHistoryWorkspace) Config() *config.Config { return nil }
+func (fileHistoryWorkspace) Config() *workspace.FrontendConfig { return nil }
 
 // TestHandleFileEvent_SessionClearedBeforeCmdRuns is the regression case for
 // the class of bug this package was audited for: a tea.Cmd closure must not

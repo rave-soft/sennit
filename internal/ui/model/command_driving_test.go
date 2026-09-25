@@ -173,7 +173,7 @@ func (w *cmdDrivingWorkspace) ListSessions(context.Context) ([]session.Session, 
 }
 
 func (w *cmdDrivingWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.Config().Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.rawConfig().Options.DisableDefaultProviders)
 }
 
 func (w *cmdDrivingWorkspace) CustomProviderTypes() []string {
@@ -186,13 +186,21 @@ func (w *cmdDrivingWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {
 	return accounts.Usage{}, false
 }
 
-func (w *cmdDrivingWorkspace) Config() *config.Config {
+// rawConfig builds the *config.Config this fake's Config() and
+// KnownProviders() both project from. Kept separate so KnownProviders can
+// read it without going through Config() (which itself needs
+// KnownProviders to build FrontendProvider.Custom) and recursing.
+func (w *cmdDrivingWorkspace) rawConfig() *config.Config {
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	providers.Set("test-provider", config.ProviderConfig{ID: "test-provider"})
 	return &config.Config{
 		Providers: providers,
 		Options:   &config.Options{TUI: &config.TUIOptions{}},
 	}
+}
+
+func (w *cmdDrivingWorkspace) Config() *workspace.FrontendConfig {
+	return workspace.NewFrontendConfig(w.rawConfig(), w.KnownProviders())
 }
 
 func (w *cmdDrivingWorkspace) RefreshProviderModels(ctx context.Context, providerID string) ([]workspace.ModelRefreshResult, error) {

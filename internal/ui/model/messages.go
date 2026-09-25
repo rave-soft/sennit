@@ -5,7 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
@@ -13,7 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
-func sessionMessageItems(sty *styles.Styles, cfg *config.Config, msgs []message.Message) ([]chat.MessageItem, int64) {
+func sessionMessageItems(sty *styles.Styles, cfg *workspace.FrontendConfig, msgs []message.Message) ([]chat.MessageItem, int64) {
 	msgPtrs := make([]*message.Message, len(msgs))
 	for i := range msgs {
 		msgPtrs[i] = &msgs[i]
@@ -86,7 +85,7 @@ type childLoad struct {
 	tools     []chat.ToolMessageItem
 }
 
-func loadNestedToolCalls(ctx context.Context, ws workspace.SessionStore, sty *styles.Styles, cfg *config.Config, rootSessionID string, generation uint64, items []chat.MessageItem) error {
+func loadNestedToolCalls(ctx context.Context, ws workspace.SessionStore, sty *styles.Styles, cfg *workspace.FrontendConfig, rootSessionID string, generation uint64, items []chat.MessageItem) error {
 	var children []childLoad
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)

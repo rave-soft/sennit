@@ -1,6 +1,8 @@
 package appws
 
 import (
+	"sync/atomic"
+
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -33,6 +35,13 @@ type AppWorkspace struct {
 	worktreeRoot *AppWorkspace
 	worktreeName string
 	worktreePath string
+
+	// frontendConfigCache memoizes Config()'s *workspace.FrontendConfig
+	// against the *config.Config pointer it was built from - see
+	// app_workspace_config.go's Config() doc comment. An atomic.Pointer
+	// because Config() runs from the Update goroutine and from tea.Cmd
+	// goroutines concurrently.
+	frontendConfigCache atomic.Pointer[frontendConfigCacheEntry]
 }
 
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app

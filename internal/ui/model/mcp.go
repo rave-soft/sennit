@@ -17,8 +17,8 @@ func (is *integrationsState) mcpInfo(com *common.Common, width, maxItems int, is
 	var mcps []mcp.MCPClientInfo
 	t := com.Styles
 
-	for _, mcp := range com.Config().MCP.Sorted() {
-		if state, ok := is.mcpStates[mcp.Name]; ok {
+	for _, name := range com.Config().MCPNames {
+		if state, ok := is.mcpStates[name]; ok {
 			mcps = append(mcps, state)
 		}
 	}

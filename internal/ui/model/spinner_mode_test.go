@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/uiprefs"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // spinnerWorkspace is a countingWorkspace that actually has a config, so
@@ -20,7 +21,12 @@ type spinnerWorkspace struct {
 	cfg *config.Config
 }
 
-func (w *spinnerWorkspace) Config() *config.Config { return w.cfg }
+func (w *spinnerWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, nil)
+}
 
 func configWithSpinner(mode string) *config.Config {
 	return &config.Config{Options: &config.Options{TUI: &config.TUIOptions{Spinner: mode}}}
@@ -46,7 +52,7 @@ func TestSpinnerModeComesFromConfig(t *testing.T) {
 		{"disco", spin.ModeScramble},
 	} {
 		ws := &spinnerWorkspace{countingWorkspace: &countingWorkspace{}, cfg: configWithSpinner(tc.configured)}
-		prefs := &uiprefs.MemStore{P: uiprefs.FromConfig(ws.Config())}
+		prefs := &uiprefs.MemStore{P: uiprefs.FromConfig(ws.cfg)}
 		com := common.DefaultCommon(context.Background(), ws, prefs)
 		require.Equal(t, tc.want, com.Styles.WorkingSpinner, "spinner %q", tc.configured)
 	}

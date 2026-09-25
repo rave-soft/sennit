@@ -26,7 +26,7 @@ type commandsNamesTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w commandsNamesTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -41,8 +41,11 @@ func (w *commandsNamesTestWorkspace) SupportsThreads() bool { return true }
 // runs the probe.
 func (w *commandsNamesTestWorkspace) DockerMCPAvailable() (bool, bool) { return false, false }
 
-func (w *commandsNamesTestWorkspace) Config() *config.Config {
-	return w.cfg
+func (w *commandsNamesTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
 }
 
 func (w *commandsNamesTestWorkspace) WorktreeState() workspace.WorktreeState {

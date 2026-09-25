@@ -115,8 +115,11 @@ func (w *testWorkspace) SupportsThreads() bool { return false }
 // agents section; no test here drives one.
 func (w *testWorkspace) SupportsTasks() bool { return false }
 
-func (w *testWorkspace) Config() *config.Config {
-	return w.cfg
+func (w *testWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, nil)
 }
 
 func (w *testWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {

@@ -43,16 +43,17 @@ func (w rootTestWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w rootTestWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w rootTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *rootTestWorkspace) Config() *config.Config {
+func (w *rootTestWorkspace) Config() *workspace.FrontendConfig {
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	// New() must land in uiLanding/uiFocusEditor (not uiOnboarding) so
 	// handleGlobalKeys — and therefore the threads key — is reachable; that
 	// needs at least one enabled provider (see Config.IsConfigured).
 	providers.Set("test-provider", config.ProviderConfig{ID: "test-provider"})
-	return &config.Config{
+	cfg := &config.Config{
 		Providers: providers,
 		Options:   &config.Options{TUI: &config.TUIOptions{}},
 	}
+	return workspace.NewFrontendConfig(cfg, w.KnownProviders())
 }
 
 func (w *rootTestWorkspace) PermissionSkipRequests() bool { return false }

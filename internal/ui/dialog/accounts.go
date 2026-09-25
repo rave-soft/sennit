@@ -420,8 +420,8 @@ func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfi
 // already-loaded config — a cheap in-memory read, not IO, so it's fine to
 // call from HandleMsg directly (see internal/ui/AGENTS.md's dialog rules).
 func (m *Accounts) currentActiveAccountID() string {
-	if pc, ok := m.com.Config().RuntimeProvider(m.providerID); ok {
-		return pc.Account
+	if pc, ok := m.com.Config().Provider(m.providerID); ok {
+		return pc.Auth.Account
 	}
 	return ""
 }
@@ -450,7 +450,7 @@ func (m *Accounts) selectedAccount() (accounts.Account, bool) {
 // it, else the bare ID as a last resort.
 func providerDisplayName(com *common.Common, providerID string) string {
 	cfg := com.Config()
-	if pc, ok := cfg.Providers.Get(providerID); ok && pc.Name != "" {
+	if pc, ok := cfg.Provider(providerID); ok && pc.Name != "" {
 		return pc.Name
 	}
 	for _, p := range com.Workspace.KnownProviders() {

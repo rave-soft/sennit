@@ -66,8 +66,8 @@ func refreshAccountLabelCmd(com *common.Common, owner *UI, providerID string) te
 			return accountLabelsLoadedMsg{uiOwned: uiOwned{owner: owner}, providerID: providerID}
 		}
 		activeID := ""
-		if pc, ok := com.Config().RuntimeProvider(providerID); ok {
-			activeID = pc.Account
+		if pc, ok := com.Config().Provider(providerID); ok {
+			activeID = pc.Auth.Account
 		}
 		label := ""
 		for _, a := range accs {

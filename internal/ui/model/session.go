@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
@@ -205,7 +204,7 @@ type sessionLoadResolver struct {
 	workspace      sessionLoadWorkspace
 	sessionChanges workspace.SessionChangePreparer
 	styles         *styles.Styles
-	config         *config.Config
+	config         *workspace.FrontendConfig
 	// resumable marks a load the user can go on to type into: a top-level
 	// session, not a sub-agent's transcript they drilled into. Only such a
 	// load restores the session's pinned model, because only such a load

@@ -23,7 +23,18 @@ type fakeRunWorkspace struct {
 
 func (f *fakeRunWorkspace) InitCoderAgentNonInteractive(context.Context) error { return nil }
 
-func (f *fakeRunWorkspace) Config() *config.Config {
+func (f *fakeRunWorkspace) Config() *workspace.FrontendConfig {
+	return workspace.NewFrontendConfig(f.rawConfig(), nil)
+}
+
+// ServerConfig satisfies workspace.ServerConfigReader, which runAgent's
+// progress/theme/spinner reads (serverConfig in server_config.go) type-
+// assert for.
+func (f *fakeRunWorkspace) ServerConfig() *config.Config {
+	return f.rawConfig()
+}
+
+func (f *fakeRunWorkspace) rawConfig() *config.Config {
 	return &config.Config{Options: &config.Options{}}
 }
 

@@ -34,7 +34,12 @@ type sidebarCacheWorkspace struct {
 	countsN int // number of BackgroundJobCounts calls, for tests that want to distinguish
 }
 
-func (w *sidebarCacheWorkspace) Config() *config.Config         { return w.cfg }
+func (w *sidebarCacheWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, nil)
+}
 func (w *sidebarCacheWorkspace) WorkingDir() string             { return w.cwd }
 func (w *sidebarCacheWorkspace) BuiltinSkills() []*skills.Skill { return nil }
 func (w *sidebarCacheWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {

@@ -359,7 +359,7 @@ func authListAll(ws interface {
 	workspace.AccountLister
 },
 ) error {
-	cfg := ws.Config()
+	cfg := serverConfig(ws)
 	if cfg == nil || cfg.Providers == nil {
 		fmt.Println("No accounts stored for any provider.")
 		return nil
@@ -400,7 +400,7 @@ var (
 // (accounts.CapabilitiesOf) — its stored allowance figures.
 func printAccountList(ws workspace.ConfigReader, providerID string, accts []accounts.Account) {
 	activeID := ""
-	if cfg := ws.Config(); cfg != nil {
+	if cfg := serverConfig(ws); cfg != nil {
 		if pc, ok := cfg.RuntimeProvider(providerID); ok {
 			activeID = pc.Account
 		}

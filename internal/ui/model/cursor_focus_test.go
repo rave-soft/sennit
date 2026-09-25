@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +38,12 @@ type cursorTestWorkspace struct {
 	planUsage         accounts.Usage
 }
 
-func (w *cursorTestWorkspace) Config() *config.Config { return w.cfg }
+func (w *cursorTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, nil)
+}
 
 // CurrentPlanUsage answers for planUsageProvider only, so a test can check
 // both that the plan line appears for the provider that quotes limits and

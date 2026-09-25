@@ -131,7 +131,7 @@ func logoutCodex(ws logoutWorkspace) error {
 }
 
 func pickLoggedInProvider(ws workspace.ConfigReader) string {
-	cfg := ws.Config()
+	cfg := serverConfig(ws)
 	if cfg == nil {
 		fmt.Println(logoutPromptStyle.Render("You are not logged in to any platform."))
 		return ""

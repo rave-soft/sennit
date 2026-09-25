@@ -28,7 +28,7 @@ type themeTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w themeTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -37,7 +37,12 @@ func (w themeTestWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w themeTestWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w themeTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *themeTestWorkspace) Config() *config.Config { return w.cfg }
+func (w *themeTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
+}
 
 func newThemeTestCommon(themeID string) *common.Common {
 	s := styles.SennitDark()

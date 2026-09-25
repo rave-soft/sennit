@@ -80,7 +80,7 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 func (m *UI) initializeView() string {
 	s := m.com.Styles.Initialize
 	cwd := home.Short(m.com.Workspace.WorkingDir())
-	initFile := m.com.Config().Options.InitializeAs
+	initFile := m.com.Config().InitializeAs
 
 	header := s.Header.Render("Would you like to initialize this project?")
 	path := s.Accent.PaddingLeft(2).Render(cwd)

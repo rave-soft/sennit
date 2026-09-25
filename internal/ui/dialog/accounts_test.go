@@ -58,7 +58,7 @@ func (w *accountsTestWorkspace) SupportsThreads() bool { return false }
 // KnownProviders mirrors what the dialog used to compute for itself: the
 // embedded catalog for this fake's config.
 func (w accountsTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -67,7 +67,12 @@ func (w accountsTestWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w accountsTestWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w accountsTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *accountsTestWorkspace) Config() *config.Config { return w.cfg }
+func (w *accountsTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
+}
 
 func (w *accountsTestWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
 	return w.accs, w.listErr
@@ -393,7 +398,7 @@ func TestAccounts_SelectNonActiveAccount_DialogStaysOpen(t *testing.T) {
 	// Simulate the model-layer reload: after a switch, the UI rebuilds
 	// the dialog with the new active account. The selection follows the
 	// new active row, so a second Enter is a no-op.
-	com.Config().SetRuntimeProvider(providerID, providerstate.Provider{
+	ws.cfg.SetRuntimeProvider(providerID, providerstate.Provider{
 		ID:      providerID,
 		Account: "acct-2",
 	})

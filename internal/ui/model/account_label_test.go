@@ -32,7 +32,7 @@ type accountLabelTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w accountLabelTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -41,7 +41,12 @@ func (w accountLabelTestWorkspace) SkillStates() []*skills.SkillState { return n
 func (w accountLabelTestWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w accountLabelTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *accountLabelTestWorkspace) Config() *config.Config { return w.cfg }
+func (w *accountLabelTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
+}
 
 func (w *accountLabelTestWorkspace) ListAccounts(string) ([]accounts.Account, error) {
 	return w.accs, w.err

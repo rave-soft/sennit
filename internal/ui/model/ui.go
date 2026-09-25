@@ -994,7 +994,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var (
 		providerID   = msg.Model.Provider
 		isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
-		isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
+		isConfigured = func() bool { _, ok := cfg.Provider(providerID); return ok }
 		isOnboarding = m.state == uiOnboarding
 	)
 
@@ -1092,7 +1092,7 @@ func currentModelSupportsImages(com *common.Common) bool {
 	if cfg == nil {
 		return false
 	}
-	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
+	if !cfg.HasCoderAgent() {
 		return false
 	}
 	// The coder agent leaves Model unset (it inherits the app's configured

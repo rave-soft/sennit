@@ -527,7 +527,7 @@ func (s *stubWorkspace) LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticC
 }
 
 // Config
-func (s *stubWorkspace) Config() *config.Config            { return &config.Config{} }
+func (s *stubWorkspace) Config() *FrontendConfig           { return &FrontendConfig{} }
 func (s *stubWorkspace) WorkingDir() string                { return "/default" }
 func (s *stubWorkspace) Resolver() config.VariableResolver { return config.IdentityResolver() }
 

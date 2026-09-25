@@ -132,7 +132,7 @@ type onboardingTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself: the
 // embedded catalog for this fake's config.
 func (w onboardingTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -141,7 +141,12 @@ func (w onboardingTestWorkspace) SkillStates() []*skills.SkillState { return nil
 func (w onboardingTestWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w onboardingTestWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *onboardingTestWorkspace) Config() *config.Config { return w.cfg }
+func (w *onboardingTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
+}
 
 func (w *onboardingTestWorkspace) PermissionSkipRequests() bool { return false }
 

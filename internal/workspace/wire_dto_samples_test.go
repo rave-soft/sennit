@@ -42,11 +42,6 @@ var sampleTime = time.Date(2026, 3, 4, 15, 6, 7, 0, time.UTC)
 // -- wireSampleZeroExemptions ------------------------------------------
 
 var wireSampleZeroExemptions = map[string]string{
-	// json:"-": never crosses the wire, so a real value would prove
-	// nothing about JSON fidelity - and would actually break the round
-	// trip, since Marshal drops it and Unmarshal always produces zero.
-	"github.com/rave-soft/sennit/internal/config.Config.RuntimeProviders": `json:"-"`,
-	"github.com/rave-soft/sennit/internal/config.Config.Problems":         `json:"-"`,
 	// json:"-": never travels; see skills.Skill's own doc comment on why
 	// the field exists at all (it is for handing a skill to another
 	// in-process workspace, not for the wire).
@@ -299,21 +294,54 @@ var sampleMCPConfig = config.MCPConfig{
 	OAuthToken:        &sampleOAuthToken,
 }
 
-var sampleConfig = config.Config{
-	Schema:       "https://sennit.dev/schema.json",
-	Model:        sampleSelectedModel,
-	RecentModels: []config.SelectedModel{sampleSelectedModel},
-	Providers:    sampleProvidersMap,
-	// RuntimeProviders: json:"-", left zero (see wireSampleZeroExemptions).
-	MCP:         config.MCPs{"myserver": sampleMCPConfig},
-	LSP:         config.LSPs{"gopls": sampleLSPConfig},
-	Options:     &sampleOptions,
-	Permissions: &samplePermissions,
-	Tools:       sampleTools,
-	Hooks:       map[string][]config.HookConfig{"PreToolUse": {sampleHook}},
-	Env:         map[string]string{"FOO": "bar"},
-	Agents:      map[string]config.Agent{"reviewer": sampleAgent},
-	// Problems: json:"-", left zero (see wireSampleZeroExemptions).
+// FrontendConfig is what Workspace.Config() (ConfigReader, class C) now
+// returns instead of *config.Config - see workspace.NewFrontendConfig's
+// doc comment (CLIENT-SERVER.md PR 0.5). config.Config itself is no longer
+// reachable from Workspace's walked methods, so it has no sample here any
+// more; the fields it used to expose (RuntimeProviders, Providers, MCP,
+// Options, ...) are projected through FrontendConfig/FrontendProvider/
+// FrontendAgent/ProviderAuth below instead.
+var sampleRotationConfig = providerconfig.RotationConfig{
+	Enabled:             true,
+	MinRemainingPercent: 15,
+	Cooldown:            "10m",
+	Order:               []string{"acct-1", "acct-2"},
+}
+
+var sampleProviderAuth = ProviderAuth{
+	Known:          true,
+	HasAPIKey:      true,
+	HasOAuth:       true,
+	OAuthExpiresAt: sampleTime.Unix(),
+	Account:        "acct-1",
+}
+
+var sampleFrontendProvider = FrontendProvider{
+	ID:       "openai",
+	Name:     "OpenAI",
+	BaseURL:  "https://api.openai.com/v1",
+	Type:     catwalk.TypeOpenAI,
+	Disable:  true,
+	ProxyURL: "http://localhost:8080",
+	Rotation: &sampleRotationConfig,
+	Models:   []catwalk.Model{sampleCatwalkModel},
+	Custom:   true,
+	Auth:     sampleProviderAuth,
+}
+
+var sampleFrontendAgent = FrontendAgent{
+	Model:           "openai/gpt-5",
+	ReasoningEffort: "high",
+}
+
+var sampleFrontendConfig = FrontendConfig{
+	Model:          sampleSelectedModel,
+	RecentModels:   []config.SelectedModel{sampleSelectedModel},
+	Providers:      []FrontendProvider{sampleFrontendProvider},
+	MCPNames:       []string{"myserver"},
+	Agents:         map[string]FrontendAgent{"reviewer": sampleFrontendAgent},
+	InitializeAs:   "AGENTS.md",
+	DisabledSkills: []string{"sennit-config"},
 }
 
 var sampleWireErrQuota = wireerr.Quota{
@@ -867,7 +895,6 @@ var wireSamples = map[reflect.Type]any{
 	reflectTypeOf[config.Attribution]():              sampleAttribution,
 	reflectTypeOf[config.AutoSummarizeIdleOptions](): sampleAutoSummarizeIdle,
 	reflectTypeOf[config.Completions]():              sampleCompletions,
-	reflectTypeOf[config.Config]():                   sampleConfig,
 	reflectTypeOf[config.LSPConfig]():                sampleLSPConfig,
 	reflectTypeOf[config.MCPConfig]():                sampleMCPConfig,
 	reflectTypeOf[config.Options]():                  sampleOptions,
@@ -881,9 +908,15 @@ var wireSamples = map[reflect.Type]any{
 	reflectTypeOf[config.ToolLs]():                   sampleToolLs,
 	reflectTypeOf[config.Tools]():                    sampleTools,
 	reflectTypeOf[config.WebSearchOptions]():         sampleWebSearchOptions,
+	reflectTypeOf[providerconfig.RotationConfig]():   sampleRotationConfig,
 
 	reflectTypeOf[csync.Map[string, providerconfig.ProviderConfig]](): sampleProvidersMap,
 	reflectTypeOf[csync.Map[string, providerstate.Provider]]():        sampleRuntimeProvidersMap,
+
+	reflectTypeOf[FrontendConfig]():   sampleFrontendConfig,
+	reflectTypeOf[FrontendProvider](): sampleFrontendProvider,
+	reflectTypeOf[FrontendAgent]():    sampleFrontendAgent,
+	reflectTypeOf[ProviderAuth]():     sampleProviderAuth,
 
 	reflectTypeOf[git.FileChange](): sampleGitFileChange,
 

@@ -30,7 +30,7 @@ type slashCommandsTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w slashCommandsTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -49,8 +49,11 @@ func (w *slashCommandsTestWorkspace) DockerMCPAvailable() (bool, bool) { return 
 // agents section; no test here drives one.
 func (w *slashCommandsTestWorkspace) SupportsTasks() bool { return false }
 
-func (w *slashCommandsTestWorkspace) Config() *config.Config {
-	return w.cfg
+func (w *slashCommandsTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
 }
 
 func (w *slashCommandsTestWorkspace) PermissionSkipRequests() bool {

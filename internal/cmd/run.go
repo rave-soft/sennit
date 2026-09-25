@@ -175,12 +175,13 @@ func runAgent(
 	}
 
 	stderrTTY := term.IsTerminal(os.Stderr.Fd())
-	progress := ws.Config().Options.Progress == nil || *ws.Config().Options.Progress
+	cfg := serverConfig(ws)
+	progress := cfg.Options.Progress == nil || *cfg.Options.Progress
 
 	var spinner *format.Spinner
 	if !hideSpinner && stderrTTY {
-		t := styles.Theme(ws.Config().ThemeID())
-		spinnerMode, _ := ws.Config().SpinnerMode()
+		t := styles.Theme(cfg.ThemeID())
+		spinnerMode, _ := cfg.SpinnerMode()
 
 		spinner = format.NewSpinner(ctx, cancel, spin.Settings{
 			Size: 10,
@@ -276,7 +277,7 @@ func overrideModel(ctx context.Context, ws workspace.Workspace, model string) er
 		return nil
 	}
 
-	providers := ws.Config().Providers.Copy()
+	providers := serverConfig(ws).Providers.Copy()
 
 	matches, err := config.FindModelMatches(providers, model)
 	if err != nil {

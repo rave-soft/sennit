@@ -6,11 +6,60 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- Config (read-only) --
 
-func (w *AppWorkspace) Config() *config.Config {
+// frontendConfigCacheEntry pairs a built *workspace.FrontendConfig with
+// the *config.ConfigStore snapshot it was built from, so Config() can tell
+// whether a cached DTO is still current without comparing its contents.
+type frontendConfigCacheEntry struct {
+	src *config.Config
+	dto *workspace.FrontendConfig
+}
+
+// Config implements workspace.ConfigReader: the allowlist snapshot the UI
+// (in-process today, remote once this is served over gRPC) is allowed to
+// see. See workspace.FrontendConfig's doc comment for why this is not
+// *config.Config.
+//
+// Cached on w.frontendConfigCache, keyed on the identity of the config
+// pointer w.store.Config() returns. ConfigStore publishes an immutable
+// snapshot per load/reload and swaps the pointer under its own lock
+// (config.go's doc comments on Config/setConfig); a typed mutator
+// (SetConfigField, RecordAccount, ...) goes through the same reload path,
+// so a new config pointer is exactly the "something changed" signal this
+// needs. w.store.KnownProviders() is reassigned in reloadFromDisk
+// (internal/config/reload.go) in the same call that publishes the new
+// config pointer - see NewFrontendConfig's callers here and in the DTO's
+// own tests for why a fresh config pointer is a reliable proxy for "the
+// catalog might have moved too", without this method having to compare
+// the catalog slice on every call.
+//
+// The UI calls this several times per rendered frame (sidebar, header,
+// model info, ...); with the embedded model catalog, rebuilding the DTO
+// on every call is O(providers x models) allocation per call, so this
+// caches the pointer rather than rebuilding it - see FrontendConfig's own
+// doc comment for why the DTO is safe to share as long as nothing
+// downstream mutates it. Config() is called from the Update goroutine and
+// from tea.Cmd goroutines concurrently, so the cache is an atomic pointer,
+// not a plain field: a racing rebuild after a reload just does the work
+// twice, never a torn read.
+func (w *AppWorkspace) Config() *workspace.FrontendConfig {
+	src := w.store.Config()
+	if cached := w.frontendConfigCache.Load(); cached != nil && cached.src == src {
+		return cached.dto
+	}
+	dto := workspace.NewFrontendConfig(src, w.store.KnownProviders())
+	w.frontendConfigCache.Store(&frontendConfigCacheEntry{src: src, dto: dto})
+	return dto
+}
+
+// ServerConfig implements workspace.ServerConfigReader: the full,
+// unredacted config, for callers that run only in-process (see that
+// interface's doc comment for why this is not part of Workspace).
+func (w *AppWorkspace) ServerConfig() *config.Config {
 	return w.store.Config()
 }
 

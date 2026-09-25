@@ -339,7 +339,21 @@ type LSPController interface {
 }
 
 type ConfigReader interface {
-	Config() *config.Config
+	Config() *FrontendConfig
+}
+
+// ServerConfigReader hands back the full, unredacted *config.Config -
+// secrets and all. It is deliberately not part of FrontendWorkspace or
+// Workspace: those are what a remote client sees, and *config.Config must
+// never cross that boundary (see FrontendConfig's doc comment). It exists
+// for callers that only ever run in-process against the real AppWorkspace -
+// today, internal/cmd's login/logout/accounts commands, which need
+// RuntimeProvider/Providers.Get access ConfigReader.Config() no longer
+// offers. A caller holding a plain Workspace/FrontendWorkspace value type-
+// asserts to this interface to reach it; AppWorkspace is the only
+// implementation.
+type ServerConfigReader interface {
+	ServerConfig() *config.Config
 }
 
 // WorkingDirectory reports the workspace path used to scope operations to the

@@ -88,7 +88,7 @@ func (is *integrationsState) skillStatusItems(com *common.Common) []skillStatusI
 	disabledSet := make(map[string]bool)
 	if com != nil && com.Workspace != nil {
 		if cfg := com.Config(); cfg != nil {
-			for _, name := range cfg.Options.DisabledSkills {
+			for _, name := range cfg.DisabledSkills {
 				disabledSet[name] = true
 			}
 		}

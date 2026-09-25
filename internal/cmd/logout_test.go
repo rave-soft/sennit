@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +33,7 @@ type stubConfigAccessor struct {
 	purgeErr error
 }
 
-func (s *stubConfigAccessor) Config() *config.Config             { return nil }
+func (s *stubConfigAccessor) Config() *workspace.FrontendConfig  { return nil }
 func (s *stubConfigAccessor) KnownProviders() []catwalk.Provider { return nil }
 func (s *stubConfigAccessor) CustomProviderTypes() []string      { return nil }
 func (s *stubConfigAccessor) CurrentPlanUsage(string) (accounts.Usage, bool) {

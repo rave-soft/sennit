@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,6 +64,6 @@ type bareConfigWorkspace struct {
 // Providers is non-nil only so New()'s unrelated IsConfigured() check has a
 // map to range over — Options (and so Options.TUI) stays nil, which is
 // what this test actually exercises.
-func (w *bareConfigWorkspace) Config() *config.Config {
-	return &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
+func (w *bareConfigWorkspace) Config() *workspace.FrontendConfig {
+	return &workspace.FrontendConfig{Providers: []workspace.FrontendProvider{{ID: "test-provider"}}}
 }

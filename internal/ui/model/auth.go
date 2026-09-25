@@ -3,7 +3,6 @@ package model
 import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 )
@@ -13,11 +12,11 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 	if cfg == nil {
 		return nil
 	}
-	providerCfg, ok := cfg.RuntimeProvider(providerID)
+	providerCfg, ok := cfg.Provider(providerID)
 	if !ok {
 		return nil
 	}
-	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
+	if !cfg.HasCoderAgent() {
 		return nil
 	}
 	// Inlined from providerruntime.ToProvider: openAuthenticationDialog only

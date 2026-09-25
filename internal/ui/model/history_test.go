@@ -29,8 +29,8 @@ func (w historyWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w historyWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w historyWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (historyWorkspace) Config() *config.Config {
-	return &config.Config{}
+func (historyWorkspace) Config() *workspace.FrontendConfig {
+	return &workspace.FrontendConfig{}
 }
 
 func (historyWorkspace) PermissionSkipRequests() bool {

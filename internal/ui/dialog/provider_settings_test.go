@@ -31,7 +31,7 @@ type providerSettingsTestWorkspace struct {
 // KnownProviders mirrors what the UI used to compute for itself:
 // the embedded catalog for this fake's config.
 func (w providerSettingsTestWorkspace) KnownProviders() []catwalk.Provider {
-	return providerruntime.Providers(w.cfg.Options.DisableDefaultProviders)
+	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
@@ -42,14 +42,11 @@ func (w providerSettingsTestWorkspace) BuiltinSkills() []*skills.Skill {
 	return skills.DiscoverBuiltin()
 }
 
-func (w *providerSettingsTestWorkspace) Config() *config.Config { return w.cfg }
-
-// RuntimeProvider returns the provider's resolved credentials for the
-// auth-state read in loadAuthStateCmd. The test config carries whatever
-// the test set via cfg.Providers, so we just look it up there.
-func (w *providerSettingsTestWorkspace) RuntimeProvider(providerID string) (config.ProviderConfig, bool) {
-	pc, ok := w.cfg.Providers.Get(providerID)
-	return pc, ok
+func (w *providerSettingsTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
 }
 
 // newProviderSettingsTestCommon builds a *common.Common whose Config()
@@ -539,9 +536,10 @@ func TestProviderAuthState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			com := newProviderSettingsTestCommon(t, "codex", config.ProviderConfig{})
-			com.Config().RuntimeProviders = csync.NewMap[string, providerstate.Provider]()
+			ws := com.Workspace.(*providerSettingsTestWorkspace)
+			ws.cfg.RuntimeProviders = csync.NewMap[string, providerstate.Provider]()
 			if tt.runtime != nil {
-				com.Config().SetRuntimeProvider("codex", *tt.runtime)
+				ws.cfg.SetRuntimeProvider("codex", *tt.runtime)
 			}
 			require.Equal(t, tt.want, providerAuthState(com, "codex"))
 		})

@@ -158,7 +158,7 @@ func NewProviderSettings(com *common.Common, providerID string) (*ProviderSettin
 // field-hiding logic below still has to honor it if a provider registry
 // entry ever does.
 func newProviderSettings(com *common.Common, providerID string, caps workspace.AccountCapabilities) *ProviderSettings {
-	pc, _ := com.Config().Providers.Get(providerID)
+	pc, _ := com.Config().Provider(providerID)
 
 	m := &ProviderSettings{
 		Base:       NewBase(com, providerSettingsMaxWidth),
@@ -166,7 +166,7 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 		providerID: providerID,
 		caps:       caps,
 		fields:     []providerSettingsField{providerSettingsFieldProxy},
-		canRefresh: providerID == CodexProviderID || isCustomProvider(com, providerID, pc),
+		canRefresh: providerID == CodexProviderID || pc.Custom,
 	}
 
 	m.proxy = textinput.New()
@@ -258,16 +258,16 @@ func (m *ProviderSettings) loadAuthStateCmd() tea.Cmd {
 
 // providerAuthState classifies the provider's live credential.
 func providerAuthState(com *common.Common, providerID string) providerSettingsAuthState {
-	pc, ok := com.Config().RuntimeProvider(providerID)
+	auth := com.Config().ProviderAuth(providerID)
 	switch {
-	case !ok:
+	case !auth.Known:
 		return providerSettingsAuthUnknown
-	case pc.OAuthToken != nil:
-		if pc.OAuthToken.IsExpired() {
+	case auth.HasOAuth:
+		if auth.Expired(time.Now().Unix()) {
 			return providerSettingsAuthExpired
 		}
 		return providerSettingsAuthOK
-	case pc.APIKey != "":
+	case auth.HasAPIKey:
 		// An API key carries no expiry, so there is nothing to report
 		// that the user cannot already see in the settings themselves.
 		return providerSettingsAuthUnknown
@@ -597,20 +597,6 @@ func (m *ProviderSettings) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	cur := m.Cursor(view)
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
-}
-
-// isCustomProvider reports whether providerID is a custom provider with a
-// base_url: not in the catalog, so its models come from discovery.
-func isCustomProvider(com *common.Common, providerID string, pc config.ProviderConfig) bool {
-	if pc.BaseURL == "" {
-		return false
-	}
-	for _, p := range com.Workspace.KnownProviders() {
-		if string(p.ID) == providerID {
-			return false
-		}
-	}
-	return true
 }
 
 // formatModelRefreshStatus summarizes the refresh of the one provider the

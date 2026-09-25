@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/uiprefs"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +36,17 @@ type settingsTestWorkspace struct {
 	updatePreferredModelErr error
 }
 
-func (w *settingsTestWorkspace) Config() *config.Config { return w.cfg }
+func (w *settingsTestWorkspace) Config() *workspace.FrontendConfig {
+	if w.cfg == nil {
+		return nil
+	}
+	return workspace.NewFrontendConfig(w.cfg, nil)
+}
+
+// RawConfig exposes the underlying *config.Config for wsPrefsStore, which
+// needs uiprefs.FromConfig's full input - display preferences are read
+// from the real config, not the UI-facing FrontendConfig snapshot.
+func (w *settingsTestWorkspace) RawConfig() *config.Config { return w.cfg }
 
 func (w *settingsTestWorkspace) InitCoderAgent(context.Context) error {
 	return w.initCoderAgentErr
@@ -57,12 +68,12 @@ func (w *settingsTestWorkspace) UpdatePreferredModel(_ config.Scope, model confi
 // write once those writes go through Prefs instead of Workspace.
 type wsPrefsStore struct {
 	ws interface {
-		Config() *config.Config
+		RawConfig() *config.Config
 		SetConfigField(config.Scope, string, any) error
 	}
 }
 
-func (s wsPrefsStore) Prefs() uiprefs.Prefs { return uiprefs.FromConfig(s.ws.Config()) }
+func (s wsPrefsStore) Prefs() uiprefs.Prefs { return uiprefs.FromConfig(s.ws.RawConfig()) }
 
 func (s wsPrefsStore) Set(key string, value any) error {
 	return s.ws.SetConfigField(config.ScopeGlobal, key, value)
