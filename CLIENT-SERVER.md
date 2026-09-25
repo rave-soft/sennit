@@ -366,6 +366,31 @@ encode → decode → `require.Equal`. Новый тип без образца �
 
 ### PR 0.5. Снимок конфигурации для фронтенда
 
+**Уточнено 2026-09-26 по разбору.** UI читает `Config()` в 57 местах. Одно из
+них реально ломается по сети: пять проверок авторизации через
+`RuntimeProvider()` читают поле `RuntimeProviders` с `json:"-"`. Выбран
+allowlist-DTO вместо отредактированного клона `*config.Config`: новый секрет
+в конфиге тогда не утечёт по умолчанию, а методы, читающие скрытое
+состояние, недоступны UI по построению.
+
+- `workspace.FrontendConfig{Model, RecentModels, Providers []FrontendProvider,
+  MCPNames, Agents, InitializeAs, DisabledSkills}` с теми методами, которые UI
+  уже вызывает (`GetModel`, `ProviderName`, `SelectedCatalogModel`, ...).
+  `FrontendProvider` несёт `ProviderAuth{Known, HasAPIKey, HasOAuth,
+  OAuthExpiresAt, Account}` и `ProxyURL` без пароля; `Custom` считает сервер.
+- `Config()` возвращает `*FrontendConfig`; `*config.Config` остаётся у `cmd`
+  и `readOnlyWorkspace`. Проверка импортов не даёт `ui/model` и `ui/dialog`
+  вызывать методы `*config.Config`.
+- Тест полноты: `config.Config`, `providerstate.Provider`,
+  `providerconfig.ProviderConfig`, `oauth.Token`, `csync.Map` запрещены на
+  проводе; у типа с методами не может быть полей `json:"-"`; каждый метод
+  `FrontendConfig` сравнивается на исходном и декодированном значении.
+- Тест секретов: все строковые поля `config.Config` заполняются маркерами,
+  в JSON снимка могут остаться только разрешённые.
+- Порядок: сначала 0.5b, чтобы в DTO не попали UI-настройки.
+
+Текст ниже сохранён как исходный замысел.
+
 - `config.Config.FrontendSnapshot()` возвращает клон, где API-ключи
   заменены маркером наличия, а OAuth-токены обнулены с сохранением флага
   `HasOAuth`. Перед реализацией прочитать четыре места, где UI зовёт
@@ -379,6 +404,15 @@ encode → decode → `require.Equal`. Новый тип без образца �
 тестовые значения ключа и токена и падает, если находит.
 
 ### PR 0.5b. UI-настройки на стороне клиента
+
+**Уточнено 2026-09-26.** `internal/uiprefs`: `Prefs` + `Store{Prefs(), Set(key,
+v), Subscribe}`; UI получает его через `common.Common`, отдельно от
+`Workspace`. Во встроенном режиме адаптер оборачивает `*config.ConfigStore`
+приложения и пишет через `SetConfigField(ScopeGlobal, ...)`, как сейчас;
+проектные переопределения работают как сейчас. Удалённо клиент грузит
+только глобальный конфиг (`config.LoadGlobal()`). Умолчание прозрачности
+(Apple Terminal) считается на клиенте; умолчание лимитов дополнений зависит
+от проекта и остаётся серверным.
 
 - Перечислить поля `config.Config`, которые относятся только к
   отображению: `ThemeID`, `SpinnerMode`, `Scrollbar`, `Keybindings`,
