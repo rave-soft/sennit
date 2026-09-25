@@ -1622,6 +1622,189 @@ func TestPermissionService_PersistentGrantKeyIsPathScoped(t *testing.T) {
 	})
 }
 
+// tamperedRenameParams is a struct whose JSON field order does not match
+// alphabetical order (declared "beta" then "alpha"), so marshaling it
+// differs from marshaling the equivalent map[string]any (which Go's
+// encoding/json always emits in sorted key order). It stands in for a
+// tool's real Params struct.
+type tamperedRenameParams struct {
+	Beta  string `json:"beta"`
+	Alpha string `json:"alpha"`
+}
+
+// asDecodedMap round-trips v through JSON the way a remote frontend would:
+// encode it, then decode into map[string]any, which is what a struct
+// becomes once it crosses a JSON wire and loses its Go type.
+func asDecodedMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	encoded, err := json.Marshal(v)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	return decoded
+}
+
+// TestPermissionService_ResolveUsesStoredRequest covers the fix for resolve
+// reading the caller's copy of a PermissionRequest instead of the one the
+// service itself published. A caller only ever gets to name an ID; every
+// other field resolve acts on — the notification's ToolCallID and the
+// persistent-grant key — must come from the request the service is still
+// holding, never from what the caller hands back. Otherwise a caller that
+// sends a known pending ID with different fields (or the same fields
+// reshaped by a JSON round trip, which is what a remote frontend will
+// produce) can record a persistent grant for an operation nobody was ever
+// asked about, or bury the wrong tool call's outcome in a notification.
+func TestPermissionService_ResolveUsesStoredRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("GrantPersistent ignores the caller's tampered fields", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+		notifications := service.SubscribeNotifications(t.Context())
+
+		path := filepath.Join(dir, "a.txt")
+		var wg sync.WaitGroup
+		var granted bool
+		wg.Go(func() {
+			granted, _ = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID: "s1", ToolCallID: "real-call", ToolName: "edit",
+				Action: "edit", Path: path,
+			})
+		})
+
+		var pending PermissionRequest
+		select {
+		case ev := <-events:
+			pending = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("request was never published")
+		}
+
+		// Drain the "request opened" notification before resolving.
+		select {
+		case ev := <-notifications:
+			require.False(t, ev.Payload.Granted)
+			require.False(t, ev.Payload.Denied)
+		case <-time.After(2 * time.Second):
+			t.Fatal("initial notification was never published")
+		}
+
+		// The caller's copy names the right ID but everything else about a
+		// different, unrelated operation.
+		tampered := pending
+		tampered.ToolCallID = "tampered-call"
+		tampered.ToolName = "bash"
+		tampered.Action = "execute"
+		tampered.Path = filepath.Join(dir, "elsewhere")
+		tampered.Params = map[string]any{"cmd": "rm -rf /"}
+
+		require.True(t, service.GrantPersistent(tampered), "resolves the pending request by ID")
+		wg.Wait()
+		require.True(t, granted, "the original request must observe its grant")
+
+		// The notification must carry the real request's ToolCallID, not
+		// the tampered copy's.
+		select {
+		case ev := <-notifications:
+			assert.True(t, ev.Payload.Granted)
+			assert.Equal(t, "real-call", ev.Payload.ToolCallID,
+				"notification must report the stored request's tool call, not the caller's")
+		case <-time.After(2 * time.Second):
+			t.Fatal("resolution notification was never published")
+		}
+
+		// A later request identical to the real one is auto-approved: the
+		// persistent grant was recorded against it, not the tampered copy.
+		// Bound the context: if the grant was instead recorded against the
+		// tampered fields, this request matches nothing and blocks waiting
+		// for a prompt nobody will answer. Without the bound that is a
+		// silent hang; with it, Request's own ctx.Done() path returns a
+		// DeadlineExceeded error within the timeout, so the assertion below
+		// fails fast and says why instead of the package timing out ten
+		// minutes later with no name attached to the invariant.
+		matchCtx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		granted, err := service.Request(matchCtx, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "edit",
+			Action: "edit", Path: path,
+		})
+		require.NoError(t, err, "the persistent grant did not match an identical request")
+		assert.True(t, granted, "the persistent grant did not match an identical request")
+
+		// A request matching the tampered fields must NOT be auto-approved:
+		// nobody ever consented to it.
+		var wg2 sync.WaitGroup
+		var wg2Granted bool
+		var wg2Err error
+		wg2.Go(func() {
+			wg2Granted, wg2Err = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID: "s1", ToolCallID: "call-3", ToolName: "bash",
+				Action: "execute", Path: filepath.Join(dir, "elsewhere"),
+				Params: map[string]any{"cmd": "rm -rf /"},
+			})
+		})
+		denyNext(t, service, events)
+		wg2.Wait()
+		require.NoError(t, wg2Err)
+		assert.False(t, wg2Granted, "the tampered operation must never have been granted")
+	})
+
+	t.Run("GrantPersistent ignores a JSON-decoded copy of the same Params", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		service := NewPermissionService(dir, false, nil)
+		events := service.Subscribe(t.Context())
+
+		path := filepath.Join(dir, "sym.go")
+		realParams := tamperedRenameParams{Beta: "b", Alpha: "a"}
+
+		var wg sync.WaitGroup
+		var granted bool
+		wg.Go(func() {
+			granted, _ = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID: "s1", ToolCallID: "real-call", ToolName: "lsp_rename",
+				Action: "rename", Path: path, Params: realParams,
+			})
+		})
+
+		var pending PermissionRequest
+		select {
+		case ev := <-events:
+			pending = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("request was never published")
+		}
+
+		// Simulate what a remote transport hands back: the same params,
+		// but decoded into map[string]any, which marshals with sorted
+		// keys instead of the struct's declared field order.
+		tampered := pending
+		tampered.Params = asDecodedMap(t, realParams)
+		require.NotEqual(t, permissionParamsKey(realParams), permissionParamsKey(tampered.Params),
+			"the test fixture must actually exercise mismatched marshal order")
+
+		require.True(t, service.GrantPersistent(tampered))
+		wg.Wait()
+		require.True(t, granted)
+
+		// A later identical request (same struct Params) must be
+		// auto-approved: the key was recorded from the stored struct
+		// Params, not the tampered map. Bounded for the same reason as the
+		// sibling subtest above: a mismatched key here means an unanswered
+		// hang instead of a fast, named failure.
+		matchCtx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		granted, err := service.Request(matchCtx, CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-2", ToolName: "lsp_rename",
+			Action: "rename", Path: path, Params: tamperedRenameParams{Beta: "b", Alpha: "a"},
+		})
+		require.NoError(t, err, "the grant did not match the original struct Params")
+		assert.True(t, granted, "the grant did not match the original struct Params")
+	})
+}
+
 // TestPermissionService_RequireExplicit covers the bash deny list's floor:
 // a RequireExplicit request is answered by a person or not at all. Yolo, an
 // auto-approved session and an allowed-tools entry naming the tool all grant

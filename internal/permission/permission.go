@@ -285,6 +285,23 @@ type PermissionKey struct {
 	Params string
 }
 
+// pendingRequest is what the pending-request map keys on a request ID: the
+// original request Request built, kept alongside its response channel.
+//
+// resolve looks this up by ID and reads req for everything it needs — the
+// notification's ToolCallID, and GrantPersistent's session-grant key — never
+// the PermissionRequest a caller (Grant/Deny/GrantPersistent) hands in. A
+// caller's copy is only a routing token to find this entry; once a remote
+// frontend exists it may arrive as decoded JSON with a reordered Params map,
+// or (per permissionsFor's retry-every-candidate routing) simply be wrong
+// about SessionID/ToolName/Action/Path. Using the stored req instead of the
+// caller's copy means neither can happen: the answer is always about the
+// request that was actually asked.
+type pendingRequest struct {
+	req PermissionRequest
+	ch  chan bool
+}
+
 type permissionService struct {
 	// confined marks this service's workspace as write-confined to
 	// workingDir; see Service.ConfinedDir.
@@ -295,7 +312,7 @@ type permissionService struct {
 	notificationBroker    *pubsub.Broker[PermissionNotification]
 	workingDir            string
 	sessionPermissions    *csync.Map[PermissionKey, bool]
-	pendingRequests       *csync.Map[string, chan bool]
+	pendingRequests       *csync.Map[string, pendingRequest]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
@@ -333,39 +350,46 @@ type permissionService struct {
 // it had already been resolved (e.g., by another concurrent caller) or
 // the request ID is unknown.
 //
-// If onResolve is non-nil it runs after the pending entry has been
-// taken but before the notification is published or the waiter is
-// unblocked. This lets GrantPersistent record the session permission
-// only when it actually wins the race, so a losing GrantPersistent
-// that lost to a Deny does not leak an auto-approve entry.
+// If onResolve is non-nil it runs after the pending entry has been taken
+// but before the notification is published or the waiter is unblocked. It
+// is handed the stored request (never the caller's copy — see
+// pendingRequest) so GrantPersistent records a session permission keyed on
+// what was actually asked, and only when it actually wins the race, so a
+// losing GrantPersistent that lost to a Deny does not leak an auto-approve
+// entry.
 //
-// All three public resolution methods (Grant, GrantPersistent, Deny)
-// route through this helper so multi-subscriber UIs can race safely:
-// the first caller wins, the rest become no-ops.
-func (s *permissionService) resolve(permission PermissionRequest, granted, denied bool, onResolve func()) bool {
-	respCh, ok := s.pendingRequests.Take(permission.ID)
+// All three public resolution methods (Grant, GrantPersistent, Deny) route
+// through this helper so multi-subscriber UIs can race safely: the first
+// caller wins, the rest become no-ops. permission is the caller's copy and
+// contributes only its ID, used to look up the stored request; everything
+// else this resolves against — the notification's ToolCallID, and
+// onResolve's session-grant key — comes from that stored request, not from
+// permission.
+func (s *permissionService) resolve(permission PermissionRequest, granted, denied bool, onResolve func(PermissionRequest)) bool {
+	pending, ok := s.pendingRequests.Take(permission.ID)
 	if !ok {
 		return false
 	}
+	stored := pending.req
 
 	if onResolve != nil {
-		onResolve()
+		onResolve(stored)
 	}
 
 	s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: permission.ToolCallID,
+		ToolCallID: stored.ToolCallID,
 		Granted:    granted,
 		Denied:     denied,
 	})
 
-	// respCh is buffered (cap 1) and only ever has at most one sender
+	// pending.ch is buffered (cap 1) and only ever has at most one sender
 	// per request because Take removes the entry under the map lock,
 	// so this send never blocks.
-	respCh <- granted
+	pending.ch <- granted
 
 	// This request no longer occupies the "currently shown" slot (if it
 	// ever did); let the next queued request take its place.
-	s.dispatchNext(permission.ID)
+	s.dispatchNext(stored.ID)
 
 	return true
 }
@@ -476,13 +500,13 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
 	// pending-request race. Otherwise a losing GrantPersistent that
 	// lost to a Deny would still leave an auto-approve entry behind,
 	// silently flipping later denied calls to allowed.
-	return s.resolve(permission, true, false, func() {
+	return s.resolve(permission, true, false, func(stored PermissionRequest) {
 		s.sessionPermissions.Set(PermissionKey{
-			SessionID: permission.SessionID,
-			ToolName:  permission.ToolName,
-			Action:    permission.Action,
-			Path:      permission.Path,
-			Params:    permissionParamsKey(permission.Params),
+			SessionID: stored.SessionID,
+			ToolName:  stored.ToolName,
+			Action:    stored.Action,
+			Path:      stored.Path,
+			Params:    permissionParamsKey(stored.Params),
 		}, true)
 	})
 }
@@ -638,7 +662,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 
 	respCh := make(chan bool, 1)
-	s.pendingRequests.Set(permission.ID, respCh)
+	s.pendingRequests.Set(permission.ID, pendingRequest{req: permission, ch: respCh})
 
 	// Publish the request now if no other request is being shown to the
 	// user, otherwise queue it to be published once the current one is
@@ -794,7 +818,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
 		allowedTools:        allowedTools,
-		pendingRequests:     csync.NewMap[string, chan bool](),
+		pendingRequests:     csync.NewMap[string, pendingRequest](),
 	}
 	svc.skip.Store(skip)
 	return svc
