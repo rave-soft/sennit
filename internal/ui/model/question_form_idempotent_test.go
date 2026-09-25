@@ -20,7 +20,7 @@ func TestOpenBatchFormDialog_SameBatchIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	batch := question.Request{
 		ID: "batch-1",

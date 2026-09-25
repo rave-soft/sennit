@@ -51,7 +51,7 @@ func TestEditorPlaceholderStateRandomizeUsesKnownPools(t *testing.T) {
 }
 
 func TestEditorPlaceholderRandomizationTiming(t *testing.T) {
-	m := newCmdDrivenGoldenUI(&cmdDrivingWorkspace{agentReady: true})
+	m := newCmdDrivenGoldenUI(t, &cmdDrivingWorkspace{agentReady: true})
 	m.editor.placeholder = newEditorPlaceholderStateWithValues("before-ready", "before-working")
 
 	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

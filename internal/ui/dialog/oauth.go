@@ -246,6 +246,25 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 			m.proxyInput.SetValue(msg.value)
 		}
 
+	case oauthProxyAcceptedMsg:
+		// A dismissed-then-reopened dialog only matters here if the state
+		// has moved off Proxy already (e.g. a second, faster submit beat
+		// this one back) — applying a stale proxy value over a newer one
+		// would be a race, so this checks State the same way
+		// oauthProxyPrefillMsg checks it above.
+		if m.State != OAuthStateProxy {
+			return nil
+		}
+		msg.configurer.applyProxyURL(msg.proxy)
+		m.State = OAuthStateInitializing
+		return ActionCmd{tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)}
+
+	case oauthProxyRejectedMsg:
+		if m.State != OAuthStateProxy {
+			return nil
+		}
+		return ActionCmd{util.ReportError(msg.err)}
+
 	case ActionInitiateOAuth:
 		m.deviceCode = msg.DeviceCode
 		m.userCode = msg.UserCode
@@ -319,11 +338,16 @@ func (m *OAuth) handleProxyKey(msg tea.KeyPressMsg) Action {
 			return nil
 		}
 		proxy := strings.TrimSpace(m.proxyInput.Value())
-		if err := configurer.setProxyURL(proxy); err != nil {
-			return ActionCmd{util.ReportError(err)}
-		}
-		m.State = OAuthStateInitializing
-		return ActionCmd{tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)}
+		// validateProxyURL may call OAuthValidateProxy, class "U"
+		// (wire_classes_test.go), so it has to run off this goroutine —
+		// see oauthProxyAcceptedMsg/oauthProxyRejectedMsg below for what
+		// applies the result once it lands.
+		return ActionCmd{func() tea.Msg {
+			if err := configurer.validateProxyURL(proxy); err != nil {
+				return oauthProxyRejectedMsg{err: err}
+			}
+			return oauthProxyAcceptedMsg{configurer: configurer, proxy: proxy}
+		}}
 
 	default:
 		var cmd tea.Cmd
@@ -342,9 +366,16 @@ type oauthProxyConfigurer interface {
 	// proxyURL is the value to prefill, typically whatever the provider is
 	// already configured with.
 	proxyURL() string
-	// setProxyURL applies the value the user entered, rejecting one that
-	// cannot work. An empty value means no proxy.
-	setProxyURL(string) error
+	// validateProxyURL checks whether proxy is usable without applying it.
+	// It may perform IO (OAuthValidateProxy), so it is only ever called
+	// from a tea.Cmd (see handleProxyKey's Submit case), never directly
+	// from HandleMsg.
+	validateProxyURL(proxy string) error
+	// applyProxyURL stores an already-validated proxy value. It is a pure
+	// field write — called only from HandleMsg (oauthProxyAcceptedMsg),
+	// never from a tea.Cmd, so it never races the dialog being read or
+	// written from Update.
+	applyProxyURL(proxy string)
 }
 
 // oauthProxyPrefillMsg carries the proxy value read off the Update loop
@@ -352,6 +383,23 @@ type oauthProxyConfigurer interface {
 // field can be prefilled without the constructor blocking on that read.
 type oauthProxyPrefillMsg struct {
 	value string
+}
+
+// oauthProxyAcceptedMsg carries a validated proxy value back from
+// handleProxyKey's Submit cmd. HandleMsg applies it to the provider and
+// starts the flow — the same two steps handleProxyKey used to do inline,
+// now split across the round trip validateProxyURL's IO requires.
+type oauthProxyAcceptedMsg struct {
+	configurer oauthProxyConfigurer
+	proxy      string
+}
+
+// oauthProxyRejectedMsg carries a proxy validation failure back from
+// handleProxyKey's Submit cmd, so the dialog can report it and stay on the
+// proxy step — the same outcome the previous synchronous setProxyURL error
+// path produced.
+type oauthProxyRejectedMsg struct {
+	err error
 }
 
 // oauthSaveDoneMsg is emitted by the background save command once the

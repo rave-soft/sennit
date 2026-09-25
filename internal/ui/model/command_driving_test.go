@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,6 +91,13 @@ type cmdDrivingWorkspace struct {
 	threads                 []proto.Thread
 	getSessionCalls         int
 	listSessionHistoryCalls int
+	listSessions            []session.Session
+	listSessionsErr         error
+	renameSessionCalls      int
+	lastRenamedID           string
+	lastRenamedTitle        string
+	deleteSessionCalls      int
+	lastDeletedID           string
 	lspStartCalls           int
 	setCurrentSessionCalls  int
 	currentSessionIDs       []string
@@ -117,6 +125,25 @@ type cmdDrivingWorkspace struct {
 	lastRemovedID      string
 	removeAccountErr   error
 
+	// OAuth stubs.
+	oauthConfiguredProxy    string
+	oauthValidateProxyCalls int
+	oauthValidateProxyErr   error
+	startOAuthCalls         int
+	startOAuthResult        workspace.OAuthStartResult
+	startOAuthErr           error
+
+	// MCP auth stubs.
+	mcpPendingAuth       []workspace.MCPPendingAuthServer
+	mcpAuthenticateCalls int
+	lastMCPAuthName      string
+	mcpAuthenticateErr   error
+
+	configureCustomProviderCalls int
+	configureCustomProviderErr   error
+
+	updatePreferredModelCalls int
+
 	setProviderProxyCalls int
 	lastSetProviderProxy  string
 	setProviderProxyErr   error
@@ -135,8 +162,22 @@ type cmdDrivingWorkspace struct {
 func (w cmdDrivingWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w cmdDrivingWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w cmdDrivingWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
+func (w *cmdDrivingWorkspace) AccountCapabilities(string) workspace.AccountCapabilities {
+	return workspace.AccountCapabilities{}
+}
+func (w *cmdDrivingWorkspace) DoctorProblems() []config.Problem { return nil }
+
+func (w *cmdDrivingWorkspace) DockerMCPAvailable() (bool, bool) { return false, true }
+func (w *cmdDrivingWorkspace) ListSessions(context.Context) ([]session.Session, error) {
+	return w.listSessions, w.listSessionsErr
+}
+
 func (w *cmdDrivingWorkspace) KnownProviders() []catwalk.Provider {
 	return providerruntime.Providers(w.Config().Options.DisableDefaultProviders)
+}
+
+func (w *cmdDrivingWorkspace) CustomProviderTypes() []string {
+	return []string{"openai", "anthropic"}
 }
 
 // CurrentPlanUsage: no provider in these tests quotes rate limits, so the
@@ -336,7 +377,16 @@ func (w *cmdDrivingWorkspace) ListAllUserMessages(_ context.Context) ([]message.
 	return nil, nil
 }
 
-func (w *cmdDrivingWorkspace) DeleteSession(_ context.Context, _ string) error {
+func (w *cmdDrivingWorkspace) DeleteSession(_ context.Context, id string) error {
+	w.deleteSessionCalls++
+	w.lastDeletedID = id
+	return nil
+}
+
+func (w *cmdDrivingWorkspace) RenameSession(_ context.Context, id, title string) error {
+	w.renameSessionCalls++
+	w.lastRenamedID = id
+	w.lastRenamedTitle = title
 	return nil
 }
 
@@ -396,6 +446,7 @@ func (w *cmdDrivingWorkspace) LSPGetDiagnosticCounts(name string) proto.LSPDiagn
 }
 
 func (w *cmdDrivingWorkspace) UpdatePreferredModel(config.Scope, config.SelectedModel) error {
+	w.updatePreferredModelCalls++
 	return nil
 }
 
@@ -409,6 +460,11 @@ func (w *cmdDrivingWorkspace) SetCompactMode(config.Scope, bool) error {
 
 func (w *cmdDrivingWorkspace) SetProviderAPIKey(config.Scope, string, string) error {
 	return nil
+}
+
+func (w *cmdDrivingWorkspace) ConfigureCustomProvider(context.Context, config.Scope, workspace.ConfigureCustomProviderParams) ([]catwalk.Model, error) {
+	w.configureCustomProviderCalls++
+	return nil, w.configureCustomProviderErr
 }
 
 func (w *cmdDrivingWorkspace) SetConfigField(config.Scope, string, any) error {
@@ -482,11 +538,13 @@ func (w *cmdDrivingWorkspace) EnableDockerMCP(ctx context.Context) error {
 }
 func (w *cmdDrivingWorkspace) DisableDockerMCP() error { return nil }
 func (w *cmdDrivingWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
-	return nil
+	w.mcpAuthenticateCalls++
+	w.lastMCPAuthName = name
+	return w.mcpAuthenticateErr
 }
 
 func (w *cmdDrivingWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer {
-	return nil
+	return w.mcpPendingAuth
 }
 
 func (w *cmdDrivingWorkspace) MCPAuthURL(string) string { return "" }
@@ -560,13 +618,35 @@ func (w *cmdDrivingWorkspace) RemoveAccount(_ config.Scope, _, accountID string)
 	return w.removeAccountErr
 }
 
+func (w *cmdDrivingWorkspace) OAuthConfiguredProxy(string) string { return w.oauthConfiguredProxy }
+
+func (w *cmdDrivingWorkspace) OAuthValidateProxy(string, string) error {
+	w.oauthValidateProxyCalls++
+	return w.oauthValidateProxyErr
+}
+
+func (w *cmdDrivingWorkspace) StartOAuth(context.Context, string, string, bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+	w.startOAuthCalls++
+	return w.startOAuthResult, nil, w.startOAuthErr
+}
+
 // ---------------------------------------------------------------------------
 // cmdDrivenUI builds a UI over cmdDrivingWorkspace with all caches warm.
 // ---------------------------------------------------------------------------
 
-func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
-	com := common.DefaultCommon(context.Background(), ws)
-	return &UI{
+// newCmdDrivenUI builds a UI over cmdDrivingWorkspace with all caches warm.
+// The workspace is wrapped in the update-goroutine guard (wsguard_test.go)
+// so every test built through this constructor automatically runs under
+// it: a synchronous U/S/H call made from m.Update, m.View, or anything they
+// call directly fails the test, the same way it would freeze the real TUI
+// once Workspace is served over gRPC. driveCmdStep/runCmdTree/runGuardedCmd
+// are what clear the guard for the span a genuine tea.Cmd would run in.
+func newCmdDrivenUI(t *testing.T, ws *cmdDrivingWorkspace) *UI {
+	t.Helper()
+	on := &atomic.Bool{}
+	on.Store(true)
+	com := common.DefaultCommon(context.Background(), newUpdateGoroutineGuard(t, ws, on))
+	m := &UI{
 		com: com,
 		widgets: widgets{
 			status: NewStatus(com, nil),
@@ -586,6 +666,8 @@ func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 		sess:   sessionState{current: &session.Session{ID: "s1"}},
 		keyMap: DefaultKeyMap(),
 	}
+	registerGuardFlag(m, on)
+	return m
 }
 
 // warmCmdDrivenCaches marks all memoized workspace state fresh so only
@@ -641,7 +723,7 @@ func unwrapOwnedOne(msg tea.Msg) tea.Msg {
 // message through Update. It deliberately does not execute Update's returned
 // command, allowing tests to inspect state at asynchronous boundaries.
 func driveCmdStep(m *UI, cmd tea.Cmd) (tea.Msg, tea.Cmd) {
-	msg := unwrapOwnedOne(cmd())
+	msg := unwrapOwnedOne(runGuardedCmd(m, cmd))
 	_, next := m.Update(msg)
 	return msg, next
 }
@@ -676,7 +758,7 @@ func runCmdTree(m *UI, cmd tea.Cmd, afterUpdate func(tea.Msg, tea.Cmd)) []tea.Ms
 	for len(stack) > 0 {
 		cmd := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		msg := unwrapOwnedOne(cmd())
+		msg := unwrapOwnedOne(runGuardedCmd(m, cmd))
 		if cmds, ok := isCommandSliceWrapper(msg); ok {
 			for i := len(cmds) - 1; i >= 0; i-- {
 				stack = append(stack, cmds[i])
@@ -705,7 +787,7 @@ func TestCmdDriving_CommandExecution_DispatchAndApply(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true, agentBusy: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// Directly dispatch a busy refresh (simulating what staleWorkspaceRefreshCmds does).
@@ -733,7 +815,7 @@ func TestCmdDriving_StaleResultGuard_DiscardedAndRedispatched(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true, agentBusy: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// Optimistically set busy=true (simulates sendMessage's optimistic
@@ -783,7 +865,7 @@ func TestCmdDriving_RepeatedEnter_SendAndSubmit(t *testing.T) {
 		agentErr:            nil,
 		sessionsBySessionID: map[string]session.Session{"new-sess": {ID: "new-sess"}},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 	m.editor.textarea.SetValue("hello")
 
@@ -822,7 +904,7 @@ func TestCmdDriving_PermissionRoundTrip_Allow(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	perm := permission.PermissionRequest{
@@ -894,7 +976,7 @@ func TestCmdDriving_PermissionRoundTrip_GrantError(t *testing.T) {
 
 	grantErr := errors.New("workspace unreachable")
 	ws := &cmdDrivingWorkspace{agentReady: true, permGrantErr: grantErr}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	perm := permission.PermissionRequest{
@@ -940,7 +1022,7 @@ func TestCmdDriving_PermissionRoundTrip_EnableYolo(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true, yolo: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	perm := permission.PermissionRequest{
@@ -973,7 +1055,7 @@ func TestCmdDriving_Routing_DistinctMsgTypes(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// 1. busyStateMsg → applyBusyState path. Start from the opposite
@@ -1010,7 +1092,7 @@ func TestCmdDriving_StalePromptQueue_WrongSession(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// The current session is "s1". A stale fetch from "s2" arrives via
@@ -1054,7 +1136,7 @@ func TestCmdDriving_EnterWhenNoSession_CreatesSession(t *testing.T) {
 		},
 	}
 	// No session set — m.sess.current is nil.
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	m.sess.current = nil
 	warmCmdDrivenCaches(m)
 	m.editor.textarea.SetValue("first message")
@@ -1099,7 +1181,7 @@ func TestCmdDriving_PermissionRoundTrip_Deny(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	perm := permission.PermissionRequest{
@@ -1137,7 +1219,7 @@ func TestCmdDriving_PermissionRoundTrip_AllowForSession(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	perm := permission.PermissionRequest{
@@ -1177,7 +1259,7 @@ func TestCmdDriving_RepeatedEnter_SequentialSends(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// First send via UI.Update.
@@ -1215,7 +1297,7 @@ func TestCmdDriving_SequenceSupport_DrivesInOrder(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// Build a tea.Sequence(cmd1, cmd2) where each cmd produces a
@@ -1257,7 +1339,7 @@ func TestCmdDriving_UnknownMessage_RoutedThroughUpdate(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// A cmd that returns an unknown message type — not matched by any
@@ -1289,7 +1371,7 @@ func TestCmdDriving_UnknownMessage_RoutedThroughUpdate(t *testing.T) {
 
 func TestCmdDriving_PreviewResultRoutedToCoveredFilePicker(t *testing.T) {
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 	m.dialog.OpenDialog(&stubActionDialog{
 		id:     dialog.FilePickerID,
@@ -1318,7 +1400,7 @@ func TestCmdDriving_LoadSession_FreshResultApplied(t *testing.T) {
 			},
 		},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(requestSessionLoad{sessionID: "s-new"})
@@ -1361,11 +1443,11 @@ func TestCmdDriving_LoadSession_NestedToolsApplied(t *testing.T) {
 			}},
 		},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(requestSessionLoad{sessionID: "parent"})
-	result := cmd().(loadSessionMsg)
+	result := runGuardedCmd(m, cmd).(loadSessionMsg)
 	require.NoError(t, result.err)
 	require.Len(t, result.items, 1)
 	container, ok := result.items[0].(chat.NestedToolContainer)
@@ -1415,11 +1497,11 @@ func TestCmdDriving_LoadSession_MultipleChildrenBatched(t *testing.T) {
 			},
 		},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(requestSessionLoad{sessionID: "parent"})
-	result := cmd().(loadSessionMsg)
+	result := runGuardedCmd(m, cmd).(loadSessionMsg)
 	require.NoError(t, result.err)
 
 	require.Len(t, result.items, 3)
@@ -1475,11 +1557,11 @@ func TestCmdDriving_LoadSession_DeepNestingRecursiveBatch(t *testing.T) {
 			},
 		},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(requestSessionLoad{sessionID: "parent"})
-	result := cmd().(loadSessionMsg)
+	result := runGuardedCmd(m, cmd).(loadSessionMsg)
 	require.NoError(t, result.err)
 
 	require.Len(t, result.items, 1)
@@ -1511,13 +1593,13 @@ func TestCmdDriving_LoadSession_CapturesWorkspace(t *testing.T) {
 			"captured": {ID: "captured", Title: "Replacement"},
 		},
 	}
-	m := newCmdDrivenUI(original)
+	m := newCmdDrivenUI(t, original)
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(requestSessionLoad{sessionID: "captured"})
 	m.com.Workspace = replacement
 
-	msg := cmd().(loadSessionMsg)
+	msg := runGuardedCmd(m, cmd).(loadSessionMsg)
 	require.NoError(t, msg.err)
 	require.Equal(t, "Captured", msg.session.Title)
 	require.Equal(t, 1, original.getSessionCalls)
@@ -1541,12 +1623,12 @@ func TestCmdDriving_LoadSession_StaleResultDiscarded(t *testing.T) {
 			"s-fresh": {{SessionID: "s-fresh", Path: "fresh.go", Content: "fresh", Version: 1}},
 		},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, oldCmd := m.Update(requestSessionLoad{sessionID: "s-old"})
 	_, freshCmd := m.Update(requestSessionLoad{sessionID: "s-fresh"})
-	oldResult := oldCmd().(loadSessionMsg)
+	oldResult := runGuardedCmd(m, oldCmd).(loadSessionMsg)
 	runCmdTree(m, freshCmd, nil)
 
 	sessionID, sessionTitle := m.sess.current.ID, m.sess.current.Title
@@ -1576,13 +1658,13 @@ func TestCmdDriving_LoadSession_ReportUsesAcceptedSessionAfterSupersedingRequest
 			"s-fresh": {ID: "s-fresh"},
 		},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, oldLoadCmd := m.Update(requestSessionLoad{sessionID: "s-old"})
-	oldResult := oldLoadCmd().(loadSessionMsg)
+	oldResult := runGuardedCmd(m, oldLoadCmd).(loadSessionMsg)
 	_, freshLoadCmd := m.Update(requestSessionLoad{sessionID: "s-fresh"})
-	freshResult := freshLoadCmd().(loadSessionMsg)
+	freshResult := runGuardedCmd(m, freshLoadCmd).(loadSessionMsg)
 	_, reportCmd := m.Update(freshResult)
 	require.NotNil(t, reportCmd)
 
@@ -1609,12 +1691,12 @@ func TestCmdDriving_LoadSession_StaleErrorDiscarded(t *testing.T) {
 		},
 		listMessagesErrByID: map[string]error{"s-old": fmt.Errorf("old load failed")},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, oldCmd := m.Update(requestSessionLoad{sessionID: "s-old"})
 	_, freshCmd := m.Update(requestSessionLoad{sessionID: "s-fresh"})
-	oldResult := oldCmd().(loadSessionMsg)
+	oldResult := runGuardedCmd(m, oldCmd).(loadSessionMsg)
 	require.Error(t, oldResult.err)
 	runCmdTree(m, freshCmd, nil)
 
@@ -1642,7 +1724,7 @@ func TestCmdDriving_SendMessage_AgentNotReady(t *testing.T) {
 		agentErr:            fmt.Errorf("agent not initialized"),
 		sessionsBySessionID: map[string]session.Session{"s1": {ID: "s1"}},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(sendMessageMsg{Content: "test"})
@@ -1677,7 +1759,7 @@ func TestCmdDriving_SendMessage_CreateSessionError(t *testing.T) {
 		// No sessions registered and CreateSession returns error.
 	}
 	ws.createSessionErr = fmt.Errorf("DB full")
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	m.sess.current = nil // No session → triggers CreateSession
 	warmCmdDrivenCaches(m)
 
@@ -1707,7 +1789,7 @@ func TestCmdDriving_SendMessage_SessionExists(t *testing.T) {
 		agentErr:            nil,
 		sessionsBySessionID: map[string]session.Session{"s1": {ID: "s1"}},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(sendMessageMsg{Content: "hello"})
@@ -1738,7 +1820,7 @@ func TestCmdDriving_ToggleCompactMode_InCmd(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	cmd := m.toggleCompactMode()
@@ -1761,7 +1843,7 @@ func TestCmdDriving_PermissionGrant_InCmd(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
 
 	// Directly dispatch the permission cmd.

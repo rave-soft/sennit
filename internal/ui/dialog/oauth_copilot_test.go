@@ -72,11 +72,20 @@ func TestOAuthCopilotUsesConfiguredProxy(t *testing.T) {
 	}
 
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderCopilot, Name: "GitHub Copilot"}
-	dlg, _ := NewOAuthCopilot(com, false, provider, nil, false)
+	dlg, cmd := NewOAuthCopilot(com, false, provider, nil, false)
 
 	oc, ok := dlg.oAuthProvider.(*OAuthCopilot)
 	require.True(t, ok)
-	require.Equal(t, "socks5://127.0.0.1:1080", oc.proxy)
+	require.Empty(t, oc.proxy, "the proxy must not be read before initiateAuth's cmd runs")
+	// NewOAuthCopilot must still hand back a cmd (spinner tick +
+	// initiateAuth) even though this test drives initiateAuth directly
+	// below, the same way TestOAuthCopilotNoProxyConfigured does.
+	require.NotNil(t, cmd)
+
+	// OAuthConfiguredProxy is class "U" (wire_classes_test.go): the read
+	// happens inside initiateAuth rather than in NewOAuthCopilot itself.
+	oc.initiateAuth()
+	require.Equal(t, "socks5://127.0.0.1:1080", oc.currentProxy())
 }
 
 // TestOAuthCopilotNoProxyConfigured pins the no-proxy case unchanged: a

@@ -77,6 +77,23 @@ func TestOAuthCopilotSkipsProxyStep(t *testing.T) {
 	require.Nil(t, dlg.proxyInput)
 }
 
+// submitProxyStep drives the Enter key on the proxy step through to
+// completion: OAuthValidateProxy is class "U" (wire_classes_test.go), so
+// handleProxyKey's Submit case now returns an ActionCmd that validates
+// off-thread instead of applying the state transition inline — this runs
+// that cmd and feeds its result back into HandleMsg, the same round trip
+// the real Update loop drives, and returns the final Action.
+func submitProxyStep(t *testing.T, dlg *OAuth) Action {
+	t.Helper()
+
+	action := dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected the Submit key to return an ActionCmd, got %#v", action)
+	require.NotNil(t, cmdAction.Cmd)
+
+	return dlg.HandleMsg(cmdAction.Cmd())
+}
+
 // TestOAuthCodexRejectsBadProxy: an unusable value keeps the user on the
 // step, rather than starting a sign-in that fails a few seconds later with
 // something less obviously about the proxy.
@@ -86,7 +103,7 @@ func TestOAuthCodexRejectsBadProxy(t *testing.T) {
 	dlg := newCodexDialog(t)
 	dlg.proxyInput.SetValue("ftp://nope:21")
 
-	action := dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	action := submitProxyStep(t, dlg)
 
 	require.Equal(t, OAuthStateProxy, dlg.State, "a bad proxy must not start the flow")
 	require.IsType(t, ActionCmd{}, action, "the failure must be reported to the user")
@@ -100,7 +117,7 @@ func TestOAuthCodexAcceptsProxy(t *testing.T) {
 	dlg := newCodexDialog(t)
 	dlg.proxyInput.SetValue("  socks5://127.0.0.1:1080  ")
 
-	dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	submitProxyStep(t, dlg)
 
 	require.Equal(t, OAuthStateInitializing, dlg.State)
 	provider, ok := dlg.oAuthProvider.(*OAuthCodex)
@@ -115,7 +132,7 @@ func TestOAuthCodexEmptyProxyIsAllowed(t *testing.T) {
 
 	dlg := newCodexDialog(t)
 
-	dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	submitProxyStep(t, dlg)
 
 	require.Equal(t, OAuthStateInitializing, dlg.State)
 	provider, ok := dlg.oAuthProvider.(*OAuthCodex)

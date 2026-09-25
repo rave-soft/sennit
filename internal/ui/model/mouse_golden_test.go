@@ -21,7 +21,7 @@ import (
 func TestMouseGolden(t *testing.T) {
 	t.Run("breadcrumb_hover", func(t *testing.T) {
 		ws := &cmdDrivingWorkspace{agentReady: true}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 		// A breadcrumb trail (and its Back button) only renders once the UI
 		// is embedded below some root — see breadcrumbCrumbs.
 		m.crumbRoot = "Golden Thread"
@@ -44,7 +44,7 @@ func TestMouseGolden(t *testing.T) {
 
 	t.Run("bash_tool_expand_click", func(t *testing.T) {
 		ws := &cmdDrivingWorkspace{agentReady: true}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 
 		toolCall := message.ToolCall{
 			ID:       "bash-golden",
@@ -80,7 +80,7 @@ func TestMouseGolden(t *testing.T) {
 
 	t.Run("scrollbar_drag", func(t *testing.T) {
 		ws := &cmdDrivingWorkspace{agentReady: true}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 		for i := range 200 {
 			m.chat.AppendMessages(chat.NewAssistantMessageItem(m.com.Styles, &message.Message{
 				ID:   "m" + string(rune('a'+i%26)) + string(rune('0'+i/26)),

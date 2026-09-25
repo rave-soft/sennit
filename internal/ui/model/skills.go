@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -33,13 +34,30 @@ var builtinSkillsCache struct {
 
 // cachedBuiltinSkills reads the shipped skills once per process. The read
 // itself is the workspace's — discovery is not the panel's job — and the
-// cache stays here because it exists to keep a render path from repeating
-// the call, which is a UI concern.
+// cache stays here because it exists to keep repeat loads (every UI
+// instance: the main screen, each embedded thread) from repeating the
+// call, which is a UI concern.
+//
+// BuiltinSkills is class "U" (wire_classes_test.go), so this must only run
+// off the Update goroutine — called from loadBuiltinSkillsCmd's tea.Cmd
+// body, never from Draw or a constructor. skillStatusItems (the render
+// path) reads integrationsState.builtinSkills instead, which
+// loadBuiltinSkillsCmd populates once this has run.
 func cachedBuiltinSkills(com *common.Common) []*skills.Skill {
 	builtinSkillsCache.once.Do(func() {
 		builtinSkillsCache.skills = com.Workspace.BuiltinSkills()
 	})
 	return builtinSkillsCache.skills
+}
+
+// loadBuiltinSkillsCmd fetches the shipped skills off-thread (see
+// cachedBuiltinSkills) and delivers them for the skills status panel to
+// render. Dispatched once from Init; the panel shows only
+// runtime-discovered skills for the one frame before this result lands.
+func loadBuiltinSkillsCmd(com *common.Common, owner *UI) tea.Cmd {
+	return func() tea.Msg {
+		return builtinSkillsLoadedMsg{uiOwned: uiOwned{owner: owner}, skills: cachedBuiltinSkills(com)}
+	}
 }
 
 // skillsInfo renders the skill discovery status section showing loaded and
@@ -106,11 +124,12 @@ func (is *integrationsState) skillStatusItems(com *common.Common) []skillStatusI
 		})
 	}
 
-	// Clone before sorting: cachedBuiltinSkills returns the process-global
+	// Clone before sorting: is.builtinSkills was populated (once, by
+	// loadBuiltinSkillsCmd) from cachedBuiltinSkills' process-global
 	// memoized slice, and this runs from a render path — sorting it in
 	// place would mutate shared state every other reader of the cache
 	// also sees.
-	builtin := slices.Clone(cachedBuiltinSkills(com))
+	builtin := slices.Clone(is.builtinSkills)
 	slices.SortStableFunc(builtin, func(a, b *skills.Skill) int {
 		return strings.Compare(a.Name, b.Name)
 	})

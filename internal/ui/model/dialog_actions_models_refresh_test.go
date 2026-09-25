@@ -17,14 +17,14 @@ func TestApplyProviderDialogAction_RefreshModelsRunsOffThread(t *testing.T) {
 	ws := &cmdDrivingWorkspace{
 		refreshModelsResults: []workspace.ModelRefreshResult{{ID: "custom", Added: 2}},
 	}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 
 	cmd, handled := m.applyProviderDialogAction(dialog.ActionRefreshModels{ProviderID: "custom"})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
 	require.Zero(t, ws.refreshModelsCalls, "refresh must not run synchronously")
 
-	msg := findAccountsMsg(t, cmd, func(msg tea.Msg) bool {
+	msg := findAccountsMsg(t, m, cmd, func(msg tea.Msg) bool {
 		_, ok := msg.(dialog.ActionRefreshModelsResult)
 		return ok
 	})

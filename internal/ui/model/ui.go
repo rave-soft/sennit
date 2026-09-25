@@ -350,8 +350,13 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 			states: make(map[string]workspace.LSPClientInfo),
 		},
 		integrationsState: integrationsState{
-			mcpStates:   make(map[string]workspace.MCPClientInfo),
-			skillStates: com.Workspace.SkillStates(),
+			mcpStates: make(map[string]workspace.MCPClientInfo),
+			// skillStates starts empty: SkillStates is class "U"
+			// (wire_classes_test.go), so it cannot be read synchronously
+			// here. loadSkillStatesCmd fetches it from Init instead, and
+			// the sidebar's skills section renders "None" for the one
+			// frame before that result lands — the same tradeoff
+			// ConfigProblems/ProjectNeedsInitialization make below.
 		},
 		notifyState: notifyState{
 			notifyBackend:       notification.NoopBackend{},
@@ -430,9 +435,15 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		}
 	} else if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
-		desiredState = uiInitialize
 	}
+	// The uiInitialize case (does this project need a first-run prompt?)
+	// used to be decided here too, via a synchronous
+	// Workspace.ProjectNeedsInitialization call — but that's class "U"
+	// (wire_classes_test.go), so it cannot run on this goroutine. New
+	// starts these projects on the landing screen instead, and
+	// checkProjectInitCmd (dispatched from Init) switches to uiInitialize
+	// once the async result lands, same as it would for any other
+	// project-initialization command run from the landing screen.
 
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
@@ -492,32 +503,76 @@ func (m *UI) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if cmd := m.checkConfigProblems(); cmd != nil {
+	if cmd := m.checkConfigProblemsCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	// Load the discovered skill states and shipped builtin skills async
+	// (see the integrationsState field's doc comment in New for why
+	// neither can be read there).
+	cmds = append(cmds, loadSkillStatesCmd(m.com, m), loadBuiltinSkillsCmd(m.com, m))
+	// Decide whether this project needs the first-run initialize screen
+	// async too (see New's doc comment on desiredState).
+	if cmd := m.checkProjectInitCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
 }
 
-// checkConfigProblems surfaces config.Doctor's findings as a single
+// loadSkillStatesCmd fetches the discovered skill states off-thread.
+// Skills that fail discovery are still reported in the returned slice
+// (state.State == skills.StateError), so a broken SKILL.md never needs
+// its own error handling here.
+func loadSkillStatesCmd(com *common.Common, owner *UI) tea.Cmd {
+	ws := com.Workspace
+	return func() tea.Msg {
+		return skillStatesLoadedMsg{uiOwned: uiOwned{owner: owner}, states: ws.SkillStates()}
+	}
+}
+
+// checkProjectInitCmd asks whether this project needs the first-run
+// initialize screen, off-thread. Only dispatched for the same case New
+// used to decide synchronously: not embedded, not onboarding (a project
+// with no configuration yet has nothing to initialize until it has one).
+func (m *UI) checkProjectInitCmd() tea.Cmd {
+	if m.embedded || m.state == uiOnboarding {
+		return nil
+	}
+	ws := m.com.Workspace
+	owner := m
+	return func() tea.Msg {
+		needsInit, _ := ws.ProjectNeedsInitialization()
+		return projectInitCheckMsg{uiOwned: uiOwned{owner: owner}, needsInit: needsInit}
+	}
+}
+
+// checkConfigProblemsCmd surfaces config.Doctor's findings as a single
 // startup toast (e.g. "3 config problems — /doctor for details") so a
 // misconfiguration like a sub-agent pinned to a nonexistent model is
 // visible instead of only a log line the user never reads. It only counts
 // static problems available immediately after config load; MCP server
 // health (which needs a live connection attempt) is picked up by the
 // /doctor dialog itself once servers have connected.
-func (m *UI) checkConfigProblems() tea.Cmd {
+//
+// ConfigProblems is class "U" (wire_classes_test.go), so the read itself
+// has to happen inside the returned closure — Init runs on the Update
+// goroutine, the same as New, and calling it there directly would be the
+// same violation moved one function over.
+func (m *UI) checkConfigProblemsCmd() tea.Cmd {
 	if m.state == uiOnboarding {
 		return nil
 	}
-	n := len(m.com.Workspace.ConfigProblems())
-	if n == 0 {
-		return nil
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		n := len(ws.ConfigProblems())
+		if n == 0 {
+			return nil
+		}
+		noun := "problem"
+		if n != 1 {
+			noun = "problems"
+		}
+		return util.NewWarnMsg(fmt.Sprintf("%d config %s — /doctor for details", n, noun))
 	}
-	noun := "problem"
-	if n != 1 {
-		noun = "problems"
-	}
-	return util.ReportWarn(fmt.Sprintf("%d config %s — /doctor for details", n, noun))
 }
 
 // loadInitialSession loads the initial session if one was specified on startup.
@@ -635,7 +690,9 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 		reflect.TypeFor[promptHistoryLoadedMsg](), reflect.TypeFor[pubsub.Event[workspace.LSPEvent]](),
 		reflect.TypeFor[pubsub.Event[skills.Event]](), reflect.TypeFor[dialog.ActionMCPAuthStarted](),
 		reflect.TypeFor[dialog.ActionMCPAuthComplete](), reflect.TypeFor[dialog.ActionMCPAuthErrored](),
-		reflect.TypeFor[pubsub.Event[workspace.MCPEvent]](), reflect.TypeFor[accountLabelsLoadedMsg]())
+		reflect.TypeFor[pubsub.Event[workspace.MCPEvent]](), reflect.TypeFor[accountLabelsLoadedMsg](),
+		reflect.TypeFor[skillStatesLoadedMsg](), reflect.TypeFor[projectInitCheckMsg](),
+		reflect.TypeFor[builtinSkillsLoadedMsg]())
 
 	register((*UI).updatePrompts,
 		reflect.TypeFor[closeDialogMsg](), reflect.TypeFor[pubsub.Event[permission.PermissionRequest]](),

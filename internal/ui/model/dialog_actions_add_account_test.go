@@ -17,7 +17,7 @@ func TestApplyProviderDialogAction_AddAccountForcesNewAccount(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 
 	_, handled := m.applyProviderDialogAction(dialog.ActionAddAccount{ProviderID: dialog.CodexProviderID})
 	require.True(t, handled)
@@ -35,7 +35,7 @@ func TestApplyProviderDialogAction_ConfigureProviderDoesNotForceNewAccount(t *te
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 
 	_, handled := m.applyProviderDialogAction(dialog.ActionConfigureProvider{ProviderID: dialog.CodexProviderID})
 	require.True(t, handled)

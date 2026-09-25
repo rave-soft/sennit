@@ -17,7 +17,7 @@ import (
 // keep the frame from returning to its original bytes on cancel.
 func TestThemePreview_RepaintsWholeScreen(t *testing.T) {
 	ws := &cmdDrivingWorkspace{}
-	m := newCmdDrivenGoldenUI(ws)
+	m := newCmdDrivenGoldenUI(t, ws)
 
 	m.openDialog(dialog.ThemeID)
 	require.True(t, m.dialog.ContainsDialog(dialog.ThemeID))

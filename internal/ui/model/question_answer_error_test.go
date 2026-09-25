@@ -35,7 +35,7 @@ func TestQuestionAnswer_ErrorReportedAndFormReopened(t *testing.T) {
 
 	answerErr := errors.New("workspace unreachable")
 	ws := &cmdDrivingWorkspace{agentReady: true, questionAnswerErr: answerErr}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	batch := testQuestionBatch("batch-answer-err")
 	u.openBatchFormDialog(batch)
@@ -45,7 +45,7 @@ func TestQuestionAnswer_ErrorReportedAndFormReopened(t *testing.T) {
 	yes := true
 	cmd := form.OnAnswer([]question.Answer{{QuestionID: "q1", Yes: &yes}})
 	require.NotNil(t, cmd)
-	msg := cmd()
+	msg := runGuardedCmd(u, cmd)
 
 	// The form is gone by the time the result lands, matching the real
 	// flow (keypress.go clears activeInline before running this Cmd).
@@ -58,7 +58,7 @@ func TestQuestionAnswer_ErrorReportedAndFormReopened(t *testing.T) {
 		if c == nil {
 			continue
 		}
-		if info, ok := c().(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+		if info, ok := runGuardedCmd(u, c).(util.InfoMsg); ok && info.Type == util.InfoTypeError {
 			reported = info
 			break
 		}
@@ -78,7 +78,7 @@ func TestQuestionCancel_ErrorReported(t *testing.T) {
 
 	cancelErr := errors.New("workspace unreachable")
 	ws := &cmdDrivingWorkspace{agentReady: true, questionCancelErr: cancelErr}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	batch := testQuestionBatch("batch-cancel-err")
 	u.openBatchFormDialog(batch)
@@ -87,7 +87,7 @@ func TestQuestionCancel_ErrorReported(t *testing.T) {
 
 	cmd := form.OnCancel()
 	require.NotNil(t, cmd)
-	msg := cmd()
+	msg := runGuardedCmd(u, cmd)
 	u.activeInline = nil
 
 	cmds, _ := u.updatePrompts(msg, nil)
@@ -97,7 +97,7 @@ func TestQuestionCancel_ErrorReported(t *testing.T) {
 		if c == nil {
 			continue
 		}
-		if info, ok := c().(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+		if info, ok := runGuardedCmd(u, c).(util.InfoMsg); ok && info.Type == util.InfoTypeError {
 			reported = info
 			break
 		}
@@ -118,7 +118,7 @@ func TestQuestionAnswer_NoErrorDoesNotReopenForm(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	batch := testQuestionBatch("batch-ok")
 	u.openBatchFormDialog(batch)
@@ -128,5 +128,5 @@ func TestQuestionAnswer_NoErrorDoesNotReopenForm(t *testing.T) {
 	yes := true
 	cmd := form.OnAnswer([]question.Answer{{QuestionID: "q1", Yes: &yes}})
 	require.NotNil(t, cmd)
-	require.Nil(t, cmd(), "a successful answer must not produce a result message")
+	require.Nil(t, runGuardedCmd(u, cmd), "a successful answer must not produce a result message")
 }

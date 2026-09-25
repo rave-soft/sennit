@@ -190,7 +190,7 @@ func TestQuestionForm_OnAnswerAndOnCancelDeferToCmd(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 	u.openBatchFormDialog(question.Request{
 		ID: "batch-original",
 		Questions: []question.Question{{
@@ -213,7 +213,7 @@ func TestQuestionForm_OnAnswerAndOnCancelDeferToCmd(t *testing.T) {
 			Text: "Still ready?",
 		}},
 	})
-	cmd()
+	runGuardedCmd(u, cmd)
 	require.Equal(t, 1, ws.questionAnswerCalls, "the answer must still reach the workspace once the cmd runs")
 	require.Equal(t, "batch-original", ws.questionAnswerBatchID, "the deferred callback must retain the form's batch ID")
 	require.Len(t, ws.questionAnswerResponse, 1)
@@ -234,6 +234,6 @@ func TestQuestionForm_OnAnswerAndOnCancelDeferToCmd(t *testing.T) {
 	require.NotNil(t, cancelCmd, "cancel must hand back a cmd instead of calling the workspace inline")
 	require.Zero(t, ws.questionCancelCalls, "OnCancel must not call the workspace before its cmd runs")
 
-	cancelCmd()
+	runGuardedCmd(u, cancelCmd)
 	require.Equal(t, 1, ws.questionCancelCalls)
 }

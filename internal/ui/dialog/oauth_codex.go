@@ -109,16 +109,22 @@ func (m *OAuthCodex) proxyURL() string {
 	return m.com.Workspace.OAuthConfiguredProxy(CodexProviderID)
 }
 
-// setProxyURL validates the entered value up front: a bad proxy would
+// validateProxyURL checks the entered value up front: a bad proxy would
 // otherwise surface as a confusing sign-in failure a few seconds later.
-func (m *OAuthCodex) setProxyURL(proxyURL string) error {
-	if m.com != nil && m.com.Workspace != nil {
-		if err := m.com.Workspace.OAuthValidateProxy(CodexProviderID, proxyURL); err != nil {
-			return err
-		}
+// OAuthValidateProxy is class "U" (wire_classes_test.go), so this is only
+// ever called from handleProxyKey's tea.Cmd, never from HandleMsg directly.
+func (m *OAuthCodex) validateProxyURL(proxyURL string) error {
+	if m.com == nil || m.com.Workspace == nil {
+		return nil
 	}
+	return m.com.Workspace.OAuthValidateProxy(CodexProviderID, proxyURL)
+}
+
+// applyProxyURL stores an already-validated proxy value. A pure field
+// write — called only from HandleMsg (oauthProxyAcceptedMsg), never from a
+// tea.Cmd, so it never races initiateAuth/startPolling reading m.proxy.
+func (m *OAuthCodex) applyProxyURL(proxyURL string) {
 	m.proxy = proxyURL
-	return nil
 }
 
 // initiateAuth starts the flow, which binds the callback port before

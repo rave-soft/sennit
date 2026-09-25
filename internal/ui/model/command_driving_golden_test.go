@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,11 +19,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newCmdDrivenGoldenUI(ws *cmdDrivingWorkspace) *UI {
+// newCmdDrivenGoldenUI builds a UI through the real New constructor (unlike
+// newCmdDrivenUI, which hand-builds the struct) so golden renders exercise
+// New's own field setup. The workspace is guarded the same way
+// newCmdDrivenUI's is: New must not call a U/S/H method synchronously, and
+// this constructor never calls Init, so the guard stays on for the whole
+// test — there is no cmd execution span to clear it for.
+func newCmdDrivenGoldenUI(t *testing.T, ws *cmdDrivingWorkspace) *UI {
+	t.Helper()
+	on := &atomic.Bool{}
+	on.Store(true)
 	// Pin the platform: goldens were recorded with ctrl+ bindings, and the
 	// footer/help text they capture would otherwise render super+ on a
 	// macOS CI runner (see keys.go's darwin rewrite in configuredKeyMap).
-	m := New(common.DefaultCommon(context.Background(), ws), "", false, withGOOS("linux"))
+	m := New(common.DefaultCommon(context.Background(), newUpdateGoroutineGuard(t, ws, on)), "", false, withGOOS("linux"))
+	registerGuardFlag(m, on)
 	m.state = uiChat
 	m.focus = uiFocusEditor
 	m.lay.width = 140
@@ -52,6 +63,12 @@ func renderDashboardScreen(r *Root) []byte {
 	return []byte(canvas.Render())
 }
 
+// runRootCmdTree drives r.Update like the real Bubble Tea runtime. cmd
+// bodies run through runGuardedCmd(r.main, cmd) rather than being called
+// bare, so the update-goroutine guard on r.main's workspace (registered by
+// newCmdDrivenGoldenUI) doesn't mistake a genuine tea.Cmd for a synchronous
+// call on Update — mirrors runCmdTree's own use of runGuardedCmd for a bare
+// *UI.
 func runRootCmdTree(r *Root, cmd tea.Cmd) *Root {
 	if cmd == nil {
 		return r
@@ -60,7 +77,7 @@ func runRootCmdTree(r *Root, cmd tea.Cmd) *Root {
 	for len(stack) > 0 {
 		cmd := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		msg := cmd()
+		msg := runGuardedCmd(r.main, cmd)
 		if cmds, ok := isCommandSliceWrapper(msg); ok {
 			for _, cmd := range slices.Backward(cmds) {
 				stack = append(stack, cmd)
@@ -79,7 +96,7 @@ func runRootCmdTree(r *Root, cmd tea.Cmd) *Root {
 func TestCmdDrivingGolden(t *testing.T) {
 	t.Run("open_models", func(t *testing.T) {
 		ws := &cmdDrivingWorkspace{agentReady: true}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 
 		_, cmd := m.Update(tea.KeyPressMsg{Mod: tea.ModCtrl, Code: 'l'})
 		runCmdTree(m, cmd, nil)
@@ -90,7 +107,7 @@ func TestCmdDrivingGolden(t *testing.T) {
 
 	t.Run("send_message", func(t *testing.T) {
 		ws := &cmdDrivingWorkspace{agentReady: true}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 		m.editor.textarea.SetValue("ship the golden tests")
 
 		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -112,7 +129,7 @@ func TestCmdDrivingGolden(t *testing.T) {
 
 	t.Run("permission_flow", func(t *testing.T) {
 		ws := &cmdDrivingWorkspace{agentReady: true}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 		perm := permission.PermissionRequest{ID: "permission-golden", ToolCallID: "tool-golden", ToolName: "bash"}
 
 		_, cmd := m.Update(pubsub.Event[permission.PermissionRequest]{Type: pubsub.CreatedEvent, Payload: perm})
@@ -149,7 +166,7 @@ func TestCmdDrivingGolden(t *testing.T) {
 				},
 			},
 		}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 
 		_, cmd := m.Update(requestSessionLoad{sessionID: "s-loaded"})
 		runCmdTree(m, cmd, nil)
@@ -169,7 +186,7 @@ func TestCmdDrivingGolden(t *testing.T) {
 				{ID: "task-golden", Name: "Ordinary task", Kind: "task", Status: "running", Goal: "render shared work"},
 			},
 		}
-		m := newCmdDrivenGoldenUI(ws)
+		m := newCmdDrivenGoldenUI(t, ws)
 		m.lay.width, m.lay.height = 100, 24
 		r := &Root{
 			com:             m.com,

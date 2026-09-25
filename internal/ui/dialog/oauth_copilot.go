@@ -25,15 +25,14 @@ func NewOAuthCopilot(
 	model *config.SelectedModel,
 	forceNewAccount bool,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, &OAuthCopilot{com: com, proxy: configuredCopilotProxy(com)}, forceNewAccount)
+	return newOAuth(com, isOnboarding, provider, model, &OAuthCopilot{com: com}, forceNewAccount)
 }
 
 // configuredCopilotProxy asks the workspace what proxy Copilot is already
-// configured with. It is called from NewOAuthCopilot, which runs on the
-// Update goroutine, and never again afterward: initiateAuth and
-// startPolling run off tea.Cmds on their own goroutines, and reading
-// config there would race with the dialog — see internal/ui/AGENTS.md's
-// rule on capturing fields by value instead of the struct itself.
+// configured with. OAuthConfiguredProxy is a "U" method (wire_classes_test.go),
+// so this must run off the Update goroutine; it is called from
+// initiateAuth, which already runs as a tea.Cmd, rather than from
+// NewOAuthCopilot itself.
 func configuredCopilotProxy(com *common.Common) string {
 	// Common carries no workspace in tests, so its absence is a
 	// legitimate "nothing configured" here.
@@ -45,11 +44,9 @@ func configuredCopilotProxy(com *common.Common) string {
 
 type OAuthCopilot struct {
 	com *common.Common
-	// proxy is snapshot once at construction (see configuredCopilotProxy)
-	// and never written again: initiateAuth/startPolling run off the
-	// Update goroutine as tea.Cmds, and writing it from there would race
-	// with a read from another — see internal/ui/AGENTS.md's rule on
-	// capturing fields by value.
+	// proxy is fetched by initiateAuth, the first tea.Cmd this dialog
+	// runs, and read afterward by currentProxy once the flow has
+	// completed — see the mu doc below for why the write is guarded.
 	proxy string
 
 	// flow, initiateCancel, pollCancel and stopped are all touched from
@@ -83,8 +80,12 @@ func (m *OAuthCopilot) name() string {
 
 // currentProxy implements [oauthProxyUser]; see OAuthCodex.currentProxy.
 // Copilot's own CompleteOAuth ignores it today, but passing it keeps every
-// sign-in's completion shaped the same way.
+// sign-in's completion shaped the same way. Only called after initiateAuth
+// has returned (the flow reached OAuthStateDisplay or later), so the
+// mu-guarded write below always happens-before this read.
 func (m *OAuthCopilot) currentProxy() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.proxy
 }
 
@@ -100,11 +101,19 @@ func (m *OAuthCopilot) initiateAuth() tea.Msg {
 	m.initiateCancel = cancel
 	m.mu.Unlock()
 
+	// OAuthConfiguredProxy is a network/config read (class "U"), so it
+	// happens here rather than in NewOAuthCopilot: initiateAuth is
+	// already a tea.Cmd, never called on the Update goroutine.
+	proxy := configuredCopilotProxy(m.com)
+	m.mu.Lock()
+	m.proxy = proxy
+	m.mu.Unlock()
+
 	// The device-code request's own timeout lives with the flow, in the
 	// workspace implementation; this context only carries cancellation.
 	// Copilot has no login on disk to reuse, so there is nothing for a
 	// deliberate "login account" to skip: false, always.
-	result, flow, err := m.com.Workspace.StartOAuth(ctx, CopilotProviderID, m.proxy, false)
+	result, flow, err := m.com.Workspace.StartOAuth(ctx, CopilotProviderID, proxy, false)
 
 	m.mu.Lock()
 	m.initiateCancel = nil

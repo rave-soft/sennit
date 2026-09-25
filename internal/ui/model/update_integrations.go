@@ -20,8 +20,9 @@ import (
 // Embedded anonymously (by value) on UI so its fields keep promoting
 // unchanged (m.mcpStates, ...); see widgets.go for why.
 type integrationsState struct {
-	mcpStates   map[string]workspace.MCPClientInfo
-	skillStates []*skills.SkillState
+	mcpStates     map[string]workspace.MCPClientInfo
+	skillStates   []*skills.SkillState
+	builtinSkills []*skills.Skill
 
 	// mcpVersion / skillsVersion bump every time mcpStates / skillStates are
 	// replaced. The sidebar cache (sidebar.go) keys off these instead of
@@ -65,6 +66,34 @@ type mcpStateChangedMsg struct {
 	uiOwned
 
 	states map[string]workspace.MCPClientInfo
+}
+
+// skillStatesLoadedMsg carries the initial skill discovery result kicked
+// off by loadSkillStatesCmd (Init). uiOwned: routed by active screen the
+// same way userCommandsLoadedMsg is, so a thread's own embedded UI applies
+// its own load rather than the main screen's (or vice versa).
+type skillStatesLoadedMsg struct {
+	uiOwned
+
+	states []*skills.SkillState
+}
+
+// builtinSkillsLoadedMsg carries the shipped-skills result kicked off by
+// loadBuiltinSkillsCmd (Init). uiOwned for the same reason
+// skillStatesLoadedMsg is.
+type builtinSkillsLoadedMsg struct {
+	uiOwned
+
+	skills []*skills.Skill
+}
+
+// projectInitCheckMsg carries the async result of checkProjectInitCmd
+// (Init), telling the UI whether to switch to the first-run initialize
+// screen. uiOwned for the same reason skillStatesLoadedMsg is.
+type projectInitCheckMsg struct {
+	uiOwned
+
+	needsInit bool
 }
 
 // updateIntegrations handles the LSP, custom-command, and MCP branches of
@@ -121,6 +150,25 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 
 	case accountLabelsLoadedMsg:
 		m.applyAccountLabelsLoaded(msg)
+
+	case skillStatesLoadedMsg:
+		m.skillStates = msg.states
+		m.skillsVersion++
+
+	case builtinSkillsLoadedMsg:
+		m.builtinSkills = msg.skills
+		m.skillsVersion++
+
+	case projectInitCheckMsg:
+		// Only switch if the user hasn't already moved off landing (e.g.
+		// by loading a session) while this check was in flight — the
+		// synchronous version this replaces could never race a user
+		// action this way, so this guard keeps the same "first thing
+		// shown" behavior instead of clobbering wherever they've since
+		// navigated.
+		if msg.needsInit && m.state == uiLanding {
+			m.setState(uiInitialize, uiFocusEditor)
+		}
 
 	case promptHistoryLoadedMsg:
 		m.editor.promptHistory.load(msg.messages)

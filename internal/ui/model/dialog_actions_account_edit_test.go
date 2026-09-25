@@ -10,19 +10,24 @@ import (
 )
 
 // findAccountsMsg runs cmd (unwrapping a tea.BatchMsg if that's what it
-// produces) and returns the first message matching match.
-func findAccountsMsg(t *testing.T, cmd tea.Cmd, match func(tea.Msg) bool) tea.Msg {
+// produces) and returns the first message matching match. It runs cmd
+// through runGuardedCmd rather than calling it bare, so these assertions
+// keep working under the guarded UIs built by newCmdDrivenUI (see
+// wsguard_test.go) — cmd's own body is allowed to call U/S/H methods,
+// which is exactly what these tests are checking happens off the Update
+// goroutine.
+func findAccountsMsg(t *testing.T, m *UI, cmd tea.Cmd, match func(tea.Msg) bool) tea.Msg {
 	t.Helper()
 	if cmd == nil {
 		return nil
 	}
-	msg := cmd()
+	msg := runGuardedCmd(m, cmd)
 	if match(msg) {
 		return msg
 	}
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, c := range batch {
-			if found := findAccountsMsg(t, c, match); found != nil {
+			if found := findAccountsMsg(t, m, c, match); found != nil {
 				return found
 			}
 		}
@@ -37,7 +42,7 @@ func TestApplyProviderDialogAction_OpenAccountEdit_OpensForm(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 
 	account := accounts.Account{ID: "acct-1", Label: "Work"}
 	_, handled := m.applyProviderDialogAction(dialog.ActionOpenAccountEdit{
@@ -58,7 +63,7 @@ func TestApplyProviderDialogAction_SubmitAccountForm_CallsUpdateAccountOffThread
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 
 	account := accounts.Account{ID: "acct-1", Label: "Renamed", ProxyURL: "http://proxy:8080"}
 	cmd, handled := m.applyProviderDialogAction(dialog.ActionSubmitAccountForm{
@@ -68,7 +73,7 @@ func TestApplyProviderDialogAction_SubmitAccountForm_CallsUpdateAccountOffThread
 	require.NotNil(t, cmd)
 	require.Zero(t, ws.updateAccountCalls, "UpdateAccount must not run synchronously")
 
-	msg := findAccountsMsg(t, cmd, func(msg tea.Msg) bool {
+	msg := findAccountsMsg(t, m, cmd, func(msg tea.Msg) bool {
 		_, ok := msg.(dialog.ActionAccountFormResult)
 		return ok
 	})
@@ -87,7 +92,7 @@ func TestApplyProviderDialogAction_AccountSaved_ClosesFormAndReloadsList(t *test
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{accs: []accounts.Account{{ID: "acct-1", Label: "Renamed"}}}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	m.dialog.OpenDialog(dialog.NewAccountForm(m.com, "test-provider", accounts.Account{ID: "acct-1"}, false))
 
 	cmd, handled := m.applyProviderDialogAction(dialog.ActionAccountSaved{ProviderID: "test-provider"})
@@ -95,7 +100,7 @@ func TestApplyProviderDialogAction_AccountSaved_ClosesFormAndReloadsList(t *test
 	require.False(t, m.dialog.ContainsDialog(dialog.AccountFormID), "the form must close on save")
 	require.NotNil(t, cmd)
 
-	msg := findAccountsMsg(t, cmd, func(msg tea.Msg) bool {
+	msg := findAccountsMsg(t, m, cmd, func(msg tea.Msg) bool {
 		_, ok := msg.(dialog.ActionAccountsLoaded)
 		return ok
 	})
@@ -112,7 +117,7 @@ func TestApplyProviderDialogAction_RequestAccountRemoval_OpensConfirm(t *testing
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 
 	account := accounts.Account{ID: "acct-1", Label: "Work"}
 	_, handled := m.applyProviderDialogAction(dialog.ActionRequestAccountRemoval{
@@ -130,7 +135,7 @@ func TestApplyProviderDialogAction_RemoveAccountConfirmed_RemovesAndReloadsList(
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{accs: []accounts.Account{{ID: "acct-2", Label: "Personal"}}}
-	m := newCmdDrivenUI(ws)
+	m := newCmdDrivenUI(t, ws)
 	m.dialog.OpenDialog(dialog.NewAccountRemoveConfirm(m.com, "test-provider", accounts.Account{ID: "acct-1", Label: "Work"}))
 
 	cmd, handled := m.applyProviderDialogAction(dialog.ActionRemoveAccountConfirmed{
@@ -141,7 +146,7 @@ func TestApplyProviderDialogAction_RemoveAccountConfirmed_RemovesAndReloadsList(
 	require.Zero(t, ws.removeAccountCalls, "RemoveAccount must not run synchronously")
 	require.NotNil(t, cmd)
 
-	msg := findAccountsMsg(t, cmd, func(msg tea.Msg) bool {
+	msg := findAccountsMsg(t, m, cmd, func(msg tea.Msg) bool {
 		_, ok := msg.(dialog.ActionAccountsLoaded)
 		return ok
 	})

@@ -336,6 +336,14 @@ encode → decode → `require.Equal`. Новый тип без образца �
 
 ### PR 0.4. UI не зовёт воркспейс из `Update`/`View`
 
+**Уточнено 2026-09-26.** Методы класса C в клиенте PR 1.4 читают локальный
+кэш и сети не касаются, поэтому их синхронные вызовы из `Update`/`View`
+остаются. PR 0.4 убирает синхронные вызовы классов U, S и H и добавляет
+тест-страж. Новые события (`BackgroundJobsChanged`, `PlanUsageChanged`,
+занятость сессий, `ConfigChanged`) переезжают в PR 1.2/1.4, где у них
+появляется потребитель: событие, которое никто не слушает, было бы мёртвым
+механизмом. Текст ниже сохранён как исходный замысел.
+
 - Новые события, публикуемые `app` и переводимые `translateEvent`:
   `ConfigChanged` (снимок, см. PR 0.5), `BackgroundJobsChanged`,
   `PlanUsageChanged{ProviderID, Usage}`, `SessionBusyChanged{SessionID,

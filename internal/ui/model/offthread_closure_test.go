@@ -27,7 +27,7 @@ func TestAttachSkillCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	cmd := attachSkill(u.com, "skill-1", "Skill One")
 	require.NotNil(t, cmd)
@@ -35,7 +35,7 @@ func TestAttachSkillCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		cmd()
+		runGuardedCmd(u, cmd)
 	}()
 
 	// Concurrently swap the workspace the pre-fix closure used to read
@@ -52,7 +52,7 @@ func TestStartLSPsCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	cmd := startLSPs(u.com, []string{"main.go"})
 	require.NotNil(t, cmd)
@@ -60,7 +60,7 @@ func TestStartLSPsCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		cmd()
+		runGuardedCmd(u, cmd)
 	}()
 
 	u.com.Workspace = &cmdDrivingWorkspace{agentReady: true}
@@ -75,7 +75,7 @@ func TestLoadMCPromptsCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	cmd := loadMCPromptsCmd(u.com, u)
 	require.NotNil(t, cmd)
@@ -83,7 +83,7 @@ func TestLoadMCPromptsCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		cmd()
+		runGuardedCmd(u, cmd)
 	}()
 
 	u.com.Workspace = &cmdDrivingWorkspace{agentReady: true}
@@ -98,7 +98,7 @@ func TestHandleStateChangedCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(u)
 
 	cmd := u.handleStateChanged()
@@ -118,7 +118,7 @@ func TestHandleStateChangedCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		leaf()
+		runGuardedCmd(u, leaf)
 	}()
 
 	u.com.Workspace = &cmdDrivingWorkspace{agentReady: true}
@@ -137,7 +137,7 @@ func TestApplySessionDialogAction_SummarizeDoesNotReadModelOffGoroutine(t *testi
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{agentReady: true}
-	u := newCmdDrivenUI(ws)
+	u := newCmdDrivenUI(t, ws)
 
 	cmd, handled := u.applySessionDialogAction(dialog.ActionSummarize{SessionID: "s1"})
 	require.True(t, handled)
@@ -146,7 +146,7 @@ func TestApplySessionDialogAction_SummarizeDoesNotReadModelOffGoroutine(t *testi
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		cmd()
+		runGuardedCmd(u, cmd)
 	}()
 
 	u.com.Workspace = &cmdDrivingWorkspace{agentReady: true}
