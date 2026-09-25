@@ -533,8 +533,9 @@ func (w *cmdDrivingWorkspace) QuestionCancel(batchID string) (bool, error) {
 	}
 	return false, nil
 }
-func (w *cmdDrivingWorkspace) Subscribe(func(any)) {}
-func (w *cmdDrivingWorkspace) Shutdown()           {}
+func (w *cmdDrivingWorkspace) Subscribe(func(any))            {}
+func (w *cmdDrivingWorkspace) SubscribeWith(func(any)) func() { return func() {} }
+func (w *cmdDrivingWorkspace) Shutdown()                      {}
 
 func (w *cmdDrivingWorkspace) ListAccounts(string) ([]accounts.Account, error) {
 	w.listAccountsCalls++

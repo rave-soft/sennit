@@ -18,10 +18,6 @@ func (w *AppWorkspace) WorkingDir() string {
 	return w.store.WorkingDir()
 }
 
-func (w *AppWorkspace) Resolver() config.VariableResolver {
-	return w.store.Resolver()
-}
-
 // -- Config mutations --
 
 func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {

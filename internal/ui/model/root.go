@@ -54,7 +54,7 @@ type (
 type worktreeTransferMsg struct {
 	generation uint64
 	name       string
-	ws         common.Workspace
+	ws         workspace.Workspace
 	release    func()
 	err        error
 	exit       bool
@@ -74,17 +74,6 @@ const (
 	screenDashboard
 	screenThread
 )
-
-// threadEventSubscriber is implemented by concrete workspaces returned from
-// AttachThread. It is not part of workspace.Workspace itself — SubscribeWith
-// is a second,
-// independently stoppable subscription, distinct from the primary
-// ws.Subscribe(program) pump cmd/root.go starts for the main workspace —
-// so a thread's own event stream can be torn down on detach without
-// disturbing the main one.
-type threadEventSubscriber interface {
-	SubscribeWith(send func(any)) func()
-}
 
 // threadAttachment holds everything tied to the thread currently attached
 // for viewing: its own workspace, an embedded UI over that workspace, and
@@ -246,7 +235,7 @@ type threadAttachedMsg struct {
 	id        string
 	sessionID string
 	name      string
-	ws        common.Workspace
+	ws        workspace.Workspace
 	detach    func()
 	err       error
 	// activateErr is set when ActivateThread failed to revive the thread.
@@ -566,15 +555,16 @@ func (r *Root) handleWorktreeTransfer(msg worktreeTransferMsg) (tea.Model, tea.C
 		name = ""
 	}
 	r.main.crumbRoot = name
-	stop := func() {}
-	if sub, ok := msg.ws.(threadEventSubscriber); ok {
-		generation := msg.generation
-		stop = sub.SubscribeWith(func(inner any) {
-			if r.send != nil {
-				r.send(worktreeEventMsg{generation: generation, inner: inner})
-			}
-		})
-	}
+	// SubscribeWith is a second, independently stoppable subscription,
+	// distinct from the primary ws.Subscribe(program) pump cmd/root.go
+	// starts for the main workspace — so a worktree's own event stream
+	// can be torn down on transfer without disturbing the main one.
+	generation := msg.generation
+	stop := msg.ws.SubscribeWith(func(inner any) {
+		if r.send != nil {
+			r.send(worktreeEventMsg{generation: generation, inner: inner})
+		}
+	})
 	// The release callbacks reap whichever App no longer owns the session,
 	// so the one the previous attachment held is run here rather than
 	// dropped: after an exit it is what shuts the worktree App down, and
@@ -804,15 +794,16 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	com := common.DefaultCommon(r.com.Context(), msg.ws)
 	childUI := New(com, msg.sessionID, false, WithEmbedded(), WithBreadcrumbRoot(msg.name))
 
-	stop := func() {}
-	if sub, ok := msg.ws.(threadEventSubscriber); ok {
-		id := msg.id
-		stop = sub.SubscribeWith(func(m any) {
-			if r.send != nil {
-				r.send(threadEventMsg{threadID: id, inner: m})
-			}
-		})
-	}
+	// SubscribeWith is a second, independently stoppable subscription,
+	// distinct from the primary ws.Subscribe(program) pump cmd/root.go
+	// starts for the main workspace — so a thread's own event stream can
+	// be torn down on detach without disturbing the main one.
+	id := msg.id
+	stop := msg.ws.SubscribeWith(func(m any) {
+		if r.send != nil {
+			r.send(threadEventMsg{threadID: id, inner: m})
+		}
+	})
 
 	// Tear down whatever was attached before installing this one — a
 	// second threadAttachedMsg for the same thread (double Enter) must not

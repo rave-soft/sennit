@@ -112,28 +112,15 @@ func (w *attachedThreadWorkspace) parentAttempt(answer func(*AppWorkspace) (bool
 
 // SubscribeWith forwards to the wrapped workspace's own subscription.
 //
-// It has to be spelled out. The embedded field is the Workspace
-// *interface*, and SubscribeWith is not part of it — it is a concrete
-// method on AppWorkspace — so nothing is promoted and this wrapper does
-// not satisfy the subscriber interface the TUI type-asserts for when
-// attaching (see the router's handleThreadAttached). That assertion
-// failing is silent: the attach succeeds and the thread's screen simply
-// never receives an event again. Its chat stopped growing as its agent
-// worked, and only leaving and re-entering showed what had happened,
-// because that re-reads the messages instead of being told about them.
-//
-// The type assertion is kept rather than widened to the Workspace
-// interface for the reason SubscribeWith is not on it: this is a second,
-// independently stoppable subscription that only a workspace backed by a
-// real App can offer.
+// SubscribeWith is now part of workspace.Workspace (previously it was
+// reached only by a type assertion outside the interface, which failed
+// silently — the attach succeeded and the thread's screen simply never
+// received an event again; see workspace.EventSubscriber's doc comment),
+// so the embedded field promotes it automatically. This method is spelled
+// out anyway, purely as documentation that the promoted behavior is the
+// intended one here.
 func (w *attachedThreadWorkspace) SubscribeWith(send func(any)) func() {
-	sub, ok := w.Workspace.(interface {
-		SubscribeWith(func(any)) func()
-	})
-	if !ok {
-		return func() {}
-	}
-	return sub.SubscribeWith(send)
+	return w.Workspace.SubscribeWith(send)
 }
 
 func (w *attachedThreadWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {

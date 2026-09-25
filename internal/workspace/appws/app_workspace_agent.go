@@ -11,7 +11,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
@@ -532,11 +531,4 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	}()
 
 	return out, nil
-}
-
-// ResetAgentToolCache clears the built-in tools' process-wide regex
-// caches (see tools.ResetCache), so a session started after this one does
-// not reuse compiled patterns left over from it.
-func (w *AppWorkspace) ResetAgentToolCache() {
-	tools.ResetCache()
 }

@@ -1384,7 +1384,6 @@ func (m *UI) newSession() tea.Cmd {
 	m.editor.historyReset()
 	ws := m.com.Workspace
 	ctx := m.com.Context()
-	ws.ResetAgentToolCache()
 	return tea.Batch(
 		func() tea.Msg {
 			if err := ws.LSPStopAll(ctx); err != nil {

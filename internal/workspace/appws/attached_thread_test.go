@@ -11,53 +11,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// threadEventSubscriber mirrors the interface the TUI router type-asserts
-// for when it attaches to a thread (see internal/ui/model's Root). It is
-// restated here because that assertion is the whole contract: it lives in
-// another package, it is silent when it fails, and what it costs when it
-// fails is every live event on the thread's screen.
-type threadEventSubscriber interface {
-	SubscribeWith(send func(any)) func()
-}
+// The wrapper AttachThread returns must still deliver events through
+// SubscribeWith. It embeds the Workspace interface, which now carries
+// SubscribeWith directly (no type assertion needed, and no gap for an
+// implementation to silently fall through — see workspace.EventSubscriber's
+// doc comment for the bug that used to cause). This asserts the forward is
+// real, not just present: the send callback identity must reach the
+// wrapped workspace, and stop must reach its stopped flag — a wrapper that
+// swallows both (returning an unconnected no-op) would pass a weaker
+// "stop is non-nil" check but not this one.
+func TestAttachedThreadWorkspace_DeliversEventsThroughSubscribeWith(t *testing.T) {
+	inner := &subscribeStubWorkspace{}
+	var ws workspace.Workspace = &attachedThreadWorkspace{Workspace: inner}
 
-// The wrapper AttachThread returns must still offer the subscription.
-//
-// It embeds the Workspace interface, which does not carry SubscribeWith —
-// that is a concrete AppWorkspace method — so nothing is promoted and the
-// wrapper silently stopped satisfying this. The attach still succeeded and
-// the thread's screen simply never received another event: its chat froze
-// while its agent worked, and only leaving and re-entering showed what had
-// happened.
-func TestAttachedThreadWorkspace_StillOffersSubscribeWith(t *testing.T) {
-	var ws workspace.Workspace = &attachedThreadWorkspace{Workspace: &subscribeStubWorkspace{}}
-
-	sub, ok := ws.(threadEventSubscriber)
-	require.True(t, ok,
-		"the attached-thread wrapper must satisfy the subscriber interface the router asserts for")
-
-	stop := sub.SubscribeWith(func(any) {})
+	var received any
+	stop := ws.SubscribeWith(func(m any) { received = m })
 	require.NotNil(t, stop)
-	stop()
-}
+	require.NotNil(t, inner.send, "SubscribeWith must forward the send callback to the wrapped workspace")
 
-// A wrapped workspace that cannot subscribe (a read-only one, say) must
-// degrade to a no-op rather than panic: the caller always calls stop.
-func TestAttachedThreadWorkspace_SubscribeWithoutSupportIsANoop(t *testing.T) {
-	ws := &attachedThreadWorkspace{Workspace: &plainStubWorkspace{}}
+	inner.send("hello")
+	require.Equal(t, "hello", received, "an event sent through the wrapped workspace must reach the caller's callback")
 
-	stop := ws.SubscribeWith(func(any) {})
-	require.NotNil(t, stop)
 	stop()
+	require.True(t, inner.stopped, "stop must reach the wrapped workspace's own stop")
 }
 
 // subscribeStubWorkspace is a Workspace that can subscribe, standing in
 // for the thread's own AppWorkspace.
 type subscribeStubWorkspace struct {
 	workspace.Workspace
+	send    func(any)
 	stopped bool
 }
 
-func (s *subscribeStubWorkspace) SubscribeWith(func(any)) func() {
+func (s *subscribeStubWorkspace) SubscribeWith(send func(any)) func() {
+	s.send = send
 	return func() { s.stopped = true }
 }
 

@@ -285,14 +285,6 @@ type AgentController interface {
 	// prompt with; anything that can show one should leave it false and
 	// let permission requests surface normally.
 	AgentRunStream(ctx context.Context, sessionID, prompt string, opts AgentRunOptions) (<-chan AgentRunEvent, error)
-	// ResetAgentToolCache clears process-wide caches the agent's built-in
-	// tools keep (e.g. compiled grep/glob regexes), so a fresh session
-	// does not inherit state left over from a previous one. It is a
-	// method on the interface, rather than a free function reaching into
-	// internal/agent/tools directly, so the contract package never needs
-	// to import that package (see app_workspace_agent.go's
-	// implementation in internal/workspace/appws).
-	ResetAgentToolCache()
 }
 
 // PermissionResolver resolves or inspects pending tool-permission requests.
@@ -444,10 +436,6 @@ type AccountUsage interface {
 	// whether it quotes a usage snapshot, and when it rotates — so the
 	// settings dialog can render only the fields that apply.
 	AccountCapabilities(providerID string) AccountCapabilities
-}
-
-type ConfigResolver interface {
-	Resolver() config.VariableResolver
 }
 
 type PreferredModelUpdater interface {
@@ -804,6 +792,19 @@ type BackgroundJobs interface {
 
 type EventSubscriber interface {
 	Subscribe(send func(any))
+	// SubscribeWith runs a second, independently stoppable event
+	// subscription against this workspace, for a caller that needs a
+	// plain send callback and an explicit stop rather than a UI-bound
+	// Subscribe — e.g. the TUI's worktree transfer and thread-attach
+	// screens, whose event pumps must be torn down on their own schedule
+	// without disturbing the main Subscribe(program) pump. Previously
+	// reached only by an ad hoc type assertion outside this interface,
+	// which failed silently: an implementation that did not happen to
+	// satisfy the assertion's shape left the caller with no events at
+	// all, and nothing reported it (see the git history of
+	// appws.attachedThreadWorkspace.SubscribeWith for the bug this
+	// caused in practice).
+	SubscribeWith(send func(any)) (stop func())
 	Shutdown()
 }
 
@@ -836,7 +837,6 @@ type FrontendWorkspace interface {
 	LSPController
 	ConfigReader
 	WorkingDirectory
-	ConfigResolver
 	ConfigFieldEditor
 	AccountRecorder
 	AccountLister

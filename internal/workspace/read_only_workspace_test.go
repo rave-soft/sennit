@@ -453,8 +453,6 @@ func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt st
 	return nil, nil
 }
 
-func (s *stubWorkspace) ResetAgentToolCache() { s.track("ResetAgentToolCache") }
-
 // PermissionResolver
 func (s *stubWorkspace) PermissionGrant(perm permission.PermissionRequest) (bool, error) {
 	s.track("PermissionGrant")
@@ -813,7 +811,12 @@ func (s *stubWorkspace) CancelTask(context.Context, string, string) error {
 
 // EventSubscriber
 func (s *stubWorkspace) Subscribe(send func(any)) { s.track("Subscribe") }
-func (s *stubWorkspace) Shutdown()                { s.track("Shutdown") }
+
+func (s *stubWorkspace) SubscribeWith(send func(any)) func() {
+	s.track("SubscribeWith")
+	return func() {}
+}
+func (s *stubWorkspace) Shutdown() { s.track("Shutdown") }
 
 func (s *stubWorkspace) ListMessagesBySessionIDs(_ context.Context, rootSessionID string, _ uint64, sessionIDs []string) (map[string][]message.Message, error) {
 	s.batchRoots = append(s.batchRoots, rootSessionID)

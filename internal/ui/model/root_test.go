@@ -76,6 +76,12 @@ func (w *rootTestWorkspace) ListThreads(context.Context) ([]proto.Thread, error)
 	return nil, nil
 }
 
+// SubscribeWith is a no-op default: most tests using this stub as an
+// attached/transferred workspace don't care about its event pump, only
+// that installing one doesn't panic through the embedded nil Workspace.
+// neutralSubscriberWorkspace below overrides this when a test does care.
+func (w *rootTestWorkspace) SubscribeWith(func(any)) func() { return func() {} }
+
 type neutralSubscriberWorkspace struct {
 	rootTestWorkspace
 	send      func(any)

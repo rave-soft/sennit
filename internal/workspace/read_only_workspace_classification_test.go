@@ -14,9 +14,9 @@ import (
 )
 
 // refusedMethods are the Workspace methods readOnlyWorkspace must override
-// and refuse: every mutation, plus Shutdown and Subscribe, which do not
-// touch persisted state but do register process-level effects (tearing
-// down or re-subscribing) on the real workspace behind this one.
+// and refuse: every mutation, plus Shutdown, Subscribe, and SubscribeWith,
+// which do not touch persisted state but do register process-level effects
+// (tearing down or re-subscribing) on the real workspace behind this one.
 //
 // readOnlyWorkspace embeds Workspace, so any method NOT listed here (or in
 // readOnlySafeMethods below) is silently promoted from the embedded field:
@@ -83,6 +83,7 @@ var refusedMethods = []string{
 	"Shutdown",
 	"StartOAuth",
 	"Subscribe",
+	"SubscribeWith",
 	"UpdateAccount",
 	"UpdateAgentModel",
 	"UpdatePreferredModel",
@@ -145,8 +146,6 @@ var readOnlySafeMethods = []string{
 	"ProjectNeedsInitialization",
 	"ReadMCPResource",
 	"ReadSkill",
-	"ResetAgentToolCache",
-	"Resolver",
 	"SessionDescendantCost",
 	"SetCurrentSession",
 	"SetCurrentSessionGeneration",
@@ -436,6 +435,11 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"Subscribe": func(_ *testing.T, ro *readOnlyWorkspace) {
 			ro.Subscribe(nil)
+		},
+		"SubscribeWith": func(t *testing.T, ro *readOnlyWorkspace) {
+			stop := ro.SubscribeWith(nil)
+			require.NotNil(t, stop)
+			stop()
 		},
 		"UpdateAgentModel": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.UpdateAgentModel(t.Context())

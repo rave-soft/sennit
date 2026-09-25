@@ -318,17 +318,6 @@ func (w *readOnlyWorkspace) AgentRunStream(ctx context.Context, sessionID, promp
 	return nil, w.readOnlyError("AgentRunStream")
 }
 
-// ResetAgentToolCache proxies to the wrapped workspace rather than
-// no-opping like the other mutations above: it clears a process-wide
-// cache, not anything scoped to a session or to write access, so there is
-// no read-only boundary for it to respect, and no-opping here would
-// silently stop the cache from being cleared whenever the caller happens
-// to be holding a read-only view (e.g. while inspecting a thread) instead
-// of the underlying workspace.
-func (w *readOnlyWorkspace) ResetAgentToolCache() {
-	w.ws.ResetAgentToolCache()
-}
-
 // -- Permissions (all denied) --
 
 func (w *readOnlyWorkspace) PermissionGrant(perm permission.PermissionRequest) (bool, error) {
@@ -693,6 +682,16 @@ func (w *readOnlyWorkspace) Subscribe(send func(any)) {
 	// but not meaningful for a completed thread.
 }
 
+// SubscribeWith mirrors Subscribe's refusal: a read-only view has no
+// events of its own worth pumping, so it hands back a no-op stop instead
+// of subscribing. This preserves today's observable behavior — before
+// SubscribeWith was part of the Workspace interface, readOnlyWorkspace had
+// no such method at all, so a read-only thread view already got no event
+// pump.
+func (w *readOnlyWorkspace) SubscribeWith(send func(any)) func() {
+	return func() {}
+}
+
 func (w *readOnlyWorkspace) Shutdown() {
 	// No-op: shutting down a read-only workspace must NOT affect
 	// the parent workspace. It is safe to call multiple times.
@@ -830,10 +829,6 @@ func (w *readOnlyWorkspace) ReadMCPResource(ctx context.Context, name, uri strin
 
 func (w *readOnlyWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
 	return w.ws.ReadSkill(ctx, skillID)
-}
-
-func (w *readOnlyWorkspace) Resolver() config.VariableResolver {
-	return w.ws.Resolver()
 }
 
 func (w *readOnlyWorkspace) Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error) {

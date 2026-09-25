@@ -3,13 +3,29 @@ package appws
 import (
 	"context"
 
+	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 )
 
 // -- Sessions --
 
+// resetToolCache is a package-level seam over tools.ResetCache, so a test
+// in this package can swap in a counting stand-in (without a test hook
+// leaking into internal/agent/tools's own production code — see
+// TestCreateSession_ClearsAgentToolCache) rather than observing the
+// process-wide cache directly.
+var resetToolCache = tools.ResetCache
+
 func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
+	// Clear the built-in tools' process-wide regex caches (compiled
+	// grep/glob patterns, see tools.ResetCache) so this session does not
+	// inherit state left over from a previous one. This is a pure,
+	// in-memory cache with no per-session ownership, so clearing it here
+	// is safe even with several frontends attached to the same process —
+	// the worst case is a cache miss on the next grep/glob call, not a
+	// wrong result.
+	resetToolCache()
 	return w.app.Sessions().Create(ctx, title)
 }
 

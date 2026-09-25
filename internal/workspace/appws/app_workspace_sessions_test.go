@@ -65,3 +65,44 @@ func TestRenameSession_PreservesConcurrentUsageAndTodos(t *testing.T) {
 	require.Equal(t, "summary-msg-1", got.SummaryMessageID, "RenameSession must not roll back the summary pointer")
 	require.Len(t, got.Todos, 1, "RenameSession must not roll back todos")
 }
+
+// TestCreateSession_ClearsAgentToolCache pins CreateSession as the new home
+// for the process-wide grep/glob regex cache reset that used to be a
+// separate Workspace method (ResetAgentToolCache) the UI called by hand
+// from newSession. Folding it into CreateSession means every session gets
+// a clean cache regardless of caller, not just the one frontend that
+// remembered to ask for it.
+//
+// It swaps the package-level resetToolCache seam for a counting stand-in
+// rather than reaching into internal/agent/tools's cache directly — that
+// package must not carry test-only exports (see commit 59666e391). This
+// mutates shared package state, so unlike its neighbor above it must NOT
+// run in parallel with another test that swaps the same var; there is none
+// today (TestAppWorkspace_AgentRunShellCommand_StreamingErrorSurfaces swaps
+// a different var, runAndCaptureStream, and doesn't call t.Parallel()
+// either), but this test deliberately omits t.Parallel() to keep it that
+// way.
+func TestCreateSession_ClearsAgentToolCache(t *testing.T) {
+	orig := resetToolCache
+	t.Cleanup(func() { resetToolCache = orig })
+	calls := 0
+	resetToolCache = func() { calls++ }
+
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+	})
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := sessionstore.NewService(db.New(conn), conn, dataDir)
+
+	a := &app.App{}
+	a.SetSessionsForTest(sessions)
+	store := configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir()))
+	ws := NewAppWorkspace(a, store)
+
+	_, err = ws.CreateSession(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	require.Equal(t, 1, calls, "CreateSession must clear the grep/glob regex cache")
+}

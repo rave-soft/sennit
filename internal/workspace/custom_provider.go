@@ -45,7 +45,6 @@ type ModelDiscoverer func(ctx context.Context, params ConfigureCustomProviderPar
 // customProviderWriter is what ConfigureCustomProviderUsing needs to
 // persist a provider's configuration, once discovery has already run.
 type customProviderWriter interface {
-	ConfigResolver
 	ConfigFieldEditor
 	ProviderAPIKeySetter
 }
@@ -53,9 +52,11 @@ type customProviderWriter interface {
 // ConfigureCustomProviderUsing persists a custom provider's configuration
 // and runs model discovery against it via discoverModels.
 //
-// It takes only the resolver and config-writing capabilities it needs
-// rather than the full [Workspace] interface, so it works against any
-// implementation without depending on unrelated workspace operations.
+// It takes only the resolver (as an explicit parameter, since Resolver is
+// no longer part of the frontend contract — see [Workspace]'s doc comment)
+// and config-writing capabilities it needs, rather than the full
+// [Workspace] interface, so it works against any implementation without
+// depending on unrelated workspace operations.
 //
 // Discovery runs first, against params directly, before anything is
 // persisted. The result then decides how fields are ordered: the config
@@ -73,12 +74,12 @@ type customProviderWriter interface {
 // returns nothing — callers should treat a zero-model result as "not yet
 // usable" rather than deleted, since the user may fix the URL and retry via
 // `sennit models refresh <id>` or this same flow again.
-func ConfigureCustomProviderUsing(ctx context.Context, ws customProviderWriter, scope config.Scope, params ConfigureCustomProviderParams, discoverModels ModelDiscoverer) ([]catwalk.Model, error) {
+func ConfigureCustomProviderUsing(ctx context.Context, ws customProviderWriter, scope config.Scope, params ConfigureCustomProviderParams, resolver config.VariableResolver, discoverModels ModelDiscoverer) ([]catwalk.Model, error) {
 	if params.ID == "" || params.BaseURL == "" {
 		return nil, fmt.Errorf("provider ID and base URL are required")
 	}
 
-	models, discErr := discoverModels(ctx, params, ws.Resolver())
+	models, discErr := discoverModels(ctx, params, resolver)
 
 	if err := ws.SetConfigField(scope, config.ProviderFieldKey(params.ID, "type"), params.Type); err != nil {
 		return nil, fmt.Errorf("failed to save provider type: %w", err)

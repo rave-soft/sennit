@@ -25,7 +25,7 @@ func newAccountTestProvider(t *testing.T, ws *testConfigAccessor, providerID str
 		ID:      providerID,
 		BaseURL: "https://example.com/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
-	}, stubDiscoverer([]catwalk.Model{{ID: "model-a"}}, nil))
+	}, ws.Resolver(), stubDiscoverer([]catwalk.Model{{ID: "model-a"}}, nil))
 	require.NoError(t, err)
 }
 

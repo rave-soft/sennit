@@ -14,7 +14,7 @@ import (
 // internal/workspace itself must not import — see
 // workspace.ModelDiscoverer's doc comment.
 func (w *AppWorkspace) ConfigureCustomProvider(ctx context.Context, scope config.Scope, params workspace.ConfigureCustomProviderParams) ([]catwalk.Model, error) {
-	return workspace.ConfigureCustomProviderUsing(ctx, w, scope, params, discoverCustomProviderModels)
+	return workspace.ConfigureCustomProviderUsing(ctx, w, scope, params, w.store.Resolver(), discoverCustomProviderModels)
 }
 
 // discoverCustomProviderModels runs the same discover.DiscoverModels /

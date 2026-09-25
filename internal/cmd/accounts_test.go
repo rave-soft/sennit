@@ -177,7 +177,7 @@ func newAuthTestProviderWithID(t *testing.T, ws *realConfigAccessor, providerID 
 		ID:      providerID,
 		BaseURL: "https://example.com/v1",
 		Type:    string(catwalk.TypeOpenAICompat),
-	}, discoverModels)
+	}, ws.Resolver(), discoverModels)
 	require.NoError(t, err)
 }
 

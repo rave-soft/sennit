@@ -200,7 +200,7 @@ func TestConfigureCustomProviderUsing_WritesFieldsAndDiscoversModels(t *testing.
 	}
 	discovered := []catwalk.Model{{ID: "model-a"}, {ID: "model-b"}}
 
-	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(discovered, nil))
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, ws.Resolver(), stubDiscoverer(discovered, nil))
 	require.NoError(t, err)
 	require.Len(t, models, 2)
 
@@ -222,7 +222,7 @@ func TestConfigureCustomProviderUsing_NoModelsFoundKeepsFieldsPersisted(t *testi
 		Type:    string(catwalk.TypeOpenAICompat),
 	}
 
-	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(nil, nil))
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, ws.Resolver(), stubDiscoverer(nil, nil))
 	require.Error(t, err)
 	require.Nil(t, models)
 
@@ -261,7 +261,7 @@ func TestConfigureCustomProviderUsing_DiscoveryErrorKeepsFieldsPersisted(t *test
 	}
 	discErr := fmt.Errorf("dial tcp: lookup example.invalid: no such host")
 
-	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(nil, discErr))
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, ws.Resolver(), stubDiscoverer(nil, discErr))
 	require.ErrorIs(t, err, discErr)
 	require.Nil(t, models)
 
@@ -293,10 +293,10 @@ func TestConfigureCustomProviderUsing_RequiresIDAndBaseURL(t *testing.T) {
 		return nil, nil
 	}
 
-	_, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{}, failIfCalled)
+	_, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{}, ws.Resolver(), failIfCalled)
 	require.Error(t, err)
 
-	_, err = ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{ID: "x"}, failIfCalled)
+	_, err = ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{ID: "x"}, ws.Resolver(), failIfCalled)
 	require.Error(t, err)
 }
 
@@ -322,7 +322,7 @@ func TestConfigureCustomProviderUsing_FullCycle_SurvivesRestartWithEndpointDown(
 	}
 	discovered := []catwalk.Model{{ID: "model-a"}, {ID: "model-b"}}
 
-	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(discovered, nil))
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, ws.Resolver(), stubDiscoverer(discovered, nil))
 	require.NoError(t, err)
 	require.Len(t, models, 2)
 
@@ -370,7 +370,7 @@ func TestConfigureCustomProviderUsing_IDWithDots(t *testing.T) {
 	}
 	discovered := []catwalk.Model{{ID: "model-a"}}
 
-	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, stubDiscoverer(discovered, nil))
+	models, err := ConfigureCustomProviderUsing(context.Background(), ws, config.ScopeGlobal, params, ws.Resolver(), stubDiscoverer(discovered, nil))
 	require.NoError(t, err)
 	require.Len(t, models, 1)
 
