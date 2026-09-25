@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
@@ -82,18 +83,22 @@ type PermissionRequest struct {
 }
 
 type permissionRequestJSON struct {
-	ID          string         `json:"id"`
-	SessionID   string         `json:"session_id"`
-	ToolCallID  string         `json:"tool_call_id"`
-	ToolName    string         `json:"tool_name"`
-	Description string         `json:"description"`
-	Action      string         `json:"action"`
-	Params      any            `json:"params"`
-	Path        string         `json:"path"`
-	Delegation  *DelegationRef `json:"delegation,omitempty"`
+	ID          string          `json:"id"`
+	SessionID   string          `json:"session_id"`
+	ToolCallID  string          `json:"tool_call_id"`
+	ToolName    string          `json:"tool_name"`
+	Description string          `json:"description"`
+	Action      string          `json:"action"`
+	Params      json.RawMessage `json:"params"`
+	Path        string          `json:"path"`
+	Delegation  *DelegationRef  `json:"delegation,omitempty"`
 }
 
 func (p PermissionRequest) MarshalJSON() ([]byte, error) {
+	params, err := json.Marshal(p.Params)
+	if err != nil {
+		return nil, fmt.Errorf("marshal permission params: %w", err)
+	}
 	request := permissionRequestJSON{
 		ID:          p.ID,
 		SessionID:   p.SessionID,
@@ -101,7 +106,7 @@ func (p PermissionRequest) MarshalJSON() ([]byte, error) {
 		ToolName:    p.ToolName,
 		Description: p.Description,
 		Action:      p.Action,
-		Params:      p.Params,
+		Params:      params,
 		Path:        p.Path,
 	}
 	if p.Delegation != (DelegationRef{}) {
@@ -110,6 +115,14 @@ func (p PermissionRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(request)
 }
 
+// UnmarshalJSON decodes Params through proto.DecodePermissionParams rather
+// than leaving it the map[string]any a plain `any` field would produce.
+// Every PermissionRequest a UI renders has been through this path since
+// the permission dialog was wired to internal/pubsub, which round-trips
+// events through JSON; decoding into the concrete type each tool actually
+// passes (see the registry's own doc comment) is what lets the dialog's
+// renderer registry (internal/ui/dialog/permissions.go) keep
+// type-asserting on it instead of silently falling back to raw JSON.
 func (p *PermissionRequest) UnmarshalJSON(data []byte) error {
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		return nil
@@ -123,12 +136,26 @@ func (p *PermissionRequest) UnmarshalJSON(data []byte) error {
 		ToolName:    p.ToolName,
 		Description: p.Description,
 		Action:      p.Action,
-		Params:      p.Params,
 		Path:        p.Path,
 		Delegation:  &delegation,
 	}
 	if err := json.Unmarshal(data, &request); err != nil {
 		return err
+	}
+
+	// request.Params is left nil by encoding/json when the incoming
+	// object has no "params" key at all, distinct from an explicit
+	// "params": null (which decodes to the four bytes "null" and clears
+	// Params below through DecodePermissionParams's own empty-raw
+	// check). A partial patch object that never mentions params - the
+	// pattern the other fields above already support via their
+	// pre-seeded defaults - must leave p.Params exactly as it was.
+	if request.Params != nil {
+		params, err := proto.DecodePermissionParams(request.ToolName, request.Params)
+		if err != nil {
+			return err
+		}
+		p.Params = params
 	}
 
 	p.ID = request.ID
@@ -137,7 +164,6 @@ func (p *PermissionRequest) UnmarshalJSON(data []byte) error {
 	p.ToolName = request.ToolName
 	p.Description = request.Description
 	p.Action = request.Action
-	p.Params = request.Params
 	p.Path = request.Path
 	p.Delegation = DelegationRef{}
 	if request.Delegation != nil {

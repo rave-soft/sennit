@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/lsp"
 	lsputil "github.com/rave-soft/sennit/internal/lsp/util"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 type RenameParams struct {
@@ -23,6 +24,10 @@ type RenameParams struct {
 	NewName string `json:"new_name" description:"The new name for the symbol"`
 	Path    string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
 }
+
+// RenamePermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type RenamePermissionsParams = proto.RenamePermissionsParams
 
 const RenameToolName = "lsp_rename"
 
@@ -135,7 +140,7 @@ func NewRenameTool(
 					ToolName:    RenameToolName,
 					Action:      "rename",
 					Path:        searchDir,
-					Params:      params,
+					Params:      RenamePermissionsParams{Symbol: params.Symbol, NewName: params.NewName, Path: params.Path},
 					Description: fmt.Sprintf("Rename '%s' to '%s'", params.Symbol, params.NewName),
 				})
 				if err != nil {

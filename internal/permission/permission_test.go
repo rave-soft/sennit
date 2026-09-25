@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -901,7 +902,11 @@ func TestPermissionRequestJSONDelegation(t *testing.T) {
 	assert.Equal(t, background.ToolName, decoded.ToolName)
 	assert.Equal(t, background.Description, decoded.Description)
 	assert.Equal(t, background.Action, decoded.Action)
-	assert.Equal(t, map[string]any{"command": "ls"}, decoded.Params)
+	// bash is a registered tool name, so the round trip now lands in the
+	// concrete type the bash tool itself passes, not the map[string]any
+	// a plain `any` field decoded into before proto.DecodePermissionParams
+	// existed - see internal/proto/permission_params.go.
+	assert.Equal(t, proto.BashPermissionsParams{Command: "ls"}, decoded.Params)
 	assert.Equal(t, background.Path, decoded.Path)
 }
 

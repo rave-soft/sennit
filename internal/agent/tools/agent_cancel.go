@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 const AgentCancelToolName = "agent_cancel"
@@ -24,10 +25,9 @@ type AgentCancelParams struct {
 	Reason string `json:"reason,omitempty" description:"Why the delegation is being cancelled"`
 }
 
-type AgentCancelPermissionParams struct {
-	ID     string `json:"id"`
-	Reason string `json:"reason,omitempty"`
-}
+// AgentCancelPermissionParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type AgentCancelPermissionParams = proto.AgentCancelPermissionParams
 
 // NewAgentCancelTool creates the agent_cancel tool. See
 // [NewAgentListTool] for the manager nil-safety note.

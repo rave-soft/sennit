@@ -29,10 +29,9 @@ type WebFetchParams struct {
 	URL string `json:"url" description:"The URL to fetch content from"`
 }
 
-// WebFetchPermissionsParams defines the permission parameters for the web_fetch tool.
-type WebFetchPermissionsParams struct {
-	URL string `json:"url"`
-}
+// WebFetchPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type WebFetchPermissionsParams = proto.WebFetchPermissionsParams
 
 // WebSearchParams defines the parameters for the web_search tool.
 type WebSearchParams struct {
@@ -40,11 +39,9 @@ type WebSearchParams struct {
 	MaxResults int    `json:"max_results,omitempty" description:"Maximum number of results to return (default: 10, max: 20)"`
 }
 
-// WebSearchPermissionsParams defines the permission parameters for the web_search tool.
-type WebSearchPermissionsParams struct {
-	Query      string `json:"query"`
-	MaxResults int    `json:"max_results,omitempty"`
-}
+// WebSearchPermissionsParams is defined in proto; see the comment on
+// BashPermissionsParams in bash.go.
+type WebSearchPermissionsParams = proto.WebSearchPermissionsParams
 
 // FetchParams defines the parameters for the simple fetch tool.
 type FetchParams struct {

@@ -8,10 +8,13 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 const (
-	MultiReadToolName     = "multi_read"
+	// MultiReadToolName is defined in proto; see the comment on
+	// BashPermissionsParams in bash.go.
+	MultiReadToolName     = proto.MultiReadToolName
 	MaxMultiReadFiles     = 20
 	DefaultMultiReadBytes = MaxReadSize
 )

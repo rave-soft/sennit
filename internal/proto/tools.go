@@ -291,6 +291,12 @@ const (
 	// present in sessions recorded before the rename. History renderers
 	// and the config loader both keep accepting it.
 	LegacyReadToolName = "view"
+	// MultiReadToolName is the multi_read tool's name. It shares
+	// ReadPermissionsParams with ReadToolName: both raise their
+	// outside-workdir permission request through the same
+	// requireOutsideWorkdirPermission call in
+	// internal/agent/tools/read_core.go.
+	MultiReadToolName = "multi_read"
 )
 
 // ReadParams represents the parameters for the read tool.

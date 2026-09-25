@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -525,4 +526,76 @@ func TestRenderContent_LSIgnorePatterns(t *testing.T) {
 	})
 	got := p.renderContent(80)
 	require.Contains(t, got, "*.log, node_modules")
+}
+
+// TestRenderContent_SurvivesJSONRoundTrip pins the actual defect this
+// registry fixes: before proto.DecodePermissionParams existed, a
+// PermissionRequest that had been through encoding/json - which is what
+// every request becomes once the Workspace is served over a wire, and
+// already happens whenever pubsub round-trips an event - decoded Params
+// into map[string]any, so the dialog's type-asserting renderers
+// (renderBashContent, diffContentRenderer) silently fell back to
+// renderDefaultContent's raw JSON dump instead of the command panel or
+// diff view. This asserts the round-tripped request renders identically
+// to the one built in-process, for a diff-shaped tool (edit) and a
+// non-diff one (bash).
+func TestRenderContent_SurvivesJSONRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		toolName string
+		params   any
+	}{
+		{
+			name:     "edit",
+			toolName: proto.EditToolName,
+			params: proto.EditPermissionsParams{
+				FilePath:   "roundtrip.txt",
+				OldContent: "old-roundtrip-line\n",
+				NewContent: "new-roundtrip-line\n",
+			},
+		},
+		{
+			name:     "bash",
+			toolName: proto.BashToolName,
+			params:   proto.BashPermissionsParams{Command: "echo roundtrip-marker"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			original := permission.PermissionRequest{
+				ID:         "perm-roundtrip-" + tc.name,
+				ToolCallID: "tool-call-roundtrip",
+				ToolName:   tc.toolName,
+				Params:     tc.params,
+			}
+			encoded, err := json.Marshal(original)
+			require.NoError(t, err)
+
+			var decoded permission.PermissionRequest
+			require.NoError(t, json.Unmarshal(encoded, &decoded))
+
+			// The defect this test pins: without the registry, decoded.Params
+			// would be map[string]any here, not the concrete type below.
+			require.IsType(t, tc.params, decoded.Params)
+
+			s := styles.SennitDark()
+			com := &common.Common{Styles: &s}
+
+			originalDialog := NewPermissions(com, original)
+			originalDialog.viewportDirty = true
+			originalOut := ansi.Strip(originalDialog.renderContent(80))
+			require.NotEmpty(t, originalOut)
+
+			decodedDialog := NewPermissions(com, decoded)
+			decodedDialog.viewportDirty = true
+			decodedOut := ansi.Strip(decodedDialog.renderContent(80))
+
+			require.Equal(t, originalOut, decodedOut)
+		})
+	}
 }

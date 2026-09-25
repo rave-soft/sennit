@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 // mcpResourceLister is the subset of *mcp.Registry that
@@ -28,9 +29,9 @@ type ListMCPResourcesParams struct {
 	MCPName string `json:"mcp_name" description:"The MCP server name"`
 }
 
-type ListMCPResourcesPermissionsParams struct {
-	MCPName string `json:"mcp_name"`
-}
+// ListMCPResourcesPermissionsParams is defined in proto; see the comment
+// on BashPermissionsParams in bash.go.
+type ListMCPResourcesPermissionsParams = proto.ListMCPResourcesPermissionsParams
 
 const ListMCPResourcesToolName = "list_mcp_resources"
 

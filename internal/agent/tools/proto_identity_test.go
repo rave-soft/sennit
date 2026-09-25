@@ -21,4 +21,10 @@ var (
 	_ = func(p ReplaceSymbolPermissionsParams) proto.ReplaceSymbolPermissionsParams { return p }
 	_ = func(p GlobParams) proto.GlobParams { return p }
 	_ = func(p RipgrepParams) proto.RipgrepParams { return p }
+	_ = func(p WebFetchPermissionsParams) proto.WebFetchPermissionsParams { return p }
+	_ = func(p WebSearchPermissionsParams) proto.WebSearchPermissionsParams { return p }
+	_ = func(p AgentCancelPermissionParams) proto.AgentCancelPermissionParams { return p }
+	_ = func(p ReadMCPResourcePermissionsParams) proto.ReadMCPResourcePermissionsParams { return p }
+	_ = func(p ListMCPResourcesPermissionsParams) proto.ListMCPResourcesPermissionsParams { return p }
+	_ = func(p RenamePermissionsParams) proto.RenamePermissionsParams { return p }
 )

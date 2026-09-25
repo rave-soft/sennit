@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
 )
 
 type ReadMCPResourceParams struct {
@@ -19,10 +20,9 @@ type ReadMCPResourceParams struct {
 	URI     string `json:"uri" description:"The resource URI to read"`
 }
 
-type ReadMCPResourcePermissionsParams struct {
-	MCPName string `json:"mcp_name"`
-	URI     string `json:"uri"`
-}
+// ReadMCPResourcePermissionsParams is defined in proto; see the comment
+// on BashPermissionsParams in bash.go.
+type ReadMCPResourcePermissionsParams = proto.ReadMCPResourcePermissionsParams
 
 const ReadMCPResourceToolName = "read_mcp_resource"
 

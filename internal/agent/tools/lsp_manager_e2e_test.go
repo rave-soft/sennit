@@ -260,7 +260,12 @@ func TestLSPRenameThroughManagerRequestsOperationScopedPermission(t *testing.T) 
 	}
 	require.Equal(t, "rename", req.Action)
 	require.Equal(t, root, req.Path)
-	require.Equal(t, params, req.Params)
+	// The request carries RenamePermissionsParams, not params (RenameParams,
+	// the tool's own argument struct): the two used to be the same value in
+	// process and different types after a JSON round trip, which is the
+	// defect this conversion fixes. See RenamePermissionsParams's doc
+	// comment in internal/proto/permission_params.go.
+	require.Equal(t, RenamePermissionsParams{Symbol: params.Symbol, NewName: params.NewName, Path: params.Path}, req.Params)
 	require.True(t, perms.GrantPersistent(req))
 	response := <-done
 	require.False(t, response.IsError, response.Content)
@@ -271,7 +276,7 @@ func TestLSPRenameThroughManagerRequestsOperationScopedPermission(t *testing.T) 
 	otherDone := make(chan fantasy.ToolResponse, 1)
 	go func() { otherDone <- runToolWith(t, tool, ctx, RenameToolName, other) }()
 	otherRequest := <-events
-	require.Equal(t, other, otherRequest.Payload.Params)
+	require.Equal(t, RenamePermissionsParams{Symbol: other.Symbol, NewName: other.NewName, Path: other.Path}, otherRequest.Payload.Params)
 	require.True(t, perms.Deny(otherRequest.Payload))
 	require.True(t, (<-otherDone).IsError)
 }
