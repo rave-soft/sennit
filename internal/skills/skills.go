@@ -15,6 +15,7 @@ import (
 
 	"github.com/charlievieth/fastwalk"
 	"github.com/rave-soft/sennit/internal/frontmatter"
+	"github.com/rave-soft/sennit/internal/wireerr"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,7 +68,11 @@ type SkillState struct {
 	Name  string
 	Path  string
 	State DiscoveryState
-	Err   error
+	// Err is display-only ([wireerr.FromMessage]'s "internal" code):
+	// nothing in this package needs to recognize a specific discovery
+	// failure by identity, only report its text (see skillErrorDescription,
+	// doctor.SkillProblems).
+	Err *wireerr.Error
 }
 
 // Event is published when skill discovery completes.
@@ -215,7 +220,7 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 			Name:  name,
 			Path:  path,
 			State: state,
-			Err:   err,
+			Err:   wireerr.FromMessage(err),
 		})
 		mu.Unlock()
 	}

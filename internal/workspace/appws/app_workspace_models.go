@@ -2,8 +2,10 @@ package appws
 
 import (
 	"context"
+	"errors"
 
 	"github.com/rave-soft/sennit/internal/modelsrefresh"
+	"github.com/rave-soft/sennit/internal/wireerr"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -28,7 +30,7 @@ func (w *AppWorkspace) RefreshProviderModels(ctx context.Context, providerID str
 			Added: result.Added, Removed: result.Removed,
 			Updated: len(result.ContextWindowChanges),
 			Skipped: result.Skipped, SkipReason: result.SkipReason,
-			Err: result.Err,
+			Err: encodeRefreshErr(result.Err),
 		}
 		refreshed = refreshed || (!result.Skipped && result.Err == nil)
 	}
@@ -42,4 +44,18 @@ func (w *AppWorkspace) RefreshProviderModels(ctx context.Context, providerID str
 		return converted, err
 	}
 	return converted, nil
+}
+
+// encodeRefreshErr is workspace.EncodeError plus one special case:
+// modelsrefresh.ErrDiscoveryDisabled has no counterpart workspace.EncodeError
+// can recognize on its own, since internal/workspace must not import
+// internal/modelsrefresh (see workspace.ErrDiscoveryDisabled's doc comment
+// for why). This package already imports modelsrefresh, so it is the
+// right place to translate that one sentinel into the "discovery_disabled"
+// code before falling back to the generic encoder.
+func encodeRefreshErr(err error) *wireerr.Error {
+	if errors.Is(err, modelsrefresh.ErrDiscoveryDisabled) {
+		return &wireerr.Error{Code: "discovery_disabled", Message: err.Error()}
+	}
+	return workspace.EncodeError(err)
 }

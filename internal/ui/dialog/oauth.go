@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 type OAuthProvider interface {
@@ -733,7 +734,7 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		// AppWorkspace.CompleteOAuth: it already reads as a complete
 		// sentence, so it is not wrapped again here.
 		if completion.ProxyError != nil {
-			return oauthSaveErrMsg{err: completion.ProxyError}
+			return oauthSaveErrMsg{err: workspace.DecodeError(completion.ProxyError)}
 		}
 		// A model list that could not be fetched leaves a saved credential
 		// with nothing to select, which is a failed sign-in as far as this
@@ -742,7 +743,7 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		// not re-wrapping: completion.ModelsError already reads as a
 		// complete sentence.
 		if completion.ModelsError != nil {
-			return oauthSaveErrMsg{err: completion.ModelsError}
+			return oauthSaveErrMsg{err: workspace.DecodeError(completion.ModelsError)}
 		}
 		return oauthSaveDoneMsg{account: cmp.Or(completion.Account.Email, completion.Account.Label)}
 	}

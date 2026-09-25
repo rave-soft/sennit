@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
+	"github.com/rave-soft/sennit/internal/wireerr"
 )
 
 // Reasons the coder agent may be unavailable, returned by
@@ -147,7 +148,7 @@ type LSPEvent struct {
 	Type            LSPEventType
 	Name            string
 	State           proto.LSPState
-	Error           error
+	Error           *wireerr.Error
 	DiagnosticCount int
 }
 
@@ -389,7 +390,7 @@ type ModelRefreshResult struct {
 	Updated    int
 	Skipped    bool
 	SkipReason string
-	Err        error
+	Err        *wireerr.Error
 }
 
 // ModelsRefresher refreshes custom provider and Codex model lists.
@@ -547,7 +548,7 @@ type OAuthCompletion struct {
 	// themselves whether that makes the overall sign-in a failure (the
 	// TUI dialog does; the CLI does not, see loginCodex's existing
 	// behavior on model-fetch failure).
-	ModelsError error
+	ModelsError *wireerr.Error
 	// ProxyError is set when the proxy this sign-in used could not be
 	// persisted as the provider's default. The credential is already
 	// saved when this is set, and the model fetch (if any) still runs
@@ -557,7 +558,7 @@ type OAuthCompletion struct {
 	// failure; unlike ModelsError, this is never set for a sign-in whose
 	// proxy already matched what was configured, since nothing is
 	// written in that case.
-	ProxyError error
+	ProxyError *wireerr.Error
 }
 
 // OAuthController starts a provider's OAuth sign-in flow and finishes it
@@ -672,7 +673,7 @@ type MCPCounts struct {
 type MCPClientInfo struct {
 	Name        string
 	State       MCPState
-	Error       error
+	Error       *wireerr.Error
 	Counts      MCPCounts
 	ConnectedAt time.Time
 }
@@ -905,7 +906,7 @@ type AgentRunEvent struct {
 	TextDelta string
 	Status    string
 	Done      bool
-	Err       error
+	Err       *wireerr.Error
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

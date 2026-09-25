@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/wireerr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -663,7 +664,7 @@ func TestSennitInfo_Problems_BrokenSkill(t *testing.T) {
 	states := []*skills.SkillState{{
 		Path:  "/repo/.sennit/skills/feature-development/SKILL.md",
 		State: skills.StateError,
-		Err:   errors.New("parsing frontmatter: yaml: line 2: mapping values are not allowed in this context"),
+		Err:   wireerr.FromMessage(errors.New("parsing frontmatter: yaml: line 2: mapping values are not allowed in this context")),
 	}}
 
 	var b strings.Builder

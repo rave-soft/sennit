@@ -21,7 +21,7 @@ func (w *AppWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo {
 	states := w.app.MCP.GetStates()
 	result := make(map[string]workspace.MCPClientInfo, len(states))
 	for name, state := range states {
-		result[name] = workspace.MCPClientInfo{Name: state.Name, State: workspace.MCPState(state.State), Error: state.Error, Counts: workspace.MCPCounts{Tools: state.Counts.Tools, Prompts: state.Counts.Prompts, Resources: state.Counts.Resources}, ConnectedAt: state.ConnectedAt}
+		result[name] = workspace.MCPClientInfo{Name: state.Name, State: workspace.MCPState(state.State), Error: workspace.EncodeError(state.Error), Counts: workspace.MCPCounts{Tools: state.Counts.Tools, Prompts: state.Counts.Prompts, Resources: state.Counts.Resources}, ConnectedAt: state.ConnectedAt}
 	}
 	return result
 }

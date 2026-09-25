@@ -7,6 +7,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/wireerr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,7 +40,7 @@ func TestSkillProblems_ReportsOnlyFailedSkills(t *testing.T) {
 	problems := SkillProblems([]*skills.SkillState{
 		nil,
 		{Name: "fine", State: skills.StateNormal},
-		{Name: "broken", State: skills.StateError, Path: "/w/.sennit/skills/broken/SKILL.md", Err: errors.New("yaml: mapping values are not allowed")},
+		{Name: "broken", State: skills.StateError, Path: "/w/.sennit/skills/broken/SKILL.md", Err: wireerr.FromMessage(errors.New("yaml: mapping values are not allowed"))},
 	})
 
 	require.Len(t, problems, 1)
@@ -59,7 +60,7 @@ func TestSkillProblems_NamesTheDirectoryWhenTheSkillHasNoName(t *testing.T) {
 
 	path := filepath.Join("/w", ".sennit", "skills", "unnamed", "SKILL.md")
 	problems := SkillProblems([]*skills.SkillState{
-		{State: skills.StateError, Path: path, Err: errors.New("boom")},
+		{State: skills.StateError, Path: path, Err: wireerr.FromMessage(errors.New("boom"))},
 	})
 
 	require.Len(t, problems, 1)

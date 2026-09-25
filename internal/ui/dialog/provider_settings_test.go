@@ -224,7 +224,7 @@ func TestProviderSettings_RefreshFailureShowsError(t *testing.T) {
 	m.HandleMsg(ctrlRMsg())
 	require.Nil(t, m.HandleMsg(ActionRefreshModelsResult{
 		ProviderID: "custom",
-		Results:    []workspace.ModelRefreshResult{{ID: "custom", Err: errors.New("endpoint down")}},
+		Results:    []workspace.ModelRefreshResult{{ID: "custom", Err: workspace.EncodeError(errors.New("endpoint down"))}},
 	}))
 	require.Equal(t, "endpoint down", m.errMsg)
 	require.Empty(t, m.refreshMsg)

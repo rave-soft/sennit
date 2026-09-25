@@ -177,7 +177,7 @@ func TestOAuthSaveCredential_ModelFetchFailureFailsTheDialog(t *testing.T) {
 	s := styles.SennitDark()
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"}
 	ws := &completeOAuthTestWorkspace{
-		completion: workspace.OAuthCompletion{ModelsError: errors.New("model list unavailable")},
+		completion: workspace.OAuthCompletion{ModelsError: workspace.EncodeError(errors.New("model list unavailable"))},
 	}
 	com := &common.Common{Styles: &s, Workspace: ws}
 
@@ -205,7 +205,7 @@ func TestOAuthSaveCredential_ProxyWriteFailureFailsTheDialog(t *testing.T) {
 	s := styles.SennitDark()
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"}
 	ws := &completeOAuthTestWorkspace{
-		completion: workspace.OAuthCompletion{ProxyError: errors.New("proxy setting unavailable")},
+		completion: workspace.OAuthCompletion{ProxyError: workspace.EncodeError(errors.New("proxy setting unavailable"))},
 	}
 	com := &common.Common{Styles: &s, Workspace: ws}
 

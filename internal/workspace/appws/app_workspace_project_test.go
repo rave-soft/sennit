@@ -103,7 +103,7 @@ func TestMCPDoctorProblems_ErrorAndNeedsAuthOnly(t *testing.T) {
 	t.Parallel()
 
 	states := map[string]workspace.MCPClientInfo{
-		"github": {Name: "github", State: workspace.MCPStateError, Error: errors.New("connection refused")},
+		"github": {Name: "github", State: workspace.MCPStateError, Error: workspace.EncodeError(errors.New("connection refused"))},
 		"docs":   {Name: "docs", State: workspace.MCPStateConnected},
 		"auth":   {Name: "auth", State: workspace.MCPStateNeedsAuth},
 	}

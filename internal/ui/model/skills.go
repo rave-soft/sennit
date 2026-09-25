@@ -144,7 +144,7 @@ func skillErrorDescription(state *skills.SkillState) string {
 	if state.Err == nil {
 		return "failed to load"
 	}
-	msg := strings.TrimSpace(state.Err.Error())
+	msg := strings.TrimSpace(state.Err.Text())
 	if msg == "" {
 		return "failed to load"
 	}

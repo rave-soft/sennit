@@ -103,7 +103,7 @@ func TestAppWorkspace_AgentRunStream_CtxCancelAlwaysDeliversTerminalEvent(t *tes
 				}
 				if ev.Done {
 					gotTerminal = true
-					terminalErr = ev.Err
+					terminalErr = workspace.DecodeError(ev.Err)
 				}
 			case <-time.After(2 * time.Second):
 				t.Fatalf("iteration %d: never observed the channel close", i)
@@ -143,7 +143,7 @@ func TestAppWorkspace_AgentRunStream_InternalCancellationIsTerminalError(t *test
 	var terminal error
 	for ev := range out {
 		if ev.Done {
-			terminal = ev.Err
+			terminal = workspace.DecodeError(ev.Err)
 		}
 	}
 	require.ErrorIs(t, terminal, context.Canceled)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/wireerr"
 )
 
 // BuiltinPrefix is the path prefix for builtin skill files. It is used by
@@ -52,14 +53,14 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 		content, err := builtinFS.ReadFile(path)
 		if err != nil {
 			slog.Warn("Failed to read builtin skill file", "path", path, "error", err)
-			states = append(states, &SkillState{Path: path, State: StateError, Err: err})
+			states = append(states, &SkillState{Path: path, State: StateError, Err: wireerr.FromMessage(err)})
 			return nil
 		}
 
 		skill, err := ParseContent(content)
 		if err != nil {
 			slog.Warn("Failed to parse builtin skill file", "path", path, "error", err)
-			states = append(states, &SkillState{Path: path, State: StateError, Err: err})
+			states = append(states, &SkillState{Path: path, State: StateError, Err: wireerr.FromMessage(err)})
 			return nil
 		}
 
@@ -74,7 +75,7 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 
 		if err := skill.Validate(); err != nil {
 			slog.Warn("Builtin skill validation failed", "path", path, "error", err)
-			states = append(states, &SkillState{Name: skill.Name, Path: path, State: StateError, Err: err})
+			states = append(states, &SkillState{Name: skill.Name, Path: path, State: StateError, Err: wireerr.FromMessage(err)})
 			return nil
 		}
 

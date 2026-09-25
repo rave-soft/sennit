@@ -226,7 +226,7 @@ func TestAppWorkspace_CompleteOAuthCodex_RecordsAccountAndProxy_ModelFetchFails(
 
 	comp, err := w.CompleteOAuth(t.Context(), codex.ProviderID, deadProxy, token, false)
 	require.NoError(t, err, "a model-fetch failure must not fail CompleteOAuth itself")
-	require.Error(t, comp.ModelsError)
+	require.NotNil(t, comp.ModelsError)
 	require.Equal(t, 0, comp.ModelsFetched)
 	require.NotEmpty(t, comp.Account.ID)
 
@@ -321,7 +321,7 @@ func TestAppWorkspace_CompleteOAuthCodex_SkipsWriteWhenProxyUnchanged(t *testing
 
 	comp, err := w.CompleteOAuth(t.Context(), codex.ProviderID, proxy, token, false)
 	require.NoError(t, err)
-	require.NoError(t, comp.ProxyError, "an unchanged proxy must never attempt a write, so there is nothing to fail")
+	require.Nil(t, comp.ProxyError, "an unchanged proxy must never attempt a write, so there is nothing to fail")
 	require.Equal(t, proxy, persistedCodexProxy(t), "the original value must survive untouched")
 }
 
@@ -351,12 +351,12 @@ func TestAppWorkspace_CompleteOAuthCodex_ProxyWriteFailureIsNonFatal(t *testing.
 	// than reaching a real endpoint.
 	comp, err := w.CompleteOAuth(t.Context(), codex.ProviderID, "", token, false)
 	require.NoError(t, err, "a proxy write failure must not fail CompleteOAuth itself")
-	require.Error(t, comp.ProxyError)
+	require.NotNil(t, comp.ProxyError)
 	require.NotEmpty(t, comp.Account.ID, "the account must still be recorded")
 	// The model fetch still ran (not skipped because the proxy write
 	// failed), and fails on its own terms — there is no real Codex
 	// endpoint to reach from a test.
-	require.Error(t, comp.ModelsError)
+	require.NotNil(t, comp.ModelsError)
 	require.Equal(t, "socks5://before:1080", persistedCodexProxy(t),
 		"a failed write must leave the previous value in place, not blank it out")
 
@@ -376,7 +376,7 @@ func TestAppWorkspace_CompleteOAuthCopilot_RecordsAccountWithNoIdentity(t *testi
 	comp, err := w.CompleteOAuth(t.Context(), copilotProviderID, "", token, false)
 	require.NoError(t, err)
 	require.Equal(t, -1, comp.ModelsFetched)
-	require.NoError(t, comp.ModelsError)
+	require.Nil(t, comp.ModelsError)
 	require.NotEmpty(t, comp.Account.ID)
 
 	accts, err := w.ListAccounts(copilotProviderID)

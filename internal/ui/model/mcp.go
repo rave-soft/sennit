@@ -79,7 +79,7 @@ func mcpList(t *styles.Styles, mcps []mcp.MCPClientInfo, width, maxItems int) st
 			icon = t.Resource.ErrorIcon.String()
 			description = t.Resource.StatusText.Render("error")
 			if m.Error != nil {
-				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", m.Error.Error()))
+				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", m.Error.Text()))
 			}
 		case mcp.MCPStateNeedsAuth:
 			icon = t.Resource.NeedsAuthIcon.String()

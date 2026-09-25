@@ -494,14 +494,14 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			case result := <-done:
 				if result.err != nil {
 					if errors.Is(result.err, context.Canceled) && callerCtx.Err() != nil {
-						sendFinal(workspace.AgentRunEvent{Done: true, Err: callerCtx.Err()})
+						sendFinal(workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(callerCtx.Err())})
 						return
 					}
-					sendFinal(workspace.AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)})
+					sendFinal(workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(fmt.Errorf("agent processing failed: %w", result.err))})
 					return
 				}
 				if err := drain(); err != nil {
-					sendFinal(workspace.AgentRunEvent{Done: true, Err: err})
+					sendFinal(workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(err)})
 					return
 				}
 				sendFinal(workspace.AgentRunEvent{Done: true})
@@ -518,13 +518,13 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 				}
 				if stop, err := emit(ev); stop {
 					if err != nil {
-						sendFinal(workspace.AgentRunEvent{Done: true, Err: err})
+						sendFinal(workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(err)})
 					}
 					return
 				}
 
 			case <-ctx.Done():
-				sendFinal(workspace.AgentRunEvent{Done: true, Err: ctx.Err()})
+				sendFinal(workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(ctx.Err())})
 				return
 			}
 		}

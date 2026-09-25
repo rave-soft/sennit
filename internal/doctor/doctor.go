@@ -75,7 +75,7 @@ func SkillProblems(states []*skills.SkillState) []config.Problem {
 		}
 		msg := fmt.Sprintf("skill %s failed to load", subject)
 		if st.Err != nil {
-			msg += ": " + st.Err.Error()
+			msg += ": " + st.Err.Text()
 		}
 		problems = append(problems, config.Problem{
 			Severity: config.SeverityError,

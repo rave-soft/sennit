@@ -244,7 +244,7 @@ func (w *AppWorkspace) completeCodexOAuth(ctx context.Context, proxyURL string, 
 			proxyErr = setCodexProxyConfigField(w, config.ScopeGlobal, proxyKey, proxyURL)
 		}
 		if proxyErr != nil {
-			completion.ProxyError = fmt.Errorf("signed in, but the proxy setting could not be saved: %w", proxyErr)
+			completion.ProxyError = workspace.EncodeError(fmt.Errorf("signed in, but the proxy setting could not be saved: %w", proxyErr))
 		}
 	}
 
@@ -261,11 +261,11 @@ func (w *AppWorkspace) completeCodexOAuth(ctx context.Context, proxyURL string, 
 
 	models, err := codex.FetchModels(fetchCtx, proxyURL, token.AccessToken, accountID)
 	if err != nil {
-		completion.ModelsError = fmt.Errorf("signed in, but the model list could not be fetched: %w", err)
+		completion.ModelsError = workspace.EncodeError(fmt.Errorf("signed in, but the model list could not be fetched: %w", err))
 		return completion, nil
 	}
 	if err := w.SetConfigField(config.ScopeGlobal, "providers."+codex.ProviderID+".models", models); err != nil {
-		completion.ModelsError = err
+		completion.ModelsError = workspace.EncodeError(err)
 		return completion, nil
 	}
 	completion.ModelsFetched = len(models)

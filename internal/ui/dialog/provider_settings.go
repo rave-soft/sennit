@@ -309,8 +309,12 @@ func (m *ProviderSettings) HandleMsg(msg tea.Msg) Action {
 		m.refreshing = false
 		m.refreshMsg = ""
 		err := msg.Err
-		if err == nil && len(msg.Results) > 0 {
-			err = msg.Results[0].Err
+		// msg.Results[0].Err is a *wireerr.Error: checking it against nil
+		// before the assignment (rather than after, on the `error`
+		// interface it would become) avoids storing a non-nil interface
+		// wrapping a nil pointer.
+		if err == nil && len(msg.Results) > 0 && msg.Results[0].Err != nil {
+			err = workspace.DecodeError(msg.Results[0].Err)
 		}
 		if err != nil {
 			m.errMsg = err.Error()

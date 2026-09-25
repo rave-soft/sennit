@@ -111,7 +111,7 @@ func mcpDoctorProblems(states map[string]workspace.MCPClientInfo) []config.Probl
 		}
 		msg := fmt.Sprintf("mcp server %s is in state %s", name, info.State)
 		if info.Error != nil {
-			msg += ": " + info.Error.Error()
+			msg += ": " + info.Error.Text()
 		}
 		problems = append(problems, config.Problem{
 			Severity: config.SeverityError,

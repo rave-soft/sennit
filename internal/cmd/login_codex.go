@@ -137,7 +137,7 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 	// sentence (see AppWorkspace.CompleteOAuth), so it is returned as-is
 	// rather than wrapped again.
 	if completion.ProxyError != nil {
-		return completion.ProxyError
+		return workspace.DecodeError(completion.ProxyError)
 	}
 
 	// Which models the account may use is per-plan, so the catalog entry
@@ -148,7 +148,7 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 	// complete sentence and is printed as-is.
 	if completion.ModelsError != nil {
 		fmt.Println()
-		fmt.Println(completion.ModelsError)
+		fmt.Println(completion.ModelsError.Text())
 		fmt.Println("Run `sennit login codex -f` to try again.")
 		return nil
 	}

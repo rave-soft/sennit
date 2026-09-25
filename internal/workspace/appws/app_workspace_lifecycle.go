@@ -55,7 +55,7 @@ func (w *AppWorkspace) translateEvent(msg any) any {
 		}
 		return pubsub.Event[workspace.MCPEvent]{Type: e.Type, Payload: workspace.MCPEvent{Type: eventType, Name: e.Payload.Name}}
 	case pubsub.Event[app.LSPEvent]:
-		return pubsub.Event[workspace.LSPEvent]{Type: e.Type, Payload: workspace.LSPEvent{Type: workspace.LSPEventType(e.Payload.Type), Name: e.Payload.Name, State: lspState(e.Payload.State), Error: e.Payload.Error, DiagnosticCount: e.Payload.DiagnosticCount}}
+		return pubsub.Event[workspace.LSPEvent]{Type: e.Type, Payload: workspace.LSPEvent{Type: workspace.LSPEventType(e.Payload.Type), Name: e.Payload.Name, State: lspState(e.Payload.State), Error: workspace.EncodeError(e.Payload.Error), DiagnosticCount: e.Payload.DiagnosticCount}}
 	}
 	e, ok := msg.(pubsub.Event[thread.Event])
 	if !ok {

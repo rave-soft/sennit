@@ -220,7 +220,7 @@ func TestLoginCodex_ModelFetchFailureIsNotFatal(t *testing.T) {
 	ws := newCodexLoginFake(nil, nil)
 	ws.completion = workspace.OAuthCompletion{
 		Account:     accounts.Account{ID: "new", Label: "New account"},
-		ModelsError: errors.New("model list unavailable"),
+		ModelsError: workspace.EncodeError(errors.New("model list unavailable")),
 	}
 
 	require.NoError(t, loginCodex(ws, true, false, ""))
@@ -254,10 +254,16 @@ func TestLoginCodex_ProxyWriteFailureIsFatal(t *testing.T) {
 	ws := newCodexLoginFake(nil, nil)
 	ws.completion = workspace.OAuthCompletion{
 		Account:    accounts.Account{ID: "new", Label: "New account"},
-		ProxyError: proxyErr,
+		ProxyError: workspace.EncodeError(proxyErr),
 	}
 
-	require.ErrorIs(t, loginCodex(ws, true, false, ""), proxyErr)
+	// proxyErr is an opaque error with no registered wireerr code, so it
+	// crosses OAuthCompletion.ProxyError as "internal": DecodeError
+	// preserves its text but not its identity (see DecodeError's doc
+	// comment) — the same tradeoff every other opaque error takes once it
+	// is carried on a DTO field, per this package's wireerr conversion.
+	err := loginCodex(ws, true, false, "")
+	require.ErrorContains(t, err, proxyErr.Error())
 }
 
 // TestLoginCodex_ProxyResolutionOrder pins flag > configured > the Codex

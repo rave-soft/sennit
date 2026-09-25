@@ -253,7 +253,7 @@ func runAgent(
 			}
 			if ev.Done {
 				stopSpinner()
-				return ev.Err
+				return workspace.DecodeError(ev.Err)
 			}
 
 		case <-progressTick:
