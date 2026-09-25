@@ -433,6 +433,27 @@ v), Subscribe}`; UI получает его через `common.Common`, отде
   меняет тему через диалог и видит изменение в файле глобального конфига,
   как сейчас.
 
+### PR 0.5c. Аккаунты без токенов в UI
+
+Найдено тестом секретов 2026-09-26. `ListAccounts`, `RefreshAccountLimits`,
+`RecordAccount` и `OAuthCompletion.Account` отдают UI `accounts.Account`
+целиком, с `Token` (access и refresh) и `APIKey`, а `UpdateAccount`
+принимает аккаунт от UI и сохраняет его токен. UI читает из токена только
+срок (`ui/dialog/accounts.go:582-612`).
+
+- `workspace.FrontendAccount{ID, Label, AccountID, Email, ProxyURL,
+  Disabled, Usage, HasToken, TokenExpiresAt, TokenExpiresIn, HasAPIKey}`
+  для всех методов, возвращающих аккаунты UI.
+- `UpdateAccount` заменяется узким изменением полей, которые UI правит
+  (метка, прокси, отключение: сверить с `ui/model/dialog_actions.go:390` и
+  `cmd/accounts.go:224`); токен и ключ сервер берёт из сохранённого
+  аккаунта.
+- Запись `accounts.Account.Token` в `forbiddenTypeAllowList` удаляется.
+
+Смежное, в PR 1.3: токен входа (StartOAuth → UI → CompleteOAuth,
+ImportCopilot → RecordAccount) не должен проходить через UI; сервер
+завершает поток за хэндлом.
+
 ### PR 0.6. Файлы проекта только через воркспейс
 
 - `ListProjectFiles(ctx, dir string, depth, limit int) ([]string, error)`:

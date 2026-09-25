@@ -24,12 +24,17 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	providerconfig "github.com/rave-soft/sennit/internal/providers/config"
+	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -174,6 +179,141 @@ var mapAnyFieldAllowList = map[string]bool{
 	"github.com/rave-soft/sennit/internal/config.SelectedModel.ProviderOptions": true,
 }
 
+// -- Forbidden types -------------------------------------------------------
+//
+// These types carry secrets or unexported/json:"-" runtime state that must
+// never reach a remote frontend (CLIENT-SERVER.md PR 0.5's "Уточнено
+// 2026-09-26" note). *config.Config itself had a hole of exactly this
+// shape until FrontendConfig replaced it as Config()'s return type
+// (workspace.NewFrontendConfig): RuntimeProviders was json:"-", so the old
+// completeness gate never saw it, even though four UI call sites read
+// RuntimeProvider(id) through it. Banning these types by identity - not
+// just by the shapes they currently reach through - means a future method
+// that starts returning one of them again fails here immediately, instead
+// of waiting for someone to notice a json:"-" field by hand.
+var forbiddenWireTypes = map[reflect.Type]string{
+	reflectTypeOf[config.Config]():                 "config.Config",
+	reflectTypeOf[providerstate.Provider]():        "providerstate.Provider",
+	reflectTypeOf[providerconfig.ProviderConfig](): "providerconfig.ProviderConfig",
+	reflectTypeOf[oauth.Token]():                   "oauth.Token",
+}
+
+// csyncMapPkgPath is internal/csync's import path; forbiddenWireTypeName
+// matches any csync.Map[K, V] instantiation by package and name prefix
+// rather than listing every K/V combination by hand.
+const csyncMapPkgPath = "github.com/rave-soft/sennit/internal/csync"
+
+// forbiddenWireTypeName reports the human-readable name of t if it is one
+// of forbiddenWireTypes, or any csync.Map instantiation.
+func forbiddenWireTypeName(t reflect.Type) (string, bool) {
+	if name, ok := forbiddenWireTypes[t]; ok {
+		return name, true
+	}
+	if t.PkgPath() == csyncMapPkgPath && strings.HasPrefix(t.Name(), "Map[") {
+		return "csync." + t.Name(), true
+	}
+	return "", false
+}
+
+// forbiddenTypeAllowList permits a forbidden type to be reached at one
+// exact field/param/result path (the same "<Type>.<Field>" or
+// "Workspace.<Method>.paramN"/"resultN" key fieldKey/ownerField produce),
+// each entry recording why that specific value legitimately has to travel.
+// Do not add an entry to relax the rule generally - only to document one
+// path that must carry the forbidden type by design.
+var forbiddenTypeAllowList = map[string]string{
+	// Known leak, not a design: ListAccounts, RefreshAccountLimits,
+	// RecordAccount and OAuthCompletion hand the UI whole accounts,
+	// refresh tokens included, and UpdateAccount takes one back and
+	// persists its token. The UI only needs the token's expiry. Removed
+	// by PR 0.5c of CLIENT-SERVER.md (an account DTO and a narrow
+	// UpdateAccount); delete this entry with it.
+	"github.com/rave-soft/sennit/internal/providers/accounts.Account.Token": "known leak, removed by CLIENT-SERVER.md PR 0.5c",
+	// The OAuth paths below move a token server -> UI -> server: the UI
+	// receives it from StartOAuth/ImportCopilot and hands it straight back
+	// to CompleteOAuth/RecordAccount. PR 1.3 of CLIENT-SERVER.md completes
+	// the flow on the server behind a handle, so the token never reaches
+	// the UI; these entries go with it.
+	"github.com/rave-soft/sennit/internal/providers/accounts.LegacyCredential.Token": "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
+	"Workspace.ImportCopilot.result0":                                                "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
+	"github.com/rave-soft/sennit/internal/workspace.OAuthStartResult.Token":          "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
+	"Workspace.CompleteOAuth.param3":                                                 "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
+}
+
+// -- No hidden state on types with behavior --------------------------------
+//
+// A type with an exported method invites a caller to call it on whatever
+// value it has in hand - including one just JSON-decoded off the wire. If
+// that type also has a field encoding/json cannot see (unexported, or
+// json:"-"), the caller has no way to tell whether the method's result
+// depends on state the wire drops; RuntimeProviders was exactly this shape
+// before FrontendConfig existed. hiddenStateMethodExemptions excludes the
+// handful of method names that are codec/stringer hooks, not application
+// logic, from counting as "behavior" here.
+var hiddenStateMethodExemptions = map[string]bool{
+	"MarshalJSON": true, "UnmarshalJSON": true,
+	"MarshalText": true, "UnmarshalText": true,
+	"String": true, "Error": true,
+}
+
+// hasBehavior reports whether t exports any method - by value or pointer
+// receiver - beyond hiddenStateMethodExemptions.
+func hasBehavior(t reflect.Type) bool {
+	exports := func(rt reflect.Type) bool {
+		for i := range rt.NumMethod() {
+			if !hiddenStateMethodExemptions[rt.Method(i).Name] {
+				return true
+			}
+		}
+		return false
+	}
+	return exports(t) || exports(reflect.PointerTo(t))
+}
+
+// hiddenStateFieldAllowList permits one exact "<PkgPath>.<Type>.<Field>"
+// hidden field on a type that otherwise has behavior. Every entry must
+// show that no method on the type reads the field - not merely that the
+// current ones happen not to - since that is what makes it safe for a
+// caller working off a JSON-decoded copy.
+var hiddenStateFieldAllowList = map[string]string{
+	// skills.Skill's one exported method, Validate (internal/skills/skills.go),
+	// checks Name/Description/Path/Compatibility only - it never reads
+	// Source, so a UI working off a JSON-decoded Skill (Source stripped by
+	// its own json:"-") gets the same Validate result a full, in-process
+	// Skill would. Source exists solely to hand a skill's text to another
+	// in-process workspace (thread inheritance, see Skill's own doc
+	// comment); it was never meant to reach the wire.
+	"github.com/rave-soft/sennit/internal/skills.Skill.Source": "Skill.Validate does not read Source; Source is for in-process thread handoff, never the wire",
+}
+
+// checkNoHiddenStateWithBehavior fails t if typ has behavior (hasBehavior)
+// and also carries an unexported or json:"-" field not covered by
+// hiddenStateFieldAllowList. Opaque types are skipped: their own codec,
+// not their Go layout, is what wireRoundTripJSON already holds accountable
+// for what crosses the wire.
+func checkNoHiddenStateWithBehavior(t *testing.T, typ reflect.Type) {
+	if isOpaque(typ) || !hasBehavior(typ) {
+		return
+	}
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		key := fieldKey(typ, f.Name)
+		if !f.IsExported() {
+			if _, ok := hiddenStateFieldAllowList[key]; ok {
+				continue
+			}
+			t.Errorf("wire type %s has behavior and an unexported field %q: a caller cannot tell whether a method's result depends on state a JSON round trip drops (add %q to hiddenStateFieldAllowList with proof no method reads it, or remove the field/method)", typeKey(typ), f.Name, key)
+			continue
+		}
+		if f.Tag.Get("json") == "-" {
+			if _, ok := hiddenStateFieldAllowList[key]; ok {
+				continue
+			}
+			t.Errorf("wire type %s has behavior and a json:\"-\" field %q: a caller cannot tell whether a method's result depends on state a JSON round trip drops (add %q to hiddenStateFieldAllowList with proof no method reads it, or remove the field/method)", typeKey(typ), f.Name, key)
+		}
+	}
+}
+
 // wireWalker collects every named struct/opaque type reachable from the
 // method set below, and fails the test on any forbidden shape found along
 // the way.
@@ -252,6 +392,14 @@ func (w *wireWalker) walk(t reflect.Type, path string, ownerField string) {
 		w.walk(elem, path+"[]", ownerField)
 		return
 	case reflect.Struct:
+		if name, forbidden := forbiddenWireTypeName(t); forbidden {
+			if reason, ok := forbiddenTypeAllowList[ownerField]; ok {
+				_ = reason
+			} else {
+				w.t.Errorf("wire type %s: forbidden type %s reachable via %q; add an entry to forbiddenTypeAllowList with a reason if it legitimately must travel, or fix the method/field that reaches it", path, name, ownerField)
+				return
+			}
+		}
 		// time.Time and every other type with its own MarshalJSON/
 		// UnmarshalJSON is a leaf: trust its codec, don't walk fields.
 		if isOpaque(t) {
@@ -357,6 +505,7 @@ func TestWireTypesRoundTripJSON(t *testing.T) {
 		typ := byName[name]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			checkNoHiddenStateWithBehavior(t, typ)
 			sample, ok := wireSamples[typ]
 			if !ok {
 				t.Fatalf("no sample registered for wire type %s in wireSamples (wire_dto_samples_test.go)", name)
