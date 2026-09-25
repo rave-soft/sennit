@@ -3,6 +3,8 @@ package filetracker
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -15,7 +17,7 @@ import (
 // Service defines the interface for tracking file reads in sessions.
 type Service interface {
 	// RecordRead records that the whole file was read.
-	RecordRead(ctx context.Context, sessionID, path string)
+	RecordRead(ctx context.Context, sessionID, path string) error
 
 	// RecordPartialRead records that lines [start, end] of the file were
 	// read — the read tool serves windows, and an edit is only allowed to
@@ -35,8 +37,8 @@ type Service interface {
 	ReadCoverage(ctx context.Context, sessionID, path string) Coverage
 
 	// LastReadTime returns when a file was last read.
-	// Returns zero time if never read.
-	LastReadTime(ctx context.Context, sessionID, path string) time.Time
+	// Returns zero time if never read, or on error.
+	LastReadTime(ctx context.Context, sessionID, path string) (time.Time, error)
 
 	// ListReadFiles returns the paths of all files read in a session.
 	ListReadFiles(ctx context.Context, sessionID string) ([]string, error)
@@ -58,15 +60,17 @@ func NewService(q *db.Queries, workingDir string) Service {
 
 // RecordRead records that the whole file was read, superseding whatever
 // partial ranges were recorded before.
-func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
-	s.record(ctx, sessionID, path, FullCoverage)
+func (s *service) RecordRead(ctx context.Context, sessionID, path string) error {
+	return s.record(ctx, sessionID, path, FullCoverage)
 }
 
 // RecordPartialRead records a window of the file as read, merged into
 // whatever this session had already seen.
 func (s *service) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
 	path = s.relpath(path)
-	s.update(ctx, sessionID, path, func(encoded string, exists bool) string {
+	// Service.RecordPartialRead has no error return (out of scope to add
+	// one here), and s.update already logs any failure itself.
+	_ = s.update(ctx, sessionID, path, func(encoded string, exists bool) string {
 		return encodeRanges(decodeCoverage(encoded, exists).Add(LineRange{Start: start, End: end}))
 	})
 }
@@ -75,7 +79,9 @@ func (s *service) RecordPartialRead(ctx context.Context, sessionID, path string,
 // below it.
 func (s *service) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
 	path = s.relpath(path)
-	s.update(ctx, sessionID, path, func(encoded string, exists bool) string {
+	// Service.RecordEdit has no error return (out of scope to add one
+	// here), and s.update already logs any failure itself.
+	_ = s.update(ctx, sessionID, path, func(encoded string, exists bool) string {
 		coverage := decodeCoverage(encoded, exists)
 		coverage = coverage.Shift(start, end, newEnd-end).Add(LineRange{Start: start, End: newEnd})
 		return encodeRanges(coverage)
@@ -94,34 +100,42 @@ func (s *service) ReadCoverage(ctx context.Context, sessionID, path string) Cove
 	return decodeRanges(readFile.ReadRanges)
 }
 
-func (s *service) update(ctx context.Context, sessionID, path string, update func(ranges string, exists bool) string) {
+func (s *service) update(ctx context.Context, sessionID, path string, update func(ranges string, exists bool) string) error {
 	if err := s.q.UpdateFileRead(ctx, sessionID, path, update); err != nil {
 		slog.Error("Error recording file read", "error", err, "file", path)
+		return err
 	}
+	return nil
 }
 
-func (s *service) record(ctx context.Context, sessionID, path string, coverage Coverage) {
+func (s *service) record(ctx context.Context, sessionID, path string, coverage Coverage) error {
 	if err := s.q.RecordFileRead(ctx, db.RecordFileReadParams{
 		SessionID:  sessionID,
 		Path:       s.relpath(path),
 		ReadRanges: encodeRanges(coverage),
 	}); err != nil {
 		slog.Error("Error recording file read", "error", err, "file", path)
+		return err
 	}
+	return nil
 }
 
 // LastReadTime returns when a file was last read.
-// Returns zero time if never read.
-func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time.Time {
+// Returns zero time if never read; a non-nil error means the read itself
+// failed, which is not the same thing as never having read the file.
+func (s *service) LastReadTime(ctx context.Context, sessionID, path string) (time.Time, error) {
 	readFile, err := s.q.GetFileRead(ctx, db.GetFileReadParams{
 		SessionID: sessionID,
 		Path:      s.relpath(path),
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, err
 	}
 
-	return time.UnixMilli(readFile.ReadAt)
+	return time.UnixMilli(readFile.ReadAt), nil
 }
 
 func (s *service) relpath(path string) string {

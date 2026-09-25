@@ -46,10 +46,10 @@ func (s *stubConfigAccessor) UpdatePreferredModel(config.Scope, config.SelectedM
 	return nil
 }
 
-func (s *stubConfigAccessor) OverridePreferredModel(config.SelectedModel) error { return nil }
-func (s *stubConfigAccessor) SetCompactMode(config.Scope, bool) error           { return nil }
-func (s *stubConfigAccessor) SetProviderAPIKey(config.Scope, string, any) error { return nil }
-func (s *stubConfigAccessor) SetConfigField(config.Scope, string, any) error    { return nil }
+func (s *stubConfigAccessor) OverridePreferredModel(config.SelectedModel) error    { return nil }
+func (s *stubConfigAccessor) SetCompactMode(config.Scope, bool) error              { return nil }
+func (s *stubConfigAccessor) SetProviderAPIKey(config.Scope, string, string) error { return nil }
+func (s *stubConfigAccessor) SetConfigField(config.Scope, string, any) error       { return nil }
 
 func (s *stubConfigAccessor) RemoveConfigField(_ config.Scope, key string) error {
 	s.removed = append(s.removed, key)
@@ -75,7 +75,9 @@ func (s *stubConfigAccessor) RefreshAccountLimits(context.Context, string) ([]ac
 	return nil, nil
 }
 
-func (s *stubConfigAccessor) ImportCopilot() (*oauth.Token, bool) { return nil, false }
+func (s *stubConfigAccessor) ImportCopilot(context.Context) (*oauth.Token, bool, error) {
+	return nil, false, nil
+}
 
 func (s *stubConfigAccessor) RefreshOAuthToken(context.Context, config.Scope, string) error {
 	return nil

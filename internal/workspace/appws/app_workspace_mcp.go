@@ -41,16 +41,16 @@ func (w *AppWorkspace) MCPResources() []workspace.MCPResourceInfo {
 	return result
 }
 
-func (w *AppWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
-	w.app.MCP.RefreshPrompts(ctx, name)
+func (w *AppWorkspace) MCPRefreshPrompts(ctx context.Context, name string) error {
+	return w.app.MCP.RefreshPrompts(ctx, name)
 }
 
-func (w *AppWorkspace) MCPRefreshResources(ctx context.Context, name string) {
-	w.app.MCP.RefreshResources(ctx, name)
+func (w *AppWorkspace) MCPRefreshResources(ctx context.Context, name string) error {
+	return w.app.MCP.RefreshResources(ctx, name)
 }
 
-func (w *AppWorkspace) RefreshMCPTools(ctx context.Context, name string) {
-	w.app.MCP.RefreshTools(ctx, w.store, name)
+func (w *AppWorkspace) RefreshMCPTools(ctx context.Context, name string) error {
+	return w.app.MCP.RefreshTools(ctx, w.store, name)
 }
 
 func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]workspace.MCPResourceContents, error) {
@@ -85,8 +85,8 @@ func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]workspace.MCPPrompt, e
 	return toWorkspaceMCPPrompts(prompts), err
 }
 
-func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	return commands.GetMCPPrompt(func(ctx context.Context, clientID, promptID string, args map[string]string) ([]string, error) {
+func (w *AppWorkspace) GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error) {
+	return commands.GetMCPPrompt(func(_ context.Context, clientID, promptID string, args map[string]string) ([]string, error) {
 		return w.app.MCP.GetPromptMessages(ctx, w.store, clientID, promptID, args)
 	}, clientID, promptID, args)
 }
@@ -142,8 +142,8 @@ func (w *AppWorkspace) DockerMCPAvailable() (available, known bool) {
 }
 
 // RefreshDockerMCPAvailability implements Workspace.
-func (w *AppWorkspace) RefreshDockerMCPAvailability() bool {
-	return dockermcp.RefreshAvailability()
+func (w *AppWorkspace) RefreshDockerMCPAvailability(ctx context.Context) (bool, error) {
+	return dockermcp.RefreshAvailability(ctx)
 }
 
 // toWorkspaceArguments converts internal/commands' argument shape into the

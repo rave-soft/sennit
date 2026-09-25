@@ -486,7 +486,9 @@ func startLSPs(com *common.Common, paths []string) tea.Cmd {
 	ws := com.Workspace
 	return func() tea.Msg {
 		for _, path := range paths {
-			ws.LSPStart(ctx, path)
+			if err := ws.LSPStart(ctx, path); err != nil {
+				slog.Warn("Failed to start LSP server", "path", path, "error", err)
+			}
 		}
 		return nil
 	}

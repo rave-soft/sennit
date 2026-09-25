@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -11,8 +12,9 @@ import (
 
 func (w *widgets) runMCPPrompt(com *common.Common, owner *UI, clientID, promptID string, arguments map[string]string) tea.Cmd {
 	ws := com.Workspace
+	ctx := com.Context()
 	load := func() tea.Msg {
-		prompt, err := ws.GetMCPPrompt(clientID, promptID, arguments)
+		prompt, err := ws.GetMCPPrompt(ctx, clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()
@@ -64,21 +66,27 @@ func (m *UI) handleStateChanged() tea.Cmd {
 
 func handleMCPPromptsEvent(ctx context.Context, ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.MCPRefreshPrompts(ctx, name)
+		if err := ws.MCPRefreshPrompts(ctx, name); err != nil {
+			slog.Warn("Failed to refresh MCP prompts", "mcp_name", name, "error", err)
+		}
 		return nil
 	}
 }
 
 func handleMCPToolsEvent(ctx context.Context, ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.RefreshMCPTools(ctx, name)
+		if err := ws.RefreshMCPTools(ctx, name); err != nil {
+			slog.Warn("Failed to refresh MCP tools", "mcp_name", name, "error", err)
+		}
 		return nil
 	}
 }
 
 func handleMCPResourcesEvent(ctx context.Context, ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.MCPRefreshResources(ctx, name)
+		if err := ws.MCPRefreshResources(ctx, name); err != nil {
+			slog.Warn("Failed to refresh MCP resources", "mcp_name", name, "error", err)
+		}
 		return nil
 	}
 }

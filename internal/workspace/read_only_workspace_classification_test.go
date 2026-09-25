@@ -217,11 +217,11 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			_, err := ro.ActivateThread(t.Context(), "id")
 			require.True(t, IsReadOnlyError(err))
 		},
-		"AgentCancel": func(_ *testing.T, ro *readOnlyWorkspace) {
-			ro.AgentCancel("sess-1")
+		"AgentCancel": func(t *testing.T, ro *readOnlyWorkspace) {
+			require.NoError(t, ro.AgentCancel("sess-1"))
 		},
-		"AgentClearQueue": func(_ *testing.T, ro *readOnlyWorkspace) {
-			ro.AgentClearQueue("sess-1")
+		"AgentClearQueue": func(t *testing.T, ro *readOnlyWorkspace) {
+			require.NoError(t, ro.AgentClearQueue("sess-1"))
 		},
 		"AgentRun": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.AgentRun(t.Context(), "sess-1", "hello")
@@ -289,10 +289,11 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.True(t, IsReadOnlyError(err))
 		},
 		"FileTrackerRecordRead": func(t *testing.T, ro *readOnlyWorkspace) {
-			ro.FileTrackerRecordRead(t.Context(), "sess-1", "/foo")
+			require.NoError(t, ro.FileTrackerRecordRead(t.Context(), "sess-1", "/foo"))
 		},
 		"ImportCopilot": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, ok := ro.ImportCopilot()
+			_, ok, err := ro.ImportCopilot(t.Context())
+			require.NoError(t, err)
 			require.False(t, ok)
 		},
 		"InitCoderAgent": func(t *testing.T, ro *readOnlyWorkspace) {
@@ -304,20 +305,20 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.True(t, IsReadOnlyError(err))
 		},
 		"LSPStart": func(t *testing.T, ro *readOnlyWorkspace) {
-			ro.LSPStart(t.Context(), "/tmp")
+			require.NoError(t, ro.LSPStart(t.Context(), "/tmp"))
 		},
 		"LSPStopAll": func(t *testing.T, ro *readOnlyWorkspace) {
-			ro.LSPStopAll(t.Context())
+			require.NoError(t, ro.LSPStopAll(t.Context()))
 		},
 		"MCPAuthenticate": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.MCPAuthenticate(t.Context(), "name")
 			require.True(t, IsReadOnlyError(err))
 		},
 		"MCPRefreshPrompts": func(t *testing.T, ro *readOnlyWorkspace) {
-			ro.MCPRefreshPrompts(t.Context(), "name")
+			require.NoError(t, ro.MCPRefreshPrompts(t.Context(), "name"))
 		},
 		"MCPRefreshResources": func(t *testing.T, ro *readOnlyWorkspace) {
-			ro.MCPRefreshResources(t.Context(), "name")
+			require.NoError(t, ro.MCPRefreshResources(t.Context(), "name"))
 		},
 		"MarkProjectInitialized": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.MarkProjectInitialized()
@@ -328,25 +329,35 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.True(t, IsReadOnlyError(err))
 		},
 		"PermissionDeny": func(t *testing.T, ro *readOnlyWorkspace) {
-			require.False(t, ro.PermissionDeny(permission.PermissionRequest{}))
+			accepted, err := ro.PermissionDeny(permission.PermissionRequest{})
+			require.NoError(t, err)
+			require.False(t, accepted)
 		},
 		"PermissionGrant": func(t *testing.T, ro *readOnlyWorkspace) {
-			require.False(t, ro.PermissionGrant(permission.PermissionRequest{}))
+			accepted, err := ro.PermissionGrant(permission.PermissionRequest{})
+			require.NoError(t, err)
+			require.False(t, accepted)
 		},
 		"PermissionGrantPersistent": func(t *testing.T, ro *readOnlyWorkspace) {
-			require.False(t, ro.PermissionGrantPersistent(permission.PermissionRequest{}))
+			accepted, err := ro.PermissionGrantPersistent(permission.PermissionRequest{})
+			require.NoError(t, err)
+			require.False(t, accepted)
 		},
-		"PermissionSetSkipRequests": func(_ *testing.T, ro *readOnlyWorkspace) {
-			ro.PermissionSetSkipRequests(true)
+		"PermissionSetSkipRequests": func(t *testing.T, ro *readOnlyWorkspace) {
+			require.NoError(t, ro.PermissionSetSkipRequests(true))
 		},
 		"QuestionAnswer": func(t *testing.T, ro *readOnlyWorkspace) {
-			require.False(t, ro.QuestionAnswer("", nil))
+			accepted, err := ro.QuestionAnswer("", nil)
+			require.NoError(t, err)
+			require.False(t, accepted)
 		},
 		"QuestionCancel": func(t *testing.T, ro *readOnlyWorkspace) {
-			require.False(t, ro.QuestionCancel(""))
+			accepted, err := ro.QuestionCancel("")
+			require.NoError(t, err)
+			require.False(t, accepted)
 		},
 		"RefreshMCPTools": func(t *testing.T, ro *readOnlyWorkspace) {
-			ro.RefreshMCPTools(t.Context(), "name")
+			require.NoError(t, ro.RefreshMCPTools(t.Context(), "name"))
 		},
 		"RefreshOAuthToken": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.RefreshOAuthToken(t.Context(), config.ScopeWorkspace, "provider")

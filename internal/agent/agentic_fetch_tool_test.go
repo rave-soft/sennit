@@ -20,10 +20,10 @@ import (
 // the interface satisfied, not its bookkeeping.
 type fakeFileTracker struct{}
 
-func (fakeFileTracker) RecordRead(context.Context, string, string) {}
+func (fakeFileTracker) RecordRead(context.Context, string, string) error { return nil }
 
-func (fakeFileTracker) LastReadTime(context.Context, string, string) time.Time {
-	return time.Time{}
+func (fakeFileTracker) LastReadTime(context.Context, string, string) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (fakeFileTracker) ListReadFiles(context.Context, string) ([]string, error) {

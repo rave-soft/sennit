@@ -75,13 +75,20 @@ func (c *cache) set(available bool) {
 var defaultCache = newCache()
 
 // IsAvailable checks if Docker MCP is available by running
-// 'docker mcp version'.
-func IsAvailable() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// 'docker mcp version'. The bool alone cannot distinguish "checked, and
+// it's not there" from "couldn't check" (the caller's ctx was cancelled or
+// expired before the probe finished), so the error return is set only for
+// the latter — an ordinary probe failure (docker missing, non-zero exit)
+// still reports (false, nil).
+func IsAvailable(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	err := versionRunner(ctx)
-	return err == nil
+	if err != nil && ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	return err == nil, nil
 }
 
 // AvailabilityCached returns the cached Docker MCP availability and
@@ -90,9 +97,14 @@ func AvailabilityCached() (available bool, known bool) {
 	return defaultCache.cached()
 }
 
-// RefreshAvailability refreshes and caches Docker MCP availability.
-func RefreshAvailability() bool {
-	available := IsAvailable()
+// RefreshAvailability refreshes and caches Docker MCP availability. On
+// error the cache is left untouched: a probe that couldn't run at all
+// must not overwrite a previously known-good answer.
+func RefreshAvailability(ctx context.Context) (bool, error) {
+	available, err := IsAvailable(ctx)
+	if err != nil {
+		return false, err
+	}
 	defaultCache.set(available)
-	return available
+	return available, nil
 }

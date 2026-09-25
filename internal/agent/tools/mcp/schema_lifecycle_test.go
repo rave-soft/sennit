@@ -70,7 +70,7 @@ func TestInvalidSchemaRefreshFailsClosedWithoutClobberingNewSession(t *testing.T
 	r.allResources.Set(name, []*Resource{{Name: "old-resource"}})
 	r.publishMu.Unlock()
 
-	r.RefreshTools(context.Background(), cfg, name)
+	require.NoError(t, r.RefreshTools(context.Background(), cfg, name))
 	info, ok := r.GetState(name)
 	require.True(t, ok)
 	require.Equal(t, StateError, info.State)

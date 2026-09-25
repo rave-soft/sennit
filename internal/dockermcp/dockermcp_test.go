@@ -78,7 +78,9 @@ func TestAvailabilityCached_IsolatedBetweenTests(t *testing.T) {
 	_, known := AvailabilityCached()
 	require.False(t, known, "a swapped-in fresh cache must start unknown")
 
-	require.True(t, RefreshAvailability())
+	refreshed, err := RefreshAvailability(context.Background())
+	require.NoError(t, err)
+	require.True(t, refreshed)
 	available, known := AvailabilityCached()
 	require.True(t, known)
 	require.True(t, available)
@@ -87,11 +89,24 @@ func TestAvailabilityCached_IsolatedBetweenTests(t *testing.T) {
 func TestIsAvailable(t *testing.T) {
 	t.Run("true when the probe succeeds", func(t *testing.T) {
 		setVersionRunner(t, func(context.Context) error { return nil })
-		require.True(t, IsAvailable())
+		available, err := IsAvailable(context.Background())
+		require.NoError(t, err)
+		require.True(t, available)
 	})
 
 	t.Run("false when the probe fails", func(t *testing.T) {
 		setVersionRunner(t, func(context.Context) error { return errDockerUnavailable })
-		require.False(t, IsAvailable())
+		available, err := IsAvailable(context.Background())
+		require.NoError(t, err)
+		require.False(t, available)
+	})
+
+	t.Run("error when the caller's context is already done", func(t *testing.T) {
+		setVersionRunner(t, func(ctx context.Context) error { return ctx.Err() })
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		available, err := IsAvailable(ctx)
+		require.Error(t, err)
+		require.False(t, available)
 	})
 }

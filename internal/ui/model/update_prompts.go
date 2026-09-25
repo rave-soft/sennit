@@ -1,11 +1,14 @@
 package model
 
 import (
+	"fmt"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/ui/notification"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // updatePrompts handles the permission and question prompt branches of
@@ -55,6 +58,16 @@ func (m *UI) updatePrompts(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	case pubsub.Event[question.Notification]:
 		m.handleQuestionNotification(msg.Payload)
+	case questionAnswerResultMsg:
+		verb := "answer"
+		if msg.Cancelled {
+			verb = "cancel"
+		}
+		cmds = append(cmds, util.ReportError(fmt.Errorf("could not %s question: %w", verb, msg.Err)))
+		// Reopen a fresh copy of the form so the person can retry — see
+		// questionAnswerResultMsg's doc comment for why the original
+		// answers can't be recovered.
+		m.openBatchFormDialog(msg.Batch)
 	}
 	return cmds, false
 }

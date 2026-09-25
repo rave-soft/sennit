@@ -142,7 +142,7 @@ func TestRefreshTools_UpdatesCatalogAndCounts(t *testing.T) {
 	seedConnected(t, r, name, config.MCPConfig{Type: config.MCPStdio})
 
 	before := r.Version()
-	r.RefreshTools(context.Background(), cfg, name)
+	require.NoError(t, r.RefreshTools(context.Background(), cfg, name))
 
 	info, ok := r.GetState(name)
 	require.True(t, ok)
@@ -154,8 +154,9 @@ func TestRefreshTools_UpdatesCatalogAndCounts(t *testing.T) {
 func TestRefreshTools_NoSessionIsNoop(t *testing.T) {
 	r := NewRegistry()
 	cfg := configtest.NewStore(t, &config.Config{})
-	// Must not panic or hang when nothing is connected.
-	r.RefreshTools(context.Background(), cfg, "nothing-here")
+	// Must not panic or hang when nothing is connected; there's no
+	// session to refresh, so the result is deliberately ignored here.
+	_ = r.RefreshTools(context.Background(), cfg, "nothing-here")
 }
 
 // TestClose_WhileConnectionInFlight pins Close's shutdown ordering against a
@@ -317,7 +318,7 @@ func TestRegistry_ConcurrentAccessRace(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			r.RefreshTools(context.Background(), cfg, name)
+			_ = r.RefreshTools(context.Background(), cfg, name)
 		}()
 	}
 	wg.Wait()

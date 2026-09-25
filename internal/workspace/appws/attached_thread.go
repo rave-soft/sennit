@@ -58,24 +58,24 @@ type attachedThreadWorkspace struct {
 //
 // Trying both is safe for the reason answerPermission spells out: a
 // service that is not holding the request does nothing at all.
-func (w *attachedThreadWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+func (w *attachedThreadWorkspace) PermissionGrant(perm permission.PermissionRequest) (bool, error) {
 	return answerPermission(
-		func() bool { return w.Workspace.PermissionGrant(perm) },
-		w.parentAttempt(func(p *AppWorkspace) bool { return p.PermissionGrant(perm) }),
+		func() (bool, error) { return w.Workspace.PermissionGrant(perm) },
+		w.parentAttempt(func(p *AppWorkspace) (bool, error) { return p.PermissionGrant(perm) }),
 	)
 }
 
-func (w *attachedThreadWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+func (w *attachedThreadWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) (bool, error) {
 	return answerPermission(
-		func() bool { return w.Workspace.PermissionGrantPersistent(perm) },
-		w.parentAttempt(func(p *AppWorkspace) bool { return p.PermissionGrantPersistent(perm) }),
+		func() (bool, error) { return w.Workspace.PermissionGrantPersistent(perm) },
+		w.parentAttempt(func(p *AppWorkspace) (bool, error) { return p.PermissionGrantPersistent(perm) }),
 	)
 }
 
-func (w *attachedThreadWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+func (w *attachedThreadWorkspace) PermissionDeny(perm permission.PermissionRequest) (bool, error) {
 	return answerPermission(
-		func() bool { return w.Workspace.PermissionDeny(perm) },
-		w.parentAttempt(func(p *AppWorkspace) bool { return p.PermissionDeny(perm) }),
+		func() (bool, error) { return w.Workspace.PermissionDeny(perm) },
+		w.parentAttempt(func(p *AppWorkspace) (bool, error) { return p.PermissionDeny(perm) }),
 	)
 }
 
@@ -85,17 +85,17 @@ func (w *attachedThreadWorkspace) PermissionDeny(perm permission.PermissionReque
 // question raised by the parent workspace behind it is relayed onto this
 // screen too, and answering it here must be able to reach the service
 // that is actually holding it.
-func (w *attachedThreadWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+func (w *attachedThreadWorkspace) QuestionAnswer(batchID string, responses []question.Answer) (bool, error) {
 	return answerPermission(
-		func() bool { return w.Workspace.QuestionAnswer(batchID, responses) },
-		w.parentAttempt(func(p *AppWorkspace) bool { return p.QuestionAnswer(batchID, responses) }),
+		func() (bool, error) { return w.Workspace.QuestionAnswer(batchID, responses) },
+		w.parentAttempt(func(p *AppWorkspace) (bool, error) { return p.QuestionAnswer(batchID, responses) }),
 	)
 }
 
-func (w *attachedThreadWorkspace) QuestionCancel(batchID string) bool {
+func (w *attachedThreadWorkspace) QuestionCancel(batchID string) (bool, error) {
 	return answerPermission(
-		func() bool { return w.Workspace.QuestionCancel(batchID) },
-		w.parentAttempt(func(p *AppWorkspace) bool { return p.QuestionCancel(batchID) }),
+		func() (bool, error) { return w.Workspace.QuestionCancel(batchID) },
+		w.parentAttempt(func(p *AppWorkspace) (bool, error) { return p.QuestionCancel(batchID) }),
 	)
 }
 
@@ -103,11 +103,11 @@ func (w *attachedThreadWorkspace) QuestionCancel(batchID string) bool {
 // there is none to fall back to. Going through the parent workspace rather
 // than straight to its permission service keeps its own routing (a
 // delegation's prompt relayed into it) in play.
-func (w *attachedThreadWorkspace) parentAttempt(answer func(*AppWorkspace) bool) func() bool {
+func (w *attachedThreadWorkspace) parentAttempt(answer func(*AppWorkspace) (bool, error)) func() (bool, error) {
 	if w.parent == nil {
 		return nil
 	}
-	return func() bool { return answer(w.parent) }
+	return func() (bool, error) { return answer(w.parent) }
 }
 
 // SubscribeWith forwards to the wrapped workspace's own subscription.

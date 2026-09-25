@@ -51,7 +51,9 @@ func TestAppWorkspace_QuestionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	}
 
 	yes := true
-	require.True(t, ws.QuestionAnswer(req.ID, []question.Answer{{QuestionID: req.Questions[0].ID, Yes: &yes}}),
+	answeredOK, err := ws.QuestionAnswer(req.ID, []question.Answer{{QuestionID: req.Questions[0].ID, Yes: &yes}})
+	require.NoError(t, err)
+	require.True(t, answeredOK,
 		"answering through the parent workspace must reach the thread's own service")
 
 	select {
@@ -128,7 +130,9 @@ func TestAppWorkspace_QuestionCancelTargetsOnlyItsOwnBatch(t *testing.T) {
 		t.Fatal("the thread never raised its question request")
 	}
 
-	require.True(t, ws.QuestionCancel(threadReq.ID),
+	cancelledOK, err := ws.QuestionCancel(threadReq.ID)
+	require.NoError(t, err)
+	require.True(t, cancelledOK,
 		"cancelling the delegation's batch must reach the delegation's own service")
 
 	select {
@@ -192,7 +196,9 @@ func TestAttachedThread_QuestionAnswerReachesTheParentThatRaisedIt(t *testing.T)
 	}
 
 	yes := true
-	require.True(t, attached.QuestionAnswer(req.ID, []question.Answer{{QuestionID: req.Questions[0].ID, Yes: &yes}}),
+	answeredOK, err := attached.QuestionAnswer(req.ID, []question.Answer{{QuestionID: req.Questions[0].ID, Yes: &yes}})
+	require.NoError(t, err)
+	require.True(t, answeredOK,
 		"answering on the thread's screen must still reach the service that raised the question")
 
 	select {

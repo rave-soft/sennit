@@ -22,14 +22,14 @@ type questionCancelCountingWorkspace struct {
 	cancelledBatchIDs []string
 }
 
-func (w *questionCancelCountingWorkspace) QuestionCancel(batchID string) bool {
+func (w *questionCancelCountingWorkspace) QuestionCancel(batchID string) (bool, error) {
 	w.cancelCalls++
 	w.lastBatchID = batchID
 	w.cancelledBatchIDs = append(w.cancelledBatchIDs, batchID)
 	if batchID == "" {
 		w.sawEmptyBatch = true
 	}
-	return true
+	return true, nil
 }
 
 // openQuestionForm gives threadUI a displayed QuestionForm for batchID, the

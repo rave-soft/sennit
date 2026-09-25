@@ -294,11 +294,20 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			permissionID, _ := m.permissionResponse.current()
 			workspace := m.com.Workspace
 			cmds = append(cmds, func() tea.Msg {
-				workspace.PermissionSetSkipRequests(true)
-				accepted := workspace.PermissionGrant(perm)
+				if err := workspace.PermissionSetSkipRequests(true); err != nil {
+					return yoloPermissionEnabledMsg{
+						uiOwned:              uiOwned{owner: m},
+						SkipErr:              err,
+						Permission:           permissionID,
+						permissionGeneration: permissionGeneration,
+						yoloGeneration:       yoloGeneration,
+					}
+				}
+				accepted, err := workspace.PermissionGrant(perm)
 				return yoloPermissionEnabledMsg{
 					uiOwned:              uiOwned{owner: m},
 					Accepted:             accepted,
+					GrantErr:             err,
 					Permission:           permissionID,
 					permissionGeneration: permissionGeneration,
 					yoloGeneration:       yoloGeneration,
@@ -314,16 +323,19 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		permissionID, _ := m.permissionResponse.current()
 		workspace := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
-			accepted := false
+			var (
+				accepted bool
+				err      error
+			)
 			switch action {
 			case dialog.PermissionAllow:
-				accepted = workspace.PermissionGrant(perm)
+				accepted, err = workspace.PermissionGrant(perm)
 			case dialog.PermissionAllowForSession:
-				accepted = workspace.PermissionGrantPersistent(perm)
+				accepted, err = workspace.PermissionGrantPersistent(perm)
 			case dialog.PermissionDeny:
-				accepted = workspace.PermissionDeny(perm)
+				accepted, err = workspace.PermissionDeny(perm)
 			}
-			return permissionResponseMsg{uiOwned: uiOwned{owner: m}, Accepted: accepted, Permission: permissionID, generation: generation}
+			return permissionResponseMsg{uiOwned: uiOwned{owner: m}, Accepted: accepted, Err: err, Permission: permissionID, generation: generation}
 		})
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {

@@ -53,6 +53,7 @@ type countingWorkspace struct {
 	queueListCalls      int
 	permCalls           int
 	permSetCalls        int
+	permSetErr          error
 	clearQueueCalls     int
 	cancelCalls         int
 	modelCalls          int
@@ -72,7 +73,7 @@ type countingWorkspace struct {
 // Models.setProviderItems's prune Cmd): both must only ever be called from
 // inside a tea.Cmd, never synchronously from HandleMsg/Update, so their
 // counters feed syncProbes just like the read probes above.
-func (w *countingWorkspace) SetProviderAPIKey(_ config.Scope, _ string, _ any) error {
+func (w *countingWorkspace) SetProviderAPIKey(_ config.Scope, _ string, _ string) error {
 	w.setAPIKeyCalls++
 	return w.setAPIKeyErr
 }
@@ -130,13 +131,25 @@ func (w *countingWorkspace) AgentQueuedPromptsList(string) []string {
 
 func (w *countingWorkspace) PermissionSkipRequests() bool { w.permCalls++; return w.yolo }
 
-func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
+func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) error {
 	w.permSetCalls++
+	if w.permSetErr != nil {
+		return w.permSetErr
+	}
 	w.yolo = skip
+	return nil
 }
 
-func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
-func (w *countingWorkspace) AgentCancel(string)     { w.cancelCalls++ }
+func (w *countingWorkspace) AgentClearQueue(string) error {
+	w.clearQueueCalls++
+	w.queued = nil
+	return nil
+}
+
+func (w *countingWorkspace) AgentCancel(string) error {
+	w.cancelCalls++
+	return nil
+}
 
 func (w *countingWorkspace) AgentModel() workspace.AgentModel {
 	w.modelCalls++
@@ -190,7 +203,7 @@ func (w *countingWorkspace) InitializePrompt() (string, error) {
 	return "", nil
 }
 
-func (w *countingWorkspace) LSPStart(context.Context, string) {}
+func (w *countingWorkspace) LSPStart(context.Context, string) error { return nil }
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 

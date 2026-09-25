@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -125,8 +126,12 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 			common.StartTurn(sessionID)
 		}
 		for _, path := range reads {
-			ws.FileTrackerRecordRead(ctx, sessionID, path)
-			ws.LSPStart(ctx, path)
+			if err := ws.FileTrackerRecordRead(ctx, sessionID, path); err != nil {
+				slog.Warn("Failed to record file read", "session_id", sessionID, "path", path, "error", err)
+			}
+			if err := ws.LSPStart(ctx, path); err != nil {
+				slog.Warn("Failed to start LSP server", "session_id", sessionID, "path", path, "error", err)
+			}
 		}
 		if err := ws.AgentRun(ctx, sessionID, content, attachments...); err != nil && !errors.Is(err, context.Canceled) {
 			if quota, ok := workspace.GetProviderQuotaInfo(err); ok {
@@ -171,7 +176,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 	// Queued prompts pending: esc clears the queue. Decide from the cached
 	// count (event-driven) instead of a synchronous workspace probe.
 	if m.promptQueue.count() > 0 {
-		m.com.Workspace.AgentClearQueue(m.sess.current.ID)
+		if err := m.com.Workspace.AgentClearQueue(m.sess.current.ID); err != nil {
+			slog.Warn("Failed to clear agent queue", "session_id", m.sess.current.ID, "error", err)
+		}
 		m.queued.clear(m.chat)
 		// Bump the queue generation so a fetch started before this clear
 		// cannot land and repopulate the pill we just emptied, then write
@@ -192,7 +199,9 @@ func (m *UI) confirmAgentCancellation() tea.Cmd {
 	// Cancel a running bang command if one is in progress.
 	m.editor.bang.cancelRunning()
 
-	m.com.Workspace.AgentCancel(m.sess.current.ID)
+	if err := m.com.Workspace.AgentCancel(m.sess.current.ID); err != nil {
+		slog.Warn("Failed to cancel agent", "session_id", m.sess.current.ID, "error", err)
+	}
 	// A cancelled turn publishes neither AgentNotificationFinished (only
 	// sent on a clean end) nor AgentNotificationError (only sent for a
 	// non-cancellation failure — see handleAgentNotification), so this is

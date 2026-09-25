@@ -235,7 +235,10 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 		if hasSession {
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := ws.FileTrackerLastReadTime(ctx, sessionID, absPath)
+			lastRead, err := ws.FileTrackerLastReadTime(ctx, sessionID, absPath)
+			if err != nil {
+				slog.Warn("Failed to read last-read time for file", "session_id", sessionID, "path", absPath, "error", err)
+			}
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
 					return nil

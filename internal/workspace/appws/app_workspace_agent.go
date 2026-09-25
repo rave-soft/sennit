@@ -119,10 +119,11 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	}, nil
 }
 
-func (w *AppWorkspace) AgentCancel(sessionID string) {
+func (w *AppWorkspace) AgentCancel(sessionID string) error {
 	if coord := w.app.Coordinator(); coord != nil {
 		coord.Cancel(sessionID)
 	}
+	return nil
 }
 
 func (w *AppWorkspace) AgentIsBusy() bool {
@@ -220,10 +221,11 @@ func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	return coord.QueuedPromptsList(sessionID)
 }
 
-func (w *AppWorkspace) AgentClearQueue(sessionID string) {
+func (w *AppWorkspace) AgentClearQueue(sessionID string) error {
 	if coord := w.app.Coordinator(); coord != nil {
 		coord.ClearQueue(sessionID)
 	}
+	return nil
 }
 
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {

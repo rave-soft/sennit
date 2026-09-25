@@ -109,20 +109,36 @@ type yoloToggledMsg struct {
 }
 
 // yoloPermissionEnabledMsg carries the result of enabling yolo mode and
-// granting the permission that prompted the choice.
+// granting the permission that prompted the choice. These are two
+// separate workspace calls (PermissionSetSkipRequests then, only if that
+// succeeded, PermissionGrant), and a single Err field would conflate two
+// very different outcomes: when SkipErr is set, skip-requests itself
+// failed, so yolo was never turned on and stays reported off. When
+// GrantErr is set instead, skip-requests already succeeded before the
+// grant was attempted — the workspace is auto-approving everything
+// regardless of what the grant call did next, so yolo must be reported
+// enabled (cache/prompt updated) even though the permission dialog stays
+// open for a retry of the grant. Accepted is only meaningful when GrantErr
+// is nil; it means what permissionResponseMsg's Accepted means.
 type yoloPermissionEnabledMsg struct {
 	uiOwned
 
 	Accepted             bool
+	SkipErr              error
+	GrantErr             error
 	Permission           string
 	permissionGeneration uint64
 	yoloGeneration       uint64
 }
 
+// permissionResponseMsg carries the result of resolving a permission
+// request. See yoloPermissionEnabledMsg's Err for what distinguishes it
+// from Accepted=false.
 type permissionResponseMsg struct {
 	uiOwned
 
 	Accepted   bool
+	Err        error
 	Permission string
 	generation uint64
 }
@@ -268,12 +284,42 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		yoloCompleted := m.yolo.complete(msg.yoloGeneration)
 		permissionCompleted := m.permissionResponse.complete(msg.Permission, msg.permissionGeneration)
 		if yoloCompleted {
-			m.wsCache.yoloCache.Set(true)
-			m.wsCache.busyFetchGen++
-			m.setEditorPrompt(true)
-			cmds = append(cmds, util.ReportInfo("Yolo mode enabled"))
+			if msg.SkipErr != nil {
+				// PermissionSetSkipRequests itself failed: skip-requests
+				// never took effect in the workspace, so yolo stays
+				// reported off.
+				cmds = append(cmds, util.ReportError(fmt.Errorf("enabling yolo mode: %w", msg.SkipErr)))
+			} else {
+				// Skip-requests succeeded, whatever GrantErr says below:
+				// the workspace is now auto-approving every request, so
+				// the UI must reflect that regardless of whether the
+				// grant that prompted this also succeeded.
+				m.wsCache.yoloCache.Set(true)
+				m.wsCache.busyFetchGen++
+				m.setEditorPrompt(true)
+				cmds = append(cmds, util.ReportInfo("Yolo mode enabled"))
+			}
 		}
 		if permissionCompleted {
+			if msg.SkipErr != nil {
+				// Skip-requests failed, so PermissionGrant was never
+				// attempted (see the dispatching Cmd) — this is the same
+				// call-could-not-be-carried-out case as GrantErr, just
+				// caught one call earlier. Leave the dialog open for a
+				// retry. The yolo branch above already reported it when
+				// it owned this generation.
+				if !yoloCompleted {
+					cmds = append(cmds, util.ReportError(msg.SkipErr))
+				}
+				break
+			}
+			if msg.GrantErr != nil {
+				// The grant call itself failed; leave the dialog open so
+				// the user can retry it, same as permissionResponseMsg's
+				// Err handling.
+				cmds = append(cmds, util.ReportError(msg.GrantErr))
+				break
+			}
 			m.dialog.CloseDialog(dialog.PermissionsID)
 			if !msg.Accepted {
 				cmds = append(cmds, util.ReportError(errors.New("permission request is no longer waiting for an answer")))
@@ -282,6 +328,14 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 
 	case permissionResponseMsg:
 		if !m.permissionResponse.complete(msg.Permission, msg.generation) {
+			break
+		}
+		if msg.Err != nil {
+			// The call could not be carried out at all; keep the dialog
+			// open (permissionResponse.complete already cleared the
+			// in-flight state above, so a retry is allowed) rather than
+			// treating this like a lost race.
+			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}
 		if !msg.Accepted {
@@ -322,6 +376,9 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	case importCopilotResult:
 		if !m.modelOperation.owns(msg.generation) {
 			break
+		}
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("importing github copilot token: %w", msg.Err)))
 		}
 		// ImportCopilot completed (successfully or not). Now check
 		// whether the provider is actually configured.

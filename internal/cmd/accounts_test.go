@@ -49,7 +49,7 @@ func (a *realConfigAccessor) SetCompactMode(scope config.Scope, enabled bool) er
 	return a.store.SetCompactMode(scope, enabled)
 }
 
-func (a *realConfigAccessor) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+func (a *realConfigAccessor) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {
 	return a.store.SetProviderAPIKey(scope, providerID, apiKey)
 }
 
@@ -123,8 +123,8 @@ func (a *realConfigAccessor) CurrentPlanUsage(string) (accounts.Usage, bool) {
 	return accounts.Usage{}, false
 }
 
-func (a *realConfigAccessor) ImportCopilot() (*oauth.Token, bool) {
-	return a.credentials.ImportCopilot()
+func (a *realConfigAccessor) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+	return a.credentials.ImportCopilot(ctx)
 }
 
 func (a *realConfigAccessor) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {

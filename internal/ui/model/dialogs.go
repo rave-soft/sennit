@@ -30,6 +30,20 @@ type closeDialogMsg struct {
 	id string
 }
 
+// questionAnswerResultMsg carries the result of a form's OnAnswer/OnCancel
+// call, both of which resolve on the cmd goroutine (see openBatchFormDialog).
+// It exists only for the error case: a nil Err means the call succeeded (or
+// simply lost the race to resolve an already-decided batch), and nothing
+// dispatches this message for that outcome — see openBatchFormDialog's
+// OnAnswer/OnCancel closures.
+type questionAnswerResultMsg struct {
+	uiOwned
+
+	Err       error
+	Batch     question.Request
+	Cancelled bool
+}
+
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	action := m.dialog.Update(msg)
 	if action == nil {
@@ -528,16 +542,29 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	// keeps that off the Update goroutine, matching the rest of this
 	// dialog's IO. Snapshot the workspace by value so the closures don't
 	// race with Update reading m.com off the render loop.
+	//
+	// Both the form and its pendingInlineBatches entry are already torn
+	// down synchronously (keypress.go/mouse.go clear m.activeInline and
+	// untrack the batch the moment Enter/click fires this Cmd, before it
+	// ever runs) — the optimistic-close pattern the permission dialog
+	// also uses. So a call that fails here cannot "leave the form open";
+	// the best this can do is report the failure and reopen a fresh copy
+	// of the form (the answers already entered are lost) so the person
+	// can retry instead of the response silently vanishing.
 	ws := m.com.Workspace
 	form.OnAnswer = func(responses []question.Answer) tea.Cmd {
 		return func() tea.Msg {
-			ws.QuestionAnswer(batch.ID, responses)
+			if _, err := ws.QuestionAnswer(batch.ID, responses); err != nil {
+				return questionAnswerResultMsg{uiOwned: uiOwned{owner: m}, Err: err, Batch: batch}
+			}
 			return nil
 		}
 	}
 	form.OnCancel = func() tea.Cmd {
 		return func() tea.Msg {
-			ws.QuestionCancel(batch.ID)
+			if _, err := ws.QuestionCancel(batch.ID); err != nil {
+				return questionAnswerResultMsg{uiOwned: uiOwned{owner: m}, Err: err, Batch: batch, Cancelled: true}
+			}
 			return nil
 		}
 	}

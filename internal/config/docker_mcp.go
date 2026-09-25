@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/rave-soft/sennit/internal/dockermcp"
@@ -37,7 +38,11 @@ func DockerMCPConfig() MCPConfig {
 // PrepareDockerMCPConfig validates Docker MCP availability and stages the
 // Docker MCP configuration in memory.
 func (s *ConfigStore) PrepareDockerMCPConfig() (MCPConfig, error) {
-	if !dockermcp.IsAvailable() {
+	available, err := dockermcp.IsAvailable(context.Background())
+	if err != nil {
+		return MCPConfig{}, fmt.Errorf("checking docker mcp availability: %w", err)
+	}
+	if !available {
 		return MCPConfig{}, fmt.Errorf("docker mcp is not available, please ensure docker is installed and 'docker mcp version' succeeds")
 	}
 

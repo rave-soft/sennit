@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -72,9 +73,11 @@ type cmdDrivingWorkspace struct {
 	agentRunShellCalls        int
 
 	permGrantCalls          int
+	permGrantErr            error
 	permGrantPersistentCall permission.PermissionRequest
 	permDenyCalls           int
 	permSetSkipCalls        int
+	permSetSkipErr          error
 	permSkipCalls           int
 	lastPermSkip            bool
 
@@ -94,8 +97,10 @@ type cmdDrivingWorkspace struct {
 	questionAnswerCalls    int
 	questionAnswerBatchID  string
 	questionAnswerResponse []question.Answer
+	questionAnswerErr      error
 	questionCancelCalls    int
 	questionCancelBatchID  string
+	questionCancelErr      error
 
 	sessionsBySessionID map[string]session.Session
 	messagesBySessionID map[string][]message.Message
@@ -170,26 +175,33 @@ func (w *cmdDrivingWorkspace) PermissionSkipRequests() bool {
 	return w.yolo
 }
 
-func (w *cmdDrivingWorkspace) PermissionSetSkipRequests(skip bool) {
+func (w *cmdDrivingWorkspace) PermissionSetSkipRequests(skip bool) error {
 	w.permSetSkipCalls++
+	if w.permSetSkipErr != nil {
+		return w.permSetSkipErr
+	}
 	w.lastPermSkip = skip
 	w.yolo = skip
+	return nil
 }
 
-func (w *cmdDrivingWorkspace) PermissionGrant(p permission.PermissionRequest) bool {
+func (w *cmdDrivingWorkspace) PermissionGrant(p permission.PermissionRequest) (bool, error) {
 	w.permGrantCalls++
-	return true
+	if w.permGrantErr != nil {
+		return false, w.permGrantErr
+	}
+	return true, nil
 }
 
-func (w *cmdDrivingWorkspace) PermissionGrantPersistent(p permission.PermissionRequest) bool {
+func (w *cmdDrivingWorkspace) PermissionGrantPersistent(p permission.PermissionRequest) (bool, error) {
 	w.permGrantPersistentCall = p
 	w.permGrantCalls++
-	return true
+	return true, nil
 }
 
-func (w *cmdDrivingWorkspace) PermissionDeny(p permission.PermissionRequest) bool {
+func (w *cmdDrivingWorkspace) PermissionDeny(p permission.PermissionRequest) (bool, error) {
 	w.permDenyCalls++
-	return true
+	return true, nil
 }
 
 func (w *cmdDrivingWorkspace) AgentIsReady() bool {
@@ -218,8 +230,17 @@ func (w *cmdDrivingWorkspace) AgentQueuedPromptsList(string) []string {
 	w.agentQueuedCalls++
 	return nil
 }
-func (w *cmdDrivingWorkspace) AgentClearQueue(string) { w.agentClearQueueCalls++ }
-func (w *cmdDrivingWorkspace) AgentCancel(string)     { w.agentCancelCalls++ }
+
+func (w *cmdDrivingWorkspace) AgentClearQueue(string) error {
+	w.agentClearQueueCalls++
+	return nil
+}
+
+func (w *cmdDrivingWorkspace) AgentCancel(string) error {
+	w.agentCancelCalls++
+	return nil
+}
+
 func (w *cmdDrivingWorkspace) AgentSummarize(ctx context.Context, s string) error {
 	w.agentSummarizeCalls++
 	return nil
@@ -360,8 +381,12 @@ func (w *cmdDrivingWorkspace) InitCoderAgentNonInteractive(ctx context.Context) 
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) LSPStart(ctx context.Context, path string) { w.lspStartCalls++ }
-func (w *cmdDrivingWorkspace) LSPStopAll(ctx context.Context)            {}
+func (w *cmdDrivingWorkspace) LSPStart(ctx context.Context, path string) error {
+	w.lspStartCalls++
+	return nil
+}
+
+func (w *cmdDrivingWorkspace) LSPStopAll(ctx context.Context) error { return nil }
 func (w *cmdDrivingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
 	return nil
 }
@@ -382,7 +407,7 @@ func (w *cmdDrivingWorkspace) SetCompactMode(config.Scope, bool) error {
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) SetProviderAPIKey(config.Scope, string, any) error {
+func (w *cmdDrivingWorkspace) SetProviderAPIKey(config.Scope, string, string) error {
 	return nil
 }
 
@@ -394,8 +419,8 @@ func (w *cmdDrivingWorkspace) RemoveConfigField(config.Scope, string) error {
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) ImportCopilot() (*oauth.Token, bool) {
-	return nil, false
+func (w *cmdDrivingWorkspace) ImportCopilot(context.Context) (*oauth.Token, bool, error) {
+	return nil, false, nil
 }
 
 func (w *cmdDrivingWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
@@ -433,9 +458,13 @@ func (w *cmdDrivingWorkspace) Stats(context.Context, stats.Request) (stats.Snaps
 func (w *cmdDrivingWorkspace) MCPResources() []workspace.MCPResourceInfo {
 	return nil
 }
-func (w *cmdDrivingWorkspace) MCPRefreshPrompts(ctx context.Context, name string)   {}
-func (w *cmdDrivingWorkspace) MCPRefreshResources(ctx context.Context, name string) {}
-func (w *cmdDrivingWorkspace) RefreshMCPTools(ctx context.Context, name string)     {}
+
+func (w *cmdDrivingWorkspace) MCPRefreshPrompts(ctx context.Context, name string) error { return nil }
+
+func (w *cmdDrivingWorkspace) MCPRefreshResources(ctx context.Context, name string) error { return nil }
+
+func (w *cmdDrivingWorkspace) RefreshMCPTools(ctx context.Context, name string) error { return nil }
+
 func (w *cmdDrivingWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]workspace.MCPResourceContents, error) {
 	return nil, nil
 }
@@ -444,7 +473,7 @@ func (w *cmdDrivingWorkspace) ListMCPPrompts(ctx context.Context) ([]workspace.M
 	return nil, nil
 }
 
-func (w *cmdDrivingWorkspace) GetMCPPrompt(string, string, map[string]string) (string, error) {
+func (w *cmdDrivingWorkspace) GetMCPPrompt(context.Context, string, string, map[string]string) (string, error) {
 	return "", nil
 }
 
@@ -460,10 +489,13 @@ func (w *cmdDrivingWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer 
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) MCPAuthURL(string) string                                          { return "" }
-func (w *cmdDrivingWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {}
-func (w *cmdDrivingWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
-	return time.Time{}
+func (w *cmdDrivingWorkspace) MCPAuthURL(string) string { return "" }
+func (w *cmdDrivingWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) error {
+	return nil
+}
+
+func (w *cmdDrivingWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (w *cmdDrivingWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
@@ -483,17 +515,23 @@ func (w *cmdDrivingWorkspace) PrepareSessionChanges(ctx context.Context, session
 	return workspace.AggregateSessionFiles(files), nil
 }
 
-func (w *cmdDrivingWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+func (w *cmdDrivingWorkspace) QuestionAnswer(batchID string, responses []question.Answer) (bool, error) {
 	w.questionAnswerCalls++
 	w.questionAnswerBatchID = batchID
 	w.questionAnswerResponse = responses
-	return false
+	if w.questionAnswerErr != nil {
+		return false, w.questionAnswerErr
+	}
+	return false, nil
 }
 
-func (w *cmdDrivingWorkspace) QuestionCancel(batchID string) bool {
+func (w *cmdDrivingWorkspace) QuestionCancel(batchID string) (bool, error) {
 	w.questionCancelCalls++
 	w.questionCancelBatchID = batchID
-	return false
+	if w.questionCancelErr != nil {
+		return false, w.questionCancelErr
+	}
+	return false, nil
 }
 func (w *cmdDrivingWorkspace) Subscribe(func(any)) {}
 func (w *cmdDrivingWorkspace) Shutdown()           {}
@@ -842,6 +880,59 @@ func TestCmdDriving_PermissionRoundTrip_Allow(t *testing.T) {
 	// Dialog must close.
 	require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID),
 		"permissions dialog must close after action")
+}
+
+// TestCmdDriving_PermissionRoundTrip_GrantError pins the difference
+// between "the call itself failed" (Err set) and "the request was already
+// resolved elsewhere" (Accepted=false, Err=nil): on a genuine call
+// failure, the dialog must stay open (so the user can retry) and the
+// failure must be reported, rather than being treated as a lost race and
+// silently dismissed.
+func TestCmdDriving_PermissionRoundTrip_GrantError(t *testing.T) {
+	t.Parallel()
+
+	grantErr := errors.New("workspace unreachable")
+	ws := &cmdDrivingWorkspace{agentReady: true, permGrantErr: grantErr}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	perm := permission.PermissionRequest{
+		ID:         "perm-err",
+		ToolCallID: "tool-call-err",
+		ToolName:   "bash",
+	}
+
+	permsDialog := dialog.NewPermissions(m.com, perm)
+	m.permissionResponse.open(perm.ID, false)
+	m.dialog.OpenDialog(permsDialog)
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	require.NotNil(t, cmd)
+	messages := runCmdTree(m, cmd, nil)
+
+	var reported util.InfoMsg
+	for _, msg := range messages {
+		if info, ok := msg.(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+			reported = info
+			break
+		}
+	}
+	require.Equal(t, util.InfoTypeError, reported.Type, "the call failure must be reported")
+
+	// The dialog stays open and the in-flight state is cleared, so a
+	// retry is possible.
+	require.True(t, m.dialog.ContainsDialog(dialog.PermissionsID),
+		"a failed call must leave the dialog open for a retry")
+	require.False(t, m.permissionResponse.loading,
+		"the in-flight response must be cleared so a retry can begin")
+
+	// A retry now succeeds: clear the injected error and answer again.
+	ws.permGrantErr = nil
+	_, retryCmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	require.NotNil(t, retryCmd, "a retry must be possible after the failed call")
+	runCmdTree(m, retryCmd, nil)
+	require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID),
+		"the retried grant must close the dialog")
 }
 
 func TestCmdDriving_PermissionRoundTrip_EnableYolo(t *testing.T) {
@@ -1675,7 +1766,7 @@ func TestCmdDriving_PermissionGrant_InCmd(t *testing.T) {
 	// Directly dispatch the permission cmd.
 	perm := permission.PermissionRequest{ID: "p1", ToolName: "bash"}
 	cmd := func() tea.Msg {
-		m.com.Workspace.PermissionGrant(perm)
+		_, _ = m.com.Workspace.PermissionGrant(perm)
 		return nil
 	}
 

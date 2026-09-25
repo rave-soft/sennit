@@ -66,7 +66,7 @@ type fakeTrackingStore struct {
 	lastRead     time.Time
 }
 
-func (s *fakeTrackingStore) RecordRead(context.Context, string, string)                  {}
+func (s *fakeTrackingStore) RecordRead(context.Context, string, string) error            { return nil }
 func (s *fakeTrackingStore) RecordPartialRead(context.Context, string, string, int, int) {}
 func (s *fakeTrackingStore) RecordEdit(context.Context, string, string, int, int, int)   {}
 func (s *fakeTrackingStore) ReadCoverage(context.Context, string, string) filetracker.Coverage {
@@ -74,8 +74,8 @@ func (s *fakeTrackingStore) ReadCoverage(context.Context, string, string) filetr
 	return filetracker.Coverage{Ranges: []filetracker.LineRange{{Start: 2, End: 4}}}
 }
 
-func (s *fakeTrackingStore) LastReadTime(context.Context, string, string) time.Time {
-	return s.lastRead
+func (s *fakeTrackingStore) LastReadTime(context.Context, string, string) (time.Time, error) {
+	return s.lastRead, nil
 }
 
 func (s *fakeTrackingStore) ListReadFiles(context.Context, string) ([]string, error) { return nil, nil }

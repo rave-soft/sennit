@@ -218,7 +218,9 @@ func TestDisableDockerMCP(t *testing.T) {
 func TestEnableDockerMCPWithRealDockerWhenAvailable(t *testing.T) {
 	t.Parallel()
 
-	if !dockermcp.IsAvailable() {
+	available, err := dockermcp.IsAvailable(context.Background())
+	require.NoError(t, err)
+	if !available {
 		t.Skip("docker mcp not available on this machine")
 	}
 
@@ -234,7 +236,7 @@ func TestEnableDockerMCPWithRealDockerWhenAvailable(t *testing.T) {
 		resolver:       NewShellVariableResolver(env.New()),
 	}
 
-	err := store.EnableDockerMCP()
+	err = store.EnableDockerMCP()
 	require.NoError(t, err)
 	require.True(t, store.Config().IsDockerMCPEnabled())
 }

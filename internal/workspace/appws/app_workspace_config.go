@@ -39,7 +39,7 @@ func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 	return w.store.SetCompactMode(scope, enabled)
 }
 
-func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {
 	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
 		return err
 	}
@@ -55,8 +55,8 @@ func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 	return w.store.RemoveConfigField(scope, key)
 }
 
-func (w *AppWorkspace) ImportCopilot() (*oauth.Token, bool) {
-	return w.app.Credentials().ImportCopilot()
+func (w *AppWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+	return w.app.Credentials().ImportCopilot(ctx)
 }
 
 func (w *AppWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {

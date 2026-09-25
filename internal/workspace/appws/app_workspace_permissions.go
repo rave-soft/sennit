@@ -1,6 +1,8 @@
 package appws
 
 import (
+	"errors"
+
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/question"
 )
@@ -49,38 +51,53 @@ func (w *AppWorkspace) permissionsFor(perm permission.PermissionRequest) []permi
 // the request does nothing at all and says so. Order still matters --
 // the routed service is asked first -- but only for cost, not
 // correctness.
-func answerPermission(attempts ...func() bool) bool {
+//
+// Semantics: the first attempt that resolves the request wins, reported
+// as (true, nil). If none resolves, the result is (false, err) where err
+// joins every error an attempt reported (nil if none did) — a resolver
+// that simply did not hold the request is not an error, only one that
+// could not be asked at all is.
+func answerPermission(attempts ...func() (bool, error)) (bool, error) {
+	var errs []error
 	for _, attempt := range attempts {
-		if attempt != nil && attempt() {
-			return true
+		if attempt == nil {
+			continue
+		}
+		ok, err := attempt()
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if ok {
+			return true, nil
 		}
 	}
-	return false
+	return false, errors.Join(errs...)
 }
 
 // serviceAttempts adapts candidate services into answerPermission attempts.
-func serviceAttempts(services []permission.Resolver, answer func(permission.Resolver) bool) []func() bool {
-	attempts := make([]func() bool, 0, len(services))
+func serviceAttempts(services []permission.Resolver, answer func(permission.Resolver) bool) []func() (bool, error) {
+	attempts := make([]func() (bool, error), 0, len(services))
 	for _, svc := range services {
 		if svc == nil {
 			continue
 		}
-		attempts = append(attempts, func() bool { return answer(svc) })
+		attempts = append(attempts, func() (bool, error) { return answer(svc), nil })
 	}
 	return attempts
 }
 
-func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) (bool, error) {
 	return answerPermission(serviceAttempts(w.permissionsFor(perm),
 		func(s permission.Resolver) bool { return s.Grant(perm) })...)
 }
 
-func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) (bool, error) {
 	return answerPermission(serviceAttempts(w.permissionsFor(perm),
 		func(s permission.Resolver) bool { return s.GrantPersistent(perm) })...)
 }
 
-func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) (bool, error) {
 	return answerPermission(serviceAttempts(w.permissionsFor(perm),
 		func(s permission.Resolver) bool { return s.Deny(perm) })...)
 }
@@ -89,8 +106,9 @@ func (w *AppWorkspace) PermissionSkipRequests() bool {
 	return w.app.Permissions().SkipRequests()
 }
 
-func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
+func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) error {
 	w.app.SetPermissionsSkip(skip)
+	return nil
 }
 
 // -- Questions --
@@ -111,23 +129,23 @@ func (w *AppWorkspace) questionServices() []question.Service {
 	return services
 }
 
-func questionServiceAttempts(services []question.Service, answer func(question.Service) bool) []func() bool {
-	attempts := make([]func() bool, 0, len(services))
+func questionServiceAttempts(services []question.Service, answer func(question.Service) bool) []func() (bool, error) {
+	attempts := make([]func() (bool, error), 0, len(services))
 	for _, svc := range services {
 		if svc == nil {
 			continue
 		}
-		attempts = append(attempts, func() bool { return answer(svc) })
+		attempts = append(attempts, func() (bool, error) { return answer(svc), nil })
 	}
 	return attempts
 }
 
-func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answer) (bool, error) {
 	return answerPermission(questionServiceAttempts(w.questionServices(),
 		func(s question.Service) bool { return s.Answer(batchID, responses) })...)
 }
 
-func (w *AppWorkspace) QuestionCancel(batchID string) bool {
+func (w *AppWorkspace) QuestionCancel(batchID string) (bool, error) {
 	return answerPermission(questionServiceAttempts(w.questionServices(),
 		func(s question.Service) bool { return s.Cancel(batchID) })...)
 }

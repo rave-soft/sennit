@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
-	"log/slog"
 	"slices"
 	"strings"
 
@@ -132,28 +131,29 @@ func (r *Registry) RunTool(ctx context.Context, cfg ConfigProvider, name, toolNa
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the
-// global state.
-func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name string) {
+// global state. See RefreshPrompts for what the error return covers versus
+// what lands in the server's own state.
+func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name string) error {
 	owner, session, ok := r.sessionOwner(name)
 	if !ok {
-		slog.Warn("Refresh tools: no session", "name", name)
-		return
+		return fmt.Errorf("refresh tools: no session for %q", name)
 	}
 	tools, err := getTools(ctx, session)
 	if err != nil {
 		r.failStateForSession(name, owner, session, err)
-		return
+		return nil
 	}
 	m, ok := cfg.Config().MCP[name]
 	if !ok {
-		return
+		return nil
 	}
 	tools = filterTools(m, tools)
 	if err := validateToolSchemas(tools); err != nil {
 		r.failStateForSession(name, owner, session, err)
-		return
+		return nil
 	}
 	publishSingleCatalog(r, r.allTools, name, owner, session, tools, func(c *Counts, n int) { c.Tools = n })
+	return nil
 }
 
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {

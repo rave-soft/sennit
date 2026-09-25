@@ -10,12 +10,14 @@ import (
 
 // -- LSP --
 
-func (w *AppWorkspace) LSPStart(ctx context.Context, path string) {
+func (w *AppWorkspace) LSPStart(ctx context.Context, path string) error {
 	w.app.LSPManager.Start(ctx, path)
+	return nil
 }
 
-func (w *AppWorkspace) LSPStopAll(ctx context.Context) {
+func (w *AppWorkspace) LSPStopAll(ctx context.Context) error {
 	w.app.LSPManager.StopAll(ctx)
+	return nil
 }
 
 func (w *AppWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {

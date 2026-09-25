@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"log/slog"
 
@@ -61,20 +62,21 @@ func (r *Registry) ReadResource(ctx context.Context, cfg ConfigProvider, name, u
 	return result.Contents, nil
 }
 
-// RefreshResources gets the updated list of resources from the MCP and updates the
-// global state.
-func (r *Registry) RefreshResources(ctx context.Context, name string) {
+// RefreshResources gets the updated list of resources from the MCP and
+// updates the global state. See RefreshPrompts for what the error return
+// covers versus what lands in the server's own state.
+func (r *Registry) RefreshResources(ctx context.Context, name string) error {
 	owner, session, ok := r.sessionOwner(name)
 	if !ok {
-		slog.Warn("Refresh resources: no session", "name", name)
-		return
+		return fmt.Errorf("refresh resources: no session for %q", name)
 	}
 	resources, err := r.listResources(ctx, session)
 	if err != nil {
 		r.failStateForSession(name, owner, session, err)
-		return
+		return nil
 	}
 	publishSingleCatalog(r, r.allResources, name, owner, session, resources, func(c *Counts, n int) { c.Resources = n })
+	return nil
 }
 
 // hasResourcesCapability is the resources counterpart to

@@ -279,12 +279,14 @@ func (w *readOnlyWorkspace) AgentRunShellCommand(ctx context.Context, sessionID,
 	return proto.ShellCommandResponse{}, w.readOnlyError("AgentRunShellCommand")
 }
 
-func (w *readOnlyWorkspace) AgentCancel(sessionID string) {
+func (w *readOnlyWorkspace) AgentCancel(sessionID string) error {
 	// No-op: cancelling a non-running thread is harmless.
+	return nil
 }
 
-func (w *readOnlyWorkspace) AgentClearQueue(sessionID string) {
+func (w *readOnlyWorkspace) AgentClearQueue(sessionID string) error {
 	// No-op: clearing an empty queue is harmless.
+	return nil
 }
 
 func (w *readOnlyWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
@@ -329,30 +331,31 @@ func (w *readOnlyWorkspace) ResetAgentToolCache() {
 
 // -- Permissions (all denied) --
 
-func (w *readOnlyWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
-	return false
+func (w *readOnlyWorkspace) PermissionGrant(perm permission.PermissionRequest) (bool, error) {
+	return false, nil
 }
 
-func (w *readOnlyWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
-	return false
+func (w *readOnlyWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) (bool, error) {
+	return false, nil
 }
 
-func (w *readOnlyWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
-	return false
+func (w *readOnlyWorkspace) PermissionDeny(perm permission.PermissionRequest) (bool, error) {
+	return false, nil
 }
 
-func (w *readOnlyWorkspace) PermissionSetSkipRequests(skip bool) {
+func (w *readOnlyWorkspace) PermissionSetSkipRequests(skip bool) error {
 	// No-op: setting skip on a read-only workspace is harmless.
+	return nil
 }
 
 // -- Questions (all denied) --
 
-func (w *readOnlyWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
-	return false
+func (w *readOnlyWorkspace) QuestionAnswer(batchID string, responses []question.Answer) (bool, error) {
+	return false, nil
 }
 
-func (w *readOnlyWorkspace) QuestionCancel(batchID string) bool {
-	return false
+func (w *readOnlyWorkspace) QuestionCancel(batchID string) (bool, error) {
+	return false, nil
 }
 
 // PrepareSessionChanges must not delegate to the embedded Workspace's own
@@ -387,14 +390,15 @@ func (w *readOnlyWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileCha
 
 // -- FileTracker --
 
-func (w *readOnlyWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
+func (w *readOnlyWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) error {
 	// No-op: recording reads is harmless.
+	return nil
 }
 
-func (w *readOnlyWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
+func (w *readOnlyWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error) {
 	allowed, err := w.allowsSession(ctx, sessionID)
 	if err != nil || !allowed {
-		return time.Time{}
+		return time.Time{}, nil
 	}
 	return w.ws.FileTrackerLastReadTime(ctx, sessionID, path)
 }
@@ -425,12 +429,14 @@ func (w *readOnlyWorkspace) ListSessionHistory(ctx context.Context, sessionID st
 
 // -- LSP (mutations only) --
 
-func (w *readOnlyWorkspace) LSPStart(ctx context.Context, path string) {
+func (w *readOnlyWorkspace) LSPStart(ctx context.Context, path string) error {
 	// No-op: starting LSP on a read-only workspace is harmless.
+	return nil
 }
 
-func (w *readOnlyWorkspace) LSPStopAll(ctx context.Context) {
+func (w *readOnlyWorkspace) LSPStopAll(ctx context.Context) error {
 	// No-op: stopping LSP on a read-only workspace is harmless.
+	return nil
 }
 
 // -- Config --
@@ -451,7 +457,7 @@ func (w *readOnlyWorkspace) SetCompactMode(scope config.Scope, enabled bool) err
 	return w.readOnlyError("SetCompactMode")
 }
 
-func (w *readOnlyWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+func (w *readOnlyWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {
 	return w.readOnlyError("SetProviderAPIKey")
 }
 
@@ -538,8 +544,8 @@ func (w *readOnlyWorkspace) DockerMCPAvailable() (available, known bool) {
 // RefreshDockerMCPAvailability runs a probe and caches its answer, but it
 // changes nothing about this workspace or the project — it is a question
 // about the machine — so a read-only workspace may ask it.
-func (w *readOnlyWorkspace) RefreshDockerMCPAvailability() bool {
-	return w.ws.RefreshDockerMCPAvailability()
+func (w *readOnlyWorkspace) RefreshDockerMCPAvailability(ctx context.Context) (bool, error) {
+	return w.ws.RefreshDockerMCPAvailability(ctx)
 }
 
 func (w *readOnlyWorkspace) KnownProviders() []catwalk.Provider {
@@ -562,8 +568,8 @@ func (w *readOnlyWorkspace) RemoveConfigField(scope config.Scope, key string) er
 	return w.readOnlyError("RemoveConfigField")
 }
 
-func (w *readOnlyWorkspace) ImportCopilot() (*oauth.Token, bool) {
-	return nil, false
+func (w *readOnlyWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+	return nil, false, nil
 }
 
 func (w *readOnlyWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
@@ -582,16 +588,19 @@ func (w *readOnlyWorkspace) MarkProjectInitialized() error {
 
 // -- MCP (mutations only) --
 
-func (w *readOnlyWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
+func (w *readOnlyWorkspace) MCPRefreshPrompts(ctx context.Context, name string) error {
 	// No-op: refreshing prompts on a read-only workspace is harmless.
+	return nil
 }
 
-func (w *readOnlyWorkspace) MCPRefreshResources(ctx context.Context, name string) {
+func (w *readOnlyWorkspace) MCPRefreshResources(ctx context.Context, name string) error {
 	// No-op: refreshing resources on a read-only workspace is harmless.
+	return nil
 }
 
-func (w *readOnlyWorkspace) RefreshMCPTools(ctx context.Context, name string) {
+func (w *readOnlyWorkspace) RefreshMCPTools(ctx context.Context, name string) error {
 	// No-op: refreshing tools on a read-only workspace is harmless.
+	return nil
 }
 
 func (w *readOnlyWorkspace) EnableDockerMCP(ctx context.Context) error {
@@ -735,8 +744,8 @@ func (w *readOnlyWorkspace) Config() *config.Config {
 	return w.ws.Config()
 }
 
-func (w *readOnlyWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	return w.ws.GetMCPPrompt(clientID, promptID, args)
+func (w *readOnlyWorkspace) GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error) {
+	return w.ws.GetMCPPrompt(ctx, clientID, promptID, args)
 }
 
 func (w *readOnlyWorkspace) InitializePrompt() (string, error) {

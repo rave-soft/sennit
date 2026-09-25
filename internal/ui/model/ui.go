@@ -640,7 +640,7 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 	register((*UI).updatePrompts,
 		reflect.TypeFor[closeDialogMsg](), reflect.TypeFor[pubsub.Event[permission.PermissionRequest]](),
 		reflect.TypeFor[pubsub.Event[permission.PermissionNotification]](), reflect.TypeFor[pubsub.Event[question.Request]](),
-		reflect.TypeFor[pubsub.Event[question.Notification]]())
+		reflect.TypeFor[pubsub.Event[question.Notification]](), reflect.TypeFor[questionAnswerResultMsg]())
 
 	register((*UI).updateSettings,
 		reflect.TypeFor[providerConfiguredResult](), reflect.TypeFor[modelSelectResult](),
@@ -951,14 +951,16 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			return util.ReportWarn("Model settings are already being updated")
 		}
 		ws := m.com.Workspace
+		ctx := m.com.Context()
 		cmds = append(cmds, func() tea.Msg {
-			ws.ImportCopilot()
+			_, _, err := ws.ImportCopilot(ctx)
 			return importCopilotResult{
 				uiOwned:      uiOwned{owner: m},
 				providerID:   providerID,
 				model:        msg.Model,
 				isOnboarding: isOnboarding,
 				generation:   generation,
+				Err:          err,
 			}
 		})
 		return tea.Batch(cmds...)
@@ -1274,6 +1276,11 @@ type importCopilotResult struct {
 	model        config.SelectedModel
 	isOnboarding bool
 	generation   uint64
+	// Err is set when the import call itself failed (as opposed to
+	// simply finding nothing to import). The handler still re-checks
+	// whether the provider ended up configured either way, but reports
+	// this so the failure isn't silent.
+	Err error
 }
 
 // sendMessageErrorMsg carries an error from a sendMessage cmd. The Update
@@ -1380,7 +1387,9 @@ func (m *UI) newSession() tea.Cmd {
 	ws.ResetAgentToolCache()
 	return tea.Batch(
 		func() tea.Msg {
-			ws.LSPStopAll(ctx)
+			if err := ws.LSPStopAll(ctx); err != nil {
+				slog.Warn("Failed to stop LSP servers", "error", err)
+			}
 			return nil
 		},
 		m.sess.loadPromptHistory(m.com, m),

@@ -21,11 +21,11 @@ func (w *AppWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, 
 	return git.UncommittedFiles(ctx, w.store.WorkingDir())
 }
 
-func (w *AppWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
-	w.app.FileTracker.RecordRead(ctx, sessionID, path)
+func (w *AppWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) error {
+	return w.app.FileTracker.RecordRead(ctx, sessionID, path)
 }
 
-func (w *AppWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
+func (w *AppWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error) {
 	return w.app.FileTracker.LastReadTime(ctx, sessionID, path)
 }
 

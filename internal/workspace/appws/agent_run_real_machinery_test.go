@@ -346,7 +346,7 @@ func TestAppWorkspace_AgentRun_CancelBetweenAcceptAndActive_RealMachinery(t *tes
 	// A cancel arriving now lands in the accepted-but-not-active window
 	// and is only recorded because BeginAccepted incremented the accept
 	// counter.
-	aw.AgentCancel(sess.ID)
+	require.NoError(t, aw.AgentCancel(sess.ID))
 
 	// Release the gate so the real RunAccepted threads the handle into
 	// sessionAgent.Run, which must drive cancel-on-entry.

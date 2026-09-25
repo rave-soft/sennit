@@ -63,7 +63,7 @@ func (w *rootTestWorkspace) SupportsThreads() bool        { return w.supportsThr
 // attached thread now cancels any question still pending on it (see
 // cancelThreadQuestion), so any test that builds an embedded thread UI
 // around this stub calls this on teardown.
-func (w *rootTestWorkspace) QuestionCancel(batchID string) bool { return false }
+func (w *rootTestWorkspace) QuestionCancel(batchID string) (bool, error) { return false, nil }
 
 // SupportsTasks answers for the delegation list behind the panel's
 // agents section; no test here drives one.

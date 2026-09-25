@@ -56,7 +56,8 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	require.True(t, IsReadOnlyError(err))
 
 	// Importing credentials is a mutation and must not reach the underlying workspace.
-	_, imported := ro.ImportCopilot()
+	_, imported, err := ro.ImportCopilot(t.Context())
+	require.NoError(t, err)
 	require.False(t, imported)
 	require.Zero(t, stub.importCopilotCalls)
 
@@ -97,13 +98,23 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	require.True(t, IsReadOnlyError(err))
 
 	// Question resolution denied.
-	require.False(t, ro.QuestionAnswer("", nil))
-	require.False(t, ro.QuestionCancel(""))
+	answered, err := ro.QuestionAnswer("", nil)
+	require.NoError(t, err)
+	require.False(t, answered)
+	cancelled, err := ro.QuestionCancel("")
+	require.NoError(t, err)
+	require.False(t, cancelled)
 
 	// Permission mutations denied.
-	require.False(t, ro.PermissionGrant(permission.PermissionRequest{}))
-	require.False(t, ro.PermissionGrantPersistent(permission.PermissionRequest{}))
-	require.False(t, ro.PermissionDeny(permission.PermissionRequest{}))
+	granted, err := ro.PermissionGrant(permission.PermissionRequest{})
+	require.NoError(t, err)
+	require.False(t, granted)
+	grantedPersistent, err := ro.PermissionGrantPersistent(permission.PermissionRequest{})
+	require.NoError(t, err)
+	require.False(t, grantedPersistent)
+	denied, err := ro.PermissionDeny(permission.PermissionRequest{})
+	require.NoError(t, err)
+	require.False(t, denied)
 }
 
 // TestReadOnlyWorkspace_AllowsReads verifies read-only operations delegate
@@ -171,7 +182,9 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	require.Nil(t, ro.AgentQueuedPromptsList("sess-1"))
 
 	// File reads pass through.
-	require.True(t, ro.FileTrackerLastReadTime(t.Context(), "sess-1", "/foo").IsZero())
+	lastRead, err := ro.FileTrackerLastReadTime(t.Context(), "sess-1", "/foo")
+	require.NoError(t, err)
+	require.True(t, lastRead.IsZero())
 	files, err := ro.FileTrackerListReadFiles(t.Context(), "sess-1")
 	require.NoError(t, err)
 	require.Empty(t, files)
@@ -203,7 +216,7 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, resources)
 	_, _ = ro.ListMCPPrompts(t.Context())
-	_, _ = ro.GetMCPPrompt("client", "prompt", map[string]string{})
+	_, _ = ro.GetMCPPrompt(t.Context(), "client", "prompt", map[string]string{})
 	require.Nil(t, ro.MCPPendingAuth())
 	require.Empty(t, ro.MCPAuthURL("name"))
 
@@ -271,16 +284,16 @@ func TestReadOnlyWorkspace_NoopMethods(t *testing.T) {
 	stub := &stubWorkspace{}
 	ro := NewReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "", git.UncommittedFiles)
 
-	require.NotPanics(t, func() { ro.AgentCancel("sess-1") })
-	require.NotPanics(t, func() { ro.AgentClearQueue("sess-1") })
+	require.NotPanics(t, func() { _ = ro.AgentCancel("sess-1") })
+	require.NotPanics(t, func() { _ = ro.AgentClearQueue("sess-1") })
 	require.NotPanics(t, func() { ro.Subscribe(nil) })
-	require.NotPanics(t, func() { ro.LSPStart(t.Context(), "/tmp") })
-	require.NotPanics(t, func() { ro.LSPStopAll(t.Context()) })
-	require.NotPanics(t, func() { ro.MCPRefreshPrompts(t.Context(), "test") })
-	require.NotPanics(t, func() { ro.MCPRefreshResources(t.Context(), "test") })
-	require.NotPanics(t, func() { ro.RefreshMCPTools(t.Context(), "test") })
-	require.NotPanics(t, func() { ro.FileTrackerRecordRead(t.Context(), "sess-1", "/foo/bar") })
-	require.NotPanics(t, func() { ro.PermissionSetSkipRequests(true) })
+	require.NotPanics(t, func() { _ = ro.LSPStart(t.Context(), "/tmp") })
+	require.NotPanics(t, func() { _ = ro.LSPStopAll(t.Context()) })
+	require.NotPanics(t, func() { _ = ro.MCPRefreshPrompts(t.Context(), "test") })
+	require.NotPanics(t, func() { _ = ro.MCPRefreshResources(t.Context(), "test") })
+	require.NotPanics(t, func() { _ = ro.RefreshMCPTools(t.Context(), "test") })
+	require.NotPanics(t, func() { _ = ro.FileTrackerRecordRead(t.Context(), "sess-1", "/foo/bar") })
+	require.NotPanics(t, func() { _ = ro.PermissionSetSkipRequests(true) })
 }
 
 // --- Stub ---
@@ -394,14 +407,21 @@ func (s *stubWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, com
 	s.track("AgentRunShellCommand")
 	return proto.ShellCommandResponse{}, nil
 }
-func (s *stubWorkspace) AgentCancel(sessionID string)                     { s.track("AgentCancel") }
+
+func (s *stubWorkspace) AgentCancel(sessionID string) error {
+	s.track("AgentCancel")
+	return nil
+}
 func (s *stubWorkspace) AgentIsBusy() bool                                { return false }
 func (s *stubWorkspace) AgentIsSessionBusy(sessionID string) bool         { return false }
 func (s *stubWorkspace) AgentModel() AgentModel                           { return AgentModel{} }
 func (s *stubWorkspace) AgentIsReady() bool                               { return false }
 func (s *stubWorkspace) AgentReadyErr() error                             { return ErrAgentNotInitialized }
 func (s *stubWorkspace) AgentQueuedPromptsList(sessionID string) []string { return nil }
-func (s *stubWorkspace) AgentClearQueue(sessionID string)                 { s.track("AgentClearQueue") }
+func (s *stubWorkspace) AgentClearQueue(sessionID string) error {
+	s.track("AgentClearQueue")
+	return nil
+}
 
 func (s *stubWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
 	s.track("AgentSummarize")
@@ -436,42 +456,49 @@ func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt st
 func (s *stubWorkspace) ResetAgentToolCache() { s.track("ResetAgentToolCache") }
 
 // PermissionResolver
-func (s *stubWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+func (s *stubWorkspace) PermissionGrant(perm permission.PermissionRequest) (bool, error) {
 	s.track("PermissionGrant")
-	return false
+	return false, nil
 }
 
-func (s *stubWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+func (s *stubWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) (bool, error) {
 	s.track("PermissionGrantPersistent")
-	return false
+	return false, nil
 }
 
-func (s *stubWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+func (s *stubWorkspace) PermissionDeny(perm permission.PermissionRequest) (bool, error) {
 	s.track("PermissionDeny")
-	return false
+	return false, nil
 }
-func (s *stubWorkspace) PermissionSkipRequests() bool        { return false }
-func (s *stubWorkspace) PermissionSetSkipRequests(skip bool) { s.track("PermissionSetSkipRequests") }
+func (s *stubWorkspace) PermissionSkipRequests() bool { return false }
+func (s *stubWorkspace) PermissionSetSkipRequests(skip bool) error {
+	s.track("PermissionSetSkipRequests")
+	return nil
+}
 
 // QuestionResponder
-func (s *stubWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+func (s *stubWorkspace) QuestionAnswer(batchID string, responses []question.Answer) (bool, error) {
 	s.track("QuestionAnswer")
-	return false
+	return false, nil
 }
 
-func (s *stubWorkspace) QuestionCancel(batchID string) bool { s.track("QuestionCancel"); return false }
+func (s *stubWorkspace) QuestionCancel(batchID string) (bool, error) {
+	s.track("QuestionCancel")
+	return false, nil
+}
 
 // FileServices
 func (s *stubWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
 	return s.uncommitted, nil
 }
 
-func (s *stubWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
+func (s *stubWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) error {
 	s.track("FileTrackerRecordRead")
+	return nil
 }
 
-func (s *stubWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
-	return time.Time{}
+func (s *stubWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (s *stubWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
@@ -489,9 +516,16 @@ func (s *stubWorkspace) PrepareSessionChanges(ctx context.Context, sessionID str
 }
 
 // LSP
-func (s *stubWorkspace) LSPStart(ctx context.Context, path string) { s.track("LSPStart") }
-func (s *stubWorkspace) LSPStopAll(ctx context.Context)            { s.track("LSPStopAll") }
-func (s *stubWorkspace) LSPGetStates() map[string]LSPClientInfo    { return nil }
+func (s *stubWorkspace) LSPStart(ctx context.Context, path string) error {
+	s.track("LSPStart")
+	return nil
+}
+
+func (s *stubWorkspace) LSPStopAll(ctx context.Context) error {
+	s.track("LSPStopAll")
+	return nil
+}
+func (s *stubWorkspace) LSPGetStates() map[string]LSPClientInfo { return nil }
 func (s *stubWorkspace) LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts {
 	return proto.LSPDiagnosticCounts{}
 }
@@ -517,7 +551,7 @@ func (s *stubWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 	return nil
 }
 
-func (s *stubWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+func (s *stubWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {
 	s.track("SetProviderAPIKey")
 	return nil
 }
@@ -602,9 +636,9 @@ func (s *stubWorkspace) DockerMCPAvailable() (bool, bool) {
 	return false, false
 }
 
-func (s *stubWorkspace) RefreshDockerMCPAvailability() bool {
+func (s *stubWorkspace) RefreshDockerMCPAvailability(ctx context.Context) (bool, error) {
 	s.track("RefreshDockerMCPAvailability")
-	return false
+	return false, nil
 }
 
 func (s *stubWorkspace) ConfigProblems() []config.Problem {
@@ -695,15 +729,20 @@ func (s *stubWorkspace) Stats(context.Context, stats.Request) (stats.Snapshot, e
 	return stats.Snapshot{}, nil
 }
 func (s *stubWorkspace) MCPResources() []MCPResourceInfo { return nil }
-func (s *stubWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
+func (s *stubWorkspace) MCPRefreshPrompts(ctx context.Context, name string) error {
 	s.track("MCPRefreshPrompts")
+	return nil
 }
 
-func (s *stubWorkspace) MCPRefreshResources(ctx context.Context, name string) {
+func (s *stubWorkspace) MCPRefreshResources(ctx context.Context, name string) error {
 	s.track("MCPRefreshResources")
+	return nil
 }
 
-func (s *stubWorkspace) RefreshMCPTools(ctx context.Context, name string) { s.track("RefreshMCPTools") }
+func (s *stubWorkspace) RefreshMCPTools(ctx context.Context, name string) error {
+	s.track("RefreshMCPTools")
+	return nil
+}
 
 func (s *stubWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
 	return nil, nil
@@ -713,7 +752,7 @@ func (s *stubWorkspace) ListMCPPrompts(ctx context.Context) ([]MCPPrompt, error)
 	return nil, nil
 }
 
-func (s *stubWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
+func (s *stubWorkspace) GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error) {
 	return "", nil
 }
 
@@ -786,10 +825,10 @@ func (s *stubWorkspace) ListMessagesBySessionIDs(_ context.Context, rootSessionI
 }
 
 // ImportCopilot
-func (s *stubWorkspace) ImportCopilot() (*oauth.Token, bool) {
+func (s *stubWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
 	s.track("ImportCopilot")
 	s.importCopilotCalls++
-	return nil, false
+	return nil, false, nil
 }
 
 func TestReadOnlyWorkspace_BatchMessages_ChildAndSibling(t *testing.T) {

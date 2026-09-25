@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"log/slog"
 	"os"
 	"strings"
 
@@ -157,8 +158,13 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 // rather than run from the dialog.
 func checkDockerMCPAvailabilityCmd(com *common.Common) tea.Cmd {
 	ws := com.Workspace
+	ctx := com.Context()
 	return func() tea.Msg {
-		return dockerMCPAvailabilityCheckedMsg{available: ws.RefreshDockerMCPAvailability()}
+		available, err := ws.RefreshDockerMCPAvailability(ctx)
+		if err != nil {
+			slog.Warn("Failed to check docker MCP availability", "error", err)
+		}
+		return dockerMCPAvailabilityCheckedMsg{available: available}
 	}
 }
 

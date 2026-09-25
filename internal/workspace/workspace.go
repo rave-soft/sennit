@@ -224,7 +224,7 @@ type AgentController interface {
 	// owned by the workspace/App and is stopped with AgentCancel instead.
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
-	AgentCancel(sessionID string)
+	AgentCancel(sessionID string) error
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel
@@ -237,7 +237,7 @@ type AgentController interface {
 	// both cases into "agent offline".
 	AgentReadyErr() error
 	AgentQueuedPromptsList(sessionID string) []string
-	AgentClearQueue(sessionID string)
+	AgentClearQueue(sessionID string) error
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	// ApplySessionModel switches this instance onto the model sessionID is
@@ -302,22 +302,26 @@ type AgentController interface {
 // already been resolved by another subscriber (or is no longer pending).
 // A false return is not an error; the modal can still close locally
 // because the resolution will arrive via the PermissionNotification event
-// stream regardless of which client won the race.
+// stream regardless of which client won the race. The error return is set
+// when the call itself could not be carried out (e.g. lost transport); it
+// is independent of the bool and means the request's outcome is unknown.
 type PermissionResolver interface {
-	PermissionGrant(perm permission.PermissionRequest) bool
-	PermissionGrantPersistent(perm permission.PermissionRequest) bool
-	PermissionDeny(perm permission.PermissionRequest) bool
+	PermissionGrant(perm permission.PermissionRequest) (bool, error)
+	PermissionGrantPersistent(perm permission.PermissionRequest) (bool, error)
+	PermissionDeny(perm permission.PermissionRequest) (bool, error)
 	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
+	PermissionSetSkipRequests(skip bool) error
 }
 
 // QuestionResponder resolves or cancels a pending agent question.
 type QuestionResponder interface {
-	// QuestionAnswer resolves the pending question with responses.
-	QuestionAnswer(batchID string, responses []question.Answer) bool
+	// QuestionAnswer resolves the pending question with responses. The
+	// bool means what PermissionResolver's does; the error is set when the
+	// call itself could not be carried out.
+	QuestionAnswer(batchID string, responses []question.Answer) (bool, error)
 	// QuestionCancel cancels the question at batchID, if one is still
 	// pending under that ID.
-	QuestionCancel(batchID string) bool
+	QuestionCancel(batchID string) (bool, error)
 }
 
 // FileServices covers per-session file tracking (what's been read, when)
@@ -325,8 +329,8 @@ type QuestionResponder interface {
 type FileServices interface {
 	UncommittedFiles(ctx context.Context) ([]git.FileChange, error)
 
-	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
-	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time
+	FileTrackerRecordRead(ctx context.Context, sessionID, path string) error
+	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error)
 	FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error)
 
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
@@ -335,8 +339,8 @@ type FileServices interface {
 // LSPController starts/stops LSP servers and reports their state and
 // diagnostic counts.
 type LSPController interface {
-	LSPStart(ctx context.Context, path string)
-	LSPStopAll(ctx context.Context)
+	LSPStart(ctx context.Context, path string) error
+	LSPStopAll(ctx context.Context) error
 	LSPGetStates() map[string]LSPClientInfo
 	LSPGetDiagnosticCounts(name string) proto.LSPDiagnosticCounts
 }
@@ -457,7 +461,7 @@ type PreferredModelUpdater interface {
 }
 
 type ProviderAPIKeySetter interface {
-	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
+	SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error
 }
 
 // ProviderCatalog answers what providers this workspace knows about and
@@ -598,7 +602,7 @@ type OAuthController interface {
 	// ImportCopilot imports the credentials of an existing GitHub Copilot
 	// CLI login, if one is present on this machine, for use as this
 	// workspace's Copilot provider token.
-	ImportCopilot() (*oauth.Token, bool)
+	ImportCopilot(ctx context.Context) (*oauth.Token, bool, error)
 	// RefreshOAuthToken refreshes providerID's stored OAuth token at scope.
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
 	// RefreshOAuthTokenForAccount refreshes one stored account's OAuth
@@ -700,12 +704,12 @@ type MCPController interface {
 	// MCPResources returns the cached resource catalog across all
 	// connected MCP servers, e.g. for completion popups.
 	MCPResources() []MCPResourceInfo
-	MCPRefreshPrompts(ctx context.Context, name string)
-	MCPRefreshResources(ctx context.Context, name string)
-	RefreshMCPTools(ctx context.Context, name string)
+	MCPRefreshPrompts(ctx context.Context, name string) error
+	MCPRefreshResources(ctx context.Context, name string) error
+	RefreshMCPTools(ctx context.Context, name string) error
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
 	ListMCPPrompts(ctx context.Context) ([]MCPPrompt, error)
-	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
+	GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
 	// DockerMCPAvailable reports the cached answer to "is the Docker MCP
@@ -717,7 +721,7 @@ type MCPController interface {
 	// is why it is on the facade: the command palette used to spawn that
 	// process itself, from a tea.Cmd, to decide whether to offer a menu
 	// entry.
-	RefreshDockerMCPAvailability() bool
+	RefreshDockerMCPAvailability(ctx context.Context) (bool, error)
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []MCPPendingAuthServer
 	MCPAuthURL(name string) string

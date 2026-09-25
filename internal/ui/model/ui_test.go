@@ -135,16 +135,19 @@ type mcpEventsWorkspace struct {
 	resourcesRefreshed []string
 }
 
-func (w *mcpEventsWorkspace) MCPRefreshPrompts(_ context.Context, name string) {
+func (w *mcpEventsWorkspace) MCPRefreshPrompts(_ context.Context, name string) error {
 	w.promptsRefreshed = append(w.promptsRefreshed, name)
+	return nil
 }
 
-func (w *mcpEventsWorkspace) RefreshMCPTools(_ context.Context, name string) {
+func (w *mcpEventsWorkspace) RefreshMCPTools(_ context.Context, name string) error {
 	w.toolsRefreshed = append(w.toolsRefreshed, name)
+	return nil
 }
 
-func (w *mcpEventsWorkspace) MCPRefreshResources(_ context.Context, name string) {
+func (w *mcpEventsWorkspace) MCPRefreshResources(_ context.Context, name string) error {
 	w.resourcesRefreshed = append(w.resourcesRefreshed, name)
+	return nil
 }
 
 // TestHandleMCPEventsUseNarrowWorkspaceInterface pins the role-interface

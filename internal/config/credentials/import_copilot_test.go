@@ -66,9 +66,10 @@ func TestImportCopilot_BoundsTheExchange(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		token, ok := m.ImportCopilot()
+		token, ok, err := m.ImportCopilot(context.Background())
 		require.Nil(t, token)
 		require.False(t, ok)
+		require.Error(t, err)
 	}()
 
 	select {

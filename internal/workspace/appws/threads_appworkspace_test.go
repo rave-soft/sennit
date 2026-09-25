@@ -900,7 +900,9 @@ func TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	}
 	require.Equal(t, st.ID, req.Delegation.ID, "precondition: the request is attributed to its thread")
 
-	require.True(t, ws.PermissionGrant(req),
+	grantedOK, err := ws.PermissionGrant(req)
+	require.NoError(t, err)
+	require.True(t, grantedOK,
 		"granting through the parent workspace must reach the thread's own service")
 
 	select {
@@ -956,7 +958,9 @@ func TestAttachedThread_PermissionAnswerReachesTheParentThatRaisedIt(t *testing.
 	}
 	require.Empty(t, req.Delegation.ID, "precondition: this is the parent's own turn")
 
-	require.True(t, attached.PermissionGrant(req),
+	grantedOK, err := attached.PermissionGrant(req)
+	require.NoError(t, err)
+	require.True(t, grantedOK,
 		"answering on the thread's screen must still reach the service that raised the prompt")
 
 	select {

@@ -20,7 +20,7 @@ func newFileTracking(service filetracker.Service) tools.FileTracking {
 }
 
 func (t fileTracking) RecordRead(ctx context.Context, sessionID, path string) {
-	t.service.RecordRead(ctx, sessionID, path)
+	_ = t.service.RecordRead(ctx, sessionID, path)
 }
 
 func (t fileTracking) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
@@ -39,7 +39,8 @@ func (t fileTracking) ReadCoverage(ctx context.Context, sessionID, path string) 
 }
 
 func (t fileTracking) LastReadTime(ctx context.Context, sessionID, path string) time.Time {
-	return t.service.LastReadTime(ctx, sessionID, path)
+	last, _ := t.service.LastReadTime(ctx, sessionID, path)
+	return last
 }
 
 // todoSessionService is the slice of the session store this adapter needs.

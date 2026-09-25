@@ -17,6 +17,7 @@ package model
 
 import (
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 
@@ -174,7 +175,9 @@ func cancelThreadQuestion(thread *threadAttachment) {
 		return
 	}
 	for id := range thread.ui.pendingInlineBatches {
-		thread.ui.com.Workspace.QuestionCancel(id)
+		if _, err := thread.ui.com.Workspace.QuestionCancel(id); err != nil {
+			slog.Warn("Failed to cancel question on thread detach", "batch_id", id, "error", err)
+		}
 	}
 }
 

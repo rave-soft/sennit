@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"image"
 	"testing"
 
@@ -82,7 +83,9 @@ func (w dockerProbeWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w dockerProbeWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w dockerProbeWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 
-func (w *dockerProbeWorkspace) RefreshDockerMCPAvailability() bool { return w.available }
+func (w *dockerProbeWorkspace) RefreshDockerMCPAvailability(context.Context) (bool, error) {
+	return w.available, nil
+}
 
 // TestCheckDockerMCPAvailabilityCmd verifies the returned tea.Cmd yields a
 // dockerMCPAvailabilityCheckedMsg carrying what the workspace answered.

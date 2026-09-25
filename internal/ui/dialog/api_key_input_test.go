@@ -48,13 +48,13 @@ func (w *apiKeyTestWorkspace) SupportsThreads() bool { return false }
 
 func (w *apiKeyTestWorkspace) Resolver() config.VariableResolver { return config.IdentityResolver() }
 
-func (w *apiKeyTestWorkspace) SetProviderAPIKey(_ config.Scope, providerID string, apiKey any) error {
+func (w *apiKeyTestWorkspace) SetProviderAPIKey(_ config.Scope, providerID string, apiKey string) error {
 	w.setCalls++
 	if w.saveErr != nil {
 		return w.saveErr
 	}
 	w.savedProviderID = providerID
-	w.savedAPIKey = apiKey.(string)
+	w.savedAPIKey = apiKey
 	return nil
 }
 

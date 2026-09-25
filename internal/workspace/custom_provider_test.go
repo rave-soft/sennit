@@ -48,7 +48,7 @@ func (a *testConfigAccessor) SetCompactMode(scope config.Scope, enabled bool) er
 	return a.store.SetCompactMode(scope, enabled)
 }
 
-func (a *testConfigAccessor) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+func (a *testConfigAccessor) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {
 	return a.store.SetProviderAPIKey(scope, providerID, apiKey)
 }
 
@@ -135,8 +135,8 @@ func (a *testConfigAccessor) RemoveConfigField(scope config.Scope, key string) e
 	return a.store.RemoveConfigField(scope, key)
 }
 
-func (a *testConfigAccessor) ImportCopilot() (*oauth.Token, bool) {
-	return a.credentials.ImportCopilot()
+func (a *testConfigAccessor) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+	return a.credentials.ImportCopilot(ctx)
 }
 
 func (a *testConfigAccessor) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {

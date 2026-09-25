@@ -2,6 +2,7 @@ package appws
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/history"
@@ -136,7 +137,9 @@ func TestAttachedThreadWorkspace_FallsBackToTheParentForPermissions(t *testing.T
 	inner := &permissionStubWorkspace{}
 	ws := &attachedThreadWorkspace{Workspace: inner}
 
-	require.False(t, ws.PermissionGrant(permission.PermissionRequest{ID: "req"}),
+	accepted, err := ws.PermissionGrant(permission.PermissionRequest{ID: "req"})
+	require.NoError(t, err)
+	require.False(t, accepted,
 		"with no parent to fall back to, the thread's own answer stands")
 	require.Equal(t, []string{"grant"}, inner.calls)
 }
@@ -148,7 +151,9 @@ func TestAttachedThreadWorkspace_AsksTheThreadFirst(t *testing.T) {
 	inner := &permissionStubWorkspace{accept: true}
 	ws := &attachedThreadWorkspace{Workspace: inner}
 
-	require.True(t, ws.PermissionGrant(permission.PermissionRequest{ID: "req"}))
+	accepted, err := ws.PermissionGrant(permission.PermissionRequest{ID: "req"})
+	require.NoError(t, err)
+	require.True(t, accepted)
 	require.Equal(t, []string{"grant"}, inner.calls)
 }
 
@@ -157,8 +162,12 @@ func TestAttachedThreadWorkspace_RoutesEveryPermissionAnswer(t *testing.T) {
 	inner := &permissionStubWorkspace{accept: true}
 	ws := &attachedThreadWorkspace{Workspace: inner}
 
-	require.True(t, ws.PermissionGrantPersistent(permission.PermissionRequest{ID: "req"}))
-	require.True(t, ws.PermissionDeny(permission.PermissionRequest{ID: "req"}))
+	acceptedPersistent, err := ws.PermissionGrantPersistent(permission.PermissionRequest{ID: "req"})
+	require.NoError(t, err)
+	require.True(t, acceptedPersistent)
+	deniedAccepted, err := ws.PermissionDeny(permission.PermissionRequest{ID: "req"})
+	require.NoError(t, err)
+	require.True(t, deniedAccepted)
 	require.Equal(t, []string{"grant-persistent", "deny"}, inner.calls)
 }
 
@@ -167,20 +176,45 @@ func TestAttachedThreadWorkspace_RoutesEveryPermissionAnswer(t *testing.T) {
 // one).
 func TestAnswerPermission_StopsAtTheFirstAcceptance(t *testing.T) {
 	var ran []string
-	accepted := answerPermission(
+	accepted, err := answerPermission(
 		nil,
-		func() bool { ran = append(ran, "first"); return false },
-		func() bool { ran = append(ran, "second"); return true },
-		func() bool { ran = append(ran, "third"); return true },
+		func() (bool, error) { ran = append(ran, "first"); return false, nil },
+		func() (bool, error) { ran = append(ran, "second"); return true, nil },
+		func() (bool, error) { ran = append(ran, "third"); return true, nil },
 	)
 
+	require.NoError(t, err)
 	require.True(t, accepted)
 	require.Equal(t, []string{"first", "second"}, ran)
 }
 
 func TestAnswerPermission_ReportsNoAcceptance(t *testing.T) {
-	require.False(t, answerPermission(func() bool { return false }))
-	require.False(t, answerPermission())
+	accepted, err := answerPermission(func() (bool, error) { return false, nil })
+	require.NoError(t, err)
+	require.False(t, accepted)
+
+	accepted, err = answerPermission()
+	require.NoError(t, err)
+	require.False(t, accepted)
+}
+
+// TestAnswerPermission_JoinsErrorsWhenNoneResolves pins the combinator's
+// error semantics: an attempt that itself fails (the call could not be
+// carried out) neither wins nor is silently dropped — if nothing resolves
+// the request, every such error is joined into the result.
+func TestAnswerPermission_JoinsErrorsWhenNoneResolves(t *testing.T) {
+	errFirst := errors.New("first failed")
+	errSecond := errors.New("second failed")
+
+	accepted, err := answerPermission(
+		func() (bool, error) { return false, errFirst },
+		func() (bool, error) { return false, nil },
+		func() (bool, error) { return false, errSecond },
+	)
+
+	require.False(t, accepted)
+	require.ErrorIs(t, err, errFirst)
+	require.ErrorIs(t, err, errSecond)
 }
 
 // permissionStubWorkspace records which permission answer was asked of it.
@@ -190,17 +224,17 @@ type permissionStubWorkspace struct {
 	accept bool
 }
 
-func (s *permissionStubWorkspace) PermissionGrant(permission.PermissionRequest) bool {
+func (s *permissionStubWorkspace) PermissionGrant(permission.PermissionRequest) (bool, error) {
 	s.calls = append(s.calls, "grant")
-	return s.accept
+	return s.accept, nil
 }
 
-func (s *permissionStubWorkspace) PermissionGrantPersistent(permission.PermissionRequest) bool {
+func (s *permissionStubWorkspace) PermissionGrantPersistent(permission.PermissionRequest) (bool, error) {
 	s.calls = append(s.calls, "grant-persistent")
-	return s.accept
+	return s.accept, nil
 }
 
-func (s *permissionStubWorkspace) PermissionDeny(permission.PermissionRequest) bool {
+func (s *permissionStubWorkspace) PermissionDeny(permission.PermissionRequest) (bool, error) {
 	s.calls = append(s.calls, "deny")
-	return s.accept
+	return s.accept, nil
 }

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/ui/dialog"
@@ -15,7 +16,7 @@ type mcpPromptWorkspace struct {
 	*countingWorkspace
 }
 
-func (w *mcpPromptWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
+func (w *mcpPromptWorkspace) GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error) {
 	return "", nil
 }
 

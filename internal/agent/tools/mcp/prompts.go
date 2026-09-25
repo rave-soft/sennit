@@ -2,8 +2,8 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"iter"
-	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -48,20 +48,23 @@ func (r *Registry) GetPromptMessages(ctx context.Context, cfg ConfigProvider, cl
 	return messages, nil
 }
 
-// RefreshPrompts gets the updated list of prompts from the MCP and updates the
-// global state.
-func (r *Registry) RefreshPrompts(ctx context.Context, name string) {
+// RefreshPrompts gets the updated list of prompts from the MCP and updates
+// the global state. A server-side failure fetching the list is recorded in
+// that server's state (r.failStateForSession) rather than returned, since
+// it is visible there; the error return is for a refresh that could not
+// even be attempted (no session for name).
+func (r *Registry) RefreshPrompts(ctx context.Context, name string) error {
 	owner, session, ok := r.sessionOwner(name)
 	if !ok {
-		slog.Warn("Refresh prompts: no session", "name", name)
-		return
+		return fmt.Errorf("refresh prompts: no session for %q", name)
 	}
 	prompts, err := getPrompts(ctx, session)
 	if err != nil {
 		r.failStateForSession(name, owner, session, err)
-		return
+		return nil
 	}
 	publishSingleCatalog(r, r.allPrompts, name, owner, session, prompts, func(c *Counts, n int) { c.Prompts = n })
+	return nil
 }
 
 // hasPromptsCapability reports whether a server's initialize result

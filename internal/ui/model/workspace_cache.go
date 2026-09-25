@@ -380,8 +380,8 @@ func (m *UI) toggleYoloMode() tea.Cmd {
 	desired := !m.wsCache.yoloModeCached()
 	workspace := m.com.Workspace
 	return func() tea.Msg {
-		workspace.PermissionSetSkipRequests(desired)
-		return yoloToggledMsg{uiOwned: uiOwned{owner: m}, Enabled: desired, generation: generation}
+		err := workspace.PermissionSetSkipRequests(desired)
+		return yoloToggledMsg{uiOwned: uiOwned{owner: m}, Err: err, Enabled: desired, generation: generation}
 	}
 }
 
