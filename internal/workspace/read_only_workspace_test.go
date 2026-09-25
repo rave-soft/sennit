@@ -98,7 +98,7 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 
 	// Question resolution denied.
 	require.False(t, ro.QuestionAnswer("", nil))
-	require.False(t, ro.QuestionCancel())
+	require.False(t, ro.QuestionCancel(""))
 
 	// Permission mutations denied.
 	require.False(t, ro.PermissionGrant(permission.PermissionRequest{}))
@@ -458,7 +458,8 @@ func (s *stubWorkspace) QuestionAnswer(batchID string, responses []question.Answ
 	s.track("QuestionAnswer")
 	return false
 }
-func (s *stubWorkspace) QuestionCancel() bool { s.track("QuestionCancel"); return false }
+
+func (s *stubWorkspace) QuestionCancel(batchID string) bool { s.track("QuestionCancel"); return false }
 
 // FileServices
 func (s *stubWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {

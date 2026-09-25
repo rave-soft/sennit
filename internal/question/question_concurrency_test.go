@@ -92,9 +92,43 @@ func TestCancelTwiceIsANoOpNotAPanic(t *testing.T) {
 		}()
 	}, 2*time.Second, 5*time.Millisecond)
 
-	require.True(t, s.Cancel())
-	require.False(t, s.Cancel(), "the second cancel has nothing left to cancel")
+	require.True(t, s.Cancel("cancel-me"))
+	require.False(t, s.Cancel("cancel-me"), "the second cancel has nothing left to cancel")
 	require.False(t, s.Answer("cancel-me", []Answer{{QuestionID: "cancel-me-q1"}}))
+	require.ErrorIs(t, <-done, ErrCancelled)
+}
+
+// TestCancelChecksTheBatchID is the regression test for finding 1: Cancel
+// used to take down whatever question happened to be pending, regardless
+// of which batch ID the caller meant to cancel. With two batches never
+// simultaneously pending on one service (only one can be, by design), the
+// check that matters is that a stale or unrelated ID is refused and the
+// real pending question is left blocked, exactly like Answer already does.
+func TestCancelChecksTheBatchID(t *testing.T) {
+	t.Parallel()
+
+	s := NewService()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Ask(context.Background(), testRequest("a"))
+		done <- err
+	}()
+	require.Eventually(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.pending != nil
+	}, 2*time.Second, 5*time.Millisecond)
+
+	require.False(t, s.Cancel("b"), "a non-matching batch ID must not cancel the pending question")
+	select {
+	case err := <-done:
+		t.Fatalf("Ask for %q resolved after an unrelated Cancel(%q): %v", "a", "b", err)
+	case <-time.After(50 * time.Millisecond):
+		// Still blocked, as expected.
+	}
+
+	require.True(t, s.Cancel("a"), "the matching batch ID must cancel it")
 	require.ErrorIs(t, <-done, ErrCancelled)
 }
 
@@ -137,7 +171,7 @@ func TestActiveRequest_ReportsTheQuestionStillWaiting(t *testing.T) {
 	require.Len(t, req.Questions, 1)
 	require.Equal(t, "proceed?", req.Questions[0].Text)
 
-	require.True(t, svc.Cancel())
+	require.True(t, svc.Cancel(req.ID))
 	require.Eventually(t, func() bool {
 		_, found := svc.ActiveRequest()
 		return !found

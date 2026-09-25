@@ -214,9 +214,10 @@ type Service interface {
 	// Answer resolves the pending question with the given answers.
 	Answer(batchID string, answers []Answer) bool
 
-	// Cancel cancels the pending question. Returns false if no
-	// question is pending.
-	Cancel() bool
+	// Cancel cancels the pending question if its batch ID matches.
+	// Returns false if no question is pending, or if the pending one
+	// has a different batch ID.
+	Cancel(batchID string) bool
 
 	// ActiveRequest returns the question currently waiting for an
 	// answer, if any. A request is announced to subscribers exactly
@@ -365,26 +366,26 @@ func (s *questionService) Answer(batchID string, answers []Answer) bool {
 	return true
 }
 
-// Cancel cancels the pending question. Returns false if no
-// question is pending.
-func (s *questionService) Cancel() bool {
+// Cancel cancels the pending question if its batch ID matches. Returns
+// false if no question is pending, or if the pending one has a different
+// batch ID — mirroring Answer's check, so cancelling one batch can never
+// take down an unrelated question pending on this same service.
+func (s *questionService) Cancel(batchID string) bool {
 	// Taking the channel out under the lock is what makes a second Cancel
 	// a no-op instead of a panic: closing an already-closed channel is
 	// fatal, and two clients dismissing the same form (or a cancel racing
 	// the session teardown) is ordinary.
 	s.mu.Lock()
-	batchID := s.pendingID
-	cancelCh := s.cancelled
-	if cancelCh != nil {
-		s.pending = nil
-		s.cancelled = nil
-		s.pendingID = ""
-	}
-	s.mu.Unlock()
-
-	if cancelCh == nil {
+	if s.pending == nil || s.pendingID != batchID {
+		s.mu.Unlock()
 		return false
 	}
+	cancelCh := s.cancelled
+	s.pending = nil
+	s.cancelled = nil
+	s.pendingID = ""
+	s.mu.Unlock()
+
 	close(cancelCh)
 
 	// Publish a notification so non-answering clients can dismiss

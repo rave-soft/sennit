@@ -127,7 +127,7 @@ func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answe
 		func(s question.Service) bool { return s.Answer(batchID, responses) })...)
 }
 
-func (w *AppWorkspace) QuestionCancel() bool {
+func (w *AppWorkspace) QuestionCancel(batchID string) bool {
 	return answerPermission(questionServiceAttempts(w.questionServices(),
-		func(s question.Service) bool { return s.Cancel() })...)
+		func(s question.Service) bool { return s.Cancel(batchID) })...)
 }

@@ -512,8 +512,15 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 		if qf.BatchID == batch.ID {
 			return
 		}
+		// The replaced form's batch is deliberately left in
+		// pendingInlineBatches: dropping it here without cancelling would
+		// otherwise strand its Ask forever, since nothing else in the
+		// question tool's lifetime ever resolves it once this UI stops
+		// showing it. cancelThreadQuestion sweeps whatever is still
+		// tracked on detach; see pendingInlineBatches' doc comment.
 		m.activeInline = nil
 	}
+	m.trackInlineBatch(batch.ID)
 
 	form := dialog.NewQuestionForm(m.com.Styles, batch)
 	// QuestionAnswer/QuestionCancel resolve the question service's
@@ -530,7 +537,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	}
 	form.OnCancel = func() tea.Cmd {
 		return func() tea.Msg {
-			ws.QuestionCancel()
+			ws.QuestionCancel(batch.ID)
 			return nil
 		}
 	}
@@ -539,6 +546,26 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	m.focus = uiFocusEditor
 	m.activeInline.SetFocused(true)
 	m.updateLayoutAndSize()
+}
+
+// trackInlineBatch records batchID as opened-and-unresolved. Called only
+// from the Update goroutine (openBatchFormDialog), same as untrackInlineBatch.
+func (m *UI) trackInlineBatch(batchID string) {
+	if batchID == "" {
+		return
+	}
+	if m.pendingInlineBatches == nil {
+		m.pendingInlineBatches = make(map[string]struct{})
+	}
+	m.pendingInlineBatches[batchID] = struct{}{}
+}
+
+// untrackInlineBatch removes batchID once it is resolved — by this UI's
+// own answer/cancel (keypress.go, mouse.go) or by a question.Notification
+// naming it (notifications.go). Safe to call for an ID that was never
+// tracked or already removed.
+func (m *UI) untrackInlineBatch(batchID string) {
+	delete(m.pendingInlineBatches, batchID)
 }
 
 // shouldCollapseQuestion reports whether a question form should render

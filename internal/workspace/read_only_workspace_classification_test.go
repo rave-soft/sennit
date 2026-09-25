@@ -343,7 +343,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.False(t, ro.QuestionAnswer("", nil))
 		},
 		"QuestionCancel": func(t *testing.T, ro *readOnlyWorkspace) {
-			require.False(t, ro.QuestionCancel())
+			require.False(t, ro.QuestionCancel(""))
 		},
 		"RefreshMCPTools": func(t *testing.T, ro *readOnlyWorkspace) {
 			ro.RefreshMCPTools(t.Context(), "name")

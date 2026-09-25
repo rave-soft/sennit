@@ -103,6 +103,12 @@ func (m *UI) applyMouseClick(msg tea.MouseClickMsg, cmds []tea.Cmd) ([]tea.Cmd, 
 					cmds = append(cmds, cmd)
 				}
 				if done {
+					// Same as keypress.go's resolution path: cmd above
+					// carries the form's own submit/cancel, so its batch
+					// is resolved — untrack it. See pendingInlineBatches.
+					if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
+						m.untrackInlineBatch(qf.BatchID)
+					}
 					m.activeInline = nil
 					m.editor.textarea.Focus()
 					m.updateLayoutAndSize()

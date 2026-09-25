@@ -351,7 +351,7 @@ func (w *readOnlyWorkspace) QuestionAnswer(batchID string, responses []question.
 	return false
 }
 
-func (w *readOnlyWorkspace) QuestionCancel() bool {
+func (w *readOnlyWorkspace) QuestionCancel(batchID string) bool {
 	return false
 }
 

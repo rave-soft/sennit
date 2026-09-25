@@ -94,6 +94,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			// The form itself decided to submit or cancel (its own
+			// OnAnswer/OnCancel is what cmd above carries), so its batch
+			// is resolved from here on — untrack it so a later detach
+			// doesn't also try to cancel it. See pendingInlineBatches.
+			if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
+				m.untrackInlineBatch(qf.BatchID)
+			}
 			m.activeInline = nil
 			m.editor.textarea.Focus()
 			m.updateLayoutAndSize()

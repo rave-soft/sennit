@@ -92,10 +92,10 @@ func (w *attachedThreadWorkspace) QuestionAnswer(batchID string, responses []que
 	)
 }
 
-func (w *attachedThreadWorkspace) QuestionCancel() bool {
+func (w *attachedThreadWorkspace) QuestionCancel(batchID string) bool {
 	return answerPermission(
-		func() bool { return w.Workspace.QuestionCancel() },
-		w.parentAttempt(func(p *AppWorkspace) bool { return p.QuestionCancel() }),
+		func() bool { return w.Workspace.QuestionCancel(batchID) },
+		w.parentAttempt(func(p *AppWorkspace) bool { return p.QuestionCancel(batchID) }),
 	)
 }
 

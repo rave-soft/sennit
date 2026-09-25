@@ -175,12 +175,21 @@ func (m *UI) shouldSendNotification() bool {
 	return m.caps.ReportFocusEvents && !m.notifyWindowFocused
 }
 
-// handleQuestionNotification dismisses an open question form when
-// any client resolved the pending batch. Only one question can be
-// pending at a time, so any notification means the current form
-// is stale regardless of BatchID.
-func (m *UI) handleQuestionNotification(_ question.Notification) {
-	if _, ok := m.activeInline.(*dialog.QuestionForm); ok {
+// handleQuestionNotification dismisses an open question form when another
+// client resolved its batch, and untracks that batch regardless of
+// whether it is the one currently displayed.
+//
+// A single question.Service only ever has one question pending, but this
+// UI can have more than one batch outstanding at once: openBatchFormDialog
+// leaves a replaced form's batch in pendingInlineBatches instead of
+// cancelling it (see its doc comment), so the notification that finally
+// resolves that older batch can arrive while a newer, unrelated batch is
+// what's on screen. Clearing activeInline unconditionally — as this used
+// to, back when only one batch was ever in flight per UI — would dismiss
+// that newer, still-pending form out from under the person.
+func (m *UI) handleQuestionNotification(n question.Notification) {
+	m.untrackInlineBatch(n.BatchID)
+	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil && qf.BatchID == n.BatchID {
 		m.activeInline = nil
 		m.editor.textarea.Focus()
 		m.updateLayoutAndSize()

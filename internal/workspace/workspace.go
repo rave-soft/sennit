@@ -315,8 +315,9 @@ type PermissionResolver interface {
 type QuestionResponder interface {
 	// QuestionAnswer resolves the pending question with responses.
 	QuestionAnswer(batchID string, responses []question.Answer) bool
-	// QuestionCancel cancels the pending question.
-	QuestionCancel() bool
+	// QuestionCancel cancels the question at batchID, if one is still
+	// pending under that ID.
+	QuestionCancel(batchID string) bool
 }
 
 // FileServices covers per-session file tracking (what's been read, when)

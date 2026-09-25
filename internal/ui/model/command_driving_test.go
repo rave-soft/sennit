@@ -95,6 +95,7 @@ type cmdDrivingWorkspace struct {
 	questionAnswerBatchID  string
 	questionAnswerResponse []question.Answer
 	questionCancelCalls    int
+	questionCancelBatchID  string
 
 	sessionsBySessionID map[string]session.Session
 	messagesBySessionID map[string][]message.Message
@@ -489,8 +490,9 @@ func (w *cmdDrivingWorkspace) QuestionAnswer(batchID string, responses []questio
 	return false
 }
 
-func (w *cmdDrivingWorkspace) QuestionCancel() bool {
+func (w *cmdDrivingWorkspace) QuestionCancel(batchID string) bool {
 	w.questionCancelCalls++
+	w.questionCancelBatchID = batchID
 	return false
 }
 func (w *cmdDrivingWorkspace) Subscribe(func(any)) {}

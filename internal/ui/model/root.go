@@ -139,17 +139,43 @@ func (s *threadAttachmentState) cleanup() {
 	s.thread = nil
 }
 
-// cancelThreadQuestion cancels any question still pending on the detached
-// thread's own workspace. Destroying the embedded window (thread.ui) drops
-// its open QuestionForm without ever calling question.Service.Cancel, and
-// the question tool that raised it is blocked in Ask with no timeout — see
-// forwardQuestions. Detaching used to leave it stuck there forever, since
-// nothing else in the tool's lifetime ever answers or cancels it.
+// cancelThreadQuestion cancels every question batch the detached thread's
+// own embedded UI has opened a form for and not yet seen resolved (see
+// pendingInlineBatches), not only whichever one happens to be on screen.
+// Destroying the embedded window (thread.ui) drops its open QuestionForm
+// without ever calling question.Service.Cancel, and the question tool that
+// raised it is blocked in Ask with no timeout — see forwardQuestions.
+// Detaching used to leave it stuck there forever, since nothing else in
+// the tool's lifetime ever answers or cancels it.
+//
+// A displayed form is not the only outstanding one: openBatchFormDialog
+// silently drops a form when a different batch replaces it (the person
+// never got to answer or dismiss the one that was showing), so a batch
+// can be pending-but-not-displayed at the moment of detach too. Cancelling
+// only qf.BatchID — the previous behavior — left that replaced batch
+// leaked exactly the way this function exists to prevent; sweeping the
+// whole tracked set closes that gap.
+//
+// pendingInlineBatches only ever holds batches this thread's own embedded
+// UI opened a form for. Root only ever feeds a thread's own
+// pubsub.Event[question.Request]/[question.Notification] to thread.ui
+// through its dedicated event pump (see threadEventMsg in Root.Update);
+// every other question.Request — including the parent workspace's own —
+// falls through Root.Update's default case straight to r.main and is
+// never dispatched to thread.ui.Update at all (grep Root.Update: no case
+// matches pubsub.Event[question.Request] or [question.Notification]
+// before its final "not claimed by anything above" fallback). So there is
+// no parent-originated batch to exclude here: with nothing tracked, there
+// is nothing to cancel, and the parent's own pending question — if it has
+// one — is left alone as a consequence of never being in the set, not
+// because of a separate check.
 func cancelThreadQuestion(thread *threadAttachment) {
 	if thread == nil || thread.ui == nil || thread.ui.com == nil || thread.ui.com.Workspace == nil {
 		return
 	}
-	thread.ui.com.Workspace.QuestionCancel()
+	for id := range thread.ui.pendingInlineBatches {
+		thread.ui.com.Workspace.QuestionCancel(id)
+	}
 }
 
 // stopThreadTurnTimer stops the turn-elapsed clock for the detached
