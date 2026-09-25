@@ -61,6 +61,11 @@ const (
 	// The TUI renders this as a REFUSED banner rather than a silent
 	// empty turn.
 	FinishReasonContentFilter FinishReason = "content_filter"
+	// FinishReasonToolLoop is a turn Sennit stopped itself because the
+	// model kept repeating the same tool call with the same result, and
+	// went on repeating it after being warned. The agent persists the
+	// title and details; the TUI renders them as a STOPPED banner.
+	FinishReasonToolLoop FinishReason = "tool_loop"
 
 	// Should never happen
 	FinishReasonUnknown FinishReason = "unknown"
@@ -391,11 +396,11 @@ func (m *Message) FinishReason() FinishReason {
 }
 
 // IsErrorLike reports whether the message finished with an error-style
-// banner (a real error or a provider safety refusal). The TUI renders
-// both through the same banner path.
+// banner (a real error, a provider safety refusal, or a turn stopped on a
+// tool-call loop). The TUI renders all three through the same banner path.
 func (m *Message) IsErrorLike() bool {
 	switch m.FinishReason() {
-	case FinishReasonError, FinishReasonContentFilter:
+	case FinishReasonError, FinishReasonContentFilter, FinishReasonToolLoop:
 		return true
 	}
 	return false

@@ -47,6 +47,40 @@ func makeEmptyStep() fantasy.StepResult {
 	}
 }
 
+// hasRepeatedToolCalls is repeatedToolCall with nothing skipped, read as
+// a yes/no answer.
+func hasRepeatedToolCalls(steps []fantasy.StepResult) bool {
+	sig, _ := repeatedToolCall(steps, nil)
+	return sig != ""
+}
+
+func TestRepeatedToolCall_SkipsWarnedSignatures(t *testing.T) {
+	t.Parallel()
+
+	// Two loops in one window: "a" fills it first, "b" follows. Once "a"
+	// has been dealt with, "b" must still be found behind it.
+	steps := make([]fantasy.StepResult, 0, 20)
+	for range 10 {
+		steps = append(steps, makeToolStep("read", `{"file":"a.go"}`, "a"))
+	}
+	for range 6 {
+		steps = append(steps, makeToolStep("read", `{"file":"b.go"}`, "b"))
+	}
+
+	aSig := getToolInteractionSignature(steps[0].Content)
+	bSig := getToolInteractionSignature(steps[len(steps)-1].Content)
+
+	sig, count := repeatedToolCall(steps, nil)
+	if sig != bSig || count != 6 {
+		t.Fatalf("expected b with 6 repeats, got %q with %d", sig, count)
+	}
+
+	sig, _ = repeatedToolCall(steps[:10], func(s string) bool { return s == aSig })
+	if sig != "" {
+		t.Fatalf("expected the skipped loop to go unreported, got %q", sig)
+	}
+}
+
 func TestHasRepeatedToolCalls(t *testing.T) {
 	t.Run("no steps", func(t *testing.T) {
 		result := hasRepeatedToolCalls(nil)

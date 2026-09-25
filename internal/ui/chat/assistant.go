@@ -44,6 +44,10 @@ const (
 	refusalDetails  = "The provider's safety classifier stopped this response before any usable content was produced. Rephrase the request, start a fresh session, or try a different model."
 )
 
+// toolLoopTagLabel tags the banner of a turn Sennit stopped because the
+// model kept repeating the same tool call (FinishReasonToolLoop).
+const toolLoopTagLabel = "STOPPED"
+
 // maxExpandedThinkingTailLines is the F5 tail-window cap. When the user
 // expands a thinking block whose post-glamour line count exceeds this
 // threshold, only the last N lines are shown with an affordance line
@@ -777,16 +781,21 @@ func (a *AssistantMessageItem) renderSpinning() string {
 	return a.anim.Render()
 }
 
-// renderError renders an error or provider-refusal banner.
+// renderError renders an error, provider-refusal or tool-loop-stop banner.
 func (a *AssistantMessageItem) renderError(width int) string {
 	finishPart := a.message.FinishPart()
 	tagLabel := "ERROR"
 	titleText := finishPart.Message
 	detailsText := finishPart.Details
-	if finishPart.Reason == message.FinishReasonContentFilter {
+	switch finishPart.Reason {
+	case message.FinishReasonContentFilter:
 		tagLabel = refusalTagLabel
 		titleText = cmp.Or(titleText, refusalTitle)
 		detailsText = cmp.Or(detailsText, refusalDetails)
+	case message.FinishReasonToolLoop:
+		// The agent persists the title and details (they name the tool
+		// and the count); only the tag is the TUI's.
+		tagLabel = toolLoopTagLabel
 	}
 	errTag := a.sty.Messages.ErrorTag.Render(tagLabel)
 	truncated := ansi.Truncate(titleText, width-2-lipgloss.Width(errTag), "...")

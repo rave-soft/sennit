@@ -398,6 +398,7 @@ func (a *sessionAgent) finishTurn(
 	// RunComplete rather than by returning early: see the shouldSummarize
 	// branch's comment.
 	var summarizeFailed error
+	t.recordToolLoopStop()
 	if t.shouldSummarize {
 		// Hand our still-installed active-run slot straight to summarize
 		// via claim, rather than releasing it first: releasing here and
@@ -623,6 +624,8 @@ func (a *sessionAgent) completeTurn(
 			// it: a cancel takes down the turn's genCtx, not the outer
 			// ctx this reads.
 			complete.Cancelled = errors.Is(summarizeFailed, context.Canceled)
+		} else if t.toolLoopStop != nil {
+			complete.Error = t.toolLoopStopError()
 		}
 		if t.currentAssistant != nil {
 			complete.MessageID = t.currentAssistant.ID
@@ -751,6 +754,11 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 			complete.Cancelled = errors.Is(retErr, context.Canceled)
 		} else if ctx.Err() != nil {
 			complete.Cancelled = true
+		} else if t != nil && t.toolLoopStop != nil {
+			// The turn ended without an error of its own, but short of its
+			// work: a delegation's parent reading an empty "completed"
+			// result would take the task as done. See stopOnToolLoop.
+			complete.Error = t.toolLoopStopError()
 		}
 		// Publish on a context detached from the run's, not on ctx:
 		// workspace shutdown may have already cancelled ctx by the time
@@ -884,9 +892,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		OnStepFinish:     t.onStepFinish,
 		StopWhen: []fantasy.StopCondition{
 			t.stopOnContextWindow,
-			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps)
-			},
+			t.stopOnToolLoop,
 		},
 	})
 	if err != nil {

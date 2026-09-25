@@ -84,3 +84,32 @@ func TestErrorEmptyDetailsNoTrailingBlock(t *testing.T) {
 	require.False(t, strings.HasSuffix(out, "\n"),
 		"empty-details error must not render a trailing details block")
 }
+
+// TestToolLoopFinishRendersBanner: a turn Sennit stopped on a tool-call
+// loop renders the persisted title and details under a STOPPED tag, even
+// though the step it ends on holds nothing but tool calls.
+func TestToolLoopFinishRendersBanner(t *testing.T) {
+	sty := styles.SennitDark()
+	msg := &message.Message{
+		ID:   "loop-1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-1", Name: "read", Input: `{}`, Finished: true},
+			message.Finish{
+				Reason:  message.FinishReasonToolLoop,
+				Message: "Stopped: the model kept repeating the same tool call",
+				Details: "The model called read 7 times.",
+				Time:    testFinishTime,
+			},
+		},
+	}
+
+	require.True(t, ShouldRenderAssistantMessage(msg),
+		"a tool-call-only step must still render when it carries the stop banner")
+
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	out := item.Render(80)
+	require.Contains(t, out, toolLoopTagLabel)
+	require.Contains(t, out, "kept repeating the same tool call")
+	require.Contains(t, out, "The model called read 7 times.")
+}

@@ -138,6 +138,17 @@ type runTurn struct {
 	// pendingCompletions, so a requeued batch takes its messages back
 	// out with it instead of being shown twice when it is folded again.
 	pendingFoldedCount int
+
+	// loopWarned maps each tool-call signature the model has been warned
+	// about in this turn to the number of steps the turn had taken when
+	// the warning was scheduled. See stopOnToolLoop.
+	loopWarned map[string]int
+	// loopWarning is a warning stopOnToolLoop scheduled for the next
+	// step; prepareStep hands it to the model (injectToolLoopWarning).
+	loopWarning *toolLoop
+	// toolLoopStop is set when stopOnToolLoop ended the turn; finishTurn
+	// records it on the last assistant message (recordToolLoopStop).
+	toolLoopStop *toolLoop
 }
 
 // newRunTurn returns a runTurn ready to be wired into a
@@ -237,6 +248,11 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	// mid-batch fails) goes back to the queue, which foldSteering does
 	// itself before returning its error.
 	prepared.Messages, err = t.foldSteering(callContext, prepared.Messages)
+	if err != nil {
+		return callContext, prepared, err
+	}
+
+	prepared.Messages, err = t.injectToolLoopWarning(callContext, prepared.Messages)
 	if err != nil {
 		return callContext, prepared, err
 	}

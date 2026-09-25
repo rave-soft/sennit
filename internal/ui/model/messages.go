@@ -300,6 +300,16 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		}
 	}
 
+	// The reverse case: a message holding only tool calls was removed
+	// above while it streamed, and has now finished with a banner of its
+	// own (a turn stopped on a tool-call loop ends on exactly such a
+	// step). Nothing else would bring it back until the session is
+	// reloaded, so the banner would never be seen live.
+	if existingItem == nil && shouldRenderAssistant && len(msg.ToolCalls()) > 0 &&
+		msg.IsFinished() && msg.IsErrorLike() {
+		m.chat.AppendMessages(chat.NewAssistantMessageItem(m.com.Styles, &msg))
+	}
+
 	if isEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.sess.lastUserMessageTime, 0))
