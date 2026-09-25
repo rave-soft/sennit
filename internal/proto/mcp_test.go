@@ -1,11 +1,49 @@
 package proto_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMCPState_JSONRoundTrips pins a defect the workspace package's PR 0.3
+// wire-DTO test found: MCPState implements MarshalText but had no
+// UnmarshalText, so encoding/json encoded it as a string ("connected")
+// but then tried to decode that same string straight into the
+// underlying int and failed outright - any struct carrying an MCPState
+// field marshaled fine and then could never be unmarshaled back.
+func TestMCPState_JSONRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []proto.MCPState{
+		proto.MCPStateDisabled,
+		proto.MCPStateStarting,
+		proto.MCPStateConnected,
+		proto.MCPStateError,
+		proto.MCPStateNeedsAuth,
+	} {
+		data, err := json.Marshal(want)
+		require.NoError(t, err)
+
+		var got proto.MCPState
+		require.NoError(t, json.Unmarshal(data, &got))
+		require.Equal(t, want, got)
+	}
+}
+
+// TestMCPState_UnmarshalUnknownDegradesToDisabled pins UnmarshalText's
+// forward-compatibility behavior: a state value from a newer build this
+// one does not recognize decodes to MCPStateDisabled instead of failing
+// the whole decode.
+func TestMCPState_UnmarshalUnknownDegradesToDisabled(t *testing.T) {
+	t.Parallel()
+
+	var got proto.MCPState
+	require.NoError(t, json.Unmarshal([]byte(`"some future state"`), &got))
+	require.Equal(t, proto.MCPStateDisabled, got)
+}
 
 // TestSplitMCPToolName_ServerNameWithUnderscore pins Audit 12 finding 5:
 // an MCP server's name is a config key, not a generated identifier, and

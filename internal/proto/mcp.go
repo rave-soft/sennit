@@ -66,6 +66,32 @@ func (s MCPState) MarshalText() ([]byte, error) {
 	return []byte(s.String()), nil
 }
 
+// UnmarshalText implements the [encoding.TextUnmarshaler] interface,
+// reversing MarshalText. Without it, encoding/json still calls
+// MarshalText to encode a value of this type (it has no MarshalJSON, and
+// TextMarshaler is enough for that direction), but has nothing to call
+// decoding back - the underlying int kind makes it try to unmarshal the
+// wire string straight into an int and fail. Every value MarshalText
+// produces has a case here; an unrecognized string decodes to the zero
+// value (MCPStateDisabled) rather than erroring, so a client running
+// ahead of the server on this enum degrades instead of breaking the
+// whole decode.
+func (s *MCPState) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "starting":
+		*s = MCPStateStarting
+	case "connected":
+		*s = MCPStateConnected
+	case "error":
+		*s = MCPStateError
+	case "needs auth":
+		*s = MCPStateNeedsAuth
+	default:
+		*s = MCPStateDisabled
+	}
+	return nil
+}
+
 // String returns the string representation of the MCPState.
 func (s MCPState) String() string {
 	switch s {
