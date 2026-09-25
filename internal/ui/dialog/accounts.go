@@ -2,7 +2,6 @@ package dialog
 
 import (
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
@@ -10,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
@@ -58,8 +56,8 @@ type Accounts struct {
 	state      accountsState
 	spinner    spinner.Model
 	err        error
-	sd         *selectDialog      // built once accounts are loaded; nil until then
-	accs       []accounts.Account // last loaded set, kept for e/d's lookup by ID
+	sd         *selectDialog               // built once accounts are loaded; nil until then
+	accs       []workspace.FrontendAccount // last loaded set, kept for e/d's lookup by ID
 	caps       workspace.AccountCapabilities
 	activating string // account ID currently being switched to; "" when idle
 	keyMap     struct {
@@ -164,7 +162,7 @@ func (m *Accounts) refreshLimitsCmd() tea.Cmd {
 // way oauth.go's oauthSaveDoneMsg/oauthSaveErrMsg do.
 type ActionAccountsLoaded struct {
 	ProviderID string
-	Accounts   []accounts.Account
+	Accounts   []workspace.FrontendAccount
 	Err        error
 }
 
@@ -332,7 +330,7 @@ func (m *Accounts) HandleMsg(msg tea.Msg) Action {
 // accounts: an item per account, and an onSelect that activates the
 // chosen one (refusing a no-op re-select of the active account, or a
 // disabled one) via [Accounts.activateAccountCmd].
-func (m *Accounts) selectDialogConfig(accs []accounts.Account) selectDialogConfig {
+func (m *Accounts) selectDialogConfig(accs []workspace.FrontendAccount) selectDialogConfig {
 	activeAccountID := m.currentActiveAccountID()
 	caps := m.com.Workspace.AccountCapabilities(m.providerID)
 	t := m.com.Styles
@@ -429,20 +427,20 @@ func (m *Accounts) currentActiveAccountID() string {
 // selectedAccount returns the account currently highlighted in the list,
 // looked up in the last loaded set by ID. It reports false for the
 // "Login account…" entry or when nothing is loaded yet.
-func (m *Accounts) selectedAccount() (accounts.Account, bool) {
+func (m *Accounts) selectedAccount() (workspace.FrontendAccount, bool) {
 	if m.sd == nil {
-		return accounts.Account{}, false
+		return workspace.FrontendAccount{}, false
 	}
 	id := m.sd.selectedID()
 	if id == "" || id == loginAccountItemID {
-		return accounts.Account{}, false
+		return workspace.FrontendAccount{}, false
 	}
 	for _, a := range m.accs {
 		if a.ID == id {
 			return a, true
 		}
 	}
-	return accounts.Account{}, false
+	return workspace.FrontendAccount{}, false
 }
 
 // providerDisplayName resolves providerID to the name shown in the UI: the
@@ -544,7 +542,7 @@ var _ help.KeyMap = (*Accounts)(nil)
 // AccountItem represents an account list item.
 type AccountItem struct {
 	list.BaseItem
-	account accounts.Account
+	account workspace.FrontendAccount
 	active  bool
 	caps    workspace.AccountCapabilities
 	t       *styles.Styles
@@ -579,7 +577,7 @@ func (a *AccountItem) Render(width int) string {
 	if a.account.Disabled {
 		parts = append(parts, "Disabled")
 	}
-	if a.caps.OAuth && a.account.Token != nil {
+	if a.caps.OAuth && a.account.HasToken {
 		parts = append(parts, a.tokenStatus())
 	}
 	if a.caps.Usage {
@@ -598,14 +596,12 @@ func (a *AccountItem) Render(width int) string {
 // tokenStatus returns a short human-readable label for the account's
 // OAuth token state: "expired", "expiring soon", or "valid".
 func (a *AccountItem) tokenStatus() string {
-	t := a.account.Token
-	if t.IsExpired() {
+	if a.account.IsTokenExpired() {
 		return "expired"
 	}
 	// Within the refresh buffer (max(expires_in/10, 30s)) the token is
 	// about to expire; flag it so the user knows a refresh is due.
-	buffer := max(int64(t.ExpiresIn)/10, 30)
-	if time.Now().Unix() >= t.ExpiresAt-buffer {
+	if a.account.TokenExpiresSoon() {
 		return "expiring soon"
 	}
 	return "valid"

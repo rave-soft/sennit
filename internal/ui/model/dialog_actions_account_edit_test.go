@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,7 +44,7 @@ func TestApplyProviderDialogAction_OpenAccountEdit_OpensForm(t *testing.T) {
 	ws := &cmdDrivingWorkspace{}
 	m := newCmdDrivenUI(t, ws)
 
-	account := accounts.Account{ID: "acct-1", Label: "Work"}
+	account := workspace.FrontendAccount{ID: "acct-1", Label: "Work"}
 	_, handled := m.applyProviderDialogAction(dialog.ActionOpenAccountEdit{
 		ProviderID: "test-provider", Account: account, Active: true,
 	})
@@ -65,13 +65,15 @@ func TestApplyProviderDialogAction_SubmitAccountForm_CallsUpdateAccountOffThread
 	ws := &cmdDrivingWorkspace{}
 	m := newCmdDrivenUI(t, ws)
 
-	account := accounts.Account{ID: "acct-1", Label: "Renamed", ProxyURL: "http://proxy:8080"}
+	label := "Renamed"
+	proxy := "http://proxy:8080"
+	edit := workspace.AccountEdit{Label: &label, ProxyURL: &proxy}
 	cmd, handled := m.applyProviderDialogAction(dialog.ActionSubmitAccountForm{
-		ProviderID: "test-provider", Account: account,
+		ProviderID: "test-provider", AccountID: "acct-1", Edit: edit,
 	})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	require.Zero(t, ws.updateAccountCalls, "UpdateAccount must not run synchronously")
+	require.Zero(t, ws.updateAccountCalls, "UpdateAccountFields must not run synchronously")
 
 	msg := findAccountsMsg(t, m, cmd, func(msg tea.Msg) bool {
 		_, ok := msg.(dialog.ActionAccountFormResult)
@@ -81,7 +83,8 @@ func TestApplyProviderDialogAction_SubmitAccountForm_CallsUpdateAccountOffThread
 	require.True(t, ok, "expected ActionAccountFormResult, got %#v", msg)
 	require.NoError(t, result.Err)
 	require.Equal(t, 1, ws.updateAccountCalls)
-	require.Equal(t, account, ws.lastUpdatedAccount)
+	require.Equal(t, "acct-1", ws.lastUpdatedAccountID)
+	require.Equal(t, edit, ws.lastAccountEdit)
 }
 
 // TestApplyProviderDialogAction_AccountSaved_ClosesFormAndReloadsList
@@ -91,9 +94,9 @@ func TestApplyProviderDialogAction_SubmitAccountForm_CallsUpdateAccountOffThread
 func TestApplyProviderDialogAction_AccountSaved_ClosesFormAndReloadsList(t *testing.T) {
 	t.Parallel()
 
-	ws := &cmdDrivingWorkspace{accs: []accounts.Account{{ID: "acct-1", Label: "Renamed"}}}
+	ws := &cmdDrivingWorkspace{accs: []workspace.FrontendAccount{{ID: "acct-1", Label: "Renamed"}}}
 	m := newCmdDrivenUI(t, ws)
-	m.dialog.OpenDialog(dialog.NewAccountForm(m.com, "test-provider", accounts.Account{ID: "acct-1"}, false))
+	m.dialog.OpenDialog(dialog.NewAccountForm(m.com, "test-provider", workspace.FrontendAccount{ID: "acct-1"}, false))
 
 	cmd, handled := m.applyProviderDialogAction(dialog.ActionAccountSaved{ProviderID: "test-provider"})
 	require.True(t, handled)
@@ -119,7 +122,7 @@ func TestApplyProviderDialogAction_RequestAccountRemoval_OpensConfirm(t *testing
 	ws := &cmdDrivingWorkspace{}
 	m := newCmdDrivenUI(t, ws)
 
-	account := accounts.Account{ID: "acct-1", Label: "Work"}
+	account := workspace.FrontendAccount{ID: "acct-1", Label: "Work"}
 	_, handled := m.applyProviderDialogAction(dialog.ActionRequestAccountRemoval{
 		ProviderID: "test-provider", Account: account,
 	})
@@ -134,9 +137,9 @@ func TestApplyProviderDialogAction_RequestAccountRemoval_OpensConfirm(t *testing
 func TestApplyProviderDialogAction_RemoveAccountConfirmed_RemovesAndReloadsList(t *testing.T) {
 	t.Parallel()
 
-	ws := &cmdDrivingWorkspace{accs: []accounts.Account{{ID: "acct-2", Label: "Personal"}}}
+	ws := &cmdDrivingWorkspace{accs: []workspace.FrontendAccount{{ID: "acct-2", Label: "Personal"}}}
 	m := newCmdDrivenUI(t, ws)
-	m.dialog.OpenDialog(dialog.NewAccountRemoveConfirm(m.com, "test-provider", accounts.Account{ID: "acct-1", Label: "Work"}))
+	m.dialog.OpenDialog(dialog.NewAccountRemoveConfirm(m.com, "test-provider", workspace.FrontendAccount{ID: "acct-1", Label: "Work"}))
 
 	cmd, handled := m.applyProviderDialogAction(dialog.ActionRemoveAccountConfirmed{
 		ProviderID: "test-provider", AccountID: "acct-1",

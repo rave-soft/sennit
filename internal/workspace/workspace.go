@@ -368,19 +368,35 @@ type ConfigFieldEditor interface {
 }
 
 type AccountRecorder interface {
-	RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error)
+	RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (FrontendAccount, error)
 }
 
 type AccountLister interface {
-	ListAccounts(providerID string) ([]accounts.Account, error)
+	ListAccounts(providerID string) ([]FrontendAccount, error)
 }
 
 type AccountActivator interface {
 	ActivateAccount(scope config.Scope, providerID, accountID string) error
 }
 
+// AccountEdit is a narrow edit of exactly the fields a frontend may change
+// on a stored account - never the credential (Token, APIKey). A nil field
+// leaves that field alone. UpdateAccountFields loads the stored account,
+// applies whichever of these are set, and persists the result, so a
+// caller can never overwrite the real token by round-tripping a whole
+// account it was handed as a FrontendAccount (see CLIENT-SERVER.md
+// PR 0.5c).
+type AccountEdit struct {
+	Label    *string
+	ProxyURL *string
+	Disabled *bool
+}
+
 type AccountUpdater interface {
-	UpdateAccount(providerID string, account accounts.Account) error
+	// UpdateAccountFields applies edit to providerID's accountID account
+	// and persists it. The credential is never taken from the caller: it
+	// is read from the stored account and carried over unchanged.
+	UpdateAccountFields(providerID, accountID string, edit AccountEdit) error
 }
 
 type AccountRemover interface {
@@ -432,7 +448,7 @@ type AccountUsage interface {
 	// learned, returning the provider's accounts. A single account's
 	// fetch failing does not fail the call — see config.RefreshAccountLimits
 	// for the full contract.
-	RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error)
+	RefreshAccountLimits(ctx context.Context, providerID string) ([]FrontendAccount, error)
 	// CurrentPlanUsage reports the rate-limit snapshot the provider quoted
 	// on its most recent response, and whether there is one. It is not the
 	// stored per-account snapshot RefreshAccountLimits persists: this one
@@ -550,7 +566,7 @@ type OAuthFlow interface {
 // OAuthCompletion is what CompleteOAuth returns once the credential and
 // any provider-specific follow-up have been persisted.
 type OAuthCompletion struct {
-	Account accounts.Account
+	Account FrontendAccount
 	// ModelsFetched is the number of models fetched for a provider whose
 	// catalog is per-account (Codex); -1 for a provider with nothing to
 	// fetch.

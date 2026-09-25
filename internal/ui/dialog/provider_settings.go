@@ -87,6 +87,12 @@ type ProviderSettings struct {
 	providerID string
 	caps       workspace.AccountCapabilities
 
+	// originalProxy is the value the proxy field was pre-filled with
+	// (FrontendProvider.ProxyURL, its userinfo password already
+	// stripped for display) — see submit()'s doc comment for why this
+	// is what "did the person touch this field" is checked against.
+	originalProxy string
+
 	proxy     textinput.Model
 	enabled   bool
 	threshold textinput.Model
@@ -168,6 +174,8 @@ func newProviderSettings(com *common.Common, providerID string, caps workspace.A
 		fields:     []providerSettingsField{providerSettingsFieldProxy},
 		canRefresh: providerID == CodexProviderID || pc.Custom,
 	}
+
+	m.originalProxy = pc.ProxyURL
 
 	m.proxy = textinput.New()
 	m.proxy.SetVirtualCursor(false)
@@ -467,7 +475,16 @@ func (m *ProviderSettings) submit() Action {
 	m.errMsg = ""
 	m.submitting = true
 
-	return ActionSubmitProviderSettings{ProviderID: m.providerID, Proxy: proxy, Rotation: rotation}
+	// Only send the proxy if it was actually touched - see
+	// ActionSubmitProviderSettings's doc comment for why an
+	// unconditional send would silently strip a stored password on
+	// every save that only changed rotation.
+	var proxyEdit *string
+	if proxy != m.originalProxy {
+		proxyEdit = &proxy
+	}
+
+	return ActionSubmitProviderSettings{ProviderID: m.providerID, Proxy: proxyEdit, Rotation: rotation}
 }
 
 // Cursor returns the cursor position relative to the dialog by finding

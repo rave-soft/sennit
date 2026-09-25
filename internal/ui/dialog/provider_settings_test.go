@@ -545,3 +545,55 @@ func TestProviderAuthState(t *testing.T) {
 		})
 	}
 }
+
+// TestProviderSettings_UntouchedProxyNotSent pins the fix for a defect
+// where the proxy field, pre-filled from FrontendProvider.ProxyURL (its
+// userinfo password already stripped for display - see redactProxyURL),
+// was sent back unconditionally on every save: changing only the rotation
+// setting silently overwrote the stored proxy with its password-stripped
+// display form. Only toggling Enabled here must leave Proxy nil.
+func TestProviderSettings_UntouchedProxyNotSent(t *testing.T) {
+	t.Parallel()
+
+	com := newProviderSettingsTestCommon(t, "custom", config.ProviderConfig{
+		BaseURL: "http://127.0.0.1:9/v1", ProxyURL: "http://user:pw@proxy.example:8080",
+	})
+	m := newProviderSettings(com, "custom", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
+	// The proxy field must show the redacted form, exactly what a real
+	// FrontendProvider.ProxyURL pre-fill hands the dialog.
+	require.Equal(t, "http://user@proxy.example:8080", m.proxy.Value())
+
+	m.advanceFocus(1) // move to Enabled
+	require.Equal(t, providerSettingsFieldEnabled, m.currentField())
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	require.Nil(t, action)
+
+	submitAction := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	submit, ok := submitAction.(ActionSubmitProviderSettings)
+	require.True(t, ok, "expected ActionSubmitProviderSettings, got %#v", submitAction)
+	require.Nil(t, submit.Proxy, "an untouched, already-redacted proxy field must not be sent back")
+	require.NotNil(t, submit.Rotation, "rotation was actually toggled and must still be sent")
+}
+
+// TestProviderSettings_EditedProxySent is the control case: actually
+// typing a new proxy must submit exactly what was typed.
+func TestProviderSettings_EditedProxySent(t *testing.T) {
+	t.Parallel()
+
+	com := newProviderSettingsTestCommon(t, "custom", config.ProviderConfig{
+		BaseURL: "http://127.0.0.1:9/v1", ProxyURL: "http://user:pw@proxy.example:8080",
+	})
+	m := newProviderSettings(com, "custom", workspace.AccountCapabilities{RotateOn: workspace.RotateThreshold})
+
+	// Clear the pre-filled value and type a new one.
+	for range "http://user@proxy.example:8080" {
+		m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	typeIntoProviderSettings(t, m, "http://h2:1")
+
+	submitAction := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	submit, ok := submitAction.(ActionSubmitProviderSettings)
+	require.True(t, ok, "expected ActionSubmitProviderSettings, got %#v", submitAction)
+	require.NotNil(t, submit.Proxy)
+	require.Equal(t, "http://h2:1", *submit.Proxy)
+}

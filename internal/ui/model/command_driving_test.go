@@ -115,15 +115,16 @@ type cmdDrivingWorkspace struct {
 	historyBySessionID  map[string][]history.File
 
 	// Account stubs
-	listAccountsCalls  int
-	accs               []accounts.Account
-	listAccountsErr    error
-	updateAccountCalls int
-	lastUpdatedAccount accounts.Account
-	updateAccountErr   error
-	removeAccountCalls int
-	lastRemovedID      string
-	removeAccountErr   error
+	listAccountsCalls    int
+	accs                 []workspace.FrontendAccount
+	listAccountsErr      error
+	updateAccountCalls   int
+	lastUpdatedAccountID string
+	lastAccountEdit      workspace.AccountEdit
+	updateAccountErr     error
+	removeAccountCalls   int
+	lastRemovedID        string
+	removeAccountErr     error
 
 	// OAuth stubs.
 	oauthConfiguredProxy    string
@@ -147,10 +148,16 @@ type cmdDrivingWorkspace struct {
 	setProviderProxyCalls int
 	lastSetProviderProxy  string
 	setProviderProxyErr   error
-	refreshModelsCalls    int
-	lastRefreshProvider   string
-	refreshModelsResults  []workspace.ModelRefreshResult
-	refreshModelsErr      error
+
+	// providerProxyURL, when set, overrides "test-provider"'s ProxyURL in
+	// rawConfig - for tests driving the real ProviderSettings dialog
+	// against a provider that already has a proxy configured.
+	providerProxyURL     string
+	accountCapabilities  workspace.AccountCapabilities
+	refreshModelsCalls   int
+	lastRefreshProvider  string
+	refreshModelsResults []workspace.ModelRefreshResult
+	refreshModelsErr     error
 }
 
 // KnownProviders mirrors what the UI used to compute for itself: the
@@ -163,7 +170,7 @@ func (w cmdDrivingWorkspace) ConfigProblems() []config.Problem  { return nil }
 func (w cmdDrivingWorkspace) SkillStates() []*skills.SkillState { return nil }
 func (w cmdDrivingWorkspace) BuiltinSkills() []*skills.Skill    { return skills.DiscoverBuiltin() }
 func (w *cmdDrivingWorkspace) AccountCapabilities(string) workspace.AccountCapabilities {
-	return workspace.AccountCapabilities{}
+	return w.accountCapabilities
 }
 func (w *cmdDrivingWorkspace) DoctorProblems() []config.Problem { return nil }
 
@@ -192,7 +199,7 @@ func (w *cmdDrivingWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {
 // KnownProviders to build FrontendProvider.Custom) and recursing.
 func (w *cmdDrivingWorkspace) rawConfig() *config.Config {
 	providers := csync.NewMap[string, config.ProviderConfig]()
-	providers.Set("test-provider", config.ProviderConfig{ID: "test-provider"})
+	providers.Set("test-provider", config.ProviderConfig{ID: "test-provider", ProxyURL: w.providerProxyURL})
 	return &config.Config{
 		Providers: providers,
 		Options:   &config.Options{TUI: &config.TUIOptions{}},
@@ -599,14 +606,15 @@ func (w *cmdDrivingWorkspace) Subscribe(func(any))            {}
 func (w *cmdDrivingWorkspace) SubscribeWith(func(any)) func() { return func() {} }
 func (w *cmdDrivingWorkspace) Shutdown()                      {}
 
-func (w *cmdDrivingWorkspace) ListAccounts(string) ([]accounts.Account, error) {
+func (w *cmdDrivingWorkspace) ListAccounts(string) ([]workspace.FrontendAccount, error) {
 	w.listAccountsCalls++
 	return w.accs, w.listAccountsErr
 }
 
-func (w *cmdDrivingWorkspace) UpdateAccount(_ string, account accounts.Account) error {
+func (w *cmdDrivingWorkspace) UpdateAccountFields(_, accountID string, edit workspace.AccountEdit) error {
 	w.updateAccountCalls++
-	w.lastUpdatedAccount = account
+	w.lastUpdatedAccountID = accountID
+	w.lastAccountEdit = edit
 	return w.updateAccountErr
 }
 

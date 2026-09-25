@@ -13,7 +13,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
@@ -34,7 +33,7 @@ type accountsTestWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
 
-	accs    []accounts.Account
+	accs    []workspace.FrontendAccount
 	listErr error
 
 	activateCalls   int
@@ -45,7 +44,7 @@ type accountsTestWorkspace struct {
 
 	refreshCalls            int
 	refreshErr              error
-	refreshedAccs           []accounts.Account
+	refreshedAccs           []workspace.FrontendAccount
 	lastRefreshedProviderID string
 
 	refreshTokenCalls          int
@@ -74,7 +73,7 @@ func (w *accountsTestWorkspace) Config() *workspace.FrontendConfig {
 	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
 }
 
-func (w *accountsTestWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
+func (w *accountsTestWorkspace) ListAccounts(providerID string) ([]workspace.FrontendAccount, error) {
 	return w.accs, w.listErr
 }
 
@@ -115,7 +114,7 @@ func (w *accountsTestWorkspace) RefreshOAuthTokenForAccount(_ context.Context, _
 	return w.refreshTokenErr
 }
 
-func (w *accountsTestWorkspace) RefreshAccountLimits(_ context.Context, providerID string) ([]accounts.Account, error) {
+func (w *accountsTestWorkspace) RefreshAccountLimits(_ context.Context, providerID string) ([]workspace.FrontendAccount, error) {
 	w.refreshCalls++
 	w.lastRefreshedProviderID = providerID
 	if w.refreshErr != nil {
@@ -196,7 +195,7 @@ func loadedAccounts(t *testing.T, com *common.Common, providerID string) *Accoun
 func TestAccounts_ListsAccountsAndMarksActive(t *testing.T) {
 	providerID := "openai"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+	com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -239,7 +238,7 @@ func TestAccounts_UsageShownOnlyForCapableProvider(t *testing.T) {
 	t.Run("codex reports usage", func(t *testing.T) {
 		providerID := "codex" // accounts.CapabilitiesOf("codex").Usage == true
 		com, _ := newAccountsTestCommon(t, providerID, "")
-		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+		com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 			{ID: "acct-1", Label: "Work", Usage: usage},
 		}
 		dlg := loadedAccounts(t, com, providerID)
@@ -255,7 +254,7 @@ func TestAccounts_UsageShownOnlyForCapableProvider(t *testing.T) {
 	t.Run("a provider without usage capability shows no usage column", func(t *testing.T) {
 		providerID := "openai" // not in accounts' capability registry
 		com, _ := newAccountsTestCommon(t, providerID, "")
-		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+		com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 			// Carries a non-empty Usage anyway; it must not leak into the
 			// row for a provider that doesn't report usage.
 			{ID: "acct-1", Label: "Work", Usage: usage},
@@ -304,12 +303,12 @@ func TestAccounts_LoadErrorEntersErrorState(t *testing.T) {
 func TestAccounts_IgnoresLoadedResultForADifferentProvider(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	ws.accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 	dlg := loadedAccounts(t, com, providerID)
 
 	action := dlg.HandleMsg(ActionAccountsLoaded{
 		ProviderID: "anthropic",
-		Accounts:   []accounts.Account{{ID: "other-acct", Label: "Someone else"}},
+		Accounts:   []workspace.FrontendAccount{{ID: "other-acct", Label: "Someone else"}},
 	})
 
 	require.Nil(t, action, "a mismatched provider result must be dropped, not acted on")
@@ -327,7 +326,7 @@ func TestAccounts_IgnoresLoadedResultForADifferentProvider(t *testing.T) {
 func TestAccounts_IgnoresActivationResultForADifferentProvider(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	ws.accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 	dlg := loadedAccounts(t, com, providerID)
 
 	action := dlg.HandleMsg(accountActivatedMsg{providerID: "anthropic"})
@@ -339,7 +338,7 @@ func TestAccounts_IgnoresActivationResultForADifferentProvider(t *testing.T) {
 func TestAccounts_SelectNonActiveAccount_NoIOInHandleMsg(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -373,7 +372,7 @@ func TestAccounts_SelectNonActiveAccount_NoIOInHandleMsg(t *testing.T) {
 func TestAccounts_SelectNonActiveAccount_DialogStaysOpen(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -402,7 +401,7 @@ func TestAccounts_SelectNonActiveAccount_DialogStaysOpen(t *testing.T) {
 		ID:      providerID,
 		Account: "acct-2",
 	})
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -420,7 +419,7 @@ func TestAccounts_SelectNonActiveAccount_DialogStaysOpen(t *testing.T) {
 func TestAccounts_SelectActiveAccount_NoOp(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -471,7 +470,7 @@ func TestAccounts_TitleIncludesProviderName(t *testing.T) {
 		com, _ := newAccountsTestCommon(t, providerID, "", func(pc *config.ProviderConfig) {
 			pc.Name = "My OpenAI"
 		})
-		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+		com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 
 		dlg := loadedAccounts(t, com, providerID)
 		require.Equal(t, "My OpenAI Accounts", dlg.sd.cfg.title)
@@ -480,7 +479,7 @@ func TestAccounts_TitleIncludesProviderName(t *testing.T) {
 	t.Run("falls back to the bare ID when nothing names the provider", func(t *testing.T) {
 		providerID := "unknown-provider"
 		com, _ := newAccountsTestCommon(t, providerID, "")
-		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+		com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 
 		dlg := loadedAccounts(t, com, providerID)
 		require.Equal(t, "unknown-provider Accounts", dlg.sd.cfg.title)
@@ -490,7 +489,7 @@ func TestAccounts_TitleIncludesProviderName(t *testing.T) {
 func TestAccounts_SelectDisabledAccount_WarnsAndDoesNotActivate(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal", Disabled: true},
 	}
@@ -516,7 +515,7 @@ func TestAccounts_SelectDisabledAccount_WarnsAndDoesNotActivate(t *testing.T) {
 func TestAccounts_LoginAccountItemAppendedToList(t *testing.T) {
 	providerID := "openai"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+	com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -539,7 +538,7 @@ func TestAccounts_LoginAccountItemAppendedToList(t *testing.T) {
 func TestAccounts_EditKey_ReturnsActionOpenAccountEdit_NoIO(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -564,7 +563,7 @@ func TestAccounts_EditKey_ReturnsActionOpenAccountEdit_NoIO(t *testing.T) {
 func TestAccounts_EditKey_OnLoginAccountItem_NoOp(t *testing.T) {
 	providerID := "openai"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 
 	dlg := loadedAccounts(t, com, providerID)
 	items := dlg.sd.list.FilteredItems()
@@ -582,7 +581,7 @@ func TestAccounts_EditKey_OnLoginAccountItem_NoOp(t *testing.T) {
 func TestAccounts_DeleteKey_ReturnsActionRequestAccountRemoval_NoIO(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Personal"},
 	}
@@ -606,7 +605,7 @@ func TestAccounts_DeleteKey_ReturnsActionRequestAccountRemoval_NoIO(t *testing.T
 func TestAccounts_SelectLoginAccount_ReturnsActionAddAccount_NoIO(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 	}
 
@@ -630,7 +629,7 @@ func TestAccounts_SelectLoginAccount_ReturnsActionAddAccount_NoIO(t *testing.T) 
 func TestAccounts_CtrlATriggersAddAccount(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 	}
 
@@ -652,7 +651,7 @@ func TestAccounts_CtrlATriggersAddAccount(t *testing.T) {
 func TestAccounts_SelectProviderSettings_ReturnsActionOpenProviderSettings_NoIO(t *testing.T) {
 	providerID := "openai"
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{
+	ws.accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 	}
 
@@ -678,7 +677,7 @@ func TestAccounts_SelectProviderSettings_ReturnsActionOpenProviderSettings_NoIO(
 func TestAccounts_RefreshLimitsKey_UsageProvider_RefreshesOffThread(t *testing.T) {
 	providerID := "codex" // accounts.CapabilitiesOf("codex").Usage == true
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	ws.accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 
 	dlg := loadedAccounts(t, com, providerID)
 	require.True(t, dlg.caps.Usage)
@@ -690,7 +689,7 @@ func TestAccounts_RefreshLimitsKey_UsageProvider_RefreshesOffThread(t *testing.T
 	cmdAction, ok := action.(ActionCmd)
 	require.True(t, ok, "expected ActionCmd carrying the async refresh, got %#v", action)
 
-	ws.refreshedAccs = []accounts.Account{
+	ws.refreshedAccs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work", Usage: accounts.Usage{Plan: "plus", Primary: accounts.UsageWindow{UsedPercent: 7, WindowMinutes: 10080}}},
 	}
 	loaded := findMsg(t, cmdAction.Cmd, isAccountsLoaded)
@@ -711,7 +710,7 @@ func TestAccounts_RefreshLimitsKey_UsageProvider_RefreshesOffThread(t *testing.T
 func TestAccounts_RefreshLimitsKey_HiddenAndInertForNonUsageProvider(t *testing.T) {
 	providerID := "openai" // not in accounts' capability registry
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	ws.accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	ws.accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 
 	dlg := loadedAccounts(t, com, providerID)
 	require.False(t, dlg.caps.Usage)
@@ -738,7 +737,7 @@ func TestAccounts_RefreshLimitsKey_HiddenAndInertForNonUsageProvider(t *testing.
 func TestAccounts_SelectDialogHelpIncludesEditDeleteRefresh(t *testing.T) {
 	providerID := "codex" // accounts.CapabilitiesOf("codex").Usage == true
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 
 	dlg := loadedAccounts(t, com, providerID)
 
@@ -777,7 +776,7 @@ func TestAccounts_SelectDialogHelpIncludesEditDeleteRefresh(t *testing.T) {
 func TestAccounts_RefreshLimitsError_KeepsLastLoadedAccounts(t *testing.T) {
 	providerID := "codex" // accounts.CapabilitiesOf("codex").Usage == true
 	com, ws := newAccountsTestCommon(t, providerID, "acct-1")
-	original := []accounts.Account{{ID: "acct-1", Label: "Work"}}
+	original := []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}
 	ws.accs = original
 
 	dlg := loadedAccounts(t, com, providerID)
@@ -806,7 +805,7 @@ func TestAccounts_RefreshTokenKey_ReturnsActionForOAuthProvider(t *testing.T) {
 	// "codex" is an OAuth provider in the capabilities registry.
 	providerID := "codex"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+	com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 	}
 
@@ -830,7 +829,7 @@ func TestAccounts_RefreshTokenKey_IgnoredForAPIKeyProvider(t *testing.T) {
 	// defaultCapabilities with AuthKind = AuthAPIKey.
 	providerID := "openai"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+	com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 	}
 
@@ -852,7 +851,7 @@ func TestAccounts_BareLettersReachTheFilter(t *testing.T) {
 
 	providerID := "codex"
 	com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-	com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+	com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "rob@example.com"},
 		{ID: "acct-2", Label: "dana@example.com"},
 	}
@@ -876,11 +875,13 @@ func TestAccounts_TokenStatusShownForOAuthAccounts(t *testing.T) {
 		t.Parallel()
 		providerID := "codex"
 		com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+		com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 			{
-				ID:    "acct-1",
-				Label: "Work",
-				Token: &oauth.Token{AccessToken: "tok", ExpiresIn: 3600, ExpiresAt: time.Now().Add(time.Hour).Unix()},
+				ID:             "acct-1",
+				Label:          "Work",
+				HasToken:       true,
+				TokenExpiresIn: 3600,
+				TokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 			},
 		}
 		dlg := loadedAccounts(t, com, providerID)
@@ -893,11 +894,13 @@ func TestAccounts_TokenStatusShownForOAuthAccounts(t *testing.T) {
 		t.Parallel()
 		providerID := "codex"
 		com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
+		com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
 			{
-				ID:    "acct-1",
-				Label: "Work",
-				Token: &oauth.Token{AccessToken: "tok", ExpiresIn: 3600, ExpiresAt: time.Now().Add(-time.Hour).Unix()},
+				ID:             "acct-1",
+				Label:          "Work",
+				HasToken:       true,
+				TokenExpiresIn: 3600,
+				TokenExpiresAt: time.Now().Add(-time.Hour).Unix(),
 			},
 		}
 		dlg := loadedAccounts(t, com, providerID)
@@ -909,8 +912,8 @@ func TestAccounts_TokenStatusShownForOAuthAccounts(t *testing.T) {
 		t.Parallel()
 		providerID := "openai"
 		com, _ := newAccountsTestCommon(t, providerID, "acct-1")
-		com.Workspace.(*accountsTestWorkspace).accs = []accounts.Account{
-			{ID: "acct-1", Label: "Work", APIKey: "$KEY"},
+		com.Workspace.(*accountsTestWorkspace).accs = []workspace.FrontendAccount{
+			{ID: "acct-1", Label: "Work", HasAPIKey: true},
 		}
 		dlg := loadedAccounts(t, com, providerID)
 		rendered := dlg.sd.list.FilteredItems()[0].(*AccountItem).Render(60)

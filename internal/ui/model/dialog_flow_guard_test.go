@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -26,7 +25,7 @@ import (
 func TestOpenAccountsDialog_LoadsOffThread(t *testing.T) {
 	t.Parallel()
 
-	ws := &cmdDrivingWorkspace{accs: []accounts.Account{{ID: "acct-1", Label: "Work"}}}
+	ws := &cmdDrivingWorkspace{accs: []workspace.FrontendAccount{{ID: "acct-1", Label: "Work"}}}
 	m := newCmdDrivenUI(t, ws)
 
 	cmd := m.openAccountsDialog(m.com, "test-provider")

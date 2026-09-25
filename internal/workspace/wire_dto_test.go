@@ -222,13 +222,6 @@ func forbiddenWireTypeName(t reflect.Type) (string, bool) {
 // Do not add an entry to relax the rule generally - only to document one
 // path that must carry the forbidden type by design.
 var forbiddenTypeAllowList = map[string]string{
-	// Known leak, not a design: ListAccounts, RefreshAccountLimits,
-	// RecordAccount and OAuthCompletion hand the UI whole accounts,
-	// refresh tokens included, and UpdateAccount takes one back and
-	// persists its token. The UI only needs the token's expiry. Removed
-	// by PR 0.5c of CLIENT-SERVER.md (an account DTO and a narrow
-	// UpdateAccount); delete this entry with it.
-	"github.com/rave-soft/sennit/internal/providers/accounts.Account.Token": "known leak, removed by CLIENT-SERVER.md PR 0.5c",
 	// The OAuth paths below move a token server -> UI -> server: the UI
 	// receives it from StartOAuth/ImportCopilot and hands it straight back
 	// to CompleteOAuth/RecordAccount. PR 1.3 of CLIENT-SERVER.md completes

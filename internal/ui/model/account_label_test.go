@@ -9,7 +9,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -25,7 +24,7 @@ import (
 type accountLabelTestWorkspace struct {
 	workspace.Workspace
 	cfg  *config.Config
-	accs []accounts.Account
+	accs []workspace.FrontendAccount
 	err  error
 }
 
@@ -48,11 +47,11 @@ func (w *accountLabelTestWorkspace) Config() *workspace.FrontendConfig {
 	return workspace.NewFrontendConfig(w.cfg, w.KnownProviders())
 }
 
-func (w *accountLabelTestWorkspace) ListAccounts(string) ([]accounts.Account, error) {
+func (w *accountLabelTestWorkspace) ListAccounts(string) ([]workspace.FrontendAccount, error) {
 	return w.accs, w.err
 }
 
-func newAccountLabelTestUI(t *testing.T, activeAccountID string, accs []accounts.Account) (*UI, *accountLabelTestWorkspace) {
+func newAccountLabelTestUI(t *testing.T, activeAccountID string, accs []workspace.FrontendAccount) (*UI, *accountLabelTestWorkspace) {
 	t.Helper()
 	const providerID = "codex"
 	providers := csync.NewMap[string, config.ProviderConfig]()
@@ -73,7 +72,7 @@ func newAccountLabelTestUI(t *testing.T, activeAccountID string, accs []accounts
 // TestRefreshAccountLabelCmd_MultipleAccounts_ReportsActiveLabel is the
 // heart of the "shown when there is more than one account" rule.
 func TestRefreshAccountLabelCmd_MultipleAccounts_ReportsActiveLabel(t *testing.T) {
-	u, _ := newAccountLabelTestUI(t, "acct-2", []accounts.Account{
+	u, _ := newAccountLabelTestUI(t, "acct-2", []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Work"},
 		{ID: "acct-2", Label: "Личный Plus"},
 	})
@@ -91,7 +90,7 @@ func TestRefreshAccountLabelCmd_MultipleAccounts_ReportsActiveLabel(t *testing.T
 // when there is only one account" rule at the cmd layer (sidebar_plan_test
 // covers it at the render layer).
 func TestRefreshAccountLabelCmd_SingleAccount_ReportsNoLabel(t *testing.T) {
-	u, _ := newAccountLabelTestUI(t, "acct-1", []accounts.Account{
+	u, _ := newAccountLabelTestUI(t, "acct-1", []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "Only Account"},
 	})
 
@@ -112,7 +111,7 @@ func TestRefreshAccountLabelCmd_EmptyProviderID_NoCmd(t *testing.T) {
 // TestRefreshAccountLabelCmd_ListErrorClearsCache mirrors the config-level
 // contract of leaving no stale label behind when the read itself fails.
 func TestRefreshAccountLabelCmd_ListErrorClearsCache(t *testing.T) {
-	u, ws := newAccountLabelTestUI(t, "acct-1", []accounts.Account{
+	u, ws := newAccountLabelTestUI(t, "acct-1", []workspace.FrontendAccount{
 		{ID: "acct-1"}, {ID: "acct-2"},
 	})
 	ws.err = errors.New("boom")
@@ -153,7 +152,7 @@ func TestApplyAccountLabelsLoaded_BumpsVersionAndStores(t *testing.T) {
 // touching a dialog, so the notification itself has to refresh the label
 // cache or the sidebar keeps naming the account the turn has left.
 func TestHandleAgentNotification_AccountRotated_RefreshesLabel(t *testing.T) {
-	u, _ := newAccountLabelTestUI(t, "acct-2", []accounts.Account{
+	u, _ := newAccountLabelTestUI(t, "acct-2", []workspace.FrontendAccount{
 		{ID: "acct-1", Label: "first@example.com"},
 		{ID: "acct-2", Label: "second@example.com"},
 	})

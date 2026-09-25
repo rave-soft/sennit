@@ -2,6 +2,7 @@ package appws
 
 import (
 	"context"
+	"fmt"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
@@ -27,18 +28,22 @@ func (w *AppWorkspace) accounts() *config.AccountsService {
 }
 
 // RecordAccount implements Workspace.
-func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
 	a, err := w.accounts().Record(scope, providerID, cred)
 	if err != nil {
-		return accounts.Account{}, err
+		return workspace.FrontendAccount{}, err
 	}
 	w.app.Credentials().SignalAuthComplete(providerID)
-	return a, nil
+	return workspace.NewFrontendAccount(a), nil
 }
 
 // ListAccounts implements Workspace.
-func (w *AppWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
-	return w.accounts().List(providerID)
+func (w *AppWorkspace) ListAccounts(providerID string) ([]workspace.FrontendAccount, error) {
+	accs, err := w.accounts().List(providerID)
+	if err != nil {
+		return nil, err
+	}
+	return frontendAccounts(accs), nil
 }
 
 // ActivateAccount implements Workspace.
@@ -46,9 +51,40 @@ func (w *AppWorkspace) ActivateAccount(scope config.Scope, providerID, accountID
 	return w.accounts().Activate(scope, providerID, accountID)
 }
 
-// UpdateAccount implements Workspace.
-func (w *AppWorkspace) UpdateAccount(providerID string, account accounts.Account) error {
-	return w.accounts().Update(providerID, account)
+// UpdateAccountFields implements Workspace. The stored account is loaded
+// fresh and only the edited fields are applied - the credential (Token,
+// APIKey) always comes from disk, never from the caller, so a frontend
+// can never overwrite it by round-tripping a FrontendAccount it was
+// handed (see CLIENT-SERVER.md PR 0.5c).
+func (w *AppWorkspace) UpdateAccountFields(providerID, accountID string, edit workspace.AccountEdit) error {
+	store := w.accountStore()
+	account, ok, err := store.Get(providerID, accountID)
+	if err != nil {
+		return fmt.Errorf("looking up account %s for provider %s: %w", accountID, providerID, err)
+	}
+	if !ok {
+		return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
+	}
+	if edit.Label != nil {
+		account.Label = *edit.Label
+	}
+	if edit.ProxyURL != nil {
+		account.ProxyURL = *edit.ProxyURL
+	}
+	if edit.Disabled != nil {
+		account.Disabled = *edit.Disabled
+	}
+	return config.NewAccountsService(w.store, store, fetchCodexUsage).Update(providerID, account)
+}
+
+// frontendAccounts projects a slice of stored accounts down to what a
+// frontend is allowed to see.
+func frontendAccounts(accs []accounts.Account) []workspace.FrontendAccount {
+	out := make([]workspace.FrontendAccount, len(accs))
+	for i, a := range accs {
+		out[i] = workspace.NewFrontendAccount(a)
+	}
+	return out
 }
 
 // RemoveAccount implements Workspace.
@@ -67,8 +103,12 @@ func (w *AppWorkspace) SetProviderProxy(providerID, proxy string) error {
 }
 
 // RefreshAccountLimits implements Workspace.
-func (w *AppWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
-	return w.accounts().RefreshLimits(ctx, providerID)
+func (w *AppWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]workspace.FrontendAccount, error) {
+	accs, err := w.accounts().RefreshLimits(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	return frontendAccounts(accs), nil
 }
 
 // fetchCodexUsage adapts codex.FetchUsage to config.AccountUsageFetcher by

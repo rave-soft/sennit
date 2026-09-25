@@ -9,7 +9,6 @@ import (
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -105,7 +104,7 @@ type codexCompleteCall struct {
 }
 
 type codexLoginListResult struct {
-	accounts []accounts.Account
+	accounts []workspace.FrontendAccount
 	err      error
 }
 
@@ -147,7 +146,7 @@ func (w *codexLoginWorkspaceFake) OAuthValidateProxy(_, proxyURL string) error {
 	return nil
 }
 
-func (w *codexLoginWorkspaceFake) ListAccounts(providerID string) ([]accounts.Account, error) {
+func (w *codexLoginWorkspaceFake) ListAccounts(providerID string) ([]workspace.FrontendAccount, error) {
 	w.calls = append(w.calls, "ListAccounts:"+providerID)
 	result := w.listResults[0]
 	w.listResults = w.listResults[1:]
@@ -157,14 +156,14 @@ func (w *codexLoginWorkspaceFake) ListAccounts(providerID string) ([]accounts.Ac
 // newCodexLoginFake builds a fake whose sign-in short-circuits on an
 // existing Codex CLI login, so no test here needs the interactive
 // browser step (which would block on stdin).
-func newCodexLoginFake(before, after []accounts.Account) *codexLoginWorkspaceFake {
+func newCodexLoginFake(before, after []workspace.FrontendAccount) *codexLoginWorkspaceFake {
 	return &codexLoginWorkspaceFake{
 		startResult: workspace.OAuthStartResult{
 			Token:               &oauth.Token{AccessToken: "access-token"},
 			ReusedExistingLogin: true,
 		},
 		completion: workspace.OAuthCompletion{
-			Account:       accounts.Account{ID: "new", Label: "New account"},
+			Account:       workspace.FrontendAccount{ID: "new", Label: "New account"},
 			ModelsFetched: 1,
 		},
 		listResults: []codexLoginListResult{{accounts: before}, {accounts: after}},
@@ -179,8 +178,8 @@ func TestLoginCodex_StartsThenCompletesSignIn(t *testing.T) {
 	t.Parallel()
 
 	ws := newCodexLoginFake(
-		[]accounts.Account{{ID: "existing"}},
-		[]accounts.Account{{ID: "existing"}, {ID: "new"}},
+		[]workspace.FrontendAccount{{ID: "existing"}},
+		[]workspace.FrontendAccount{{ID: "existing"}, {ID: "new"}},
 	)
 
 	require.NoError(t, loginCodex(ws, true, false, ""))
@@ -230,7 +229,7 @@ func TestLoginCodex_ModelFetchFailureIsNotFatal(t *testing.T) {
 
 	ws := newCodexLoginFake(nil, nil)
 	ws.completion = workspace.OAuthCompletion{
-		Account:     accounts.Account{ID: "new", Label: "New account"},
+		Account:     workspace.FrontendAccount{ID: "new", Label: "New account"},
 		ModelsError: workspace.EncodeError(errors.New("model list unavailable")),
 	}
 
@@ -264,7 +263,7 @@ func TestLoginCodex_ProxyWriteFailureIsFatal(t *testing.T) {
 	proxyErr := errors.New("signed in, but the proxy setting could not be saved: disk full")
 	ws := newCodexLoginFake(nil, nil)
 	ws.completion = workspace.OAuthCompletion{
-		Account:    accounts.Account{ID: "new", Label: "New account"},
+		Account:    workspace.FrontendAccount{ID: "new", Label: "New account"},
 		ProxyError: workspace.EncodeError(proxyErr),
 	}
 
@@ -302,7 +301,7 @@ func TestLoginCodex_ProxyResolutionOrder(t *testing.T) {
 			configuredProxy: "socks5://from-cli:1080",
 		}
 		ws.stubConfigAccessor = stubConfigAccessor{}
-		ws.completion = workspace.OAuthCompletion{Account: accounts.Account{Label: "acct"}}
+		ws.completion = workspace.OAuthCompletion{Account: workspace.FrontendAccount{Label: "acct"}}
 		require.NoError(t, loginCodexWithConfiguredProxy(t, ws, "socks5://configured:1080"))
 		require.Equal(t, []string{"socks5://configured:1080"}, ws.startProxies)
 	})

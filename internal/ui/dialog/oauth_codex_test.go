@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/oauth"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -427,7 +426,7 @@ func TestOAuthCodexSuccessScreenNamesAccount(t *testing.T) {
 			ReusedExistingLogin: true,
 		},
 		completion: workspace.OAuthCompletion{
-			Account: accounts.Account{ID: "acc_1", Email: "someone@example.com"},
+			Account: workspace.FrontendAccount{ID: "acc_1", Email: "someone@example.com"},
 		},
 	}
 	dlg := newCodexDialogWith(t, ws)

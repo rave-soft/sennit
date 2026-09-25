@@ -83,7 +83,7 @@ var refusedMethods = []string{
 	"StartOAuth",
 	"Subscribe",
 	"SubscribeWith",
-	"UpdateAccount",
+	"UpdateAccountFields",
 	"UpdateAgentModel",
 	"UpdatePreferredModel",
 	"VerifyProviderAPIKey",
@@ -393,8 +393,8 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			err := ro.ActivateAccount(config.ScopeWorkspace, "provider", "account")
 			require.True(t, IsReadOnlyError(err))
 		},
-		"UpdateAccount": func(t *testing.T, ro *readOnlyWorkspace) {
-			err := ro.UpdateAccount("provider", accounts.Account{ID: "account"})
+		"UpdateAccountFields": func(t *testing.T, ro *readOnlyWorkspace) {
+			err := ro.UpdateAccountFields("provider", "account", AccountEdit{})
 			require.True(t, IsReadOnlyError(err))
 		},
 		"RemoveAccount": func(t *testing.T, ro *readOnlyWorkspace) {

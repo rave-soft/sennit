@@ -9,10 +9,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/proxyhttp"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/key"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // AccountFormID is the identifier for the account edit form dialog.
@@ -32,16 +32,18 @@ const (
 
 // AccountForm edits the user-editable fields of an existing stored account
 // (see internal/providers/accounts.Account): Label, ProxyURL, and Disabled.
-// It does no IO itself — submitting returns [ActionSubmitAccountForm] and
-// the caller (ui.go) does the async UpdateAccount call in a tea.Cmd. The
-// result rounds back as [ActionAccountFormResult] (see actions.go's
-// [ActionCustomProviderResult] doc comment for how this round-trip works).
+// It does no IO itself — submitting returns [ActionSubmitAccountForm],
+// carrying only the edited fields (never the credential — see
+// workspace.AccountEdit), and the caller (ui.go) does the async
+// UpdateAccountFields call in a tea.Cmd. The result rounds back as
+// [ActionAccountFormResult] (see actions.go's [ActionCustomProviderResult]
+// doc comment for how this round-trip works).
 type AccountForm struct {
 	Base
 	com *common.Common
 
 	providerID string
-	account    accounts.Account
+	account    workspace.FrontendAccount
 	// active is whether this account is the provider's current one. An
 	// active account cannot be disabled from here — see submit().
 	active bool
@@ -73,7 +75,7 @@ var _ Dialog = (*AccountForm)(nil)
 // NewAccountForm creates the edit form for account, one of providerID's
 // stored accounts. active tells the form whether account is the provider's
 // currently active one, which governs whether Enabled can be turned off.
-func NewAccountForm(com *common.Common, providerID string, account accounts.Account, active bool) *AccountForm {
+func NewAccountForm(com *common.Common, providerID string, account workspace.FrontendAccount, active bool) *AccountForm {
 	m := &AccountForm{
 		Base:       NewBase(com, accountFormMaxWidth),
 		com:        com,
@@ -212,12 +214,30 @@ func (m *AccountForm) submit() Action {
 	m.errMsg = ""
 	m.submitting = true
 
-	account := m.account
-	account.Label = strings.TrimSpace(m.label.Value())
-	account.ProxyURL = proxy
-	account.Disabled = !m.enabled
+	label := strings.TrimSpace(m.label.Value())
+	disabled := !m.enabled
 
-	return ActionSubmitAccountForm{ProviderID: m.providerID, Account: account}
+	// Only send a field the person actually changed. The proxy field in
+	// particular is pre-filled with account.ProxyURL, which already had
+	// its userinfo password stripped for display (redactProxyURL) -
+	// sending it back unconditionally would silently overwrite a real
+	// password with the redacted form on every save, even one that only
+	// touched the label. Comparing against the pre-filled value, not
+	// re-validating the password, is what lets an unrelated edit pass
+	// through untouched while a deliberate proxy edit still writes
+	// exactly what was typed.
+	var edit workspace.AccountEdit
+	if label != m.account.Label {
+		edit.Label = &label
+	}
+	if proxy != m.account.ProxyURL {
+		edit.ProxyURL = &proxy
+	}
+	if disabled != m.account.Disabled {
+		edit.Disabled = &disabled
+	}
+
+	return ActionSubmitAccountForm{ProviderID: m.providerID, AccountID: m.account.ID, Edit: edit}
 }
 
 // Cursor returns the cursor position relative to the dialog. Each field's

@@ -220,8 +220,7 @@ func runAuthProxy(ws interface {
 	if err != nil {
 		return err
 	}
-	account.ProxyURL = proxyURL
-	if err := ws.UpdateAccount(providerID, account); err != nil {
+	if err := ws.UpdateAccountFields(providerID, account.ID, workspace.AccountEdit{ProxyURL: &proxyURL}); err != nil {
 		return err
 	}
 	fmt.Printf("Account %q of %s now %s.\n", account.Label, providerID, describeProxy(proxyURL))
@@ -261,10 +260,10 @@ func normalizeAuthProvider(provider string) string {
 
 // findAuthAccount resolves account (matched against ID, or Label
 // case-insensitively) to one of providerID's stored accounts.
-func findAuthAccount(ws workspace.AccountLister, providerID, account string) (accounts.Account, error) {
+func findAuthAccount(ws workspace.AccountLister, providerID, account string) (workspace.FrontendAccount, error) {
 	accts, err := ws.ListAccounts(providerID)
 	if err != nil {
-		return accounts.Account{}, err
+		return workspace.FrontendAccount{}, err
 	}
 	for _, a := range accts {
 		if a.ID == account {
@@ -276,7 +275,7 @@ func findAuthAccount(ws workspace.AccountLister, providerID, account string) (ac
 			return a, nil
 		}
 	}
-	return accounts.Account{}, fmt.Errorf("no account %q found for provider %s", account, providerID)
+	return workspace.FrontendAccount{}, fmt.Errorf("no account %q found for provider %s", account, providerID)
 }
 
 // authAddOAuth runs the existing OAuth login flow with both force flags
@@ -398,7 +397,7 @@ var (
 // printAccountList renders providerID's accounts: label, active/disabled
 // markers, and — only for a provider that reports usage
 // (accounts.CapabilitiesOf) — its stored allowance figures.
-func printAccountList(ws workspace.ConfigReader, providerID string, accts []accounts.Account) {
+func printAccountList(ws workspace.ConfigReader, providerID string, accts []workspace.FrontendAccount) {
 	activeID := ""
 	if cfg := serverConfig(ws); cfg != nil {
 		if pc, ok := cfg.RuntimeProvider(providerID); ok {

@@ -552,12 +552,12 @@ func (s *stubWorkspace) ConfigureCustomProvider(ctx context.Context, scope confi
 	return nil, nil
 }
 
-func (s *stubWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+func (s *stubWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (FrontendAccount, error) {
 	s.track("RecordAccount")
-	return accounts.Account{}, nil
+	return FrontendAccount{}, nil
 }
 
-func (s *stubWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
+func (s *stubWorkspace) ListAccounts(providerID string) ([]FrontendAccount, error) {
 	s.track("ListAccounts")
 	return nil, nil
 }
@@ -567,8 +567,8 @@ func (s *stubWorkspace) ActivateAccount(scope config.Scope, providerID, accountI
 	return nil
 }
 
-func (s *stubWorkspace) UpdateAccount(providerID string, account accounts.Account) error {
-	s.track("UpdateAccount")
+func (s *stubWorkspace) UpdateAccountFields(providerID, accountID string, edit AccountEdit) error {
+	s.track("UpdateAccountFields")
 	return nil
 }
 
@@ -592,7 +592,7 @@ func (s *stubWorkspace) RefreshProviderModels(ctx context.Context, providerID st
 	return nil, nil
 }
 
-func (s *stubWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+func (s *stubWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]FrontendAccount, error) {
 	s.track("RefreshAccountLimits")
 	return nil, nil
 }

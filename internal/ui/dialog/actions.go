@@ -9,7 +9,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -247,17 +246,20 @@ type (
 	// list, to open [AccountForm] for the selected account.
 	ActionOpenAccountEdit struct {
 		ProviderID string
-		Account    accounts.Account
+		Account    workspace.FrontendAccount
 		// Active is whether this account is providerID's current one —
 		// forwarded to AccountForm so it can refuse to let the user
 		// disable it (see AccountForm.submit).
 		Active bool
 	}
 	// ActionSubmitAccountForm is sent when the account edit form is
-	// submitted with valid input.
+	// submitted with valid input. Edit carries only the fields the form
+	// actually changed — never the credential, which the server always
+	// takes from the stored account (see workspace.AccountEdit).
 	ActionSubmitAccountForm struct {
 		ProviderID string
-		Account    accounts.Account
+		AccountID  string
+		Edit       workspace.AccountEdit
 	}
 	// ActionAccountFormResult carries the outcome of the async
 	// UpdateAccount call kicked off by ActionSubmitAccountForm. Like
@@ -279,7 +281,7 @@ type (
 	// removing the selected account.
 	ActionRequestAccountRemoval struct {
 		ProviderID string
-		Account    accounts.Account
+		Account    workspace.FrontendAccount
 	}
 	// ActionRemoveAccountConfirmed is returned once the user confirms
 	// removing an account in [AccountRemoveConfirm]. The caller performs
@@ -315,10 +317,15 @@ type (
 	// ActionSubmitProviderSettings is sent when the provider settings
 	// form is submitted with valid input. Rotation is nil for a provider
 	// whose accounts.CapabilitiesOf(...).RotateOn is accounts.RotateNever
-	// — there is nothing to save for it.
+	// — there is nothing to save for it. Proxy is nil when the person did
+	// not touch the proxy field: it is pre-filled from FrontendProvider's
+	// already-redacted ProxyURL (password stripped for display), so
+	// sending it back unconditionally would silently overwrite a real
+	// stored password with the redacted form on every unrelated save
+	// (e.g. changing only rotation) — see ProviderSettings.submit.
 	ActionSubmitProviderSettings struct {
 		ProviderID string
-		Proxy      string
+		Proxy      *string
 		Rotation   *config.RotationConfig
 	}
 	// ActionProviderSettingsResult carries the outcome of the async

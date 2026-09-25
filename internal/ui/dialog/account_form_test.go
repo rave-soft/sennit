@@ -5,13 +5,13 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestAccountForm(t *testing.T, account accounts.Account, active bool) *AccountForm {
+func newTestAccountForm(t *testing.T, account workspace.FrontendAccount, active bool) *AccountForm {
 	t.Helper()
 	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
@@ -27,16 +27,34 @@ func typeIntoAccountForm(t *testing.T, m *AccountForm, s string) {
 }
 
 // TestAccountForm_EmptyLabelAllowed covers submitting with an empty label —
-// it's optional; the account's ID is what's shown in its place.
+// it's optional; the account's ID is what's shown in its place. The
+// account already has no label, so the field is untouched and Edit.Label
+// stays nil (see submit()'s "only send what changed" rule).
 func TestAccountForm_EmptyLabelAllowed(t *testing.T) {
-	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+	m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", HasAPIKey: true}, false)
 
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	submit, ok := action.(ActionSubmitAccountForm)
 	require.True(t, ok, "expected ActionSubmitAccountForm, got %#v", action)
 	require.Equal(t, "openai", submit.ProviderID)
-	require.Empty(t, submit.Account.Label)
+	require.Nil(t, submit.Edit.Label, "an untouched field must not be sent")
 	require.True(t, m.submitting)
+}
+
+// TestAccountForm_LabelEditSendsOnlyLabel covers the actual edit case: only
+// the field the person touched must appear on Edit, everything else stays
+// nil so an unrelated save can never overwrite ProxyURL/Disabled.
+func TestAccountForm_LabelEditSendsOnlyLabel(t *testing.T) {
+	m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", Label: "Old", ProxyURL: "http://user@host:8080"}, false)
+	typeIntoAccountForm(t, m, "New")
+
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	submit, ok := action.(ActionSubmitAccountForm)
+	require.True(t, ok, "expected ActionSubmitAccountForm, got %#v", action)
+	require.NotNil(t, submit.Edit.Label)
+	require.Equal(t, "OldNew", *submit.Edit.Label)
+	require.Nil(t, submit.Edit.ProxyURL, "the untouched, already-redacted proxy field must not be sent back")
+	require.Nil(t, submit.Edit.Disabled)
 }
 
 // TestAccountForm_InvalidProxyRejectedBeforeSaving pins the requirement
@@ -44,7 +62,7 @@ func TestAccountForm_EmptyLabelAllowed(t *testing.T) {
 // submitting — not after a failed request — and that a rejected value
 // leaves the form open with an error rather than producing a submit action.
 func TestAccountForm_InvalidProxyRejectedBeforeSaving(t *testing.T) {
-	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+	m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", HasAPIKey: true}, false)
 	m.advanceFocus(1) // move to the proxy field
 	typeIntoAccountForm(t, m, "://not-a-url")
 
@@ -55,11 +73,13 @@ func TestAccountForm_InvalidProxyRejectedBeforeSaving(t *testing.T) {
 }
 
 // TestAccountForm_ValidProxySubmits covers each of the proxy field's three
-// legal states: empty (inherit), "none" (direct), and a real URL.
+// legal states: empty (inherit, unchanged from the account's own empty
+// ProxyURL so nothing is sent), "none" (direct), and a real URL (both
+// actually typed, so both are sent as-is).
 func TestAccountForm_ValidProxySubmits(t *testing.T) {
 	for _, proxy := range []string{"", "none", "http://proxy.example:8080"} {
 		t.Run(proxy, func(t *testing.T) {
-			m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+			m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", HasAPIKey: true}, false)
 			m.advanceFocus(1)
 			if proxy != "" {
 				typeIntoAccountForm(t, m, proxy)
@@ -68,7 +88,12 @@ func TestAccountForm_ValidProxySubmits(t *testing.T) {
 			action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 			submit, ok := action.(ActionSubmitAccountForm)
 			require.True(t, ok, "expected ActionSubmitAccountForm, got %#v", action)
-			require.Equal(t, proxy, submit.Account.ProxyURL)
+			if proxy == "" {
+				require.Nil(t, submit.Edit.ProxyURL, "an untouched empty proxy field must not be sent")
+				return
+			}
+			require.NotNil(t, submit.Edit.ProxyURL)
+			require.Equal(t, proxy, *submit.Edit.ProxyURL)
 		})
 	}
 }
@@ -80,7 +105,7 @@ func TestAccountForm_ValidProxySubmits(t *testing.T) {
 // on an active account must block the submit with an explanatory error
 // instead of quietly disabling and orphaning it.
 func TestAccountForm_ActiveAccountCannotBeDisabled(t *testing.T) {
-	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, true)
+	m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", HasAPIKey: true}, true)
 	m.advanceFocus(2) // move to the Enabled field
 	require.Equal(t, accountFormFieldEnabled, m.focus)
 
@@ -97,7 +122,7 @@ func TestAccountForm_ActiveAccountCannotBeDisabled(t *testing.T) {
 // TestAccountForm_InactiveAccountCanBeDisabled is the control case for the
 // rule above: disabling an account that isn't active must submit normally.
 func TestAccountForm_InactiveAccountCanBeDisabled(t *testing.T) {
-	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+	m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", HasAPIKey: true}, false)
 	m.advanceFocus(2)
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	require.False(t, m.enabled)
@@ -105,7 +130,8 @@ func TestAccountForm_InactiveAccountCanBeDisabled(t *testing.T) {
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	submit, ok := action.(ActionSubmitAccountForm)
 	require.True(t, ok, "expected ActionSubmitAccountForm, got %#v", action)
-	require.True(t, submit.Account.Disabled)
+	require.NotNil(t, submit.Edit.Disabled)
+	require.True(t, *submit.Edit.Disabled)
 }
 
 // TestAccountForm_ResultRoundTrip covers HandleMsg's ActionAccountFormResult
@@ -113,7 +139,7 @@ func TestAccountForm_InactiveAccountCanBeDisabled(t *testing.T) {
 // loop by returning ActionAccountSaved.
 func TestAccountForm_ResultRoundTrip(t *testing.T) {
 	t.Run("error keeps the form open", func(t *testing.T) {
-		m := newTestAccountForm(t, accounts.Account{ID: "acct-1"}, false)
+		m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1"}, false)
 		m.submitting = true
 
 		action := m.HandleMsg(ActionAccountFormResult{ProviderID: "openai", Err: errors.New("boom")})
@@ -123,7 +149,7 @@ func TestAccountForm_ResultRoundTrip(t *testing.T) {
 	})
 
 	t.Run("success closes the loop", func(t *testing.T) {
-		m := newTestAccountForm(t, accounts.Account{ID: "acct-1"}, false)
+		m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1"}, false)
 		m.submitting = true
 
 		action := m.HandleMsg(ActionAccountFormResult{ProviderID: "openai"})
@@ -137,7 +163,7 @@ func TestAccountForm_ResultRoundTrip(t *testing.T) {
 // has focus: the chord cannot collide with typing.
 func TestAccountForm_CtrlATriggersSignIn(t *testing.T) {
 	t.Parallel()
-	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+	m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", HasAPIKey: true}, false)
 
 	for i := 0; i < int(accountFormFieldCount); i++ {
 		m.advanceFocus(1)
@@ -152,7 +178,7 @@ func TestAccountForm_CtrlATriggersSignIn(t *testing.T) {
 // character in the label field: it does not trigger sign-in.
 func TestAccountForm_PlainATypesIntoLabel(t *testing.T) {
 	t.Parallel()
-	m := newTestAccountForm(t, accounts.Account{ID: "acct-1", APIKey: "key"}, false)
+	m := newTestAccountForm(t, workspace.FrontendAccount{ID: "acct-1", HasAPIKey: true}, false)
 
 	action := m.HandleMsg(keyMsg('a'))
 	_, isAdd := action.(ActionAddAccount)

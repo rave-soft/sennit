@@ -385,9 +385,10 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 	case dialog.ActionSubmitAccountForm:
 		ws := m.com.Workspace
 		providerID := msg.ProviderID
-		account := msg.Account
+		accountID := msg.AccountID
+		edit := msg.Edit
 		cmds = append(cmds, func() tea.Msg {
-			err := ws.UpdateAccount(providerID, account)
+			err := ws.UpdateAccountFields(providerID, accountID, edit)
 			return dialog.ActionAccountFormResult{ProviderID: providerID, Err: err}
 		})
 	case dialog.ActionAccountSaved:
@@ -432,8 +433,10 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		proxy := msg.Proxy
 		rotation := msg.Rotation
 		cmds = append(cmds, func() tea.Msg {
-			if err := ws.SetProviderProxy(providerID, proxy); err != nil {
-				return dialog.ActionProviderSettingsResult{ProviderID: providerID, Err: err}
+			if proxy != nil {
+				if err := ws.SetProviderProxy(providerID, *proxy); err != nil {
+					return dialog.ActionProviderSettingsResult{ProviderID: providerID, Err: err}
+				}
 			}
 			if rotation != nil {
 				key := config.ProviderFieldKey(providerID, "rotation")

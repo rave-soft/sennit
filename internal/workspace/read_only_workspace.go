@@ -464,16 +464,16 @@ func (w *readOnlyWorkspace) ConfigureCustomProvider(ctx context.Context, scope c
 	return nil, w.readOnlyError("ConfigureCustomProvider")
 }
 
-func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
-	return accounts.Account{}, w.readOnlyError("RecordAccount")
+func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (FrontendAccount, error) {
+	return FrontendAccount{}, w.readOnlyError("RecordAccount")
 }
 
 func (w *readOnlyWorkspace) ActivateAccount(scope config.Scope, providerID, accountID string) error {
 	return w.readOnlyError("ActivateAccount")
 }
 
-func (w *readOnlyWorkspace) UpdateAccount(providerID string, account accounts.Account) error {
-	return w.readOnlyError("UpdateAccount")
+func (w *readOnlyWorkspace) UpdateAccountFields(providerID, accountID string, edit AccountEdit) error {
+	return w.readOnlyError("UpdateAccountFields")
 }
 
 func (w *readOnlyWorkspace) RemoveAccount(scope config.Scope, providerID, accountID string) error {
@@ -492,7 +492,7 @@ func (w *readOnlyWorkspace) RefreshProviderModels(ctx context.Context, providerI
 	return nil, w.readOnlyError("RefreshProviderModels")
 }
 
-func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID string) ([]FrontendAccount, error) {
 	return nil, w.readOnlyError("RefreshAccountLimits")
 }
 
@@ -755,7 +755,7 @@ func (w *readOnlyWorkspace) LSPGetStates() map[string]LSPClientInfo {
 	return w.ws.LSPGetStates()
 }
 
-func (w *readOnlyWorkspace) ListAccounts(providerID string) ([]accounts.Account, error) {
+func (w *readOnlyWorkspace) ListAccounts(providerID string) ([]FrontendAccount, error) {
 	return w.ws.ListAccounts(providerID)
 }
 

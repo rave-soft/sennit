@@ -6,6 +6,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,10 +20,10 @@ type recordAccountConfigAccessor struct {
 	recorded         []accounts.LegacyCredential
 }
 
-func (s *recordAccountConfigAccessor) RecordAccount(_ config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+func (s *recordAccountConfigAccessor) RecordAccount(_ config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
 	s.recordedProvider = providerID
 	s.recorded = append(s.recorded, cred)
-	return accounts.Account{ID: "acct-copilot"}, nil
+	return workspace.FrontendAccount{ID: "acct-copilot"}, nil
 }
 
 // TestRecordCopilotAccount_RoutesThroughRecordAccount guards the fix for a

@@ -404,6 +404,29 @@ var sampleAccount = accounts.Account{
 	Usage:     sampleAccountUsage,
 }
 
+// sampleFrontendAccount is what a frontend actually receives for an
+// account: presence/expiry facts, never the token or key themselves. See
+// FrontendAccount's doc comment.
+var sampleFrontendAccount = FrontendAccount{
+	ID:             "acct-1",
+	Label:          "Work",
+	AccountID:      "acct-remote-1",
+	Email:          "person@example.com",
+	ProxyURL:       "http://localhost:8080",
+	Disabled:       true,
+	Usage:          sampleAccountUsage,
+	HasToken:       true,
+	TokenExpiresAt: sampleTime.Unix(),
+	TokenExpiresIn: 3600,
+	HasAPIKey:      true,
+}
+
+var sampleAccountEdit = AccountEdit{
+	Label:    ptr("Work"),
+	ProxyURL: ptr("http://localhost:8080"),
+	Disabled: ptr(true),
+}
+
 var sampleLegacyCredential = accounts.LegacyCredential{
 	APIKey:          "$OPENAI_API_KEY",
 	Token:           &sampleOAuthToken,
@@ -863,7 +886,7 @@ var sampleModelRefreshResult = ModelRefreshResult{
 }
 
 var sampleOAuthCompletion = OAuthCompletion{
-	Account:       sampleAccount,
+	Account:       sampleFrontendAccount,
 	ModelsFetched: 5,
 	ModelsError:   &sampleWireErr,
 	ProxyError:    &sampleWireErr,
@@ -916,6 +939,8 @@ var wireSamples = map[reflect.Type]any{
 	reflectTypeOf[FrontendConfig]():   sampleFrontendConfig,
 	reflectTypeOf[FrontendProvider](): sampleFrontendProvider,
 	reflectTypeOf[FrontendAgent]():    sampleFrontendAgent,
+	reflectTypeOf[FrontendAccount]():  sampleFrontendAccount,
+	reflectTypeOf[AccountEdit]():      sampleAccountEdit,
 	reflectTypeOf[ProviderAuth]():     sampleProviderAuth,
 
 	reflectTypeOf[git.FileChange](): sampleGitFileChange,

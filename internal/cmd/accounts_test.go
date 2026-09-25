@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,17 +67,29 @@ func (a *realConfigAccessor) RemoveConfigField(scope config.Scope, key string) e
 	return a.store.RemoveConfigField(scope, key)
 }
 
-func (a *realConfigAccessor) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+func (a *realConfigAccessor) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
-	return config.RecordAccount(a.store, accStore, scope, providerID, cred)
+	acc, err := config.RecordAccount(a.store, accStore, scope, providerID, cred)
+	if err != nil {
+		return workspace.FrontendAccount{}, err
+	}
+	return workspace.NewFrontendAccount(acc), nil
 }
 
-func (a *realConfigAccessor) ListAccounts(providerID string) ([]accounts.Account, error) {
+func (a *realConfigAccessor) ListAccounts(providerID string) ([]workspace.FrontendAccount, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
 	if err := config.EnsureAccountMigrated(a.store, accStore, providerID); err != nil {
 		return nil, err
 	}
-	return accStore.List(providerID)
+	accs, err := accStore.List(providerID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]workspace.FrontendAccount, len(accs))
+	for i, acc := range accs {
+		out[i] = workspace.NewFrontendAccount(acc)
+	}
+	return out, nil
 }
 
 func (a *realConfigAccessor) ActivateAccount(scope config.Scope, providerID, accountID string) error {
@@ -91,8 +104,24 @@ func (a *realConfigAccessor) ActivateAccount(scope config.Scope, providerID, acc
 	return a.store.ActivateAccount(scope, providerID, account)
 }
 
-func (a *realConfigAccessor) UpdateAccount(providerID string, account accounts.Account) error {
+func (a *realConfigAccessor) UpdateAccountFields(providerID, accountID string, edit workspace.AccountEdit) error {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	account, ok, err := accStore.Get(providerID, accountID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("account %s not found for provider %s", accountID, providerID)
+	}
+	if edit.Label != nil {
+		account.Label = *edit.Label
+	}
+	if edit.ProxyURL != nil {
+		account.ProxyURL = *edit.ProxyURL
+	}
+	if edit.Disabled != nil {
+		account.Disabled = *edit.Disabled
+	}
 	return config.UpdateAccount(a.store, accStore, providerID, account)
 }
 
@@ -111,11 +140,19 @@ func (a *realConfigAccessor) SetProviderProxy(providerID, proxy string) error {
 	return config.SetProviderProxy(a.store, accStore, providerID, proxy)
 }
 
-func (a *realConfigAccessor) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+func (a *realConfigAccessor) RefreshAccountLimits(ctx context.Context, providerID string) ([]workspace.FrontendAccount, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
 	// No provider in these tests reports usage, so the fetcher is never
 	// reached; the real wiring lives in internal/workspace/appws.
-	return config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
+	accs, err := config.RefreshAccountLimits(ctx, a.store, accStore, providerID, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]workspace.FrontendAccount, len(accs))
+	for i, acc := range accs {
+		out[i] = workspace.NewFrontendAccount(acc)
+	}
+	return out, nil
 }
 
 func (a *realConfigAccessor) KnownProviders() []catwalk.Provider { return a.store.KnownProviders() }
@@ -219,7 +256,17 @@ func TestAuthAdd_APIKeyProvider_StoresLiteralTemplate(t *testing.T) {
 	accts, err := ws.ListAccounts(providerID)
 	require.NoError(t, err)
 	require.Len(t, accts, 1)
-	require.Equal(t, "$SENNIT_AUTH_TEST_VAR", accts[0].APIKey, "the literal template must be stored, not the resolved secret")
+	require.True(t, accts[0].HasAPIKey)
+
+	// The literal template, not the resolved secret, is what must be on
+	// disk — checked against the account store directly, since
+	// FrontendAccount (what ws.ListAccounts hands back) never carries the
+	// key itself, only HasAPIKey (see CLIENT-SERVER.md PR 0.5c).
+	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
+	stored, ok, err := accStore.Get(providerID, accts[0].ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "$SENNIT_AUTH_TEST_VAR", stored.APIKey, "the literal template must be stored, not the resolved secret")
 }
 
 // TestAuthUse_DisabledAccountRefused pins that "auth use" must refuse a
@@ -240,8 +287,7 @@ func TestAuthUse_DisabledAccountRefused(t *testing.T) {
 	require.NoError(t, err)
 
 	// Disable the first account and switch the active one back to it.
-	first.Disabled = true
-	require.NoError(t, ws.UpdateAccount(providerID, first))
+	require.NoError(t, ws.UpdateAccountFields(providerID, first.ID, workspace.AccountEdit{Disabled: ptr(true)}))
 
 	account, err := findAuthAccount(ws, providerID, first.ID)
 	require.NoError(t, err)
@@ -296,8 +342,7 @@ func TestAuthProxy_ProviderLevelVsAccountLevel(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "http://provider-proxy.example:8080", pc.ConfiguredProxyURL)
 
-	account.ProxyURL = "http://account-proxy.example:9090"
-	require.NoError(t, ws.UpdateAccount(providerID, account))
+	require.NoError(t, ws.UpdateAccountFields(providerID, account.ID, workspace.AccountEdit{ProxyURL: ptr("http://account-proxy.example:9090")}))
 
 	accts, err := ws.ListAccounts(providerID)
 	require.NoError(t, err)
@@ -413,3 +458,7 @@ func TestReadSecretLine_NonTerminalTrimsTrailingWhitespaceOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "sk-abc 123", got)
 }
+
+// ptr returns a pointer to v, for building workspace.AccountEdit literals
+// inline.
+func ptr[T any](v T) *T { return &v }

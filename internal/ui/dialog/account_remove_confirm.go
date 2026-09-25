@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // AccountRemoveConfirmID is the identifier for the account-remove
@@ -27,7 +27,7 @@ var _ Dialog = (*AccountRemoveConfirm)(nil)
 
 // NewAccountRemoveConfirm creates a confirmation dialog for removing
 // account, one of providerID's stored accounts.
-func NewAccountRemoveConfirm(com *common.Common, providerID string, account accounts.Account) *AccountRemoveConfirm {
+func NewAccountRemoveConfirm(com *common.Common, providerID string, account workspace.FrontendAccount) *AccountRemoveConfirm {
 	label := account.Label
 	if label == "" {
 		label = account.ID

@@ -119,7 +119,7 @@ var methodClasses = map[string]methodClass{
 	"RecordAccount":        classUnary,
 	"ListAccounts":         classUnary,
 	"ActivateAccount":      classUnary,
-	"UpdateAccount":        classUnary,
+	"UpdateAccountFields":  classUnary,
 	"RemoveAccount":        classUnary,
 	"SetProviderProxy":     classUnary,
 	"PurgeAccounts":        classUnary,

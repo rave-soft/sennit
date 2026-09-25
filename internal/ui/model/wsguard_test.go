@@ -141,7 +141,7 @@ var updateGoroutineGuardedMethods = map[string]bool{
 	"Subscribe":                    true,
 	"SubscribeWith":                true,
 	"UncommittedFiles":             true,
-	"UpdateAccount":                true,
+	"UpdateAccountFields":          true,
 	"UpdateAgentModel":             true,
 	"UpdatePreferredModel":         true,
 	"VerifyProviderAPIKey":         true,
@@ -456,7 +456,7 @@ func (g *updateGoroutineGuard) LSPStopAll(ctx context.Context) error {
 	return g.Workspace.LSPStopAll(ctx)
 }
 
-func (g *updateGoroutineGuard) ListAccounts(providerID string) ([]accounts.Account, error) {
+func (g *updateGoroutineGuard) ListAccounts(providerID string) ([]workspace.FrontendAccount, error) {
 	g.check("ListAccounts")
 	return g.Workspace.ListAccounts(providerID)
 }
@@ -611,12 +611,12 @@ func (g *updateGoroutineGuard) ReadSkill(ctx context.Context, skillID string) ([
 	return g.Workspace.ReadSkill(ctx, skillID)
 }
 
-func (g *updateGoroutineGuard) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (accounts.Account, error) {
+func (g *updateGoroutineGuard) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
 	g.check("RecordAccount")
 	return g.Workspace.RecordAccount(scope, providerID, cred)
 }
 
-func (g *updateGoroutineGuard) RefreshAccountLimits(ctx context.Context, providerID string) ([]accounts.Account, error) {
+func (g *updateGoroutineGuard) RefreshAccountLimits(ctx context.Context, providerID string) ([]workspace.FrontendAccount, error) {
 	g.check("RefreshAccountLimits")
 	return g.Workspace.RefreshAccountLimits(ctx, providerID)
 }
@@ -726,9 +726,9 @@ func (g *updateGoroutineGuard) UncommittedFiles(ctx context.Context) ([]git.File
 	return g.Workspace.UncommittedFiles(ctx)
 }
 
-func (g *updateGoroutineGuard) UpdateAccount(providerID string, account accounts.Account) error {
-	g.check("UpdateAccount")
-	return g.Workspace.UpdateAccount(providerID, account)
+func (g *updateGoroutineGuard) UpdateAccountFields(providerID, accountID string, edit workspace.AccountEdit) error {
+	g.check("UpdateAccountFields")
+	return g.Workspace.UpdateAccountFields(providerID, accountID, edit)
 }
 
 func (g *updateGoroutineGuard) UpdateAgentModel(ctx context.Context) error {

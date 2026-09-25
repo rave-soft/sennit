@@ -142,7 +142,7 @@ type loginAccountWorkspace interface {
 	workspace.OAuthController
 }
 
-func recordCopilotAccount(ws workspace.AccountRecorder, token *oauth.Token, forceNewAccount bool) (accounts.Account, error) {
+func recordCopilotAccount(ws workspace.AccountRecorder, token *oauth.Token, forceNewAccount bool) (workspace.FrontendAccount, error) {
 	return ws.RecordAccount(config.ScopeGlobal, "copilot", accounts.LegacyCredential{
 		Token:           token,
 		ForceNewAccount: forceNewAccount,
