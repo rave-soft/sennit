@@ -94,9 +94,9 @@ func (m *UI) updateGlobalOptionCmd(state *asyncOperationState, warnText, key str
 	if !started {
 		return util.ReportWarn(warnText), false
 	}
-	ws := m.com.Workspace
+	prefs := m.com.Prefs
 	return func() tea.Msg {
-		return buildMsg(ws.SetConfigField(config.ScopeGlobal, key, value), generation)
+		return buildMsg(prefs.Set(key, value), generation)
 	}, true
 }
 
@@ -146,16 +146,14 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportWarn("Notification settings are already being updated"))
 			break
 		}
-		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
-			style := msg.Style
-			cmd, _ := m.updateGlobalOptionCmd(&m.notificationStyle.asyncOperationState,
-				"Notification settings are already being updated",
-				"options.notifications", style,
-				func(err error, generation uint64) tea.Msg {
-					return notificationStyleSetMsg{uiOwned: uiOwned{owner: m}, Err: err, Style: style, generation: generation}
-				})
-			cmds = append(cmds, cmd)
-		}
+		style := msg.Style
+		cmd, _ := m.updateGlobalOptionCmd(&m.notificationStyle.asyncOperationState,
+			"Notification settings are already being updated",
+			"options.notifications", style,
+			func(err error, generation uint64) tea.Msg {
+				return notificationStyleSetMsg{uiOwned: uiOwned{owner: m}, Err: err, Style: style, generation: generation}
+			})
+		cmds = append(cmds, cmd)
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -184,12 +182,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportWarn("Transparency is already being updated"))
 			break
 		}
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
-		}
-		desired := !cfg.TransparentEnabled()
+		desired := !m.com.UIPrefs().TransparentEnabled
 		cmd, started := m.updateGlobalOptionCmd(&m.transparency.asyncOperationState,
 			"Transparency is already being updated",
 			"options.tui.transparent", desired,

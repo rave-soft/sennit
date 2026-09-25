@@ -130,7 +130,6 @@ var updateGoroutineGuardedMethods = map[string]bool{
 	"RemoveThread":                 true,
 	"RenameSession":                true,
 	"SessionDescendantCost":        true,
-	"SetCompactMode":               true,
 	"SetConfigField":               true,
 	"SetCurrentSession":            true,
 	"SetCurrentSessionGeneration":  true,
@@ -670,11 +669,6 @@ func (g *updateGoroutineGuard) RenameSession(ctx context.Context, sessionID stri
 func (g *updateGoroutineGuard) SessionDescendantCost(ctx context.Context, sessionID string) (float64, error) {
 	g.check("SessionDescendantCost")
 	return g.Workspace.SessionDescendantCost(ctx, sessionID)
-}
-
-func (g *updateGoroutineGuard) SetCompactMode(scope config.Scope, enabled bool) error {
-	g.check("SetCompactMode")
-	return g.Workspace.SetCompactMode(scope, enabled)
 }
 
 func (g *updateGoroutineGuard) SetConfigField(scope config.Scope, key string, value any) error {

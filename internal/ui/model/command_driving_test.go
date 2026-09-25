@@ -454,10 +454,6 @@ func (w *cmdDrivingWorkspace) OverridePreferredModel(config.SelectedModel) error
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) SetCompactMode(config.Scope, bool) error {
-	return nil
-}
-
 func (w *cmdDrivingWorkspace) SetProviderAPIKey(config.Scope, string, string) error {
 	return nil
 }

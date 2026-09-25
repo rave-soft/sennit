@@ -76,7 +76,6 @@ var refusedMethods = []string{
 	"RemoveConfigField",
 	"RemoveThread",
 	"RenameSession",
-	"SetCompactMode",
 	"SetConfigField",
 	"SetProviderAPIKey",
 	"SetProviderProxy",
@@ -376,10 +375,6 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"RenameSession": func(t *testing.T, ro *readOnlyWorkspace) {
 			err := ro.RenameSession(t.Context(), "sess-1", "new title")
-			require.True(t, IsReadOnlyError(err))
-		},
-		"SetCompactMode": func(t *testing.T, ro *readOnlyWorkspace) {
-			err := ro.SetCompactMode(config.ScopeWorkspace, true)
 			require.True(t, IsReadOnlyError(err))
 		},
 		"SetConfigField": func(t *testing.T, ro *readOnlyWorkspace) {

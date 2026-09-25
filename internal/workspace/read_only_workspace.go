@@ -442,10 +442,6 @@ func (w *readOnlyWorkspace) OverridePreferredModel(model config.SelectedModel) e
 	return w.readOnlyError("OverridePreferredModel")
 }
 
-func (w *readOnlyWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
-	return w.readOnlyError("SetCompactMode")
-}
-
 func (w *readOnlyWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {
 	return w.readOnlyError("SetProviderAPIKey")
 }

@@ -14,6 +14,15 @@ func (w *AppWorkspace) Config() *config.Config {
 	return w.store.Config()
 }
 
+// ConfigStore returns the underlying [config.ConfigStore]. It exists so a
+// caller building the UI's own preference store (internal/uiprefs) can wrap
+// this same store, rather than reading display-only fields off Config() —
+// see uiprefs's package doc. It is not part of the [workspace.Workspace]
+// interface.
+func (w *AppWorkspace) ConfigStore() *config.ConfigStore {
+	return w.store
+}
+
 func (w *AppWorkspace) WorkingDir() string {
 	return w.store.WorkingDir()
 }
@@ -29,10 +38,6 @@ func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, model config.Sel
 func (w *AppWorkspace) OverridePreferredModel(model config.SelectedModel) error {
 	w.store.OverridePreferredModel(model)
 	return nil
-}
-
-func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
-	return w.store.SetCompactMode(scope, enabled)
 }
 
 func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {

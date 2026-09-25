@@ -791,7 +791,12 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	}
 	r.attachment.pendingID = ""
 
-	com := common.DefaultCommon(r.com.Context(), msg.ws)
+	// A thread's own embedded UI is still the same person's TUI, so it
+	// reuses the root Common's preference store rather than deriving one
+	// from msg.ws — which may be a different project's AppWorkspace (a
+	// worktree), whose config differs from the display prefs the user
+	// picked. See CLIENT-SERVER.md "PR 0.5b".
+	com := common.DefaultCommon(r.com.Context(), msg.ws, r.com.Prefs)
 	childUI := New(com, msg.sessionID, false, WithEmbedded(), WithBreadcrumbRoot(msg.name))
 
 	// SubscribeWith is a second, independently stoppable subscription,

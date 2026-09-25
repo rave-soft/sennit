@@ -435,7 +435,8 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	if msg.String() == "@" && !m.editor.completions.open && !m.editor.bang.isActive() {
 		// Only show if beginning of prompt or after whitespace.
 		if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
-			depth, limit := m.com.Config().CompletionsLimits()
+			prefs := m.com.UIPrefs()
+			depth, limit := prefs.CompletionsDepth, prefs.CompletionsItems
 			// completions.CompletionItemsLoadedMsg is defined outside
 			// model, so it cannot embed uiOwned itself — wrapped here via
 			// ownCmd instead. Routed by active screen instead, files

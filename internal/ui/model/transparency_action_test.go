@@ -45,7 +45,10 @@ func TestApplySettingsDialogAction_TransparencyLifecycle(t *testing.T) {
 		require.Equal(t, 1, ws.setConfigFieldCalls)
 	})
 
-	t.Run("idle invalid configuration preserves zero state", func(t *testing.T) {
+	// Transparency now reads and writes through Prefs, not Workspace.Config():
+	// a nil/unready workspace config no longer holds the toggle back, since
+	// Prefs always has a value (defaulted, if nothing else) to flip.
+	t.Run("missing workspace configuration does not block the toggle", func(t *testing.T) {
 		t.Parallel()
 		m, ws := newSettingsUI(nil)
 
@@ -53,9 +56,11 @@ func TestApplySettingsDialogAction_TransparencyLifecycle(t *testing.T) {
 
 		require.True(t, handled)
 		require.NotNil(t, cmd)
-		require.False(t, m.transparency.isLoading())
-		require.Zero(t, m.transparency.generation)
-		require.Zero(t, ws.setConfigFieldCalls)
+		require.True(t, m.transparency.isLoading())
+		require.Equal(t, uint64(1), m.transparency.generation)
+		result := transparencyResult(t, cmd)
+		require.NoError(t, result.Err)
+		require.Equal(t, 1, ws.setConfigFieldCalls)
 	})
 
 	t.Run("write error is consumed and permits a retry", func(t *testing.T) {

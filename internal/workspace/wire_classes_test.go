@@ -114,7 +114,6 @@ var methodClasses = map[string]methodClass{
 	// ConfigFieldEditor.
 	"SetConfigField":    classUnary,
 	"RemoveConfigField": classUnary,
-	"SetCompactMode":    classUnary,
 
 	// Accounts.
 	"RecordAccount":        classUnary,

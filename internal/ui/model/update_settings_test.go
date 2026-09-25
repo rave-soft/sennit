@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/uiprefs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,6 +50,28 @@ func (w *settingsTestWorkspace) UpdatePreferredModel(_ config.Scope, model confi
 	return w.updatePreferredModelErr
 }
 
+// wsPrefsStore adapts a countingWorkspace's Config/SetConfigField (the
+// pre-uiprefs way these tests drove a config write) as a [uiprefs.Store],
+// so the counters and injectable errors those tests already assert on
+// (setConfigFieldCalls, setConfigFieldErr) keep tracking every UI-pref
+// write once those writes go through Prefs instead of Workspace.
+type wsPrefsStore struct {
+	ws interface {
+		Config() *config.Config
+		SetConfigField(config.Scope, string, any) error
+	}
+}
+
+func (s wsPrefsStore) Prefs() uiprefs.Prefs { return uiprefs.FromConfig(s.ws.Config()) }
+
+func (s wsPrefsStore) Set(key string, value any) error {
+	return s.ws.SetConfigField(config.ScopeGlobal, key, value)
+}
+
+func (s wsPrefsStore) SetCompactMode(enabled bool) error {
+	return s.ws.SetConfigField(config.ScopeGlobal, "options.tui.compact_mode", enabled)
+}
+
 // newSettingsUI builds a UI wired to a settingsTestWorkspace, reusing
 // newBusyUI's fixture (chat/status/editor/dialog wiring) so setTheme,
 // updateLayoutAndSize, and setEditorPrompt all have what they need.
@@ -58,6 +81,7 @@ func newSettingsUI(cfg *config.Config) (*UI, *settingsTestWorkspace) {
 		cfg:               cfg,
 	}
 	m := newBusyUI(ws)
+	m.com.Prefs = wsPrefsStore{ws: ws}
 	// newBusyUI wires editor.attachments with a nil renderer (attachments
 	// aren't its concern); setTheme unconditionally dereferences it via
 	// Renderer().SetStyles, so give it a real one here for the themeSetMsg

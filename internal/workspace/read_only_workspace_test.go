@@ -66,8 +66,6 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	require.True(t, IsReadOnlyError(err))
 	err = ro.OverridePreferredModel(config.SelectedModel{})
 	require.True(t, IsReadOnlyError(err))
-	err = ro.SetCompactMode(config.ScopeWorkspace, true)
-	require.True(t, IsReadOnlyError(err))
 	err = ro.SetProviderAPIKey(config.ScopeWorkspace, "provider", "key")
 	require.True(t, IsReadOnlyError(err))
 	err = ro.SetConfigField(config.ScopeWorkspace, "key", "val")
@@ -541,11 +539,6 @@ func (s *stubWorkspace) UpdatePreferredModel(scope config.Scope, model config.Se
 
 func (s *stubWorkspace) OverridePreferredModel(model config.SelectedModel) error {
 	s.track("OverridePreferredModel")
-	return nil
-}
-
-func (s *stubWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
-	s.track("SetCompactMode")
 	return nil
 }
 

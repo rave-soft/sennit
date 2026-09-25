@@ -65,7 +65,7 @@ func NewTheme(com *common.Common) (*Theme, error) {
 // themeItems builds the palette list, returning the index of the palette
 // currently in use so the dialog opens with it selected.
 func themeItems(com *common.Common) ([]list.FilterableItem, int, error) {
-	current := styles.PaletteByID(common.ThemeID(com.Workspace)).ID
+	current := styles.PaletteByID(common.ThemeID(com.Prefs)).ID
 
 	palettes := styles.Palettes()
 	items := make([]list.FilterableItem, 0, len(palettes))

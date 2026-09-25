@@ -306,7 +306,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	ta.Focus()
 
 	scrollbarMode := config.ScrollbarDefault
-	if sb := com.Config().Scrollbar(); sb != "" {
+	if sb := com.UIPrefs().Scrollbar; sb != "" {
 		scrollbarMode = sb
 	}
 	ch := chatlist.NewChat(com, scrollbarMode)
@@ -376,7 +376,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	if ui.goos == "" {
 		ui.goos = runtime.GOOS
 	}
-	ui.keyMap = configuredKeyMap(ui.goos, com.Config().Keybindings())
+	ui.keyMap = configuredKeyMap(ui.goos, com.UIPrefs().Keybindings)
 	ui.editor.attachments = attachments.New(
 		attachments.NewRenderer(
 			com.Styles.Attachments.Normal,
@@ -413,7 +413,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	ui.status = status
 
 	// Initialize compact mode from config
-	ui.lay.forceCompactMode = com.Config().CompactMode()
+	ui.lay.forceCompactMode = com.UIPrefs().CompactMode
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
@@ -448,12 +448,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
 
-	cfg := com.Config()
+	prefs := com.UIPrefs()
 
 	// disable indeterminate progress bar
-	ui.progressBarEnabled = cfg.Options == nil || cfg.Options.Progress == nil || *cfg.Options.Progress
+	ui.progressBarEnabled = prefs.ProgressEnabled
 	// enable transparent mode
-	ui.lay.isTransparent = cfg.TransparentEnabled()
+	ui.lay.isTransparent = prefs.TransparentEnabled
 	if ui.embedded {
 		// Only one UI instance may own the terminal's progress bar.
 		ui.progressBarEnabled = false
@@ -1110,9 +1110,9 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 		return util.ReportWarn("Compact mode is already being updated")
 	}
 	desired := !m.lay.forceCompactMode
-	workspace := m.com.Workspace
+	prefs := m.com.Prefs
 	return func() tea.Msg {
-		return compactModeToggledMsg{uiOwned: uiOwned{owner: m}, Err: workspace.SetCompactMode(config.ScopeGlobal, desired), Enabled: desired, generation: generation}
+		return compactModeToggledMsg{uiOwned: uiOwned{owner: m}, Err: prefs.SetCompactMode(desired), Enabled: desired, generation: generation}
 	}
 }
 
@@ -1159,7 +1159,7 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 	// A preview that ends in a choice is kept, so the palette to fall back
 	// to on a failed write is the configured one, not whatever the cursor
 	// happened to be resting on.
-	previous := styles.PaletteByID(m.com.Config().ThemeID()).ID
+	previous := styles.PaletteByID(m.com.UIPrefs().ThemeID).ID
 	m.themePreview.confirm()
 	if id == previous && m.liveThemeID() == previous {
 		return nil
@@ -1167,11 +1167,11 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 
 	cmd := m.setTheme(id)
 	generation := m.themePersistence.begin()
-	ws := m.com.Workspace
+	prefs := m.com.Prefs
 	return tea.Batch(cmd, func() tea.Msg {
 		return themeSetMsg{
 			uiOwned:    uiOwned{owner: m},
-			Err:        ws.SetConfigField(config.ScopeGlobal, "options.tui.theme", id),
+			Err:        prefs.Set("options.tui.theme", id),
 			ID:         id,
 			Previous:   previous,
 			generation: generation,
@@ -1182,7 +1182,7 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 // liveThemeID returns the palette currently drawn, which is the previewed
 // one while the theme picker is browsing and the configured one otherwise.
 func (m *UI) liveThemeID() string {
-	configured := styles.PaletteByID(m.com.Config().ThemeID()).ID
+	configured := styles.PaletteByID(m.com.UIPrefs().ThemeID).ID
 	return m.themePreview.live(configured)
 }
 
@@ -1194,7 +1194,7 @@ func (m *UI) previewTheme(id string) tea.Cmd {
 	if !styles.IsKnownPaletteID(id) {
 		return nil
 	}
-	configured := styles.PaletteByID(m.com.Config().ThemeID()).ID
+	configured := styles.PaletteByID(m.com.UIPrefs().ThemeID).ID
 	if !m.themePreview.preview(id, configured) {
 		return nil
 	}
@@ -1240,7 +1240,7 @@ func (m *UI) setTheme(id string) tea.Cmd {
 	// leaves every already-issued snapshot exactly as it was — a frozen
 	// copy of the old palette — while new readers of m.com.Styles see the
 	// new one.
-	newStyles := styles.Theme(id).WithSpinner(common.SpinnerMode(m.com.Workspace))
+	newStyles := styles.Theme(id).WithSpinner(common.SpinnerMode(m.com.Prefs))
 	m.com.Styles = &newStyles
 	m.themePreview.setLive(styles.PaletteByID(id).ID)
 	t := m.com.Styles

@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/logo"
 	ui "github.com/rave-soft/sennit/internal/ui/model"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/uiprefs"
 	"github.com/rave-soft/sennit/internal/version"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/rave-soft/sennit/internal/workspace/appws"
@@ -115,7 +116,11 @@ sennit --continue
 		_, stopPprof := devtools.StartPprof()
 		defer stopPprof()
 
-		com := common.DefaultCommon(cmd.Context(), ws)
+		prefs, err := uiPrefsStore(ws)
+		if err != nil {
+			return err
+		}
+		com := common.DefaultCommon(cmd.Context(), ws, prefs)
 		model := ui.NewRoot(com, sessionID, continueLast)
 
 		inputFilter := ui.NewFilter()
@@ -325,6 +330,21 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	ws := appws.NewAppWorkspace(boot.App, boot.Config)
 	cleanup := func() { boot.App.Shutdown() }
 	return ws, cleanup, nil
+}
+
+// uiPrefsStore wraps ws's underlying config store as the UI's preference
+// store (internal/uiprefs), so the TUI reads and writes its own display
+// preferences through it instead of Workspace.Config(). Every workspace
+// setupLocalWorkspace produces is an *appws.AppWorkspace, which exposes its
+// store for exactly this. Any other workspace is an error rather than an
+// in-memory fallback: a fallback would accept every theme or compact-mode
+// change and silently lose it on exit.
+func uiPrefsStore(ws workspace.Workspace) (uiprefs.Store, error) {
+	cs, ok := ws.(interface{ ConfigStore() *config.ConfigStore })
+	if !ok {
+		return nil, fmt.Errorf("workspace %T has no config store for UI preferences", ws)
+	}
+	return uiprefs.NewConfigStoreAdapter(cs.ConfigStore()), nil
 }
 
 func MaybePrependStdin(prompt string) (string, error) {

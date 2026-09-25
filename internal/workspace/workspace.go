@@ -351,8 +351,6 @@ type WorkingDirectory interface {
 type ConfigFieldEditor interface {
 	SetConfigField(scope config.Scope, key string, value any) error
 	RemoveConfigField(scope config.Scope, key string) error
-	// SetCompactMode sets whether compact mode is enabled at scope.
-	SetCompactMode(scope config.Scope, enabled bool) error
 }
 
 type AccountRecorder interface {

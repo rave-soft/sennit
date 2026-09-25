@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/brand"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/ui/chat"
@@ -104,9 +103,9 @@ func notificationBodyQuestions(count int) string {
 // on terminal capabilities, environment, and user configuration. This is a pure
 // function that should be called once during initialization or when capabilities
 // change.
-func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
-	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
-		switch cfg.Options.Notifications {
+func selectNotificationBackend(caps common.Capabilities, notificationStyle string) notification.Backend {
+	if notificationStyle != "" {
+		switch notificationStyle {
 		case "native":
 			if !notification.NativeSupported {
 				slog.Debug("Native notifications unavailable on this platform; using OSC backend", "osc99_supported", caps.OSC99Notifications)
@@ -126,7 +125,7 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 		case "auto":
 			// Fall through to auto-detection below.
 		default:
-			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.Notifications)
+			slog.Warn("Unknown notification style, using auto", "style", notificationStyle)
 		}
 	}
 
@@ -160,16 +159,14 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 }
 
 func (m *UI) updateNotificationBackend() {
-	cfg := m.com.Config()
-	m.notifyBackend = selectNotificationBackend(m.caps, cfg)
+	m.notifyBackend = selectNotificationBackend(m.caps, m.com.UIPrefs().NotificationStyle)
 }
 
 // shouldSendNotification returns true if notifications should be sent based on
 // current state. Focus reporting must be supported, window must not be
 // focused, and notifications must not be disabled in config.
 func (m *UI) shouldSendNotification() bool {
-	cfg := m.com.Config()
-	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications == "disabled" {
+	if m.com.UIPrefs().NotificationStyle == "disabled" {
 		return false
 	}
 	return m.caps.ReportFocusEvents && !m.notifyWindowFocused

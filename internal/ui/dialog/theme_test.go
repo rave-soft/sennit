@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/uiprefs"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -40,12 +41,14 @@ func (w *themeTestWorkspace) Config() *config.Config { return w.cfg }
 
 func newThemeTestCommon(themeID string) *common.Common {
 	s := styles.SennitDark()
+	cfg := &config.Config{
+		Options:   &config.Options{TUI: &config.TUIOptions{Theme: themeID}},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}
 	return &common.Common{
-		Styles: &s,
-		Workspace: &themeTestWorkspace{cfg: &config.Config{
-			Options:   &config.Options{TUI: &config.TUIOptions{Theme: themeID}},
-			Providers: csync.NewMap[string, config.ProviderConfig](),
-		}},
+		Styles:    &s,
+		Workspace: &themeTestWorkspace{cfg: cfg},
+		Prefs:     &uiprefs.MemStore{P: uiprefs.FromConfig(cfg)},
 	}
 }
 

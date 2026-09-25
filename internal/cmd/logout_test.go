@@ -47,7 +47,6 @@ func (s *stubConfigAccessor) UpdatePreferredModel(config.Scope, config.SelectedM
 }
 
 func (s *stubConfigAccessor) OverridePreferredModel(config.SelectedModel) error    { return nil }
-func (s *stubConfigAccessor) SetCompactMode(config.Scope, bool) error              { return nil }
 func (s *stubConfigAccessor) SetProviderAPIKey(config.Scope, string, string) error { return nil }
 func (s *stubConfigAccessor) SetConfigField(config.Scope, string, any) error       { return nil }
 

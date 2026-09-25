@@ -98,7 +98,10 @@ func TestApplySettingsDialogAction_NotificationStyleLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("idle invalid configuration preserves zero state", func(t *testing.T) {
+	// Notification style now reads and writes through Prefs, not
+	// Workspace.Config(): a nil/unready workspace config no longer blocks
+	// the write, since Prefs always has a value to update.
+	t.Run("missing workspace configuration does not block the write", func(t *testing.T) {
 		t.Parallel()
 
 		for _, cfg := range []*config.Config{nil, {}} {
@@ -109,10 +112,12 @@ func TestApplySettingsDialogAction_NotificationStyleLifecycle(t *testing.T) {
 
 			cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectNotificationStyle{Style: "desktop"})
 			require.True(t, handled)
-			require.Nil(t, cmd)
-			require.False(t, m.notificationStyle.isLoading())
-			require.Zero(t, m.notificationStyle.generation)
-			require.Zero(t, ws.setConfigFieldCalls)
+			require.NotNil(t, cmd)
+			require.True(t, m.notificationStyle.isLoading())
+			require.Equal(t, uint64(1), m.notificationStyle.generation)
+			result := notificationStyleResult(t, cmd)
+			require.NoError(t, result.Err)
+			require.Equal(t, 1, ws.setConfigFieldCalls)
 		}
 	})
 

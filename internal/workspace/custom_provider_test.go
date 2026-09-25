@@ -44,10 +44,6 @@ func (a *testConfigAccessor) OverridePreferredModel(model config.SelectedModel) 
 	return nil
 }
 
-func (a *testConfigAccessor) SetCompactMode(scope config.Scope, enabled bool) error {
-	return a.store.SetCompactMode(scope, enabled)
-}
-
 func (a *testConfigAccessor) SetProviderAPIKey(scope config.Scope, providerID string, apiKey string) error {
 	return a.store.SetProviderAPIKey(scope, providerID, apiKey)
 }

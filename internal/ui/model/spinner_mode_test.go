@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/uiprefs"
 )
 
 // spinnerWorkspace is a countingWorkspace that actually has a config, so
@@ -45,7 +46,8 @@ func TestSpinnerModeComesFromConfig(t *testing.T) {
 		{"disco", spin.ModeScramble},
 	} {
 		ws := &spinnerWorkspace{countingWorkspace: &countingWorkspace{}, cfg: configWithSpinner(tc.configured)}
-		com := common.DefaultCommon(context.Background(), ws)
+		prefs := &uiprefs.MemStore{P: uiprefs.FromConfig(ws.Config())}
+		com := common.DefaultCommon(context.Background(), ws, prefs)
 		require.Equal(t, tc.want, com.Styles.WorkingSpinner, "spinner %q", tc.configured)
 	}
 }
@@ -67,6 +69,7 @@ func TestThemeSwitchKeepsSpinnerMode(t *testing.T) {
 		countingWorkspace: &countingWorkspace{},
 		cfg:               configWithSpinner(config.SpinnerDots),
 	}
+	u.com.Prefs = &uiprefs.MemStore{P: uiprefs.FromConfig(configWithSpinner(config.SpinnerDots))}
 	u.com.Styles.WorkingSpinner = spin.ModeDots
 
 	u.setTheme(styles.PaletteInkSage.ID)

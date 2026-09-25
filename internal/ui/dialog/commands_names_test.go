@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/uiprefs"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -58,6 +59,7 @@ func newCommandsNamesTestCommon(t *testing.T) *common.Common {
 	return &common.Common{
 		Styles:    &s,
 		Workspace: &commandsNamesTestWorkspace{cfg: cfg},
+		Prefs:     &uiprefs.MemStore{P: uiprefs.FromConfig(cfg)},
 	}
 }
 

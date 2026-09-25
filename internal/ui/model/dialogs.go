@@ -501,7 +501,7 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	m.dialog.CloseDialog(dialog.PermissionsID)
 
 	var opts []dialog.PermissionsOption
-	if diffMode := m.com.Config().DiffMode(); diffMode != "" {
+	if diffMode := m.com.UIPrefs().DiffMode; diffMode != "" {
 		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))
 	}
 

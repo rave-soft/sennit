@@ -72,11 +72,7 @@ func NewNotifications(com *common.Common) *Notifications {
 // notificationItems builds the notification style list items, returning the
 // index of the currently active style.
 func notificationItems(com *common.Common) ([]list.FilterableItem, int, error) {
-	cfg := com.Config()
-	currentStyle := "auto"
-	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
-		currentStyle = cfg.Options.Notifications
-	}
+	currentStyle := com.UIPrefs().NotificationStyle
 
 	items := make([]list.FilterableItem, 0, len(AllNotificationStyles))
 	selectedIndex := 0
