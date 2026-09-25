@@ -49,7 +49,7 @@ func (d *delegationFinalizer) snapshotDelegation(args *tools.TaskCreateArgs, def
 						return fmt.Errorf("snapshot delegation content: %w", err)
 					}
 					item.Parts = nil
-					captured = append(captured, delegationHistoryMessage{Message: item, Parts: parts})
+					captured = append(captured, delegationHistoryMessage{Message: delegationMessage(item), Parts: parts})
 				}
 				spec.History = append(spec.History, captured)
 			}
@@ -79,8 +79,24 @@ func (d *delegationFinalizer) snapshotDelegation(args *tools.TaskCreateArgs, def
 	return nil
 }
 
+// delegationMessage is a defined type over message.Message, not an
+// alias: a defined type does not inherit the base type's MarshalJSON/
+// UnmarshalJSON, so encoding it falls back to plain reflection over its
+// exported fields (PascalCase field names as JSON keys) rather than
+// message.Message's snake_case, parts-blob-embedding codec.
+//
+// This snapshot is persisted verbatim in the threads table's execution
+// column (see internal/db/threads.sql.go's Execution field,
+// internal/thread/store.go's Execution accessor) and read back by
+// task_resume.go on thread respawn — a later process, possibly a later
+// binary, decoding bytes an earlier one wrote. It must keep decoding the
+// exact shape written today, so it deliberately does not use
+// message.Message's own (de)serializer; see snapshotDelegation's and
+// buildDelegationRun's Message<->delegationMessage conversions below.
+type delegationMessage message.Message
+
 type delegationHistoryMessage struct {
-	Message message.Message
+	Message delegationMessage
 	Parts   json.RawMessage
 }
 
@@ -138,7 +154,7 @@ func (d *delegationFinalizer) buildDelegationRun(ctx context.Context, spec Deleg
 	for _, prior := range spec.History {
 		messages := make([]message.Message, 0, len(prior))
 		for _, captured := range prior {
-			item := captured.Message
+			item := message.Message(captured.Message)
 			item.Parts, err = message.UnmarshalParts(captured.Parts, item.ID)
 			if err != nil {
 				return nil, fmt.Errorf("restore delegation history: %w", err)
