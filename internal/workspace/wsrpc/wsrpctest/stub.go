@@ -228,21 +228,63 @@ func (s *StubWorkspace) Shutdown() {
 
 // StubOAuthFlow is workspace.OAuthFlow's stub implementation, letting a
 // StartOAuth test exercise a codec/transport's wrapping of the returned
-// handle.
+// handle, and a grpcws test exercise OAuthWait/OAuthCancel's own contract:
+// the ctx flow.Wait was actually called with (WaitCtxCh -- was it
+// stream.Context() passed straight through, per CLIENT-SERVER.md PR
+// 1.3b-2, rather than detached the way AgentRunStream's turn is), how many
+// times Cancel ran (CancelCalls -- must be exactly one, whether that's
+// OAuthWait's own drop, an explicit OAuthCancel call, or a lease-expiry
+// sweep), and a controllable completion (WaitDone, to hold Wait open until
+// a test is ready to let it finish, or ctx ends first).
 type StubOAuthFlow struct {
 	Completion workspace.OAuthCompletion
 	WaitErr    error
-	Cancelled  bool
+
+	// WaitCtxCh, if non-nil, receives the ctx Wait was actually called
+	// with (best effort, non-blocking send) -- see StreamCtxCh's identical
+	// pattern above for why a channel rather than a plain field.
+	WaitCtxCh chan context.Context
+
+	// WaitDone, if non-nil, blocks Wait from returning until it's closed,
+	// or ctx is done, whichever comes first -- letting a test hold a flow
+	// "pending" long enough to sever the connection or expire the lease
+	// while OAuthWait is still in flight.
+	WaitDone chan struct{}
+
+	// Cancelled is kept for existing callers that only care whether
+	// Cancel ran at all; CancelCalls is the same count, for a test that
+	// needs to assert it ran exactly once.
+	CancelMu    sync.Mutex
+	Cancelled   bool
+	CancelCalls int
 }
 
-func (f *StubOAuthFlow) Wait(context.Context) (workspace.OAuthCompletion, error) {
+func (f *StubOAuthFlow) Wait(ctx context.Context) (workspace.OAuthCompletion, error) {
+	if f.WaitCtxCh != nil {
+		select {
+		case f.WaitCtxCh <- ctx:
+		default:
+		}
+	}
+	if f.WaitDone != nil {
+		select {
+		case <-f.WaitDone:
+		case <-ctx.Done():
+			return workspace.OAuthCompletion{}, ctx.Err()
+		}
+	}
 	if f.WaitErr != nil {
 		return workspace.OAuthCompletion{}, f.WaitErr
 	}
 	return f.Completion, nil
 }
 
-func (f *StubOAuthFlow) Cancel() { f.Cancelled = true }
+func (f *StubOAuthFlow) Cancel() {
+	f.CancelMu.Lock()
+	defer f.CancelMu.Unlock()
+	f.Cancelled = true
+	f.CancelCalls++
+}
 
 // OAuthCompletionSample is a representative workspace.OAuthCompletion value
 // for StartOAuth/Wait tests.

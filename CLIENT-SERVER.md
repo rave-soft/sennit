@@ -613,11 +613,11 @@ UI импортирует `wsrpc` ради таблицы классов. Тес
 `CompleteOAuth` убран, `RecordAccount` принимает `AccountCredential` без
 токена, `sennit login copilot` идёт через `StartOAuth` после попытки
 `ImportCopilot`) сделан; 1.3b-2 (`StartOAuth`/`OAuthWait`/`OAuthCancel` по
-gRPC) впереди, до него `StartOAuth` по сети недоступен. Открыто:
+gRPC, реестр pending-флоу с той же арендой, что и хэндлы) сделан. Открыто:
 `ImportCopilot` обменивает токен без прокси провайдера (старый CLI учитывал
 прокси); `sennit login copilot --force` при уже настроенном Copilot идёт в
 device flow, а не берёт токен с диска. 1.3c (keepalive и настоящий тест
-обрыва) впереди. До 1.3b перевод входа и аккаунтов на демон невозможен.
+обрыва) сделан в `2e2a9005f`. PR 1.3 закрыт.
 
 - Реестр `handle → Workspace` в демоне. Корень создаётся при старте.
 - `EnterWorktree`/`ExitWorktree`/`AttachThread` на сервере вызывают

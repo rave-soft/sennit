@@ -381,20 +381,25 @@ type clientLease struct {
 // forever. A client that reconnects within grace -- a new connection,
 // same client ID -- keeps its handles, because the timer backing that
 // release is cancelled by the next call's begin() before it ever fires
-// (CLIENT-SERVER.md, PR 1.3).
+// (CLIENT-SERVER.md, PR 1.3). oauthRegistry gets the same sweep, for the
+// same owner, as registry: a client that goes quiet mid sign-in must not
+// leave its OAuthFlow (and whatever resource it holds -- a loopback
+// listener, an in-flight poll) pinned open any more than its worktree/
+// thread handles are (PR 1.3b-2).
 type leaseManager struct {
-	grace    time.Duration
-	registry *handleRegistry
+	grace         time.Duration
+	registry      *handleRegistry
+	oauthRegistry *oauthFlowRegistry
 
 	mu      sync.Mutex
 	clients map[string]*clientLease
 }
 
-func newLeaseManager(grace time.Duration, registry *handleRegistry) *leaseManager {
+func newLeaseManager(grace time.Duration, registry *handleRegistry, oauthRegistry *oauthFlowRegistry) *leaseManager {
 	if grace <= 0 {
 		grace = defaultHandleLeaseGrace
 	}
-	return &leaseManager{grace: grace, registry: registry, clients: map[string]*clientLease{}}
+	return &leaseManager{grace: grace, registry: registry, oauthRegistry: oauthRegistry, clients: map[string]*clientLease{}}
 }
 
 // begin marks clientID as having one more open RPC/stream, cancelling any
@@ -451,6 +456,7 @@ func (lm *leaseManager) expire(clientID string) {
 	delete(lm.clients, clientID)
 	lm.mu.Unlock()
 	lm.registry.releaseByOwner(clientID)
+	lm.oauthRegistry.releaseByOwner(clientID)
 }
 
 // unaryInterceptor is the leaseManager's half of a grpc.ChainUnaryInterceptor

@@ -13,13 +13,14 @@ import (
 
 // wantHandleWorkspaceMethods is every method wsrpc.MethodClasses
 // classifies H that hands back a workspace.Workspace -- StartOAuth is
-// also class H, but its handle is an OAuthFlow, out of this PR's scope
-// (see Client.StartOAuth's own doc comment), so it's deliberately not
-// here. This is the set handlesServiceDesc must cover exactly, mirroring
+// also class H, but its handle is an OAuthFlow, not a workspace.Workspace,
+// so it doesn't fit the Handles service's shape and is wired into its own
+// OAuth service instead (see oauth.go), deliberately not here. This is the
+// set handlesServiceDesc must cover exactly, mirroring
 // completeness_test.go's TestServiceDescCoversEveryUCMethod for the
 // generated Workspace service: an H method a future change forgets to
 // wire into the Handles service fails loudly here instead of silently
-// falling back to notAvailableOverWire on the client.
+// going unimplemented on the client.
 func wantHandleWorkspaceMethods() map[string]bool {
 	return map[string]bool{"EnterWorktree": true, "ExitWorktree": true, "AttachThread": true}
 }
@@ -111,7 +112,7 @@ func TestLeaseManager_ExpiresOnlyWhenClientStaysIdle(t *testing.T) {
 	handle := r.register(nil, func() { released.Add(1) }, "client-1")
 
 	grace := 20 * time.Millisecond
-	lm := newLeaseManager(grace, r)
+	lm := newLeaseManager(grace, r, newOAuthFlowRegistry())
 
 	lm.begin("client-1")
 	time.Sleep(3 * grace) // active: must not expire while a call is open.

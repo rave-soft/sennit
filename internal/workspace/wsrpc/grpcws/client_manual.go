@@ -174,14 +174,6 @@ func grpcStatusFromError(ctx context.Context, err error) error {
 	return status.Error(code, we.Message)
 }
 
-// notAvailableOverWire builds the error every H/X method below returns:
-// handles (H) are hand-written in a later PR (1.3); streams (S) are all
-// wired up now (AgentRunStream/AgentRunShellCommand in agent.go, Subscribe
-// in subscribe.go).
-func notAvailableOverWire(method string) error {
-	return fmt.Errorf("wsrpc: %s is not available over this transport yet", method)
-}
-
 // initialReconnectBackoff and maxReconnectBackoff bound
 // runSubscription's reconnect delay (CLIENT-SERVER.md, PR 1.2/1.4): it
 // starts at initialReconnectBackoff and doubles on each further failure,
@@ -353,13 +345,6 @@ func sleepBackoff(ctx context.Context, backoff *time.Duration) bool {
 		*backoff = maxReconnectBackoff
 	}
 	return true
-}
-
-// StartOAuth is class H. OAuthWait/OAuthCancel are a separate PR
-// (CLIENT-SERVER.md, PR 1.3's "смежное" note on the OAuth handle) --
-// this one only wires up the three Workspace-returning H methods below.
-func (c *Client) StartOAuth(context.Context, string, string, bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
-	return workspace.OAuthStartResult{}, nil, notAvailableOverWire("StartOAuth")
 }
 
 // EnterWorktree is class H: it calls the Handles service's EnterWorktree

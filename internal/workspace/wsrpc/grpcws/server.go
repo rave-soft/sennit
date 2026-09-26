@@ -167,8 +167,9 @@ func WithHandleLeaseGrace(d time.Duration) ServerOption {
 // handle (""), the Meta service's Hello, the Agent service's
 // AgentRunStream/AgentRunShellCommand, the Events service's Subscribe,
 // the Handles service's EnterWorktree/ExitWorktree/AttachThread/
-// ReleaseHandle, and the standard gRPC health service -- everything a
-// Client (or `grpc_health_v1`'s own tooling) needs to talk to this process
+// ReleaseHandle, the OAuth service's StartOAuth/OAuthWait/OAuthCancel, and
+// the standard gRPC health service -- everything a Client (or
+// `grpc_health_v1`'s own tooling) needs to talk to this process
 // (CLIENT-SERVER.md, PR 1.1, build step 5; PR 1.2 build steps 1-2; PR 1.3).
 // A handle any of those four methods minted resolves on every service
 // exactly like the root does; any other (unknown, released, or expired by
@@ -200,7 +201,8 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 	}
 
 	registry := newHandleRegistry(cfg.eventBufferSize)
-	lease := newLeaseManager(cfg.handleLeaseGrace, registry)
+	oauthRegistry := newOAuthFlowRegistry()
+	lease := newLeaseManager(cfg.handleLeaseGrace, registry, oauthRegistry)
 
 	// The lease's interceptors go first, ahead of whatever
 	// WithGRPCServerOptions supplies: grpc.ChainUnaryInterceptor/
@@ -232,6 +234,7 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 	s.RegisterService(&agentServiceDesc, &agentServer{resolve: resolveRoot})
 	s.RegisterService(&metaServiceDesc, &metaServer{workingDir: ws.WorkingDir, serverHome: cfg.serverHome})
 	s.RegisterService(&handlesServiceDesc, &handlesServer{resolve: resolveRoot, registry: registry})
+	s.RegisterService(&oauthServiceDesc, &oauthServer{resolve: resolveRoot, registry: oauthRegistry})
 
 	rootHub := newEventHub(cfg.eventBufferSize)
 	s.RegisterService(&eventsServiceDesc, &eventsServer{resolveHub: func(ctx context.Context) (*eventHub, error) {
@@ -254,6 +257,7 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 	return s, func() {
 		rootHub.close()
 		registry.closeAll()
+		oauthRegistry.closeAll()
 	}
 }
 
