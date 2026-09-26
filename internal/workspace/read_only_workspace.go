@@ -346,6 +346,12 @@ func (w *readOnlyWorkspace) QuestionCancel(batchID string) (bool, error) {
 	return false, nil
 }
 
+// PendingPrompts is a read, not a mutation, so it delegates rather than
+// being denied like the answer/cancel methods above.
+func (w *readOnlyWorkspace) PendingPrompts(ctx context.Context) (PendingPrompts, error) {
+	return w.ws.PendingPrompts(ctx)
+}
+
 // PrepareSessionChanges must not delegate to the embedded Workspace's own
 // PrepareSessionChanges: that method (AppWorkspace's) closes over its own
 // UncommittedFiles, which reads the parent's working directory - not this

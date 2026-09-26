@@ -104,6 +104,7 @@ type WorkspaceServer interface {
 	OAuthConfiguredProxy(ctx context.Context, req *wsrpc.OAuthConfiguredProxyRequest) (*wsrpc.OAuthConfiguredProxyResponse, error)
 	OAuthValidateProxy(ctx context.Context, req *wsrpc.OAuthValidateProxyRequest) (*wsrpc.OAuthValidateProxyResponse, error)
 	OverridePreferredModel(ctx context.Context, req *wsrpc.OverridePreferredModelRequest) (*wsrpc.OverridePreferredModelResponse, error)
+	PendingPrompts(ctx context.Context, req *wsrpc.PendingPromptsRequest) (*wsrpc.PendingPromptsResponse, error)
 	PermissionDeny(ctx context.Context, req *wsrpc.PermissionDenyRequest) (*wsrpc.PermissionDenyResponse, error)
 	PermissionGrant(ctx context.Context, req *wsrpc.PermissionGrantRequest) (*wsrpc.PermissionGrantResponse, error)
 	PermissionGrantPersistent(ctx context.Context, req *wsrpc.PermissionGrantPersistentRequest) (*wsrpc.PermissionGrantPersistentResponse, error)
@@ -224,6 +225,7 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "OAuthConfiguredProxy", Handler: _Workspace_OAuthConfiguredProxy_Handler},
 		{MethodName: "OAuthValidateProxy", Handler: _Workspace_OAuthValidateProxy_Handler},
 		{MethodName: "OverridePreferredModel", Handler: _Workspace_OverridePreferredModel_Handler},
+		{MethodName: "PendingPrompts", Handler: _Workspace_PendingPrompts_Handler},
 		{MethodName: "PermissionDeny", Handler: _Workspace_PermissionDeny_Handler},
 		{MethodName: "PermissionGrant", Handler: _Workspace_PermissionGrant_Handler},
 		{MethodName: "PermissionGrantPersistent", Handler: _Workspace_PermissionGrantPersistent_Handler},
@@ -1316,6 +1318,21 @@ func _Workspace_OverridePreferredModel_Handler(srv any, ctx context.Context, dec
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/OverridePreferredModel"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).OverridePreferredModel(ctx, req.(*wsrpc.OverridePreferredModelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Workspace_PendingPrompts_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(wsrpc.PendingPromptsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkspaceServer).PendingPrompts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/PendingPrompts"}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return srv.(WorkspaceServer).PendingPrompts(ctx, req.(*wsrpc.PendingPromptsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2821,6 +2838,20 @@ func (s *workspaceServer) OverridePreferredModel(ctx context.Context, req *wsrpc
 	return &wsrpc.OverridePreferredModelResponse{}, nil
 }
 
+func (s *workspaceServer) PendingPrompts(ctx context.Context, req *wsrpc.PendingPromptsRequest) (*wsrpc.PendingPromptsResponse, error) {
+	ws, err := s.resolve(ctx)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, err)
+	}
+	res0, res1 := ws.PendingPrompts(ctx)
+	if res1 != nil {
+		return nil, grpcStatusFromError(ctx, res1)
+	}
+	return &wsrpc.PendingPromptsResponse{
+		Result: res0,
+	}, nil
+}
+
 func (s *workspaceServer) PermissionDeny(ctx context.Context, req *wsrpc.PermissionDenyRequest) (*wsrpc.PermissionDenyResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -4267,6 +4298,17 @@ func (c *Client) OverridePreferredModel(model config.SelectedModel) (err error) 
 		return err
 	}
 	return nil
+}
+
+// PendingPrompts calls the Workspace service's PendingPrompts RPC.
+func (c *Client) PendingPrompts(ctx context.Context) (res0 workspace.PendingPrompts, err error) {
+	wsrpcReq := &wsrpc.PendingPromptsRequest{}
+	wsrpcResp := new(wsrpc.PendingPromptsResponse)
+	if err := c.invoke(ctx, "PendingPrompts", wsrpcReq, wsrpcResp); err != nil {
+		var zero0 workspace.PendingPrompts
+		return zero0, err
+	}
+	return wsrpcResp.Result, nil
 }
 
 // PermissionDeny calls the Workspace service's PermissionDeny RPC.

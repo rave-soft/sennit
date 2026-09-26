@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -192,6 +193,31 @@ var eventSampleConnectionEvent = pubsub.Event[workspace.ConnectionEvent]{
 	},
 }
 
+var eventSampleClientState = pubsub.Event[workspace.ClientState]{
+	Type: pubsub.UpdatedEvent,
+	Payload: workspace.ClientState{
+		Version:                7,
+		AgentIsBusy:            true,
+		AgentModel:             workspace.AgentModel{ModelCfg: workspace.AgentSelection{Provider: "openai", Model: "gpt-5"}},
+		AgentIsReady:           true,
+		PermissionSkipRequests: true,
+		Config:                 &workspace.FrontendConfig{Model: config.SelectedModel{Provider: "openai", Model: "gpt-5"}},
+		WorkingDir:             "/repo",
+		PlanUsage: map[string]workspace.Usage{"openai": {
+			Plan:    "pro",
+			Primary: workspace.UsageWindow{UsedPercent: 42, WindowMinutes: 300, ResetsAt: time.Unix(eventSampleTime.Unix(), 0)},
+		}},
+		AccountCapabilities: map[string]workspace.AccountCapabilities{"openai": {Usage: true, OAuth: true}},
+		DockerMCPAvailable:  true,
+		DockerMCPKnown:      true,
+		MCPPendingAuth:      []workspace.MCPPendingAuthServer{{Name: "myserver", URL: "https://example.test/auth"}},
+		WorktreeState:       workspace.WorktreeState{Name: "feature", Active: true},
+		SupportsThreads:     true,
+		SupportsTasks:       true,
+		BackgroundJobs:      workspace.BackgroundJobCounts{Active: 1, Completed: 2},
+	},
+}
+
 // eventSamples pairs every registered event with its populated sample, so
 // TestEventRegistry_RoundTrips can enumerate the registry (not this list)
 // and still catch a sample nobody bothered to add: it fails loudly if a
@@ -210,6 +236,7 @@ var eventSamples = map[string]any{
 	"lsp":                     eventSampleLSPEvent,
 	"mcp":                     eventSampleMCPEvent,
 	"connection":              eventSampleConnectionEvent,
+	"client_state":            eventSampleClientState,
 }
 
 // TestEventRegistry_RoundTrips enumerates the registry built in events.go

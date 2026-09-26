@@ -959,6 +959,7 @@ type FrontendWorkspace interface {
 	UsageReporter
 	PermissionResolver
 	QuestionResponder
+	PendingPromptsReader
 	FileServices
 	LSPController
 	ConfigReader

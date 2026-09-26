@@ -702,6 +702,15 @@ type OverridePreferredModelResponse struct {
 	Err *wireerr.Error `json:"err,omitempty"`
 }
 
+// PendingPromptsRequest is the request DTO for workspace.Workspace.PendingPrompts.
+type PendingPromptsRequest struct{}
+
+// PendingPromptsResponse is the response DTO for workspace.Workspace.PendingPrompts.
+type PendingPromptsResponse struct {
+	Result workspace.PendingPrompts `json:"result"`
+	Err    *wireerr.Error           `json:"err,omitempty"`
+}
+
 // PermissionDenyRequest is the request DTO for workspace.Workspace.PermissionDeny.
 type PermissionDenyRequest struct {
 	Perm permission.PermissionRequest `json:"perm"`

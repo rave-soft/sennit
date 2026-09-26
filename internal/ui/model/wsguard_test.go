@@ -494,6 +494,11 @@ func (g *updateGoroutineGuard) OverridePreferredModel(model config.SelectedModel
 	return g.Workspace.OverridePreferredModel(model)
 }
 
+func (g *updateGoroutineGuard) PendingPrompts(ctx context.Context) (workspace.PendingPrompts, error) {
+	g.check("PendingPrompts")
+	return g.Workspace.PendingPrompts(ctx)
+}
+
 func (g *updateGoroutineGuard) PermissionDeny(perm permission.PermissionRequest) (bool, error) {
 	g.check("PermissionDeny")
 	return g.Workspace.PermissionDeny(perm)

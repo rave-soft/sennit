@@ -8,6 +8,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc"
 )
 
@@ -35,11 +38,29 @@ type EventFrame struct {
 	Resync bool            `json:"resync,omitempty"`
 }
 
+// SnapshotRequest is Snapshot's (empty) request.
+type SnapshotRequest struct{}
+
+// SnapshotResponse is Snapshot's result: everything a client needs to seed
+// its cache and its pending-prompt dialogs before subscribing from Seq+1
+// (CLIENT-SERVER.md, PR 1.4a). PendingPermissions/PendingQuestions cover
+// requests that were already outstanding when this client connected -- a
+// request is announced on the event stream exactly once, when it is
+// raised, so a client with no other way to have seen that announcement
+// needs this to learn about one.
+type SnapshotResponse struct {
+	Seq                uint64                         `json:"seq"`
+	State              workspace.ClientState          `json:"state"`
+	PendingPermissions []permission.PermissionRequest `json:"pending_permissions,omitempty"`
+	PendingQuestions   []question.Request             `json:"pending_questions,omitempty"`
+}
+
 // WorkspaceEventsServer is the interface grpc.Server.RegisterService
 // checks the registered handler against (see MetaServer's doc comment for
 // why this can't just be *eventsServer).
 type WorkspaceEventsServer interface {
 	Subscribe(*SubscribeRequest, WorkspaceEventsSubscribeServer) error
+	Snapshot(context.Context, *SnapshotRequest) (*SnapshotResponse, error)
 }
 
 // WorkspaceEventsSubscribeServer is the server side of the Subscribe
@@ -60,7 +81,9 @@ func (x *workspaceEventsSubscribeServer) Send(m *EventFrame) error {
 var eventsServiceDesc = grpc.ServiceDesc{
 	ServiceName: eventsServiceName,
 	HandlerType: (*WorkspaceEventsServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{MethodName: "Snapshot", Handler: _WorkspaceEvents_Snapshot_Handler},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Subscribe",
@@ -79,12 +102,75 @@ func _WorkspaceEvents_Subscribe_Handler(srv any, stream grpc.ServerStream) error
 	return srv.(WorkspaceEventsServer).Subscribe(m, &workspaceEventsSubscribeServer{stream})
 }
 
+func _WorkspaceEvents_Snapshot_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(SnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkspaceEventsServer).Snapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + eventsServiceName + "/Snapshot"}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return srv.(WorkspaceEventsServer).Snapshot(ctx, req.(*SnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // eventsServer adapts one or more eventHubs to WorkspaceEventsServer.
 // resolveHub mirrors NewServer's handle resolution for the unary service:
 // PR 1.2 only ever serves the root handle ("" from handleFromContext);
-// PR 1.3 adds non-root ones.
+// PR 1.3 adds non-root ones. resolve is the same handle resolution down to
+// the workspace.Workspace itself (not just its hub), which Snapshot needs
+// for PendingPrompts -- the hub alone knows the last published Seq/State,
+// but not what's currently awaiting an answer.
 type eventsServer struct {
 	resolveHub func(ctx context.Context) (*eventHub, error)
+	resolve    func(ctx context.Context) (workspace.Workspace, error)
+}
+
+// Snapshot implements WorkspaceEventsServer: it reads the hub's last
+// published Seq and workspace.ClientState as one atomic pair (see
+// eventHub.snapshot's own doc comment for why that ordering is what makes
+// a client's "subscribe from Seq+1" safe against an event landing in
+// between), then collects whatever permission/question requests are
+// currently awaiting an answer with no subscriber yet -- CLIENT-SERVER.md,
+// PR 1.4a.
+func (s *eventsServer) Snapshot(ctx context.Context, _ *SnapshotRequest) (*SnapshotResponse, error) {
+	hub, err := s.resolveHub(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seq, state := hub.snapshot()
+
+	ws, err := s.resolve(ctx)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, err)
+	}
+	pending, err := ws.PendingPrompts(ctx)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, err)
+	}
+
+	return &SnapshotResponse{
+		Seq:                seq,
+		State:              state,
+		PendingPermissions: pending.Permissions,
+		PendingQuestions:   pending.Questions,
+	}, nil
+}
+
+// Snapshot calls the Events service's Snapshot RPC: everything a client
+// needs to seed its cache before subscribing from the returned Seq+1 (see
+// SnapshotResponse's own doc comment).
+func (c *Client) Snapshot(ctx context.Context) (SnapshotResponse, error) {
+	req := &SnapshotRequest{}
+	resp := new(SnapshotResponse)
+	fullMethod := "/" + eventsServiceName + "/Snapshot"
+	if err := c.invokeMethod(ctx, fullMethod, "Snapshot", req, resp); err != nil {
+		return SnapshotResponse{}, err
+	}
+	return *resp, nil
 }
 
 // Subscribe implements the semantics documented on SubscribeRequest/

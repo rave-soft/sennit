@@ -9,10 +9,14 @@ package wsrpctest
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+
+	"charm.land/catwalk/pkg/catwalk"
 
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -64,8 +68,18 @@ type StubWorkspace struct {
 	SubscribeSend   func(any)
 
 	SubscribeWithCalled bool
-	SubscribeWithSend   func(any)
-	SubscribeWithStop   func()
+	// SubscribeWithCalls counts every SubscribeWith call, for a test that
+	// needs to prove "no NEW call happened" rather than just "called at
+	// least once" (SubscribeWithCalled) -- e.g. a root hub that already
+	// started eagerly at NewServer time (CLIENT-SERVER.md, PR 1.4a) has
+	// SubscribeWithCalled true before the test does anything, so the
+	// interesting assertion is that a child handle's own subscription
+	// never bumps this count further. Safe for concurrent reads/writes
+	// (grpcws's per-hub state publisher can call SubscribeWith from its
+	// own goroutine).
+	SubscribeWithCalls atomic.Int32
+	SubscribeWithSend  func(any)
+	SubscribeWithStop  func()
 	// SubscribeWithReady, if non-nil, is closed once SubscribeWith has
 	// recorded its arguments above. A caller across goroutines (e.g.
 	// grpcws's tests, where SubscribeWith runs on the gRPC stream
@@ -100,10 +114,98 @@ type StubWorkspace struct {
 	ShutdownCalled bool
 
 	WorkingDirResult string
+
+	// The fields below back every class-C getter (wsrpc.MethodClasses)
+	// StubWorkspace did not already have a field for, so
+	// wsrpc.BuildClientState's mapping test can drive each one to a
+	// distinctive value without a nil-embedded-Workspace panic -- and so
+	// every other test built on this stub (most of grpcws's) gets a safe,
+	// zero-value answer for a getter it never bothered to set, including
+	// from a background goroutine (grpcws's per-hub state publisher ticks
+	// on its own schedule, independent of whatever the test is doing).
+	AgentIsBusyResult            bool
+	AgentIsSessionBusyResult     bool
+	AgentIsReadyResult           bool
+	AgentReadyErrResult          error
+	AgentQueuedPromptsListResult []string
+	PermissionSkipRequestsResult bool
+	ConfigResult                 *workspace.FrontendConfig
+	CurrentPlanUsageResult       accounts.Usage
+	CurrentPlanUsageOK           bool
+	AccountCapabilitiesResult    workspace.AccountCapabilities
+	KnownProvidersResult         []catwalk.Provider
+	CustomProviderTypesResult    []string
+	DockerMCPAvailableResult     bool
+	DockerMCPKnownResult         bool
+	MCPPendingAuthResult         []workspace.MCPPendingAuthServer
+	MCPAuthURLResult             string
+	WorktreeStateResult          workspace.WorktreeState
+	SupportsThreadsResult        bool
+	SupportsTasksResult          bool
+	BackgroundJobCountsResult    workspace.BackgroundJobCounts
+
+	// PendingPromptsResult backs PendingPrompts (class U, not C -- see
+	// workspace.PendingPromptsReader's doc comment): the Snapshot RPC's
+	// own pending-permission/pending-question collection, settable so a
+	// test can prove Snapshot surfaces a request that has no subscriber.
+	PendingPromptsResult workspace.PendingPrompts
+	PendingPromptsErr    error
+}
+
+func (s *StubWorkspace) PendingPrompts(context.Context) (workspace.PendingPrompts, error) {
+	return s.PendingPromptsResult, s.PendingPromptsErr
 }
 
 func (s *StubWorkspace) WorkingDir() string {
 	return s.WorkingDirResult
+}
+
+func (s *StubWorkspace) AgentIsBusy() bool { return s.AgentIsBusyResult }
+
+func (s *StubWorkspace) AgentIsSessionBusy(string) bool { return s.AgentIsSessionBusyResult }
+
+func (s *StubWorkspace) AgentIsReady() bool { return s.AgentIsReadyResult }
+
+func (s *StubWorkspace) AgentReadyErr() error { return s.AgentReadyErrResult }
+
+func (s *StubWorkspace) AgentQueuedPromptsList(string) []string {
+	return s.AgentQueuedPromptsListResult
+}
+
+func (s *StubWorkspace) PermissionSkipRequests() bool { return s.PermissionSkipRequestsResult }
+
+func (s *StubWorkspace) Config() *workspace.FrontendConfig { return s.ConfigResult }
+
+func (s *StubWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {
+	return s.CurrentPlanUsageResult, s.CurrentPlanUsageOK
+}
+
+func (s *StubWorkspace) AccountCapabilities(string) workspace.AccountCapabilities {
+	return s.AccountCapabilitiesResult
+}
+
+func (s *StubWorkspace) KnownProviders() []catwalk.Provider { return s.KnownProvidersResult }
+
+func (s *StubWorkspace) CustomProviderTypes() []string { return s.CustomProviderTypesResult }
+
+func (s *StubWorkspace) DockerMCPAvailable() (bool, bool) {
+	return s.DockerMCPAvailableResult, s.DockerMCPKnownResult
+}
+
+func (s *StubWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer {
+	return s.MCPPendingAuthResult
+}
+
+func (s *StubWorkspace) MCPAuthURL(string) string { return s.MCPAuthURLResult }
+
+func (s *StubWorkspace) WorktreeState() workspace.WorktreeState { return s.WorktreeStateResult }
+
+func (s *StubWorkspace) SupportsThreads() bool { return s.SupportsThreadsResult }
+
+func (s *StubWorkspace) SupportsTasks() bool { return s.SupportsTasksResult }
+
+func (s *StubWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {
+	return s.BackgroundJobCountsResult
 }
 
 func (s *StubWorkspace) ListMessages(_ context.Context, sessionID string) ([]message.Message, error) {
@@ -173,6 +275,7 @@ func (s *StubWorkspace) Subscribe(send func(any)) {
 
 func (s *StubWorkspace) SubscribeWith(send func(any)) func() {
 	s.SubscribeWithCalled = true
+	s.SubscribeWithCalls.Add(1)
 	s.SubscribeWithSend = send
 	if s.SubscribeWithReady != nil {
 		close(s.SubscribeWithReady)

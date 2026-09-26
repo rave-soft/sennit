@@ -104,6 +104,9 @@ var MethodClasses = map[string]Class{
 	"QuestionAnswer": U,
 	"QuestionCancel": U,
 
+	// PendingPromptsReader.
+	"PendingPrompts": U,
+
 	// FileServices.
 	"UncommittedFiles":         U,
 	"FileTrackerRecordRead":    U,

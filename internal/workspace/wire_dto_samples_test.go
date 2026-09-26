@@ -935,6 +935,11 @@ var sampleSessionFile = SessionFile{
 	GitKnown:      true,
 }
 
+var samplePendingPrompts = PendingPrompts{
+	Permissions: []permission.PermissionRequest{samplePermissionRequest},
+	Questions:   []question.Request{sampleQuestionRequest},
+}
+
 var sampleWorktreeState = WorktreeState{
 	Name:   "session-abc12345",
 	Path:   "/repo/.worktrees/session-abc12345",
@@ -1059,6 +1064,7 @@ var wireSamples = map[reflect.Type]any{
 	reflectTypeOf[ModelRefreshResult]():            sampleModelRefreshResult,
 	reflectTypeOf[OAuthCompletion]():               sampleOAuthCompletion,
 	reflectTypeOf[OAuthStartResult]():              sampleOAuthStartResult,
+	reflectTypeOf[PendingPrompts]():                samplePendingPrompts,
 	reflectTypeOf[SessionFile]():                   sampleSessionFile,
 	reflectTypeOf[WorktreeState]():                 sampleWorktreeState,
 

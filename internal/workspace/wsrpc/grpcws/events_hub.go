@@ -3,8 +3,12 @@ package grpcws
 import (
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
+	"time"
 
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc"
 )
 
@@ -13,6 +17,12 @@ import (
 // given: generous enough that a client reconnecting after a short network
 // blip replays instead of resyncing.
 const defaultEventBufferSize = 4096
+
+// defaultClientStateTickInterval is how often eventHub re-checks its own
+// workspace.ClientState for changes when nothing else has already
+// triggered a rebuild (CLIENT-SERVER.md, PR 1.4a) -- production's default
+// when WithClientStateTickInterval isn't given.
+const defaultClientStateTickInterval = time.Second
 
 // hubEvent is one ring buffer slot: env is the already-EncodeEvent'd
 // payload, seq its position in this hub's stream.
@@ -28,33 +38,73 @@ type hubEvent struct {
 // (ws.SubscribeWith, started lazily by ensureStarted) regardless of how
 // many gRPC streams are attached, so N reconnecting clients cost one
 // upstream subscription, not N.
+//
+// It also runs the per-hub workspace.ClientState publisher (CLIENT-
+// SERVER.md, PR 1.4a): every real event ensureStarted's callback delivers,
+// plus a ticker firing every stateTickInterval, triggers maybePublishState,
+// which rebuilds the state via wsrpc.BuildClientState, compares it against
+// the last one this hub published, and -- only if it changed -- assigns
+// the next Version and publishes it through this same hub, so it gets a
+// Seq and is replayed/snapshotted like any other event.
 type eventHub struct {
-	capacity int
+	capacity          int
+	stateTickInterval time.Duration
 
 	startOnce sync.Once
 
-	mu      sync.Mutex
-	stop    func() // ws.SubscribeWith's stop func, once startOnce has run; nil until then. Guarded by mu (not just startOnce) so close, on a different goroutine than ensureStarted, has a happens-before edge to read it.
-	nextSeq uint64 // seq to assign to the next published event; starts at 1.
-	buf     []hubEvent
-	subs    map[*hubSubscriber]struct{}
+	mu        sync.Mutex
+	stop      func() // ws.SubscribeWith's stop func, once startOnce has run; nil until then. Guarded by mu (not just startOnce) so close, on a different goroutine than ensureStarted, has a happens-before edge to read it.
+	nextSeq   uint64 // seq to assign to the next published event; starts at 1.
+	buf       []hubEvent
+	subs      map[*hubSubscriber]struct{}
+	ws        workspace.Workspace    // set by ensureStarted when its argument is a full Workspace (every production caller); nil in a unit test that only needs the plain SubscribeWith behavior.
+	lastState *workspace.ClientState // last state this hub actually published, nil until the first one.
+
+	stateStop chan struct{} // closed by close() to stop the ticker goroutine, if one was started.
+	stateDone chan struct{} // closed by the ticker goroutine when it exits, so close() can wait for it (no goroutine leak).
 }
 
 func newEventHub(capacity int) *eventHub {
+	return newEventHubWithStateTick(capacity, 0)
+}
+
+// newEventHubWithStateTick is newEventHub plus an explicit client-state
+// tick interval (0 means defaultClientStateTickInterval) -- split out so
+// NewServer's ServerOption can override it without every other newEventHub
+// caller (mostly tests with no state publisher needs) having to spell the
+// default.
+func newEventHubWithStateTick(capacity int, stateTickInterval time.Duration) *eventHub {
 	if capacity <= 0 {
 		capacity = defaultEventBufferSize
 	}
-	return &eventHub{capacity: capacity, nextSeq: 1, subs: map[*hubSubscriber]struct{}{}}
+	if stateTickInterval <= 0 {
+		stateTickInterval = defaultClientStateTickInterval
+	}
+	return &eventHub{
+		capacity: capacity, stateTickInterval: stateTickInterval,
+		nextSeq: 1, subs: map[*hubSubscriber]struct{}{},
+	}
 }
 
-// ensureStarted subscribes to ws exactly once, the first time any stream
-// needs this hub. The callback recovers its own panics (an encoding bug,
-// or anything else unexpected in publish) instead of letting them escape
-// into ws.SubscribeWith's own goroutine, whose sole recover just ends the
-// whole upstream subscription -- see AppWorkspace.SubscribeWith and
-// CLIENT-SERVER.md's PR 1.2 build step 3 for why that would take every
-// stream on this hub down at once, a bigger blast radius than "one
-// stream".
+// ensureStarted subscribes to ws exactly once, the first time this hub
+// needs it -- for the root hub, that is NewServer itself (not the first
+// Subscribe RPC any more, see NewServer's own doc comment); for a handle's
+// hub, that is handleRegistry.register (CLIENT-SERVER.md, PR 1.4a: "per-
+// handle hubs still start when the handle is registered"). The callback
+// recovers its own panics (an encoding bug, or anything else unexpected in
+// publish) instead of letting them escape into ws.SubscribeWith's own
+// goroutine, whose sole recover just ends the whole upstream subscription
+// -- see AppWorkspace.SubscribeWith and CLIENT-SERVER.md's PR 1.2 build
+// step 3 for why that would take every stream on this hub down at once, a
+// bigger blast radius than "one stream".
+//
+// ws only needs to satisfy the narrow subscriber interface (SubscribeWith
+// alone) for the event fan-out itself; the client-state publisher started
+// alongside it needs the full workspace.Workspace (wsrpc.BuildClientState's
+// parameter), so it only starts when ws happens to also be one -- every
+// production caller passes the real Workspace, and a unit test that
+// wraps SubscribeWith alone (see events_hub_test.go's wrappedSubscriber)
+// simply gets no state publisher, which is fine: it isn't testing one.
 func (h *eventHub) ensureStarted(ws subscriber) {
 	h.startOnce.Do(func() {
 		stop := ws.SubscribeWith(func(v any) {
@@ -64,10 +114,19 @@ func (h *eventHub) ensureStarted(ws subscriber) {
 				}
 			}()
 			h.publish(v)
+			h.maybePublishState()
 		})
+		full, hasFullWorkspace := ws.(workspace.Workspace)
 		h.mu.Lock()
 		h.stop = stop
+		if hasFullWorkspace {
+			h.ws = full
+		}
 		h.mu.Unlock()
+
+		if hasFullWorkspace {
+			h.startStatePublisher()
+		}
 	})
 }
 
@@ -78,14 +137,120 @@ type subscriber interface {
 	SubscribeWith(send func(any)) (stop func())
 }
 
-// close stops the upstream subscription, if one was ever started. Safe to
-// call even when ensureStarted never ran.
+// startStatePublisher launches the ticker goroutine that periodically
+// re-checks this hub's workspace.ClientState even when no other event has
+// (a config reload, an account limit refresh, or anything else this hub's
+// upstream Subscribe never announces on its own). Called at most once,
+// from ensureStarted's startOnce.
+func (h *eventHub) startStatePublisher() {
+	h.mu.Lock()
+	h.stateStop = make(chan struct{})
+	h.stateDone = make(chan struct{})
+	interval := h.stateTickInterval
+	h.mu.Unlock()
+
+	go func() {
+		defer close(h.stateDone)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-h.stateStop:
+				return
+			case <-ticker.C:
+				h.maybePublishState()
+			}
+		}
+	}()
+}
+
+// maybePublishState rebuilds this hub's workspace.ClientState and
+// publishes it -- with the next Version -- only if it actually changed
+// since the last one this hub published. Safe to call concurrently from
+// both the ticker and the upstream event callback; the second lock/
+// compare below (after BuildClientState, which runs unlocked so it never
+// blocks publish/subscribe) resolves the race where two callers both saw
+// a stale lastState and would otherwise double-publish.
+func (h *eventHub) maybePublishState() {
+	h.mu.Lock()
+	ws := h.ws
+	prev := h.lastState
+	h.mu.Unlock()
+	if ws == nil {
+		return
+	}
+
+	fresh := wsrpc.BuildClientState(ws)
+	if prev != nil && clientStateEqualIgnoringVersion(fresh, *prev) {
+		return
+	}
+
+	h.mu.Lock()
+	prev = h.lastState
+	if prev != nil && clientStateEqualIgnoringVersion(fresh, *prev) {
+		h.mu.Unlock()
+		return
+	}
+	version := uint64(1)
+	if prev != nil {
+		version = prev.Version + 1
+	}
+	fresh.Version = version
+	stored := fresh
+	h.lastState = &stored
+	h.mu.Unlock()
+
+	h.publish(pubsub.Event[workspace.ClientState]{Type: pubsub.UpdatedEvent, Payload: fresh})
+}
+
+// clientStateEqualIgnoringVersion compares two workspace.ClientState
+// values for everything except Version -- reflect.DeepEqual rather than a
+// JSON-bytes comparison, since map key order does not affect it (unlike a
+// byte comparison, which would need json.Marshal's own key-sorting to be
+// relied on) and it needs no marshaling at all to run.
+func clientStateEqualIgnoringVersion(a, b workspace.ClientState) bool {
+	a.Version, b.Version = 0, 0
+	return reflect.DeepEqual(a, b)
+}
+
+// snapshot returns this hub's last published Seq and workspace.ClientState
+// as of one atomic instant -- the Events service's Snapshot RPC (CLIENT-
+// SERVER.md, PR 1.4a "Уточнено ревью (п. 2)"): reading both under the same
+// lock is what makes them consistent with each other, so a client that
+// subscribes from Seq+1 afterward can safely re-apply any state event
+// that lands in between (see maybePublishState's Version-gated publish:
+// a client discards a state event whose Version is not strictly greater
+// than what it already has). Falls back to building a fresh state with
+// Version 0 when this hub has never published one -- "the last published
+// version" is 0/none in that case, so a client that later gets its first
+// real client_state event (Version 1) never mistakes it for a regression.
+func (h *eventHub) snapshot() (seq uint64, state workspace.ClientState) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	seq = h.nextSeq - 1
+	if h.lastState != nil {
+		return seq, *h.lastState
+	}
+	if h.ws != nil {
+		state = wsrpc.BuildClientState(h.ws)
+	}
+	return seq, state
+}
+
+// close stops the upstream subscription and the client-state ticker, if
+// either was ever started. Safe to call even when ensureStarted never ran.
 func (h *eventHub) close() {
 	h.mu.Lock()
 	stop := h.stop
+	stateStop := h.stateStop
+	stateDone := h.stateDone
 	h.mu.Unlock()
 	if stop != nil {
 		stop()
+	}
+	if stateStop != nil {
+		close(stateStop)
+		<-stateDone
 	}
 }
 

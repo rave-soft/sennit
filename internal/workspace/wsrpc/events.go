@@ -98,6 +98,11 @@ func init() {
 	// it and grpcws's client can build one straight from this registry
 	// (CLIENT-SERVER.md, PR 1.2 build step 4).
 	registerEvent[workspace.ConnectionEvent]("connection")
+	// workspace.ClientState is likewise produced only by grpcws (its
+	// per-hub state publisher, not AppWorkspace/translateEvent) -- see
+	// BuildClientState and grpcws's eventHub.maybePublishState
+	// (CLIENT-SERVER.md, PR 1.4a).
+	registerEvent[workspace.ClientState]("client_state")
 }
 
 // EncodeEvent marshals a pubsub.Event[T] value delivered to a

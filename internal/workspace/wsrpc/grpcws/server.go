@@ -117,12 +117,13 @@ func (c *Client) invokeMethod(ctx context.Context, fullMethod, name string, req,
 type ServerOption func(*serverConfig)
 
 type serverConfig struct {
-	grpcOpts         []grpc.ServerOption
-	serverHome       func() string
-	eventBufferSize  int
-	handleLeaseGrace time.Duration
-	keepaliveTime    time.Duration
-	keepaliveTimeout time.Duration
+	grpcOpts              []grpc.ServerOption
+	serverHome            func() string
+	eventBufferSize       int
+	handleLeaseGrace      time.Duration
+	keepaliveTime         time.Duration
+	keepaliveTimeout      time.Duration
+	clientStateTickPeriod time.Duration
 }
 
 // WithGRPCServerOptions passes extra grpc.ServerOption values through to
@@ -163,6 +164,15 @@ func WithHandleLeaseGrace(d time.Duration) ServerOption {
 	return func(c *serverConfig) { c.handleLeaseGrace = d }
 }
 
+// WithClientStateTickInterval overrides how often each event hub re-checks
+// its own workspace.ClientState for changes on its own ticker
+// (defaultClientStateTickInterval, 1s, otherwise) -- see eventHub's state
+// publisher. A test shrinks this to observe a state change land without
+// waiting out the production interval.
+func WithClientStateTickInterval(d time.Duration) ServerOption {
+	return func(c *serverConfig) { c.clientStateTickPeriod = d }
+}
+
 // NewServer builds a *grpc.Server exposing ws as the root workspace
 // handle (""), the Meta service's Hello, the Agent service's
 // AgentRunStream/AgentRunShellCommand, the Events service's Subscribe,
@@ -200,7 +210,7 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 		cfg.keepaliveTimeout = DefaultKeepaliveTimeout
 	}
 
-	registry := newHandleRegistry(cfg.eventBufferSize)
+	registry := newHandleRegistry(cfg.eventBufferSize, cfg.clientStateTickPeriod)
 	oauthRegistry := newOAuthFlowRegistry()
 	lease := newLeaseManager(cfg.handleLeaseGrace, registry, oauthRegistry)
 
@@ -236,19 +246,28 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 	s.RegisterService(&handlesServiceDesc, &handlesServer{resolve: resolveRoot, registry: registry})
 	s.RegisterService(&oauthServiceDesc, &oauthServer{resolve: resolveRoot, registry: oauthRegistry})
 
-	rootHub := newEventHub(cfg.eventBufferSize)
-	s.RegisterService(&eventsServiceDesc, &eventsServer{resolveHub: func(ctx context.Context) (*eventHub, error) {
-		handle := handleFromContext(ctx)
-		if handle == "" {
-			rootHub.ensureStarted(ws)
-			return rootHub, nil
-		}
-		hub, err := registry.resolveHub(handle)
-		if err != nil {
-			return nil, grpcStatusFromError(ctx, err)
-		}
-		return hub, nil
-	}})
+	// The root hub starts here, at server construction, rather than
+	// lazily on the first Subscribe RPC (CLIENT-SERVER.md, PR 1.4a): its
+	// client-state publisher needs to be running so Snapshot always has
+	// something to report, even for the very first caller, and so a
+	// client that only ever calls Snapshot (never Subscribe) still sees a
+	// state kept fresh by the ticker.
+	rootHub := newEventHubWithStateTick(cfg.eventBufferSize, cfg.clientStateTickPeriod)
+	rootHub.ensureStarted(ws)
+	s.RegisterService(&eventsServiceDesc, &eventsServer{
+		resolveHub: func(ctx context.Context) (*eventHub, error) {
+			handle := handleFromContext(ctx)
+			if handle == "" {
+				return rootHub, nil
+			}
+			hub, err := registry.resolveHub(handle)
+			if err != nil {
+				return nil, grpcStatusFromError(ctx, err)
+			}
+			return hub, nil
+		},
+		resolve: resolveRoot,
+	})
 
 	healthSrv := health.NewServer()
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)

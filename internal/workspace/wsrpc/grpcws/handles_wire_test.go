@@ -65,6 +65,12 @@ func TestEnterWorktree_EventsArriveOnItsOwnSubscribe(t *testing.T) {
 	root := &wsrpctest.StubWorkspace{WorktreeWorkspace: child}
 	client := newServerAndClient(t, root)
 
+	// The root hub already started eagerly at NewServer time (CLIENT-
+	// SERVER.md, PR 1.4a), so root.SubscribeWithCalled is true before
+	// anything below runs; the real assertion is that the child's own
+	// subscription traffic never bumps the root's call count any further.
+	rootCallsBefore := root.SubscribeWithCalls.Load()
+
 	childWS, release, err := client.EnterWorktree(context.Background(), "feature")
 	require.NoError(t, err)
 	t.Cleanup(release)
@@ -95,7 +101,7 @@ func TestEnterWorktree_EventsArriveOnItsOwnSubscribe(t *testing.T) {
 		return len(got) == 1
 	})
 
-	require.False(t, root.SubscribeWithCalled, "the child's own subscription must never reach the root's upstream hub")
+	require.Equal(t, rootCallsBefore, root.SubscribeWithCalls.Load(), "the child's own subscription must never reach the root's upstream hub")
 }
 
 // TestEnterWorktree_ReleaseCallsChildReleaseOnceThenErrWorkspaceGone checks

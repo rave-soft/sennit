@@ -482,6 +482,12 @@ func (s *stubWorkspace) QuestionCancel(batchID string) (bool, error) {
 	return false, nil
 }
 
+// PendingPromptsReader
+func (s *stubWorkspace) PendingPrompts(ctx context.Context) (PendingPrompts, error) {
+	s.track("PendingPrompts")
+	return PendingPrompts{}, nil
+}
+
 // FileServices
 func (s *stubWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
 	return s.uncommitted, nil

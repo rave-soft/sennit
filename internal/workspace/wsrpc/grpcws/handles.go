@@ -220,25 +220,40 @@ type handleEntry struct {
 // never in here -- it lives for the server's whole lifetime and is
 // resolved directly by NewServer's own closures.
 type handleRegistry struct {
-	eventBufferSize int
+	eventBufferSize       int
+	clientStateTickPeriod time.Duration
 
 	mu   sync.Mutex
 	byID map[string]*handleEntry
 }
 
-func newHandleRegistry(eventBufferSize int) *handleRegistry {
-	return &handleRegistry{eventBufferSize: eventBufferSize, byID: map[string]*handleEntry{}}
+func newHandleRegistry(eventBufferSize int, clientStateTickPeriod time.Duration) *handleRegistry {
+	return &handleRegistry{
+		eventBufferSize: eventBufferSize, clientStateTickPeriod: clientStateTickPeriod,
+		byID: map[string]*handleEntry{},
+	}
 }
 
 // register mints a fresh, unguessable handle ID for ws and stores it,
 // owned by owner (a client ID, or "" for a caller with no lease -- see
-// clientIDFromContext). Every registered handle gets its own event hub
-// eagerly (cheap: it starts no goroutine until ensureStarted is called --
-// see eventHub's own doc comment), so Events.Subscribe against this handle
-// has something to resolve to immediately.
+// clientIDFromContext). Every registered handle gets its own event hub,
+// started right away (CLIENT-SERVER.md, PR 1.4a: "per-handle hubs still
+// start when the handle is registered", the same eager timing NewServer
+// now gives the root hub) rather than lazily on the handle's first
+// Events.Subscribe call, so its client-state publisher is already running
+// -- a Snapshot RPC against this handle has something to report from the
+// moment it exists.
 func (r *handleRegistry) register(ws workspace.Workspace, release func(), owner string) string {
 	id := randomToken()
-	entry := &handleEntry{ws: ws, hub: newEventHub(r.eventBufferSize), owner: owner, release: release}
+	hub := newEventHubWithStateTick(r.eventBufferSize, r.clientStateTickPeriod)
+	// ws is nil in a handful of registry-only unit tests that never touch
+	// the hub; every production H method (EnterWorktree/ExitWorktree/
+	// AttachThread) hands back a real workspace.Workspace on success, so
+	// this guard never fires there.
+	if ws != nil {
+		hub.ensureStarted(ws)
+	}
+	entry := &handleEntry{ws: ws, hub: hub, owner: owner, release: release}
 	r.mu.Lock()
 	r.byID[id] = entry
 	r.mu.Unlock()

@@ -1,10 +1,12 @@
 package appws
 
 import (
+	"context"
 	"errors"
 
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // -- Permissions --
@@ -148,4 +150,42 @@ func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answe
 func (w *AppWorkspace) QuestionCancel(batchID string) (bool, error) {
 	return answerPermission(questionServiceAttempts(w.questionServices(),
 		func(s question.Service) bool { return s.Cancel(batchID) })...)
+}
+
+// -- Pending prompts --
+
+// PendingPrompts collects every permission and question request currently
+// awaiting an answer: this workspace's own two services, plus one per live
+// delegation (threads and tasks alike) reached the same way permissionsFor/
+// questionServices already do. ctx is unused — every lookup here is an
+// in-memory read — but kept to match PendingPromptsReader's signature
+// (every other read on a live delegation's services takes none either, so
+// there is nothing to cancel).
+func (w *AppWorkspace) PendingPrompts(context.Context) (workspace.PendingPrompts, error) {
+	var out workspace.PendingPrompts
+
+	permServices := []permission.Service{w.app.Permissions()}
+	qServices := []question.Service{w.app.Questions}
+	if mgr, ok := w.threadManager(); ok {
+		permServices = append(permServices, mgr.PermissionServices()...)
+		qServices = append(qServices, mgr.QuestionServices()...)
+	}
+
+	for _, svc := range permServices {
+		if svc == nil {
+			continue
+		}
+		if req, ok := svc.ActiveRequest(); ok {
+			out.Permissions = append(out.Permissions, req)
+		}
+	}
+	for _, svc := range qServices {
+		if svc == nil {
+			continue
+		}
+		if req, ok := svc.ActiveRequest(); ok {
+			out.Questions = append(out.Questions, req)
+		}
+	}
+	return out, nil
 }

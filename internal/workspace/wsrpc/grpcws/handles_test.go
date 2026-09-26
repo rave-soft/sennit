@@ -53,7 +53,7 @@ func TestHandlesServiceDescCoversEveryWorkspaceHandleMethod(t *testing.T) {
 func TestHandleRegistry_ResolveUnknownHandleReturnsErrWorkspaceGone(t *testing.T) {
 	t.Parallel()
 
-	r := newHandleRegistry(0)
+	r := newHandleRegistry(0, 0)
 	_, err := r.resolve("nonexistent")
 	require.ErrorIs(t, err, workspace.ErrWorkspaceGone)
 
@@ -69,7 +69,7 @@ func TestHandleRegistry_ResolveUnknownHandleReturnsErrWorkspaceGone(t *testing.T
 func TestHandleRegistry_ReleaseIsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	r := newHandleRegistry(0)
+	r := newHandleRegistry(0, 0)
 	var calls int
 	handle := r.register(nil, func() { calls++ }, "owner-1")
 
@@ -85,7 +85,7 @@ func TestHandleRegistry_ReleaseIsIdempotent(t *testing.T) {
 func TestHandleRegistry_ReleaseByOwnerOnlyTouchesThatOwner(t *testing.T) {
 	t.Parallel()
 
-	r := newHandleRegistry(0)
+	r := newHandleRegistry(0, 0)
 	var aCalls, bCalls int
 	ha := r.register(nil, func() { aCalls++ }, "client-a")
 	hb := r.register(nil, func() { bCalls++ }, "client-b")
@@ -107,7 +107,7 @@ func TestHandleRegistry_ReleaseByOwnerOnlyTouchesThatOwner(t *testing.T) {
 func TestLeaseManager_ExpiresOnlyWhenClientStaysIdle(t *testing.T) {
 	t.Parallel()
 
-	r := newHandleRegistry(0)
+	r := newHandleRegistry(0, 0)
 	var released atomic.Int32
 	handle := r.register(nil, func() { released.Add(1) }, "client-1")
 

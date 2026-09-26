@@ -2341,6 +2341,40 @@ func (l *Loopback) OverridePreferredModel(model config.SelectedModel) (err error
 	return
 }
 
+func (l *Loopback) PendingPrompts(ctx context.Context) (res0 workspace.PendingPrompts, err error) {
+	wsrpcReq := PendingPromptsRequest{}
+	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
+	if wsrpcErr1 != nil {
+		err = fmt.Errorf("wsrpc: marshaling PendingPrompts request: %w", wsrpcErr1)
+		return
+	}
+	var wsrpcDecodedReq PendingPromptsRequest
+	wsrpcErr2 := json.Unmarshal(wsrpcReqJSON, &wsrpcDecodedReq)
+	if wsrpcErr2 != nil {
+		err = fmt.Errorf("wsrpc: decoding PendingPrompts request: %w", wsrpcErr2)
+		return
+	}
+	wsrpcOut0, wsrpcOut1 := l.inner.PendingPrompts(ctx)
+	wsrpcResp := PendingPromptsResponse{
+		Result: wsrpcOut0,
+		Err:    workspace.EncodeError(wsrpcOut1),
+	}
+	wsrpcRespJSON, wsrpcErr3 := json.Marshal(wsrpcResp)
+	if wsrpcErr3 != nil {
+		err = fmt.Errorf("wsrpc: marshaling PendingPrompts response: %w", wsrpcErr3)
+		return
+	}
+	var wsrpcDecodedResp PendingPromptsResponse
+	wsrpcErr4 := json.Unmarshal(wsrpcRespJSON, &wsrpcDecodedResp)
+	if wsrpcErr4 != nil {
+		err = fmt.Errorf("wsrpc: decoding PendingPrompts response: %w", wsrpcErr4)
+		return
+	}
+	res0 = wsrpcDecodedResp.Result
+	err = workspace.DecodeError(wsrpcDecodedResp.Err)
+	return
+}
+
 func (l *Loopback) PermissionDeny(perm permission.PermissionRequest) (res0 bool, err error) {
 	wsrpcReq := PermissionDenyRequest{
 		Perm: perm,

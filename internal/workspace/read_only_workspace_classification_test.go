@@ -142,6 +142,7 @@ var readOnlySafeMethods = []string{
 	"MCPResources",
 	"OAuthConfiguredProxy",
 	"OAuthValidateProxy",
+	"PendingPrompts",
 	"PermissionSkipRequests",
 	"ProjectNeedsInitialization",
 	"ReadMCPResource",

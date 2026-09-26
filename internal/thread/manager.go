@@ -872,6 +872,32 @@ func (m *Manager) QuestionServices() []question.Service {
 	return services
 }
 
+// PermissionServices returns the permission service of every delegation
+// currently live under this manager (threads and tasks alike, since both
+// register into this manager's shared lifecycle controls) — the same
+// candidate set QuestionServices above returns, for the same reason:
+// workspace.Workspace.PendingPrompts wants every delegation's own
+// ActiveRequest, and there is no delegation ID to route by ahead of time
+// (unlike PermissionsFor, which answers one specific delegation).
+func (m *Manager) PermissionServices() []permission.Service {
+	controls := m.lc.snapshotControls()
+	services := make([]permission.Service, 0, len(controls))
+	for _, c := range controls {
+		c.mu.Lock()
+		rt := c.runtime
+		c.mu.Unlock()
+		if rt == nil {
+			continue
+		}
+		a := rt.handle.Workspace()
+		if a == nil || a == m.parentApp {
+			continue
+		}
+		services = append(services, a.Permissions())
+	}
+	return services
+}
+
 // Shutdown stops admission, cancels manager work, releases live runtimes, and
 // waits for manager-owned goroutines. It is idempotent and safe concurrently.
 //
