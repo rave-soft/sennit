@@ -8,6 +8,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/workspace"
+	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
 )
 
 // defaultIdlePollInterval is how often the idle monitor re-checks
@@ -20,6 +21,20 @@ const defaultIdlePollInterval = 5 * time.Second
 // Server satisfies it via ClientCount.
 type idleClientCounter interface {
 	ClientCount() int
+}
+
+// excludingClientCounter adapts *grpcws.Server's ClientCountExcluding to
+// idleClientCounter for the Shutdown RPC's OnlyIfIdle check (see
+// daemon.go's shutdownHandler): the caller making that very RPC has an
+// open connection of its own, and must not count as the "client" that
+// makes the daemon look busy to itself.
+type excludingClientCounter struct {
+	server  *grpcws.Server
+	exclude string
+}
+
+func (c *excludingClientCounter) ClientCount() int {
+	return c.server.ClientCountExcluding(c.exclude)
 }
 
 // idleBusyCheck answers, on demand, whether the daemon has anything to do

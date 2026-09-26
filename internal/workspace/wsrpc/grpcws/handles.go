@@ -188,6 +188,15 @@ func (s *handlesServer) register(ctx context.Context, ws workspace.Workspace, re
 // lease, so its handles (if it minted any before losing interest) are
 // never swept by leaseManager; NewServer's registry cleanup on Stop is
 // what still catches those.
+// ClientIDFromContext exports clientIDFromContext for a hand-written
+// service handler (internal/daemon's Shutdown handler, see
+// WithShutdownHandler) that needs to know which client is making the
+// current call -- typically to exclude that call's own, necessarily-open
+// connection from a busyness check it is about to run.
+func ClientIDFromContext(ctx context.Context) string {
+	return clientIDFromContext(ctx)
+}
+
 func clientIDFromContext(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -482,6 +491,24 @@ func (lm *leaseManager) clientCount() int {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	return len(lm.clients)
+}
+
+// clientCountExcluding is clientCount but never counts excludeID. The
+// Shutdown RPC's OnlyIfIdle check (internal/daemon) uses this rather than
+// clientCount: begin runs before the handler that decides busyness even
+// executes (see unaryInterceptor), so the very call asking "is anyone
+// using this daemon" would otherwise always count itself as a connected
+// client and the check could never say yes.
+func (lm *leaseManager) clientCountExcluding(excludeID string) int {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	n := len(lm.clients)
+	if excludeID != "" {
+		if _, ok := lm.clients[excludeID]; ok {
+			n--
+		}
+	}
+	return n
 }
 
 // unaryInterceptor is the leaseManager's half of a grpc.ChainUnaryInterceptor

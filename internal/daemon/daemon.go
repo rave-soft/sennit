@@ -84,6 +84,38 @@ type Options struct {
 	// question request or drive an agent turn directly; this is a test
 	// hook to reach the App underneath one for exactly that.
 	AppReady func(a *app.App)
+
+	// DelayBeforeListen, if set, pauses Run after Bootstrap succeeds
+	// (lock held, in ModeDaemon with no socket recorded yet -- see
+	// BootstrapOptions.WorkspaceLockMode) and before it binds the unix
+	// socket. A test uses this to simulate a slow Bootstrap (cold MCP/
+	// LSP init, a loaded machine) well past internal/daemon/supervisor's
+	// own probing cadence, and assert EnsureRunning waits it out
+	// (ModeDaemon + empty socket reads as "starting," never as a TUI)
+	// instead of misreporting ErrTUILocked.
+	DelayBeforeListen time.Duration
+}
+
+// ResolveSocketPath computes the socket path and workspace-lock
+// directory a `daemon run` for cwd will use, without starting anything:
+// the same config load, the same app.WorkspaceLockDir key, and the same
+// sockpath.Path derivation Run itself does. internal/daemon/supervisor
+// calls this rather than recomputing any of it, so a client can always
+// find (or contend for) exactly the socket a real daemon would bind.
+func ResolveSocketPath(ctx context.Context, cwd, dataDir string, debug bool) (socketPath, lockDir string, err error) {
+	cfg, err := configruntime.Load(cwd, dataDir, debug)
+	if err != nil {
+		return "", "", fmt.Errorf("daemon: failed to load config: %w", err)
+	}
+	lockDir, err = app.WorkspaceLockDir(ctx, cfg.WorkingDir(), cfg.Config().Options.DataDirectory)
+	if err != nil {
+		return "", "", fmt.Errorf("daemon: failed to resolve workspace lock directory: %w", err)
+	}
+	socketPath, err = sockpath.Path(lockDir)
+	if err != nil {
+		return "", "", fmt.Errorf("daemon: failed to resolve socket path: %w", err)
+	}
+	return socketPath, lockDir, nil
 }
 
 // Run bootstraps a full app.App for the project at cwd -- exactly like
@@ -130,17 +162,9 @@ type Options struct {
 // to, and a daemon has no pane of its own -- attaching here would steal
 // authority from whichever frontend's terminal actually owns it.
 func Run(ctx context.Context, cwd string, opts Options) error {
-	cfg, err := configruntime.Load(cwd, opts.DataDir, opts.Debug)
+	socketPath, _, err := ResolveSocketPath(ctx, cwd, opts.DataDir, opts.Debug)
 	if err != nil {
-		return fmt.Errorf("daemon: failed to load config: %w", err)
-	}
-	lockDir, err := app.WorkspaceLockDir(ctx, cfg.WorkingDir(), cfg.Config().Options.DataDirectory)
-	if err != nil {
-		return fmt.Errorf("daemon: failed to resolve workspace lock directory: %w", err)
-	}
-	socketPath, err := sockpath.Path(lockDir)
-	if err != nil {
-		return fmt.Errorf("daemon: failed to resolve socket path: %w", err)
+		return err
 	}
 
 	logSetup := opts.LogSetup
@@ -155,7 +179,14 @@ func Run(ctx context.Context, cwd string, opts Options) error {
 		Channels:      opts.Channels,
 		TrustProject:  opts.TrustProject,
 		WorkspaceLock: true,
-		HerdrClient:   func() *herdr.Client { return nil },
+		// Acquire the lock already in ModeDaemon (empty socket, i.e.
+		// "starting"), not the default ModeTUI: a reader (in particular
+		// internal/daemon/supervisor) must be able to tell "a daemon is
+		// still booting" from "a TUI holds this" for the whole span of
+		// Bootstrap, not just from whenever SetMode runs below. See
+		// BootstrapOptions.WorkspaceLockMode's doc comment.
+		WorkspaceLockMode: workspacelock.ModeDaemon,
+		HerdrClient:       func() *herdr.Client { return nil },
 		// MCP OAuth must never open a browser on the daemon's own
 		// machine (CLIENT-SERVER.md, PR 2.1): a client reaches the
 		// authorization URL through MCPPendingAuth/MCPAuthURL instead.
@@ -184,6 +215,15 @@ func Run(ctx context.Context, cwd string, opts Options) error {
 	}
 	if logPath != "" {
 		fmt.Fprintln(os.Stderr, "Daemon log:", logPath)
+	}
+
+	if opts.DelayBeforeListen > 0 {
+		select {
+		case <-time.After(opts.DelayBeforeListen):
+		case <-ctx.Done():
+			boot.App.Shutdown()
+			return ctx.Err()
+		}
 	}
 
 	// From here on this process holds the workspace lock (boot.Lock),
@@ -222,7 +262,42 @@ func Run(ctx context.Context, cwd string, opts Options) error {
 	))
 
 	ws := appws.NewAppWorkspace(boot.App, boot.Config)
-	grpcServer, stopHub := grpcws.NewServer(ws)
+
+	// runCtx is what the shutdown select below actually waits on: ctx
+	// cancels it from the caller's side (SIGTERM/SIGINT), the idle
+	// monitor cancels it from ours once nothing has been busy for
+	// idle_timeout (CLIENT-SERVER.md, PR 2.1), and a supervisor's
+	// Shutdown RPC (PR 2.2) cancels it a third way once this daemon has
+	// agreed to stand down. All three converge on the same graceful-
+	// shutdown code beneath the select; the monitor itself is torn down
+	// by this same cancellation, not separately.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
+	// grpcServer is referenced by shutdownHandler below before it is
+	// assigned; that is fine because grpc.MethodDesc handlers -- and so
+	// shutdownHandler itself -- only ever run once Serve has started,
+	// which happens after the assignment a few lines down.
+	var grpcServer *grpcws.Server
+	shutdownHandler := func(ctx context.Context, onlyIfIdle bool) bool {
+		if onlyIfIdle {
+			// Exclude the calling client's own connection: begin() runs
+			// before this handler even starts (see unaryInterceptor), so
+			// without this the call asking "is anyone using this
+			// daemon" would always see itself and answer busy.
+			caller := grpcws.ClientIDFromContext(ctx)
+			clients := &excludingClientCounter{server: grpcServer, exclude: caller}
+			if busy, reason := (&idleBusyCheck{ws: ws, clients: clients}).busy(ctx); busy {
+				slog.Info("Refusing conditional shutdown request: daemon is busy", "reason", reason)
+				return false
+			}
+		}
+		slog.Info("Shutting down on supervisor request", "only_if_idle", onlyIfIdle)
+		runCancel()
+		return true
+	}
+	var stopHub func()
+	grpcServer, stopHub = grpcws.NewServer(ws, grpcws.WithShutdownHandler(shutdownHandler))
 
 	if err := chmodSocket(socketPath); err != nil {
 		slog.Warn("Failed to restrict daemon socket permissions", "path", socketPath, "error", err)
@@ -235,14 +310,6 @@ func Run(ctx context.Context, cwd string, opts Options) error {
 		opts.Ready(socketPath)
 	}
 
-	// runCtx is what the shutdown select below actually waits on: ctx
-	// cancels it from the caller's side (SIGTERM/SIGINT), and the idle
-	// monitor cancels it from ours once nothing has been busy for
-	// idle_timeout (CLIENT-SERVER.md, PR 2.1). Either path converges on
-	// the same graceful-shutdown code beneath the select; the monitor
-	// itself is torn down by this same cancellation, not separately.
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
 	go runIdleMonitor(runCtx,
 		&idleBusyCheck{ws: ws, clients: grpcServer},
 		boot.Config.Config().Options.Daemon.EffectiveIdleTimeout(),

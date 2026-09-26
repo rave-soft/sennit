@@ -276,6 +276,55 @@ func TestBootstrap_WorkspaceLockOptionApplies(t *testing.T) {
 	t.Cleanup(result.App.Shutdown)
 }
 
+// TestBootstrap_WorkspaceLockModeAppliesInitialMode covers
+// WorkspaceLockMode (CLIENT-SERVER.md, PR 2.2 review round 1): passing
+// it records that mode in the lock file from the moment Acquire
+// succeeds, with an empty Socket, rather than the package default
+// ModeTUI -- internal/daemon/supervisor relies on this to tell a daemon
+// still mid-Bootstrap from a genuine TUI holder by Mode alone, with no
+// timing guess involved.
+func TestBootstrap_WorkspaceLockModeAppliesInitialMode(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	dataDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDir) })
+	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
+		DataDir:           dataDir,
+		WorkspaceLock:     true,
+		WorkspaceLockMode: workspacelock.ModeDaemon,
+	})
+	require.NoError(t, err)
+	t.Cleanup(result.App.Shutdown)
+
+	info, ok, err := workspacelock.CurrentOwner(dataDir)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, workspacelock.ModeDaemon, info.Mode)
+	require.Empty(t, info.Socket, "expected no socket recorded until SetMode is called")
+}
+
+// TestBootstrap_WorkspaceLockModeDefaultsToTUI pins the other half: an
+// unset WorkspaceLockMode (every caller except internal/daemon.Run)
+// keeps the package default, ModeTUI -- WorkspaceLockMode is additive,
+// not a required field every existing caller now has to set.
+func TestBootstrap_WorkspaceLockModeDefaultsToTUI(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	dataDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDir) })
+	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
+		DataDir:       dataDir,
+		WorkspaceLock: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(result.App.Shutdown)
+
+	info, ok, err := workspacelock.CurrentOwner(dataDir)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, workspacelock.ModeTUI, info.Mode)
+}
+
 // TestBootstrap_WorkspaceLockReleasedOnShutdown confirms the workspace
 // lock acquired by WorkspaceLock is released once the resulting App is
 // shut down, so a second Bootstrap of the same data directory can

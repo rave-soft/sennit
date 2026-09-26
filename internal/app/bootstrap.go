@@ -80,6 +80,20 @@ type BootstrapOptions struct {
 	// workspaces lock their data directory.
 	WorkspaceLock bool
 
+	// WorkspaceLockMode, if set, is the workspacelock.Mode the lock is
+	// acquired under (workspacelock.WithMode(WorkspaceLockMode, "")),
+	// in place of the package default (workspacelock.ModeTUI). Only
+	// internal/daemon.Run sets this, to workspacelock.ModeDaemon: a
+	// daemon must be visible as a daemon (with no socket yet, i.e.
+	// "starting") for the whole span of Bootstrap, not just from
+	// whenever it later calls Lock.SetMode once its socket is bound.
+	// Acquiring in ModeTUI first and only flipping to ModeDaemon after
+	// Bootstrap finishes would make every daemon indistinguishable from
+	// a genuine interactive TUI for that entire window, to any other
+	// process reading the lock file (internal/daemon/supervisor, in
+	// particular -- see its own doc comments on this).
+	WorkspaceLockMode workspacelock.Mode
+
 	// PostDataDir, if set, runs after the .sennit data directory has
 	// been created and before the DB connection is opened. The
 	// top-level workspace uses this to register the project with the
@@ -168,7 +182,11 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		if err != nil {
 			return nil, err
 		}
-		wsLock, err = workspacelock.Acquire(lockDir)
+		var acquireOpts []workspacelock.AcquireOption
+		if opts.WorkspaceLockMode != "" {
+			acquireOpts = append(acquireOpts, workspacelock.WithMode(opts.WorkspaceLockMode, ""))
+		}
+		wsLock, err = workspacelock.Acquire(lockDir, acquireOpts...)
 		if err != nil {
 			return nil, err
 		}

@@ -42,16 +42,38 @@ type HelloResponse struct {
 	ServerHome      string `json:"server_home"`
 }
 
+// ShutdownRequest is Shutdown's request (supervisor.EnsureRunning, PR
+// 2.2's version-skew handling): OnlyIfIdle asks the daemon to refuse
+// rather than tear down a session a client hasn't checked for itself.
+type ShutdownRequest struct {
+	OnlyIfIdle bool `json:"only_if_idle"`
+}
+
+// ShutdownResponse reports whether Shutdown was accepted. A daemon with
+// no shutdown handler wired up (WithShutdownHandler not passed to
+// NewServer -- every caller other than internal/daemon.Run) always
+// reports false rather than panicking on a nil func.
+type ShutdownResponse struct {
+	Accepted bool `json:"accepted"`
+}
+
 // MetaServer is the interface grpc.Server.RegisterService checks metaServer
 // against (google.golang.org/grpc requires ServiceDesc.HandlerType to name
 // an interface, not the concrete impl -- see grpc.Server.RegisterService).
 type MetaServer interface {
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
+	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 }
 
 type metaServer struct {
 	workingDir func() string
 	serverHome func() string
+	// shutdown is nil unless WithShutdownHandler was passed to
+	// NewServer -- only internal/daemon.Run wires one up. It reports
+	// whether it agreed to shut down (and, if so, has already begun
+	// doing so -- the caller does not wait for the process to actually
+	// exit here, only for this RPC to acknowledge the request).
+	shutdown func(ctx context.Context, onlyIfIdle bool) bool
 }
 
 func (s *metaServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
@@ -64,29 +86,47 @@ func (s *metaServer) Hello(context.Context, *HelloRequest) (*HelloResponse, erro
 	}, nil
 }
 
+func (s *metaServer) Shutdown(ctx context.Context, req *ShutdownRequest) (*ShutdownResponse, error) {
+	if s.shutdown == nil {
+		return &ShutdownResponse{Accepted: false}, nil
+	}
+	return &ShutdownResponse{Accepted: s.shutdown(ctx, req.OnlyIfIdle)}, nil
+}
+
+// metaUnaryHandler builds a grpc.MethodDesc.Handler for one MetaServer
+// unary method, following oauthUnaryHandler's own shape (see its doc
+// comment).
+func metaUnaryHandler[Req, Resp any](methodName string, call func(*metaServer, context.Context, *Req) (*Resp, error)) func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	return func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+		in := new(Req)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		s := srv.(*metaServer)
+		if interceptor == nil {
+			return call(s, ctx, in)
+		}
+		info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + metaServiceName + "/" + methodName}
+		handler := func(ctx context.Context, req any) (any, error) {
+			return call(s, ctx, req.(*Req))
+		}
+		return interceptor(ctx, in, info, handler)
+	}
+}
+
+var _Meta_Hello_Handler = metaUnaryHandler("Hello", (*metaServer).Hello)
+
+var _Meta_Shutdown_Handler = metaUnaryHandler("Shutdown", (*metaServer).Shutdown)
+
 var metaServiceDesc = grpc.ServiceDesc{
 	ServiceName: metaServiceName,
 	HandlerType: (*MetaServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{MethodName: "Hello", Handler: _Meta_Hello_Handler},
+		{MethodName: "Shutdown", Handler: _Meta_Shutdown_Handler},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "wsrpc/meta",
-}
-
-func _Meta_Hello_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(HelloRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MetaServer).Hello(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + metaServiceName + "/Hello"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(MetaServer).Hello(ctx, req.(*HelloRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 // Hello calls the Meta service's Hello RPC.
@@ -98,6 +138,21 @@ func (c *Client) Hello(ctx context.Context) (HelloResponse, error) {
 		return HelloResponse{}, err
 	}
 	return *resp, nil
+}
+
+// RequestShutdown calls the Meta service's Shutdown RPC, asking the
+// server to stop -- if onlyIfIdle, only when it agrees it has nothing
+// running (internal/daemon's own busy check). It returns whether the
+// server accepted the request; a server with no shutdown handler wired
+// up always reports false rather than erroring.
+func (c *Client) RequestShutdown(ctx context.Context, onlyIfIdle bool) (bool, error) {
+	req := &ShutdownRequest{OnlyIfIdle: onlyIfIdle}
+	resp := new(ShutdownResponse)
+	fullMethod := "/" + metaServiceName + "/Shutdown"
+	if err := c.invokeMethod(ctx, fullMethod, "Shutdown", req, resp); err != nil {
+		return false, err
+	}
+	return resp.Accepted, nil
 }
 
 // invokeMethod is invoke (client_manual.go) generalized to an arbitrary
@@ -124,6 +179,7 @@ type serverConfig struct {
 	keepaliveTime         time.Duration
 	keepaliveTimeout      time.Duration
 	clientStateTickPeriod time.Duration
+	shutdown              func(ctx context.Context, onlyIfIdle bool) bool
 }
 
 // WithGRPCServerOptions passes extra grpc.ServerOption values through to
@@ -162,6 +218,15 @@ func WithKeepaliveParams(pingTime, pingTimeout time.Duration) ServerOption {
 // otherwise) -- see leaseManager.
 func WithHandleLeaseGrace(d time.Duration) ServerOption {
 	return func(c *serverConfig) { c.handleLeaseGrace = d }
+}
+
+// WithShutdownHandler wires the Meta service's Shutdown RPC to fn, which
+// must report whether it agreed to stop the server (and, if so, have
+// already begun doing so) -- see internal/daemon/supervisor's version-
+// skew handling (CLIENT-SERVER.md, PR 2.2). Without this option Shutdown
+// always reports Accepted=false; only internal/daemon.Run passes one.
+func WithShutdownHandler(fn func(ctx context.Context, onlyIfIdle bool) bool) ServerOption {
+	return func(c *serverConfig) { c.shutdown = fn }
 }
 
 // WithClientStateTickInterval overrides how often each event hub re-checks
@@ -243,7 +308,7 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*Server, func()) {
 
 	RegisterWorkspaceServer(s, resolveRoot)
 	s.RegisterService(&agentServiceDesc, &agentServer{resolve: resolveRoot})
-	s.RegisterService(&metaServiceDesc, &metaServer{workingDir: ws.WorkingDir, serverHome: cfg.serverHome})
+	s.RegisterService(&metaServiceDesc, &metaServer{workingDir: ws.WorkingDir, serverHome: cfg.serverHome, shutdown: cfg.shutdown})
 	s.RegisterService(&handlesServiceDesc, &handlesServer{resolve: resolveRoot, registry: registry})
 	s.RegisterService(&oauthServiceDesc, &oauthServer{resolve: resolveRoot, registry: oauthRegistry})
 
@@ -297,6 +362,13 @@ type Server struct {
 // monitor should still treat as connected.
 func (s *Server) ClientCount() int {
 	return s.lease.clientCount()
+}
+
+// ClientCountExcluding is ClientCount but never counts excludeID -- see
+// leaseManager.clientCountExcluding's doc comment for why the Shutdown
+// RPC's OnlyIfIdle check needs this instead of ClientCount.
+func (s *Server) ClientCountExcluding(excludeID string) int {
+	return s.lease.clientCountExcluding(excludeID)
 }
 
 // handleFromContext reads the "sennit-handle" metadata key an incoming

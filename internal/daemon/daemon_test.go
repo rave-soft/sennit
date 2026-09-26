@@ -557,3 +557,58 @@ func parseReadyLine(line string) string {
 	}
 	return line[len(prefix) : len(line)-1] // trim the trailing '\n'
 }
+
+// TestDaemon_ShutdownRPC_AcceptsWhenIdle covers the Meta Shutdown RPC
+// (CLIENT-SERVER.md, PR 2.2's version-skew handling): a caller with no
+// other connected client and nothing running gets Accepted=true, and the
+// daemon actually goes on to shut itself down through the same path idle
+// exit uses.
+func TestDaemon_ShutdownRPC_AcceptsWhenIdle(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	writeGlobalConfig(t)
+
+	projectDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	defer cancel()
+
+	socketPath, runErr := startDaemon(t, ctx, projectDir)
+	client, _ := dialDaemon(t, socketPath)
+
+	accepted, err := client.RequestShutdown(t.Context(), true)
+	require.NoError(t, err)
+	require.True(t, accepted, "expected an idle daemon to accept a conditional shutdown request")
+
+	awaitShutdown(t, runErr)
+}
+
+// TestDaemon_ShutdownRPC_RefusesWhenAnotherClientConnected covers the
+// other half: a caller must not see its own connection count as
+// busyness (excludingClientCounter), but a second, distinct client's
+// still-open connection must -- OnlyIfIdle refuses, and the daemon keeps
+// running.
+func TestDaemon_ShutdownRPC_RefusesWhenAnotherClientConnected(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	writeGlobalConfig(t)
+
+	projectDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	defer cancel()
+
+	socketPath, runErr := startDaemon(t, ctx, projectDir)
+	other, closeOther := dialDaemon(t, socketPath)
+	_, err := other.Hello(t.Context())
+	require.NoError(t, err)
+
+	caller, closeCaller := dialDaemon(t, socketPath)
+
+	accepted, err := caller.RequestShutdown(t.Context(), true)
+	require.NoError(t, err)
+	require.False(t, accepted, "expected a conditional shutdown request to be refused while another client is connected")
+
+	closeCaller()
+	closeOther()
+	cancel()
+	awaitShutdown(t, runErr)
+}
