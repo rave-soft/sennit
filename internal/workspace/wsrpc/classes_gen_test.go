@@ -19,12 +19,13 @@ import (
 // ./internal/workspace/wsrpc/...` is caught by a plain `go test` instead of
 // only by a separate CI step.
 func TestGeneratedFilesAreFresh(t *testing.T) {
-	typesSrc, loopbackSrc, err := genlib.Generate()
+	typesSrc, loopbackSrc, serviceSrc, err := genlib.Generate()
 	if err != nil {
 		t.Fatalf("generating: %v", err)
 	}
 	checkFresh(t, genlib.TypesFileName, typesSrc)
 	checkFresh(t, genlib.LoopbackFileName, loopbackSrc)
+	checkFresh(t, genlib.ServiceFileName, serviceSrc)
 }
 
 // checkFresh compares want (the generator's own output, always LF -- both

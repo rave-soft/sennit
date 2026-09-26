@@ -528,6 +528,13 @@ PR 0.2 на копии дерева и убедиться, что задание
 
 ### PR 1.1. Унарный транспорт
 
+**Сделано.** Отличие от текста: gRPC-код живёт в подпакете
+`internal/workspace/wsrpc/grpcws`, а `wsrpc` остаётся без gRPC, потому что
+UI импортирует `wsrpc` ради таблицы классов. Тест
+`ui/model/grpc_dependency_guard_test.go` запрещает UI линковать gRPC.
+Общие заглушки для тестов loopback и gRPC лежат в `wsrpc/wsrpctest`.
+Кодек: v1 `encoding.Codec` с именем `json`.
+
 - `wsrpc/codec.go`: `encoding.RegisterCodec` с именем `json`; клиент
   выставляет `grpc.CallContentSubtype("json")`.
 - Генератор дополнительно выпускает `grpc.ServiceDesc`

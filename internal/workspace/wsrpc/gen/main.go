@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc/gen/genlib"
 )
@@ -21,7 +22,7 @@ func main() {
 }
 
 func run() error {
-	typesSrc, loopbackSrc, err := genlib.Generate()
+	typesSrc, loopbackSrc, serviceSrc, err := genlib.Generate()
 	if err != nil {
 		return err
 	}
@@ -30,6 +31,12 @@ func run() error {
 	}
 	if err := os.WriteFile(genlib.LoopbackFileName, loopbackSrc, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", genlib.LoopbackFileName, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(genlib.ServiceFileName), 0o755); err != nil {
+		return fmt.Errorf("creating directory for %s: %w", genlib.ServiceFileName, err)
+	}
+	if err := os.WriteFile(genlib.ServiceFileName, serviceSrc, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", genlib.ServiceFileName, err)
 	}
 	return nil
 }
