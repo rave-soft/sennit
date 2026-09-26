@@ -847,6 +847,10 @@ var sampleMCPEvent = MCPEvent{
 	Name: "myserver",
 }
 
+var sampleConnectionEvent = ConnectionEvent{
+	State: ConnectionLost,
+}
+
 var sampleMCPPendingAuthServer = MCPPendingAuthServer{
 	Name: "myserver",
 	URL:  "https://example.com/authorize",
@@ -1028,6 +1032,7 @@ var wireSamples = map[reflect.Type]any{
 	reflectTypeOf[AgentSelection]():                sampleAgentSelection,
 	reflectTypeOf[Argument]():                      sampleArgument,
 	reflectTypeOf[BackgroundJobCounts]():           sampleBackgroundJobCounts,
+	reflectTypeOf[ConnectionEvent]():               sampleConnectionEvent,
 	reflectTypeOf[ConfigureCustomProviderParams](): sampleConfigureCustomProviderParams,
 	reflectTypeOf[CustomCommand]():                 sampleCustomCommand,
 	reflectTypeOf[LSPEvent]():                      sampleLSPEvent,

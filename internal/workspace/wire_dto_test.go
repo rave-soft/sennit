@@ -64,6 +64,7 @@ type (
 	eventAgentNotification      = AgentNotification
 	eventLSP                    = LSPEvent
 	eventMCP                    = MCPEvent
+	eventConnection             = ConnectionEvent
 )
 
 // -- Event payload types --------------------------------------------------
@@ -79,11 +80,17 @@ type (
 // back would cycle) or internal/ui (the whole point of this boundary), so
 // the list is kept explicit here instead of discovered by reflection.
 //
+// ConnectionEvent is the 13th entry and the one exception: it has no
+// translateEvent producer at all (see its own doc comment) -- it is
+// synthesized client-side by grpcws's Subscribe/SubscribeWith reconnect
+// loop (CLIENT-SERVER.md, PR 1.2/1.4) -- but travels the same event
+// registry, so it belongs in this gate too.
+//
 // message.Message and permission.PermissionRequest carry their own
 // MarshalJSON/UnmarshalJSON (see message/json.go, permission/permission.go)
 // so the walk treats them as opaque; question.Request, question.Notification,
 // history.File, skills.Event, session.Session, proto.Thread,
-// permission.PermissionNotification and the three workspace.* event
+// permission.PermissionNotification and the four workspace.* event
 // structs are plain data and get walked normally.
 var eventPayloadTypes = []reflect.Type{
 	reflectTypeOf[eventMessage](),
@@ -98,6 +105,7 @@ var eventPayloadTypes = []reflect.Type{
 	reflectTypeOf[eventAgentNotification](),
 	reflectTypeOf[eventLSP](),
 	reflectTypeOf[eventMCP](),
+	reflectTypeOf[eventConnection](),
 }
 
 // -- S/H data types ---------------------------------------------------------

@@ -53,6 +53,13 @@ type StubWorkspace struct {
 	SubscribeWithCalled bool
 	SubscribeWithSend   func(any)
 	SubscribeWithStop   func()
+	// SubscribeWithReady, if non-nil, is closed once SubscribeWith has
+	// recorded its arguments above. A caller across goroutines (e.g.
+	// grpcws's tests, where SubscribeWith runs on the gRPC stream
+	// handler's own goroutine) reads SubscribeWithSend/Called/Stop
+	// unsynchronized otherwise, which -race rightly flags; receiving from
+	// this channel first establishes the happens-before edge instead.
+	SubscribeWithReady chan struct{}
 
 	GotOAuthProviderID string
 	OAuthResult        workspace.OAuthStartResult
@@ -127,6 +134,9 @@ func (s *StubWorkspace) Subscribe(send func(any)) {
 func (s *StubWorkspace) SubscribeWith(send func(any)) func() {
 	s.SubscribeWithCalled = true
 	s.SubscribeWithSend = send
+	if s.SubscribeWithReady != nil {
+		close(s.SubscribeWithReady)
+	}
 	return s.SubscribeWithStop
 }
 

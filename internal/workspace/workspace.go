@@ -152,6 +152,35 @@ type LSPEvent struct {
 	DiagnosticCount int
 }
 
+// ConnectionState is what a remote.Workspace's event stream is doing to
+// the connection it rides on (CLIENT-SERVER.md, PR 1.2/1.4). It has no
+// in-process producer today -- only the gRPC client (internal/workspace/
+// wsrpc/grpcws) synthesizes it, from its Subscribe/SubscribeWith
+// reconnect loop -- but it is registered in wsrpc's event registry like
+// any other frontend event type so the wire DTO gate and Loopback cover
+// it, and so the UI's Update has a case ready for PR 1.4's handler.
+type ConnectionState string
+
+const (
+	// ConnectionLost is emitted once when a previously open event stream
+	// breaks, before the client starts reconnecting.
+	ConnectionLost ConnectionState = "lost"
+	// ConnectionRecovered is emitted once a new stream is established
+	// (or, on the very first Subscribe/SubscribeWith call, once it is).
+	ConnectionRecovered ConnectionState = "recovered"
+	// ConnectionResync is emitted when the server's Resync frame arrives:
+	// the client fell too far behind (or asked for a Seq the server no
+	// longer has buffered) and must refetch its state instead of trusting
+	// the event stream to fill the gap.
+	ConnectionResync ConnectionState = "resync"
+)
+
+// ConnectionEvent reports a change in the health of the event stream a
+// remote.Workspace's Subscribe/SubscribeWith rides on. See ConnectionState.
+type ConnectionEvent struct {
+	State ConnectionState
+}
+
 // AgentCatalog contains the catalog properties the UI renders.
 type AgentCatalog struct {
 	ID              string

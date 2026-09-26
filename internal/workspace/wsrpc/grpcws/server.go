@@ -119,8 +119,9 @@ func (c *Client) invokeMethod(ctx context.Context, fullMethod, name string, req,
 type ServerOption func(*serverConfig)
 
 type serverConfig struct {
-	grpcOpts   []grpc.ServerOption
-	serverHome func() string
+	grpcOpts        []grpc.ServerOption
+	serverHome      func() string
+	eventBufferSize int
 }
 
 // WithGRPCServerOptions passes extra grpc.ServerOption values through to
@@ -135,13 +136,27 @@ func WithServerHome(home func() string) ServerOption {
 	return func(c *serverConfig) { c.serverHome = home }
 }
 
+// WithEventBufferSize overrides the root handle's event hub's ring buffer
+// capacity (defaultEventBufferSize otherwise) -- see eventHub.
+func WithEventBufferSize(n int) ServerOption {
+	return func(c *serverConfig) { c.eventBufferSize = n }
+}
+
 // NewServer builds a *grpc.Server exposing ws as the root workspace
-// handle (""), the Meta service's Hello, and the standard gRPC health
-// service -- everything a Client (or `grpc_health_v1`'s own tooling)
-// needs to talk to this process (CLIENT-SERVER.md, PR 1.1, build step 5).
-// PR 1.3 adds non-root handles to resolve; until then, any other handle
-// is a coded NotFound.
-func NewServer(ws workspace.Workspace, opts ...ServerOption) *grpc.Server {
+// handle (""), the Meta service's Hello, the Events service's Subscribe,
+// and the standard gRPC health service -- everything a Client (or
+// `grpc_health_v1`'s own tooling) needs to talk to this process
+// (CLIENT-SERVER.md, PR 1.1, build step 5; PR 1.2 build steps 1-2). PR 1.3
+// adds non-root handles to resolve; until then, any other handle is a
+// coded NotFound on every service.
+//
+// The returned stop func stops the root handle's event hub -- the one
+// background goroutine (workspace.Workspace.SubscribeWith) NewServer
+// starts on demand, the first time a Subscribe RPC needs it -- and must
+// be called after the *grpc.Server itself has stopped serving, or a test
+// asserting no goroutine leak sees one that just hasn't been asked to
+// exit yet.
+func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func()) {
 	cfg := &serverConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -164,11 +179,21 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) *grpc.Server {
 	})
 	s.RegisterService(&metaServiceDesc, &metaServer{workingDir: ws.WorkingDir, serverHome: cfg.serverHome})
 
+	rootHub := newEventHub(cfg.eventBufferSize)
+	s.RegisterService(&eventsServiceDesc, &eventsServer{resolveHub: func(ctx context.Context) (*eventHub, error) {
+		handle := handleFromContext(ctx)
+		if handle != "" {
+			return nil, notFoundHandle(handle)
+		}
+		rootHub.ensureStarted(ws)
+		return rootHub, nil
+	}})
+
 	healthSrv := health.NewServer()
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(s, healthSrv)
 
-	return s
+	return s, rootHub.close
 }
 
 // handleFromContext reads the "sennit-handle" metadata key an incoming

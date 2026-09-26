@@ -32,8 +32,8 @@ func TestHello_RoundTrips(t *testing.T) {
 func TestHealth_RoundTrips(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcws.NewServer(&wsrpctest.StubWorkspace{})
-	dialer := startServer(t, srv)
+	srv, stopHub := grpcws.NewServer(&wsrpctest.StubWorkspace{})
+	dialer := startServer(t, srv, stopHub)
 
 	conn, err := dialRawConn(t, dialer)
 	require.NoError(t, err)

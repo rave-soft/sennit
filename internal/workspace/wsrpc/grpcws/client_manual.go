@@ -13,8 +13,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/wireerr"
 	"github.com/rave-soft/sennit/internal/workspace"
+	"github.com/rave-soft/sennit/internal/workspace/wsrpc"
 )
 
 // handleMetadataKey is the outgoing metadata key a Client attaches to every
@@ -37,6 +39,15 @@ type Client struct {
 	conn        grpc.ClientConnInterface
 	handle      string
 	callTimeout time.Duration
+
+	// lifeCtx/lifeCancel bound every subscription's lifetime: Subscribe
+	// rides lifeCtx directly ("blocks until Shutdown"), SubscribeWith
+	// derives its own child of it (its stop func cancels only that
+	// child). Shutdown cancels lifeCtx, ending every running
+	// subscription without touching conn -- PR 1.1 already decided
+	// Shutdown doesn't own the connection (see Shutdown's doc comment).
+	lifeCtx    context.Context
+	lifeCancel context.CancelFunc
 }
 
 // ClientOption configures a Client at construction (NewClient).
@@ -59,7 +70,8 @@ func WithHandle(handle string) ClientOption {
 // NewClient wraps conn (typically a *grpc.ClientConn, or a bufconn-dialed
 // one in tests) as a workspace.Workspace.
 func NewClient(conn grpc.ClientConnInterface, opts ...ClientOption) *Client {
-	c := &Client{conn: conn, callTimeout: defaultCallTimeout}
+	lifeCtx, lifeCancel := context.WithCancel(context.Background())
+	c := &Client{conn: conn, callTimeout: defaultCallTimeout, lifeCtx: lifeCtx, lifeCancel: lifeCancel}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -148,17 +160,177 @@ func (c *Client) AgentRunStream(context.Context, string, string, workspace.Agent
 	return nil, notAvailableOverWire("AgentRunStream")
 }
 
-// Subscribe is class S; see AgentRunShellCommand. It has no error result,
-// so it logs instead of silently doing nothing.
-func (c *Client) Subscribe(func(any)) {
-	logNotAvailable("Subscribe")
+// initialReconnectBackoff and maxReconnectBackoff bound
+// runSubscription's reconnect delay (CLIENT-SERVER.md, PR 1.2/1.4): it
+// starts at initialReconnectBackoff and doubles on each further failure,
+// capped at maxReconnectBackoff, and resets to initialReconnectBackoff
+// the moment a reconnect succeeds (a frame is actually received).
+const (
+	initialReconnectBackoff = 250 * time.Millisecond
+	maxReconnectBackoff     = 10 * time.Second
+)
+
+// Subscribe is class S: it opens the Events service's Subscribe stream
+// and calls send for every event it decodes, blocking until ctx (this
+// Client's own lifetime -- see Shutdown) is done. A broken stream is
+// reconnected with capped backoff, replaying from the last Seq this
+// client saw (or resyncing, if the server's buffer no longer has it) --
+// see runSubscription. send also receives workspace.ConnectionEvent
+// values reporting the stream's own health; the UI doesn't have a case
+// for those yet (PR 1.4), which is harmless -- see root.go's default
+// message routing.
+func (c *Client) Subscribe(send func(any)) {
+	c.runSubscription(c.lifeCtx, 0, send)
 }
 
-// SubscribeWith is class S; see Subscribe. The returned stop func is a
-// no-op: there is nothing running to stop.
-func (c *Client) SubscribeWith(func(any)) func() {
-	logNotAvailable("SubscribeWith")
-	return func() {}
+// SubscribeWith is class S; see Subscribe. It runs the same loop on its
+// own goroutine, scoped to a child of this Client's lifetime so Shutdown
+// still ends it, and returns a stop func that cancels just this
+// subscription and waits for its goroutine to exit.
+func (c *Client) SubscribeWith(send func(any)) func() {
+	ctx, cancel := context.WithCancel(c.lifeCtx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.runSubscription(ctx, 0, send)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// runSubscription is Subscribe/SubscribeWith's shared body: open the
+// Events service's Subscribe stream at fromSeq, decode every EventFrame
+// through wsrpc's event registry and hand the result to send, and on any
+// stream error reconnect with backoff -- FromSeq = lastSeen+1, so a
+// reconnect after a short blip replays exactly what was missed instead of
+// either losing events or redelivering ones already seen. A Resync frame
+// (the server's buffer didn't have what was asked for) is reported to
+// send as a workspace.ConnectionEvent and, per its own doc comment,
+// doesn't update lastSeen itself -- the next data frame's Seq does that,
+// picking live delivery back up from wherever the server's hub currently
+// is.
+func (c *Client) runSubscription(ctx context.Context, fromSeq uint64, send func(any)) {
+	backoff := initialReconnectBackoff
+	everConnected := false
+	for ctx.Err() == nil {
+		stream, err := c.openEventStream(ctx, fromSeq)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if everConnected {
+				send(connectionEvent(workspace.ConnectionLost))
+				everConnected = false
+			}
+			if !sleepBackoff(ctx, &backoff) {
+				return
+			}
+			continue
+		}
+
+		for {
+			frame, err := stream.Recv()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				if everConnected {
+					send(connectionEvent(workspace.ConnectionLost))
+				}
+				everConnected = false
+				break
+			}
+			backoff = initialReconnectBackoff
+			if !everConnected {
+				send(connectionEvent(workspace.ConnectionRecovered))
+				everConnected = true
+			}
+			if frame.Resync {
+				send(connectionEvent(workspace.ConnectionResync))
+				continue
+			}
+			if frame.Event == nil {
+				continue
+			}
+			v, err := wsrpc.DecodeEvent(*frame.Event)
+			if err != nil {
+				slog.Error("Wsrpc client failed to decode event frame, dropping it", "error", err)
+				continue
+			}
+			send(v)
+			fromSeq = frame.Seq + 1
+		}
+
+		if !sleepBackoff(ctx, &backoff) {
+			return
+		}
+	}
+}
+
+// connectionEvent wraps state as the pubsub.Event[workspace.ConnectionEvent]
+// send expects -- the same shape every other registered event travels as
+// (see wsrpc/events.go), even though this one is never actually encoded
+// across the wire: it's synthesized here, client-side, from the stream's
+// own health.
+func connectionEvent(state workspace.ConnectionState) pubsub.Event[workspace.ConnectionEvent] {
+	return pubsub.Event[workspace.ConnectionEvent]{Type: pubsub.UpdatedEvent, Payload: workspace.ConnectionEvent{State: state}}
+}
+
+// openEventStream opens one attempt at the Events service's Subscribe
+// stream, attaching this Client's handle metadata like every other call
+// (see invoke).
+func (c *Client) openEventStream(ctx context.Context, fromSeq uint64) (grpc.ServerStreamingClient[EventFrame], error) {
+	ctx = metadata.AppendToOutgoingContext(ctx, handleMetadataKey, c.handle)
+	desc := &eventsServiceDesc.Streams[0]
+	fullMethod := "/" + eventsServiceName + "/Subscribe"
+	stream, err := c.conn.NewStream(ctx, desc, fullMethod, grpc.CallContentSubtype(jsonCodecName))
+	if err != nil {
+		return nil, err
+	}
+	req := &SubscribeRequest{FromSeq: fromSeq}
+	if err := stream.SendMsg(req); err != nil {
+		return nil, err
+	}
+	if err := stream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return &eventStreamClient{stream}, nil
+}
+
+// eventStreamClient adapts the untyped grpc.ClientStream NewStream hands
+// back into grpc.ServerStreamingClient[EventFrame]'s typed Recv, the way
+// generated code normally would.
+type eventStreamClient struct {
+	grpc.ClientStream
+}
+
+func (x *eventStreamClient) Recv() (*EventFrame, error) {
+	m := new(EventFrame)
+	if err := x.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// sleepBackoff waits backoff (or until ctx is done, whichever first),
+// then doubles *backoff up to maxReconnectBackoff. It reports whether the
+// wait completed normally (false means ctx ended first, so the caller
+// should stop).
+func sleepBackoff(ctx context.Context, backoff *time.Duration) bool {
+	timer := time.NewTimer(*backoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return false
+	}
+	*backoff *= 2
+	if *backoff > maxReconnectBackoff {
+		*backoff = maxReconnectBackoff
+	}
+	return true
 }
 
 // StartOAuth is class H; not available until PR 1.3 adds the handle
@@ -182,19 +354,15 @@ func (c *Client) AttachThread(context.Context, string) (workspace.Workspace, fun
 	return nil, nil, notAvailableOverWire("AttachThread")
 }
 
-// Shutdown is class X. On a real connection this would close it and
+// Shutdown is class X. On a real connection this would also close it and
 // release any handles the client holds (CLIENT-SERVER.md's method table:
 // "в клиенте закрывает соединение и освобождает хэндлы; демон не
 // трогает"), but PR 1.1 doesn't own the connection's lifecycle -- whatever
-// dialed conn also closes it. Shutdown is therefore a deliberate no-op
-// here; a later PR that gives Client its own *grpc.ClientConn (rather than
-// a bare grpc.ClientConnInterface, which has no Close) can make it do
-// that.
-func (c *Client) Shutdown() {}
-
-// logNotAvailable is notAvailableOverWire's counterpart for the two
-// callback-style S methods (Subscribe, SubscribeWith) that have no error
-// result to report a missing transport through.
-func logNotAvailable(method string) {
-	slog.Warn("Wsrpc method not available over this transport yet", "method", method)
+// dialed conn also closes it -- so a later PR that gives Client its own
+// *grpc.ClientConn (rather than a bare grpc.ClientConnInterface, which has
+// no Close) still has that part to add. What Shutdown does today (PR 1.2):
+// cancel every running Subscribe/SubscribeWith, so neither blocks forever
+// on a connection nobody is going to use again.
+func (c *Client) Shutdown() {
+	c.lifeCancel()
 }

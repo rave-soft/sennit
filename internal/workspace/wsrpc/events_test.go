@@ -185,6 +185,13 @@ var eventSampleMCPEvent = pubsub.Event[workspace.MCPEvent]{
 	},
 }
 
+var eventSampleConnectionEvent = pubsub.Event[workspace.ConnectionEvent]{
+	Type: pubsub.UpdatedEvent,
+	Payload: workspace.ConnectionEvent{
+		State: workspace.ConnectionLost,
+	},
+}
+
 // eventSamples pairs every registered event with its populated sample, so
 // TestEventRegistry_RoundTrips can enumerate the registry (not this list)
 // and still catch a sample nobody bothered to add: it fails loudly if a
@@ -202,6 +209,7 @@ var eventSamples = map[string]any{
 	"agent_notification":      eventSampleAgentNotification,
 	"lsp":                     eventSampleLSPEvent,
 	"mcp":                     eventSampleMCPEvent,
+	"connection":              eventSampleConnectionEvent,
 }
 
 // TestEventRegistry_RoundTrips enumerates the registry built in events.go

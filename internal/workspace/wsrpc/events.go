@@ -93,6 +93,11 @@ func init() {
 	registerEvent[workspace.AgentNotification]("agent_notification")
 	registerEvent[workspace.LSPEvent]("lsp")
 	registerEvent[workspace.MCPEvent]("mcp")
+	// workspace.ConnectionEvent has no in-process producer -- see its own
+	// doc comment -- but is registered so the DTO gate and Loopback cover
+	// it and grpcws's client can build one straight from this registry
+	// (CLIENT-SERVER.md, PR 1.2 build step 4).
+	registerEvent[workspace.ConnectionEvent]("connection")
 }
 
 // EncodeEvent marshals a pubsub.Event[T] value delivered to a

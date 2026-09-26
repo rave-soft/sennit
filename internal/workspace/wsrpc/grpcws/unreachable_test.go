@@ -53,8 +53,8 @@ func TestUnreachable_CMethodLogsAndReturnsZero(t *testing.T) {
 // no server ever runs, so no trailer is ever set.
 func deadClient(t *testing.T) *grpcws.Client {
 	t.Helper()
-	srv := grpcws.NewServer(&wsrpctest.StubWorkspace{})
-	dialer := startServer(t, srv)
+	srv, stopHub := grpcws.NewServer(&wsrpctest.StubWorkspace{})
+	dialer := startServer(t, srv, stopHub)
 	srv.Stop() // stop immediately: every subsequent call is transport-level unreachable
 	return dialClient(t, dialer)
 }

@@ -18,8 +18,12 @@ const bufSize = 1 << 20
 // startServer starts srv listening on an in-memory bufconn.Listener and
 // returns a dialer for it (grpc.WithContextDialer) plus a cleanup that
 // stops the server and closes the listener. t.Cleanup runs the cleanup
-// automatically.
-func startServer(t *testing.T, srv *grpc.Server) func(context.Context, string) (net.Conn, error) {
+// automatically. stopHub is grpcws.NewServer's second return value (or
+// nil, when the test's own srv.Stop() call already covers it, as in
+// deadClient); it always runs after srv.Stop(), so the root hub's
+// SubscribeWith goroutine (started lazily) has nothing left to deliver
+// into once it exits.
+func startServer(t *testing.T, srv *grpc.Server, stopHub func()) func(context.Context, string) (net.Conn, error) {
 	t.Helper()
 	lis := bufconn.Listen(bufSize)
 	go func() {
@@ -27,6 +31,9 @@ func startServer(t *testing.T, srv *grpc.Server) func(context.Context, string) (
 	}()
 	t.Cleanup(func() {
 		srv.Stop()
+		if stopHub != nil {
+			stopHub()
+		}
 		_ = lis.Close()
 	})
 	return func(ctx context.Context, _ string) (net.Conn, error) {
@@ -68,7 +75,7 @@ func dialClient(t *testing.T, dialer func(context.Context, string) (net.Conn, er
 // returns a *grpcws.Client talking to it.
 func newServerAndClient(t *testing.T, ws workspace.Workspace) *grpcws.Client {
 	t.Helper()
-	srv := grpcws.NewServer(ws)
-	dialer := startServer(t, srv)
+	srv, stopHub := grpcws.NewServer(ws)
+	dialer := startServer(t, srv, stopHub)
 	return dialClient(t, dialer)
 }

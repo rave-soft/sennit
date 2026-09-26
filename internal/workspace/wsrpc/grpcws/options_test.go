@@ -19,8 +19,8 @@ import (
 func TestWithHandle_SendsNonRootHandle(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcws.NewServer(&wsrpctest.StubWorkspace{})
-	dialer := startServer(t, srv)
+	srv, stopHub := grpcws.NewServer(&wsrpctest.StubWorkspace{})
+	dialer := startServer(t, srv, stopHub)
 	conn, err := dialRawConn(t, dialer)
 	require.NoError(t, err)
 	client := grpcws.NewClient(conn, grpcws.WithHandle("some-worktree-handle"))
@@ -36,8 +36,8 @@ func TestWithHandle_SendsNonRootHandle(t *testing.T) {
 func TestWithCallTimeout_BoundsACtxlessCall(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcws.NewServer(&wsrpctest.StubWorkspace{})
-	dialer := startServer(t, srv)
+	srv, stopHub := grpcws.NewServer(&wsrpctest.StubWorkspace{})
+	dialer := startServer(t, srv, stopHub)
 	conn, err := dialRawConn(t, dialer)
 	require.NoError(t, err)
 	client := grpcws.NewClient(conn, grpcws.WithCallTimeout(time.Nanosecond))
@@ -66,8 +66,8 @@ func TestWithGRPCServerOptions_AppliesToTheServer(t *testing.T) {
 		calls++
 		return handler(ctx, req)
 	}
-	srv := grpcws.NewServer(&wsrpctest.StubWorkspace{}, grpcws.WithGRPCServerOptions(grpc.ChainUnaryInterceptor(interceptor)))
-	dialer := startServer(t, srv)
+	srv, stopHub := grpcws.NewServer(&wsrpctest.StubWorkspace{}, grpcws.WithGRPCServerOptions(grpc.ChainUnaryInterceptor(interceptor)))
+	dialer := startServer(t, srv, stopHub)
 	client := dialClient(t, dialer)
 
 	_, _ = client.GetSession(context.Background(), "sess-1")
@@ -79,8 +79,8 @@ func TestWithGRPCServerOptions_AppliesToTheServer(t *testing.T) {
 func TestWithServerHome_OverridesHello(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcws.NewServer(&wsrpctest.StubWorkspace{}, grpcws.WithServerHome(func() string { return "/custom/server/home" }))
-	dialer := startServer(t, srv)
+	srv, stopHub := grpcws.NewServer(&wsrpctest.StubWorkspace{}, grpcws.WithServerHome(func() string { return "/custom/server/home" }))
+	dialer := startServer(t, srv, stopHub)
 	client := dialClient(t, dialer)
 
 	got, err := client.Hello(context.Background())
