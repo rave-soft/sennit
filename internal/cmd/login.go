@@ -11,10 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/clipboard"
-	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -114,39 +111,31 @@ func init() {
 }
 
 // loginCopilot signs Sennit in to GitHub Copilot. forceNewAccount is
-// threaded through to RecordAccount: Copilot's OAuth token carries no
-// account identifier of its own (unlike Codex's JWT), so RecordAccount has
-// no way to tell "this is the same sign-in, refresh it" from "this is a
-// deliberate second account" without being told explicitly — see
+// threaded through to StartOAuth, which passes it on to RecordAccount once
+// the flow completes: Copilot's OAuth token carries no account identifier
+// of its own (unlike Codex's JWT), so RecordAccount has no way to tell
+// "this is the same sign-in, refresh it" from "this is a deliberate second
+// account" without being told explicitly — see
 // accounts.LegacyCredential.ForceNewAccount's doc comment. `sennit login
 // copilot` passes false (a routine re-login updates the existing account);
 // `sennit accounts add copilot`, via authAddOAuth, passes true.
-// recordCopilotAccount persists token as a Copilot account.
 //
-// RecordAccount, not SetProviderAPIKey: the latter overwrites
-// providers.copilot.oauth outright, so a second sign-in (from `sennit
-// accounts add copilot`, or a device-code flow that couldn't tell it was
-// talking to an already-known account) clobbered the first account's token
-// instead of adding or updating one on record — contradicting
-// authAddOAuth's own doc comment and this command's Long help, and leaving
-// `sennit accounts use copilot <old>` pointing at a stale credential the
-// store still remembered.
+// The sign-in itself lives behind the workspace now (see
+// workspace.OAuthController, implemented in internal/workspace/appws):
+// running the device flow, recording the account and persisting it are all
+// one implementation shared with the TUI's sign-in dialog, mirroring
+// login_codex.go. What stays here is the console half — narrating the
+// device code and URL, and the interactive "press enter to open the
+// browser" step a UI has no use for - plus one CLI-only shortcut,
+// ImportCopilot, that reuses a GitHub Copilot CLI login already on disk
+// (see the comment where it is called, below).
 type loginAccountWorkspace interface {
 	workspace.ConfigReader
 	workspace.ConfigFieldEditor
-	workspace.AccountRecorder
 	workspace.AccountLister
-	// OAuthController is what authAddOAuth's loginCodex needs: the Codex
-	// sign-in flow itself lives behind the workspace now (see
-	// login_codex.go).
+	// OAuthController is what authAddOAuth's loginCodex/loginCopilot need:
+	// the sign-in flow itself lives behind the workspace now.
 	workspace.OAuthController
-}
-
-func recordCopilotAccount(ws workspace.AccountRecorder, token *oauth.Token, forceNewAccount bool) (workspace.FrontendAccount, error) {
-	return ws.RecordAccount(config.ScopeGlobal, "copilot", accounts.LegacyCredential{
-		Token:           token,
-		ForceNewAccount: forceNewAccount,
-	})
 }
 
 func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
@@ -171,43 +160,67 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 		}
 	}
 
-	diskToken, hasDiskToken := copilot.RefreshTokenFromDisk()
-	var token *oauth.Token
-
-	switch {
-	case hasDiskToken:
-		fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
-
-		t, err := copilot.RefreshToken(loginCtx, proxyURL, diskToken)
-		if err != nil {
-			return fmt.Errorf("unable to refresh token from disk: %w", err)
-		}
-		token = t
-	default:
-		fmt.Println("Requesting device code from GitHub...")
-		dc, err := copilot.RequestDeviceCode(loginCtx, proxyURL)
+	// ImportCopilot mirrors the on-disk refresh-token shortcut this
+	// command used to run itself (copilot.RefreshTokenFromDisk +
+	// copilot.RefreshToken): a GitHub Copilot CLI login already on this
+	// machine is imported without a device flow. It now lives behind the
+	// workspace (internal/config/credentials.Manager.ImportCopilot),
+	// which persists straight to providers.copilot.oauth and reports
+	// (false, nil) - not an error - the moment Copilot has ANY credential
+	// configured, with no notion of "which account".
+	//
+	// That makes it the wrong tool for a deliberate "add account"
+	// (forceNewAccount): reusing it there would either silently do
+	// nothing (an account is already configured, which is the ordinary
+	// case for "add another") or, on a first-ever login run with
+	// --force-new-account for some reason, record the disk login outside
+	// RecordAccount's multi-account bookkeeping entirely. `sennit
+	// accounts add copilot` therefore always goes through the device
+	// flow below, which threads forceNewAccount into RecordAccount
+	// properly; only a routine `sennit login copilot` tries the disk
+	// shortcut first.
+	if !forceNewAccount {
+		imported, err := ws.ImportCopilot(loginCtx)
 		if err != nil {
 			return err
 		}
+		if imported {
+			fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
+			fmt.Println()
+			fmt.Println("You're now authenticated with GitHub Copilot!")
+			return nil
+		}
+	}
 
-		clipboard.WriteText(dc.UserCode)
+	result, flow, err := ws.StartOAuth(loginCtx, "copilot", proxyURL, forceNewAccount)
+	if err != nil {
+		return err
+	}
+	if flow != nil {
+		defer flow.Cancel()
+	}
+
+	if result.Completed == nil {
+		fmt.Println("Requesting device code from GitHub...")
+
+		clipboard.WriteText(result.UserCode)
 		fmt.Println()
 		fmt.Println("The following code should be on clipboard already:")
 		fmt.Println()
-		_, _ = lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode)) // terminal output
+		_, _ = lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(result.UserCode)) // terminal output
 		fmt.Println()
 		fmt.Println("Press enter to open this URL and authenticate with GitHub Copilot:")
 		fmt.Println()
-		_, _ = lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI)) // terminal output
+		_, _ = lipgloss.Println(lipgloss.NewStyle().Hyperlink(result.VerificationURL, "id=copilot").Render(result.VerificationURL)) // terminal output
 		fmt.Println()
 		waitEnter()
-		if err := browser.OpenURL(dc.VerificationURI); err != nil {
+		if err := browser.OpenURL(result.VerificationURL); err != nil {
 			fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
 		}
 
 		fmt.Println("Waiting for authorization...")
 
-		t, err := copilot.PollForToken(loginCtx, proxyURL, dc)
+		_, err = flow.Wait(loginCtx)
 		if errors.Is(err, copilot.ErrNotAvailable) {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
@@ -221,11 +234,6 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 		if err != nil {
 			return err
 		}
-		token = t
-	}
-
-	if _, err := recordCopilotAccount(ws, token, forceNewAccount); err != nil {
-		return err
 	}
 
 	fmt.Println()

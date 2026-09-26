@@ -12,7 +12,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/configruntime"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -67,9 +66,16 @@ func (a *realConfigAccessor) RemoveConfigField(scope config.Scope, key string) e
 	return a.store.RemoveConfigField(scope, key)
 }
 
-func (a *realConfigAccessor) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
+func (a *realConfigAccessor) RecordAccount(scope config.Scope, providerID string, cred workspace.AccountCredential) (workspace.FrontendAccount, error) {
 	accStore := accounts.NewFileStore(config.GlobalAccountsFile())
-	acc, err := config.RecordAccount(a.store, accStore, scope, providerID, cred)
+	acc, err := config.RecordAccount(a.store, accStore, scope, providerID, accounts.LegacyCredential{
+		APIKey:          cred.APIKey,
+		ProxyURL:        cred.ProxyURL,
+		AccountID:       cred.AccountID,
+		Email:           cred.Email,
+		Label:           cred.Label,
+		ForceNewAccount: cred.ForceNewAccount,
+	})
 	if err != nil {
 		return workspace.FrontendAccount{}, err
 	}
@@ -165,7 +171,7 @@ func (a *realConfigAccessor) CurrentPlanUsage(string) (accounts.Usage, bool) {
 	return accounts.Usage{}, false
 }
 
-func (a *realConfigAccessor) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+func (a *realConfigAccessor) ImportCopilot(ctx context.Context) (bool, error) {
 	return a.credentials.ImportCopilot(ctx)
 }
 
@@ -277,11 +283,11 @@ func TestAuthUse_DisabledAccountRefused(t *testing.T) {
 	providerID := authTestProviderID
 	newAuthTestProvider(t, ws)
 
-	first, err := ws.RecordAccount(config.ScopeGlobal, providerID, accounts.LegacyCredential{
+	first, err := ws.RecordAccount(config.ScopeGlobal, providerID, workspace.AccountCredential{
 		APIKey: "key-one", Label: "First", ForceNewAccount: true,
 	})
 	require.NoError(t, err)
-	second, err := ws.RecordAccount(config.ScopeGlobal, providerID, accounts.LegacyCredential{
+	second, err := ws.RecordAccount(config.ScopeGlobal, providerID, workspace.AccountCredential{
 		APIKey: "key-two", Label: "Second", ForceNewAccount: true,
 	})
 	require.NoError(t, err)
@@ -310,7 +316,7 @@ func TestAuthRemove_LastAccountRefused(t *testing.T) {
 	providerID := authTestProviderID
 	newAuthTestProvider(t, ws)
 
-	only, err := ws.RecordAccount(config.ScopeGlobal, providerID, accounts.LegacyCredential{
+	only, err := ws.RecordAccount(config.ScopeGlobal, providerID, workspace.AccountCredential{
 		APIKey: "key-one", Label: "Only", ForceNewAccount: true,
 	})
 	require.NoError(t, err)
@@ -332,7 +338,7 @@ func TestAuthProxy_ProviderLevelVsAccountLevel(t *testing.T) {
 	providerID := authTestProviderID
 	newAuthTestProvider(t, ws)
 
-	account, err := ws.RecordAccount(config.ScopeGlobal, providerID, accounts.LegacyCredential{
+	account, err := ws.RecordAccount(config.ScopeGlobal, providerID, workspace.AccountCredential{
 		APIKey: "key-one", Label: "Only", ForceNewAccount: true,
 	})
 	require.NoError(t, err)

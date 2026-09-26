@@ -78,18 +78,10 @@ type OAuthCodex struct {
 var (
 	_ OAuthProvider        = (*OAuthCodex)(nil)
 	_ oauthProxyConfigurer = (*OAuthCodex)(nil)
-	_ oauthProxyUser       = (*OAuthCodex)(nil)
 )
 
 func (m *OAuthCodex) name() string {
 	return codexProviderName
-}
-
-// currentProxy implements [oauthProxyUser]: the proxy this sign-in used has
-// to reach CompleteOAuth, which persists it as the provider's default and
-// routes the model-list fetch through it.
-func (m *OAuthCodex) currentProxy() string {
-	return m.proxy
 }
 
 // proxyURL prefills the step with whatever the backend says the provider
@@ -140,11 +132,11 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 	if err != nil {
 		return ActionOAuthErrored{Error: err}
 	}
-	if result.Token != nil {
+	if result.Completed != nil {
 		// Nothing was asked of the user, so the success screen has to say
 		// where this token came from — otherwise a sign-in that quietly
 		// adopted another tool's login reads as "it just worked".
-		return ActionCompleteOAuth{Token: result.Token, Note: existingLoginNote(result)}
+		return ActionCompleteOAuth{Completion: *result.Completed, Note: existingLoginNote(result)}
 	}
 
 	m.mu.Lock()
@@ -182,14 +174,14 @@ func (m *OAuthCodex) startPolling(_ string, _ int) tea.Cmd {
 	m.cancelFunc = cancel
 	m.mu.Unlock()
 	return func() tea.Msg {
-		token, err := flow.Wait(ctx)
+		completion, err := flow.Wait(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil // cancelled or timed out; the dialog is gone.
 			}
 			return ActionOAuthErrored{Error: err}
 		}
-		return ActionCompleteOAuth{Token: token}
+		return ActionCompleteOAuth{Completion: completion}
 	}
 }
 

@@ -438,6 +438,18 @@ var sampleLegacyCredential = accounts.LegacyCredential{
 	ForceNewAccount: true,
 }
 
+// sampleAccountCredential is RecordAccount's own contract type: every field
+// of accounts.LegacyCredential except Token (see AccountCredential's doc
+// comment, CLIENT-SERVER.md PR 1.3).
+var sampleAccountCredential = AccountCredential{
+	APIKey:          "$OPENAI_API_KEY",
+	ProxyURL:        "http://localhost:8080",
+	AccountID:       "acct-remote-1",
+	Email:           "person@example.com",
+	Label:           "Work",
+	ForceNewAccount: true,
+}
+
 var sampleGitFileChange = git.FileChange{
 	Path:      "internal/foo.go",
 	Additions: 3,
@@ -904,7 +916,7 @@ var sampleOAuthStartResult = OAuthStartResult{
 	VerificationURL:        "https://example.com/verify",
 	Interval:               5,
 	ExpiresIn:              600,
-	Token:                  &sampleOAuthToken,
+	Completed:              &sampleOAuthCompletion,
 	ReusedExistingLogin:    true,
 	RefreshedExistingLogin: true,
 	ExistingLoginFailure:   "previous login expired",
@@ -1024,6 +1036,7 @@ var wireSamples = map[reflect.Type]any{
 	reflectTypeOf[wireerr.ReadOnly](): sampleWireErrReadOnly,
 
 	reflectTypeOf[AccountCapabilities]():           sampleAccountCapabilities,
+	reflectTypeOf[AccountCredential]():             sampleAccountCredential,
 	reflectTypeOf[AgentCatalog]():                  sampleAgentCatalog,
 	reflectTypeOf[AgentModel]():                    sampleAgentModel,
 	reflectTypeOf[AgentNotification]():             sampleAgentNotification,

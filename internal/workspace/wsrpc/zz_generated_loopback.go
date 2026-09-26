@@ -14,7 +14,6 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -657,45 +656,6 @@ func (l *Loopback) CancelThread(ctx context.Context, id string, reason string) (
 	return
 }
 
-func (l *Loopback) CompleteOAuth(ctx context.Context, providerID string, proxyURL string, token *oauth.Token, forceNewAccount bool) (res0 workspace.OAuthCompletion, err error) {
-	wsrpcReq := CompleteOAuthRequest{
-		ProviderID:      providerID,
-		ProxyURL:        proxyURL,
-		Token:           token,
-		ForceNewAccount: forceNewAccount,
-	}
-	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
-	if wsrpcErr1 != nil {
-		err = fmt.Errorf("wsrpc: marshaling CompleteOAuth request: %w", wsrpcErr1)
-		return
-	}
-	var wsrpcDecodedReq CompleteOAuthRequest
-	wsrpcErr2 := json.Unmarshal(wsrpcReqJSON, &wsrpcDecodedReq)
-	if wsrpcErr2 != nil {
-		err = fmt.Errorf("wsrpc: decoding CompleteOAuth request: %w", wsrpcErr2)
-		return
-	}
-	wsrpcOut0, wsrpcOut1 := l.inner.CompleteOAuth(ctx, wsrpcDecodedReq.ProviderID, wsrpcDecodedReq.ProxyURL, wsrpcDecodedReq.Token, wsrpcDecodedReq.ForceNewAccount)
-	wsrpcResp := CompleteOAuthResponse{
-		Result: wsrpcOut0,
-		Err:    workspace.EncodeError(wsrpcOut1),
-	}
-	wsrpcRespJSON, wsrpcErr3 := json.Marshal(wsrpcResp)
-	if wsrpcErr3 != nil {
-		err = fmt.Errorf("wsrpc: marshaling CompleteOAuth response: %w", wsrpcErr3)
-		return
-	}
-	var wsrpcDecodedResp CompleteOAuthResponse
-	wsrpcErr4 := json.Unmarshal(wsrpcRespJSON, &wsrpcDecodedResp)
-	if wsrpcErr4 != nil {
-		err = fmt.Errorf("wsrpc: decoding CompleteOAuth response: %w", wsrpcErr4)
-		return
-	}
-	res0 = wsrpcDecodedResp.Result
-	err = workspace.DecodeError(wsrpcDecodedResp.Err)
-	return
-}
-
 func (l *Loopback) Config() (res0 *workspace.FrontendConfig) {
 	wsrpcReq := ConfigRequest{}
 	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
@@ -1293,7 +1253,7 @@ func (l *Loopback) GetSession(ctx context.Context, sessionID string) (res0 sessi
 	return
 }
 
-func (l *Loopback) ImportCopilot(ctx context.Context) (res0 *oauth.Token, res1 bool, err error) {
+func (l *Loopback) ImportCopilot(ctx context.Context) (res0 bool, err error) {
 	wsrpcReq := ImportCopilotRequest{}
 	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
 	if wsrpcErr1 != nil {
@@ -1306,11 +1266,10 @@ func (l *Loopback) ImportCopilot(ctx context.Context) (res0 *oauth.Token, res1 b
 		err = fmt.Errorf("wsrpc: decoding ImportCopilot request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1, wsrpcOut2 := l.inner.ImportCopilot(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ImportCopilot(ctx)
 	wsrpcResp := ImportCopilotResponse{
-		Result0: wsrpcOut0,
-		Result1: wsrpcOut1,
-		Err:     workspace.EncodeError(wsrpcOut2),
+		Result: wsrpcOut0,
+		Err:    workspace.EncodeError(wsrpcOut1),
 	}
 	wsrpcRespJSON, wsrpcErr3 := json.Marshal(wsrpcResp)
 	if wsrpcErr3 != nil {
@@ -1323,8 +1282,7 @@ func (l *Loopback) ImportCopilot(ctx context.Context) (res0 *oauth.Token, res1 b
 		err = fmt.Errorf("wsrpc: decoding ImportCopilot response: %w", wsrpcErr4)
 		return
 	}
-	res0 = wsrpcDecodedResp.Result0
-	res1 = wsrpcDecodedResp.Result1
+	res0 = wsrpcDecodedResp.Result
 	err = workspace.DecodeError(wsrpcDecodedResp.Err)
 	return
 }
@@ -2806,7 +2764,7 @@ func (l *Loopback) ReadSkill(ctx context.Context, skillID string) (res0 []byte, 
 	return
 }
 
-func (l *Loopback) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (res0 workspace.FrontendAccount, err error) {
+func (l *Loopback) RecordAccount(scope config.Scope, providerID string, cred workspace.AccountCredential) (res0 workspace.FrontendAccount, err error) {
 	wsrpcReq := RecordAccountRequest{
 		Scope:      scope,
 		ProviderID: providerID,

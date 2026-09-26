@@ -69,24 +69,10 @@ type OAuthCopilot struct {
 	stopped        bool
 }
 
-var (
-	_ OAuthProvider  = (*OAuthCopilot)(nil)
-	_ oauthProxyUser = (*OAuthCopilot)(nil)
-)
+var _ OAuthProvider = (*OAuthCopilot)(nil)
 
 func (m *OAuthCopilot) name() string {
 	return "GitHub Copilot"
-}
-
-// currentProxy implements [oauthProxyUser]; see OAuthCodex.currentProxy.
-// Copilot's own CompleteOAuth ignores it today, but passing it keeps every
-// sign-in's completion shaped the same way. Only called after initiateAuth
-// has returned (the flow reached OAuthStateDisplay or later), so the
-// mu-guarded write below always happens-before this read.
-func (m *OAuthCopilot) currentProxy() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.proxy
 }
 
 func (m *OAuthCopilot) initiateAuth() tea.Msg {
@@ -132,6 +118,12 @@ func (m *OAuthCopilot) initiateAuth() tea.Msg {
 	if err != nil {
 		return ActionOAuthErrored{Error: err}
 	}
+	if result.Completed != nil {
+		// Copilot's own StartOAuth never takes this shortcut today (there
+		// is no sibling CLI login to reuse), but honor it the same way
+		// Codex's dialog does in case that ever changes.
+		return ActionCompleteOAuth{Completion: *result.Completed}
+	}
 
 	m.mu.Lock()
 	m.flow = flow
@@ -162,7 +154,7 @@ func (m *OAuthCopilot) startPolling(deviceCode string, expiresIn int) tea.Cmd {
 	m.pollCancel = cancel
 	m.mu.Unlock()
 	return func() tea.Msg {
-		token, err := flow.Wait(ctx)
+		completion, err := flow.Wait(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil // cancelled, don't report error.
@@ -170,7 +162,7 @@ func (m *OAuthCopilot) startPolling(deviceCode string, expiresIn int) tea.Cmd {
 			return ActionOAuthErrored{Error: err}
 		}
 
-		return ActionCompleteOAuth{Token: token}
+		return ActionCompleteOAuth{Completion: completion}
 	}
 }
 

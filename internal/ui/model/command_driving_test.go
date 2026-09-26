@@ -18,7 +18,6 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -487,8 +486,8 @@ func (w *cmdDrivingWorkspace) RemoveConfigField(config.Scope, string) error {
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) ImportCopilot(context.Context) (*oauth.Token, bool, error) {
-	return nil, false, nil
+func (w *cmdDrivingWorkspace) ImportCopilot(context.Context) (bool, error) {
+	return false, nil
 }
 
 func (w *cmdDrivingWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {

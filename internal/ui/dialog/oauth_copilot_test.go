@@ -85,7 +85,7 @@ func TestOAuthCopilotUsesConfiguredProxy(t *testing.T) {
 	// OAuthConfiguredProxy is class "U" (wire_classes_test.go): the read
 	// happens inside initiateAuth rather than in NewOAuthCopilot itself.
 	oc.initiateAuth()
-	require.Equal(t, "socks5://127.0.0.1:1080", oc.currentProxy())
+	require.Equal(t, "socks5://127.0.0.1:1080", oc.proxy)
 }
 
 // TestOAuthCopilotNoProxyConfigured pins the no-proxy case unchanged: a

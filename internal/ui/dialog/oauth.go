@@ -14,7 +14,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -35,7 +34,6 @@ const (
 	OAuthStateInitializing OAuthState = iota
 	OAuthStateDisplay
 	OAuthStateSuccess
-	OAuthStateSaving
 	OAuthStateError
 	// OAuthStateProxy asks for a proxy before the flow starts. Only
 	// providers that opt in (see oauthProxyConfigurer) ever reach it —
@@ -58,12 +56,13 @@ type OAuth struct {
 	oAuthProvider OAuthProvider
 
 	// ForceNewAccount records that this sign-in was started deliberately
-	// as "Add account…" rather than a routine (re-)login, so
-	// saveCredential can tell RecordAccount to always create a new
-	// account instead of possibly updating the active one in place — see
-	// accounts.LegacyCredential.ForceNewAccount for the full reasoning.
-	// Exported (like State) so the model package's dispatch can assert it
-	// was set correctly on the constructed dialog.
+	// as "Add account…" rather than a routine (re-)login. It is threaded
+	// through to StartOAuth, which passes it on to RecordAccount once the
+	// flow completes, so a provider with no account identity of its own
+	// always gets a genuinely new account instead of updating the active
+	// one in place — see accounts.LegacyCredential.ForceNewAccount for the
+	// full reasoning. Exported (like State) so the model package's
+	// dispatch can assert it was set correctly on the constructed dialog.
 	ForceNewAccount bool
 
 	State OAuthState
@@ -86,7 +85,6 @@ type OAuth struct {
 	verificationURL string
 	expiresIn       int
 	interval        int
-	token           *oauth.Token
 
 	// completionNote explains a sign-in that completed without the user
 	// doing anything (ActionCompleteOAuth.Note), and signedInAs names the
@@ -172,7 +170,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		switch m.State {
-		case OAuthStateInitializing, OAuthStateDisplay, OAuthStateSaving:
+		case OAuthStateInitializing, OAuthStateDisplay:
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			if cmd != nil {
@@ -198,10 +196,6 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 			case OAuthStateSuccess:
 				return m.confirmAndSelectModel()
 
-			case OAuthStateSaving:
-				// Save in progress; ignore submits until it finishes.
-				return nil
-
 			default:
 				cmd := m.copyCodeAndOpenURL()
 				return ActionCmd{cmd}
@@ -211,10 +205,6 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 			switch m.State {
 			case OAuthStateSuccess:
 				return m.confirmAndSelectModel()
-
-			case OAuthStateSaving:
-				// Save in progress; ignore submits until it finishes.
-				return nil
 
 			case OAuthStateInitializing, OAuthStateDisplay:
 				// Polling may already be running (Display) or about to
@@ -275,20 +265,23 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		return ActionCmd{m.oAuthProvider.startPolling(msg.DeviceCode, msg.ExpiresIn)}
 
 	case ActionCompleteOAuth:
-		// The device flow finished and we have a token. Immediately
-		// persist it and fetch models in the background (this triggers a
-		// config reload that can take a few seconds), showing a spinner.
-		// The success screen is presented only once that work completes,
-		// so it truthfully means "ready to use" rather than gating the
-		// work behind a keypress.
-		m.State = OAuthStateSaving
-		m.token = msg.Token
+		// The flow finished; the backend has already persisted the account
+		// and done whatever provider-specific follow-up it needs (model
+		// list, proxy default) before this arrived — see
+		// workspace.OAuthFlow.Wait. There is nothing left to do here but
+		// report the outcome: a proxy or model-list failure that came back
+		// on the completion is a failed sign-in as far as this dialog is
+		// concerned (the CLI, which can tell the user to retry the fetch
+		// alone, treats a model-list failure as a warning instead - see
+		// login_codex.go).
 		m.completionNote = msg.Note
-		return ActionCmd{tea.Batch(
-			m.oAuthProvider.stopPolling,
-			m.spinner.Tick,
-			m.saveCredential(),
-		)}
+		if err := completionError(msg.Completion); err != nil {
+			m.State = OAuthStateError
+			return ActionCmd{tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(err))}
+		}
+		m.State = OAuthStateSuccess
+		m.signedInAs = cmp.Or(msg.Completion.Account.Email, msg.Completion.Account.Label)
+		return ActionCmd{m.oAuthProvider.stopPolling}
 
 	case ActionOAuthErrored:
 		m.State = OAuthStateError
@@ -305,20 +298,21 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		return ActionCmd{util.ReportWarn(
 			fmt.Sprintf("Couldn't open the browser automatically (%v). Open the URL above to continue.", msg.err),
 		)}
+	}
+	return nil
+}
 
-	case oauthSaveDoneMsg:
-		// Credential saved and models fetched. Present the confirmation
-		// screen; the actual model selection happens when the user
-		// acknowledges it (fast, since the work is already done).
-		m.State = OAuthStateSuccess
-		m.signedInAs = msg.account
-		return nil
-
-	case oauthSaveErrMsg:
-		// Save failed; surface the error and move to the error state so
-		// the user can dismiss and retry the flow.
-		m.State = OAuthStateError
-		return ActionCmd{util.ReportError(msg.err)}
+// completionError turns a failed OAuthCompletion into the error this dialog
+// treats the sign-in as having failed with, or nil for one that succeeded.
+// A proxy that could not be persisted as the provider's default is checked
+// first, matching the order AppWorkspace's own completion helpers fill in
+// the two fields (the proxy write happens before the model fetch).
+func completionError(completion workspace.OAuthCompletion) error {
+	if completion.ProxyError != nil {
+		return workspace.DecodeError(completion.ProxyError)
+	}
+	if completion.ModelsError != nil {
+		return workspace.DecodeError(completion.ModelsError)
 	}
 	return nil
 }
@@ -402,30 +396,6 @@ type oauthProxyRejectedMsg struct {
 	err error
 }
 
-// oauthSaveDoneMsg is emitted by the background save command once the
-// credential has been persisted and models fetched. The model-selection
-// details are read from the dialog's own fields when the user confirms.
-//
-// account is how the saved credential identifies itself (an email, a
-// label), for the success screen to name. It is empty for a provider that
-// reports nothing to name it by.
-type oauthSaveDoneMsg struct {
-	account string
-}
-
-// DialogID implements [DialogAddressed]: the save runs while the dialog is
-// open and anything may have opened over it by the time it lands.
-func (oauthSaveDoneMsg) DialogID() string { return OAuthID }
-
-// oauthSaveErrMsg is emitted by the background save command when persisting
-// the credential fails.
-type oauthSaveErrMsg struct {
-	err error
-}
-
-// DialogID implements [DialogAddressed]; see oauthSaveDoneMsg.
-func (oauthSaveErrMsg) DialogID() string { return OAuthID }
-
 // oauthBrowserOpenFailedMsg is emitted when browser.OpenURL fails while the
 // device code and verification URL are already on screen. Unlike
 // ActionOAuthErrored, this does not abort the flow: the user can still
@@ -435,7 +405,8 @@ type oauthBrowserOpenFailedMsg struct {
 	err error
 }
 
-// DialogID implements [DialogAddressed]; see oauthSaveDoneMsg.
+// DialogID implements [DialogAddressed]: this dialog is still open (still
+// polling) when it lands.
 func (oauthBrowserOpenFailedMsg) DialogID() string { return OAuthID }
 
 // View renders the device flow dialog.
@@ -467,7 +438,7 @@ func (m *OAuth) dialogContent() string {
 	t := m.com.Styles
 
 	switch m.State {
-	case OAuthStateInitializing, OAuthStateSaving:
+	case OAuthStateInitializing:
 		return m.innerContent()
 
 	default:
@@ -606,15 +577,6 @@ func (m *OAuth) innerContent() string {
 			Padding(1).
 			Render(strings.Join(lines, "\n"))
 
-	case OAuthStateSaving:
-		return lipgloss.NewStyle().
-			Width(innerWidth).
-			Align(lipgloss.Center).
-			Render(
-				successStyle.Render(m.spinner.View()) +
-					statusTextStyle.Render(" Fetching models..."),
-			)
-
 	case OAuthStateError:
 		return errorStyle.
 			Width(innerWidth).
@@ -678,10 +640,6 @@ func (m *OAuth) ShortHelp() []key.Binding {
 			),
 		}
 
-	case OAuthStateSaving:
-		// No actionable keys while the save completes.
-		return nil
-
 	default:
 		binds := []key.Binding{}
 		if m.hasUserCode() {
@@ -742,67 +700,6 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 			return nil
 		},
 	)
-}
-
-// saveCredential returns a command that persists the OAuth token and
-// triggers the config reload (including model discovery) off the UI update
-// loop. It reports completion via oauthSaveDoneMsg or oauthSaveErrMsg.
-//
-// Everything the save actually does — recording the account, deriving the
-// account identity a provider can name, persisting the proxy this sign-in
-// used and the model list it unlocks — lives behind the workspace (see
-// workspace.OAuthController), so a sign-in performed here and one
-// performed by `sennit login codex` do the same thing.
-func (m *OAuth) saveCredential() tea.Cmd {
-	// Capture the fields the command needs so it does not race with
-	// dialog state.
-	var (
-		com             = m.com
-		provider        = m.provider
-		token           = m.token
-		forceNewAccount = m.ForceNewAccount
-	)
-	var proxy string
-	if user, ok := m.oAuthProvider.(oauthProxyUser); ok {
-		proxy = user.currentProxy()
-	}
-	return func() tea.Msg {
-		// The dialog's own context is what bounds this: the backend owns
-		// the lifetime of the persistence work it must not drop midway
-		// (see AppWorkspace.CompleteOAuth, which runs the model fetch on a
-		// context of its own for exactly that reason), so there is nothing
-		// left for this side to protect from a shutdown.
-		completion, err := com.Workspace.CompleteOAuth(com.Context(), string(provider.ID), proxy, token, forceNewAccount)
-		if err != nil {
-			return oauthSaveErrMsg{err: fmt.Errorf("failed to save account: %w", err)}
-		}
-		// A proxy that could not be persisted as the provider's default is
-		// a failed sign-in as far as this dialog is concerned, even though
-		// the credential is already saved. Message text comes straight from
-		// AppWorkspace.CompleteOAuth: it already reads as a complete
-		// sentence, so it is not wrapped again here.
-		if completion.ProxyError != nil {
-			return oauthSaveErrMsg{err: workspace.DecodeError(completion.ProxyError)}
-		}
-		// A model list that could not be fetched leaves a saved credential
-		// with nothing to select, which is a failed sign-in as far as this
-		// dialog is concerned (the CLI, which can tell the user to retry
-		// the fetch alone, treats it as a warning instead). Same note on
-		// not re-wrapping: completion.ModelsError already reads as a
-		// complete sentence.
-		if completion.ModelsError != nil {
-			return oauthSaveErrMsg{err: workspace.DecodeError(completion.ModelsError)}
-		}
-		return oauthSaveDoneMsg{account: cmp.Or(completion.Account.Email, completion.Account.Label)}
-	}
-}
-
-// oauthProxyUser is the optional half of [OAuthProvider], implemented by
-// providers whose sign-in may go through a proxy: the value the flow used
-// has to reach CompleteOAuth, which persists it as the provider's default
-// and routes any post-save request through it.
-type oauthProxyUser interface {
-	currentProxy() string
 }
 
 // confirmAndSelectModel is invoked when the user acknowledges the success

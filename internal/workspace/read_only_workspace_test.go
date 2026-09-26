@@ -13,7 +13,6 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -56,7 +55,7 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	require.True(t, IsReadOnlyError(err))
 
 	// Importing credentials is a mutation and must not reach the underlying workspace.
-	_, imported, err := ro.ImportCopilot(t.Context())
+	imported, err := ro.ImportCopilot(t.Context())
 	require.NoError(t, err)
 	require.False(t, imported)
 	require.Zero(t, stub.importCopilotCalls)
@@ -562,7 +561,7 @@ func (s *stubWorkspace) ConfigureCustomProvider(ctx context.Context, scope confi
 	return nil, nil
 }
 
-func (s *stubWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (FrontendAccount, error) {
+func (s *stubWorkspace) RecordAccount(scope config.Scope, providerID string, cred AccountCredential) (FrontendAccount, error) {
 	s.track("RecordAccount")
 	return FrontendAccount{}, nil
 }
@@ -615,11 +614,6 @@ func (s *stubWorkspace) VerifyProviderAPIKey(ctx context.Context, providerID, ap
 func (s *stubWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (OAuthStartResult, OAuthFlow, error) {
 	s.track("StartOAuth")
 	return OAuthStartResult{}, nil, nil
-}
-
-func (s *stubWorkspace) CompleteOAuth(ctx context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (OAuthCompletion, error) {
-	s.track("CompleteOAuth")
-	return OAuthCompletion{}, nil
 }
 
 func (s *stubWorkspace) OAuthConfiguredProxy(providerID string) string {
@@ -833,10 +827,10 @@ func (s *stubWorkspace) ListMessagesBySessionIDs(_ context.Context, rootSessionI
 }
 
 // ImportCopilot
-func (s *stubWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+func (s *stubWorkspace) ImportCopilot(ctx context.Context) (bool, error) {
 	s.track("ImportCopilot")
 	s.importCopilotCalls++
-	return nil, false, nil
+	return false, nil
 }
 
 func TestReadOnlyWorkspace_BatchMessages_ChildAndSibling(t *testing.T) {

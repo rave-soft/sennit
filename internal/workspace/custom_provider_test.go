@@ -11,7 +11,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
 	"github.com/rave-soft/sennit/internal/configruntime"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/stretchr/testify/require"
@@ -131,7 +130,7 @@ func (a *testConfigAccessor) RemoveConfigField(scope config.Scope, key string) e
 	return a.store.RemoveConfigField(scope, key)
 }
 
-func (a *testConfigAccessor) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+func (a *testConfigAccessor) ImportCopilot(ctx context.Context) (bool, error) {
 	return a.credentials.ImportCopilot(ctx)
 }
 

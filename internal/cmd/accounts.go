@@ -319,7 +319,7 @@ func authAddAPIKey(ws workspace.AccountRecorder, providerID, apiKey string) erro
 	if apiKey == "" {
 		return fmt.Errorf("API key for %s must not be empty", providerID)
 	}
-	account, err := ws.RecordAccount(config.ScopeGlobal, providerID, accounts.LegacyCredential{
+	account, err := ws.RecordAccount(config.ScopeGlobal, providerID, workspace.AccountCredential{
 		APIKey:          apiKey,
 		ForceNewAccount: true,
 	})

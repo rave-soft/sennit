@@ -161,7 +161,6 @@ var MethodClasses = map[string]Class{
 
 	// OAuthController.
 	"StartOAuth":                  H,
-	"CompleteOAuth":               U,
 	"OAuthConfiguredProxy":        U,
 	"OAuthValidateProxy":          U,
 	"ImportCopilot":               U,

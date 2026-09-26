@@ -7,7 +7,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -56,7 +55,7 @@ func (s *stubConfigAccessor) RemoveConfigField(_ config.Scope, key string) error
 	return s.errs[key]
 }
 
-func (s *stubConfigAccessor) RecordAccount(config.Scope, string, accounts.LegacyCredential) (accounts.Account, error) {
+func (s *stubConfigAccessor) RecordAccount(config.Scope, string, workspace.AccountCredential) (accounts.Account, error) {
 	return accounts.Account{}, nil
 }
 
@@ -75,8 +74,8 @@ func (s *stubConfigAccessor) RefreshAccountLimits(context.Context, string) ([]ac
 	return nil, nil
 }
 
-func (s *stubConfigAccessor) ImportCopilot(context.Context) (*oauth.Token, bool, error) {
-	return nil, false, nil
+func (s *stubConfigAccessor) ImportCopilot(context.Context) (bool, error) {
+	return false, nil
 }
 
 func (s *stubConfigAccessor) RefreshOAuthToken(context.Context, config.Scope, string) error {

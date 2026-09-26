@@ -9,7 +9,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -302,9 +301,9 @@ func TestOAuthCodexHidesCursorAfterProxyStep(t *testing.T) {
 func TestOAuthCodexInitiateAuthShortCircuitsOnExistingLogin(t *testing.T) {
 	t.Parallel()
 
-	token := &oauth.Token{AccessToken: "from-disk"}
+	completion := workspace.OAuthCompletion{Account: workspace.FrontendAccount{ID: "acc_1"}}
 	ws := &completeOAuthTestWorkspace{
-		startResult: workspace.OAuthStartResult{Token: token, ReusedExistingLogin: true},
+		startResult: workspace.OAuthStartResult{Completed: &completion, ReusedExistingLogin: true},
 	}
 	dlg := newCodexDialogWith(t, ws)
 	provider, ok := dlg.oAuthProvider.(*OAuthCodex)
@@ -313,7 +312,7 @@ func TestOAuthCodexInitiateAuthShortCircuitsOnExistingLogin(t *testing.T) {
 	msg := provider.initiateAuth()
 	complete, ok := msg.(ActionCompleteOAuth)
 	require.True(t, ok, "expected ActionCompleteOAuth, got %#v", msg)
-	require.Equal(t, token, complete.Token)
+	require.Equal(t, completion, complete.Completion)
 	require.Nil(t, provider.flow, "a short-circuited sign-in has no flow to wait on")
 }
 
@@ -395,9 +394,10 @@ func TestOAuthCodexLoginAccountSkipsDiskReuse(t *testing.T) {
 func TestOAuthCodexRoutineLoginAllowsDiskReuse(t *testing.T) {
 	t.Parallel()
 
+	completion := workspace.OAuthCompletion{Account: workspace.FrontendAccount{ID: "acc_1"}}
 	ws := &completeOAuthTestWorkspace{
 		startResult: workspace.OAuthStartResult{
-			Token:               &oauth.Token{AccessToken: "from-disk"},
+			Completed:           &completion,
 			ReusedExistingLogin: true,
 		},
 	}
@@ -420,25 +420,20 @@ func TestOAuthCodexRoutineLoginAllowsDiskReuse(t *testing.T) {
 func TestOAuthCodexSuccessScreenNamesAccount(t *testing.T) {
 	t.Parallel()
 
+	completion := workspace.OAuthCompletion{
+		Account: workspace.FrontendAccount{ID: "acc_1", Email: "someone@example.com"},
+	}
 	ws := &completeOAuthTestWorkspace{
 		startResult: workspace.OAuthStartResult{
-			Token:               &oauth.Token{AccessToken: "from-disk"},
+			Completed:           &completion,
 			ReusedExistingLogin: true,
-		},
-		completion: workspace.OAuthCompletion{
-			Account: workspace.FrontendAccount{ID: "acc_1", Email: "someone@example.com"},
 		},
 	}
 	dlg := newCodexDialogWith(t, ws)
 	codexProvider, ok := dlg.oAuthProvider.(*OAuthCodex)
 	require.True(t, ok)
 
-	action := dlg.HandleMsg(codexProvider.initiateAuth())
-	cmdAction, ok := action.(ActionCmd)
-	require.True(t, ok, "expected ActionCmd carrying the async save, got %#v", action)
-	done := findMsg(t, cmdAction.Cmd, oauthSaveDoneMsgFilter)
-	require.NotNil(t, done)
-	dlg.HandleMsg(done)
+	dlg.HandleMsg(codexProvider.initiateAuth())
 
 	require.Equal(t, OAuthStateSuccess, dlg.State)
 

@@ -68,10 +68,12 @@ func TestConfiguredCodexProxy_NoProviderYet(t *testing.T) {
 }
 
 // codexLoginWorkspaceFake observes the OAuth boundary loginCodex now uses:
-// the sign-in itself (StartOAuth/CompleteOAuth) lives behind the
-// workspace, so what this fake records is what the CLI asked the backend
-// to do, not the individual config/account writes the backend performs on
-// its own (those are covered in internal/workspace/appws).
+// the sign-in itself, including completing it, lives behind the workspace
+// (StartOAuth/OAuthFlow.Wait — see workspace.OAuthController and
+// CLIENT-SERVER.md PR 1.3), so what this fake records is what the CLI
+// asked the backend to do, not the individual config/account writes the
+// backend performs on its own (those are covered in
+// internal/workspace/appws).
 type codexLoginWorkspaceFake struct {
 	stubConfigAccessor
 
@@ -81,26 +83,15 @@ type codexLoginWorkspaceFake struct {
 	startFlow   *stubOAuthFlow
 	startErr    error
 
-	// completion/completeErr are CompleteOAuth's answer.
-	completion  workspace.OAuthCompletion
-	completeErr error
-
 	// configuredProxy is what OAuthConfiguredProxy reports (the Codex
 	// CLI's own config, in loginCodex's usage).
 	configuredProxy string
 
 	listResults []codexLoginListResult
 
-	calls        []string
-	startProxies []string
-	completed    []codexCompleteCall
-}
-
-type codexCompleteCall struct {
-	providerID      string
-	proxyURL        string
-	token           *oauth.Token
-	forceNewAccount bool
+	calls         []string
+	startProxies  []string
+	startForceNew []bool
 }
 
 type codexLoginListResult struct {
@@ -109,19 +100,23 @@ type codexLoginListResult struct {
 }
 
 // stubOAuthFlow stands in for a started browser flow: Wait answers with a
-// canned token, and Cancel records that the caller released it.
+// canned completion, and Cancel records that the caller released it.
 type stubOAuthFlow struct {
-	token     *oauth.Token
-	err       error
-	cancelled int
+	completion workspace.OAuthCompletion
+	err        error
+	cancelled  int
 }
 
-func (f *stubOAuthFlow) Wait(context.Context) (*oauth.Token, error) { return f.token, f.err }
-func (f *stubOAuthFlow) Cancel()                                    { f.cancelled++ }
+func (f *stubOAuthFlow) Wait(context.Context) (workspace.OAuthCompletion, error) {
+	return f.completion, f.err
+}
+
+func (f *stubOAuthFlow) Cancel() { f.cancelled++ }
 
 func (w *codexLoginWorkspaceFake) StartOAuth(_ context.Context, providerID, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	w.calls = append(w.calls, "StartOAuth:"+providerID)
 	w.startProxies = append(w.startProxies, proxyURL)
+	w.startForceNew = append(w.startForceNew, forceNewAccount)
 	if w.startErr != nil {
 		return workspace.OAuthStartResult{}, nil, w.startErr
 	}
@@ -129,12 +124,6 @@ func (w *codexLoginWorkspaceFake) StartOAuth(_ context.Context, providerID, prox
 		return w.startResult, nil, nil
 	}
 	return w.startResult, w.startFlow, nil
-}
-
-func (w *codexLoginWorkspaceFake) CompleteOAuth(_ context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (workspace.OAuthCompletion, error) {
-	w.calls = append(w.calls, "CompleteOAuth:"+providerID)
-	w.completed = append(w.completed, codexCompleteCall{providerID, proxyURL, token, forceNewAccount})
-	return w.completion, w.completeErr
 }
 
 func (w *codexLoginWorkspaceFake) OAuthConfiguredProxy(string) string { return w.configuredProxy }
@@ -155,26 +144,28 @@ func (w *codexLoginWorkspaceFake) ListAccounts(providerID string) ([]workspace.F
 
 // newCodexLoginFake builds a fake whose sign-in short-circuits on an
 // existing Codex CLI login, so no test here needs the interactive
-// browser step (which would block on stdin).
+// browser step (which would block on stdin). The server has already
+// completed the sign-in by the time StartOAuth returns, matching
+// AppWorkspace.startCodexOAuth's disk-reuse path.
 func newCodexLoginFake(before, after []workspace.FrontendAccount) *codexLoginWorkspaceFake {
+	completion := workspace.OAuthCompletion{
+		Account:       workspace.FrontendAccount{ID: "new", Label: "New account"},
+		ModelsFetched: 1,
+	}
 	return &codexLoginWorkspaceFake{
 		startResult: workspace.OAuthStartResult{
-			Token:               &oauth.Token{AccessToken: "access-token"},
+			Completed:           &completion,
 			ReusedExistingLogin: true,
-		},
-		completion: workspace.OAuthCompletion{
-			Account:       workspace.FrontendAccount{ID: "new", Label: "New account"},
-			ModelsFetched: 1,
 		},
 		listResults: []codexLoginListResult{{accounts: before}, {accounts: after}},
 	}
 }
 
-// TestLoginCodex_StartsThenCompletesSignIn pins the boundary: the CLI asks
-// the workspace to start the flow and to finish it, counting accounts
-// around the completion for its summary line, and never performs the
-// account/config writes itself.
-func TestLoginCodex_StartsThenCompletesSignIn(t *testing.T) {
+// TestLoginCodex_StartsSignIn pins the boundary: the CLI asks the
+// workspace to start the flow, which completes it server-side, counting
+// accounts around the completion for its summary line, and never performs
+// the account/config writes itself.
+func TestLoginCodex_StartsSignIn(t *testing.T) {
 	t.Parallel()
 
 	ws := newCodexLoginFake(
@@ -184,17 +175,15 @@ func TestLoginCodex_StartsThenCompletesSignIn(t *testing.T) {
 
 	require.NoError(t, loginCodex(ws, true, false, ""))
 	require.Equal(t, []string{
-		"StartOAuth:codex", "ListAccounts:codex", "CompleteOAuth:codex", "ListAccounts:codex",
+		"StartOAuth:codex", "ListAccounts:codex", "ListAccounts:codex",
 	}, ws.calls)
-	require.Len(t, ws.completed, 1)
-	require.Equal(t, "access-token", ws.completed[0].token.AccessToken)
-	require.False(t, ws.completed[0].forceNewAccount)
+	require.Equal(t, []bool{false}, ws.startForceNew)
 }
 
-// TestLoginCodex_FirstAccountListingFailureDoesNotComplete keeps the
-// pre-existing ordering guarantee: a failure to count accounts happens
-// before anything is persisted, so nothing is recorded.
-func TestLoginCodex_FirstAccountListingFailureDoesNotComplete(t *testing.T) {
+// TestLoginCodex_FirstAccountListingFailureIsFatal keeps the pre-existing
+// ordering guarantee: a failure to count accounts happens before anything
+// is reported as a success, so the command fails.
+func TestLoginCodex_FirstAccountListingFailureIsFatal(t *testing.T) {
 	t.Parallel()
 
 	listErr := errors.New("account store unavailable")
@@ -204,7 +193,6 @@ func TestLoginCodex_FirstAccountListingFailureDoesNotComplete(t *testing.T) {
 	err := loginCodex(ws, true, false, "")
 	require.ErrorIs(t, err, listErr)
 	require.Equal(t, []string{"StartOAuth:codex", "ListAccounts:codex"}, ws.calls)
-	require.Empty(t, ws.completed)
 }
 
 // TestLoginCodex_SecondAccountListingFailureKeepsSuccessfulLogin: the
@@ -217,36 +205,37 @@ func TestLoginCodex_SecondAccountListingFailureKeepsSuccessfulLogin(t *testing.T
 	ws.listResults = []codexLoginListResult{{}, {err: errors.New("account store unavailable")}}
 
 	require.NoError(t, loginCodex(ws, true, false, ""))
-	require.Len(t, ws.completed, 1, "the account is persisted before the summary re-list")
 }
 
 // TestLoginCodex_ModelFetchFailureIsNotFatal pins the non-fatal treatment
-// of a model-list failure: the credential is already saved by the time
-// CompleteOAuth reports it, so the command reports the problem and
-// succeeds.
+// of a model-list failure: the credential is already saved by the time the
+// completion reports it, so the command reports the problem and succeeds.
 func TestLoginCodex_ModelFetchFailureIsNotFatal(t *testing.T) {
 	t.Parallel()
 
 	ws := newCodexLoginFake(nil, nil)
-	ws.completion = workspace.OAuthCompletion{
+	completion := workspace.OAuthCompletion{
 		Account:     workspace.FrontendAccount{ID: "new", Label: "New account"},
 		ModelsError: workspace.EncodeError(errors.New("model list unavailable")),
 	}
+	ws.startResult.Completed = &completion
 
 	require.NoError(t, loginCodex(ws, true, false, ""))
-	require.Len(t, ws.completed, 1)
 }
 
-// TestLoginCodex_CompleteFailureIsFatal covers the other half: a
-// credential that could not be recorded at all is a failed login.
-func TestLoginCodex_CompleteFailureIsFatal(t *testing.T) {
+// TestLoginCodex_StartOAuthFailureIsFatal covers a credential that could
+// not be recorded at all (StartOAuth fails when the server's own
+// completion step fails - see AppWorkspace.startCodexOAuth): a failed
+// login, and nothing beyond StartOAuth is attempted.
+func TestLoginCodex_StartOAuthFailureIsFatal(t *testing.T) {
 	t.Parallel()
 
-	completeErr := errors.New("account store unavailable")
+	startErr := errors.New("account store unavailable")
 	ws := newCodexLoginFake(nil, nil)
-	ws.completeErr = completeErr
+	ws.startErr = startErr
 
-	require.ErrorIs(t, loginCodex(ws, true, false, ""), completeErr)
+	require.ErrorIs(t, loginCodex(ws, true, false, ""), startErr)
+	require.Equal(t, []string{"StartOAuth:codex"}, ws.calls)
 }
 
 // TestLoginCodex_ProxyWriteFailureIsFatal pins the other non-fatal field's
@@ -262,10 +251,11 @@ func TestLoginCodex_ProxyWriteFailureIsFatal(t *testing.T) {
 
 	proxyErr := errors.New("signed in, but the proxy setting could not be saved: disk full")
 	ws := newCodexLoginFake(nil, nil)
-	ws.completion = workspace.OAuthCompletion{
+	completion := workspace.OAuthCompletion{
 		Account:    workspace.FrontendAccount{ID: "new", Label: "New account"},
 		ProxyError: workspace.EncodeError(proxyErr),
 	}
+	ws.startResult.Completed = &completion
 
 	// proxyErr is an opaque error with no registered wireerr code, so it
 	// crosses OAuthCompletion.ProxyError as "internal": DecodeError
@@ -288,20 +278,20 @@ func TestLoginCodex_ProxyResolutionOrder(t *testing.T) {
 		ws.configuredProxy = "socks5://from-cli:1080"
 		require.NoError(t, loginCodex(ws, true, false, "http://flag:8080"))
 		require.Equal(t, []string{"http://flag:8080"}, ws.startProxies)
-		require.Equal(t, "http://flag:8080", ws.completed[0].proxyURL)
 	})
 
 	t.Run("configured provider proxy is next", func(t *testing.T) {
 		t.Parallel()
+		completion := workspace.OAuthCompletion{Account: workspace.FrontendAccount{Label: "acct"}}
 		ws := &codexLoginWorkspaceFake{
 			startResult: workspace.OAuthStartResult{
-				Token: &oauth.Token{AccessToken: "access-token"}, ReusedExistingLogin: true,
+				Completed:           &completion,
+				ReusedExistingLogin: true,
 			},
 			listResults:     []codexLoginListResult{{}, {}},
 			configuredProxy: "socks5://from-cli:1080",
 		}
 		ws.stubConfigAccessor = stubConfigAccessor{}
-		ws.completion = workspace.OAuthCompletion{Account: workspace.FrontendAccount{Label: "acct"}}
 		require.NoError(t, loginCodexWithConfiguredProxy(t, ws, "socks5://configured:1080"))
 		require.Equal(t, []string{"socks5://configured:1080"}, ws.startProxies)
 	})

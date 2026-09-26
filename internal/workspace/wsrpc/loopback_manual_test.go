@@ -109,14 +109,14 @@ func TestLoopback_ManualPassthroughMethods(t *testing.T) {
 
 	t.Run("StartOAuth flow Wait", func(t *testing.T) {
 		stub.OAuthErr = nil
-		innerFlow := &wsrpctest.StubOAuthFlow{Token: &wsrpctest.OAuthTokenSample}
+		innerFlow := &wsrpctest.StubOAuthFlow{Completion: wsrpctest.OAuthCompletionSample}
 		stub.OAuthFlow = innerFlow
 		_, flow, err := lb.StartOAuth(ctx, "github", "", true)
 		require.NoError(t, err)
 		require.NotNil(t, flow)
 		got, err := flow.Wait(ctx)
 		require.NoError(t, err)
-		require.Equal(t, wsrpctest.OAuthTokenSample, *got)
+		require.Equal(t, wsrpctest.OAuthCompletionSample, got)
 
 		innerFlow.WaitErr = context.Canceled
 		_, err = flow.Wait(ctx)

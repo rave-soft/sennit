@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -188,9 +187,12 @@ type (
 		Interval        int
 	}
 
-	// ActionCompleteOAuth is sent when the device flow completes successfully.
+	// ActionCompleteOAuth is sent when the flow completes successfully. The
+	// backend has already persisted the account and done whatever
+	// provider-specific follow-up it needs (see workspace.OAuthFlow.Wait) by
+	// the time this arrives, so there is no separate save step left to run.
 	ActionCompleteOAuth struct {
-		Token *oauth.Token
+		Completion workspace.OAuthCompletion
 		// Note explains a sign-in that completed without the user doing
 		// anything — a login reused from another tool's disk state (see
 		// existingLoginNote). It is empty for a flow the user actually

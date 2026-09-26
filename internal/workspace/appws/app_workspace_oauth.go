@@ -62,21 +62,9 @@ func (w *AppWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL stri
 		// Copilot has no login of its own to reuse, so a deliberate
 		// "add an account" needs nothing skipped: its flow always goes
 		// through GitHub's device code.
-		return w.startCopilotOAuth(ctx, proxyURL)
+		return w.startCopilotOAuth(ctx, proxyURL, forceNewAccount)
 	default:
 		return workspace.OAuthStartResult{}, nil, fmt.Errorf("oauth: unsupported provider %q", providerID)
-	}
-}
-
-// CompleteOAuth implements workspace.OAuthController.
-func (w *AppWorkspace) CompleteOAuth(ctx context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (workspace.OAuthCompletion, error) {
-	switch providerID {
-	case codex.ProviderID:
-		return w.completeCodexOAuth(ctx, proxyURL, token, forceNewAccount)
-	case copilotProviderID:
-		return w.completeCopilotOAuth(proxyURL, token, forceNewAccount)
-	default:
-		return workspace.OAuthCompletion{}, fmt.Errorf("oauth: unsupported provider %q", providerID)
 	}
 }
 
@@ -120,12 +108,22 @@ func (w *AppWorkspace) OAuthValidateProxy(providerID, proxyURL string) error {
 // -- Codex --
 
 // codexFlowAdapter wraps a *codex.Flow to satisfy workspace.OAuthFlow.
+// proxyURL and forceNewAccount are the values StartOAuth started this flow
+// with; Wait needs both to complete the sign-in the same way
+// startCodexOAuth's disk-reuse path does.
 type codexFlowAdapter struct {
-	flow *codex.Flow
+	flow            *codex.Flow
+	w               *AppWorkspace
+	proxyURL        string
+	forceNewAccount bool
 }
 
-func (a *codexFlowAdapter) Wait(ctx context.Context) (*oauth.Token, error) {
-	return a.flow.Wait(ctx)
+func (a *codexFlowAdapter) Wait(ctx context.Context) (workspace.OAuthCompletion, error) {
+	token, err := a.flow.Wait(ctx)
+	if err != nil {
+		return workspace.OAuthCompletion{}, err
+	}
+	return a.w.completeCodexOAuth(ctx, a.proxyURL, token, a.forceNewAccount)
 }
 
 // Cancel is best-effort and safe to call once, mirroring the flow.Close()
@@ -148,7 +146,7 @@ func (a *codexFlowAdapter) Cancel() {
 // having touched nothing the user asked for.
 func (w *AppWorkspace) startCodexOAuth(ctx context.Context, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	if forceNewAccount {
-		return w.startCodexBrowserFlow(proxyURL)
+		return w.startCodexBrowserFlow(proxyURL, forceNewAccount)
 	}
 
 	if disk, ok := codex.TokensFromDisk(); ok {
@@ -156,18 +154,26 @@ func (w *AppWorkspace) startCodexOAuth(ctx context.Context, proxyURL string, for
 		// its single-use refresh token and logs it out, which is not
 		// something to do to another tool in passing.
 		if token, ok := disk.Token(); ok {
-			return workspace.OAuthStartResult{Token: token, ReusedExistingLogin: true}, nil, nil
+			completion, err := w.completeCodexOAuth(ctx, proxyURL, token, forceNewAccount)
+			if err != nil {
+				return workspace.OAuthStartResult{}, nil, err
+			}
+			return workspace.OAuthStartResult{ReusedExistingLogin: true, Completed: &completion}, nil, nil
 		}
 
 		refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		token, err := codex.RefreshToken(refreshCtx, proxyURL, disk.RefreshToken)
 		cancel()
 		if err == nil {
-			return workspace.OAuthStartResult{Token: token, RefreshedExistingLogin: true}, nil, nil
+			completion, cerr := w.completeCodexOAuth(ctx, proxyURL, token, forceNewAccount)
+			if cerr != nil {
+				return workspace.OAuthStartResult{}, nil, cerr
+			}
+			return workspace.OAuthStartResult{RefreshedExistingLogin: true, Completed: &completion}, nil, nil
 		}
 		// A stale login on disk is not an error worth failing on: the
 		// browser flow below is the fallback for exactly that.
-		result, flow, flowErr := w.startCodexBrowserFlow(proxyURL)
+		result, flow, flowErr := w.startCodexBrowserFlow(proxyURL, forceNewAccount)
 		if flowErr != nil {
 			return workspace.OAuthStartResult{}, nil, flowErr
 		}
@@ -175,20 +181,20 @@ func (w *AppWorkspace) startCodexOAuth(ctx context.Context, proxyURL string, for
 		return result, flow, nil
 	}
 
-	return w.startCodexBrowserFlow(proxyURL)
+	return w.startCodexBrowserFlow(proxyURL, forceNewAccount)
 }
 
 // startCodexBrowserFlow is split out of startCodexOAuth so both the
 // no-disk-login and the stale-disk-login paths can build the
 // browser-flow OAuthFlow the same way.
-func (w *AppWorkspace) startCodexBrowserFlow(proxyURL string) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+func (w *AppWorkspace) startCodexBrowserFlow(proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	flow, err := codex.StartFlow(proxyURL)
 	if err != nil {
 		return workspace.OAuthStartResult{}, nil, err
 	}
 	return workspace.OAuthStartResult{
 		AuthorizationURL: flow.URL(),
-	}, &codexFlowAdapter{flow: flow}, nil
+	}, &codexFlowAdapter{flow: flow, w: w, proxyURL: proxyURL, forceNewAccount: forceNewAccount}, nil
 }
 
 // completeCodexOAuth records the account, then persists the proxy this
@@ -224,7 +230,7 @@ func (w *AppWorkspace) completeCodexOAuth(ctx context.Context, proxyURL string, 
 	previousProxyURL := previousCodexProxyURL(w)
 
 	accountID := codex.AccountID(token.AccessToken)
-	account, err := w.RecordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+	account, err := w.recordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
 		Token:           token,
 		AccountID:       accountID,
 		Email:           codex.Email(token.AccessToken),
@@ -275,14 +281,22 @@ func (w *AppWorkspace) completeCodexOAuth(ctx context.Context, proxyURL string, 
 // -- Copilot --
 
 // copilotFlowAdapter wraps copilot.PollForToken to satisfy
-// workspace.OAuthFlow.
+// workspace.OAuthFlow. proxyURL and forceNewAccount are the values
+// StartOAuth started this flow with; Wait needs both to complete the
+// sign-in once the device code is redeemed.
 type copilotFlowAdapter struct {
-	proxyURL string
-	device   *copilot.DeviceCode
+	proxyURL        string
+	device          *copilot.DeviceCode
+	w               *AppWorkspace
+	forceNewAccount bool
 }
 
-func (a *copilotFlowAdapter) Wait(ctx context.Context) (*oauth.Token, error) {
-	return copilot.PollForToken(ctx, a.proxyURL, a.device)
+func (a *copilotFlowAdapter) Wait(ctx context.Context) (workspace.OAuthCompletion, error) {
+	token, err := copilot.PollForToken(ctx, a.proxyURL, a.device)
+	if err != nil {
+		return workspace.OAuthCompletion{}, err
+	}
+	return a.w.completeCopilotOAuth(a.proxyURL, token, a.forceNewAccount)
 }
 
 // Cancel is a no-op: PollForToken has nothing to release beyond what
@@ -290,7 +304,7 @@ func (a *copilotFlowAdapter) Wait(ctx context.Context) (*oauth.Token, error) {
 // unconditionally, matching OAuthFlow's contract.
 func (a *copilotFlowAdapter) Cancel() {}
 
-func (w *AppWorkspace) startCopilotOAuth(ctx context.Context, proxyURL string) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+func (w *AppWorkspace) startCopilotOAuth(ctx context.Context, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -304,14 +318,14 @@ func (w *AppWorkspace) startCopilotOAuth(ctx context.Context, proxyURL string) (
 		VerificationURL: device.VerificationURI,
 		ExpiresIn:       device.ExpiresIn,
 		Interval:        device.Interval,
-	}, &copilotFlowAdapter{proxyURL: proxyURL, device: device}, nil
+	}, &copilotFlowAdapter{proxyURL: proxyURL, device: device, w: w, forceNewAccount: forceNewAccount}, nil
 }
 
 func (w *AppWorkspace) completeCopilotOAuth(_ string, token *oauth.Token, forceNewAccount bool) (workspace.OAuthCompletion, error) {
 	// Copilot has no way to derive an account identity or email from the
 	// token, matching today's dialog (OAuthCopilot implements neither
 	// oauthAccountIDer nor oauthAccountEmailer nor oauthPostSaver).
-	account, err := w.RecordAccount(config.ScopeGlobal, copilotProviderID, accounts.LegacyCredential{
+	account, err := w.recordAccount(config.ScopeGlobal, copilotProviderID, accounts.LegacyCredential{
 		Token:           token,
 		ForceNewAccount: forceNewAccount,
 	})

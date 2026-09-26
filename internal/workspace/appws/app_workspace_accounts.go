@@ -27,8 +27,28 @@ func (w *AppWorkspace) accounts() *config.AccountsService {
 	return config.NewAccountsService(w.store, w.accountStore(), fetchCodexUsage)
 }
 
-// RecordAccount implements Workspace.
-func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
+// RecordAccount implements Workspace. workspace.AccountCredential carries no
+// Token: an OAuth sign-in is recorded by completeCodexOAuth/
+// completeCopilotOAuth below instead, straight through recordAccount, so a
+// refresh token never has to cross this contract (CLIENT-SERVER.md PR 1.3).
+// What is left for a frontend to call this with is an API-key credential
+// (see internal/cmd/accounts.go's authAddAPIKey).
+func (w *AppWorkspace) RecordAccount(scope config.Scope, providerID string, cred workspace.AccountCredential) (workspace.FrontendAccount, error) {
+	return w.recordAccount(scope, providerID, accounts.LegacyCredential{
+		APIKey:          cred.APIKey,
+		ProxyURL:        cred.ProxyURL,
+		AccountID:       cred.AccountID,
+		Email:           cred.Email,
+		Label:           cred.Label,
+		ForceNewAccount: cred.ForceNewAccount,
+	})
+}
+
+// recordAccount is the actual persistence RecordAccount and the OAuth
+// completion helpers (app_workspace_oauth.go) share; unlike RecordAccount
+// itself, it takes the full accounts.LegacyCredential, Token included, since
+// it is never reached over the wire (see the doc comment above).
+func (w *AppWorkspace) recordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
 	a, err := w.accounts().Record(scope, providerID, cred)
 	if err != nil {
 		return workspace.FrontendAccount{}, err

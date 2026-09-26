@@ -235,17 +235,14 @@ func forbiddenWireTypeName(t reflect.Type) (string, bool) {
 // each entry recording why that specific value legitimately has to travel.
 // Do not add an entry to relax the rule generally - only to document one
 // path that must carry the forbidden type by design.
-var forbiddenTypeAllowList = map[string]string{
-	// The OAuth paths below move a token server -> UI -> server: the UI
-	// receives it from StartOAuth/ImportCopilot and hands it straight back
-	// to CompleteOAuth/RecordAccount. PR 1.3 of CLIENT-SERVER.md completes
-	// the flow on the server behind a handle, so the token never reaches
-	// the UI; these entries go with it.
-	"github.com/rave-soft/sennit/internal/providers/accounts.LegacyCredential.Token": "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
-	"Workspace.ImportCopilot.result0":                                                "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
-	"github.com/rave-soft/sennit/internal/workspace.OAuthStartResult.Token":          "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
-	"Workspace.CompleteOAuth.param3":                                                 "UI round trip of a sign-in token, removed by CLIENT-SERVER.md PR 1.3",
-}
+//
+// The four OAuth entries this map used to carry (a sign-in token moving
+// server -> UI -> server through StartOAuth/ImportCopilot and
+// CompleteOAuth/RecordAccount) are gone: CLIENT-SERVER.md PR 1.3 moved
+// sign-in completion behind OAuthFlow.Wait, so the token never leaves the
+// server, RecordAccount's contract type (AccountCredential) carries no
+// Token field, and ImportCopilot returns only a bool.
+var forbiddenTypeAllowList = map[string]string{}
 
 // -- No hidden state on types with behavior --------------------------------
 //

@@ -21,7 +21,6 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -428,8 +427,24 @@ type ConfigFieldEditor interface {
 	RemoveConfigField(scope config.Scope, key string) error
 }
 
+// AccountCredential is the credential shape a frontend may hand to
+// RecordAccount: every field of accounts.LegacyCredential except Token. An
+// OAuth sign-in is recorded server-side by OAuthFlow.Wait/StartOAuth
+// instead (see OAuthController), so a refresh token never has to round-trip
+// through this contract to get persisted - the only shape a frontend still
+// supplies here is an API key (see internal/cmd/accounts.go's
+// authAddAPIKey). CLIENT-SERVER.md PR 1.3.
+type AccountCredential struct {
+	APIKey          string
+	ProxyURL        string
+	AccountID       string
+	Email           string
+	Label           string
+	ForceNewAccount bool
+}
+
 type AccountRecorder interface {
-	RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (FrontendAccount, error)
+	RecordAccount(scope config.Scope, providerID string, cred AccountCredential) (FrontendAccount, error)
 }
 
 type AccountLister interface {
@@ -596,11 +611,12 @@ type OAuthStartResult struct {
 	// ExpiresIn bounds how long the above stays valid, in seconds.
 	ExpiresIn int
 
-	// Token is set when sign-in already completed with nothing to show —
-	// Codex found a Codex CLI login on disk it could reuse or refresh.
-	// Every field above is zero when this is set, and the accompanying
-	// OAuthFlow is nil.
-	Token *oauth.Token
+	// Completed is set when sign-in already finished with nothing to show —
+	// Codex found a Codex CLI login on disk it could reuse or refresh, and
+	// the server persisted the account (and did whatever post-save work
+	// that provider needs) before StartOAuth returned. Every field above is
+	// zero when this is set, and the accompanying OAuthFlow is nil.
+	Completed *OAuthCompletion
 
 	// ReusedExistingLogin/RefreshedExistingLogin/ExistingLoginFailure
 	// narrate how Token came to be set, or why a login found on disk was
@@ -616,8 +632,14 @@ type OAuthStartResult struct {
 
 // OAuthFlow is a started sign-in awaiting completion.
 type OAuthFlow interface {
-	// Wait blocks until the provider completes the flow or ctx is done.
-	Wait(ctx context.Context) (*oauth.Token, error)
+	// Wait blocks until the provider completes the flow or ctx is done,
+	// then does whatever CompleteOAuth used to do once the frontend called
+	// it back: persists the account and any provider-specific follow-up
+	// (the model list, the proxy this sign-in used). This keeps the token
+	// itself from ever crossing back out to a frontend (CLIENT-SERVER.md
+	// PR 1.3) - once the workspace is remote, only the completion, never
+	// the credential, needs to reach it.
+	Wait(ctx context.Context) (OAuthCompletion, error)
 	// Cancel releases whatever resource the flow holds (a loopback
 	// listener, an in-flight poll). Must be called exactly once when the
 	// flow is no longer needed, whether or not Wait was called.
@@ -667,10 +689,6 @@ type OAuthController interface {
 	// for an account the user never chose — and silently make it the
 	// active one — while the account they meant to add is never reached.
 	StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (OAuthStartResult, OAuthFlow, error)
-	// CompleteOAuth persists token as a new/updated account of providerID
-	// (scope is always global, matching RecordAccount) and performs
-	// whatever the provider needs done afterward.
-	CompleteOAuth(ctx context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (OAuthCompletion, error)
 	// OAuthConfiguredProxy is the proxy providerID already uses: whatever
 	// Sennit has configured for it, falling back to a sibling CLI's own
 	// on-disk config for a provider that has one (Codex).
@@ -678,9 +696,10 @@ type OAuthController interface {
 	// OAuthValidateProxy checks proxyURL is well-formed for providerID.
 	OAuthValidateProxy(providerID, proxyURL string) error
 	// ImportCopilot imports the credentials of an existing GitHub Copilot
-	// CLI login, if one is present on this machine, for use as this
-	// workspace's Copilot provider token.
-	ImportCopilot(ctx context.Context) (*oauth.Token, bool, error)
+	// CLI login, if one is present on this machine, and persists it as this
+	// workspace's Copilot provider token. The bool reports whether a token
+	// was actually imported.
+	ImportCopilot(ctx context.Context) (bool, error)
 	// RefreshOAuthToken refreshes providerID's stored OAuth token at scope.
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
 	// RefreshOAuthTokenForAccount refreshes one stored account's OAuth

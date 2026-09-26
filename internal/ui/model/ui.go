@@ -1010,7 +1010,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		ws := m.com.Workspace
 		ctx := m.com.Context()
 		cmds = append(cmds, func() tea.Msg {
-			_, _, err := ws.ImportCopilot(ctx)
+			_, err := ws.ImportCopilot(ctx)
 			return importCopilotResult{
 				uiOwned:      uiOwned{owner: m},
 				providerID:   providerID,

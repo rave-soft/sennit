@@ -34,11 +34,12 @@ func fakeCodexJWT(t *testing.T, accountID string) string {
 }
 
 // newOAuthTestWorkspace builds a real AppWorkspace the way
-// credentials_singleton_test.go does: RecordAccount (used by
-// CompleteOAuth) reaches through app.Credentials() to signal completion,
-// which panics on a zero *app.App, so a fully-wired one is needed rather
-// than the lighter &AppWorkspace{app: &app.App{}, store: ...} stand-in
-// used elsewhere in this package for read-only methods.
+// credentials_singleton_test.go does: recordAccount (used by
+// completeCodexOAuth/completeCopilotOAuth) reaches through
+// app.Credentials() to signal completion, which panics on a zero *app.App,
+// so a fully-wired one is needed rather than the lighter
+// &AppWorkspace{app: &app.App{}, store: ...} stand-in used elsewhere in
+// this package for read-only methods.
 func newOAuthTestWorkspace(t *testing.T) *AppWorkspace {
 	t.Helper()
 	globalConfigDir := t.TempDir()
@@ -59,7 +60,8 @@ func newOAuthTestWorkspace(t *testing.T) *AppWorkspace {
 
 // TestAppWorkspace_StartOAuthCodex_ReusesDiskLogin covers the disk
 // short-circuit: an existing Codex CLI login with a still-usable access
-// token is returned as a won Token, with no flow to wait on.
+// token is recorded and returned as a completed sign-in, with no flow to
+// wait on.
 func TestAppWorkspace_StartOAuthCodex_ReusesDiskLogin(t *testing.T) {
 	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
 	home := t.TempDir()
@@ -80,8 +82,8 @@ func TestAppWorkspace_StartOAuthCodex_ReusesDiskLogin(t *testing.T) {
 	result, flow, err := w.StartOAuth(t.Context(), codex.ProviderID, "", false)
 	require.NoError(t, err)
 	require.Nil(t, flow)
-	require.NotNil(t, result.Token)
-	require.Equal(t, accessToken, result.Token.AccessToken)
+	require.NotNil(t, result.Completed, "a reused disk login is completed before StartOAuth returns")
+	require.NotEmpty(t, result.Completed.Account.ID)
 	require.True(t, result.ReusedExistingLogin)
 	require.False(t, result.RefreshedExistingLogin)
 	require.Empty(t, result.AuthorizationURL)
@@ -113,7 +115,7 @@ func TestAppWorkspace_StartOAuthCodex_ForceNewAccountSkipsDiskLogin(t *testing.T
 	require.NotNil(t, flow)
 	t.Cleanup(flow.Cancel)
 
-	require.Nil(t, result.Token, "a usable disk login must not be adopted for a deliberate sign-in")
+	require.Nil(t, result.Completed, "a usable disk login must not be adopted for a deliberate sign-in")
 	require.NotEmpty(t, result.AuthorizationURL)
 	require.False(t, result.ReusedExistingLogin)
 	require.False(t, result.RefreshedExistingLogin)
@@ -133,7 +135,7 @@ func TestAppWorkspace_StartOAuthCodex_FallsBackToBrowserFlow(t *testing.T) {
 	require.NotNil(t, flow)
 	t.Cleanup(flow.Cancel)
 
-	require.Nil(t, result.Token)
+	require.Nil(t, result.Completed)
 	require.NotEmpty(t, result.AuthorizationURL)
 	require.False(t, result.ReusedExistingLogin)
 	require.False(t, result.RefreshedExistingLogin)
@@ -224,7 +226,7 @@ func TestAppWorkspace_CompleteOAuthCodex_RecordsAccountAndProxy_ModelFetchFails(
 	// than timing out.
 	const deadProxy = "http://127.0.0.1:1"
 
-	comp, err := w.CompleteOAuth(t.Context(), codex.ProviderID, deadProxy, token, false)
+	comp, err := w.completeCodexOAuth(t.Context(), deadProxy, token, false)
 	require.NoError(t, err, "a model-fetch failure must not fail CompleteOAuth itself")
 	require.NotNil(t, comp.ModelsError)
 	require.Equal(t, 0, comp.ModelsFetched)
@@ -274,7 +276,7 @@ func persistedCodexProxy(t *testing.T) string {
 func establishExistingCodexLogin(t *testing.T, w *AppWorkspace, accountID, proxyURL string) *oauth.Token {
 	t.Helper()
 	token := &oauth.Token{AccessToken: fakeCodexJWT(t, accountID)}
-	_, err := w.CompleteOAuth(t.Context(), codex.ProviderID, proxyURL, token, false)
+	_, err := w.completeCodexOAuth(t.Context(), proxyURL, token, false)
 	require.NoError(t, err)
 	require.Equal(t, proxyURL, persistedCodexProxy(t))
 	return token
@@ -287,7 +289,7 @@ func TestAppWorkspace_CompleteOAuthCodex_EmptyProxyRemovesField(t *testing.T) {
 	w := newOAuthTestWorkspace(t)
 	token := establishExistingCodexLogin(t, w, "acct-complete-2", "socks5://old:1080")
 
-	_, err := w.CompleteOAuth(t.Context(), codex.ProviderID, "", token, false)
+	_, err := w.completeCodexOAuth(t.Context(), "", token, false)
 	require.NoError(t, err)
 
 	require.Empty(t, persistedCodexProxy(t),
@@ -319,7 +321,7 @@ func TestAppWorkspace_CompleteOAuthCodex_SkipsWriteWhenProxyUnchanged(t *testing
 		return nil
 	}
 
-	comp, err := w.CompleteOAuth(t.Context(), codex.ProviderID, proxy, token, false)
+	comp, err := w.completeCodexOAuth(t.Context(), proxy, token, false)
 	require.NoError(t, err)
 	require.Nil(t, comp.ProxyError, "an unchanged proxy must never attempt a write, so there is nothing to fail")
 	require.Equal(t, proxy, persistedCodexProxy(t), "the original value must survive untouched")
@@ -349,7 +351,7 @@ func TestAppWorkspace_CompleteOAuthCodex_ProxyWriteFailureIsNonFatal(t *testing.
 	// above is what fails it. Port 1 is never listening, so the model
 	// fetch that follows the failed proxy write also fails fast rather
 	// than reaching a real endpoint.
-	comp, err := w.CompleteOAuth(t.Context(), codex.ProviderID, "", token, false)
+	comp, err := w.completeCodexOAuth(t.Context(), "", token, false)
 	require.NoError(t, err, "a proxy write failure must not fail CompleteOAuth itself")
 	require.NotNil(t, comp.ProxyError)
 	require.NotEmpty(t, comp.Account.ID, "the account must still be recorded")
@@ -373,7 +375,7 @@ func TestAppWorkspace_CompleteOAuthCopilot_RecordsAccountWithNoIdentity(t *testi
 	w := newOAuthTestWorkspace(t)
 
 	token := &oauth.Token{AccessToken: "gho_opaque"}
-	comp, err := w.CompleteOAuth(t.Context(), copilotProviderID, "", token, false)
+	comp, err := w.completeCopilotOAuth("", token, false)
 	require.NoError(t, err)
 	require.Equal(t, -1, comp.ModelsFetched)
 	require.Nil(t, comp.ModelsError)
@@ -385,14 +387,11 @@ func TestAppWorkspace_CompleteOAuthCopilot_RecordsAccountWithNoIdentity(t *testi
 }
 
 // TestAppWorkspace_OAuth_UnsupportedProvider is the safety net: no caller
-// today asks for a third provider, but both entry points must still fail
+// today asks StartOAuth for a third provider, but it must still fail
 // cleanly instead of dispatching nowhere.
 func TestAppWorkspace_OAuth_UnsupportedProvider(t *testing.T) {
 	w := newOAuthTestWorkspace(t)
 
 	_, _, err := w.StartOAuth(t.Context(), "anthropic", "", false)
-	require.Error(t, err)
-
-	_, err = w.CompleteOAuth(t.Context(), "anthropic", "", &oauth.Token{}, false)
 	require.Error(t, err)
 }

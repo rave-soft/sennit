@@ -13,7 +13,6 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -54,7 +53,6 @@ type WorkspaceServer interface {
 	BuiltinSkills(ctx context.Context, req *wsrpc.BuiltinSkillsRequest) (*wsrpc.BuiltinSkillsResponse, error)
 	CancelTask(ctx context.Context, req *wsrpc.CancelTaskRequest) (*wsrpc.CancelTaskResponse, error)
 	CancelThread(ctx context.Context, req *wsrpc.CancelThreadRequest) (*wsrpc.CancelThreadResponse, error)
-	CompleteOAuth(ctx context.Context, req *wsrpc.CompleteOAuthRequest) (*wsrpc.CompleteOAuthResponse, error)
 	Config(ctx context.Context, req *wsrpc.ConfigRequest) (*wsrpc.ConfigResponse, error)
 	ConfigProblems(ctx context.Context, req *wsrpc.ConfigProblemsRequest) (*wsrpc.ConfigProblemsResponse, error)
 	ConfigureCustomProvider(ctx context.Context, req *wsrpc.ConfigureCustomProviderRequest) (*wsrpc.ConfigureCustomProviderResponse, error)
@@ -175,7 +173,6 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "BuiltinSkills", Handler: _Workspace_BuiltinSkills_Handler},
 		{MethodName: "CancelTask", Handler: _Workspace_CancelTask_Handler},
 		{MethodName: "CancelThread", Handler: _Workspace_CancelThread_Handler},
-		{MethodName: "CompleteOAuth", Handler: _Workspace_CompleteOAuth_Handler},
 		{MethodName: "Config", Handler: _Workspace_Config_Handler},
 		{MethodName: "ConfigProblems", Handler: _Workspace_ConfigProblems_Handler},
 		{MethodName: "ConfigureCustomProvider", Handler: _Workspace_ConfigureCustomProvider_Handler},
@@ -554,21 +551,6 @@ func _Workspace_CancelThread_Handler(srv any, ctx context.Context, dec func(any)
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/CancelThread"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).CancelThread(ctx, req.(*wsrpc.CancelThreadRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_CompleteOAuth_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.CompleteOAuthRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).CompleteOAuth(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/CompleteOAuth"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).CompleteOAuth(ctx, req.(*wsrpc.CompleteOAuthRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2193,20 +2175,6 @@ func (s *workspaceServer) CancelThread(ctx context.Context, req *wsrpc.CancelThr
 	return &wsrpc.CancelThreadResponse{}, nil
 }
 
-func (s *workspaceServer) CompleteOAuth(ctx context.Context, req *wsrpc.CompleteOAuthRequest) (*wsrpc.CompleteOAuthResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0, res1 := ws.CompleteOAuth(ctx, req.ProviderID, req.ProxyURL, req.Token, req.ForceNewAccount)
-	if res1 != nil {
-		return nil, grpcStatusFromError(ctx, res1)
-	}
-	return &wsrpc.CompleteOAuthResponse{
-		Result: res0,
-	}, nil
-}
-
 func (s *workspaceServer) Config(ctx context.Context, req *wsrpc.ConfigRequest) (*wsrpc.ConfigResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -2440,13 +2408,12 @@ func (s *workspaceServer) ImportCopilot(ctx context.Context, req *wsrpc.ImportCo
 	if err != nil {
 		return nil, grpcStatusFromError(ctx, err)
 	}
-	res0, res1, res2 := ws.ImportCopilot(ctx)
-	if res2 != nil {
-		return nil, grpcStatusFromError(ctx, res2)
+	res0, res1 := ws.ImportCopilot(ctx)
+	if res1 != nil {
+		return nil, grpcStatusFromError(ctx, res1)
 	}
 	return &wsrpc.ImportCopilotResponse{
-		Result0: res0,
-		Result1: res1,
+		Result: res0,
 	}, nil
 }
 
@@ -3640,22 +3607,6 @@ func (c *Client) CancelThread(ctx context.Context, id string, reason string) (er
 	return nil
 }
 
-// CompleteOAuth calls the Workspace service's CompleteOAuth RPC.
-func (c *Client) CompleteOAuth(ctx context.Context, providerID string, proxyURL string, token *oauth.Token, forceNewAccount bool) (res0 workspace.OAuthCompletion, err error) {
-	wsrpcReq := &wsrpc.CompleteOAuthRequest{
-		ProviderID:      providerID,
-		ProxyURL:        proxyURL,
-		Token:           token,
-		ForceNewAccount: forceNewAccount,
-	}
-	wsrpcResp := new(wsrpc.CompleteOAuthResponse)
-	if err := c.invoke(ctx, "CompleteOAuth", wsrpcReq, wsrpcResp); err != nil {
-		var zero0 workspace.OAuthCompletion
-		return zero0, err
-	}
-	return wsrpcResp.Result, nil
-}
-
 // Config calls the Workspace service's Config RPC.
 func (c *Client) Config() (res0 *workspace.FrontendConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
@@ -3898,15 +3849,14 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (res0 session
 }
 
 // ImportCopilot calls the Workspace service's ImportCopilot RPC.
-func (c *Client) ImportCopilot(ctx context.Context) (res0 *oauth.Token, res1 bool, err error) {
+func (c *Client) ImportCopilot(ctx context.Context) (res0 bool, err error) {
 	wsrpcReq := &wsrpc.ImportCopilotRequest{}
 	wsrpcResp := new(wsrpc.ImportCopilotResponse)
 	if err := c.invoke(ctx, "ImportCopilot", wsrpcReq, wsrpcResp); err != nil {
-		var zero0 *oauth.Token
-		var zero1 bool
-		return zero0, zero1, err
+		var zero0 bool
+		return zero0, err
 	}
-	return wsrpcResp.Result0, wsrpcResp.Result1, nil
+	return wsrpcResp.Result, nil
 }
 
 // InitCoderAgent calls the Workspace service's InitCoderAgent RPC.
@@ -4493,7 +4443,7 @@ func (c *Client) ReadSkill(ctx context.Context, skillID string) (res0 []byte, re
 }
 
 // RecordAccount calls the Workspace service's RecordAccount RPC.
-func (c *Client) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (res0 workspace.FrontendAccount, err error) {
+func (c *Client) RecordAccount(scope config.Scope, providerID string, cred workspace.AccountCredential) (res0 workspace.FrontendAccount, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
 	defer cancel()
 	wsrpcReq := &wsrpc.RecordAccountRequest{

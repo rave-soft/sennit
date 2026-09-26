@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -201,23 +200,26 @@ func (s *StubWorkspace) Shutdown() {
 // StartOAuth test exercise a codec/transport's wrapping of the returned
 // handle.
 type StubOAuthFlow struct {
-	Token     *oauth.Token
-	WaitErr   error
-	Cancelled bool
+	Completion workspace.OAuthCompletion
+	WaitErr    error
+	Cancelled  bool
 }
 
-func (f *StubOAuthFlow) Wait(context.Context) (*oauth.Token, error) {
+func (f *StubOAuthFlow) Wait(context.Context) (workspace.OAuthCompletion, error) {
 	if f.WaitErr != nil {
-		return nil, f.WaitErr
+		return workspace.OAuthCompletion{}, f.WaitErr
 	}
-	return f.Token, nil
+	return f.Completion, nil
 }
 
 func (f *StubOAuthFlow) Cancel() { f.Cancelled = true }
 
-// OAuthTokenSample is a representative *oauth.Token value for StartOAuth/
-// Wait tests.
-var OAuthTokenSample = oauth.Token{AccessToken: "access-token", RefreshToken: "refresh-token", ExpiresIn: 3600}
+// OAuthCompletionSample is a representative workspace.OAuthCompletion value
+// for StartOAuth/Wait tests.
+var OAuthCompletionSample = workspace.OAuthCompletion{
+	Account:       workspace.FrontendAccount{ID: "acc_1", Label: "Sample Account"},
+	ModelsFetched: 3,
+}
 
 // SessionSample, PermissionRequestSample and MessageSample are
 // representative non-trivial values for the conformance table (matching

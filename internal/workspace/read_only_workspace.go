@@ -11,7 +11,6 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -492,7 +491,7 @@ func (w *readOnlyWorkspace) ConfigureCustomProvider(ctx context.Context, scope c
 	return nil, w.readOnlyError("ConfigureCustomProvider")
 }
 
-func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (FrontendAccount, error) {
+func (w *readOnlyWorkspace) RecordAccount(scope config.Scope, providerID string, cred AccountCredential) (FrontendAccount, error) {
 	return FrontendAccount{}, w.readOnlyError("RecordAccount")
 }
 
@@ -524,16 +523,12 @@ func (w *readOnlyWorkspace) RefreshAccountLimits(ctx context.Context, providerID
 	return nil, w.readOnlyError("RefreshAccountLimits")
 }
 
-// StartOAuth and CompleteOAuth are refused for the same reason
-// RefreshAccountLimits and VerifyProviderAPIKey are: both are live network
-// calls made — and CompleteOAuth persists a credential — in the parent
-// workspace's name, which a read-only thread view exists to avoid doing.
+// StartOAuth is refused for the same reason RefreshAccountLimits and
+// VerifyProviderAPIKey are: it is a live network call made — and, once the
+// flow completes, a credential persisted — in the parent workspace's name,
+// which a read-only thread view exists to avoid doing.
 func (w *readOnlyWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (OAuthStartResult, OAuthFlow, error) {
 	return OAuthStartResult{}, nil, w.readOnlyError("StartOAuth")
-}
-
-func (w *readOnlyWorkspace) CompleteOAuth(ctx context.Context, providerID, proxyURL string, token *oauth.Token, forceNewAccount bool) (OAuthCompletion, error) {
-	return OAuthCompletion{}, w.readOnlyError("CompleteOAuth")
 }
 
 // OAuthConfiguredProxy and OAuthValidateProxy are pure reads/validation
@@ -581,8 +576,8 @@ func (w *readOnlyWorkspace) RemoveConfigField(scope config.Scope, key string) er
 	return w.readOnlyError("RemoveConfigField")
 }
 
-func (w *readOnlyWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
-	return nil, false, nil
+func (w *readOnlyWorkspace) ImportCopilot(ctx context.Context) (bool, error) {
+	return false, nil
 }
 
 func (w *readOnlyWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {

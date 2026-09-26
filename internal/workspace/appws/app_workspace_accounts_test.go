@@ -28,7 +28,11 @@ func TestUpdateAccountFields_LabelEditKeepsTokenByteIdentical(t *testing.T) {
 		ExpiresIn:    3600,
 		ExpiresAt:    1234567890,
 	}
-	recorded, err := w.RecordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+	// recordAccount (unexported), not RecordAccount: the public method's
+	// contract type, workspace.AccountCredential, carries no Token (see its
+	// doc comment) - this test needs an OAuth account on file, which only
+	// the internal helper the OAuth completion path itself uses can create.
+	recorded, err := w.recordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
 		Token:           originalToken,
 		AccountID:       "acct-remote-1",
 		ForceNewAccount: true,
@@ -59,7 +63,7 @@ func TestUpdateAccountFields_APIKeyEditKeepsAPIKeyUnchanged(t *testing.T) {
 	t.Setenv("SENNIT_ACCOUNTS_TEST_KEY", "resolved-secret-value")
 	w := newOAuthTestWorkspace(t)
 
-	recorded, err := w.RecordAccount(config.ScopeGlobal, "openai", accounts.LegacyCredential{
+	recorded, err := w.RecordAccount(config.ScopeGlobal, "openai", workspace.AccountCredential{
 		APIKey:          "$SENNIT_ACCOUNTS_TEST_KEY",
 		ForceNewAccount: true,
 	})
@@ -88,7 +92,9 @@ func TestListAccounts_JSONNeverLeaksCredential(t *testing.T) {
 	t.Setenv("SENNIT_ACCOUNTS_TEST_KEY", "resolved-secret-value")
 	w := newOAuthTestWorkspace(t)
 
-	_, err := w.RecordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
+	// recordAccount (unexported): see the comment on the same call in
+	// TestUpdateAccountFields_LabelEditKeepsTokenByteIdentical above.
+	_, err := w.recordAccount(config.ScopeGlobal, codex.ProviderID, accounts.LegacyCredential{
 		Token: &oauth.Token{
 			AccessToken:  "super-secret-access-token",
 			RefreshToken: "super-secret-refresh-token",
@@ -99,7 +105,7 @@ func TestListAccounts_JSONNeverLeaksCredential(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = w.RecordAccount(config.ScopeGlobal, "openai", accounts.LegacyCredential{
+	_, err = w.RecordAccount(config.ScopeGlobal, "openai", workspace.AccountCredential{
 		APIKey:          "$SENNIT_ACCOUNTS_TEST_KEY",
 		ForceNewAccount: true,
 	})

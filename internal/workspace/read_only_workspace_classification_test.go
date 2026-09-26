@@ -6,10 +6,8 @@ import (
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,7 +37,6 @@ var refusedMethods = []string{
 	"AttachThread",
 	"CancelTask",
 	"CancelThread",
-	"CompleteOAuth",
 	"ConfigureCustomProvider",
 	"CreateSession",
 	"CreateThread",
@@ -294,7 +291,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.NoError(t, ro.FileTrackerRecordRead(t.Context(), "sess-1", "/foo"))
 		},
 		"ImportCopilot": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, ok, err := ro.ImportCopilot(t.Context())
+			ok, err := ro.ImportCopilot(t.Context())
 			require.NoError(t, err)
 			require.False(t, ok)
 		},
@@ -390,7 +387,7 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 			require.True(t, IsReadOnlyError(err))
 		},
 		"RecordAccount": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, err := ro.RecordAccount(config.ScopeWorkspace, "provider", accounts.LegacyCredential{})
+			_, err := ro.RecordAccount(config.ScopeWorkspace, "provider", AccountCredential{})
 			require.True(t, IsReadOnlyError(err))
 		},
 		"ActivateAccount": func(t *testing.T, ro *readOnlyWorkspace) {
@@ -423,10 +420,6 @@ func TestReadOnlyWorkspace_RefusesEveryMutatingMethod(t *testing.T) {
 		},
 		"StartOAuth": func(t *testing.T, ro *readOnlyWorkspace) {
 			_, _, err := ro.StartOAuth(t.Context(), "provider", "", false)
-			require.True(t, IsReadOnlyError(err))
-		},
-		"CompleteOAuth": func(t *testing.T, ro *readOnlyWorkspace) {
-			_, err := ro.CompleteOAuth(t.Context(), "provider", "", &oauth.Token{}, false)
 			require.True(t, IsReadOnlyError(err))
 		},
 		"Shutdown": func(_ *testing.T, ro *readOnlyWorkspace) {

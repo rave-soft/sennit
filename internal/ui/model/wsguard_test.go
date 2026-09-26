@@ -23,10 +23,8 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -261,11 +259,6 @@ func (g *updateGoroutineGuard) CancelThread(ctx context.Context, id string, reas
 	return g.Workspace.CancelThread(ctx, id, reason)
 }
 
-func (g *updateGoroutineGuard) CompleteOAuth(ctx context.Context, providerID string, proxyURL string, token *oauth.Token, forceNewAccount bool) (workspace.OAuthCompletion, error) {
-	g.check("CompleteOAuth")
-	return g.Workspace.CompleteOAuth(ctx, providerID, proxyURL, token, forceNewAccount)
-}
-
 func (g *updateGoroutineGuard) ConfigProblems() []config.Problem {
 	g.check("ConfigProblems")
 	return g.Workspace.ConfigProblems()
@@ -356,7 +349,7 @@ func (g *updateGoroutineGuard) GetSession(ctx context.Context, sessionID string)
 	return g.Workspace.GetSession(ctx, sessionID)
 }
 
-func (g *updateGoroutineGuard) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+func (g *updateGoroutineGuard) ImportCopilot(ctx context.Context) (bool, error) {
 	g.check("ImportCopilot")
 	return g.Workspace.ImportCopilot(ctx)
 }
@@ -551,7 +544,7 @@ func (g *updateGoroutineGuard) ReadSkill(ctx context.Context, skillID string) ([
 	return g.Workspace.ReadSkill(ctx, skillID)
 }
 
-func (g *updateGoroutineGuard) RecordAccount(scope config.Scope, providerID string, cred accounts.LegacyCredential) (workspace.FrontendAccount, error) {
+func (g *updateGoroutineGuard) RecordAccount(scope config.Scope, providerID string, cred workspace.AccountCredential) (workspace.FrontendAccount, error) {
 	g.check("RecordAccount")
 	return g.Workspace.RecordAccount(scope, providerID, cred)
 }

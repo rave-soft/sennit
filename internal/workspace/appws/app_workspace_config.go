@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/oauth"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -105,7 +104,7 @@ func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 	return w.store.RemoveConfigField(scope, key)
 }
 
-func (w *AppWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+func (w *AppWorkspace) ImportCopilot(ctx context.Context) (bool, error) {
 	return w.app.Credentials().ImportCopilot(ctx)
 }
 

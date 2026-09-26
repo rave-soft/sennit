@@ -10,7 +10,6 @@ import (
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/providers/accounts"
@@ -211,20 +210,6 @@ type CancelThreadResponse struct {
 	Err *wireerr.Error `json:"err,omitempty"`
 }
 
-// CompleteOAuthRequest is the request DTO for workspace.Workspace.CompleteOAuth.
-type CompleteOAuthRequest struct {
-	ProviderID      string       `json:"provider_id"`
-	ProxyURL        string       `json:"proxy_url"`
-	Token           *oauth.Token `json:"token"`
-	ForceNewAccount bool         `json:"force_new_account"`
-}
-
-// CompleteOAuthResponse is the response DTO for workspace.Workspace.CompleteOAuth.
-type CompleteOAuthResponse struct {
-	Result workspace.OAuthCompletion `json:"result"`
-	Err    *wireerr.Error            `json:"err,omitempty"`
-}
-
 // ConfigRequest is the request DTO for workspace.Workspace.Config.
 type ConfigRequest struct{}
 
@@ -409,9 +394,8 @@ type ImportCopilotRequest struct{}
 
 // ImportCopilotResponse is the response DTO for workspace.Workspace.ImportCopilot.
 type ImportCopilotResponse struct {
-	Result0 *oauth.Token   `json:"result_0"`
-	Result1 bool           `json:"result_1"`
-	Err     *wireerr.Error `json:"err,omitempty"`
+	Result bool           `json:"result"`
+	Err    *wireerr.Error `json:"err,omitempty"`
 }
 
 // InitCoderAgentRequest is the request DTO for workspace.Workspace.InitCoderAgent.
@@ -849,9 +833,9 @@ type ReadSkillResponse struct {
 
 // RecordAccountRequest is the request DTO for workspace.Workspace.RecordAccount.
 type RecordAccountRequest struct {
-	Scope      config.Scope              `json:"scope"`
-	ProviderID string                    `json:"provider_id"`
-	Cred       accounts.LegacyCredential `json:"cred"`
+	Scope      config.Scope                `json:"scope"`
+	ProviderID string                      `json:"provider_id"`
+	Cred       workspace.AccountCredential `json:"cred"`
 }
 
 // RecordAccountResponse is the response DTO for workspace.Workspace.RecordAccount.

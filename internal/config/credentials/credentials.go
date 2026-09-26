@@ -682,20 +682,21 @@ func (m *Manager) loadTokenFromDisk(scope config.Scope, providerID string) (*oau
 // waiting out the real deadline.
 var importCopilotTimeout = 15 * time.Second
 
-// ImportCopilot attempts to import a GitHub Copilot token from disk. The
-// bool reports whether a token was actually imported (an already-configured
+// ImportCopilot attempts to import a GitHub Copilot token from disk,
+// persisting it as this workspace's Copilot provider token. The bool
+// reports whether a token was actually imported (an already-configured
 // Copilot provider, or no on-disk login found, both fall through to
-// (nil, false, nil) — neither is an error); the error return is for a
-// disk token that was found but could not be turned into a usable
-// credential (the exchange or the persist failed).
-func (m *Manager) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error) {
+// (false, nil) — neither is an error); the error return is for a disk
+// token that was found but could not be turned into a usable credential
+// (the exchange or the persist failed).
+func (m *Manager) ImportCopilot(ctx context.Context) (bool, error) {
 	if m.store.HasConfigField(config.ScopeGlobal, "providers.copilot.api_key") || m.store.HasConfigField(config.ScopeGlobal, "providers.copilot.oauth") {
-		return nil, false, nil
+		return false, nil
 	}
 
 	diskToken, hasDiskToken := copilot.RefreshTokenFromDisk()
 	if !hasDiskToken {
-		return nil, false, nil
+		return false, nil
 	}
 
 	slog.Info("Found existing GitHub Copilot token on disk. Authenticating...")
@@ -708,16 +709,16 @@ func (m *Manager) ImportCopilot(ctx context.Context) (*oauth.Token, bool, error)
 	token, err := m.exchange(ctx, string(catwalk.InferenceProviderCopilot), "", diskToken)
 	if err != nil {
 		slog.Error("Unable to import GitHub Copilot token", "error", err)
-		return nil, false, fmt.Errorf("exchanging github copilot token: %w", err)
+		return false, fmt.Errorf("exchanging github copilot token: %w", err)
 	}
 
 	// SetProviderAPIKey both applies the token in memory and persists it,
 	// so a second explicit write of the same keys is unnecessary.
 	if err := m.store.SetProviderAPIKey(config.ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
 		slog.Error("Unable to save GitHub Copilot token to disk", "error", err)
-		return token, false, fmt.Errorf("saving github copilot token: %w", err)
+		return false, fmt.Errorf("saving github copilot token: %w", err)
 	}
 
 	slog.Info("GitHub Copilot successfully imported")
-	return token, true, nil
+	return true, nil
 }

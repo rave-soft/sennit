@@ -80,8 +80,27 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 		defer flow.Cancel() // best-effort listener shutdown
 	}
 
-	token := result.Token
-	if token == nil {
+	// Counted before the account is recorded so the summary below can tell
+	// "a new account appeared" (this login, or the one-time migration of a
+	// pre-existing single credential, added an entry) from "the same count
+	// as before" (this login only refreshed an account already on file) —
+	// the completion itself reports neither, only the resulting Account.
+	before, err := ws.ListAccounts(codex.ProviderID)
+	if err != nil {
+		return fmt.Errorf("listing existing Codex accounts: %w", err)
+	}
+
+	var completion workspace.OAuthCompletion
+	if result.Completed != nil {
+		fmt.Println("Found an existing Codex CLI login on disk. Using it to authenticate...")
+		if result.RefreshedExistingLogin {
+			// Refreshing spends the CLI's single-use refresh token, so say
+			// what it cost the other tool.
+			fmt.Println("The Codex CLI's token was close to expiring, so it was refreshed;")
+			fmt.Println("the CLI may ask you to sign in again the next time you use it.")
+		}
+		completion = *result.Completed
+	} else {
 		if result.ExistingLoginFailure != "" {
 			// A login was found on disk but could not be reused; the
 			// browser flow below is exactly the fallback for that.
@@ -100,33 +119,10 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 		}
 
 		fmt.Println("Waiting for authorization...")
-		token, err = flow.Wait(loginCtx)
+		completion, err = flow.Wait(loginCtx)
 		if err != nil {
 			return err
 		}
-	} else {
-		fmt.Println("Found an existing Codex CLI login on disk. Using it to authenticate...")
-		if result.RefreshedExistingLogin {
-			// Refreshing spends the CLI's single-use refresh token, so say
-			// what it cost the other tool.
-			fmt.Println("The Codex CLI's token was close to expiring, so it was refreshed;")
-			fmt.Println("the CLI may ask you to sign in again the next time you use it.")
-		}
-	}
-
-	// Counted before the account is recorded so the summary below can tell
-	// "a new account appeared" (this login, or the one-time migration of a
-	// pre-existing single credential, added an entry) from "the same count
-	// as before" (this login only refreshed an account already on file) —
-	// CompleteOAuth itself reports neither, only the resulting Account.
-	before, err := ws.ListAccounts(codex.ProviderID)
-	if err != nil {
-		return fmt.Errorf("listing existing Codex accounts: %w", err)
-	}
-
-	completion, err := ws.CompleteOAuth(loginCtx, codex.ProviderID, proxyURL, token, forceNewAccount)
-	if err != nil {
-		return err
 	}
 
 	// A proxy that could not be persisted as the provider's default fails
@@ -134,14 +130,14 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 	// refactor (it aborted the login outright, before the account was
 	// even recorded) — the credential just happens to already be saved
 	// this time. completion.ProxyError already reads as a complete
-	// sentence (see AppWorkspace.CompleteOAuth), so it is returned as-is
-	// rather than wrapped again.
+	// sentence (see AppWorkspace's OAuth completion helpers), so it is
+	// returned as-is rather than wrapped again.
 	if completion.ProxyError != nil {
 		return workspace.DecodeError(completion.ProxyError)
 	}
 
 	// Which models the account may use is per-plan, so the catalog entry
-	// ships without any and the list is fetched during CompleteOAuth. A
+	// ships without any and the list is fetched once the flow completes. A
 	// failure is not fatal to the sign-in itself: the credentials are
 	// already saved, and the list can be refreshed later.
 	// completion.ModelsError, like ProxyError above, already reads as a
@@ -180,7 +176,7 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 // that account's own override, or "none" forcing a direct connection (see
 // accounts.ResolveProxy) — while ConfiguredProxyURL is the provider-level
 // default as written in config. loginCodex falls back to this value when
-// --proxy is not passed, and CompleteOAuth then persists it back to
+// --proxy is not passed, and the completed sign-in then persists it back to
 // providers.codex.proxy_url; using the effective value there would promote
 // one account's route to every account's default on the next login, and
 // would rewrite a "$VAR" template to its resolved literal even though

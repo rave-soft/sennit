@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -125,8 +124,8 @@ func (l *Loopback) SubscribeWith(send func(any)) func() {
 
 // StartOAuth is class H. OAuthStartResult and a non-nil error
 // round-trip directly; the returned OAuthFlow (a handle, not data) is
-// wrapped so its own Wait keeps round-tripping the token and error it
-// eventually produces.
+// wrapped so its own Wait keeps round-tripping the completion and error
+// it eventually produces.
 func (l *Loopback) StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	result, flow, err := l.inner.StartOAuth(ctx, providerID, proxyURL, forceNewAccount)
 	result = jsonRoundTrip("OAuthStartResult", result)
@@ -144,9 +143,9 @@ type codecOAuthFlow struct {
 	inner workspace.OAuthFlow
 }
 
-func (f codecOAuthFlow) Wait(ctx context.Context) (*oauth.Token, error) {
-	token, err := f.inner.Wait(ctx)
-	return jsonRoundTrip("OAuthFlow token", token), roundTripError("OAuthFlow.Wait", err)
+func (f codecOAuthFlow) Wait(ctx context.Context) (workspace.OAuthCompletion, error) {
+	completion, err := f.inner.Wait(ctx)
+	return jsonRoundTrip("OAuthCompletion", completion), roundTripError("OAuthFlow.Wait", err)
 }
 
 func (f codecOAuthFlow) Cancel() {
