@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -161,15 +162,26 @@ type agentServer struct {
 //     it would in-process;
 //   - otherwise a Started frame is sent immediately, then every
 //     AgentRunEvent the turn produces, forwarded as it arrives;
-//   - stream.Context() is passed straight through as the ctx
-//     ws.AgentRunStream runs on, so this RPC's cancellation semantics
-//     match AppWorkspace.AgentRunStream's exactly: the client cancelling
-//     the call, and a dropped connection (which cancels the server
-//     stream's context the same way), both stop the turn, because that
-//     ctx is what AppWorkspace derives its own internal cancellation
-//     from. A clean end of the turn (the events channel closing after its
-//     terminal event) ends the RPC successfully (nil); the last frame
-//     sent is always the terminal AgentRunEvent (Done: true).
+//   - the turn itself runs on turnCtx, detached from the stream's own
+//     cancellation (context.WithoutCancel, which keeps stream.Context()'s
+//     values -- e.g. the resolved handle -- but not its Done channel): the
+//     stream only *observes* the turn, per CLIENT-SERVER.md's PR 1.2 fix
+//     ("Решение после ревью 2026-09-26"). A dropped connection therefore
+//     no longer stops the turn; the only way to stop it is an explicit
+//     AgentCancel(sessionID) call, which Client.AgentRunStream sends when
+//     the caller's own ctx is cancelled (see its doc comment), and which
+//     works independent of turnCtx because the coordinator tracks
+//     cancellation by session ID, not by this RPC's context (see
+//     agent.coordinator.Cancel / dispatcher's activeRequests registry);
+//   - stream.Context() (streamCtx below) still governs *forwarding*: once
+//     it's done (client gone, or the RPC itself cancelled), this handler
+//     stops sending and returns, but keeps draining events in the
+//     background so the turn -- now running unobserved -- can finish
+//     without wedging its own goroutine on a full unbuffered channel. A
+//     clean end of the turn while still observed (the events channel
+//     closing after its terminal event) ends the RPC successfully (nil);
+//     the last frame sent is always the terminal AgentRunEvent (Done:
+//     true).
 func (s *agentServer) AgentRunStream(req *AgentRunStreamRequest, stream AgentRunStreamServer) (err error) {
 	// grpc-go does not recover a streaming handler's own panics -- see
 	// eventsServer.Subscribe's identical guard.
@@ -180,28 +192,26 @@ func (s *agentServer) AgentRunStream(req *AgentRunStreamRequest, stream AgentRun
 		}
 	}()
 
-	ctx := stream.Context()
-	ws, resolveErr := s.resolve(ctx)
+	streamCtx := stream.Context()
+	ws, resolveErr := s.resolve(streamCtx)
 	if resolveErr != nil {
-		return grpcStatusFromError(ctx, resolveErr)
+		return grpcStatusFromError(streamCtx, resolveErr)
 	}
 
-	events, startErr := ws.AgentRunStream(ctx, req.SessionID, req.Prompt, req.Opts)
+	turnCtx := context.WithoutCancel(streamCtx)
+	events, startErr := ws.AgentRunStream(turnCtx, req.SessionID, req.Prompt, req.Opts)
 	if startErr != nil {
-		return grpcStatusFromError(ctx, startErr)
+		return grpcStatusFromError(streamCtx, startErr)
 	}
 
 	if err := stream.Send(&AgentRunStreamFrame{Started: true}); err != nil {
+		// The stream is already gone (client vanished between the two
+		// sends); the turn keeps running on turnCtx regardless, so drain
+		// its channel instead of leaking the goroutine that's blocked
+		// producing into it.
+		go drainAgentRunEvents(events)
 		return err
 	}
-	// Selecting on ctx.Done() as well as events, rather than a plain
-	// `for ev := range events`, is a defensive measure matching
-	// wsrpc.Loopback.AgentRunStream's own identical safety net: a
-	// conforming Workspace always closes events once ctx is cancelled
-	// (see workspace.go's doc comment on AgentRunStream), but this
-	// handler would otherwise leak its goroutine forever against one
-	// that doesn't, instead of ending the RPC as soon as the caller (or
-	// a dropped connection) cancels.
 	for {
 		select {
 		case ev, ok := <-events:
@@ -209,11 +219,25 @@ func (s *agentServer) AgentRunStream(req *AgentRunStreamRequest, stream AgentRun
 				return nil
 			}
 			if err := stream.Send(&AgentRunStreamFrame{Event: &ev}); err != nil {
+				go drainAgentRunEvents(events)
 				return err
 			}
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-streamCtx.Done():
+			// Only observation ends here -- the turn itself runs on
+			// turnCtx and is unaffected. Keep draining so it can
+			// complete normally.
+			go drainAgentRunEvents(events)
+			return streamCtx.Err()
 		}
+	}
+}
+
+// drainAgentRunEvents empties events until the turn producing them closes
+// it, so a turn that outlives its stream (see AgentRunStream's doc
+// comment) can still finish -- its sending goroutine would otherwise block
+// forever on an abandoned unbuffered channel.
+func drainAgentRunEvents(events <-chan workspace.AgentRunEvent) {
+	for range events {
 	}
 }
 
@@ -221,7 +245,27 @@ func (s *agentServer) AgentRunStream(req *AgentRunStreamRequest, stream AgentRun
 // AgentRunShellCommandFrame: stream.Context() is passed straight through
 // to ws.AgentRunShellCommand, so cancelling the call (or a dropped
 // connection) cancels the command the same way an in-process caller
-// cancelling ctx does. onProgress calls stream.Send on whatever goroutine
+// cancelling ctx does.
+//
+// Unlike AgentRunStream, this one does NOT detach the turn from the
+// stream's cancellation (CLIENT-SERVER.md, PR 1.2 build step 1.2c). That
+// fix works only because AgentCancel(sessionID) gives the client an
+// independent way to stop the thing running server-side (the coordinator
+// tracks cancellation by session ID; see agent.coordinator.Cancel). A bang
+// command has no such handle: internal/ui/model/shell.go's only cancel
+// path (m.editor.bang.cancelRunning, wired in runShellCommandInternal) is
+// context.CancelFunc on the very ctx passed to
+// workspace.AgentRunShellCommand, and AppWorkspace.AgentRunShellCommand
+// (appws/app_workspace_agent.go) runs the command directly against that
+// ctx -- there is no session- or command-ID-keyed way to reach it
+// otherwise. Detaching here would make a running shell command
+// uncancellable over the wire (surviving a disconnect at the cost of
+// never being stoppable by the one existing mechanism), so it keeps
+// today's behavior: stream.Context() is passed straight through, and a
+// dropped connection still ends the command early, same as before this
+// PR.
+//
+// onProgress calls stream.Send on whatever goroutine
 // AppWorkspace.AgentRunShellCommand calls it from -- the same "any
 // goroutine, best effort" contract the in-process implementation already
 // has (see internal/ui/model/shell.go's non-blocking send into its own
@@ -287,12 +331,16 @@ const agentStreamTerminalSendTimeout = 200 * time.Millisecond
 // error, or (channel, nil) returned as soon as the turn is accepted, not
 // once anything has actually happened yet.
 //
-// Cancelling ctx (or the connection breaking) always yields a terminal
-// event derived from ctx.Err(), exactly like the in-process
-// implementation: ctx is the stream's own context, so cancelling it
-// cancels the server-side call the same way an in-process ctx
-// cancellation would (see agentServer.AgentRunStream's doc comment); the
-// terminal event is sent best-effort, bounded by
+// The turn no longer stops just because this stream ends (see
+// agentServer.AgentRunStream's doc comment): cancelling ctx therefore also
+// sends an explicit AgentCancel(sessionID) -- a bounded, best-effort call
+// on its own background context (see the generated Client.AgentCancel) --
+// before the terminal event derived from ctx.Err() is delivered. A
+// transport failure that is NOT the caller's own cancellation (ctx.Err()
+// == nil: the server or connection is what's actually gone) does not send
+// AgentCancel; the caller gets the terminal ErrServerUnreachable event as
+// before, and there is nothing to cancel on a server that can't be
+// reached anyway. The terminal event is sent best-effort, bounded by
 // agentStreamTerminalSendTimeout, so a caller that has stopped reading
 // entirely still can't wedge this goroutine open.
 func (c *Client) AgentRunStream(ctx context.Context, sessionID, prompt string, opts workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
@@ -316,14 +364,44 @@ func (c *Client) AgentRunStream(ctx context.Context, sessionID, prompt string, o
 	// AgentRunStreamFrame's doc comment) -- so it alone decides whether
 	// this call returns a channel or an error, without waiting for
 	// anything the turn produces.
+	//
+	// ctx.Err() != nil here means the caller cancelled before the Started
+	// ack arrived, not that the server ever reported a real synchronous
+	// start error (decodeClientError's own doc comment: a caller
+	// cancellation decodes to context.Canceled/DeadlineExceeded "whether
+	// or not the server ever ran the call"). SendMsg/CloseSend above
+	// already succeeded, so the request reached the server, and
+	// agentServer.AgentRunStream's own ws.AgentRunStream call -- on
+	// turnCtx, detached from this cancellation -- may already be running.
+	// Send AgentCancel the same as the streaming loop below does once
+	// it's underway: without this, a caller unlucky enough to cancel in
+	// this narrow window before Started never sends it at all.
 	first := new(AgentRunStreamFrame)
 	if recvErr := stream.RecvMsg(first); recvErr != nil {
+		if ctx.Err() != nil {
+			_ = c.AgentCancel(sessionID)
+		}
 		return nil, decodeClientError("AgentRunStream", recvErr, stream.Trailer())
 	}
 
 	out := make(chan workspace.AgentRunEvent)
 	go func() {
 		defer close(out)
+
+		// notifyCancel sends AgentCancel(sessionID) at most once, and only
+		// from a call site that has already confirmed ctx.Err() != nil --
+		// i.e. the caller's own ctx was cancelled, not a transport
+		// failure. It runs synchronously (on this goroutine) so the
+		// terminal event below is genuinely delivered "after", per this
+		// method's doc comment; it can't wedge this goroutine because
+		// Client.AgentCancel carries its own bounded timeout regardless of
+		// ctx.
+		var cancelOnce sync.Once
+		notifyCancel := func() {
+			cancelOnce.Do(func() {
+				_ = c.AgentCancel(sessionID)
+			})
+		}
 
 		send := func(ev workspace.AgentRunEvent) bool {
 			select {
@@ -354,6 +432,9 @@ func (c *Client) AgentRunStream(ctx context.Context, sessionID, prompt string, o
 					sendFinal(workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(errors.New("wsrpc: AgentRunStream ended without a terminal event"))})
 					return
 				}
+				if ctx.Err() != nil {
+					notifyCancel()
+				}
 				final := agentStreamUnreachableErr(ctx, "AgentRunStream", recvErr)
 				sendFinal(*final.Event)
 				return
@@ -367,6 +448,7 @@ func (c *Client) AgentRunStream(ctx context.Context, sessionID, prompt string, o
 				return
 			}
 			if !send(ev) {
+				notifyCancel()
 				sendFinal(workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(ctx.Err())})
 				return
 			}

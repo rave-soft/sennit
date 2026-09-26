@@ -46,6 +46,19 @@ type StubWorkspace struct {
 	GotStreamOptions   workspace.AgentRunOptions
 	StreamChan         <-chan workspace.AgentRunEvent
 	StreamErr          error
+	// StreamCtxCh, if non-nil, receives the ctx AgentRunStream was actually
+	// called with (best effort, non-blocking send) -- letting a test
+	// observe whether the server detached it from the stream's own
+	// cancellation (CLIENT-SERVER.md, PR 1.2 build step 1.2c) instead of
+	// passing stream.Context() straight through.
+	StreamCtxCh chan context.Context
+
+	// AgentCancelCalls records every AgentCancel(sessionID) call, in
+	// order -- a test asserts on its length and contents to check "called
+	// exactly once" / "never called".
+	AgentCancelMu    sync.Mutex
+	AgentCancelCalls []string
+	AgentCancelErr   error
 
 	SubscribeCalled bool
 	SubscribeSend   func(any)
@@ -127,13 +140,30 @@ func (s *StubWorkspace) AgentRunShellCommand(_ context.Context, sessionID, _ str
 	return s.ShellResponse, s.ShellErr
 }
 
-func (s *StubWorkspace) AgentRunStream(_ context.Context, sessionID, _ string, opts workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
+func (s *StubWorkspace) AgentRunStream(ctx context.Context, sessionID, _ string, opts workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
 	s.GotStreamSessionID = sessionID
 	s.GotStreamOptions = opts
+	if s.StreamCtxCh != nil {
+		select {
+		case s.StreamCtxCh <- ctx:
+		default:
+		}
+	}
 	if s.StreamErr != nil {
 		return nil, s.StreamErr
 	}
 	return s.StreamChan, nil
+}
+
+// AgentCancel records sessionID and returns AgentCancelErr, letting a test
+// assert how many times (and with what argument) the client sent
+// AgentCancel -- e.g. exactly once, following the caller's ctx
+// cancellation (CLIENT-SERVER.md, PR 1.2 build step 1.2c).
+func (s *StubWorkspace) AgentCancel(sessionID string) error {
+	s.AgentCancelMu.Lock()
+	defer s.AgentCancelMu.Unlock()
+	s.AgentCancelCalls = append(s.AgentCancelCalls, sessionID)
+	return s.AgentCancelErr
 }
 
 func (s *StubWorkspace) Subscribe(send func(any)) {

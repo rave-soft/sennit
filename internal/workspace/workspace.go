@@ -300,7 +300,13 @@ type AgentController interface {
 	// (spinner, progress bar) and must either drain the channel to
 	// completion or cancel ctx to stop it early; cancelling ctx
 	// delivers a terminal event derived from ctx.Err() unless the turn
-	// already finished on its own.
+	// already finished on its own. Over the wire (grpcws), the turn's
+	// own lifetime is independent of any one caller's connection: a
+	// dropped connection alone does not stop it, only cancelling ctx (or
+	// another caller's AgentCancel) does -- the client achieves this by
+	// calling AgentCancel(sessionID) when ctx is cancelled, so the
+	// contract above still holds from the caller's point of view. See
+	// grpcws.agentServer.AgentRunStream's doc comment for the mechanism.
 	//
 	// If opts.AutoApprovePermissions is set, every permission request the
 	// turn raises on sessionID is granted without asking, for the rest of

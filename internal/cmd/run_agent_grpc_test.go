@@ -99,18 +99,23 @@ func TestRunAgent_OverGRPC_CleanFinishReturnsNil(t *testing.T) {
 // TestRunAgent_OverGRPC_CancelMatchesInProcess is
 // TestRunAgent_EventChannelClosesWhileCtxCancelled_ReturnsError's gRPC
 // counterpart: cancelling runAgent's ctx must report the cancellation
-// (not a false success) exactly as it does in-process, and the
-// cancellation must reach the server-side call, not just abandon the
-// client's own read (see agentServer.AgentRunStream's doc comment on
-// why a dropped connection/cancelled ctx stops the turn on both
-// transports the same way).
+// (not a false success) exactly as it does in-process. It no longer
+// checks that cancellation reaches the server-side call's ctx directly --
+// CLIENT-SERVER.md's PR 1.2 build step 1.2c detached the turn from the
+// stream's own cancellation on purpose, so a dropped connection alone
+// can't stop it any more. What replaces that check: the client sends an
+// explicit AgentCancel(sessionID) when the caller's ctx is cancelled (see
+// grpcws.Client.AgentRunStream's doc comment), which is what actually
+// stops the turn now; this test asserts that call reached the server
+// instead.
 func TestRunAgent_OverGRPC_CancelMatchesInProcess(t *testing.T) {
 	streamCtxCh := make(chan context.Context, 1)
 	// StreamChan is left nil: the embedded stub's AgentRunStream hands
 	// back a nil channel and no error, which blocks runAgent's select
 	// forever on the events case (a nil channel is never ready) until
 	// ctx cancellation ends the loop -- exactly the scenario under test.
-	ws := &grpcRunWorkspace{StubWorkspace: &wsrpctest.StubWorkspace{}, streamCtxCh: streamCtxCh}
+	stub := &wsrpctest.StubWorkspace{}
+	ws := &grpcRunWorkspace{StubWorkspace: stub, streamCtxCh: streamCtxCh}
 	client := newGRPCRunClient(t, ws)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -120,9 +125,8 @@ func TestRunAgent_OverGRPC_CancelMatchesInProcess(t *testing.T) {
 		resultCh <- runAgent(ctx, client, "hello", "", true, "", false)
 	}()
 
-	var serverCtx context.Context
 	select {
-	case serverCtx = <-streamCtxCh:
+	case <-streamCtxCh:
 	case <-time.After(5 * time.Second):
 		t.Fatal("server-side AgentRunStream was never called")
 	}
@@ -138,8 +142,17 @@ func TestRunAgent_OverGRPC_CancelMatchesInProcess(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
-	for serverCtx.Err() == nil && time.Now().Before(deadline) {
+	for {
+		stub.AgentCancelMu.Lock()
+		n := len(stub.AgentCancelCalls)
+		stub.AgentCancelMu.Unlock()
+		if n > 0 || time.Now().After(deadline) {
+			break
+		}
 		time.Sleep(time.Millisecond)
 	}
-	require.Error(t, serverCtx.Err(), "the server-side call must have been cancelled too")
+	stub.AgentCancelMu.Lock()
+	defer stub.AgentCancelMu.Unlock()
+	require.Equal(t, []string{"sess-1"}, stub.AgentCancelCalls,
+		"the client must send AgentCancel for the session exactly once on caller cancellation")
 }

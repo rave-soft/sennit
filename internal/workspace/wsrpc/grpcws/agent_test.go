@@ -2,10 +2,12 @@
 // server streams end to end (real gRPC over bufconn) -- CLIENT-SERVER.md
 // PR 1.2's acceptance tests for the two remaining streaming methods of
 // workspace.Workspace: in-order delivery, the terminal event, a
-// synchronous start error's identity, caller cancellation (and that it
-// reaches the server-side ctx, per agentServer.AgentRunStream's doc
-// comment), and a dead server translating to ErrServerUnreachable rather
-// than a channel left open forever.
+// synchronous start error's identity, that a dropped connection does NOT
+// stop the turn (only an explicit AgentCancel does -- CLIENT-SERVER.md's
+// PR 1.2 build step 1.2c, see agentServer.AgentRunStream's doc comment),
+// that caller cancellation sends AgentCancel exactly once, and a dead
+// server translating to ErrServerUnreachable rather than a channel left
+// open forever.
 package grpcws_test
 
 import (
@@ -13,6 +15,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,16 +32,33 @@ import (
 )
 
 // ctxReactiveStreamStub is a workspace.Workspace whose AgentRunStream
-// mimics AppWorkspace.AgentRunStream's own cancellation contract closely
-// enough for wire testing: it never produces anything on its own, but
-// delivers exactly one terminal event derived from ctx.Err() once ctx is
-// cancelled, then closes its channel -- the shape
-// TestAgentRunStream_CallerCancelMidTurn needs to observe both "the client
-// gets a terminal context.Canceled event" and "the server-side ctx was
-// actually cancelled" (not just abandoned).
+// produces events only when told to (via evCh), ends on ctx.Done() (a
+// safety net; turnCtx no longer becomes Done just because the stream
+// disconnects, see agentServer.AgentRunStream's doc comment), or ends
+// when AgentCancel is called -- standing in for a real coordinator's
+// activeRequests-based cancellation (agent.coordinator.Cancel), which a
+// bare ctx can't simulate now that the two are decoupled. Without this,
+// a caller-cancel test would leak this goroutine forever: nothing else in
+// this fake would ever stop it.
 type ctxReactiveStreamStub struct {
 	*wsrpctest.StubWorkspace
 	ctxCh chan context.Context
+	evCh  chan workspace.AgentRunEvent // optional: events to forward before ctx.Done()/cancelCh fires
+
+	cancelCh   chan struct{} // optional: closed by AgentCancel below
+	cancelOnce sync.Once
+}
+
+// AgentCancel records the call on the embedded stub (for assertions) and,
+// if cancelCh is set, closes it to stop AgentRunStream's goroutine --
+// simulating what a real coordinator.Cancel(sessionID) does to the run
+// it's tracking by session ID, independent of turnCtx.
+func (s *ctxReactiveStreamStub) AgentCancel(sessionID string) error {
+	_ = s.StubWorkspace.AgentCancel(sessionID)
+	if s.cancelCh != nil {
+		s.cancelOnce.Do(func() { close(s.cancelCh) })
+	}
+	return nil
 }
 
 func (s *ctxReactiveStreamStub) AgentRunStream(ctx context.Context, _ string, _ string, _ workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
@@ -51,10 +71,30 @@ func (s *ctxReactiveStreamStub) AgentRunStream(ctx context.Context, _ string, _ 
 	out := make(chan workspace.AgentRunEvent)
 	go func() {
 		defer close(out)
-		<-ctx.Done()
-		select {
-		case out <- workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(ctx.Err())}:
-		case <-time.After(2 * time.Second):
+		for {
+			select {
+			case ev, ok := <-s.evCh:
+				if !ok {
+					return
+				}
+				select {
+				case out <- ev:
+				case <-time.After(2 * time.Second):
+					return
+				}
+			case <-ctx.Done():
+				select {
+				case out <- workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(ctx.Err())}:
+				case <-time.After(2 * time.Second):
+				}
+				return
+			case <-s.cancelCh:
+				select {
+				case out <- workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(context.Canceled)}:
+				case <-time.After(2 * time.Second):
+				}
+				return
+			}
 		}
 	}()
 	return out, nil
@@ -102,20 +142,26 @@ func TestAgentRunStream_SynchronousStartErrorPreservesIdentity(t *testing.T) {
 		"expected ErrAgentNotInitialized, got: %v", err)
 }
 
-func TestAgentRunStream_CallerCancelMidTurn_DeliversContextCanceledAndCancelsServerCtx(t *testing.T) {
+// TestAgentRunStream_CallerCancelMidTurn_SendsAgentCancelAndDeliversContextCanceled
+// is CLIENT-SERVER.md PR 1.2 build step 1.2c's acceptance test: caller
+// cancellation no longer reaches the server-side turn's own ctx (it's
+// detached, see agentServer.AgentRunStream's doc comment) -- what stops
+// the turn instead is the client's explicit AgentCancel(sessionID) call,
+// which this test observes on the stub directly rather than through the
+// turn's ctx.
+func TestAgentRunStream_CallerCancelMidTurn_SendsAgentCancelAndDeliversContextCanceled(t *testing.T) {
 	t.Parallel()
 
 	ctxCh := make(chan context.Context, 1)
-	stub := &ctxReactiveStreamStub{StubWorkspace: &wsrpctest.StubWorkspace{}, ctxCh: ctxCh}
+	stub := &ctxReactiveStreamStub{StubWorkspace: &wsrpctest.StubWorkspace{}, ctxCh: ctxCh, cancelCh: make(chan struct{})}
 	client := newServerAndClient(t, stub)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	out, err := client.AgentRunStream(ctx, "sess-1", "hi", workspace.AgentRunOptions{})
 	require.NoError(t, err)
 
-	var serverCtx context.Context
 	select {
-	case serverCtx = <-ctxCh:
+	case <-ctxCh:
 	case <-time.After(5 * time.Second):
 		t.Fatal("server-side AgentRunStream was never called")
 	}
@@ -139,7 +185,182 @@ func TestAgentRunStream_CallerCancelMidTurn_DeliversContextCanceledAndCancelsSer
 		t.Fatal("channel was never closed after the terminal event")
 	}
 
-	waitFor(t, 5*time.Second, func() bool { return serverCtx.Err() != nil })
+	waitFor(t, 5*time.Second, func() bool {
+		stub.AgentCancelMu.Lock()
+		defer stub.AgentCancelMu.Unlock()
+		return len(stub.AgentCancelCalls) == 1
+	})
+	stub.AgentCancelMu.Lock()
+	defer stub.AgentCancelMu.Unlock()
+	require.Equal(t, []string{"sess-1"}, stub.AgentCancelCalls)
+}
+
+// blockingStartStub is a workspace.Workspace whose AgentRunStream reports
+// itself on ctxCh, then blocks until unblock is closed before returning
+// (StreamChan, nil) -- letting a test cancel the caller's ctx in the exact
+// window between the request reaching the server (SendMsg/CloseSend
+// already succeeded) and the Started ack being sent, which is otherwise a
+// hard window to hit deterministically.
+type blockingStartStub struct {
+	*wsrpctest.StubWorkspace
+	ctxCh   chan context.Context
+	unblock chan struct{}
+}
+
+func (s *blockingStartStub) AgentRunStream(ctx context.Context, sessionID, prompt string, opts workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
+	if s.ctxCh != nil {
+		select {
+		case s.ctxCh <- ctx:
+		default:
+		}
+	}
+	<-s.unblock
+	return s.StubWorkspace.AgentRunStream(ctx, sessionID, prompt, opts)
+}
+
+// TestAgentRunStream_CallerCancelBeforeStartedAck_StillSendsAgentCancel
+// closes the gap TestRunAgent_OverGRPC_CancelMatchesInProcess
+// (internal/cmd/run_agent_grpc_test.go) found: cancelling ctx before the
+// Started ack arrives fails Client.AgentRunStream synchronously (see its
+// own doc comment on the first RecvMsg) instead of going through the
+// streaming goroutine's notifyCancel -- a second call site for the exact
+// same "caller cancelled" condition, and one that was missing its
+// AgentCancel call entirely (CLIENT-SERVER.md PR 1.2 build step 1.2c).
+func TestAgentRunStream_CallerCancelBeforeStartedAck_StillSendsAgentCancel(t *testing.T) {
+	t.Parallel()
+
+	ctxCh := make(chan context.Context, 1)
+	stub := &blockingStartStub{StubWorkspace: &wsrpctest.StubWorkspace{}, ctxCh: ctxCh, unblock: make(chan struct{})}
+	client := newServerAndClient(t, stub)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := client.AgentRunStream(ctx, "sess-1", "hi", workspace.AgentRunOptions{})
+		resultCh <- err
+	}()
+
+	select {
+	case <-ctxCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server-side AgentRunStream was never called")
+	}
+
+	cancel()
+	close(stub.unblock) // let the server-side call return now that ctx is cancelled
+
+	select {
+	case err := <-resultCh:
+		require.Error(t, err)
+		require.True(t, errors.Is(err, context.Canceled), "expected context.Canceled, got: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("AgentRunStream never returned after cancellation")
+	}
+
+	waitFor(t, 5*time.Second, func() bool {
+		stub.AgentCancelMu.Lock()
+		defer stub.AgentCancelMu.Unlock()
+		return len(stub.AgentCancelCalls) == 1
+	})
+	stub.AgentCancelMu.Lock()
+	defer stub.AgentCancelMu.Unlock()
+	require.Equal(t, []string{"sess-1"}, stub.AgentCancelCalls)
+}
+
+// TestAgentRunStream_ConnectionDroppedMidTurn_TurnSurvivesNoAgentCancel is
+// PR 1.2 build step 1.2c's other acceptance test: a dropped connection
+// (as opposed to the caller cancelling) must NOT stop the turn and must
+// NOT send AgentCancel -- the turn keeps running on the server, detached
+// from the stream, exactly as agentServer.AgentRunStream's doc comment
+// promises. The dialer refuses every redial attempt after the first
+// connection is severed, so gRPC can't silently paper over the drop by
+// reconnecting.
+func TestAgentRunStream_ConnectionDroppedMidTurn_TurnSurvivesNoAgentCancel(t *testing.T) {
+	t.Parallel()
+
+	ctxCh := make(chan context.Context, 1)
+	evCh := make(chan workspace.AgentRunEvent, 4)
+	stub := &ctxReactiveStreamStub{StubWorkspace: &wsrpctest.StubWorkspace{}, ctxCh: ctxCh, evCh: evCh}
+
+	srv, stopHub := grpcws.NewServer(stub)
+	lis := bufconn.Listen(bufSize)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() {
+		srv.Stop()
+		stopHub()
+		_ = lis.Close()
+	})
+
+	var dialCount atomic.Int32
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		if dialCount.Add(1) > 1 {
+			return nil, errors.New("dial refused: connection severed, no redial in this test")
+		}
+		return lis.DialContext(ctx)
+	}
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(dialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := grpcws.NewClient(conn)
+
+	out, err := client.AgentRunStream(context.Background(), "sess-1", "hi", workspace.AgentRunOptions{})
+	require.NoError(t, err)
+
+	var serverCtx context.Context
+	select {
+	case serverCtx = <-ctxCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server-side AgentRunStream was never called")
+	}
+
+	evCh <- workspace.AgentRunEvent{Status: "thinking"}
+	select {
+	case ev, ok := <-out:
+		require.True(t, ok)
+		require.Equal(t, "thinking", ev.Status)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first event never arrived")
+	}
+
+	// Sever the connection: the client sees a terminal
+	// ErrServerUnreachable event, but the turn keeps running server-side.
+	require.NoError(t, conn.Close())
+
+	select {
+	case ev, ok := <-out:
+		require.True(t, ok)
+		require.True(t, ev.Done)
+		require.True(t, errors.Is(workspace.DecodeError(ev.Err), workspace.ErrServerUnreachable),
+			"expected ErrServerUnreachable, got: %v", workspace.DecodeError(ev.Err))
+	case <-time.After(5 * time.Second):
+		t.Fatal("no terminal event delivered after the connection dropped")
+	}
+
+	// The real proof the turn survives: turnCtx (observed via serverCtx)
+	// must still be alive well after the connection dropped, not just
+	// "the client got some terminal event" (which a dead server would
+	// also produce). Poll instead of a single immediate check since
+	// streamCtx.Done() firing and this goroutine noticing are not
+	// instantaneous.
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		require.NoError(t, serverCtx.Err(), "turnCtx must not be cancelled by a dropped connection")
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Let the stub's run finish cleanly so it doesn't leak: feed it a
+	// terminal event and close its channel, same as a real conforming
+	// Workspace eventually would (see agentServer.AgentRunStream's doc
+	// comment on the server's drain goroutine).
+	evCh <- workspace.AgentRunEvent{Done: true}
+	close(evCh)
+
+	stub.AgentCancelMu.Lock()
+	calls := len(stub.AgentCancelCalls)
+	stub.AgentCancelMu.Unlock()
+	require.Zero(t, calls, "a dropped connection must not send AgentCancel")
 }
 
 func TestAgentRunStream_ServerDiesMidTurn_TerminalErrServerUnreachableAndChannelCloses(t *testing.T) {
@@ -147,8 +368,12 @@ func TestAgentRunStream_ServerDiesMidTurn_TerminalErrServerUnreachableAndChannel
 
 	events := make(chan workspace.AgentRunEvent, 1)
 	events <- workspace.AgentRunEvent{Status: "thinking"}
-	// Deliberately never closed and never fed a terminal event: the
-	// server dying is what ends this turn, not the workspace itself.
+	// Not fed a terminal event before the server dies: the server dying
+	// is what ends this turn's *observation*, not the workspace itself.
+	// It's closed at the end regardless (see below), because the
+	// server's own drain goroutine (agentServer.AgentRunStream's doc
+	// comment) keeps reading it in the background past that point --
+	// same as a conforming Workspace eventually closing it on its own.
 
 	stub := &wsrpctest.StubWorkspace{StreamChan: events}
 	srv, stopHub := grpcws.NewServer(stub)
@@ -188,6 +413,8 @@ func TestAgentRunStream_ServerDiesMidTurn_TerminalErrServerUnreachableAndChannel
 	case <-time.After(5 * time.Second):
 		t.Fatal("channel was never closed after the server died")
 	}
+
+	close(events)
 }
 
 // shellStub is a workspace.Workspace stand-in for AgentRunShellCommand
@@ -322,7 +549,7 @@ func TestAgentStreams_NoGoroutineLeakAfterCancelOrServerDeath(t *testing.T) {
 		// run at the whole test's end, which would still be "running"
 		// when goleak checks in between each scenario below).
 		ctxCh := make(chan context.Context, 1)
-		stub := &ctxReactiveStreamStub{StubWorkspace: &wsrpctest.StubWorkspace{}, ctxCh: ctxCh}
+		stub := &ctxReactiveStreamStub{StubWorkspace: &wsrpctest.StubWorkspace{}, ctxCh: ctxCh, cancelCh: make(chan struct{})}
 		srv, stopHub := grpcws.NewServer(stub)
 		lis := bufconn.Listen(bufSize)
 		go func() { _ = srv.Serve(lis) }()
@@ -392,6 +619,12 @@ func TestAgentStreams_NoGoroutineLeakAfterCancelOrServerDeath(t *testing.T) {
 		srv.Stop()
 		for range out {
 		}
+		// The server keeps draining events in the background once the
+		// stream ends (see agentServer.AgentRunStream's doc comment); a
+		// conforming Workspace eventually closes it on its own even
+		// though nobody's forwarding it any more, same as this fake does
+		// here -- otherwise that drain goroutine would never exit.
+		close(events)
 
 		require.NoError(t, conn.Close())
 		stopHub()
