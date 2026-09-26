@@ -382,6 +382,75 @@ func TestLeaseGrace_ReconnectWithinGraceKeepsHandles(t *testing.T) {
 	require.NoError(t, err, "the handle must still resolve after a reconnect within grace")
 }
 
+// TestLeaseGrace_DisconnectedClientDoesNotCountAsBusy pins PR 2.3b round
+// 1's finding 1: a client that made a call and disconnected must stop
+// counting towards ClientCountExcluding immediately, not linger "busy"
+// for its handle-release grace period -- even though, in the very same
+// window, its handle is still there (TestLeaseGrace_ReconnectWithinGraceKeepsHandles
+// already covers that half; this test only adds the busy-count
+// assertion, on the same setup, so the two invariants are pinned
+// together against a regression that fixes one at the expense of the
+// other). Before the fix, ClientCountExcluding counted every entry still
+// in leaseManager.clients, including ones there only for their grace
+// timer -- so a `sennit ps` (a single unary call, done the instant it
+// returns) made a subsequent `daemon stop`/idle check see a false "busy"
+// for the whole grace window.
+func TestLeaseGrace_DisconnectedClientDoesNotCountAsBusy(t *testing.T) {
+	t.Parallel()
+
+	grace := leaseGrace()
+	child := &wsrpctest.StubWorkspace{}
+	root := &wsrpctest.StubWorkspace{
+		WorktreeWorkspace:  child,
+		WorktreeReleased:   make(chan struct{}),
+		SubscribeWithReady: make(chan struct{}),
+	}
+	srv, stopHub := grpcws.NewServer(root, grpcws.WithHandleLeaseGrace(grace))
+	lis := bufconn.Listen(bufSize)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() {
+		srv.Stop()
+		stopHub()
+		_ = lis.Close()
+	})
+
+	clientA, dialerA, _ := dialLeaseClient(t, lis)
+	stopSubA := clientA.SubscribeWith(func(any) {})
+	select {
+	case <-root.SubscribeWithReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client A's Subscribe never reached the server")
+	}
+
+	childWS, _, err := clientA.EnterWorktree(context.Background(), "feature")
+	require.NoError(t, err)
+	childHandle := childWS.(*grpcws.Client).Handle()
+	clientID := clientA.ClientID()
+
+	dialerA.sever()
+	stopSubA()
+	clientA.Shutdown()
+
+	// A second, independent client connects right away and checks
+	// busyness excluding itself -- this must read 0 well within grace,
+	// not wait it out.
+	clientB, _, _ := dialLeaseClient(t, lis)
+	require.NoError(t, clientB.Connect(context.Background()))
+	t.Cleanup(clientB.Shutdown)
+
+	require.Eventually(t, func() bool {
+		return srv.ClientCountExcluding(clientB.ClientID()) == 0
+	}, grace, 5*time.Millisecond,
+		"a disconnected client must not count as busy during its own handle-release grace period")
+
+	// client A's handle is still there, same window: the two invariants
+	// (not busy, but handles retained) hold together, not at each
+	// other's expense.
+	handleClient, _, _ := dialLeaseClient(t, lis, grpcws.WithHandle(childHandle), grpcws.WithClientID(clientID))
+	_, err = handleClient.GetSession(context.Background(), "sess-1")
+	require.NoError(t, err, "the handle must still resolve while its disconnected owner is within grace")
+}
+
 // TestLeaseGrace_OneClientsDisconnectDoesNotTouchAnothers checks the
 // isolation two independent clients depend on: client B disconnecting
 // must never release client A's handles.

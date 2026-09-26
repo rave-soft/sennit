@@ -172,6 +172,10 @@ earlier one and `--cwd` picks the project.
 
 ```sh
 sennit run "explain internal/agent"   # single non-interactive prompt (pipeable)
+sennit run --detach "..."             # hand a project's daemon the turn and exit
+sennit attach [--session ID]          # open the TUI against a running daemon
+sennit ps                             # what a project's daemon is doing right now
+sennit daemon status|stop|restart|logs  # manage a project's daemon
 sennit models [refresh]               # list models; re-discover custom providers
 sennit session list|show|last         # browse sessions
 sennit stat                           # usage statistics
@@ -184,7 +188,11 @@ sennit import claude|opencode         # bring in another tool's agents/skills
 ```
 
 `--yolo` auto-accepts every permission prompt, and `--data-dir` points the
-project's state elsewhere.
+project's state elsewhere. With `options.daemon` set to `auto` (or
+`--daemon`), Sennit connects to (or starts) a headless backend for the
+project and every client — the TUI, `run`, `attach`, `ps` — shares it;
+`sennit attach` and `sennit ps` only ever connect to one already running,
+never starting it themselves.
 
 ## Data Storage
 

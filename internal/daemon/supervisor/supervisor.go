@@ -455,6 +455,48 @@ func logTail(path string) string {
 	return fmt.Sprintf("\n--- daemon startup log (%s) ---\n%s", path, data)
 }
 
+// ProbeRunning reports whether a daemon is already running and healthy
+// for cwd's project, without starting one -- the "never spawn" half of
+// EnsureRunning, used by `sennit attach`/`ps`/`daemon status` and a
+// plain `sennit run` (CLIENT-SERVER.md, PR 2.3), none of which may spawn
+// a daemon just to answer their own question. err is
+// *ErrTUILocked when the project's workspace lock is held by an
+// embedded TUI rather than a daemon, exactly as EnsureRunning reports
+// it.
+func ProbeRunning(ctx context.Context, cwd string, opts Options) (socketPath string, running bool, err error) {
+	_, lockDir, err := daemon.ResolveSocketPath(ctx, cwd, opts.DataDir, opts.Debug)
+	if err != nil {
+		return "", false, err
+	}
+	return probeRunning(ctx, lockDir, opts)
+}
+
+// ProbeHealthy is probeHealthy's exported form, for a caller (`sennit
+// daemon status`/`stop`) that already has a socket path in hand (e.g.
+// from workspacelock.CurrentOwner) and needs a liveness check without
+// going through EnsureRunning's find-or-spawn logic.
+func ProbeHealthy(ctx context.Context, socketPath string, timeout time.Duration) bool {
+	return probeHealthy(ctx, socketPath, timeout)
+}
+
+// AwaitGone waits, bounded by ctx, for socketPath to stop answering
+// health checks -- used after a Shutdown RPC is accepted, by
+// EnsureRunning's own version-mismatch restart and by `sennit daemon
+// stop`/`restart`, which must not report success (or spawn a
+// replacement) while the outgoing daemon is still mid-GracefulStop.
+func AwaitGone(ctx context.Context, socketPath string) error {
+	return awaitSocketGone(ctx, socketPath)
+}
+
+// StartupLogPath returns the path a spawned daemon's stdout/stderr is
+// redirected to for lockDir -- the same path spawnDetached writes to.
+// `sennit daemon logs` shows it alongside the daemon's own process log so
+// a cold start that never got far enough to open its real logger is
+// still visible somewhere.
+func StartupLogPath(lockDir string) string {
+	return filepath.Join(lockDir, startupLogName)
+}
+
 // Dial opens a lazy (unconnected until first RPC) *grpc.ClientConn to the
 // unix socket EnsureRunning returned, using the same dial options this
 // package's own version/health probes use (grpcws.DefaultClientDialOptions).

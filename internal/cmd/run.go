@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/daemon/supervisor"
 	"github.com/rave-soft/sennit/internal/format"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -59,6 +60,7 @@ sennit run --continue "Follow up on your last response"
 			model, _     = cmd.Flags().GetString("model")
 			sessionID, _ = cmd.Flags().GetString("session")
 			useLast, _   = cmd.Flags().GetBool("continue")
+			detach, _    = cmd.Flags().GetBool("detach")
 		)
 
 		// Cancel on SIGINT or SIGTERM. Rooted at the command's own
@@ -80,7 +82,11 @@ sennit run --continue "Follow up on your last response"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		ws, cleanup, err := setupLocalWorkspace(cmd)
+		if detach {
+			return runDetached(cmd, prompt, model, sessionID, useLast)
+		}
+
+		ws, cleanup, err := setupRunWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -102,6 +108,90 @@ sennit run --continue "Follow up on your last response"
 	},
 }
 
+// setupRunWorkspace is `sennit run`'s own workspace setup: it connects
+// to this project's daemon when one is already running, and never
+// starts one otherwise (CLIENT-SERVER.md, PR 2.3) -- unlike the
+// interactive root command's options.daemon=auto path, a plain `run`
+// spawning a daemon behind the person's back would be a surprise, not a
+// convenience, for a single non-interactive invocation. A daemon lock
+// held by an embedded TUI (*supervisor.ErrTUILocked) is returned as-is,
+// same wording an in-process run would hit on its own when it tries to
+// acquire the workspace lock.
+func setupRunWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
+	ctx := cmd.Context()
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	debug, _ := cmd.Flags().GetBool("debug")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+
+	socketPath, running, err := supervisor.ProbeRunning(ctx, cwd, supervisor.Options{DataDir: dataDir, Debug: debug})
+	if err != nil {
+		return nil, nil, err
+	}
+	if !running {
+		return setupLocalWorkspace(cmd)
+	}
+
+	client, _, cleanup, err := connectDaemonWorkspace(ctx, cwd, dataDir, debug, socketPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, cleanup, nil
+}
+
+// runDetached implements `sennit run --detach`: it finds or starts this
+// project's daemon (spawning is allowed here, unlike a plain run --
+// that's the whole point of asking to detach), resolves the session the
+// same way an attached run would, hands the daemon the turn with
+// AgentRun rather than AgentRunStream (fire-and-forget: nothing here
+// waits for it), and returns immediately with the session ID and how to
+// come back to it.
+func runDetached(cmd *cobra.Command, prompt, model, sessionID string, useLast bool) error {
+	ctx := cmd.Context()
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return err
+	}
+	debug, _ := cmd.Flags().GetBool("debug")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+
+	client, _, cleanup, err := setupDaemonWorkspace(ctx, cwd, dataDir, debug, supervisor.Options{})
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if !client.Config().IsConfigured() {
+		return fmt.Errorf("no providers configured - please run 'sennit' to set up a provider interactively")
+	}
+
+	if err := client.InitCoderAgentNonInteractive(ctx); err != nil {
+		return fmt.Errorf("failed to initialize agent: %w", err)
+	}
+	if err := overrideModel(ctx, client, model); err != nil {
+		return fmt.Errorf("failed to override model: %w", err)
+	}
+
+	sess, err := workspace.ResolveSession(ctx, client, sessionID, useLast, "non-interactive")
+	if err != nil {
+		return fmt.Errorf("failed to resolve session: %w", err)
+	}
+
+	if err := client.SetCurrentSession(ctx, sess.ID); err != nil {
+		slog.Debug("Failed to report the run's session", "session_id", sess.ID, "error", err)
+	}
+
+	if err := client.AgentRun(ctx, sess.ID, prompt); err != nil {
+		return fmt.Errorf("starting turn: %w", err)
+	}
+
+	fmt.Fprintln(cmd.OutOrStdout(), sess.ID)
+	fmt.Fprintf(cmd.ErrOrStderr(), "Turn started on the sennit daemon. Follow it with `sennit attach --session %s`.\n", sess.ID)
+	return nil
+}
+
 // runSignalContext derives a context that cancels on SIGINT or SIGTERM, so
 // a plain `kill <pid>` (which sends SIGTERM, not SIGKILL) gets the same
 // graceful cancellation Ctrl-C does — SIGKILL cannot be caught by
@@ -117,6 +207,7 @@ func init() {
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
+	runCmd.Flags().Bool("detach", false, "Start (or find) this project's daemon, hand it the turn, and exit immediately")
 }
 
 // progressBarRefresh is how often the terminal's indeterminate

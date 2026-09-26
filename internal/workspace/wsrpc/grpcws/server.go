@@ -357,9 +357,10 @@ type Server struct {
 }
 
 // ClientCount reports how many distinct clients currently have an open
-// RPC/stream against this server, or are within the post-hangup lease
-// grace period (see leaseManager) -- i.e. a client a daemon's idle
-// monitor should still treat as connected.
+// RPC/stream against this server, right now -- a client that has
+// disconnected but is still within its post-hangup handle-release grace
+// period (see leaseManager) does not count, that grace period being
+// about retaining handles across a reconnect, not about looking busy.
 func (s *Server) ClientCount() int {
 	return s.lease.clientCount()
 }

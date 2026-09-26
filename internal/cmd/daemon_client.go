@@ -48,6 +48,17 @@ func runInteractiveDaemon(cmd *cobra.Command, cwd, sessionID string, continueLas
 	}
 	defer cleanup()
 
+	return runDaemonTUI(cmd, client, prefs, sessionID, continueLast)
+}
+
+// runDaemonTUI drives the TUI against an already-connected daemon client
+// -- the tail end of runInteractiveDaemon, factored out so `sennit
+// attach` (which connects without ever being allowed to spawn a daemon,
+// see supervisor.ProbeRunning) can reach the same TUI loop without
+// duplicating it.
+func runDaemonTUI(cmd *cobra.Command, client *grpcws.Client, prefs uiprefs.Store, sessionID string, continueLast bool) error {
+	ctx := cmd.Context()
+
 	if sessionID != "" {
 		sess, err := resolveSessionID(ctx, workspaceSessionLookup{client}, sessionID)
 		if err != nil {
@@ -121,6 +132,17 @@ func setupDaemonWorkspace(ctx context.Context, cwd, dataDir string, debug bool, 
 		fmt.Fprintln(os.Stderr, warning)
 	}
 
+	return connectDaemonWorkspace(ctx, cwd, dataDir, debug, socketPath)
+}
+
+// connectDaemonWorkspace is setupDaemonWorkspace's connect-only half: it
+// dials socketPath, runs Connect (Hello + Snapshot), and loads the
+// client-side config that backs UI preferences, without ever deciding
+// whether to spawn a daemon -- a caller that has already found a socket
+// itself (supervisor.ProbeRunning, never-spawn by design: `sennit
+// attach`/`ps`) uses this directly instead of setupDaemonWorkspace, which
+// would spawn one.
+func connectDaemonWorkspace(ctx context.Context, cwd, dataDir string, debug bool, socketPath string) (client *grpcws.Client, prefs uiprefs.Store, cleanup func(), err error) {
 	conn, err := supervisor.Dial(socketPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("connecting to sennit daemon: %w\nRun with --no-daemon to use sennit without the daemon", err)

@@ -483,14 +483,19 @@ func (lm *leaseManager) expire(clientID string) {
 	lm.oauthRegistry.releaseByOwner(clientID)
 }
 
-// clientCount reports how many clients currently have an entry in
-// lm.clients: an open RPC/stream, or a lease still within its post-hangup
-// grace period. A client whose grace timer has fired (expire has already
-// deleted it) is not counted.
+// clientCount reports how many clients currently have an open RPC or
+// stream -- active > 0 -- right now. A client that has disconnected but
+// is still sitting in lm.clients only because its grace timer hasn't
+// fired yet (see end/expire) is NOT counted: the grace period exists
+// solely to keep that client's HANDLES alive across a reconnect, not to
+// make a daemon with nobody connected look busy. Counting it here was the
+// bug behind a `sennit ps` (a plain unary call, done and gone the instant
+// it returns) making `daemon stop`/idle exit see a false "connected
+// client" for the whole grace window (10s in production) afterward.
 func (lm *leaseManager) clientCount() int {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
-	return len(lm.clients)
+	return lm.activeCountLocked("")
 }
 
 // clientCountExcluding is clientCount but never counts excludeID. The
@@ -502,11 +507,19 @@ func (lm *leaseManager) clientCount() int {
 func (lm *leaseManager) clientCountExcluding(excludeID string) int {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
-	n := len(lm.clients)
-	if excludeID != "" {
-		if _, ok := lm.clients[excludeID]; ok {
-			n--
+	return lm.activeCountLocked(excludeID)
+}
+
+// activeCountLocked counts clients with an open RPC/stream (active > 0),
+// skipping excludeID (if non-empty) and any client merely retained for
+// its handle-release grace timer (active == 0). Callers hold lm.mu.
+func (lm *leaseManager) activeCountLocked(excludeID string) int {
+	n := 0
+	for id, cl := range lm.clients {
+		if id == excludeID || cl.active == 0 {
+			continue
 		}
+		n++
 	}
 	return n
 }
