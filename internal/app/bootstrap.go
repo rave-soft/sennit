@@ -106,6 +106,18 @@ type BootstrapResult struct {
 	App    *App
 	Config *config.ConfigStore
 	Skills *skills.Manager
+
+	// Lock is the workspace lock Bootstrap acquired (nil unless
+	// WorkspaceLock was set). It is exposed, rather than kept private to
+	// Bootstrap's own cleanup, so a caller that has to do more work
+	// under the same mutual exclusion this lock provides -- `sennit
+	// daemon run` binding its unix socket only after it is certain no
+	// other process can bind the same one, in particular -- can record
+	// that fact into the lock file once that work succeeds (see
+	// workspacelock.Lock.SetMode). Bootstrap itself still owns
+	// releasing it as part of App.Shutdown; callers must not call
+	// Lock.Release directly.
+	Lock *workspacelock.Lock
 }
 
 // Bootstrap runs the workspace bootstrap sequence shared by every place
@@ -146,7 +158,7 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 
 	var wsLock *workspacelock.Lock
 	if opts.WorkspaceLock {
-		lockDir, err := workspaceLockDir(ctx, cfg.WorkingDir(), cfg.Config().Options.DataDirectory)
+		lockDir, err := WorkspaceLockDir(ctx, cfg.WorkingDir(), cfg.Config().Options.DataDirectory)
 		if err != nil {
 			return nil, err
 		}
@@ -314,10 +326,16 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	wsLock = nil
 	dbConnected = false // App owns this pooled reference through mainDBRelease.
 
-	return &BootstrapResult{App: appInstance, Config: cfg, Skills: skillsMgr}, nil
+	return &BootstrapResult{App: appInstance, Config: cfg, Skills: skillsMgr, Lock: lockToRelease}, nil
 }
 
-func workspaceLockDir(ctx context.Context, workspaceDir, dataDir string) (string, error) {
+// WorkspaceLockDir resolves the directory a workspace's lock (and, for
+// the daemon, its unix socket) is keyed on: a git repository's common
+// directory, or dataDir when workspaceDir isn't a git repository or
+// doesn't exist yet. Callers that need this key outside Bootstrap itself
+// (the daemon's socket path, in particular) must call this rather than
+// recomputing it, so the lock and the socket always agree on identity.
+func WorkspaceLockDir(ctx context.Context, workspaceDir, dataDir string) (string, error) {
 	// A path that does not exist cannot be a repository. This preserves
 	// the ability to create a workspace at a new path without treating
 	// git's chdir failure as a non-repository signal.

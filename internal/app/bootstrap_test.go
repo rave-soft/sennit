@@ -289,7 +289,7 @@ func TestWorkspaceLock_RepositoryIdentityAcrossProcesses(t *testing.T) {
 	defer result.App.Shutdown()
 
 	for _, workspace := range []string{subdir, alias, worktree} {
-		lockDir, err := workspaceLockDir(t.Context(), workspace, t.TempDir())
+		lockDir, err := WorkspaceLockDir(t.Context(), workspace, t.TempDir())
 		require.NoError(t, err)
 		requireWorkspaceLockContended(t, lockDir)
 	}
@@ -298,13 +298,13 @@ func TestWorkspaceLock_RepositoryIdentityAcrossProcesses(t *testing.T) {
 func TestWorkspaceLock_DifferentRepositoriesDoNotConflict(t *testing.T) {
 	repo := initWorkspaceRepo(t)
 	otherRepo := initWorkspaceRepo(t)
-	lockDir, err := workspaceLockDir(t.Context(), repo, t.TempDir())
+	lockDir, err := WorkspaceLockDir(t.Context(), repo, t.TempDir())
 	require.NoError(t, err)
 	lock, err := workspacelock.Acquire(lockDir)
 	require.NoError(t, err)
 	defer lock.Release()
 
-	otherLockDir, err := workspaceLockDir(t.Context(), otherRepo, t.TempDir())
+	otherLockDir, err := WorkspaceLockDir(t.Context(), otherRepo, t.TempDir())
 	require.NoError(t, err)
 	requireWorkspaceLockAcquired(t, otherLockDir)
 }
@@ -312,7 +312,7 @@ func TestWorkspaceLock_DifferentRepositoriesDoNotConflict(t *testing.T) {
 func TestWorkspaceLock_NonGitUsesDataDirFallback(t *testing.T) {
 	workspace := t.TempDir()
 	dataDir := t.TempDir()
-	lockDir, err := workspaceLockDir(t.Context(), workspace, dataDir)
+	lockDir, err := WorkspaceLockDir(t.Context(), workspace, dataDir)
 	require.NoError(t, err)
 	require.Equal(t, dataDir, lockDir)
 
@@ -327,7 +327,7 @@ func TestWorkspaceLock_CanceledContextDoesNotFallback(t *testing.T) {
 	cancel()
 	dataDir := t.TempDir()
 
-	lockDir, err := workspaceLockDir(ctx, t.TempDir(), dataDir)
+	lockDir, err := WorkspaceLockDir(ctx, t.TempDir(), dataDir)
 	require.Error(t, err)
 	require.Empty(t, lockDir)
 	require.ErrorIs(t, err, context.Canceled)
@@ -339,7 +339,7 @@ func TestWorkspaceLock_GitCommandFailureDoesNotFallback(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	dataDir := t.TempDir()
 
-	lockDir, err := workspaceLockDir(t.Context(), t.TempDir(), dataDir)
+	lockDir, err := WorkspaceLockDir(t.Context(), t.TempDir(), dataDir)
 	require.Error(t, err)
 	require.Empty(t, lockDir)
 	require.NotErrorIs(t, err, gitpkg.ErrNotRepository)
@@ -535,7 +535,7 @@ func TestBootstrap_WorkspaceLockReleasedAfterPostConnectError(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
-	lockDir, err := workspaceLockDir(t.Context(), repo, dataDir)
+	lockDir, err := WorkspaceLockDir(t.Context(), repo, dataDir)
 	require.NoError(t, err)
 	requireWorkspaceLockAcquired(t, lockDir)
 }

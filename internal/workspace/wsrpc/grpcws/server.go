@@ -214,16 +214,17 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 	oauthRegistry := newOAuthFlowRegistry()
 	lease := newLeaseManager(cfg.handleLeaseGrace, registry, oauthRegistry)
 
-	// The lease's interceptors go first, ahead of whatever
-	// WithGRPCServerOptions supplies: grpc.ChainUnaryInterceptor/
+	// recovery goes outermost of all: only it must never itself be the
+	// thing a panic skips past. lease's interceptors come next, ahead of
+	// whatever WithGRPCServerOptions supplies: grpc.ChainUnaryInterceptor/
 	// ChainStreamInterceptor compose across separate calls (each appends
 	// to the server's own chain, rather than one replacing the other), so
-	// this ordering just makes lease tracking the outermost wrapper --
-	// its own defer still runs once the whole call, including a caller-
-	// supplied inner interceptor, has finished.
+	// this ordering just makes lease tracking the outermost wrapper of
+	// what's left -- its own defer still runs once the whole call,
+	// including a caller-supplied inner interceptor, has finished.
 	grpcOpts := append([]grpc.ServerOption{
-		grpc.ChainUnaryInterceptor(lease.unaryInterceptor),
-		grpc.ChainStreamInterceptor(lease.streamInterceptor),
+		grpc.ChainUnaryInterceptor(recoveryUnaryInterceptor, lease.unaryInterceptor),
+		grpc.ChainStreamInterceptor(recoveryStreamInterceptor, lease.streamInterceptor),
 	}, serverKeepaliveOptions(cfg.keepaliveTime, cfg.keepaliveTimeout)...)
 	grpcOpts = append(grpcOpts, cfg.grpcOpts...)
 	s := grpc.NewServer(grpcOpts...)

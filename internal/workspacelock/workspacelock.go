@@ -24,14 +24,45 @@ var ErrLocked = errors.New("workspace already in use by another sennit process")
 // directory. It lives next to sennit.db so users can `ls` and find it.
 const lockFileName = brand.LockFile
 
-// ownerInfo is the JSON payload written into the lock file by
+// Mode records what kind of process holds a workspace lock: an
+// interactive TUI (or any other in-process, embedded caller) or a
+// headless daemon serving the workspace over its unix socket.
+type Mode string
+
+const (
+	// ModeTUI is the default: an in-process caller with no socket of its
+	// own. It is also what an OwnerInfo read back from a lock file
+	// written before Mode existed normalizes to — see CurrentOwner.
+	ModeTUI Mode = "tui"
+	// ModeDaemon is a `sennit daemon run` process; Socket names the unix
+	// socket it listens on.
+	ModeDaemon Mode = "daemon"
+)
+
+// OwnerInfo is the JSON payload written into the lock file by
 // the process that currently owns it. It is purely informational; the
 // authoritative state of ownership is the operating system flock on
 // the file descriptor.
-type ownerInfo struct {
+//
+// Mode and Socket were added after this record first shipped. A lock
+// file written by an older binary has neither field, which decodes as
+// the zero Mode (""); CurrentOwner normalizes that to ModeTUI rather
+// than leaving callers to special-case the empty string themselves.
+type OwnerInfo struct {
 	PID       int    `json:"pid"`
 	Version   string `json:"version,omitempty"`
 	StartedAt string `json:"started_at,omitempty"`
+	Mode      Mode   `json:"mode,omitempty"`
+	Socket    string `json:"socket,omitempty"`
+}
+
+// effectiveMode normalizes a possibly-old-format Mode: missing (from a
+// pre-Mode lock file, or a zero OwnerInfo) reads as ModeTUI.
+func (o OwnerInfo) effectiveMode() Mode {
+	if o.Mode == "" {
+		return ModeTUI
+	}
+	return o.Mode
 }
 
 // Lock represents an acquired exclusive lock on a project's workspace
@@ -58,6 +89,28 @@ type Lock struct {
 // crashed run and corruption for a live one.
 func (l *Lock) Enforced() bool {
 	return l != nil && l.enforced
+}
+
+// SetMode rewrites this lock's owner info with mode and socket, once the
+// work that mode describes has actually happened -- a daemon calls this
+// only after its unix socket is bound, not before, so a reader (a client
+// deciding whether to dial, a future `sennit daemon status`) never sees a
+// socket recorded that isn't live yet. It preserves the PID/Version/
+// StartedAt this lock was acquired with; only Mode and Socket change.
+//
+// A no-op (nil error) on a nil *Lock or one that isn't Enforced: neither
+// holds a real lock file to rewrite, and a caller that skipped locking
+// (SENNIT_SKIP_DATADIR_LOCK) has nothing here to report to anyone else
+// anyway.
+func (l *Lock) SetMode(mode Mode, socket string) error {
+	if l == nil || !l.enforced {
+		return nil
+	}
+	path := filepath.Join(l.dir, lockFileName)
+	info := readOwnerInfo(path)
+	info.Mode = mode
+	info.Socket = socket
+	return writeOwnerInfoStruct(path, info)
 }
 
 // poolEntry is the process-local, refcounted OS lock backing every
@@ -116,7 +169,15 @@ func (l *Lock) Release() {
 // SENNIT_SKIP_DATADIR_LOCK is set to a truthy value. This is intended
 // as an escape hatch for hostile filesystems that do not implement
 // advisory locking; it should not be used in normal operation.
-func Acquire(dir string) (*Lock, error) {
+//
+// By default the owner info records ModeTUI; pass WithMode to record a
+// daemon's mode and socket path instead.
+func Acquire(dir string, opts ...AcquireOption) (*Lock, error) {
+	cfg := acquireConfig{mode: ModeTUI}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	absDir, err := canonicalDir(dir)
 	if err != nil {
 		return nil, err
@@ -148,7 +209,7 @@ func Acquire(dir string) (*Lock, error) {
 	// us. Failures here are non-fatal: the OS-level lock is what
 	// actually guarantees mutual exclusion, and a missing/partial JSON
 	// payload only degrades the diagnostic a contender prints.
-	if err := writeOwnerInfo(path); err != nil {
+	if err := writeOwnerInfo(path, cfg.mode, cfg.socket); err != nil {
 		slog.Debug("Failed to write workspace lock owner info", "path", path, "error", err)
 	}
 
@@ -184,15 +245,41 @@ func skipLock() bool {
 	return v
 }
 
+// acquireConfig carries Acquire's options.
+type acquireConfig struct {
+	mode   Mode
+	socket string
+}
+
+// AcquireOption configures Acquire.
+type AcquireOption func(*acquireConfig)
+
+// WithMode records mode and (for ModeDaemon) socket in the lock file's
+// owner info, in place of the default ModeTUI with no socket.
+func WithMode(mode Mode, socket string) AcquireOption {
+	return func(c *acquireConfig) {
+		c.mode = mode
+		c.socket = socket
+	}
+}
+
 // writeOwnerInfo truncates and rewrites the lock file with the current
 // process's identifying information. It is called only after the lock
 // is held.
-func writeOwnerInfo(path string) error {
-	info := ownerInfo{
+func writeOwnerInfo(path string, mode Mode, socket string) error {
+	return writeOwnerInfoStruct(path, OwnerInfo{
 		PID:       os.Getpid(),
 		Version:   version.Version,
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+		Mode:      mode,
+		Socket:    socket,
+	})
+}
+
+// writeOwnerInfoStruct truncates and rewrites the lock file with info
+// verbatim. Shared by writeOwnerInfo (a fresh acquisition) and
+// Lock.SetMode (an update to one already held).
+func writeOwnerInfoStruct(path string, info OwnerInfo) error {
 	payload, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
 		return err
@@ -203,15 +290,46 @@ func writeOwnerInfo(path string) error {
 
 // readOwnerInfo returns the lock file's recorded owner, if it parses.
 // A missing or malformed file yields an empty struct and no error;
-// the caller decides what to surface to the user.
-func readOwnerInfo(path string) ownerInfo {
+// the caller decides what to surface to the user. Mode is left exactly
+// as decoded (possibly "", for a pre-Mode lock file); callers that need
+// the normalized value use effectiveMode or CurrentOwner.
+func readOwnerInfo(path string) OwnerInfo {
 	raw, err := os.ReadFile(path)
 	if err != nil || len(raw) == 0 {
-		return ownerInfo{}
+		return OwnerInfo{}
 	}
-	var info ownerInfo
+	var info OwnerInfo
 	_ = json.Unmarshal(raw, &info)
 	return info
+}
+
+// CurrentOwner reads the lock file's recorded owner for dir without
+// taking the lock itself — for a caller (a client dialing a project's
+// daemon, say) that needs to know who holds a workspace before deciding
+// whether to contend for it. ok is false when dir has never been locked,
+// or its lock file is missing or unreadable; Mode is normalized (a
+// pre-Mode record reads as ModeTUI).
+func CurrentOwner(dir string) (info OwnerInfo, ok bool, err error) {
+	absDir, err := canonicalDir(dir)
+	if err != nil {
+		return OwnerInfo{}, false, err
+	}
+	path := filepath.Join(absDir, lockFileName)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return OwnerInfo{}, false, nil
+		}
+		return OwnerInfo{}, false, fmt.Errorf("failed to read workspace lock owner info %q: %w", path, err)
+	}
+	if len(raw) == 0 {
+		return OwnerInfo{}, false, nil
+	}
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return OwnerInfo{}, false, fmt.Errorf("failed to parse workspace lock owner info %q: %w", path, err)
+	}
+	info.Mode = info.effectiveMode()
+	return info, true, nil
 }
 
 // contendedLockError builds a wrapped ErrLocked annotated with whatever
@@ -221,10 +339,10 @@ func contendedLockError(dir, lockPath string) error {
 	details := ""
 	switch {
 	case info.PID != 0 && info.StartedAt != "":
-		details = fmt.Sprintf(" (owner pid=%d version=%s started_at=%s)",
-			info.PID, info.Version, info.StartedAt)
+		details = fmt.Sprintf(" (owner pid=%d version=%s started_at=%s mode=%s)",
+			info.PID, info.Version, info.StartedAt, info.effectiveMode())
 	case info.PID != 0:
-		details = fmt.Sprintf(" (owner pid=%d)", info.PID)
+		details = fmt.Sprintf(" (owner pid=%d mode=%s)", info.PID, info.effectiveMode())
 	}
 	return fmt.Errorf("%w: %s%s", ErrLocked, dir, details)
 }
