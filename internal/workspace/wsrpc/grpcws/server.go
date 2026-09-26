@@ -2,15 +2,13 @@ package grpcws
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 
 	"github.com/rave-soft/sennit/internal/version"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -106,7 +104,7 @@ func (c *Client) Hello(ctx context.Context) (HelloResponse, error) {
 // full method path, so Hello (metaServiceName) can share it with the
 // Workspace service's generated calls (serviceName).
 func (c *Client) invokeMethod(ctx context.Context, fullMethod, name string, req, resp any) error {
-	ctx = metadata.AppendToOutgoingContext(ctx, handleMetadataKey, c.handle)
+	ctx = c.outgoingContext(ctx)
 	var trailer metadata.MD
 	err := c.conn.Invoke(ctx, fullMethod, req, resp, grpc.CallContentSubtype(jsonCodecName), grpc.Trailer(&trailer))
 	if err != nil {
@@ -119,9 +117,10 @@ func (c *Client) invokeMethod(ctx context.Context, fullMethod, name string, req,
 type ServerOption func(*serverConfig)
 
 type serverConfig struct {
-	grpcOpts        []grpc.ServerOption
-	serverHome      func() string
-	eventBufferSize int
+	grpcOpts         []grpc.ServerOption
+	serverHome       func() string
+	eventBufferSize  int
+	handleLeaseGrace time.Duration
 }
 
 // WithGRPCServerOptions passes extra grpc.ServerOption values through to
@@ -137,26 +136,38 @@ func WithServerHome(home func() string) ServerOption {
 }
 
 // WithEventBufferSize overrides the root handle's event hub's ring buffer
-// capacity (defaultEventBufferSize otherwise) -- see eventHub.
+// capacity (defaultEventBufferSize otherwise) -- see eventHub. Every
+// non-root handle's own hub (see handleRegistry.register) uses the same
+// capacity.
 func WithEventBufferSize(n int) ServerOption {
 	return func(c *serverConfig) { c.eventBufferSize = n }
+}
+
+// WithHandleLeaseGrace overrides how long a client may go with no open
+// RPC or stream before its handles are released (defaultHandleLeaseGrace
+// otherwise) -- see leaseManager.
+func WithHandleLeaseGrace(d time.Duration) ServerOption {
+	return func(c *serverConfig) { c.handleLeaseGrace = d }
 }
 
 // NewServer builds a *grpc.Server exposing ws as the root workspace
 // handle (""), the Meta service's Hello, the Agent service's
 // AgentRunStream/AgentRunShellCommand, the Events service's Subscribe,
-// and the standard gRPC health service -- everything a Client (or
-// `grpc_health_v1`'s own tooling) needs to talk to this process
-// (CLIENT-SERVER.md, PR 1.1, build step 5; PR 1.2 build steps 1-2). PR 1.3
-// adds non-root handles to resolve; until then, any other handle is a
-// coded NotFound on every service.
+// the Handles service's EnterWorktree/ExitWorktree/AttachThread/
+// ReleaseHandle, and the standard gRPC health service -- everything a
+// Client (or `grpc_health_v1`'s own tooling) needs to talk to this process
+// (CLIENT-SERVER.md, PR 1.1, build step 5; PR 1.2 build steps 1-2; PR 1.3).
+// A handle any of those four methods minted resolves on every service
+// exactly like the root does; any other (unknown, released, or expired by
+// its owner's lease grace -- see leaseManager) decodes on the client as
+// errors.Is(err, workspace.ErrWorkspaceGone).
 //
-// The returned stop func stops the root handle's event hub -- the one
-// background goroutine (workspace.Workspace.SubscribeWith) NewServer
-// starts on demand, the first time a Subscribe RPC needs it -- and must
-// be called after the *grpc.Server itself has stopped serving, or a test
-// asserting no goroutine leak sees one that just hasn't been asked to
-// exit yet.
+// The returned stop func releases every registered handle (root and
+// non-root alike), which stops each one's own event hub -- the background
+// goroutines (workspace.Workspace.SubscribeWith) NewServer starts on
+// demand, the first time a Subscribe RPC needs them -- and must be called
+// after the *grpc.Server itself has stopped serving, or a test asserting
+// no goroutine leak sees one that just hasn't been asked to exit yet.
 func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func()) {
 	cfg := &serverConfig{}
 	for _, opt := range opts {
@@ -169,39 +180,61 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 		}
 	}
 
-	s := grpc.NewServer(cfg.grpcOpts...)
+	registry := newHandleRegistry(cfg.eventBufferSize)
+	lease := newLeaseManager(cfg.handleLeaseGrace, registry)
+
+	// The lease's interceptors go first, ahead of whatever
+	// WithGRPCServerOptions supplies: grpc.ChainUnaryInterceptor/
+	// ChainStreamInterceptor compose across separate calls (each appends
+	// to the server's own chain, rather than one replacing the other), so
+	// this ordering just makes lease tracking the outermost wrapper --
+	// its own defer still runs once the whole call, including a caller-
+	// supplied inner interceptor, has finished.
+	grpcOpts := append([]grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(lease.unaryInterceptor),
+		grpc.ChainStreamInterceptor(lease.streamInterceptor),
+	}, cfg.grpcOpts...)
+	s := grpc.NewServer(grpcOpts...)
 
 	// resolveRoot is shared by every service that resolves a handle to a
 	// workspace.Workspace (Workspace itself, and the hand-written Agent
-	// service below): PR 1.2 only ever serves the root handle (""); PR 1.3
-	// adds non-root ones to whatever replaces this closure.
+	// and Handles services): "" always means ws itself; anything else is
+	// registry.resolve's job.
 	resolveRoot := func(ctx context.Context) (workspace.Workspace, error) {
 		handle := handleFromContext(ctx)
-		if handle != "" {
-			return nil, status.Error(codes.NotFound, fmt.Sprintf("wsrpc: no workspace registered for handle %q", handle))
+		if handle == "" {
+			return ws, nil
 		}
-		return ws, nil
+		return registry.resolve(handle)
 	}
 
 	RegisterWorkspaceServer(s, resolveRoot)
 	s.RegisterService(&agentServiceDesc, &agentServer{resolve: resolveRoot})
 	s.RegisterService(&metaServiceDesc, &metaServer{workingDir: ws.WorkingDir, serverHome: cfg.serverHome})
+	s.RegisterService(&handlesServiceDesc, &handlesServer{resolve: resolveRoot, registry: registry})
 
 	rootHub := newEventHub(cfg.eventBufferSize)
 	s.RegisterService(&eventsServiceDesc, &eventsServer{resolveHub: func(ctx context.Context) (*eventHub, error) {
 		handle := handleFromContext(ctx)
-		if handle != "" {
-			return nil, notFoundHandle(handle)
+		if handle == "" {
+			rootHub.ensureStarted(ws)
+			return rootHub, nil
 		}
-		rootHub.ensureStarted(ws)
-		return rootHub, nil
+		hub, err := registry.resolveHub(handle)
+		if err != nil {
+			return nil, grpcStatusFromError(ctx, err)
+		}
+		return hub, nil
 	}})
 
 	healthSrv := health.NewServer()
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(s, healthSrv)
 
-	return s, rootHub.close
+	return s, func() {
+		rootHub.close()
+		registry.closeAll()
+	}
 }
 
 // handleFromContext reads the "sennit-handle" metadata key an incoming

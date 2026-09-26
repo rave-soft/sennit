@@ -113,12 +113,12 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 			{Content: "task two", Status: session.TodoStatusInProgress, ActiveForm: "doing task two"},
 		},
 	}
-	attached := &threadsDockTestWorkspace{sess: sess, msgs: []message.Message{
+	attached := &threadsDockTestWorkspace{msgs: []message.Message{
 		{Parts: []message.ContentPart{
 			message.ToolCall{ID: "tc1", Name: "view", Input: `{"file_path":"internal/ui/model/ui.go"}`},
 		}},
 	}}
-	ws := &threadsDockTestWorkspace{supported: true, attachWS: attached}
+	ws := &threadsDockTestWorkspace{supported: true, sess: sess, attachWS: attached}
 	com := &common.Common{Workspace: ws}
 
 	c := &DockState{}
@@ -133,12 +133,42 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 	require.Equal(t, "doing task two", loaded.activity.InProgressTodo)
 	require.Equal(t, int64(5), loaded.activity.MessageCount)
 	require.Equal(t, "view internal/ui/model/ui.go", loaded.activity.LastTool)
+	require.Equal(t, 1, ws.attachCalls, "the first probe has no cached count to compare against, so it must attach")
 	require.Equal(t, 1, ws.detachCalls)
 
 	c.activity = map[string]listcache.TTLCache[DockActivity]{"t1": {InFlight: true}}
 	c.ApplyActivityLoaded(loaded)
 	require.False(t, c.activity["t1"].InFlight)
 	require.Equal(t, "doing task two", c.activity["t1"].Value.InProgressTodo)
+}
+
+// TestDispatchThreadActivityRefresh_SkipsAttachWhenMessageCountUnchanged is
+// the optimization dispatchThreadActivityRefresh exists for: once a
+// message count has already been seen, a probe that finds the same count
+// again must not attach at all, over a remote workspace that would
+// otherwise cost a handle round trip every ~8s TTL tick for a thread that
+// isn't doing anything new (CLIENT-SERVER.md, PR 1.3).
+func TestDispatchThreadActivityRefresh_SkipsAttachWhenMessageCountUnchanged(t *testing.T) {
+	t.Parallel()
+
+	sess := session.Session{MessageCount: 5}
+	ws := &threadsDockTestWorkspace{supported: true, sess: sess, attachWS: &threadsDockTestWorkspace{}}
+	com := &common.Common{Workspace: ws}
+
+	c := &DockState{activity: map[string]listcache.TTLCache[DockActivity]{
+		"t1": {Timestamp: time.Now(), Value: DockActivity{MessageCount: 5, LastTool: "bash go test ./..."}},
+	}}
+	cmd := c.dispatchThreadActivityRefresh(com, "t1", "sess-1")
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	loaded, ok := msg.(DockActivityLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, loaded.err)
+	require.Equal(t, int64(5), loaded.activity.MessageCount)
+	require.Equal(t, "bash go test ./...", loaded.activity.LastTool, "the cached LastTool must be reused, not cleared")
+	require.Zero(t, ws.attachCalls, "an unchanged message count must not attach")
+	require.Zero(t, ws.detachCalls)
 }
 
 func TestApplyThreadActivityLoadedDiscardsStaleGen(t *testing.T) {
@@ -175,6 +205,7 @@ type threadsDockTestWorkspace struct {
 
 	attachWS    workspace.Workspace
 	attachErr   error
+	attachCalls int
 	detachCalls int
 
 	sess    session.Session
@@ -201,6 +232,7 @@ func (w *threadsDockTestWorkspace) ListTasks(context.Context) ([]proto.Thread, e
 }
 
 func (w *threadsDockTestWorkspace) AttachThread(context.Context, string) (workspace.Workspace, func(), error) {
+	w.attachCalls++
 	return w.attachWS, func() { w.detachCalls++ }, w.attachErr
 }
 

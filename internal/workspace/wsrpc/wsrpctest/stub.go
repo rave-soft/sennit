@@ -8,6 +8,7 @@ package wsrpctest
 
 import (
 	"context"
+	"sync"
 
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
@@ -70,9 +71,19 @@ type StubWorkspace struct {
 	ExitWorktreeCalled bool
 	WorktreeWorkspace  workspace.Workspace
 	WorktreeErr        error
+	// WorktreeReleased, if non-nil, is closed the first time the release
+	// func EnterWorktree/ExitWorktree returned actually runs -- letting a
+	// test observe a handle registry's release (CLIENT-SERVER.md, PR 1.3)
+	// without racing a plain bool across goroutines.
+	WorktreeReleased    chan struct{}
+	worktreeReleaseOnce sync.Once
 
 	GotAttachThreadID     string
 	AttachThreadWorkspace workspace.Workspace
+	// AttachThreadReleased mirrors WorktreeReleased, for AttachThread's own
+	// release func.
+	AttachThreadReleased    chan struct{}
+	attachThreadReleaseOnce sync.Once
 
 	ShutdownCalled bool
 
@@ -153,17 +164,33 @@ func (s *StubWorkspace) EnterWorktree(_ context.Context, name string) (workspace
 	if s.WorktreeErr != nil {
 		return nil, nil, s.WorktreeErr
 	}
-	return s.WorktreeWorkspace, func() {}, nil
+	return s.WorktreeWorkspace, s.worktreeRelease, nil
 }
 
 func (s *StubWorkspace) ExitWorktree(context.Context) (workspace.Workspace, func(), error) {
 	s.ExitWorktreeCalled = true
-	return s.WorktreeWorkspace, func() {}, nil
+	return s.WorktreeWorkspace, s.worktreeRelease, nil
+}
+
+func (s *StubWorkspace) worktreeRelease() {
+	s.worktreeReleaseOnce.Do(func() {
+		if s.WorktreeReleased != nil {
+			close(s.WorktreeReleased)
+		}
+	})
 }
 
 func (s *StubWorkspace) AttachThread(_ context.Context, id string) (workspace.Workspace, func(), error) {
 	s.GotAttachThreadID = id
-	return s.AttachThreadWorkspace, func() {}, nil
+	return s.AttachThreadWorkspace, s.attachThreadRelease, nil
+}
+
+func (s *StubWorkspace) attachThreadRelease() {
+	s.attachThreadReleaseOnce.Do(func() {
+		if s.AttachThreadReleased != nil {
+			close(s.AttachThreadReleased)
+		}
+	})
 }
 
 func (s *StubWorkspace) Shutdown() {

@@ -68,10 +68,11 @@ var (
 	// torn down out from under the client).
 	ErrServerUnreachable = errors.New("lost connection to the sennit server")
 	// ErrWorkspaceGone means the server is reachable but no longer knows
-	// this client's workspace: it was torn down, or the server was
-	// replaced underneath the client. The subscription loop re-registers
-	// the workspace in the background when it sees this.
-	ErrWorkspaceGone = errors.New("the server reset this workspace; reconnecting")
+	// the workspace handle a call named: it was released, its client's
+	// lease expired (see grpcws' handle registry), or the server was
+	// restarted. The caller has to obtain a new handle; nothing retries
+	// on its behalf.
+	ErrWorkspaceGone = errors.New("the server no longer has this workspace")
 	// ErrStreamClosed means an established event stream ended.
 	// Resubscribing usually succeeds immediately, but events published in
 	// the meantime are lost for good, so the client treats it as a

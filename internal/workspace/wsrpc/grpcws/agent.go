@@ -10,7 +10,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/rave-soft/sennit/internal/proto"
@@ -297,7 +296,7 @@ const agentStreamTerminalSendTimeout = 200 * time.Millisecond
 // agentStreamTerminalSendTimeout, so a caller that has stopped reading
 // entirely still can't wedge this goroutine open.
 func (c *Client) AgentRunStream(ctx context.Context, sessionID, prompt string, opts workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
-	ctx = metadata.AppendToOutgoingContext(ctx, handleMetadataKey, c.handle)
+	ctx = c.outgoingContext(ctx)
 	desc := &agentServiceDesc.Streams[0]
 	fullMethod := "/" + agentServiceName + "/AgentRunStream"
 	stream, err := c.conn.NewStream(ctx, desc, fullMethod, grpc.CallContentSubtype(jsonCodecName))
@@ -385,7 +384,7 @@ func (c *Client) AgentRunStream(ctx context.Context, sessionID, prompt string, o
 // workspace.ErrServerUnreachable per decodeClientError) is returned
 // exactly as any other Workspace method's error, preserving identity.
 func (c *Client) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error) {
-	ctx = metadata.AppendToOutgoingContext(ctx, handleMetadataKey, c.handle)
+	ctx = c.outgoingContext(ctx)
 	desc := &agentServiceDesc.Streams[1]
 	fullMethod := "/" + agentServiceName + "/AgentRunShellCommand"
 	stream, err := c.conn.NewStream(ctx, desc, fullMethod, grpc.CallContentSubtype(jsonCodecName))

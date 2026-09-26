@@ -6,10 +6,14 @@ package delegations
 //
 // The all-delegation list lives in ListCache, shared with the dashboard and
 // header badge. The dock filters that cache to active isolated delegations and
-// separately fetches their live activity through AttachThread and GetSession.
-// AttachThread observes an existing runtime and may return a read-only fallback;
-// the dock never activates completed work. Activity therefore uses a longer TTL
-// and is fetched only for isolated delegations the dock renders.
+// separately fetches their live activity via GetSession, called directly on
+// the parent workspace since sessions live in the shared database -- no
+// attach needed just to read one. AttachThread only comes into it when the
+// message count has moved and the last tool call needs the thread's own
+// buffered state (see dispatchThreadActivityRefresh); it observes an
+// existing runtime and may return a read-only fallback, since the dock
+// never activates completed work. Activity therefore uses a longer TTL and
+// is fetched only for isolated delegations the dock renders.
 //
 // Follows the same TTL-cache idiom as cache.go: a memoized value,
 // checkedAt/inFlight/gen bookkeeping, a dispatchXRefresh that fetches
@@ -45,8 +49,9 @@ import (
 // can pin it.
 var threadsDockActivityTTL = 8 * time.Second
 
-// DockActivity is a per-thread live snapshot fetched from the
-// thread's own session via AttachThread + GetSession.
+// DockActivity is a per-thread live snapshot fetched via GetSession on the
+// thread's session ID, with AttachThread + ListMessages filling in the
+// last tool call only when the message count has moved.
 type DockActivity struct {
 	// InProgressTodo is the ActiveForm (falling back to Content) of the
 	// session's in-progress todo, empty if there is none.
@@ -124,8 +129,9 @@ func SortByCreation(items []proto.Thread) {
 	})
 }
 
-// DockActivityLoadedMsg delivers the result of an off-thread
-// AttachThread + GetSession fetch for a single thread's live activity.
+// DockActivityLoadedMsg delivers the result of an off-thread activity
+// fetch (GetSession, and sometimes AttachThread + ListMessages -- see
+// dispatchThreadActivityRefresh) for a single thread's live activity.
 type DockActivityLoadedMsg struct {
 	uimsg.MainScreenOwned
 	threadID string
@@ -137,22 +143,35 @@ type DockActivityLoadedMsg struct {
 	err      error
 }
 
-// dispatchThreadActivityRefresh returns a command that attaches to
-// threadID's own isolated workspace, reads its session, and reduces it to
-// a DockActivity, delivering a DockActivityLoadedMsg. It always
-// detaches, even on error, and always delivers a message (with a zero
+// dispatchThreadActivityRefresh returns a command that reads threadID's
+// session and reduces it to a DockActivity, delivering a
+// DockActivityLoadedMsg. It always delivers a message (with a zero
 // activity on failure) so the caller's inFlight flag is cleared rather than
 // left stuck. Guards against a nil workspace like the other dispatchers.
 //
-// This calls AttachThread only, never ActivateThread: it fires on an
-// ~8s TTL over every thread ActiveDockThreads returns, which deliberately
-// includes idle ones, so it runs against most threads in the dock on
-// every cycle. AttachThread must stay side-effect-free for a thread that
-// is not currently running — it hands back a read-only view instead of
-// reviving anything — or this background poll would silently respawn a
+// This fires on an ~8s TTL over every thread ActiveDockThreads returns,
+// which deliberately includes idle ones, so it runs against most threads in
+// the dock on every cycle -- over a remote workspace (CLIENT-SERVER.md's
+// client/server split), that used to mean an AttachThread/detach handle
+// round trip every tick for every thread, most of which never change
+// between ticks. MessageCount and Todos come from GetSession, called
+// directly on com.Workspace with the thread's session ID rather than
+// through AttachThread: sessions live in the shared database, so the
+// parent workspace's own view of the row is exactly the same one the
+// thread's own workspace would return. Only the last tool call summary
+// still needs an attach, and only when the message count actually moved
+// since the previous probe: it is not on the session row, and reading it
+// needs message.Service's debounced streaming deltas flushed, which only
+// the thread's own App instance buffers (see ListMessages' own doc
+// comment) -- a stale count means nothing new to summarize, so the cached
+// LastTool is reused instead.
+//
+// AttachThread, when it does run, must stay side-effect-free for a thread
+// that is not currently running -- it hands back a read-only view instead
+// of reviving anything -- or this background poll would silently respawn a
 // full App per idle thread it glances at. Do not "fix" a nil/read-only
-// result here by reaching for ActivateThread; that call belongs only to
-// a caller that means to revive the thread, like attachThreadCmd.
+// result here by reaching for ActivateThread; that call belongs only to a
+// caller that means to revive the thread, like attachThreadCmd.
 func (c *DockState) dispatchThreadActivityRefresh(com *common.Common, threadID, sessionID string) tea.Cmd {
 	if com == nil || com.Workspace == nil {
 		return nil
@@ -171,14 +190,7 @@ func (c *DockState) dispatchThreadActivityRefresh(com *common.Common, threadID, 
 	prev, hasPrev := entry.Value, !entry.Timestamp.IsZero()
 	ctx := com.Context()
 	return func() tea.Msg {
-		attached, detach, err := ws.AttachThread(ctx, threadID)
-		if err != nil {
-			slog.Error("Failed to attach thread for dock activity", "thread", threadID, "error", err)
-			return DockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
-		}
-		defer detach()
-
-		sess, err := attached.GetSession(ctx, sessionID)
+		sess, err := ws.GetSession(ctx, sessionID)
 		if err != nil {
 			slog.Error("Failed to get session for dock activity", "thread", threadID, "error", err)
 			return DockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
@@ -199,15 +211,26 @@ func (c *DockState) dispatchThreadActivityRefresh(com *common.Common, threadID, 
 
 		// The last tool call is not on the session row — it takes listing
 		// the session's messages, whose cost grows with the session's
-		// whole history (and, in local mode, forces a FlushAll first). So
-		// only re-list when the message count moved since the previous
-		// probe: an unchanged count means no new tool call, and the cached
-		// summary is still right. A listing failure only costs this one
-		// optional field, so it's a best-effort add-on rather than a
-		// reason to fail the whole probe.
+		// whole history (and forces the thread's own FlushAll first, which
+		// only an attach reaches). So only attach and re-list when the
+		// message count moved since the previous probe: an unchanged count
+		// means no new tool call, and the cached summary is still right.
+		// An attach or listing failure only costs this one optional field,
+		// so both are a best-effort add-on rather than a reason to fail
+		// the whole probe -- MessageCount/Todos above already succeeded.
 		if hasPrev && prev.MessageCount == sess.MessageCount {
 			activity.LastTool = prev.LastTool
-		} else if msgs, err := attached.ListMessages(ctx, sessionID); err != nil {
+			return DockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, activity: activity}
+		}
+
+		attached, detach, err := ws.AttachThread(ctx, threadID)
+		if err != nil {
+			slog.Error("Failed to attach thread for dock activity", "thread", threadID, "error", err)
+			return DockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, activity: activity}
+		}
+		defer detach()
+
+		if msgs, err := attached.ListMessages(ctx, sessionID); err != nil {
 			slog.Error("Failed to list messages for dock activity", "thread", threadID, "error", err)
 		} else {
 			activity.LastTool = lastToolSummary(msgs)

@@ -37,6 +37,7 @@ const defaultCallTimeout = 30 * time.Second
 type Client struct {
 	conn        grpc.ClientConnInterface
 	handle      string
+	clientID    string
 	callTimeout time.Duration
 
 	// lifeCtx/lifeCancel bound every subscription's lifetime: Subscribe
@@ -66,11 +67,24 @@ func WithHandle(handle string) ClientOption {
 	return func(c *Client) { c.handle = handle }
 }
 
+// WithClientID pins this Client's lease identity (the "sennit-client"
+// metadata every call carries -- see leaseManager) instead of the random
+// one NewClient otherwise generates. A client reconnecting after a dropped
+// connection passes the same ID its previous *Client used
+// (Client.ClientID), so the server's lease sees the same client rather
+// than a brand-new one with no handles yet -- CLIENT-SERVER.md, PR 1.3.
+func WithClientID(id string) ClientOption {
+	return func(c *Client) { c.clientID = id }
+}
+
 // NewClient wraps conn (typically a *grpc.ClientConn, or a bufconn-dialed
-// one in tests) as a workspace.Workspace.
+// one in tests) as a workspace.Workspace. Absent WithClientID, a fresh
+// random client ID is generated -- every Client that should be treated as
+// a *different* lease (a different logical client, not a reconnect of an
+// existing one) must go through NewClient rather than sharing an ID.
 func NewClient(conn grpc.ClientConnInterface, opts ...ClientOption) *Client {
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
-	c := &Client{conn: conn, callTimeout: defaultCallTimeout, lifeCtx: lifeCtx, lifeCancel: lifeCancel}
+	c := &Client{conn: conn, callTimeout: defaultCallTimeout, clientID: randomToken(), lifeCtx: lifeCtx, lifeCancel: lifeCancel}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -79,12 +93,31 @@ func NewClient(conn grpc.ClientConnInterface, opts ...ClientOption) *Client {
 
 var _ workspace.Workspace = (*Client)(nil)
 
+// ClientID is this Client's lease identity, as sent in the "sennit-client"
+// metadata on every call (see leaseManager). A caller reconnecting after a
+// dropped connection passes it to WithClientID on the replacement Client.
+func (c *Client) ClientID() string { return c.clientID }
+
+// Handle is the workspace handle this Client targets ("" for the root),
+// as sent in the "sennit-handle" metadata on every call. A caller that
+// needs to rebuild a *Client bound to the same non-root handle -- after a
+// reconnect within the server's lease grace (CLIENT-SERVER.md, PR 1.3),
+// say -- passes it to WithHandle on the replacement Client.
+func (c *Client) Handle() string { return c.handle }
+
 // invoke calls the Workspace service's method RPC, attaching c's handle
 // metadata and selecting the "json" codec, and translates any failure per
 // this package's doc comment on errors (see codec.go's errorTrailerKey and
 // decodeClientError below).
 func (c *Client) invoke(ctx context.Context, method string, req, resp any) error {
 	return c.invokeMethod(ctx, "/"+serviceName+"/"+method, method, req, resp)
+}
+
+// outgoingContext attaches this Client's handle and client-lease metadata
+// to ctx -- every call this package makes, unary or streaming, needs both
+// (see handleMetadataKey/clientMetadataKey's own doc comments).
+func (c *Client) outgoingContext(ctx context.Context) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, handleMetadataKey, c.handle, clientMetadataKey, c.clientID)
 }
 
 // decodeClientError turns a failed Invoke's error into the shape callers
@@ -133,7 +166,7 @@ func grpcStatusFromError(ctx context.Context, err error) error {
 		code = codes.Canceled
 	case "deadline_exceeded":
 		code = codes.DeadlineExceeded
-	case "session_not_found":
+	case "session_not_found", "workspace_gone":
 		code = codes.NotFound
 	case "read_only":
 		code = codes.PermissionDenied
@@ -271,7 +304,7 @@ func connectionEvent(state workspace.ConnectionState) pubsub.Event[workspace.Con
 // stream, attaching this Client's handle metadata like every other call
 // (see invoke).
 func (c *Client) openEventStream(ctx context.Context, fromSeq uint64) (grpc.ServerStreamingClient[EventFrame], error) {
-	ctx = metadata.AppendToOutgoingContext(ctx, handleMetadataKey, c.handle)
+	ctx = c.outgoingContext(ctx)
 	desc := &eventsServiceDesc.Streams[0]
 	fullMethod := "/" + eventsServiceName + "/Subscribe"
 	stream, err := c.conn.NewStream(ctx, desc, fullMethod, grpc.CallContentSubtype(jsonCodecName))
@@ -322,25 +355,65 @@ func sleepBackoff(ctx context.Context, backoff *time.Duration) bool {
 	return true
 }
 
-// StartOAuth is class H; not available until PR 1.3 adds the handle
-// registry.
+// StartOAuth is class H. OAuthWait/OAuthCancel are a separate PR
+// (CLIENT-SERVER.md, PR 1.3's "смежное" note on the OAuth handle) --
+// this one only wires up the three Workspace-returning H methods below.
 func (c *Client) StartOAuth(context.Context, string, string, bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	return workspace.OAuthStartResult{}, nil, notAvailableOverWire("StartOAuth")
 }
 
-// EnterWorktree is class H; see StartOAuth.
-func (c *Client) EnterWorktree(context.Context, string) (workspace.Workspace, func(), error) {
-	return nil, nil, notAvailableOverWire("EnterWorktree")
+// EnterWorktree is class H: it calls the Handles service's EnterWorktree
+// RPC, which acts on whatever workspace this Client currently targets (its
+// own handle metadata), and wraps a successful response as the (Workspace,
+// release) pair every H method returns -- see callHandles.
+func (c *Client) EnterWorktree(ctx context.Context, name string) (workspace.Workspace, func(), error) {
+	return c.callHandles(ctx, "EnterWorktree", &EnterWorktreeRequest{Name: name})
 }
 
-// ExitWorktree is class H; see StartOAuth.
-func (c *Client) ExitWorktree(context.Context) (workspace.Workspace, func(), error) {
-	return nil, nil, notAvailableOverWire("ExitWorktree")
+// ExitWorktree is class H; see EnterWorktree.
+func (c *Client) ExitWorktree(ctx context.Context) (workspace.Workspace, func(), error) {
+	return c.callHandles(ctx, "ExitWorktree", &ExitWorktreeRequest{})
 }
 
-// AttachThread is class H; see StartOAuth.
-func (c *Client) AttachThread(context.Context, string) (workspace.Workspace, func(), error) {
-	return nil, nil, notAvailableOverWire("AttachThread")
+// AttachThread is class H; see EnterWorktree.
+func (c *Client) AttachThread(ctx context.Context, id string) (workspace.Workspace, func(), error) {
+	return c.callHandles(ctx, "AttachThread", &AttachThreadRequest{ID: id})
+}
+
+// callHandles is EnterWorktree/ExitWorktree/AttachThread's shared body
+// (CLIENT-SERVER.md, PR 1.3, build step 4): it invokes the Handles
+// service's RPC named name with req and, on success, builds the
+// (Workspace, func(), error) every H method returns -- a new *Client
+// sharing this one's connection and client-lease identity (so the server's
+// lease tracks both as the same client -- see leaseManager) but bound to
+// the handle the server just minted, and a release func that calls
+// ReleaseHandle for it, bounded by this Client's own call timeout and
+// logging (never returning) a failure: a caller done with a handle has
+// nothing useful to do with a release error beyond knowing it happened.
+func (c *Client) callHandles(ctx context.Context, name string, req any) (workspace.Workspace, func(), error) {
+	resp := new(HandleResponse)
+	fullMethod := "/" + handlesServiceName + "/" + name
+	if err := c.invokeMethod(ctx, fullMethod, name, req, resp); err != nil {
+		return nil, nil, err
+	}
+	handle := resp.Handle
+	child := NewClient(c.conn, WithHandle(handle), WithClientID(c.clientID), WithCallTimeout(c.callTimeout))
+	release := func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
+		defer cancel()
+		if err := c.releaseHandle(releaseCtx, handle); err != nil {
+			slog.Error("Wsrpc failed to release handle", "handle", handle, "error", err)
+		}
+	}
+	return child, release, nil
+}
+
+// releaseHandle calls the Handles service's ReleaseHandle RPC for handle.
+func (c *Client) releaseHandle(ctx context.Context, handle string) error {
+	req := &ReleaseHandleRequest{Handle: handle}
+	resp := new(ReleaseHandleResponse)
+	fullMethod := "/" + handlesServiceName + "/ReleaseHandle"
+	return c.invokeMethod(ctx, fullMethod, "ReleaseHandle", req, resp)
 }
 
 // Shutdown is class X. On a real connection this would also close it and

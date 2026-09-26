@@ -144,9 +144,3 @@ func (s *eventsServer) Subscribe(req *SubscribeRequest, stream WorkspaceEventsSu
 		}
 	}
 }
-
-// notFoundHandle is the eventsServer/WorkspaceServer error both resolvers
-// return for any handle but the root ("") -- PR 1.3 adds real ones.
-func notFoundHandle(handle string) error {
-	return status.Error(codes.NotFound, "wsrpc: no workspace registered for handle "+handle)
-}
