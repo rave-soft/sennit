@@ -332,6 +332,15 @@ type Options struct {
 // its own. Every field is optional and answered by the Effective*
 // accessor below, safe to call on a nil *DaemonOptions.
 type DaemonOptions struct {
+	// Mode selects whether the interactive `sennit` command talks to a
+	// project daemon at all: "off" (default, for now — CLIENT-SERVER.md
+	// keeps in-process the default until phase 4) runs the backend
+	// in-process exactly as before; "auto" connects to (or starts) the
+	// project's daemon and drives the TUI through it instead. Unset or
+	// unrecognized falls back to "off" rather than erroring, matching
+	// IdleTimeout's own treatment of a typo. `--no-daemon`/`--daemon`
+	// override this per invocation (internal/cmd/root.go).
+	Mode string `json:"mode,omitempty" jsonschema:"description=Whether \"sennit\" connects to (or starts) this project's daemon instead of running in-process. \"off\" (default) keeps everything in-process; \"auto\" uses the daemon.,enum=off,enum=auto,default=off"`
 	// IdleTimeout is how long the daemon must see no busy client,
 	// session, thread, task, background shell, or pending permission/
 	// question request before it exits on its own, as a Go duration
@@ -347,6 +356,26 @@ type DaemonOptions struct {
 // DefaultDaemonIdleTimeout is the idle timeout applied when
 // options.daemon.idle_timeout is unset or unparseable.
 const DefaultDaemonIdleTimeout = 10 * time.Minute
+
+// DefaultDaemonMode is the mode applied when options.daemon.mode is unset
+// or unrecognized.
+const DefaultDaemonMode = "off"
+
+// EffectiveMode returns "off" or "auto", defaulting an unset or
+// unrecognized value to DefaultDaemonMode rather than erroring — a typo
+// here must fall back to today's in-process behavior, not silently mean
+// "auto".
+func (o *DaemonOptions) EffectiveMode() string {
+	if o == nil {
+		return DefaultDaemonMode
+	}
+	switch o.Mode {
+	case "off", "auto":
+		return o.Mode
+	default:
+		return DefaultDaemonMode
+	}
+}
 
 // EffectiveIdleTimeout returns how long the daemon may sit idle before
 // exiting. It returns 0 to mean "idle exit is disabled" — distinct from

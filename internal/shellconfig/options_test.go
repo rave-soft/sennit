@@ -396,6 +396,24 @@ func TestOption_AttributionTrailerStyleInvalid(t *testing.T) {
 	require.Contains(t, err.Error(), "expects none or assisted-by")
 }
 
+// TestOption_DaemonMode pins that "option daemon-mode auto" nests under
+// options.daemon, alongside daemon-idle-timeout (CLIENT-SERVER.md, PR 2.3).
+func TestOption_DaemonMode(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option daemon-mode auto`)
+	daemon := result["options"].(map[string]any)["daemon"].(map[string]any)
+	require.Equal(t, "auto", daemon["mode"])
+}
+
+func TestOption_DaemonModeInvalid(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option daemon-mode bogus`))
+	require.Error(t, err)
+}
+
 // TestOption_AttributionGeneratedWithShorthand pins that, like other
 // top-level bool options, omitting the value defaults to true.
 func TestOption_AttributionGeneratedWithShorthand(t *testing.T) {

@@ -24,15 +24,26 @@ type credentialsFileDependency struct {
 	stat    func(string) (os.FileInfo, error)
 }
 
-// LoadData loads configuration without provider runtime orchestration.
+// LoadData loads configuration without provider runtime orchestration: no
+// RuntimeProcessor runs, so there is no provider model discovery (no
+// network), no credential/secret resolution, and — since builtConfig.
+// configured is forced false without a processor (see buildConfig) — no
+// preferred-model fallback persisted either. It still merges every layer
+// (global and project, sennitrc and json) and applies the same defaults,
+// so options.* fields read through the result are the real, merged
+// values, not a stand-in.
 //
-// Production boots exclusively through LoadWithProcessor, which requires a
-// RuntimeProcessor; this entry point exists so tests can build a real,
-// disk-backed store through the same pipeline without one. That makes it
-// unreachable from main and so a permanent fixture of `deadcode` output —
-// it is not a caller that went missing. See internal/config/configtest,
-// whose package doc names it, and its ~20 callers across config,
-// workspace/appws, agent and app tests.
+// Originally this only backed tests that build a real, disk-backed store
+// through the load pipeline without a processor (internal/config/configtest
+// names it, and it has ~20 callers across config, workspace/appws, agent
+// and app tests) — but the same property (a cheap, side-effect-free read
+// of merged config) is exactly what a caller that only needs to read a
+// handful of fields wants in production too, without paying for discovery
+// or a second one when a RuntimeProcessor-backed load already ran or is
+// about to (see internal/cmd's effectiveDaemonMode and
+// setupDaemonWorkspace, CLIENT-SERVER.md PR 2.3). Anything that needs
+// providers, models, or credentials still must go through
+// LoadWithProcessor.
 func LoadData(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, nil)
 }

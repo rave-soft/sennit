@@ -137,6 +137,15 @@
     },
     "DaemonOptions": {
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "auto"
+          ],
+          "description": "Whether \"sennit\" connects to (or starts) this project's daemon instead of running in-process. \"off\" (default) keeps everything in-process; \"auto\" uses the daemon.",
+          "default": "off"
+        },
         "idle_timeout": {
           "type": "string",
           "description": "How long sennit daemon run may sit idle before it exits on its own (Go duration). 0 or negative disables idle exit.",

@@ -48,6 +48,9 @@ func init() {
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
+	rootCmd.Flags().Bool("no-daemon", false, "Run entirely in-process, ignoring options.daemon.mode")
+	rootCmd.Flags().Bool("daemon", false, "Connect to (or start) this project's daemon for this run, ignoring options.daemon.mode")
+	rootCmd.MarkFlagsMutuallyExclusive("no-daemon", "daemon")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -98,6 +101,18 @@ sennit --continue
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
+
+		cwd, err := ResolveCwd(cmd)
+		if err != nil {
+			return err
+		}
+		mode, err := effectiveDaemonMode(cmd, cwd)
+		if err != nil {
+			return err
+		}
+		if mode == "auto" {
+			return runInteractiveDaemon(cmd, cwd, sessionID, continueLast)
+		}
 
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
@@ -339,12 +354,58 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 // store for exactly this. Any other workspace is an error rather than an
 // in-memory fallback: a fallback would accept every theme or compact-mode
 // change and silently lose it on exit.
+//
+// Daemon mode has no such workspace to assert on (its workspace.Workspace
+// is a *grpcws.Client, not an *appws.AppWorkspace) and does not need this
+// assertion at all: it already holds its own *config.ConfigStore, loaded
+// client-side, and builds the store straight from it via
+// uiPrefsStoreFromConfig (CLIENT-SERVER.md, PR 0.5b/2.3).
 func uiPrefsStore(ws workspace.Workspace) (uiprefs.Store, error) {
 	cs, ok := ws.(interface{ ConfigStore() *config.ConfigStore })
 	if !ok {
 		return nil, fmt.Errorf("workspace %T has no config store for UI preferences", ws)
 	}
-	return uiprefs.NewConfigStoreAdapter(cs.ConfigStore()), nil
+	return uiPrefsStoreFromConfig(cs.ConfigStore()), nil
+}
+
+// uiPrefsStoreFromConfig wraps a *config.ConfigStore directly as the UI's
+// preference store — the explicit half of uiPrefsStore's split (see its
+// doc comment): both the in-process and daemon-mode paths end up here,
+// they just differ in how they got the store.
+func uiPrefsStoreFromConfig(cs *config.ConfigStore) uiprefs.Store {
+	return uiprefs.NewConfigStoreAdapter(cs)
+}
+
+// effectiveDaemonMode decides whether this invocation of the interactive
+// root command should talk to a project daemon (CLIENT-SERVER.md, PR
+// 2.3): "--no-daemon"/"--daemon" override options.daemon.mode outright for
+// this one run; otherwise cwd's project config is loaded and its
+// Options.Daemon.EffectiveMode() decides.
+//
+// This reads config.LoadData, not configruntime.Load: the in-process path
+// below reloads config through the real RuntimeProcessor pipeline anyway
+// (setupLocalWorkspace -> app.Bootstrap), and that pipeline runs provider
+// model discovery (network calls, see internal/providerload) — paying for
+// that twice on every single default (off-mode) invocation just to read
+// one string would be a startup-latency and network regression for
+// everyone. LoadData merges the same layers and applies the same
+// defaults without a processor, so options.daemon.mode still comes out
+// right; it just can't answer anything that needs providers or
+// credentials, which this doesn't.
+func effectiveDaemonMode(cmd *cobra.Command, cwd string) (string, error) {
+	if noDaemon, _ := cmd.Flags().GetBool("no-daemon"); noDaemon {
+		return "off", nil
+	}
+	if forceDaemon, _ := cmd.Flags().GetBool("daemon"); forceDaemon {
+		return "auto", nil
+	}
+	debug, _ := cmd.Flags().GetBool("debug")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	cfg, err := config.LoadData(cwd, dataDir, debug)
+	if err != nil {
+		return "", err
+	}
+	return cfg.Config().Options.Daemon.EffectiveMode(), nil
 }
 
 func MaybePrependStdin(prompt string) (string, error) {

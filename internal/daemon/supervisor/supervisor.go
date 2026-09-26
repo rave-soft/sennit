@@ -455,9 +455,18 @@ func logTail(path string) string {
 	return fmt.Sprintf("\n--- daemon startup log (%s) ---\n%s", path, data)
 }
 
-// dialConn opens a lazy (unconnected until first RPC) *grpc.ClientConn
-// to the unix socket at socketPath, using the same dial options a real
-// frontend would (grpcws.DefaultClientDialOptions).
+// Dial opens a lazy (unconnected until first RPC) *grpc.ClientConn to the
+// unix socket EnsureRunning returned, using the same dial options this
+// package's own version/health probes use (grpcws.DefaultClientDialOptions).
+// A caller building a real frontend (internal/cmd's daemon-mode root
+// command) uses this rather than duplicating the dialer, so the client and
+// this package's own bookkeeping calls always agree on how the socket is
+// reached.
+func Dial(socketPath string) (*grpc.ClientConn, error) {
+	return dialConn(socketPath)
+}
+
+// dialConn is Dial's unexported body; see Dial's doc comment.
 func dialConn(socketPath string) (*grpc.ClientConn, error) {
 	opts := append(grpcws.DefaultClientDialOptions(),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {

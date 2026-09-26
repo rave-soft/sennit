@@ -18,7 +18,6 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/daemon/sockpath"
 	"github.com/rave-soft/sennit/internal/herdr"
 	sennitlog "github.com/rave-soft/sennit/internal/log"
@@ -103,7 +102,11 @@ type Options struct {
 // calls this rather than recomputing any of it, so a client can always
 // find (or contend for) exactly the socket a real daemon would bind.
 func ResolveSocketPath(ctx context.Context, cwd, dataDir string, debug bool) (socketPath, lockDir string, err error) {
-	cfg, err := configruntime.Load(cwd, dataDir, debug)
+	// config.LoadData merges every layer but skips the runtime processor,
+	// so resolving a path does no provider discovery or credential
+	// resolution: the supervisor calls this on every connect, and Run
+	// calls it right before Bootstrap does the real load.
+	cfg, err := config.LoadData(cwd, dataDir, debug)
 	if err != nil {
 		return "", "", fmt.Errorf("daemon: failed to load config: %w", err)
 	}
