@@ -327,6 +327,8 @@
 
 ### PR 0.3. Тест полноты DTO
 
+**Сделано** (`5cbeb464f`, ужесточён в `6dc95fbbc`). Нашёл `MCPState` без `UnmarshalText`.
+
 Тест обходит метод-сет `FrontendWorkspace` и типы событий из `translateEvent`,
 рекурсивно собирает все типы параметров и результатов и требует для
 каждого образец в таблице `samples_test.go`. Для каждого образца:
@@ -335,6 +337,8 @@ encode → decode → `require.Equal`. Новый тип без образца �
 именем поля.
 
 ### PR 0.4. UI не зовёт воркспейс из `Update`/`View`
+
+**Сделано** (`695b676d2`). Страж нашёл шесть синхронных вызовов, включая проверку прокси OAuth Codex по Enter.
 
 **Уточнено 2026-09-26.** Методы класса C в клиенте PR 1.4 читают локальный
 кэш и сети не касаются, поэтому их синхронные вызовы из `Update`/`View`
@@ -365,6 +369,8 @@ encode → decode → `require.Equal`. Новый тип без образца �
 `Update`/`View` в тестовом харнессе `ui/model`.
 
 ### PR 0.5. Снимок конфигурации для фронтенда
+
+**Сделано** (`2ee9e5a04`, `6dc95fbbc`). Снимок кэшируется по указателю опубликованного конфига.
 
 **Уточнено 2026-09-26 по разбору.** UI читает `Config()` в 57 местах. Одно из
 них реально ломается по сети: пять проверок авторизации через
@@ -405,6 +411,8 @@ allowlist-DTO вместо отредактированного клона `*con
 
 ### PR 0.5b. UI-настройки на стороне клиента
 
+**Сделано** (`e55f200ed`).
+
 **Уточнено 2026-09-26.** `internal/uiprefs`: `Prefs` + `Store{Prefs(), Set(key,
 v), Subscribe}`; UI получает его через `common.Common`, отдельно от
 `Workspace`. Во встроенном режиме адаптер оборачивает `*config.ConfigStore`
@@ -435,6 +443,8 @@ v), Subscribe}`; UI получает его через `common.Common`, отде
 
 ### PR 0.5c. Аккаунты без токенов в UI
 
+**Сделано** (`4da2ece1d`). Заодно формы аккаунта и настроек провайдера перестали записывать поля, которые пользователь не менял: иначе прокси без пароля затирал сохранённый.
+
 Найдено тестом секретов 2026-09-26. `ListAccounts`, `RefreshAccountLimits`,
 `RecordAccount` и `OAuthCompletion.Account` отдают UI `accounts.Account`
 целиком, с `Token` (access и refresh) и `APIKey`, а `UpdateAccount`
@@ -456,6 +466,8 @@ ImportCopilot → RecordAccount) не должен проходить через
 
 ### PR 0.6. Файлы проекта только через воркспейс
 
+**Сделано** (`cf12dee95`).
+
 - `ListProjectFiles(ctx, dir string, depth, limit int) ([]string, error)`:
   замена `fsext.ListDirectory(".")` в `ui/completions/completions.go:659`,
   с тем же фильтром ignore.
@@ -470,6 +482,30 @@ ImportCopilot → RecordAccount) не должен проходить через
   с диска пользователя.
 
 ### PR 0.7. Генератор и loopback
+
+**Сделано** (`6f242da4f`, `ac5d90663`, и коммит 0.7c). Отличия и находки:
+- Таблица классов живёт в `internal/workspace/wsrpc/classes.go`; генератор
+  форматирует вывод библиотекой gofumpt, тест свежести не требует бинаря.
+- Реестр событий `wsrpc/events.go`; `translateEvent` больше не пропускает
+  в UI `notify.RunComplete` и `app.WorkspaceChanged`.
+- Возможности, которые UI находил приведением типа
+  (`SessionChangePreparer`, `WorktreeState`), вошли в контракт; тест
+  `TestUIDoesNotTypeAssertWorkspace` запрещает такие приведения в
+  `internal/ui`.
+- Ограничение задания `wire`: тесты UI подают события прямо в `Update`,
+  минуя `Subscribe`, поэтому кодек событий там не проверяется. Его
+  покрывает `wsrpc` `TestEventRegistry_RoundTrips`; настоящую проверку даст
+  PR 1.6 (сквозной поток через gRPC).
+- `internal/cmd` пока не строит настоящий воркспейс ни в одном тесте, так
+  что для него задание `wire` сейчас ничего не проверяет.
+
+Открыто на следующие фазы:
+- PR 1.3: токен входа OAuth ходит UI туда и обратно (записи
+  `forbiddenTypeAllowList` в `wire_dto_test.go`).
+- PR 2.3: `cmd/server_config.go` и `cmd/root.go` `uiPrefsStore` работают
+  только с `AppWorkspace`; для команд через демон нужен другой путь.
+- Генератор жёстко задаёт `LangVersion` go1.27.0; при смене `go` в
+  `go.mod` обновить.
 
 - `internal/workspace/wsrpc/gen`: `go:generate` читает
   `workspace.FrontendWorkspace` через `go/packages`, берёт классы из
