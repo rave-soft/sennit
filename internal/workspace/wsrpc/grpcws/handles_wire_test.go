@@ -242,6 +242,74 @@ func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet(t *testing.T) {
 	}
 }
 
+// TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet_RealDisconnectNoRedial
+// is TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet's real-disconnect
+// sibling (CLIENT-SERVER.md, PR 1.3's "Уточнено ревью (п. 3)"): unlike
+// that test's severableDialer.sever(), which calls the real Close() and
+// so sends a clean half-close through bufconn's own pipe (and needed the
+// Subscribe stream stopped by hand, or gRPC would have silently redialed
+// through the still-live listener and resumed as if nothing happened),
+// this one uses halfOpenDialer (halfopen_test.go): the connection goes
+// half-open -- the client never signals anything, ever, and never dials
+// again -- with the Subscribe stream simply left running. Only the
+// server's own keepalive (grpcws.WithKeepaliveParams) can notice a
+// connection like this at all; without it, this handle would stay leased
+// forever, since an open stream counts as activity on its own.
+func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet_RealDisconnectNoRedial(t *testing.T) {
+	t.Parallel()
+
+	pingTime, pingTimeout, grace := keepaliveTuning()
+	child := &wsrpctest.StubWorkspace{}
+	root := &wsrpctest.StubWorkspace{
+		WorktreeWorkspace:  child,
+		WorktreeReleased:   make(chan struct{}),
+		SubscribeWithReady: make(chan struct{}),
+	}
+	srv, stopHub := grpcws.NewServer(root,
+		grpcws.WithKeepaliveParams(pingTime, pingTimeout),
+		grpcws.WithHandleLeaseGrace(grace),
+	)
+	lis := bufconn.Listen(bufSize)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() {
+		srv.Stop()
+		stopHub()
+		_ = lis.Close()
+	})
+
+	// No client-side keepalive: see
+	// TestKeepalive_HalfOpenConnection_ReleasesHandlesAndTurnSurvives's
+	// doc comment on why one would let this test pass even with the
+	// server-side fix reverted.
+	dialer := &halfOpenDialer{lis: lis}
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(dialer.dial),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := grpcws.NewClient(conn)
+
+	stopSub := client.SubscribeWith(func(any) {})
+	t.Cleanup(stopSub) // left running until cleanup -- no manual stop, no redial.
+	select {
+	case <-root.SubscribeWithReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Subscribe never reached the server")
+	}
+
+	_, _, err = client.EnterWorktree(context.Background(), "feature")
+	require.NoError(t, err)
+
+	dialer.cut()
+
+	select {
+	case <-root.WorktreeReleased:
+	case <-time.After(pingTime + pingTimeout + grace + 10*time.Second):
+		t.Fatal("handle was never released after the connection went half-open")
+	}
+}
+
 // TestLeaseGrace_ReconnectWithinGraceKeepsHandles checks the flip side:
 // severing the connection and reconnecting (a fresh connection, the same
 // client ID) before the grace period elapses must keep every handle that

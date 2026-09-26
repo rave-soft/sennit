@@ -121,6 +121,8 @@ type serverConfig struct {
 	serverHome       func() string
 	eventBufferSize  int
 	handleLeaseGrace time.Duration
+	keepaliveTime    time.Duration
+	keepaliveTimeout time.Duration
 }
 
 // WithGRPCServerOptions passes extra grpc.ServerOption values through to
@@ -141,6 +143,17 @@ func WithServerHome(home func() string) ServerOption {
 // capacity.
 func WithEventBufferSize(n int) ServerOption {
 	return func(c *serverConfig) { c.eventBufferSize = n }
+}
+
+// WithKeepaliveParams overrides the server's gRPC keepalive ping interval
+// and reply timeout (DefaultKeepaliveTime/DefaultKeepaliveTimeout
+// otherwise -- see serverKeepaliveOptions). A test shrinks both to
+// exercise the half-open-connection path (CLIENT-SERVER.md, PR 1.3's
+// "Уточнено ревью (п. 3)") without waiting out the production interval; a
+// client dialing this server must use a matching pingTime (see
+// ClientDialOptions's own doc comment on why).
+func WithKeepaliveParams(pingTime, pingTimeout time.Duration) ServerOption {
+	return func(c *serverConfig) { c.keepaliveTime, c.keepaliveTimeout = pingTime, pingTimeout }
 }
 
 // WithHandleLeaseGrace overrides how long a client may go with no open
@@ -179,6 +192,12 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 			return home
 		}
 	}
+	if cfg.keepaliveTime <= 0 {
+		cfg.keepaliveTime = DefaultKeepaliveTime
+	}
+	if cfg.keepaliveTimeout <= 0 {
+		cfg.keepaliveTimeout = DefaultKeepaliveTimeout
+	}
 
 	registry := newHandleRegistry(cfg.eventBufferSize)
 	lease := newLeaseManager(cfg.handleLeaseGrace, registry)
@@ -193,7 +212,8 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 	grpcOpts := append([]grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(lease.unaryInterceptor),
 		grpc.ChainStreamInterceptor(lease.streamInterceptor),
-	}, cfg.grpcOpts...)
+	}, serverKeepaliveOptions(cfg.keepaliveTime, cfg.keepaliveTimeout)...)
+	grpcOpts = append(grpcOpts, cfg.grpcOpts...)
 	s := grpc.NewServer(grpcOpts...)
 
 	// resolveRoot is shared by every service that resolves a handle to a
