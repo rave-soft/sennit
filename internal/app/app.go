@@ -102,13 +102,26 @@ func (app *App) ProjectPath() string {
 type Option func(*appOptions)
 
 type appOptions struct {
-	herdrClient func() *herdr.Client
-	projectPath string
+	herdrClient            func() *herdr.Client
+	projectPath            string
+	suppressMCPBrowserAuth bool
 }
 
 func WithHerdrClient(client func() *herdr.Client) Option {
 	return func(options *appOptions) {
 		options.herdrClient = client
+	}
+}
+
+// WithSuppressMCPBrowserAuth stops every MCP OAuth flow this App's
+// registry runs from opening a local browser, regardless of any per-call
+// suppression a caller's ctx already carries. A daemon (CLIENT-SERVER.md,
+// PR 2.1) sets this: it has no machine-local user to hand a browser to,
+// so the authorization URL must only ever reach a client through
+// MCPAuthURL/MCPPendingAuth.
+func WithSuppressMCPBrowserAuth(suppress bool) Option {
+	return func(options *appOptions) {
+		options.suppressMCPBrowserAuth = suppress
 	}
 }
 
@@ -161,6 +174,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// (e.g., headless environment), clipboard operations will return nil.
 	if err := clipboard.Init(); err != nil {
 		slog.Warn("Clipboard initialization failed", "error", err)
+	}
+
+	if appOpts.suppressMCPBrowserAuth {
+		app.MCP.SetSuppressBrowser(true)
 	}
 
 	// Arm initialization synchronously before launching it so WaitForInit

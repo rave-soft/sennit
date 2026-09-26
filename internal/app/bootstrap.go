@@ -97,6 +97,12 @@ type BootstrapOptions struct {
 	OnAppInitFailure func(err error)
 	HerdrClient      func() *herdr.Client
 
+	// SuppressMCPBrowserAuth stops every MCP OAuth flow the resulting
+	// App's registry runs from opening a local browser (see
+	// WithSuppressMCPBrowserAuth). The daemon (CLIENT-SERVER.md, PR 2.1)
+	// sets this; the interactive TUI/CLI does not.
+	SuppressMCPBrowserAuth bool
+
 	newApp func(context.Context, *sql.DB, *config.ConfigStore, *skills.Manager, ...Option) (*App, error)
 }
 
@@ -227,7 +233,10 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 			return New(ctx, conn, store, manager, append(options, WithHerdrClient(herdrClient))...)
 		}
 	}
-	appInstance, err := newApp(ctx, conn, cfg, skillsMgr, WithProjectPath(projectPath))
+	appInstance, err := newApp(ctx, conn, cfg, skillsMgr,
+		WithProjectPath(projectPath),
+		WithSuppressMCPBrowserAuth(opts.SuppressMCPBrowserAuth),
+	)
 	if err != nil {
 		if opts.OnAppInitFailure != nil {
 			opts.OnAppInitFailure(err)

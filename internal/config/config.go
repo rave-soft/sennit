@@ -322,6 +322,48 @@ type Options struct {
 	// nothing purges history on its own. A pointer distinguishes "unset"
 	// (defaults to 90) from an explicit 0, which means keep history forever.
 	HistoryRetentionDays *int `json:"history_retention_days,omitempty" jsonschema:"description=Age in days after which \"sennit gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"sennit gc\" (e.g. from cron) to apply it.,default=90,example=30,example=180"`
+	// Daemon configures `sennit daemon run` (CLIENT-SERVER.md, PR 2.1).
+	// Nothing here affects the in-process/TUI mode.
+	Daemon *DaemonOptions `json:"daemon,omitempty" jsonschema:"description=sennit daemon run configuration."`
+}
+
+// DaemonOptions configures `sennit daemon run`'s own lifecycle: how long
+// it keeps serving a project with nothing left to do before it exits on
+// its own. Every field is optional and answered by the Effective*
+// accessor below, safe to call on a nil *DaemonOptions.
+type DaemonOptions struct {
+	// IdleTimeout is how long the daemon must see no busy client,
+	// session, thread, task, background shell, or pending permission/
+	// question request before it exits on its own, as a Go duration
+	// string ("10m", "90s"). Zero or a negative duration disables idle
+	// exit entirely — the daemon then runs until it is signaled
+	// (SIGTERM/SIGINT) or its socket is otherwise removed. Empty or an
+	// unparseable value falls back to the default instead of that,
+	// matching AutoSummarizeIdleOptions.EffectiveAfter's treatment of a
+	// typo: a bad value here must not silently mean "never exit".
+	IdleTimeout string `json:"idle_timeout,omitempty" jsonschema:"description=How long sennit daemon run may sit idle before it exits on its own (Go duration). 0 or negative disables idle exit.,default=10m,example=10m,example=0"`
+}
+
+// DefaultDaemonIdleTimeout is the idle timeout applied when
+// options.daemon.idle_timeout is unset or unparseable.
+const DefaultDaemonIdleTimeout = 10 * time.Minute
+
+// EffectiveIdleTimeout returns how long the daemon may sit idle before
+// exiting. It returns 0 to mean "idle exit is disabled" — distinct from
+// falling back to the default, which happens only for an unset or
+// unparseable value, not for an explicit non-positive one.
+func (o *DaemonOptions) EffectiveIdleTimeout() time.Duration {
+	if o == nil || o.IdleTimeout == "" {
+		return DefaultDaemonIdleTimeout
+	}
+	d, err := time.ParseDuration(o.IdleTimeout)
+	if err != nil {
+		return DefaultDaemonIdleTimeout
+	}
+	if d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // AutoSummarizeIdleOptions configures the idle summarize pass: a session

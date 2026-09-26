@@ -135,6 +135,21 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "DaemonOptions": {
+      "properties": {
+        "idle_timeout": {
+          "type": "string",
+          "description": "How long sennit daemon run may sit idle before it exits on its own (Go duration). 0 or negative disables idle exit.",
+          "default": "10m",
+          "examples": [
+            "10m",
+            "0"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Hook": {
       "properties": {
         "name": {
@@ -621,6 +636,10 @@
             30,
             180
           ]
+        },
+        "daemon": {
+          "$ref": "#/$defs/DaemonOptions",
+          "description": "sennit daemon run configuration."
         }
       },
       "additionalProperties": false,

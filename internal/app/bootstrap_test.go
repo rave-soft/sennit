@@ -145,6 +145,37 @@ func TestBootstrap_Success(t *testing.T) {
 	require.True(t, result.Config.Overrides().SkipPermissionRequests)
 }
 
+// TestBootstrap_SuppressMCPBrowserAuthAppliesToRegistry pins the daemon's
+// only-safe-mode switch (CLIENT-SERVER.md, PR 2.1): setting
+// BootstrapOptions.SuppressMCPBrowserAuth must reach the resulting App's
+// MCP registry before anything can race a connect attempt against it, so
+// no OAuth flow started right after Bootstrap returns can ever open a
+// browser on this machine. The interactive default (unset) must not
+// suppress anything, since a local TUI/CLI run does have a user to hand
+// the browser to.
+func TestBootstrap_SuppressMCPBrowserAuthAppliesToRegistry(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	cwd := t.TempDir()
+	result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{
+		DataDir:                t.TempDir(),
+		SuppressMCPBrowserAuth: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(result.App.Shutdown)
+	require.True(t, result.App.MCP.SuppressesBrowser())
+}
+
+func TestBootstrap_DoesNotSuppressMCPBrowserAuthByDefault(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	cwd := t.TempDir()
+	result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{DataDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(result.App.Shutdown)
+	require.False(t, result.App.MCP.SuppressesBrowser())
+}
+
 func TestBootstrap_ProjectRuntimeActivationRequiresTrust(t *testing.T) {
 	setBootstrapTestEnv(t)
 	cwd := t.TempDir()

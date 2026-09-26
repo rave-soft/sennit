@@ -192,7 +192,7 @@ func WithClientStateTickInterval(d time.Duration) ServerOption {
 // demand, the first time a Subscribe RPC needs them -- and must be called
 // after the *grpc.Server itself has stopped serving, or a test asserting
 // no goroutine leak sees one that just hasn't been asked to exit yet.
-func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func()) {
+func NewServer(ws workspace.Workspace, opts ...ServerOption) (*Server, func()) {
 	cfg := &serverConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -274,11 +274,29 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(s, healthSrv)
 
-	return s, func() {
+	return &Server{Server: s, lease: lease}, func() {
 		rootHub.close()
 		registry.closeAll()
 		oauthRegistry.closeAll()
 	}
+}
+
+// Server is the *grpc.Server NewServer builds, plus the one daemon-facing
+// hook idle detection needs on top of it: how many clients currently hold
+// this server busy (CLIENT-SERVER.md, PR 2.1's idle check). Embedding
+// *grpc.Server keeps every existing call site (Serve, GracefulStop, Stop,
+// RegisterService, ...) compiling unchanged.
+type Server struct {
+	*grpc.Server
+	lease *leaseManager
+}
+
+// ClientCount reports how many distinct clients currently have an open
+// RPC/stream against this server, or are within the post-hangup lease
+// grace period (see leaseManager) -- i.e. a client a daemon's idle
+// monitor should still treat as connected.
+func (s *Server) ClientCount() int {
+	return s.lease.clientCount()
 }
 
 // handleFromContext reads the "sennit-handle" metadata key an incoming

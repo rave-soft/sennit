@@ -136,12 +136,12 @@ func (cm *connectionManager) createSession(ctx context.Context, cfg ConfigProvid
 	}
 
 	// If the caller requested a browser-suppressed flow (server-driven
-	// remote auth), suppress the handler's local browser open; the caller
-	// surfaces MCPAuthURL(name) to the user on their own machine.
-	if oauthHandler != nil {
-		if suppress, _ := ctx.Value(suppressBrowserKey{}).(bool); suppress {
-			oauthHandler.SetBrowserSuppress(true)
-		}
+	// remote auth), or this Registry suppresses every flow (a daemon,
+	// CLIENT-SERVER.md PR 2.1), suppress the handler's local browser open;
+	// the caller surfaces MCPAuthURL(name) to the user on their own
+	// machine.
+	if oauthHandler != nil && shouldSuppressBrowser(ctx, cm.reg) {
+		oauthHandler.SetBrowserSuppress(true)
 	}
 
 	// Wrap the transport so channel notifications can be intercepted. The

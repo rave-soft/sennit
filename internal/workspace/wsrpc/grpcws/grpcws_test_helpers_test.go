@@ -23,7 +23,7 @@ const bufSize = 1 << 20
 // deadClient); it always runs after srv.Stop(), so the root hub's
 // SubscribeWith goroutine (started lazily) has nothing left to deliver
 // into once it exits.
-func startServer(t *testing.T, srv *grpc.Server, stopHub func()) func(context.Context, string) (net.Conn, error) {
+func startServer(t *testing.T, srv *grpcws.Server, stopHub func()) func(context.Context, string) (net.Conn, error) {
 	t.Helper()
 	lis := bufconn.Listen(bufSize)
 	go func() {

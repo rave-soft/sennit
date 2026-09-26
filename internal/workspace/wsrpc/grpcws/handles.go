@@ -474,6 +474,16 @@ func (lm *leaseManager) expire(clientID string) {
 	lm.oauthRegistry.releaseByOwner(clientID)
 }
 
+// clientCount reports how many clients currently have an entry in
+// lm.clients: an open RPC/stream, or a lease still within its post-hangup
+// grace period. A client whose grace timer has fired (expire has already
+// deleted it) is not counted.
+func (lm *leaseManager) clientCount() int {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	return len(lm.clients)
+}
+
 // unaryInterceptor is the leaseManager's half of a grpc.ChainUnaryInterceptor
 // option (see NewServer): every unary call, across every service this
 // server registers, counts as activity for its "sennit-client" metadata,

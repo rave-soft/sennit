@@ -16,6 +16,17 @@ import (
 // open a local browser; the caller surfaces the authorization URL itself.
 type suppressBrowserKey struct{}
 
+// shouldSuppressBrowser reports whether a connect made under ctx, against
+// reg, must not open a local browser: either this one call was tagged
+// (suppressBrowserKey, set by BeginAuth for a server-driven remote auth
+// flow), or reg suppresses every flow it runs (Registry.SetSuppressBrowser,
+// set once by a daemon that has no machine-local user to hand a browser
+// to — CLIENT-SERVER.md, PR 2.1). Either is enough on its own.
+func shouldSuppressBrowser(ctx context.Context, reg *Registry) bool {
+	suppress, _ := ctx.Value(suppressBrowserKey{}).(bool)
+	return suppress || reg.suppressBrowser.Load()
+}
+
 // PendingAuthServer describes an MCP server awaiting OAuth.
 type PendingAuthServer struct {
 	Name string

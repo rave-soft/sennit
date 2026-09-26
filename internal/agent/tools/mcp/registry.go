@@ -158,6 +158,15 @@ type Registry struct {
 	*connectionManager
 	*authCoordinator
 
+	// suppressBrowser mirrors suppressBrowserKey but applies to every
+	// connect this Registry makes, not just a caller-tagged ctx: a daemon
+	// (CLIENT-SERVER.md, PR 2.1) has no machine-local user to hand a
+	// browser to, so it sets this once at construction (SetSuppressBrowser)
+	// rather than relying on every ctx that might reach createSession —
+	// including a background reconcile loop's own context, which no caller
+	// tags — to carry the per-flow marker.
+	suppressBrowser atomic.Bool
+
 	// reinitMu guards reinitRunning and reinitDirty.
 	reinitMu      sync.Mutex
 	reinitRunning bool
@@ -206,6 +215,21 @@ func NewRegistry() *Registry {
 		return err
 	}
 	return r
+}
+
+// SetSuppressBrowser controls whether every OAuth flow this Registry runs
+// suppresses opening a local browser, regardless of any per-call
+// suppressBrowserKey on the connect's own ctx. A daemon (CLIENT-SERVER.md,
+// PR 2.1) calls this once, at construction, so the authorization URL only
+// ever reaches a client through MCPAuthURL/MCPPendingAuth rather than
+// opening a browser on the daemon's own machine.
+func (r *Registry) SetSuppressBrowser(suppress bool) {
+	r.suppressBrowser.Store(suppress)
+}
+
+// SuppressesBrowser reports SetSuppressBrowser's current setting.
+func (r *Registry) SuppressesBrowser() bool {
+	return r.suppressBrowser.Load()
 }
 
 func (r *Registry) ArmInit() {

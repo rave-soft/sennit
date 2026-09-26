@@ -70,6 +70,20 @@ type Options struct {
 	// per process anyway, see internal/log's initOnce) points this at a
 	// no-op.
 	LogSetup func(logFile string, debug bool)
+
+	// IdlePollInterval overrides how often the idle monitor re-checks
+	// busyness; defaults to defaultIdlePollInterval. A test shrinks this
+	// so idle exit doesn't take real wall-clock minutes to observe --
+	// options.daemon.idle_timeout still governs how long the daemon must
+	// stay idle before it actually exits.
+	IdlePollInterval time.Duration
+
+	// AppReady, if set, is called with the bootstrapped *app.App once
+	// Bootstrap succeeds, before Run starts serving. workspace.Workspace
+	// (what a real frontend sees) has no way to raise a permission or
+	// question request or drive an agent turn directly; this is a test
+	// hook to reach the App underneath one for exactly that.
+	AppReady func(a *app.App)
 }
 
 // Run bootstraps a full app.App for the project at cwd -- exactly like
@@ -142,6 +156,10 @@ func Run(ctx context.Context, cwd string, opts Options) error {
 		TrustProject:  opts.TrustProject,
 		WorkspaceLock: true,
 		HerdrClient:   func() *herdr.Client { return nil },
+		// MCP OAuth must never open a browser on the daemon's own
+		// machine (CLIENT-SERVER.md, PR 2.1): a client reaches the
+		// authorization URL through MCPPendingAuth/MCPAuthURL instead.
+		SuppressMCPBrowserAuth: true,
 		PostDataDir: func(cfg *config.ConfigStore) error {
 			if err := projects.Register(cwd, cfg.Config().Options.DataDirectory); err != nil {
 				slog.Warn("Failed to register project", "error", err)
@@ -182,6 +200,10 @@ func Run(ctx context.Context, cwd string, opts Options) error {
 		}
 	}()
 
+	if opts.AppReady != nil {
+		opts.AppReady(boot.App)
+	}
+
 	if err := boot.Lock.SetMode(workspacelock.ModeDaemon, socketPath); err != nil {
 		// Non-fatal, matching Acquire's own treatment of a failed owner-
 		// info write: the OS lock is what actually enforces exclusivity,
@@ -213,8 +235,23 @@ func Run(ctx context.Context, cwd string, opts Options) error {
 		opts.Ready(socketPath)
 	}
 
+	// runCtx is what the shutdown select below actually waits on: ctx
+	// cancels it from the caller's side (SIGTERM/SIGINT), and the idle
+	// monitor cancels it from ours once nothing has been busy for
+	// idle_timeout (CLIENT-SERVER.md, PR 2.1). Either path converges on
+	// the same graceful-shutdown code beneath the select; the monitor
+	// itself is torn down by this same cancellation, not separately.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	go runIdleMonitor(runCtx,
+		&idleBusyCheck{ws: ws, clients: grpcServer},
+		boot.Config.Config().Options.Daemon.EffectiveIdleTimeout(),
+		opts.IdlePollInterval,
+		runCancel,
+	)
+
 	select {
-	case <-ctx.Done():
+	case <-runCtx.Done():
 	case err := <-serveErrCh:
 		if err != nil {
 			slog.Error("Daemon listener stopped unexpectedly", "error", err)

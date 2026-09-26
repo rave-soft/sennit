@@ -151,6 +151,9 @@ var optionSpecs = map[string]optionSpec{
 	"auto-summarize-idle-tokens": {jsonKey: "context_tokens", kind: optInt, path: []string{"auto_summarize_idle"}, nonNegative: true},
 	"auto-summarize-idle-after":  {jsonKey: "after", kind: optDuration, path: []string{"auto_summarize_idle"}},
 
+	// Daemon, nested under options.daemon (CLIENT-SERVER.md, PR 2.1).
+	"daemon-idle-timeout": {jsonKey: "idle_timeout", kind: optDuration, path: []string{"daemon"}},
+
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},
 	"global-context-path": {jsonKey: "global_context_paths", kind: optList},
