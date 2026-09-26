@@ -235,10 +235,27 @@ func TestAgentRunStream_CallerCancelBeforeStartedAck_StillSendsAgentCancel(t *te
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Two outcomes are both correct, depending on whether the server's
+	// Started frame or the client's own cancellation wins the race once
+	// unblock is closed: AgentRunStream returns context.Canceled directly,
+	// or it returns a channel whose terminal event carries it (the
+	// in-process contract for a ctx cancelled after the turn started).
+	// Either way the turn must be cancelled explicitly, which is what this
+	// test is about.
 	resultCh := make(chan error, 1)
 	go func() {
-		_, err := client.AgentRunStream(ctx, "sess-1", "hi", workspace.AgentRunOptions{})
-		resultCh <- err
+		events, err := client.AgentRunStream(ctx, "sess-1", "hi", workspace.AgentRunOptions{})
+		if err != nil {
+			resultCh <- err
+			return
+		}
+		var terminal error
+		for ev := range events {
+			if ev.Done {
+				terminal = workspace.DecodeError(ev.Err)
+			}
+		}
+		resultCh <- terminal
 	}()
 
 	select {
