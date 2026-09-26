@@ -54,6 +54,14 @@ type ActivateThreadResponse struct {
 	Err    *wireerr.Error `json:"err,omitempty"`
 }
 
+// AgentActivityRequest is the request DTO for workspace.Workspace.AgentActivity.
+type AgentActivityRequest struct{}
+
+// AgentActivityResponse is the response DTO for workspace.Workspace.AgentActivity.
+type AgentActivityResponse struct {
+	Result workspace.AgentActivity `json:"result"`
+}
+
 // AgentCancelRequest is the request DTO for workspace.Workspace.AgentCancel.
 type AgentCancelRequest struct {
 	SessionID string `json:"session_id"`

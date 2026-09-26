@@ -83,6 +83,7 @@ var MethodClasses = map[string]Class{
 	"AgentIsReady":                 C,
 	"AgentReadyErr":                C,
 	"AgentQueuedPromptsList":       C,
+	"AgentActivity":                C,
 	"AgentClearQueue":              U,
 	"AgentSummarize":               U,
 	"UpdateAgentModel":             U,

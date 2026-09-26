@@ -73,7 +73,11 @@ func (c *stubDispatchCoordinator) IsSessionBusy(string) bool { return c.busy.Loa
 
 func (c *stubDispatchCoordinator) QueuedPrompts(string) int { return 0 }
 
-func (c *stubDispatchCoordinator) QueuedPromptsList(string) []string       { return nil }
+func (c *stubDispatchCoordinator) QueuedPromptsList(string) []string { return nil }
+func (c *stubDispatchCoordinator) BusySessions() []string            { return nil }
+func (c *stubDispatchCoordinator) SessionsWithQueuedPrompts() map[string][]string {
+	return nil
+}
 func (c *stubDispatchCoordinator) ClearQueue(string)                       {}
 func (c *stubDispatchCoordinator) Summarize(context.Context, string) error { return nil }
 

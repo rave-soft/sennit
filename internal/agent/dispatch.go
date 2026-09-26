@@ -1055,6 +1055,44 @@ func (d *dispatcher) QueuedPromptsList(sessionID string) []string {
 	return prompts
 }
 
+// BusySessionIDs returns exactly the session IDs IsSessionBusy would
+// report true for from this dispatcher's own state, i.e. activeSessionIDs
+// under its exported name — the same enumeration CancelAll drives its
+// cancellation from, so the two can never drift apart.
+func (d *dispatcher) BusySessionIDs() []string {
+	return d.activeSessionIDs()
+}
+
+// QueuedPromptSessions returns, for every session with a non-empty
+// prompt queue, the same prompts QueuedPromptsList would answer for it —
+// gathered for every session at once, for a caller (Coordinator.
+// SessionsWithQueuedPrompts) that needs every queued session rather than
+// one it already knows the ID of. A session with an empty queue is
+// absent from the result, never present with a nil/empty slice.
+func (d *dispatcher) QueuedPromptSessions() map[string][]string {
+	var out map[string][]string
+	for id, s := range d.states.Seq2() {
+		s.mu.Lock()
+		n := len(s.messageQueue)
+		var prompts []string
+		if n > 0 {
+			prompts = make([]string, n)
+			for i, call := range s.messageQueue {
+				prompts[i] = call.Prompt
+			}
+		}
+		s.mu.Unlock()
+		if n == 0 {
+			continue
+		}
+		if out == nil {
+			out = make(map[string][]string, 1)
+		}
+		out[id] = prompts
+	}
+	return out
+}
+
 // --- the methods below carry real sessionAgent-level logic (persistence,
 // pubsub). They stay on *sessionAgent, not *dispatcher: dispatcher
 // itself must stay free of any dependency on pubsub or message

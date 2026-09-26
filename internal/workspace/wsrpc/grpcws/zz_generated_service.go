@@ -37,6 +37,7 @@ type WorkspaceServer interface {
 	AccountCapabilities(ctx context.Context, req *wsrpc.AccountCapabilitiesRequest) (*wsrpc.AccountCapabilitiesResponse, error)
 	ActivateAccount(ctx context.Context, req *wsrpc.ActivateAccountRequest) (*wsrpc.ActivateAccountResponse, error)
 	ActivateThread(ctx context.Context, req *wsrpc.ActivateThreadRequest) (*wsrpc.ActivateThreadResponse, error)
+	AgentActivity(ctx context.Context, req *wsrpc.AgentActivityRequest) (*wsrpc.AgentActivityResponse, error)
 	AgentCancel(ctx context.Context, req *wsrpc.AgentCancelRequest) (*wsrpc.AgentCancelResponse, error)
 	AgentClearQueue(ctx context.Context, req *wsrpc.AgentClearQueueRequest) (*wsrpc.AgentClearQueueResponse, error)
 	AgentIsBusy(ctx context.Context, req *wsrpc.AgentIsBusyRequest) (*wsrpc.AgentIsBusyResponse, error)
@@ -158,6 +159,7 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "AccountCapabilities", Handler: _Workspace_AccountCapabilities_Handler},
 		{MethodName: "ActivateAccount", Handler: _Workspace_ActivateAccount_Handler},
 		{MethodName: "ActivateThread", Handler: _Workspace_ActivateThread_Handler},
+		{MethodName: "AgentActivity", Handler: _Workspace_AgentActivity_Handler},
 		{MethodName: "AgentCancel", Handler: _Workspace_AgentCancel_Handler},
 		{MethodName: "AgentClearQueue", Handler: _Workspace_AgentClearQueue_Handler},
 		{MethodName: "AgentIsBusy", Handler: _Workspace_AgentIsBusy_Handler},
@@ -313,6 +315,21 @@ func _Workspace_ActivateThread_Handler(srv any, ctx context.Context, dec func(an
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/ActivateThread"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).ActivateThread(ctx, req.(*wsrpc.ActivateThreadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Workspace_AgentActivity_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(wsrpc.AgentActivityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkspaceServer).AgentActivity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentActivity"}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return srv.(WorkspaceServer).AgentActivity(ctx, req.(*wsrpc.AgentActivityRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2002,6 +2019,17 @@ func (s *workspaceServer) ActivateThread(ctx context.Context, req *wsrpc.Activat
 	}, nil
 }
 
+func (s *workspaceServer) AgentActivity(ctx context.Context, req *wsrpc.AgentActivityRequest) (*wsrpc.AgentActivityResponse, error) {
+	ws, err := s.resolve(ctx)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, err)
+	}
+	res0 := ws.AgentActivity()
+	return &wsrpc.AgentActivityResponse{
+		Result: res0,
+	}, nil
+}
+
 func (s *workspaceServer) AgentCancel(ctx context.Context, req *wsrpc.AgentCancelRequest) (*wsrpc.AgentCancelResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -3414,6 +3442,20 @@ func (c *Client) ActivateThread(ctx context.Context, id string) (res0 proto.Thre
 		return zero0, err
 	}
 	return wsrpcResp.Result, nil
+}
+
+// AgentActivity calls the Workspace service's AgentActivity RPC.
+func (c *Client) AgentActivity() (res0 workspace.AgentActivity) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
+	defer cancel()
+	wsrpcReq := &wsrpc.AgentActivityRequest{}
+	wsrpcResp := new(wsrpc.AgentActivityResponse)
+	if err := c.invoke(ctx, "AgentActivity", wsrpcReq, wsrpcResp); err != nil {
+		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AgentActivity", "error", err)
+		var zero0 workspace.AgentActivity
+		return zero0
+	}
+	return wsrpcResp.Result
 }
 
 // AgentCancel calls the Workspace service's AgentCancel RPC.

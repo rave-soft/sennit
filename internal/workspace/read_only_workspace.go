@@ -750,6 +750,10 @@ func (w *readOnlyWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	return w.ws.AgentQueuedPromptsList(sessionID)
 }
 
+func (w *readOnlyWorkspace) AgentActivity() AgentActivity {
+	return w.ws.AgentActivity()
+}
+
 func (w *readOnlyWorkspace) AgentReadyErr() error {
 	return w.ws.AgentReadyErr()
 }

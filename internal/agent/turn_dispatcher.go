@@ -403,3 +403,11 @@ func (d *turnDispatcher) QueuedPrompts(sessionID string) int {
 func (d *turnDispatcher) QueuedPromptsList(sessionID string) []string {
 	return d.agentPort.current().QueuedPromptsList(sessionID)
 }
+
+func (d *turnDispatcher) BusySessionIDs() []string {
+	return d.agentPort.current().BusySessionIDs()
+}
+
+func (d *turnDispatcher) QueuedPromptSessions() map[string][]string {
+	return d.agentPort.current().QueuedPromptSessions()
+}

@@ -141,6 +141,34 @@ func (l *Loopback) ActivateThread(ctx context.Context, id string) (res0 proto.Th
 	return
 }
 
+func (l *Loopback) AgentActivity() (res0 workspace.AgentActivity) {
+	wsrpcReq := AgentActivityRequest{}
+	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
+	if wsrpcErr1 != nil {
+		panic(fmt.Sprintf("wsrpc: marshaling AgentActivity request: %v", wsrpcErr1))
+	}
+	var wsrpcDecodedReq AgentActivityRequest
+	wsrpcErr2 := json.Unmarshal(wsrpcReqJSON, &wsrpcDecodedReq)
+	if wsrpcErr2 != nil {
+		panic(fmt.Sprintf("wsrpc: decoding AgentActivity request: %v", wsrpcErr2))
+	}
+	wsrpcOut0 := l.inner.AgentActivity()
+	wsrpcResp := AgentActivityResponse{
+		Result: wsrpcOut0,
+	}
+	wsrpcRespJSON, wsrpcErr3 := json.Marshal(wsrpcResp)
+	if wsrpcErr3 != nil {
+		panic(fmt.Sprintf("wsrpc: marshaling AgentActivity response: %v", wsrpcErr3))
+	}
+	var wsrpcDecodedResp AgentActivityResponse
+	wsrpcErr4 := json.Unmarshal(wsrpcRespJSON, &wsrpcDecodedResp)
+	if wsrpcErr4 != nil {
+		panic(fmt.Sprintf("wsrpc: decoding AgentActivity response: %v", wsrpcErr4))
+	}
+	res0 = wsrpcDecodedResp.Result
+	return
+}
+
 func (l *Loopback) AgentCancel(sessionID string) (err error) {
 	wsrpcReq := AgentCancelRequest{
 		SessionID: sessionID,

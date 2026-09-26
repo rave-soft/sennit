@@ -204,6 +204,20 @@ type AgentModel struct {
 	ModelCfg   AgentSelection
 }
 
+// AgentActivity enumerates every session with agent activity right now,
+// consistent by construction with AgentIsSessionBusy/
+// AgentQueuedPromptsList: BusySessions holds exactly the ids
+// AgentIsSessionBusy(id) would report true for (including a session kept
+// busy only by a running delegation, not just the top-level dispatcher's
+// own active-run state — see agent.Coordinator.BusySessions), and
+// QueuedPrompts holds an entry, keyed by session id, for exactly the ids
+// with a non-empty queue — a session absent from the map has none, same
+// as AgentQueuedPromptsList returning nil for it.
+type AgentActivity struct {
+	BusySessions  []string            `json:"busy_sessions"`
+	QueuedPrompts map[string][]string `json:"queued_prompts,omitempty"`
+}
+
 // SessionStore covers session CRUD and message reads: everything the
 // sessions dialog, chat loading, and history/summarization code need
 // without pulling in the rest of Workspace.
@@ -267,6 +281,14 @@ type AgentController interface {
 	// both cases into "agent offline".
 	AgentReadyErr() error
 	AgentQueuedPromptsList(sessionID string) []string
+	// AgentActivity enumerates every session id AgentIsSessionBusy(id)
+	// would report true for and every session id with a non-empty prompt
+	// queue, so a client that only sees data (never probes the agent
+	// itself, e.g. wsrpc.BuildClientState) can answer both of those
+	// parameterized getters for an id it did not already have to name in
+	// advance. See workspace.AgentActivity's own doc comment for how it
+	// relates to AgentIsSessionBusy/AgentQueuedPromptsList.
+	AgentActivity() AgentActivity
 	AgentClearQueue(sessionID string) error
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error

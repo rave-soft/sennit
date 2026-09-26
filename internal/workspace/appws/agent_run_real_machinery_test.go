@@ -90,6 +90,14 @@ func (c *coordinatorOverSessionAgent) QueuedPromptsList(sessionID string) []stri
 	return c.sa.QueuedPromptsList(sessionID)
 }
 
+func (c *coordinatorOverSessionAgent) BusySessions() []string {
+	return c.sa.BusySessionIDs()
+}
+
+func (c *coordinatorOverSessionAgent) SessionsWithQueuedPrompts() map[string][]string {
+	return c.sa.QueuedPromptSessions()
+}
+
 func (c *coordinatorOverSessionAgent) ClearQueue(sessionID string) { c.sa.ClearQueue(sessionID) }
 
 func (c *coordinatorOverSessionAgent) Summarize(context.Context, string) error { return nil }

@@ -27,14 +27,14 @@ import (
 // answered by a stale cache read:
 //
 //	AgentIsBusy                 -> AgentController.AgentIsBusy
-//	BusySessions                -> AgentController.AgentIsSessionBusy(id), in principle: id's
-//	                               presence in this sorted set would answer it for any sessionID.
-//	                               NOT YET POPULATED -- see wsrpc.BuildClientState's doc comment
-//	                               for why (no getter enumerates "every session id with agent
-//	                               activity" to build this from without a new Workspace method).
-//	QueuedPrompts               -> AgentController.AgentQueuedPromptsList(id), same reported gap:
-//	                               would be keyed by sessionID, only for sessions with a
-//	                               non-empty queue, once something can enumerate them.
+//	BusySessions                -> AgentController.AgentActivity().BusySessions: id's presence
+//	                               in this sorted set answers AgentIsSessionBusy(id) for any
+//	                               sessionID, by construction (see agent.Coordinator.
+//	                               BusySessions's doc comment for how it stays consistent with
+//	                               AgentIsSessionBusy itself).
+//	QueuedPrompts               -> AgentController.AgentActivity().QueuedPrompts, keyed by
+//	                               sessionID, present only for sessions with a non-empty queue
+//	                               -- answers AgentQueuedPromptsList(id) the same way.
 //	AgentModel                  -> AgentController.AgentModel
 //	AgentIsReady                -> AgentController.AgentIsReady
 //	AgentReadyErr                       -> AgentController.AgentReadyErr, carried as *wireerr.Error since

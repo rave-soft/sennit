@@ -220,6 +220,18 @@ func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	return coord.QueuedPromptsList(sessionID)
 }
 
+// AgentActivity implements workspace.AgentController.
+func (w *AppWorkspace) AgentActivity() workspace.AgentActivity {
+	coord := w.app.Coordinator()
+	if coord == nil {
+		return workspace.AgentActivity{}
+	}
+	return workspace.AgentActivity{
+		BusySessions:  coord.BusySessions(),
+		QueuedPrompts: coord.SessionsWithQueuedPrompts(),
+	}
+}
+
 func (w *AppWorkspace) AgentClearQueue(sessionID string) error {
 	if coord := w.app.Coordinator(); coord != nil {
 		coord.ClearQueue(sessionID)

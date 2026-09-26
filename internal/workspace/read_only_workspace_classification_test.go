@@ -94,6 +94,7 @@ var refusedMethods = []string{
 // not a safety requirement - forgetting it would misbehave, not leak a
 // mutation.
 var readOnlySafeMethods = []string{
+	"AgentActivity",
 	"AgentIsBusy",
 	"AgentIsReady",
 	"AgentIsSessionBusy",

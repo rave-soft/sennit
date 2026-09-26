@@ -863,6 +863,11 @@ var sampleConnectionEvent = ConnectionEvent{
 	State: ConnectionLost,
 }
 
+var sampleAgentActivity = AgentActivity{
+	BusySessions:  []string{"session-1"},
+	QueuedPrompts: map[string][]string{"session-2": {"queued prompt"}},
+}
+
 var sampleMCPPendingAuthServer = MCPPendingAuthServer{
 	Name: "myserver",
 	URL:  "https://example.com/authorize",
@@ -1042,6 +1047,7 @@ var wireSamples = map[reflect.Type]any{
 
 	reflectTypeOf[AccountCapabilities]():           sampleAccountCapabilities,
 	reflectTypeOf[AccountCredential]():             sampleAccountCredential,
+	reflectTypeOf[AgentActivity]():                 sampleAgentActivity,
 	reflectTypeOf[AgentCatalog]():                  sampleAgentCatalog,
 	reflectTypeOf[AgentModel]():                    sampleAgentModel,
 	reflectTypeOf[AgentNotification]():             sampleAgentNotification,

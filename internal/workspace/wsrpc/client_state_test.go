@@ -21,13 +21,11 @@ import (
 // the mapping-completeness check this step's brief asked for, one level
 // below classes_test.go's own method -> class completeness check.
 //
-// AgentIsSessionBusy and AgentQueuedPromptsList are listed with an empty
-// check rather than omitted: BuildClientState does not answer them yet
-// (see its own doc comment on the reported gap -- no getter enumerates
-// "every session id with agent activity" to drive BusySessions/
-// QueuedPrompts from). Listing them keeps this table in step with
-// MethodClasses without pretending the gap is closed; when it closes,
-// the real assertion replaces the empty one here.
+// AgentIsSessionBusy and AgentQueuedPromptsList are answered by
+// AgentActivity's own case below in principle (a client reads
+// cs.BusySessions/cs.QueuedPrompts instead of calling either getter
+// directly), so their own entries just prove the specific session id
+// AgentActivity names comes through BuildClientState unchanged.
 var clientStateMapping = map[string]struct {
 	setup func(*wsrpctest.StubWorkspace)
 	check func(*testing.T, workspace.ClientState)
@@ -37,12 +35,34 @@ var clientStateMapping = map[string]struct {
 		check: func(t *testing.T, cs workspace.ClientState) { require.True(t, cs.AgentIsBusy) },
 	},
 	"AgentIsSessionBusy": {
-		setup: func(*wsrpctest.StubWorkspace) {},
-		check: func(*testing.T, workspace.ClientState) {},
+		setup: func(s *wsrpctest.StubWorkspace) {
+			s.AgentActivityResult = workspace.AgentActivity{BusySessions: []string{"distinctive-busy-session"}}
+		},
+		check: func(t *testing.T, cs workspace.ClientState) {
+			require.Contains(t, cs.BusySessions, "distinctive-busy-session")
+		},
 	},
 	"AgentQueuedPromptsList": {
-		setup: func(*wsrpctest.StubWorkspace) {},
-		check: func(*testing.T, workspace.ClientState) {},
+		setup: func(s *wsrpctest.StubWorkspace) {
+			s.AgentActivityResult = workspace.AgentActivity{
+				QueuedPrompts: map[string][]string{"distinctive-queued-session": {"distinctive-prompt"}},
+			}
+		},
+		check: func(t *testing.T, cs workspace.ClientState) {
+			require.Equal(t, []string{"distinctive-prompt"}, cs.QueuedPrompts["distinctive-queued-session"])
+		},
+	},
+	"AgentActivity": {
+		setup: func(s *wsrpctest.StubWorkspace) {
+			s.AgentActivityResult = workspace.AgentActivity{
+				BusySessions:  []string{"distinctive-busy-session"},
+				QueuedPrompts: map[string][]string{"distinctive-queued-session": {"distinctive-prompt"}},
+			}
+		},
+		check: func(t *testing.T, cs workspace.ClientState) {
+			require.Equal(t, []string{"distinctive-busy-session"}, cs.BusySessions)
+			require.Equal(t, []string{"distinctive-prompt"}, cs.QueuedPrompts["distinctive-queued-session"])
+		},
 	},
 	"AgentModel": {
 		setup: func(s *wsrpctest.StubWorkspace) { s.AgentModelResult = wsrpctest.AgentModelSample },

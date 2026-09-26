@@ -25,31 +25,20 @@ import (
 // KnownProviders/Config().Providers already hand back, not off anything
 // new asked of ws.
 //
-// Reported gap, per this step's brief ("if one cannot be answered from
-// this struct alone, report it instead of approximating"): BusySessions
-// and QueuedPrompts are left empty. AgentIsSessionBusy(id) and
-// AgentQueuedPromptsList(id) both need a candidate sessionID, and
-// Workspace has no getter that enumerates "every session id with agent
-// activity" to drive them from -- unlike the other four parameterized
-// getters (CurrentPlanUsage, AccountCapabilities, MCPAuthURL), whose
-// parameter space is exactly KnownProviders()/MCPPendingAuth(), agent
-// activity has no such closed set on this contract. The underlying data
-// exists (internal/agent's dispatcher tracks a per-session state map, and
-// the delegation finalizer separately tracks sessions kept busy only by a
-// running delegation), but reaching it needs a new enumerable primitive
-// threaded through SessionAgent/Coordinator into a new Workspace getter --
-// out of scope for this step. Approximating from AgentQueuedPromptsList's
-// own sessions (i.e. only sessions that happen to already have a queue)
-// would silently under-report every lone in-flight turn with nothing
-// queued, which is worse than an honestly empty field: a client reading
-// BusySessions today must not trust it for "no one is busy" and should
-// keep using AgentIsBusy()/AgentIsSessionBusy(id) directly until this gap
-// closes.
+// BusySessions and QueuedPrompts come from AgentActivity, the one
+// Workspace getter that enumerates "every session id with agent
+// activity" instead of answering for a single id at a time (unlike
+// AgentIsSessionBusy/AgentQueuedPromptsList themselves, which this struct
+// still needs a full session-id universe to answer generically for a
+// client that only reads data).
 func BuildClientState(ws workspace.Workspace) workspace.ClientState {
 	cfg := ws.Config()
+	activity := ws.AgentActivity()
 
 	state := workspace.ClientState{
 		AgentIsBusy:            ws.AgentIsBusy(),
+		BusySessions:           activity.BusySessions,
+		QueuedPrompts:          activity.QueuedPrompts,
 		AgentModel:             ws.AgentModel(),
 		AgentIsReady:           ws.AgentIsReady(),
 		AgentReadyErr:          workspace.EncodeError(ws.AgentReadyErr()),

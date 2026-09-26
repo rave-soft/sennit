@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -62,6 +63,20 @@ type Coordinator interface {
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
+	// BusySessions returns every session ID IsSessionBusy would report
+	// true for right now: the current agent's own active-run sessions
+	// (dispatcher.BusySessionIDs) plus every session kept busy only by a
+	// running delegation (delegationFinalizer.subSessions), the same two
+	// predicates IsSessionBusy itself consults — see its doc comment.
+	// Sorted, for a stable, comparable result.
+	BusySessions() []string
+	// SessionsWithQueuedPrompts returns, for every session with a
+	// non-empty prompt queue, its queued prompts — QueuedPromptsList's own
+	// data, gathered for every session the dispatcher tracks at once
+	// rather than one session ID at a time. A session with an empty queue
+	// is absent from the map, never present with a nil/empty slice, same
+	// as QueuedPromptsList returning nil for it.
+	SessionsWithQueuedPrompts() map[string][]string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
 	Model() Model
@@ -568,6 +583,36 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 	c.delegation.subSessionsMu.Lock()
 	defer c.delegation.subSessionsMu.Unlock()
 	return c.delegation.subSessions[sessionID] > 0
+}
+
+// BusySessions implements Coordinator. It applies IsSessionBusy's own two
+// checks — the dispatcher's active-run state and the delegation
+// finalizer's sub-session counter — over every session either one knows
+// about, instead of keeping a parallel tally that could drift from what
+// IsSessionBusy actually reports.
+func (c *coordinator) BusySessions() []string {
+	seen := make(map[string]struct{})
+	for _, id := range c.dispatcher.BusySessionIDs() {
+		seen[id] = struct{}{}
+	}
+	c.delegation.subSessionsMu.Lock()
+	for id, n := range c.delegation.subSessions {
+		if n > 0 {
+			seen[id] = struct{}{}
+		}
+	}
+	c.delegation.subSessionsMu.Unlock()
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// SessionsWithQueuedPrompts implements Coordinator.
+func (c *coordinator) SessionsWithQueuedPrompts() map[string][]string {
+	return c.dispatcher.QueuedPromptSessions()
 }
 
 // RefreshSkills replaces the cached skill discovery results and

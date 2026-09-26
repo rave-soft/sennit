@@ -415,6 +415,7 @@ func (s *stubWorkspace) AgentModel() AgentModel                           { retu
 func (s *stubWorkspace) AgentIsReady() bool                               { return false }
 func (s *stubWorkspace) AgentReadyErr() error                             { return ErrAgentNotInitialized }
 func (s *stubWorkspace) AgentQueuedPromptsList(sessionID string) []string { return nil }
+func (s *stubWorkspace) AgentActivity() AgentActivity                     { return AgentActivity{} }
 func (s *stubWorkspace) AgentClearQueue(sessionID string) error {
 	s.track("AgentClearQueue")
 	return nil

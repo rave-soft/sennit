@@ -128,6 +128,7 @@ type StubWorkspace struct {
 	AgentIsReadyResult           bool
 	AgentReadyErrResult          error
 	AgentQueuedPromptsListResult []string
+	AgentActivityResult          workspace.AgentActivity
 	PermissionSkipRequestsResult bool
 	ConfigResult                 *workspace.FrontendConfig
 	CurrentPlanUsageResult       accounts.Usage
@@ -170,6 +171,10 @@ func (s *StubWorkspace) AgentReadyErr() error { return s.AgentReadyErrResult }
 
 func (s *StubWorkspace) AgentQueuedPromptsList(string) []string {
 	return s.AgentQueuedPromptsListResult
+}
+
+func (s *StubWorkspace) AgentActivity() workspace.AgentActivity {
+	return s.AgentActivityResult
 }
 
 func (s *StubWorkspace) PermissionSkipRequests() bool { return s.PermissionSkipRequestsResult }

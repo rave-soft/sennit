@@ -52,6 +52,17 @@ type SessionAgent interface {
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
+	// BusySessionIDs returns exactly the session IDs IsSessionBusy would
+	// report true for, from this dispatcher's own state alone (a
+	// delegation sub-session tracked only by the coordinator's
+	// delegationFinalizer is not visible here — see
+	// Coordinator.BusySessions, which folds that in).
+	BusySessionIDs() []string
+	// QueuedPromptSessions returns, for every session with a non-empty
+	// prompt queue, the same prompts QueuedPromptsList would answer for
+	// it — gathered for every session at once so a caller does not need
+	// to already know which session IDs to ask about.
+	QueuedPromptSessions() map[string][]string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
