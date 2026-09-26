@@ -23,10 +23,12 @@ const (
 	// wire as JSON. The generator (gen/genlib) emits a Request/Response
 	// pair and a Loopback method for every U (and C) method.
 	U Class = "U"
-	// C is a getter the UI calls straight from Update/View today. It
-	// still returns data that must serialize — a later PR moves the call
-	// itself into a cache, not the requirement that its result travels as
-	// JSON, so C methods are generated exactly like U ones here.
+	// C is a getter the UI calls straight from Update/View today. Its
+	// Request/Response DTOs and Loopback method are still generated
+	// exactly like U's (Loopback round-trips it through JSON in-process),
+	// but it gets no gRPC RPC and no generated Client method: grpcws.Client
+	// answers a C getter from its own local cache instead, kept current by
+	// the workspace.ClientState event (CLIENT-SERVER.md, PR 1.4).
 	C Class = "C"
 	// S is a method a later PR rewrites by hand into a server-stream RPC
 	// (Subscribe, AgentRunStream, ...). The generator emits nothing for

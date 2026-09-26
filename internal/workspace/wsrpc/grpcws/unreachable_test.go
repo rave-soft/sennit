@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,13 +30,28 @@ func TestUnreachable_UMethodReturnsErrServerUnreachable(t *testing.T) {
 	require.True(t, errors.Is(err, workspace.ErrServerUnreachable), "expected ErrServerUnreachable, got: %v", err)
 }
 
-// TestUnreachable_CMethodLogsAndReturnsZero checks a C method (no error
-// result) against the same dead server: it can't report the failure
-// through its own signature, so it must log instead (captured here by an
-// identifier this test owns -- a message substring naming the method --
-// see AGENTS.md on captureLogs being process-global) and return the zero
-// value rather than panicking or blocking.
-func TestUnreachable_CMethodLogsAndReturnsZero(t *testing.T) {
+// TestUnreachable_ConnectReturnsErrServerUnreachable checks that Connect
+// itself -- the one call a class-C getter no longer makes -- still reports
+// a dead server the same way any other U call does (CLIENT-SERVER.md, PR
+// 1.4b): Connect's own Snapshot RPC is transport-level unreachable here.
+func TestUnreachable_ConnectReturnsErrServerUnreachable(t *testing.T) {
+	t.Parallel()
+
+	client := deadClient(t)
+	err := client.Connect(context.Background())
+	require.Error(t, err)
+	require.True(t, errors.Is(err, workspace.ErrServerUnreachable), "expected ErrServerUnreachable, got: %v", err)
+}
+
+// TestUnreachable_CGetterBeforeConnectLogsOnceAndReturnsZero checks a
+// class-C getter called before Connect has ever succeeded: it makes no
+// RPC at all (so a dead server changes nothing for it), returns the cache's
+// zero value, and logs exactly once per Client no matter how many getters
+// a caller asks before Connect finally succeeds -- a UI polling several
+// getters per frame must not spam this log (CLIENT-SERVER.md, PR 1.4b,
+// build step 3; captured here by an identifier this test owns, per
+// AGENTS.md's note on captureLogs being process-global).
+func TestUnreachable_CGetterBeforeConnectLogsOnceAndReturnsZero(t *testing.T) {
 	client := deadClient(t)
 
 	var buf bytes.Buffer
@@ -43,9 +59,12 @@ func TestUnreachable_CMethodLogsAndReturnsZero(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	got := client.AgentIsBusy()
-	require.False(t, got)
-	require.Contains(t, buf.String(), "AgentIsBusy", "expected a log line naming the failed method")
+	require.False(t, client.AgentIsBusy())
+	require.Equal(t, "", client.WorkingDir())
+	require.Equal(t, workspace.AgentModel{}, client.AgentModel())
+
+	require.Equal(t, 1, strings.Count(buf.String(), "class-C getter called before Connect succeeded"),
+		"expected exactly one log line, logged once per Client rather than once per call")
 }
 
 // deadClient dials a bufconn listener, then immediately closes it (and the

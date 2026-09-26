@@ -151,17 +151,63 @@ type StubWorkspace struct {
 	// test can prove Snapshot surfaces a request that has no subscriber.
 	PendingPromptsResult workspace.PendingPrompts
 	PendingPromptsErr    error
+
+	// liveMu guards WorkingDirResult, PendingPromptsResult and
+	// AgentIsBusyResult against a race between a test's own goroutine
+	// changing them and a concurrent read landing on a different
+	// goroutine while this workspace is already live -- e.g. a
+	// grpcws.Client's own background reconnect/resync attempts, or the
+	// per-hub client-state ticker, on no schedule the test controls
+	// (CLIENT-SERVER.md, PR 1.4b). A test that mutates one of these three
+	// fields while such activity is running must go through
+	// SetWorkingDirResult/SetPendingPromptsResult/SetAgentIsBusyResult
+	// instead of assigning the field directly; every other field on this
+	// stub is still fine set directly, unguarded, before anything starts
+	// reading it concurrently.
+	liveMu sync.RWMutex
 }
 
 func (s *StubWorkspace) PendingPrompts(context.Context) (workspace.PendingPrompts, error) {
+	s.liveMu.RLock()
+	defer s.liveMu.RUnlock()
 	return s.PendingPromptsResult, s.PendingPromptsErr
 }
 
+// SetPendingPromptsResult is PendingPromptsResult's data-race-safe setter;
+// see liveMu's own doc comment.
+func (s *StubWorkspace) SetPendingPromptsResult(p workspace.PendingPrompts) {
+	s.liveMu.Lock()
+	defer s.liveMu.Unlock()
+	s.PendingPromptsResult = p
+}
+
 func (s *StubWorkspace) WorkingDir() string {
+	s.liveMu.RLock()
+	defer s.liveMu.RUnlock()
 	return s.WorkingDirResult
 }
 
-func (s *StubWorkspace) AgentIsBusy() bool { return s.AgentIsBusyResult }
+// SetWorkingDirResult is WorkingDirResult's data-race-safe setter; see
+// liveMu's own doc comment.
+func (s *StubWorkspace) SetWorkingDirResult(dir string) {
+	s.liveMu.Lock()
+	defer s.liveMu.Unlock()
+	s.WorkingDirResult = dir
+}
+
+func (s *StubWorkspace) AgentIsBusy() bool {
+	s.liveMu.RLock()
+	defer s.liveMu.RUnlock()
+	return s.AgentIsBusyResult
+}
+
+// SetAgentIsBusyResult is AgentIsBusyResult's data-race-safe setter; see
+// liveMu's own doc comment.
+func (s *StubWorkspace) SetAgentIsBusyResult(busy bool) {
+	s.liveMu.Lock()
+	defer s.liveMu.Unlock()
+	s.AgentIsBusyResult = busy
+}
 
 func (s *StubWorkspace) AgentIsSessionBusy(string) bool { return s.AgentIsSessionBusyResult }
 

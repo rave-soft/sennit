@@ -42,11 +42,16 @@ func TestConformance_PermissionGrant_RoundTripsParams(t *testing.T) {
 	require.Equal(t, want, stub.GotPermissionGrantArg)
 }
 
+// TestConformance_AgentModel_CachedGetterRoundTrips checks a class-C
+// getter end to end: it answers from the Client's local cache
+// (workspace.ClientState, seeded by Connect's own Snapshot call), never an
+// RPC of its own -- see client_getters.go.
 func TestConformance_AgentModel_CachedGetterRoundTrips(t *testing.T) {
 	t.Parallel()
 
 	stub := &wsrpctest.StubWorkspace{AgentModelResult: wsrpctest.AgentModelSample}
 	client := newServerAndClient(t, stub)
+	require.NoError(t, client.Connect(context.Background()))
 
 	got := client.AgentModel()
 	require.Equal(t, wsrpctest.AgentModelSample, got)

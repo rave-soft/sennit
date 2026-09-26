@@ -16,7 +16,9 @@ const wsrpcPkgImportPath = "github.com/rave-soft/sennit/internal/workspace/wsrpc
 // renderService builds grpcws/zz_generated_service.go: the grpc.ServiceDesc
 // for the Workspace service, its server-side adapter (workspaceServer,
 // RegisterWorkspaceServer, and one handler per method), and Client's
-// generated methods for every U/C entry in methods.
+// generated methods for every entry in methods -- Generate only ever passes
+// this the U subset (PR 1.4b: a class-C getter is answered from Client's
+// own cache, hand-written in client_manual.go, not generated here).
 //
 // The literals serviceName, jsonCodecName and the helpers grpcStatusFromError
 // / invoke referenced below are not spelled out here -- they are
@@ -133,9 +135,10 @@ func writeServerAdapter(body *strings.Builder, methods []*methodInfo, wsAlias, w
 // assertion). A method with no context.Context parameter gets one here,
 // bounded by c.callTimeout, per CLIENT-SERVER.md's PR 1.1 build step. A
 // method with no error result can't report a transport failure through its
-// own signature, so it logs (slog.Warn) and returns the zero value instead
-// -- PR 1.4 replaces these C-method calls with a local cache that never
-// makes this call at all.
+// own signature, so it logs (slog.Warn) and returns the zero value instead.
+// methods here is always the U subset (Generate filters C out before
+// calling renderService); a class-C getter is a hand-written cache read on
+// Client instead (client_manual.go).
 func writeClientMethods(body *strings.Builder, methods []*methodInfo, imp *importSet, wireAlias string) {
 	for _, m := range methods {
 		hasCtx := false

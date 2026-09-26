@@ -15,7 +15,6 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -34,36 +33,23 @@ import (
 // workspaceServer against (google.golang.org/grpc requires
 // ServiceDesc.HandlerType to name an interface, not the concrete impl).
 type WorkspaceServer interface {
-	AccountCapabilities(ctx context.Context, req *wsrpc.AccountCapabilitiesRequest) (*wsrpc.AccountCapabilitiesResponse, error)
 	ActivateAccount(ctx context.Context, req *wsrpc.ActivateAccountRequest) (*wsrpc.ActivateAccountResponse, error)
 	ActivateThread(ctx context.Context, req *wsrpc.ActivateThreadRequest) (*wsrpc.ActivateThreadResponse, error)
-	AgentActivity(ctx context.Context, req *wsrpc.AgentActivityRequest) (*wsrpc.AgentActivityResponse, error)
 	AgentCancel(ctx context.Context, req *wsrpc.AgentCancelRequest) (*wsrpc.AgentCancelResponse, error)
 	AgentClearQueue(ctx context.Context, req *wsrpc.AgentClearQueueRequest) (*wsrpc.AgentClearQueueResponse, error)
-	AgentIsBusy(ctx context.Context, req *wsrpc.AgentIsBusyRequest) (*wsrpc.AgentIsBusyResponse, error)
-	AgentIsReady(ctx context.Context, req *wsrpc.AgentIsReadyRequest) (*wsrpc.AgentIsReadyResponse, error)
-	AgentIsSessionBusy(ctx context.Context, req *wsrpc.AgentIsSessionBusyRequest) (*wsrpc.AgentIsSessionBusyResponse, error)
-	AgentModel(ctx context.Context, req *wsrpc.AgentModelRequest) (*wsrpc.AgentModelResponse, error)
-	AgentQueuedPromptsList(ctx context.Context, req *wsrpc.AgentQueuedPromptsListRequest) (*wsrpc.AgentQueuedPromptsListResponse, error)
-	AgentReadyErr(ctx context.Context, req *wsrpc.AgentReadyErrRequest) (*wsrpc.AgentReadyErrResponse, error)
 	AgentRun(ctx context.Context, req *wsrpc.AgentRunRequest) (*wsrpc.AgentRunResponse, error)
 	AgentSummarize(ctx context.Context, req *wsrpc.AgentSummarizeRequest) (*wsrpc.AgentSummarizeResponse, error)
 	ApplySessionModel(ctx context.Context, req *wsrpc.ApplySessionModelRequest) (*wsrpc.ApplySessionModelResponse, error)
 	AttachProjectFile(ctx context.Context, req *wsrpc.AttachProjectFileRequest) (*wsrpc.AttachProjectFileResponse, error)
-	BackgroundJobCounts(ctx context.Context, req *wsrpc.BackgroundJobCountsRequest) (*wsrpc.BackgroundJobCountsResponse, error)
 	BuiltinSkills(ctx context.Context, req *wsrpc.BuiltinSkillsRequest) (*wsrpc.BuiltinSkillsResponse, error)
 	CancelTask(ctx context.Context, req *wsrpc.CancelTaskRequest) (*wsrpc.CancelTaskResponse, error)
 	CancelThread(ctx context.Context, req *wsrpc.CancelThreadRequest) (*wsrpc.CancelThreadResponse, error)
-	Config(ctx context.Context, req *wsrpc.ConfigRequest) (*wsrpc.ConfigResponse, error)
 	ConfigProblems(ctx context.Context, req *wsrpc.ConfigProblemsRequest) (*wsrpc.ConfigProblemsResponse, error)
 	ConfigureCustomProvider(ctx context.Context, req *wsrpc.ConfigureCustomProviderRequest) (*wsrpc.ConfigureCustomProviderResponse, error)
 	CreateSession(ctx context.Context, req *wsrpc.CreateSessionRequest) (*wsrpc.CreateSessionResponse, error)
 	CreateThread(ctx context.Context, req *wsrpc.CreateThreadRequest) (*wsrpc.CreateThreadResponse, error)
-	CurrentPlanUsage(ctx context.Context, req *wsrpc.CurrentPlanUsageRequest) (*wsrpc.CurrentPlanUsageResponse, error)
-	CustomProviderTypes(ctx context.Context, req *wsrpc.CustomProviderTypesRequest) (*wsrpc.CustomProviderTypesResponse, error)
 	DeleteSession(ctx context.Context, req *wsrpc.DeleteSessionRequest) (*wsrpc.DeleteSessionResponse, error)
 	DisableDockerMCP(ctx context.Context, req *wsrpc.DisableDockerMCPRequest) (*wsrpc.DisableDockerMCPResponse, error)
-	DockerMCPAvailable(ctx context.Context, req *wsrpc.DockerMCPAvailableRequest) (*wsrpc.DockerMCPAvailableResponse, error)
 	DoctorProblems(ctx context.Context, req *wsrpc.DoctorProblemsRequest) (*wsrpc.DoctorProblemsResponse, error)
 	EnableDockerMCP(ctx context.Context, req *wsrpc.EnableDockerMCPRequest) (*wsrpc.EnableDockerMCPResponse, error)
 	FileTrackerLastReadTime(ctx context.Context, req *wsrpc.FileTrackerLastReadTimeRequest) (*wsrpc.FileTrackerLastReadTimeResponse, error)
@@ -76,7 +62,6 @@ type WorkspaceServer interface {
 	InitCoderAgent(ctx context.Context, req *wsrpc.InitCoderAgentRequest) (*wsrpc.InitCoderAgentResponse, error)
 	InitCoderAgentNonInteractive(ctx context.Context, req *wsrpc.InitCoderAgentNonInteractiveRequest) (*wsrpc.InitCoderAgentNonInteractiveResponse, error)
 	InitializePrompt(ctx context.Context, req *wsrpc.InitializePromptRequest) (*wsrpc.InitializePromptResponse, error)
-	KnownProviders(ctx context.Context, req *wsrpc.KnownProvidersRequest) (*wsrpc.KnownProvidersResponse, error)
 	LSPGetDiagnosticCounts(ctx context.Context, req *wsrpc.LSPGetDiagnosticCountsRequest) (*wsrpc.LSPGetDiagnosticCountsResponse, error)
 	LSPGetStates(ctx context.Context, req *wsrpc.LSPGetStatesRequest) (*wsrpc.LSPGetStatesResponse, error)
 	LSPStart(ctx context.Context, req *wsrpc.LSPStartRequest) (*wsrpc.LSPStartResponse, error)
@@ -94,10 +79,8 @@ type WorkspaceServer interface {
 	ListTasks(ctx context.Context, req *wsrpc.ListTasksRequest) (*wsrpc.ListTasksResponse, error)
 	ListThreads(ctx context.Context, req *wsrpc.ListThreadsRequest) (*wsrpc.ListThreadsResponse, error)
 	ListUserMessages(ctx context.Context, req *wsrpc.ListUserMessagesRequest) (*wsrpc.ListUserMessagesResponse, error)
-	MCPAuthURL(ctx context.Context, req *wsrpc.MCPAuthURLRequest) (*wsrpc.MCPAuthURLResponse, error)
 	MCPAuthenticate(ctx context.Context, req *wsrpc.MCPAuthenticateRequest) (*wsrpc.MCPAuthenticateResponse, error)
 	MCPGetStates(ctx context.Context, req *wsrpc.MCPGetStatesRequest) (*wsrpc.MCPGetStatesResponse, error)
-	MCPPendingAuth(ctx context.Context, req *wsrpc.MCPPendingAuthRequest) (*wsrpc.MCPPendingAuthResponse, error)
 	MCPRefreshPrompts(ctx context.Context, req *wsrpc.MCPRefreshPromptsRequest) (*wsrpc.MCPRefreshPromptsResponse, error)
 	MCPRefreshResources(ctx context.Context, req *wsrpc.MCPRefreshResourcesRequest) (*wsrpc.MCPRefreshResourcesResponse, error)
 	MCPResources(ctx context.Context, req *wsrpc.MCPResourcesRequest) (*wsrpc.MCPResourcesResponse, error)
@@ -110,7 +93,6 @@ type WorkspaceServer interface {
 	PermissionGrant(ctx context.Context, req *wsrpc.PermissionGrantRequest) (*wsrpc.PermissionGrantResponse, error)
 	PermissionGrantPersistent(ctx context.Context, req *wsrpc.PermissionGrantPersistentRequest) (*wsrpc.PermissionGrantPersistentResponse, error)
 	PermissionSetSkipRequests(ctx context.Context, req *wsrpc.PermissionSetSkipRequestsRequest) (*wsrpc.PermissionSetSkipRequestsResponse, error)
-	PermissionSkipRequests(ctx context.Context, req *wsrpc.PermissionSkipRequestsRequest) (*wsrpc.PermissionSkipRequestsResponse, error)
 	PrepareSessionChanges(ctx context.Context, req *wsrpc.PrepareSessionChangesRequest) (*wsrpc.PrepareSessionChangesResponse, error)
 	ProjectNeedsInitialization(ctx context.Context, req *wsrpc.ProjectNeedsInitializationRequest) (*wsrpc.ProjectNeedsInitializationResponse, error)
 	PurgeAccounts(ctx context.Context, req *wsrpc.PurgeAccountsRequest) (*wsrpc.PurgeAccountsResponse, error)
@@ -137,16 +119,12 @@ type WorkspaceServer interface {
 	SetProviderProxy(ctx context.Context, req *wsrpc.SetProviderProxyRequest) (*wsrpc.SetProviderProxyResponse, error)
 	SkillStates(ctx context.Context, req *wsrpc.SkillStatesRequest) (*wsrpc.SkillStatesResponse, error)
 	Stats(ctx context.Context, req *wsrpc.StatsRequest) (*wsrpc.StatsResponse, error)
-	SupportsTasks(ctx context.Context, req *wsrpc.SupportsTasksRequest) (*wsrpc.SupportsTasksResponse, error)
-	SupportsThreads(ctx context.Context, req *wsrpc.SupportsThreadsRequest) (*wsrpc.SupportsThreadsResponse, error)
 	UncommittedFiles(ctx context.Context, req *wsrpc.UncommittedFilesRequest) (*wsrpc.UncommittedFilesResponse, error)
 	UpdateAccountFields(ctx context.Context, req *wsrpc.UpdateAccountFieldsRequest) (*wsrpc.UpdateAccountFieldsResponse, error)
 	UpdateAgentModel(ctx context.Context, req *wsrpc.UpdateAgentModelRequest) (*wsrpc.UpdateAgentModelResponse, error)
 	UpdatePreferredModel(ctx context.Context, req *wsrpc.UpdatePreferredModelRequest) (*wsrpc.UpdatePreferredModelResponse, error)
 	VerifyProviderAPIKey(ctx context.Context, req *wsrpc.VerifyProviderAPIKeyRequest) (*wsrpc.VerifyProviderAPIKeyResponse, error)
 	WaitForMCPInit(ctx context.Context, req *wsrpc.WaitForMCPInitRequest) (*wsrpc.WaitForMCPInitResponse, error)
-	WorkingDir(ctx context.Context, req *wsrpc.WorkingDirRequest) (*wsrpc.WorkingDirResponse, error)
-	WorktreeState(ctx context.Context, req *wsrpc.WorktreeStateRequest) (*wsrpc.WorktreeStateResponse, error)
 }
 
 // WorkspaceServiceDesc is the Workspace gRPC service's description: one
@@ -156,36 +134,23 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 	ServiceName: serviceName,
 	HandlerType: (*WorkspaceServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{MethodName: "AccountCapabilities", Handler: _Workspace_AccountCapabilities_Handler},
 		{MethodName: "ActivateAccount", Handler: _Workspace_ActivateAccount_Handler},
 		{MethodName: "ActivateThread", Handler: _Workspace_ActivateThread_Handler},
-		{MethodName: "AgentActivity", Handler: _Workspace_AgentActivity_Handler},
 		{MethodName: "AgentCancel", Handler: _Workspace_AgentCancel_Handler},
 		{MethodName: "AgentClearQueue", Handler: _Workspace_AgentClearQueue_Handler},
-		{MethodName: "AgentIsBusy", Handler: _Workspace_AgentIsBusy_Handler},
-		{MethodName: "AgentIsReady", Handler: _Workspace_AgentIsReady_Handler},
-		{MethodName: "AgentIsSessionBusy", Handler: _Workspace_AgentIsSessionBusy_Handler},
-		{MethodName: "AgentModel", Handler: _Workspace_AgentModel_Handler},
-		{MethodName: "AgentQueuedPromptsList", Handler: _Workspace_AgentQueuedPromptsList_Handler},
-		{MethodName: "AgentReadyErr", Handler: _Workspace_AgentReadyErr_Handler},
 		{MethodName: "AgentRun", Handler: _Workspace_AgentRun_Handler},
 		{MethodName: "AgentSummarize", Handler: _Workspace_AgentSummarize_Handler},
 		{MethodName: "ApplySessionModel", Handler: _Workspace_ApplySessionModel_Handler},
 		{MethodName: "AttachProjectFile", Handler: _Workspace_AttachProjectFile_Handler},
-		{MethodName: "BackgroundJobCounts", Handler: _Workspace_BackgroundJobCounts_Handler},
 		{MethodName: "BuiltinSkills", Handler: _Workspace_BuiltinSkills_Handler},
 		{MethodName: "CancelTask", Handler: _Workspace_CancelTask_Handler},
 		{MethodName: "CancelThread", Handler: _Workspace_CancelThread_Handler},
-		{MethodName: "Config", Handler: _Workspace_Config_Handler},
 		{MethodName: "ConfigProblems", Handler: _Workspace_ConfigProblems_Handler},
 		{MethodName: "ConfigureCustomProvider", Handler: _Workspace_ConfigureCustomProvider_Handler},
 		{MethodName: "CreateSession", Handler: _Workspace_CreateSession_Handler},
 		{MethodName: "CreateThread", Handler: _Workspace_CreateThread_Handler},
-		{MethodName: "CurrentPlanUsage", Handler: _Workspace_CurrentPlanUsage_Handler},
-		{MethodName: "CustomProviderTypes", Handler: _Workspace_CustomProviderTypes_Handler},
 		{MethodName: "DeleteSession", Handler: _Workspace_DeleteSession_Handler},
 		{MethodName: "DisableDockerMCP", Handler: _Workspace_DisableDockerMCP_Handler},
-		{MethodName: "DockerMCPAvailable", Handler: _Workspace_DockerMCPAvailable_Handler},
 		{MethodName: "DoctorProblems", Handler: _Workspace_DoctorProblems_Handler},
 		{MethodName: "EnableDockerMCP", Handler: _Workspace_EnableDockerMCP_Handler},
 		{MethodName: "FileTrackerLastReadTime", Handler: _Workspace_FileTrackerLastReadTime_Handler},
@@ -198,7 +163,6 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "InitCoderAgent", Handler: _Workspace_InitCoderAgent_Handler},
 		{MethodName: "InitCoderAgentNonInteractive", Handler: _Workspace_InitCoderAgentNonInteractive_Handler},
 		{MethodName: "InitializePrompt", Handler: _Workspace_InitializePrompt_Handler},
-		{MethodName: "KnownProviders", Handler: _Workspace_KnownProviders_Handler},
 		{MethodName: "LSPGetDiagnosticCounts", Handler: _Workspace_LSPGetDiagnosticCounts_Handler},
 		{MethodName: "LSPGetStates", Handler: _Workspace_LSPGetStates_Handler},
 		{MethodName: "LSPStart", Handler: _Workspace_LSPStart_Handler},
@@ -216,10 +180,8 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "ListTasks", Handler: _Workspace_ListTasks_Handler},
 		{MethodName: "ListThreads", Handler: _Workspace_ListThreads_Handler},
 		{MethodName: "ListUserMessages", Handler: _Workspace_ListUserMessages_Handler},
-		{MethodName: "MCPAuthURL", Handler: _Workspace_MCPAuthURL_Handler},
 		{MethodName: "MCPAuthenticate", Handler: _Workspace_MCPAuthenticate_Handler},
 		{MethodName: "MCPGetStates", Handler: _Workspace_MCPGetStates_Handler},
-		{MethodName: "MCPPendingAuth", Handler: _Workspace_MCPPendingAuth_Handler},
 		{MethodName: "MCPRefreshPrompts", Handler: _Workspace_MCPRefreshPrompts_Handler},
 		{MethodName: "MCPRefreshResources", Handler: _Workspace_MCPRefreshResources_Handler},
 		{MethodName: "MCPResources", Handler: _Workspace_MCPResources_Handler},
@@ -232,7 +194,6 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "PermissionGrant", Handler: _Workspace_PermissionGrant_Handler},
 		{MethodName: "PermissionGrantPersistent", Handler: _Workspace_PermissionGrantPersistent_Handler},
 		{MethodName: "PermissionSetSkipRequests", Handler: _Workspace_PermissionSetSkipRequests_Handler},
-		{MethodName: "PermissionSkipRequests", Handler: _Workspace_PermissionSkipRequests_Handler},
 		{MethodName: "PrepareSessionChanges", Handler: _Workspace_PrepareSessionChanges_Handler},
 		{MethodName: "ProjectNeedsInitialization", Handler: _Workspace_ProjectNeedsInitialization_Handler},
 		{MethodName: "PurgeAccounts", Handler: _Workspace_PurgeAccounts_Handler},
@@ -259,34 +220,15 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "SetProviderProxy", Handler: _Workspace_SetProviderProxy_Handler},
 		{MethodName: "SkillStates", Handler: _Workspace_SkillStates_Handler},
 		{MethodName: "Stats", Handler: _Workspace_Stats_Handler},
-		{MethodName: "SupportsTasks", Handler: _Workspace_SupportsTasks_Handler},
-		{MethodName: "SupportsThreads", Handler: _Workspace_SupportsThreads_Handler},
 		{MethodName: "UncommittedFiles", Handler: _Workspace_UncommittedFiles_Handler},
 		{MethodName: "UpdateAccountFields", Handler: _Workspace_UpdateAccountFields_Handler},
 		{MethodName: "UpdateAgentModel", Handler: _Workspace_UpdateAgentModel_Handler},
 		{MethodName: "UpdatePreferredModel", Handler: _Workspace_UpdatePreferredModel_Handler},
 		{MethodName: "VerifyProviderAPIKey", Handler: _Workspace_VerifyProviderAPIKey_Handler},
 		{MethodName: "WaitForMCPInit", Handler: _Workspace_WaitForMCPInit_Handler},
-		{MethodName: "WorkingDir", Handler: _Workspace_WorkingDir_Handler},
-		{MethodName: "WorktreeState", Handler: _Workspace_WorktreeState_Handler},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "wsrpc/workspace",
-}
-
-func _Workspace_AccountCapabilities_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AccountCapabilitiesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AccountCapabilities(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AccountCapabilities"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AccountCapabilities(ctx, req.(*wsrpc.AccountCapabilitiesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Workspace_ActivateAccount_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -319,21 +261,6 @@ func _Workspace_ActivateThread_Handler(srv any, ctx context.Context, dec func(an
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Workspace_AgentActivity_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AgentActivityRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AgentActivity(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentActivity"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AgentActivity(ctx, req.(*wsrpc.AgentActivityRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Workspace_AgentCancel_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(wsrpc.AgentCancelRequest)
 	if err := dec(in); err != nil {
@@ -360,96 +287,6 @@ func _Workspace_AgentClearQueue_Handler(srv any, ctx context.Context, dec func(a
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentClearQueue"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).AgentClearQueue(ctx, req.(*wsrpc.AgentClearQueueRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_AgentIsBusy_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AgentIsBusyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AgentIsBusy(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentIsBusy"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AgentIsBusy(ctx, req.(*wsrpc.AgentIsBusyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_AgentIsReady_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AgentIsReadyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AgentIsReady(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentIsReady"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AgentIsReady(ctx, req.(*wsrpc.AgentIsReadyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_AgentIsSessionBusy_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AgentIsSessionBusyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AgentIsSessionBusy(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentIsSessionBusy"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AgentIsSessionBusy(ctx, req.(*wsrpc.AgentIsSessionBusyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_AgentModel_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AgentModelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AgentModel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentModel"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AgentModel(ctx, req.(*wsrpc.AgentModelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_AgentQueuedPromptsList_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AgentQueuedPromptsListRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AgentQueuedPromptsList(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentQueuedPromptsList"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AgentQueuedPromptsList(ctx, req.(*wsrpc.AgentQueuedPromptsListRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_AgentReadyErr_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.AgentReadyErrRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).AgentReadyErr(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/AgentReadyErr"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).AgentReadyErr(ctx, req.(*wsrpc.AgentReadyErrRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -514,21 +351,6 @@ func _Workspace_AttachProjectFile_Handler(srv any, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Workspace_BackgroundJobCounts_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.BackgroundJobCountsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).BackgroundJobCounts(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/BackgroundJobCounts"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).BackgroundJobCounts(ctx, req.(*wsrpc.BackgroundJobCountsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Workspace_BuiltinSkills_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(wsrpc.BuiltinSkillsRequest)
 	if err := dec(in); err != nil {
@@ -570,21 +392,6 @@ func _Workspace_CancelThread_Handler(srv any, ctx context.Context, dec func(any)
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/CancelThread"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).CancelThread(ctx, req.(*wsrpc.CancelThreadRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_Config_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.ConfigRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).Config(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/Config"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).Config(ctx, req.(*wsrpc.ConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -649,36 +456,6 @@ func _Workspace_CreateThread_Handler(srv any, ctx context.Context, dec func(any)
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Workspace_CurrentPlanUsage_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.CurrentPlanUsageRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).CurrentPlanUsage(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/CurrentPlanUsage"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).CurrentPlanUsage(ctx, req.(*wsrpc.CurrentPlanUsageRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_CustomProviderTypes_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.CustomProviderTypesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).CustomProviderTypes(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/CustomProviderTypes"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).CustomProviderTypes(ctx, req.(*wsrpc.CustomProviderTypesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Workspace_DeleteSession_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(wsrpc.DeleteSessionRequest)
 	if err := dec(in); err != nil {
@@ -705,21 +482,6 @@ func _Workspace_DisableDockerMCP_Handler(srv any, ctx context.Context, dec func(
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/DisableDockerMCP"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).DisableDockerMCP(ctx, req.(*wsrpc.DisableDockerMCPRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_DockerMCPAvailable_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.DockerMCPAvailableRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).DockerMCPAvailable(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/DockerMCPAvailable"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).DockerMCPAvailable(ctx, req.(*wsrpc.DockerMCPAvailableRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -900,21 +662,6 @@ func _Workspace_InitializePrompt_Handler(srv any, ctx context.Context, dec func(
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/InitializePrompt"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).InitializePrompt(ctx, req.(*wsrpc.InitializePromptRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_KnownProviders_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.KnownProvidersRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).KnownProviders(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/KnownProviders"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).KnownProviders(ctx, req.(*wsrpc.KnownProvidersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1174,21 +921,6 @@ func _Workspace_ListUserMessages_Handler(srv any, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Workspace_MCPAuthURL_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.MCPAuthURLRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).MCPAuthURL(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/MCPAuthURL"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).MCPAuthURL(ctx, req.(*wsrpc.MCPAuthURLRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Workspace_MCPAuthenticate_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(wsrpc.MCPAuthenticateRequest)
 	if err := dec(in); err != nil {
@@ -1215,21 +947,6 @@ func _Workspace_MCPGetStates_Handler(srv any, ctx context.Context, dec func(any)
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/MCPGetStates"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).MCPGetStates(ctx, req.(*wsrpc.MCPGetStatesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_MCPPendingAuth_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.MCPPendingAuthRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).MCPPendingAuth(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/MCPPendingAuth"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).MCPPendingAuth(ctx, req.(*wsrpc.MCPPendingAuthRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1410,21 +1127,6 @@ func _Workspace_PermissionSetSkipRequests_Handler(srv any, ctx context.Context, 
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/PermissionSetSkipRequests"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).PermissionSetSkipRequests(ctx, req.(*wsrpc.PermissionSetSkipRequestsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_PermissionSkipRequests_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.PermissionSkipRequestsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).PermissionSkipRequests(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/PermissionSkipRequests"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).PermissionSkipRequests(ctx, req.(*wsrpc.PermissionSkipRequestsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1819,36 +1521,6 @@ func _Workspace_Stats_Handler(srv any, ctx context.Context, dec func(any) error,
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Workspace_SupportsTasks_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.SupportsTasksRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).SupportsTasks(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/SupportsTasks"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).SupportsTasks(ctx, req.(*wsrpc.SupportsTasksRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_SupportsThreads_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.SupportsThreadsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).SupportsThreads(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/SupportsThreads"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).SupportsThreads(ctx, req.(*wsrpc.SupportsThreadsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Workspace_UncommittedFiles_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(wsrpc.UncommittedFilesRequest)
 	if err := dec(in); err != nil {
@@ -1939,36 +1611,6 @@ func _Workspace_WaitForMCPInit_Handler(srv any, ctx context.Context, dec func(an
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Workspace_WorkingDir_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.WorkingDirRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).WorkingDir(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/WorkingDir"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).WorkingDir(ctx, req.(*wsrpc.WorkingDirRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Workspace_WorktreeState_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(wsrpc.WorktreeStateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkspaceServer).WorktreeState(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/WorktreeState"}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(WorkspaceServer).WorktreeState(ctx, req.(*wsrpc.WorktreeStateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // workspaceServer adapts a resolved workspace.Workspace to WorkspaceServiceDesc.
 type workspaceServer struct {
 	resolve func(ctx context.Context) (workspace.Workspace, error)
@@ -1980,17 +1622,6 @@ type workspaceServer struct {
 // handle, so resolve here only ever needs to recognize "".
 func RegisterWorkspaceServer(s grpc.ServiceRegistrar, resolve func(ctx context.Context) (workspace.Workspace, error)) {
 	s.RegisterService(&WorkspaceServiceDesc, &workspaceServer{resolve: resolve})
-}
-
-func (s *workspaceServer) AccountCapabilities(ctx context.Context, req *wsrpc.AccountCapabilitiesRequest) (*wsrpc.AccountCapabilitiesResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AccountCapabilities(req.ProviderID)
-	return &wsrpc.AccountCapabilitiesResponse{
-		Result: res0,
-	}, nil
 }
 
 func (s *workspaceServer) ActivateAccount(ctx context.Context, req *wsrpc.ActivateAccountRequest) (*wsrpc.ActivateAccountResponse, error) {
@@ -2019,17 +1650,6 @@ func (s *workspaceServer) ActivateThread(ctx context.Context, req *wsrpc.Activat
 	}, nil
 }
 
-func (s *workspaceServer) AgentActivity(ctx context.Context, req *wsrpc.AgentActivityRequest) (*wsrpc.AgentActivityResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AgentActivity()
-	return &wsrpc.AgentActivityResponse{
-		Result: res0,
-	}, nil
-}
-
 func (s *workspaceServer) AgentCancel(ctx context.Context, req *wsrpc.AgentCancelRequest) (*wsrpc.AgentCancelResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -2052,73 +1672,6 @@ func (s *workspaceServer) AgentClearQueue(ctx context.Context, req *wsrpc.AgentC
 		return nil, grpcStatusFromError(ctx, res0)
 	}
 	return &wsrpc.AgentClearQueueResponse{}, nil
-}
-
-func (s *workspaceServer) AgentIsBusy(ctx context.Context, req *wsrpc.AgentIsBusyRequest) (*wsrpc.AgentIsBusyResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AgentIsBusy()
-	return &wsrpc.AgentIsBusyResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) AgentIsReady(ctx context.Context, req *wsrpc.AgentIsReadyRequest) (*wsrpc.AgentIsReadyResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AgentIsReady()
-	return &wsrpc.AgentIsReadyResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) AgentIsSessionBusy(ctx context.Context, req *wsrpc.AgentIsSessionBusyRequest) (*wsrpc.AgentIsSessionBusyResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AgentIsSessionBusy(req.SessionID)
-	return &wsrpc.AgentIsSessionBusyResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) AgentModel(ctx context.Context, req *wsrpc.AgentModelRequest) (*wsrpc.AgentModelResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AgentModel()
-	return &wsrpc.AgentModelResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) AgentQueuedPromptsList(ctx context.Context, req *wsrpc.AgentQueuedPromptsListRequest) (*wsrpc.AgentQueuedPromptsListResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AgentQueuedPromptsList(req.SessionID)
-	return &wsrpc.AgentQueuedPromptsListResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) AgentReadyErr(ctx context.Context, req *wsrpc.AgentReadyErrRequest) (*wsrpc.AgentReadyErrResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.AgentReadyErr()
-	if res0 != nil {
-		return nil, grpcStatusFromError(ctx, res0)
-	}
-	return &wsrpc.AgentReadyErrResponse{}, nil
 }
 
 func (s *workspaceServer) AgentRun(ctx context.Context, req *wsrpc.AgentRunRequest) (*wsrpc.AgentRunResponse, error) {
@@ -2174,17 +1727,6 @@ func (s *workspaceServer) AttachProjectFile(ctx context.Context, req *wsrpc.Atta
 	}, nil
 }
 
-func (s *workspaceServer) BackgroundJobCounts(ctx context.Context, req *wsrpc.BackgroundJobCountsRequest) (*wsrpc.BackgroundJobCountsResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.BackgroundJobCounts()
-	return &wsrpc.BackgroundJobCountsResponse{
-		Result: res0,
-	}, nil
-}
-
 func (s *workspaceServer) BuiltinSkills(ctx context.Context, req *wsrpc.BuiltinSkillsRequest) (*wsrpc.BuiltinSkillsResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -2218,17 +1760,6 @@ func (s *workspaceServer) CancelThread(ctx context.Context, req *wsrpc.CancelThr
 		return nil, grpcStatusFromError(ctx, res0)
 	}
 	return &wsrpc.CancelThreadResponse{}, nil
-}
-
-func (s *workspaceServer) Config(ctx context.Context, req *wsrpc.ConfigRequest) (*wsrpc.ConfigResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.Config()
-	return &wsrpc.ConfigResponse{
-		Result: res0,
-	}, nil
 }
 
 func (s *workspaceServer) ConfigProblems(ctx context.Context, req *wsrpc.ConfigProblemsRequest) (*wsrpc.ConfigProblemsResponse, error) {
@@ -2284,29 +1815,6 @@ func (s *workspaceServer) CreateThread(ctx context.Context, req *wsrpc.CreateThr
 	}, nil
 }
 
-func (s *workspaceServer) CurrentPlanUsage(ctx context.Context, req *wsrpc.CurrentPlanUsageRequest) (*wsrpc.CurrentPlanUsageResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0, res1 := ws.CurrentPlanUsage(req.ProviderID)
-	return &wsrpc.CurrentPlanUsageResponse{
-		Result0: res0,
-		Result1: res1,
-	}, nil
-}
-
-func (s *workspaceServer) CustomProviderTypes(ctx context.Context, req *wsrpc.CustomProviderTypesRequest) (*wsrpc.CustomProviderTypesResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.CustomProviderTypes()
-	return &wsrpc.CustomProviderTypesResponse{
-		Result: res0,
-	}, nil
-}
-
 func (s *workspaceServer) DeleteSession(ctx context.Context, req *wsrpc.DeleteSessionRequest) (*wsrpc.DeleteSessionResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -2329,18 +1837,6 @@ func (s *workspaceServer) DisableDockerMCP(ctx context.Context, req *wsrpc.Disab
 		return nil, grpcStatusFromError(ctx, res0)
 	}
 	return &wsrpc.DisableDockerMCPResponse{}, nil
-}
-
-func (s *workspaceServer) DockerMCPAvailable(ctx context.Context, req *wsrpc.DockerMCPAvailableRequest) (*wsrpc.DockerMCPAvailableResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0, res1 := ws.DockerMCPAvailable()
-	return &wsrpc.DockerMCPAvailableResponse{
-		Available: res0,
-		Known:     res1,
-	}, nil
 }
 
 func (s *workspaceServer) DoctorProblems(ctx context.Context, req *wsrpc.DoctorProblemsRequest) (*wsrpc.DoctorProblemsResponse, error) {
@@ -2496,17 +1992,6 @@ func (s *workspaceServer) InitializePrompt(ctx context.Context, req *wsrpc.Initi
 		return nil, grpcStatusFromError(ctx, res1)
 	}
 	return &wsrpc.InitializePromptResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) KnownProviders(ctx context.Context, req *wsrpc.KnownProvidersRequest) (*wsrpc.KnownProvidersResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.KnownProviders()
-	return &wsrpc.KnownProvidersResponse{
 		Result: res0,
 	}, nil
 }
@@ -2739,17 +2224,6 @@ func (s *workspaceServer) ListUserMessages(ctx context.Context, req *wsrpc.ListU
 	}, nil
 }
 
-func (s *workspaceServer) MCPAuthURL(ctx context.Context, req *wsrpc.MCPAuthURLRequest) (*wsrpc.MCPAuthURLResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.MCPAuthURL(req.Name)
-	return &wsrpc.MCPAuthURLResponse{
-		Result: res0,
-	}, nil
-}
-
 func (s *workspaceServer) MCPAuthenticate(ctx context.Context, req *wsrpc.MCPAuthenticateRequest) (*wsrpc.MCPAuthenticateResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -2769,17 +2243,6 @@ func (s *workspaceServer) MCPGetStates(ctx context.Context, req *wsrpc.MCPGetSta
 	}
 	res0 := ws.MCPGetStates()
 	return &wsrpc.MCPGetStatesResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) MCPPendingAuth(ctx context.Context, req *wsrpc.MCPPendingAuthRequest) (*wsrpc.MCPPendingAuthResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.MCPPendingAuth()
-	return &wsrpc.MCPPendingAuthResponse{
 		Result: res0,
 	}, nil
 }
@@ -2932,17 +2395,6 @@ func (s *workspaceServer) PermissionSetSkipRequests(ctx context.Context, req *ws
 		return nil, grpcStatusFromError(ctx, res0)
 	}
 	return &wsrpc.PermissionSetSkipRequestsResponse{}, nil
-}
-
-func (s *workspaceServer) PermissionSkipRequests(ctx context.Context, req *wsrpc.PermissionSkipRequestsRequest) (*wsrpc.PermissionSkipRequestsResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.PermissionSkipRequests()
-	return &wsrpc.PermissionSkipRequestsResponse{
-		Result: res0,
-	}, nil
 }
 
 func (s *workspaceServer) PrepareSessionChanges(ctx context.Context, req *wsrpc.PrepareSessionChangesRequest) (*wsrpc.PrepareSessionChangesResponse, error) {
@@ -3281,28 +2733,6 @@ func (s *workspaceServer) Stats(ctx context.Context, req *wsrpc.StatsRequest) (*
 	}, nil
 }
 
-func (s *workspaceServer) SupportsTasks(ctx context.Context, req *wsrpc.SupportsTasksRequest) (*wsrpc.SupportsTasksResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.SupportsTasks()
-	return &wsrpc.SupportsTasksResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) SupportsThreads(ctx context.Context, req *wsrpc.SupportsThreadsRequest) (*wsrpc.SupportsThreadsResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.SupportsThreads()
-	return &wsrpc.SupportsThreadsResponse{
-		Result: res0,
-	}, nil
-}
-
 func (s *workspaceServer) UncommittedFiles(ctx context.Context, req *wsrpc.UncommittedFilesRequest) (*wsrpc.UncommittedFilesResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -3377,44 +2807,6 @@ func (s *workspaceServer) WaitForMCPInit(ctx context.Context, req *wsrpc.WaitFor
 	return &wsrpc.WaitForMCPInitResponse{}, nil
 }
 
-func (s *workspaceServer) WorkingDir(ctx context.Context, req *wsrpc.WorkingDirRequest) (*wsrpc.WorkingDirResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.WorkingDir()
-	return &wsrpc.WorkingDirResponse{
-		Result: res0,
-	}, nil
-}
-
-func (s *workspaceServer) WorktreeState(ctx context.Context, req *wsrpc.WorktreeStateRequest) (*wsrpc.WorktreeStateResponse, error) {
-	ws, err := s.resolve(ctx)
-	if err != nil {
-		return nil, grpcStatusFromError(ctx, err)
-	}
-	res0 := ws.WorktreeState()
-	return &wsrpc.WorktreeStateResponse{
-		Result: res0,
-	}, nil
-}
-
-// AccountCapabilities calls the Workspace service's AccountCapabilities RPC.
-func (c *Client) AccountCapabilities(providerID string) (res0 workspace.AccountCapabilities) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AccountCapabilitiesRequest{
-		ProviderID: providerID,
-	}
-	wsrpcResp := new(wsrpc.AccountCapabilitiesResponse)
-	if err := c.invoke(ctx, "AccountCapabilities", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AccountCapabilities", "error", err)
-		var zero0 workspace.AccountCapabilities
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
 // ActivateAccount calls the Workspace service's ActivateAccount RPC.
 func (c *Client) ActivateAccount(scope config.Scope, providerID string, accountID string) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
@@ -3444,20 +2836,6 @@ func (c *Client) ActivateThread(ctx context.Context, id string) (res0 proto.Thre
 	return wsrpcResp.Result, nil
 }
 
-// AgentActivity calls the Workspace service's AgentActivity RPC.
-func (c *Client) AgentActivity() (res0 workspace.AgentActivity) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AgentActivityRequest{}
-	wsrpcResp := new(wsrpc.AgentActivityResponse)
-	if err := c.invoke(ctx, "AgentActivity", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AgentActivity", "error", err)
-		var zero0 workspace.AgentActivity
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
 // AgentCancel calls the Workspace service's AgentCancel RPC.
 func (c *Client) AgentCancel(sessionID string) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
@@ -3481,92 +2859,6 @@ func (c *Client) AgentClearQueue(sessionID string) (err error) {
 	}
 	wsrpcResp := new(wsrpc.AgentClearQueueResponse)
 	if err := c.invoke(ctx, "AgentClearQueue", wsrpcReq, wsrpcResp); err != nil {
-		return err
-	}
-	return nil
-}
-
-// AgentIsBusy calls the Workspace service's AgentIsBusy RPC.
-func (c *Client) AgentIsBusy() (res0 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AgentIsBusyRequest{}
-	wsrpcResp := new(wsrpc.AgentIsBusyResponse)
-	if err := c.invoke(ctx, "AgentIsBusy", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AgentIsBusy", "error", err)
-		var zero0 bool
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// AgentIsReady calls the Workspace service's AgentIsReady RPC.
-func (c *Client) AgentIsReady() (res0 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AgentIsReadyRequest{}
-	wsrpcResp := new(wsrpc.AgentIsReadyResponse)
-	if err := c.invoke(ctx, "AgentIsReady", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AgentIsReady", "error", err)
-		var zero0 bool
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// AgentIsSessionBusy calls the Workspace service's AgentIsSessionBusy RPC.
-func (c *Client) AgentIsSessionBusy(sessionID string) (res0 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AgentIsSessionBusyRequest{
-		SessionID: sessionID,
-	}
-	wsrpcResp := new(wsrpc.AgentIsSessionBusyResponse)
-	if err := c.invoke(ctx, "AgentIsSessionBusy", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AgentIsSessionBusy", "error", err)
-		var zero0 bool
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// AgentModel calls the Workspace service's AgentModel RPC.
-func (c *Client) AgentModel() (res0 workspace.AgentModel) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AgentModelRequest{}
-	wsrpcResp := new(wsrpc.AgentModelResponse)
-	if err := c.invoke(ctx, "AgentModel", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AgentModel", "error", err)
-		var zero0 workspace.AgentModel
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// AgentQueuedPromptsList calls the Workspace service's AgentQueuedPromptsList RPC.
-func (c *Client) AgentQueuedPromptsList(sessionID string) (res0 []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AgentQueuedPromptsListRequest{
-		SessionID: sessionID,
-	}
-	wsrpcResp := new(wsrpc.AgentQueuedPromptsListResponse)
-	if err := c.invoke(ctx, "AgentQueuedPromptsList", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "AgentQueuedPromptsList", "error", err)
-		var zero0 []string
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// AgentReadyErr calls the Workspace service's AgentReadyErr RPC.
-func (c *Client) AgentReadyErr() (err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.AgentReadyErrRequest{}
-	wsrpcResp := new(wsrpc.AgentReadyErrResponse)
-	if err := c.invoke(ctx, "AgentReadyErr", wsrpcReq, wsrpcResp); err != nil {
 		return err
 	}
 	return nil
@@ -3626,20 +2918,6 @@ func (c *Client) AttachProjectFile(ctx context.Context, sessionID string, path s
 	return wsrpcResp.Result0, wsrpcResp.Result1, nil
 }
 
-// BackgroundJobCounts calls the Workspace service's BackgroundJobCounts RPC.
-func (c *Client) BackgroundJobCounts() (res0 workspace.BackgroundJobCounts) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.BackgroundJobCountsRequest{}
-	wsrpcResp := new(wsrpc.BackgroundJobCountsResponse)
-	if err := c.invoke(ctx, "BackgroundJobCounts", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "BackgroundJobCounts", "error", err)
-		var zero0 workspace.BackgroundJobCounts
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
 // BuiltinSkills calls the Workspace service's BuiltinSkills RPC.
 func (c *Client) BuiltinSkills() (res0 []*skills.Skill) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
@@ -3678,20 +2956,6 @@ func (c *Client) CancelThread(ctx context.Context, id string, reason string) (er
 		return err
 	}
 	return nil
-}
-
-// Config calls the Workspace service's Config RPC.
-func (c *Client) Config() (res0 *workspace.FrontendConfig) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.ConfigRequest{}
-	wsrpcResp := new(wsrpc.ConfigResponse)
-	if err := c.invoke(ctx, "Config", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "Config", "error", err)
-		var zero0 *workspace.FrontendConfig
-		return zero0
-	}
-	return wsrpcResp.Result
 }
 
 // ConfigProblems calls the Workspace service's ConfigProblems RPC.
@@ -3748,37 +3012,6 @@ func (c *Client) CreateThread(ctx context.Context, req proto.CreateThreadRequest
 	return wsrpcResp.Result, nil
 }
 
-// CurrentPlanUsage calls the Workspace service's CurrentPlanUsage RPC.
-func (c *Client) CurrentPlanUsage(providerID string) (res0 accounts.Usage, res1 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.CurrentPlanUsageRequest{
-		ProviderID: providerID,
-	}
-	wsrpcResp := new(wsrpc.CurrentPlanUsageResponse)
-	if err := c.invoke(ctx, "CurrentPlanUsage", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "CurrentPlanUsage", "error", err)
-		var zero0 accounts.Usage
-		var zero1 bool
-		return zero0, zero1
-	}
-	return wsrpcResp.Result0, wsrpcResp.Result1
-}
-
-// CustomProviderTypes calls the Workspace service's CustomProviderTypes RPC.
-func (c *Client) CustomProviderTypes() (res0 []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.CustomProviderTypesRequest{}
-	wsrpcResp := new(wsrpc.CustomProviderTypesResponse)
-	if err := c.invoke(ctx, "CustomProviderTypes", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "CustomProviderTypes", "error", err)
-		var zero0 []string
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
 // DeleteSession calls the Workspace service's DeleteSession RPC.
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) (err error) {
 	wsrpcReq := &wsrpc.DeleteSessionRequest{
@@ -3801,21 +3034,6 @@ func (c *Client) DisableDockerMCP() (err error) {
 		return err
 	}
 	return nil
-}
-
-// DockerMCPAvailable calls the Workspace service's DockerMCPAvailable RPC.
-func (c *Client) DockerMCPAvailable() (res0 bool, res1 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.DockerMCPAvailableRequest{}
-	wsrpcResp := new(wsrpc.DockerMCPAvailableResponse)
-	if err := c.invoke(ctx, "DockerMCPAvailable", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "DockerMCPAvailable", "error", err)
-		var zero0 bool
-		var zero1 bool
-		return zero0, zero1
-	}
-	return wsrpcResp.Available, wsrpcResp.Known
 }
 
 // DoctorProblems calls the Workspace service's DoctorProblems RPC.
@@ -3963,20 +3181,6 @@ func (c *Client) InitializePrompt() (res0 string, err error) {
 		return zero0, err
 	}
 	return wsrpcResp.Result, nil
-}
-
-// KnownProviders calls the Workspace service's KnownProviders RPC.
-func (c *Client) KnownProviders() (res0 []catwalk.Provider) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.KnownProvidersRequest{}
-	wsrpcResp := new(wsrpc.KnownProvidersResponse)
-	if err := c.invoke(ctx, "KnownProviders", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "KnownProviders", "error", err)
-		var zero0 []catwalk.Provider
-		return zero0
-	}
-	return wsrpcResp.Result
 }
 
 // LSPGetDiagnosticCounts calls the Workspace service's LSPGetDiagnosticCounts RPC.
@@ -4191,22 +3395,6 @@ func (c *Client) ListUserMessages(ctx context.Context, sessionID string) (res0 [
 	return wsrpcResp.Result, nil
 }
 
-// MCPAuthURL calls the Workspace service's MCPAuthURL RPC.
-func (c *Client) MCPAuthURL(name string) (res0 string) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.MCPAuthURLRequest{
-		Name: name,
-	}
-	wsrpcResp := new(wsrpc.MCPAuthURLResponse)
-	if err := c.invoke(ctx, "MCPAuthURL", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "MCPAuthURL", "error", err)
-		var zero0 string
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
 // MCPAuthenticate calls the Workspace service's MCPAuthenticate RPC.
 func (c *Client) MCPAuthenticate(ctx context.Context, name string) (err error) {
 	wsrpcReq := &wsrpc.MCPAuthenticateRequest{
@@ -4228,20 +3416,6 @@ func (c *Client) MCPGetStates() (res0 map[string]workspace.MCPClientInfo) {
 	if err := c.invoke(ctx, "MCPGetStates", wsrpcReq, wsrpcResp); err != nil {
 		slog.Warn("Wsrpc client call failed, returning zero value", "method", "MCPGetStates", "error", err)
 		var zero0 map[string]workspace.MCPClientInfo
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// MCPPendingAuth calls the Workspace service's MCPPendingAuth RPC.
-func (c *Client) MCPPendingAuth() (res0 []workspace.MCPPendingAuthServer) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.MCPPendingAuthRequest{}
-	wsrpcResp := new(wsrpc.MCPPendingAuthResponse)
-	if err := c.invoke(ctx, "MCPPendingAuth", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "MCPPendingAuth", "error", err)
-		var zero0 []workspace.MCPPendingAuthServer
 		return zero0
 	}
 	return wsrpcResp.Result
@@ -4410,20 +3584,6 @@ func (c *Client) PermissionSetSkipRequests(skip bool) (err error) {
 		return err
 	}
 	return nil
-}
-
-// PermissionSkipRequests calls the Workspace service's PermissionSkipRequests RPC.
-func (c *Client) PermissionSkipRequests() (res0 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.PermissionSkipRequestsRequest{}
-	wsrpcResp := new(wsrpc.PermissionSkipRequestsResponse)
-	if err := c.invoke(ctx, "PermissionSkipRequests", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "PermissionSkipRequests", "error", err)
-		var zero0 bool
-		return zero0
-	}
-	return wsrpcResp.Result
 }
 
 // PrepareSessionChanges calls the Workspace service's PrepareSessionChanges RPC.
@@ -4788,34 +3948,6 @@ func (c *Client) Stats(ctx context.Context, req stats.Request) (res0 stats.Snaps
 	return wsrpcResp.Result, nil
 }
 
-// SupportsTasks calls the Workspace service's SupportsTasks RPC.
-func (c *Client) SupportsTasks() (res0 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.SupportsTasksRequest{}
-	wsrpcResp := new(wsrpc.SupportsTasksResponse)
-	if err := c.invoke(ctx, "SupportsTasks", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "SupportsTasks", "error", err)
-		var zero0 bool
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// SupportsThreads calls the Workspace service's SupportsThreads RPC.
-func (c *Client) SupportsThreads() (res0 bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.SupportsThreadsRequest{}
-	wsrpcResp := new(wsrpc.SupportsThreadsResponse)
-	if err := c.invoke(ctx, "SupportsThreads", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "SupportsThreads", "error", err)
-		var zero0 bool
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
 // UncommittedFiles calls the Workspace service's UncommittedFiles RPC.
 func (c *Client) UncommittedFiles(ctx context.Context) (res0 []git.FileChange, err error) {
 	wsrpcReq := &wsrpc.UncommittedFilesRequest{}
@@ -4889,32 +4021,4 @@ func (c *Client) WaitForMCPInit(ctx context.Context) (err error) {
 		return err
 	}
 	return nil
-}
-
-// WorkingDir calls the Workspace service's WorkingDir RPC.
-func (c *Client) WorkingDir() (res0 string) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.WorkingDirRequest{}
-	wsrpcResp := new(wsrpc.WorkingDirResponse)
-	if err := c.invoke(ctx, "WorkingDir", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "WorkingDir", "error", err)
-		var zero0 string
-		return zero0
-	}
-	return wsrpcResp.Result
-}
-
-// WorktreeState calls the Workspace service's WorktreeState RPC.
-func (c *Client) WorktreeState() (res0 workspace.WorktreeState) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
-	defer cancel()
-	wsrpcReq := &wsrpc.WorktreeStateRequest{}
-	wsrpcResp := new(wsrpc.WorktreeStateResponse)
-	if err := c.invoke(ctx, "WorktreeState", wsrpcReq, wsrpcResp); err != nil {
-		slog.Warn("Wsrpc client call failed, returning zero value", "method", "WorktreeState", "error", err)
-		var zero0 workspace.WorktreeState
-		return zero0
-	}
-	return wsrpcResp.Result
 }

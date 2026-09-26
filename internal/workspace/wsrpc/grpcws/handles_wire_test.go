@@ -200,14 +200,20 @@ func leaseGrace() time.Duration {
 // gets disconnected has its handles released once the grace period has
 // passed with no new call.
 //
-// stopSub is called right after severing, not left running: Subscribe's
-// own reconnect loop (runSubscription) would otherwise silently redial
-// through the same severableDialer and resume the stream on a fresh
-// connection -- exactly the behavior TestSubscribe_ReconnectWithoutLoss
-// relies on, but here it would count as renewed activity and mask the
-// disconnect this test means to simulate. Ending the subscription client-
-// side is standing in for the client process actually going away, the
-// same as closing its whole connection would.
+// client.Shutdown() runs right after severing, not left running: a
+// Client's internal event pump (runPump, started once by Connect) would
+// otherwise silently redial through the same severableDialer and resume
+// the stream on a fresh connection -- exactly the behavior
+// TestSubscribe_ReconnectWithoutLoss relies on, but here it would count as
+// renewed activity and mask the disconnect this test means to simulate.
+// Shutdown also stops the worktree handle's own pump: EnterWorktree's
+// returned Client shares this one's parent lifetime (withParentLifeCtx),
+// and its release func is never called here on purpose, standing in for a
+// caller that vanished (a crash) rather than one that cleaned up -- so
+// Shutdown, not the discarded release, is what has to reach it. Ending
+// every subscription client-side this way is standing in for the client
+// process actually going away, the same as closing its whole connection
+// would.
 func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet(t *testing.T) {
 	t.Parallel()
 
@@ -228,7 +234,7 @@ func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet(t *testing.T) {
 	})
 
 	client, dialer, _ := dialLeaseClient(t, lis)
-	stopSub := client.SubscribeWith(func(any) {})
+	client.SubscribeWith(func(any) {})
 	select {
 	case <-root.SubscribeWithReady:
 	case <-time.After(5 * time.Second):
@@ -239,7 +245,7 @@ func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet(t *testing.T) {
 	require.NoError(t, err)
 
 	dialer.sever()
-	stopSub()
+	client.Shutdown()
 
 	select {
 	case <-root.WorktreeReleased:
@@ -416,12 +422,12 @@ func TestLeaseGrace_OneClientsDisconnectDoesNotTouchAnothers(t *testing.T) {
 	root.AttachThreadWorkspace = childB
 	root.AttachThreadReleased = make(chan struct{})
 	clientB, dialerB, _ := dialLeaseClient(t, lis)
-	stopSubB := clientB.SubscribeWith(func(any) {})
+	clientB.SubscribeWith(func(any) {})
 	_, _, err = clientB.AttachThread(context.Background(), "thread-b")
 	require.NoError(t, err)
 
 	dialerB.sever()
-	stopSubB()
+	clientB.Shutdown()
 
 	select {
 	case <-root.AttachThreadReleased:
