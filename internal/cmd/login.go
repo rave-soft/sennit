@@ -27,13 +27,15 @@ type oauthPlatform struct {
 var oauthPlatforms = []oauthPlatform{
 	{
 		ID: "copilot", DisplayName: "GitHub Copilot", Aliases: []string{"github", "github-copilot"},
-		Login:  func(ws workspace.Workspace, force bool, _ string) error { return loginCopilot(ws, force, false) },
+		Login: func(ws workspace.Workspace, force bool, _ string) error {
+			return loginCopilot(ws, force, false, desktopLoginIO())
+		},
 		Logout: func(ws workspace.Workspace) error { return logoutCopilot(ws) },
 	},
 	{
 		ID: "codex", DisplayName: "OpenAI Codex", Aliases: []string{"chatgpt", "openai-codex"},
 		Login: func(ws workspace.Workspace, force bool, proxyURL string) error {
-			return loginCodex(ws, force, false, proxyURL)
+			return loginCodex(ws, force, false, proxyURL, desktopLoginIO())
 		},
 		Logout: func(ws workspace.Workspace) error { return logoutCodex(ws) },
 	},
@@ -138,7 +140,7 @@ type loginAccountWorkspace interface {
 	workspace.OAuthController
 }
 
-func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
+func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool, io loginIO) error {
 	loginCtx, stop := getLoginContext()
 	defer stop()
 
@@ -203,7 +205,7 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 	if result.Completed == nil {
 		fmt.Println("Requesting device code from GitHub...")
 
-		clipboard.WriteText(result.UserCode)
+		io.copyText(result.UserCode)
 		fmt.Println()
 		fmt.Println("The following code should be on clipboard already:")
 		fmt.Println()
@@ -213,8 +215,8 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 		fmt.Println()
 		_, _ = lipgloss.Println(lipgloss.NewStyle().Hyperlink(result.VerificationURL, "id=copilot").Render(result.VerificationURL)) // terminal output
 		fmt.Println()
-		waitEnter()
-		if err := browser.OpenURL(result.VerificationURL); err != nil {
+		io.waitEnter()
+		if err := io.openURL(result.VerificationURL); err != nil {
 			fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
 		}
 
@@ -260,6 +262,26 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool) error {
 // every login attempt in a process that runs more than one, e.g. tests.
 func getLoginContext() (context.Context, func()) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+// loginIO is everything an interactive sign-in does outside the process:
+// put a code on the clipboard, wait for Enter, open a browser. Production
+// passes desktopLoginIO; tests pass a recorder. A test reaching the real
+// ones opens tabs in the person's browser and overwrites their clipboard
+// on every run, which is what happened before this indirection existed.
+// TestLoginDesktopEffectsOnlyInDesktopLoginIO keeps new call sites out.
+type loginIO struct {
+	copyText  func(string)
+	waitEnter func()
+	openURL   func(string) error
+}
+
+func desktopLoginIO() loginIO {
+	return loginIO{
+		copyText:  clipboard.WriteText,
+		waitEnter: waitEnter,
+		openURL:   browser.OpenURL,
+	}
 }
 
 func waitEnter() {

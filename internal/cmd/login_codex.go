@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -36,7 +35,7 @@ type codexLoginWorkspace interface {
 	workspace.OAuthController
 }
 
-func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL string) error {
+func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL string, io loginIO) error {
 	loginCtx, stop := getLoginContext()
 	defer stop()
 
@@ -113,8 +112,8 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 		fmt.Println()
 		_, _ = lipgloss.Println(lipgloss.NewStyle().Hyperlink(result.AuthorizationURL, "id=codex").Render(result.AuthorizationURL)) // terminal output
 		fmt.Println()
-		waitEnter()
-		if err := browser.OpenURL(result.AuthorizationURL); err != nil {
+		io.waitEnter()
+		if err := io.openURL(result.AuthorizationURL); err != nil {
 			fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
 		}
 

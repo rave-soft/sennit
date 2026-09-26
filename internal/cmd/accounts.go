@@ -293,9 +293,9 @@ func findAuthAccount(ws workspace.AccountLister, providerID, account string) (wo
 func authAddOAuth(ws loginAccountWorkspace, providerID string) error {
 	switch providerID {
 	case "codex":
-		return loginCodex(ws, true, true, "")
+		return loginCodex(ws, true, true, "", desktopLoginIO())
 	case "copilot":
-		return loginCopilot(ws, true, true)
+		return loginCopilot(ws, true, true, desktopLoginIO())
 	default:
 		return fmt.Errorf("provider %s has no OAuth sign-in flow", providerID)
 	}

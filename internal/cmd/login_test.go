@@ -91,7 +91,7 @@ func TestLoginCopilot_StartsDeviceFlow(t *testing.T) {
 
 	for _, forceNewAccount := range []bool{false, true} {
 		ws := newCopilotLoginFake()
-		require.NoError(t, loginCopilot(ws, true, forceNewAccount))
+		require.NoError(t, loginCopilot(ws, true, forceNewAccount, recordLoginIO(t)))
 		if forceNewAccount {
 			// A deliberate "add account" skips ImportCopilot entirely —
 			// see loginCopilot's own comment on why.
@@ -114,7 +114,7 @@ func TestLoginCopilot_DiskLoginSkipsDeviceFlow(t *testing.T) {
 
 	ws := newCopilotLoginFake()
 	ws.importResult = true
-	require.NoError(t, loginCopilot(ws, true, false))
+	require.NoError(t, loginCopilot(ws, true, false, recordLoginIO(t)))
 	require.Equal(t, []string{"ImportCopilot"}, ws.calls, "a disk login must not start a device flow")
 }
 
@@ -130,7 +130,7 @@ func TestLoginCopilot_ForceNewAccountSkipsDiskLogin(t *testing.T) {
 
 	ws := newCopilotLoginFake()
 	ws.importResult = true
-	require.NoError(t, loginCopilot(ws, true, true))
+	require.NoError(t, loginCopilot(ws, true, true, recordLoginIO(t)))
 	require.Equal(t, []string{"StartOAuth:copilot"}, ws.calls)
 	require.Equal(t, []bool{true}, ws.startForceNew)
 }
@@ -145,7 +145,7 @@ func TestLoginCopilot_ImportFailureIsFatal(t *testing.T) {
 	importErr := errors.New("exchanging github copilot token: boom")
 	ws := newCopilotLoginFake()
 	ws.importErr = importErr
-	require.ErrorIs(t, loginCopilot(ws, true, false), importErr)
+	require.ErrorIs(t, loginCopilot(ws, true, false, recordLoginIO(t)), importErr)
 	require.Equal(t, []string{"ImportCopilot"}, ws.calls)
 }
 
@@ -159,7 +159,7 @@ func TestLoginCopilot_ReusedLoginSkipsDeviceFlow(t *testing.T) {
 	ws := &copilotLoginWorkspaceFake{
 		startResult: workspace.OAuthStartResult{Completed: &completion},
 	}
-	require.NoError(t, loginCopilot(ws, true, false))
+	require.NoError(t, loginCopilot(ws, true, false, recordLoginIO(t)))
 	require.Equal(t, []string{"ImportCopilot", "StartOAuth:copilot"}, ws.calls)
 }
 
@@ -171,7 +171,7 @@ func TestLoginCopilot_StartOAuthFailureIsFatal(t *testing.T) {
 	startErr := errors.New("device code request failed")
 	ws := newCopilotLoginFake()
 	ws.startErr = startErr
-	require.ErrorIs(t, loginCopilot(ws, true, false), startErr)
+	require.ErrorIs(t, loginCopilot(ws, true, false, recordLoginIO(t)), startErr)
 }
 
 // TestLoginCmd_KeepsAuthAlias pins that `sennit auth <platform>` keeps
