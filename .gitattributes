@@ -2,3 +2,11 @@
 .github/sennit-schema.json linguist-generated=true
 internal/agent/hyper/provider.json linguist-generated=true
 internal/agent/testdata/**/*.yaml -diff linguist-generated=true
+# Pinned to LF: the generator (internal/workspace/wsrpc/gen) always emits
+# "\n", and wsrpc's freshness test (classes_gen_test.go) compares its
+# output byte-for-byte against these files. A Windows checkout with
+# core.autocrlf=true would otherwise convert them to CRLF on the way out,
+# turning that into a line-ending false positive rather than a real
+# staleness check (the test also normalizes CRLF->LF itself as a second
+# line of defense -- see checkFresh's doc comment).
+internal/workspace/wsrpc/zz_generated_*.go linguist-generated=true text eol=lf

@@ -32,123 +32,34 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/workspace"
+	"github.com/rave-soft/sennit/internal/workspace/wsrpc"
 )
 
-// updateGoroutineGuardedMethods is a duplicate of the U/S/H entries in
-// internal/workspace/wire_classes_test.go's methodClasses (everything that
-// is not classCachedGetter "C" or classClientLocal "X"). It has to be a
-// duplicate rather than an import: that table lives in a _test.go file, and
-// _test.go symbols are only linked into their own package's test binary --
-// internal/ui/model cannot import them, the same way internal/workspace's
-// own tests cannot import this file's table (recall commit 59666e391,
-// which forbade putting a test-only table in a production file just to
-// make it importable both ways).
+// updateGoroutineGuardedMethods is every U/S/H method in
+// wsrpc.MethodClasses (everything that is not C or X), computed here
+// instead of hand-maintained as a duplicate list: this package can import
+// wsrpc (a production package), unlike internal/workspace's own _test.go
+// table it used to mirror by hand (recall commit 59666e391, which forbade
+// putting a test-only table in a production file just to make it
+// importable both ways — wsrpc's classes.go is that production file now).
 //
-// Instead, internal/workspace/wire_classes_ui_guard_test.go reads this
-// file's source as text and compares the two lists, failing loudly on
-// drift in either direction: a method added to methodClasses here without
-// a matching entry here, or vice versa.
-var updateGoroutineGuardedMethods = map[string]bool{
-	"ActivateAccount":              true,
-	"ActivateThread":               true,
-	"AgentCancel":                  true,
-	"AgentClearQueue":              true,
-	"AgentRun":                     true,
-	"AgentRunShellCommand":         true,
-	"AgentRunStream":               true,
-	"AgentSummarize":               true,
-	"ApplySessionModel":            true,
-	"AttachProjectFile":            true,
-	"AttachThread":                 true,
-	"BuiltinSkills":                true,
-	"CancelTask":                   true,
-	"CancelThread":                 true,
-	"CompleteOAuth":                true,
-	"ConfigProblems":               true,
-	"ConfigureCustomProvider":      true,
-	"CreateSession":                true,
-	"CreateThread":                 true,
-	"DeleteSession":                true,
-	"DisableDockerMCP":             true,
-	"DoctorProblems":               true,
-	"EnableDockerMCP":              true,
-	"EnterWorktree":                true,
-	"ExitWorktree":                 true,
-	"FileTrackerLastReadTime":      true,
-	"FileTrackerListReadFiles":     true,
-	"FileTrackerRecordRead":        true,
-	"GetLastSession":               true,
-	"GetMCPPrompt":                 true,
-	"GetSession":                   true,
-	"ImportCopilot":                true,
-	"InitCoderAgent":               true,
-	"InitCoderAgentNonInteractive": true,
-	"InitializePrompt":             true,
-	"ListAccounts":                 true,
-	"ListAllUserMessages":          true,
-	"ListCustomCommands":           true,
-	"ListMCPPrompts":               true,
-	"ListMessages":                 true,
-	"ListMessagesBySessionIDs":     true,
-	"ListProjectFiles":             true,
-	"ListSessionHistory":           true,
-	"ListSessions":                 true,
-	"ListSkills":                   true,
-	"ListTasks":                    true,
-	"ListThreads":                  true,
-	"ListUserMessages":             true,
-	"LSPGetDiagnosticCounts":       true,
-	"LSPGetStates":                 true,
-	"LSPStart":                     true,
-	"LSPStopAll":                   true,
-	"MarkProjectInitialized":       true,
-	"MCPAuthenticate":              true,
-	"MCPGetStates":                 true,
-	"MCPRefreshPrompts":            true,
-	"MCPRefreshResources":          true,
-	"MCPResources":                 true,
-	"OAuthConfiguredProxy":         true,
-	"OAuthValidateProxy":           true,
-	"OverridePreferredModel":       true,
-	"PermissionDeny":               true,
-	"PermissionGrant":              true,
-	"PermissionGrantPersistent":    true,
-	"PermissionSetSkipRequests":    true,
-	"ProjectNeedsInitialization":   true,
-	"PurgeAccounts":                true,
-	"QuestionAnswer":               true,
-	"QuestionCancel":               true,
-	"ReadMCPResource":              true,
-	"ReadSkill":                    true,
-	"RecordAccount":                true,
-	"RefreshAccountLimits":         true,
-	"RefreshDockerMCPAvailability": true,
-	"RefreshMCPTools":              true,
-	"RefreshOAuthToken":            true,
-	"RefreshOAuthTokenForAccount":  true,
-	"RefreshProviderModels":        true,
-	"RemoveAccount":                true,
-	"RemoveConfigField":            true,
-	"RemoveThread":                 true,
-	"RenameSession":                true,
-	"SessionDescendantCost":        true,
-	"SetConfigField":               true,
-	"SetCurrentSession":            true,
-	"SetCurrentSessionGeneration":  true,
-	"SetProviderAPIKey":            true,
-	"SetProviderProxy":             true,
-	"SkillStates":                  true,
-	"StartOAuth":                   true,
-	"Stats":                        true,
-	"Subscribe":                    true,
-	"SubscribeWith":                true,
-	"UncommittedFiles":             true,
-	"UpdateAccountFields":          true,
-	"UpdateAgentModel":             true,
-	"UpdatePreferredModel":         true,
-	"VerifyProviderAPIKey":         true,
-	"WaitForMCPInit":               true,
-}
+// This only guarantees the *set* of guarded names stays in sync with
+// wsrpc.MethodClasses; it says nothing about whether a wrapper method
+// actually exists below for each one, and calling check() with a name
+// missing an entry here would be a bug in the generated-looking block
+// below, not in this table. internal/workspace/wire_classes_ui_guard_test.go
+// (TestUIGuardHasWrapperForEveryWireMethod) reads this file's source as
+// text and checks that every name here has a matching wrapper method.
+var updateGoroutineGuardedMethods = func() map[string]bool {
+	out := make(map[string]bool, len(wsrpc.MethodClasses))
+	for name, class := range wsrpc.MethodClasses {
+		if class == wsrpc.C || class == wsrpc.X {
+			continue
+		}
+		out[name] = true
+	}
+	return out
+}()
 
 // updateGoroutineGuard wraps a workspace.Workspace and fails the enclosing
 // test the moment a guarded (U/S/H) method runs while onUpdateGoroutine is

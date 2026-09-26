@@ -22,8 +22,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -421,6 +427,81 @@ func (w *wireWalker) walk(t reflect.Type, path string, ownerField string) {
 	}
 }
 
+// methodClasses reads wsrpc.MethodClasses's method->class ("U", "C", "S",
+// "H", "X") assignments straight out of wsrpc/classes.go's source, without
+// importing the wsrpc package: this file lives in package workspace's own
+// internal test files, and wsrpc imports workspace, so importing it back
+// here would be a cycle Go's toolchain refuses ("import cycle not allowed
+// in test") -- see wire_classes_ui_guard_test.go (now package
+// workspace_test) for the same problem solved the other way, by moving out
+// to an external test package instead. Parsing is the only option left for
+// a file that must stay in the internal package, since collectWireTypes
+// below shares unexported helpers with the rest of this file's package.
+func methodClasses() map[string]string {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("runtime.Caller failed; cannot locate wsrpc/classes.go")
+	}
+	path := filepath.Join(filepath.Dir(thisFile), "wsrpc", "classes.go")
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		panic(fmt.Sprintf("parsing %s: %v", path, err))
+	}
+
+	classes := make(map[string]string)
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vspec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			nameMatches := false
+			for _, ident := range vspec.Names {
+				if ident.Name == "MethodClasses" {
+					nameMatches = true
+				}
+			}
+			if !nameMatches {
+				continue
+			}
+			for _, value := range vspec.Values {
+				lit, ok := value.(*ast.CompositeLit)
+				if !ok {
+					continue
+				}
+				for _, elt := range lit.Elts {
+					kv, ok := elt.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					key, ok := kv.Key.(*ast.BasicLit)
+					if !ok || key.Kind != token.STRING {
+						continue
+					}
+					name, err := strconv.Unquote(key.Value)
+					if err != nil {
+						panic(err)
+					}
+					class, ok := kv.Value.(*ast.Ident)
+					if !ok {
+						continue
+					}
+					classes[name] = class.Name
+				}
+			}
+		}
+	}
+	if len(classes) == 0 {
+		panic(fmt.Sprintf("found no entries in wsrpc.MethodClasses in %s; parsing must have failed silently", path))
+	}
+	return classes
+}
+
 // collectWireTypes returns the set of every named struct/opaque type
 // reachable from Workspace's U/C methods, the event payload types, and
 // the extra S/H data types, failing t on any forbidden shape found.
@@ -430,8 +511,8 @@ func collectWireTypes(t *testing.T) map[reflect.Type]bool {
 	typ := reflect.TypeOf((*Workspace)(nil)).Elem()
 	for i := range typ.NumMethod() {
 		m := typ.Method(i)
-		class, ok := methodClasses[m.Name]
-		if !ok || (class != classUnary && class != classCachedGetter) {
+		class, ok := methodClasses()[m.Name]
+		if !ok || (class != "U" && class != "C") {
 			continue
 		}
 		mt := m.Type
