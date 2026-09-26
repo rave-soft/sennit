@@ -20,7 +20,11 @@ func (w *AppWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {
 // -- Lifecycle --
 
 func (w *AppWorkspace) Subscribe(send func(any)) {
-	w.app.Subscribe(func(msg any) { send(w.translateEvent(msg)) }, w.app.Shutdown)
+	w.app.Subscribe(func(msg any) {
+		if translated := w.translateEvent(msg); translated != nil {
+			send(translated)
+		}
+	}, w.app.Shutdown)
 }
 
 // translateEvent adapts a message from app's event fan-in into the shape
@@ -33,12 +37,26 @@ func (w *AppWorkspace) Subscribe(send func(any)) {
 // in. Convert here, at the UI-facing boundary, into
 // pubsub.Event[proto.Thread] so the delegation cache, isolated-work dock,
 // completion handling, and dashboard see live updates instead of relying
-// solely on their TTL-poll fallback. Any other
-// message passes through unchanged.
+// solely on their TTL-poll fallback. Any other message passes through
+// unchanged -- which must mean unchanged *into a type the frontend
+// contract knows*: internal/workspace/wsrpc/events.go's registry is the
+// complete list of types Subscribe/SubscribeWith may deliver, and both
+// callers drop a nil return instead of forwarding it (SubscribeWith
+// always did; Subscribe now does too, above). notify.RunComplete and
+// app.WorkspaceChanged are published on app.events for their own
+// in-process consumers (internal/thread/lifecycle.go's RunCompletions
+// wait, internal/app/threadspawn/attach.go's config-reload forwarders)
+// but have no frontend consumer and no registry entry, so they are
+// filtered to nil here rather than reaching a caller that cannot encode
+// them.
 func (w *AppWorkspace) translateEvent(msg any) any {
 	switch e := msg.(type) {
 	case pubsub.Event[notify.Notification]:
 		return pubsub.Event[workspace.AgentNotification]{Type: e.Type, Payload: workspace.AgentNotification{SessionID: e.Payload.SessionID, SessionTitle: e.Payload.SessionTitle, ChildSession: e.Payload.ChildSession, Type: workspace.AgentNotificationType(e.Payload.Type), ProviderID: e.Payload.ProviderID, RunID: e.Payload.RunID, Message: e.Payload.Message, AWSSOCommand: e.Payload.AWSSOCommand, AWSSOURL: e.Payload.AWSSOURL}}
+	case pubsub.Event[notify.RunComplete]:
+		return nil
+	case pubsub.Event[app.WorkspaceChanged]:
+		return nil
 	case pubsub.Event[mcptools.Event]:
 		var eventType workspace.MCPEventType
 		switch e.Payload.Type {
