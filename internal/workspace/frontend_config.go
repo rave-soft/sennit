@@ -7,6 +7,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/home"
 )
 
 // FrontendConfig is the allowlist snapshot of *config.Config the UI is
@@ -54,6 +55,14 @@ type FrontendConfig struct {
 
 	InitializeAs   string   `json:"initialize_as,omitempty"`
 	DisabledSkills []string `json:"disabled_skills,omitempty"`
+
+	// ServerHome is the home directory of the machine running the
+	// workspace - home.Dir() as seen from there, not from wherever the UI
+	// happens to run. A server-side absolute path (Workspace.WorkingDir(),
+	// a permission request's file path, ...) must be shortened against
+	// this home, not the client's own - see internal/ui/common's
+	// PrettyServerPath, CLIENT-SERVER.md's "PR 0.6".
+	ServerHome string `json:"server_home,omitempty"`
 }
 
 // FrontendAgent is the slice of config.Agent the UI needs to render a
@@ -133,6 +142,7 @@ func NewFrontendConfig(cfg *config.Config, knownProviders []catwalk.Provider) *F
 		Model:        cfg.Model,
 		RecentModels: slices.Clone(cfg.RecentModels),
 		MCPNames:     cfg.MCPServerNames(),
+		ServerHome:   home.Dir(),
 	}
 	slices.Sort(fc.MCPNames)
 

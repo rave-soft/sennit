@@ -117,6 +117,8 @@ var readOnlySafeMethods = []string{
 	"SkillStates",
 	"FileTrackerLastReadTime",
 	"FileTrackerListReadFiles",
+	"ListProjectFiles",
+	"AttachProjectFile",
 	"GetLastSession",
 	"KnownProviders",
 	"GetMCPPrompt",

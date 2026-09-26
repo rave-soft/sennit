@@ -105,12 +105,13 @@ func (f *FilePicker) setImageCapabilities(caps *common.Capabilities) bool {
 	return true
 }
 
+// WorkingDir is where the file picker starts browsing: the client's own
+// process cwd, never Workspace.WorkingDir(). The picker chooses files off
+// the user's own disk (see CLIENT-SERVER.md, "PR 0.6" - attachments picked
+// this way stay client-side on purpose), and once Workspace runs against a
+// remote daemon its WorkingDir() names a directory on a different machine
+// entirely, which this process cannot browse.
 func (f *FilePicker) WorkingDir() string {
-	if f.com != nil && f.com.Workspace != nil {
-		if wd := f.com.Workspace.WorkingDir(); wd != "" {
-			return wd
-		}
-	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return home.Dir()

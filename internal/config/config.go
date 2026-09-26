@@ -609,6 +609,15 @@ type Config struct {
 	// are. SetupAgents turns this into a doctor Problem so the silent ignore
 	// is visible instead of quietly no-op'ing forever.
 	jsonAgentsBlockDetected bool
+
+	// completionsLimitsDefaulted records whether applyEnvironmentDefaults
+	// (defaults.go) filled in Options.TUI.Completions.MaxDepth/MaxItems
+	// because project config left them unset, as opposed to the project
+	// itself configuring them. CompletionsLimitsExplicit reads this so a
+	// client-side snapshot (uiprefs) can tell "no limit configured" apart
+	// from "this project's environment-derived default happens to be
+	// these numbers" — see CLIENT-SERVER.md, "PR 0.5b" and "PR 0.6".
+	completionsLimitsDefaulted bool
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -701,6 +710,19 @@ func (c *Config) CompletionsLimits() (depth, items int) {
 		return 0, 0
 	}
 	return c.Options.TUI.Completions.Limits()
+}
+
+// CompletionsLimitsExplicit reports whether the numbers CompletionsLimits
+// returns came from project config, as opposed to applyEnvironmentDefaults
+// filling them in because this working directory sits outside a git
+// worktree. A client-side snapshot (uiprefs.FromConfig) uses this to decide
+// whether to send its resolved numbers or 0/0 ("apply the server's own
+// default") — see CLIENT-SERVER.md, "PR 0.6".
+func (c *Config) CompletionsLimitsExplicit() bool {
+	if c == nil {
+		return false
+	}
+	return !c.completionsLimitsDefaulted
 }
 
 // DiffMode returns the configured TUI diff mode, or the empty string when

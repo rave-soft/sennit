@@ -327,6 +327,28 @@ type FileServices interface {
 	FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error)
 
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
+
+	// ListProjectFiles lists project files for the @-mention completions
+	// popup, rooted at the workspace's own working directory rather than
+	// whatever directory the caller's process happens to run in - see
+	// CLIENT-SERVER.md, "PR 0.6". depth and limit of 0 mean "unset": the
+	// server applies its own default (config.Config.CompletionsLimits, the
+	// same environment-derived default this project would have used
+	// in-process). Returned paths are relative to the working directory,
+	// forward-slash separated, with a trailing separator on directories -
+	// the same form internal/fsext.ListDirectory has always returned.
+	ListProjectFiles(ctx context.Context, depth, limit int) ([]string, error)
+
+	// AttachProjectFile resolves path against the workspace's working
+	// directory (not the caller's process cwd), and turns it into a
+	// message.Attachment the way an @-mention pick has always been
+	// attached: stat'd, size-checked, sniffed for a text/image MIME type,
+	// and read. The bool reports "already read by the agent and unchanged
+	// since" (sessionID's file tracker has a read recorded, no later than
+	// the file's mtime) - not an error, just nothing new to attach. See
+	// AttachProjectFileUsing and its Err* sentinels for exactly which
+	// error means what.
+	AttachProjectFile(ctx context.Context, sessionID, path string) (message.Attachment, bool, error)
 }
 
 // LSPController starts/stops LSP servers and reports their state and

@@ -30,6 +30,13 @@ func applyEnvironmentDefaults(cfg *Config) {
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
 		assignIfNil(&cfg.Tools.Ls.MaxDepth, depth)
 		assignIfNil(&cfg.Tools.Ls.MaxItems, items)
+		// Recorded before assignIfNil mutates the pointers: this is the
+		// only place that can still tell "project config left these
+		// unset" apart from "the project configured this exact number" -
+		// see Config.CompletionsLimitsExplicit.
+		if cfg.Options.TUI.Completions.MaxDepth == nil && cfg.Options.TUI.Completions.MaxItems == nil {
+			cfg.completionsLimitsDefaulted = true
+		}
 		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
 	}

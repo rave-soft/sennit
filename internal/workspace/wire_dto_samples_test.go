@@ -342,6 +342,7 @@ var sampleFrontendConfig = FrontendConfig{
 	Agents:         map[string]FrontendAgent{"reviewer": sampleFrontendAgent},
 	InitializeAs:   "AGENTS.md",
 	DisabledSkills: []string{"sennit-config"},
+	ServerHome:     "/home/sennit",
 }
 
 var sampleWireErrQuota = wireerr.Quota{

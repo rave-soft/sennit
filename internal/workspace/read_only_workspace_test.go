@@ -501,6 +501,16 @@ func (s *stubWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID 
 	return nil, nil
 }
 
+func (s *stubWorkspace) ListProjectFiles(ctx context.Context, depth, limit int) ([]string, error) {
+	s.track("ListProjectFiles")
+	return nil, nil
+}
+
+func (s *stubWorkspace) AttachProjectFile(ctx context.Context, sessionID, path string) (message.Attachment, bool, error) {
+	s.track("AttachProjectFile")
+	return message.Attachment{}, false, nil
+}
+
 // History
 func (s *stubWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
 	return s.historyFiles, nil

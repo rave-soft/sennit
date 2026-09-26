@@ -403,6 +403,34 @@ func (w *readOnlyWorkspace) FileTrackerListReadFiles(ctx context.Context, sessio
 	return w.ws.FileTrackerListReadFiles(ctx, sessionID)
 }
 
+// -- Project files (safe reads) --
+
+// ListProjectFiles is a pure read of the filesystem, scoped to
+// w.workingDir like every other read here; nothing about attaching a file
+// or listing the tree mutates session state.
+func (w *readOnlyWorkspace) ListProjectFiles(ctx context.Context, depth, limit int) ([]string, error) {
+	return w.ws.ListProjectFiles(ctx, depth, limit)
+}
+
+// AttachProjectFile is a pure read too, though it must not forward
+// FileTracker.LastReadTime's session scoping to the parent workspace's
+// notion of "this session": w.ws is the parent AppWorkspace, and passing
+// sessionID through unchecked would let a read-only thread view ask about
+// last-read times for sessions outside its scope. allowsSession keeps this
+// consistent with FileTrackerLastReadTime just above.
+func (w *readOnlyWorkspace) AttachProjectFile(ctx context.Context, sessionID, path string) (message.Attachment, bool, error) {
+	if sessionID != "" {
+		allowed, err := w.allowsSession(ctx, sessionID)
+		if err != nil {
+			return message.Attachment{}, false, err
+		}
+		if !allowed {
+			return message.Attachment{}, false, w.scopeError(sessionID)
+		}
+	}
+	return AttachProjectFileUsing(ctx, w.workingDir, sessionID, path, w.ws.FileTrackerLastReadTime)
+}
+
 // -- History --
 
 func (w *readOnlyWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {

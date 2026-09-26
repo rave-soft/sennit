@@ -16,10 +16,16 @@ import (
 	"golang.org/x/text/language"
 )
 
-// PrettyPath formats a file path with home directory shortening and applies
-// muted styling.
-func PrettyPath(t *styles.Styles, path string, width int) string {
-	formatted := home.Short(path)
+// PrettyServerPath formats a server-side absolute path — most commonly
+// Workspace.WorkingDir() itself — for display, shortened against the
+// server's own home directory (serverHome, from
+// workspace.FrontendConfig.ServerHome) rather than this process's. In-
+// process the two homes are the same directory; once Workspace runs
+// against a remote daemon, shortening against this process's own home
+// (home.Short) would use the wrong machine's home, showing "~" for a path
+// that isn't under this one's home, or missing one that is.
+func PrettyServerPath(t *styles.Styles, serverHome, path string, width int) string {
+	formatted := home.ShortWithHome(serverHome, path)
 	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
 }
 

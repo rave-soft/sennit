@@ -74,7 +74,15 @@ type Store interface {
 // directly.
 func FromConfig(cfg *config.Config) Prefs {
 	spinnerMode, _ := cfg.SpinnerMode()
-	depth, items := cfg.CompletionsLimits()
+	// Send 0/0 ("apply the server's own default") when nothing was
+	// explicitly configured, rather than baking in the environment-derived
+	// default this in-process Config already resolved for its own project
+	// - see Config.CompletionsLimitsExplicit and
+	// workspace.Workspace.ListProjectFiles.
+	var depth, items int
+	if cfg.CompletionsLimitsExplicit() {
+		depth, items = cfg.CompletionsLimits()
+	}
 
 	progress := true
 	notifications := "auto"

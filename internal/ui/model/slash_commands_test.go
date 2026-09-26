@@ -1,13 +1,16 @@
 package model
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/message"
 	providerruntime "github.com/rave-soft/sennit/internal/providers/runtime"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -58,6 +61,17 @@ func (w *slashCommandsTestWorkspace) Config() *workspace.FrontendConfig {
 
 func (w *slashCommandsTestWorkspace) PermissionSkipRequests() bool {
 	return false
+}
+
+// AttachProjectFile: none of the tests using this stub have a real
+// FileTracker (or a session, most of the time), and every path they pass
+// insertFileCompletion is already absolute, so root and lastReadTime never
+// actually matter here - workspace.AttachProjectFileUsing does the real
+// stat/read/sniff work unconditionally.
+func (w *slashCommandsTestWorkspace) AttachProjectFile(ctx context.Context, sessionID, path string) (message.Attachment, bool, error) {
+	return workspace.AttachProjectFileUsing(ctx, "", sessionID, path, func(context.Context, string, string) (time.Time, error) {
+		return time.Time{}, nil
+	})
 }
 
 // newSlashTestUI builds a uiChat/uiFocusEditor UI with the wiring

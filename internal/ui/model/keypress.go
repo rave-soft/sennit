@@ -437,6 +437,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 		if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 			prefs := m.com.UIPrefs()
 			depth, limit := prefs.CompletionsDepth, prefs.CompletionsItems
+			ctx := m.com.Context()
 			// completions.CompletionItemsLoadedMsg is defined outside
 			// model, so it cannot embed uiOwned itself — wrapped here via
 			// ownCmd instead. Routed by active screen instead, files
@@ -444,7 +445,8 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 			// main screen's editor (or vice versa) if the active screen
 			// changed before the load finished.
 			cmds = append(cmds, ownCmd(m, m.editor.completions.openFiles(
-				curIdx, m.completionsPosition(), m.completionsMaxWidth(), depth, limit,
+				curIdx, m.completionsPosition(), m.completionsMaxWidth(),
+				func() []completions.FileCompletionValue { return loadProjectFileCompletions(ctx, m.com, depth, limit) },
 				func() []completions.ResourceCompletionValue { return loadMCPResourceCompletions(m.com) },
 			)))
 		}

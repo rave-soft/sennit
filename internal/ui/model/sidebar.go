@@ -306,7 +306,7 @@ func (m *UI) updateSidebarScrollState() {
 	contentWidth := max(width-2, 1)
 
 	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.sess.current.Title)
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), contentWidth)
+	cwd := common.PrettyServerPath(t, m.com.Config().ServerHome, m.com.Workspace.WorkingDir(), contentWidth)
 	sidebarLogo := m.sidebar.logo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = lipgloss.JoinVertical(lipgloss.Left, logo.SmallRender(m.com.Styles, contentWidth, logo.Opts{}), "")

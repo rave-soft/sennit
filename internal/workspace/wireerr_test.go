@@ -218,13 +218,18 @@ func TestEveryWorkspaceSentinelHasACode(t *testing.T) {
 // errorlint flags as fragile against wrapped errors — moot for exact
 // sentinel identity, but the map reads just as well) avoids that lint.
 var sentinelVarNames = map[error]string{
-	ErrAgentNotInitialized: "ErrAgentNotInitialized",
-	ErrServerUnreachable:   "ErrServerUnreachable",
-	ErrWorkspaceGone:       "ErrWorkspaceGone",
-	ErrStreamClosed:        "ErrStreamClosed",
-	ErrThreadsNotSupported: "ErrThreadsNotSupported",
-	ErrTasksNotSupported:   "ErrTasksNotSupported",
-	ErrDiscoveryDisabled:   "ErrDiscoveryDisabled",
+	ErrAgentNotInitialized:   "ErrAgentNotInitialized",
+	ErrServerUnreachable:     "ErrServerUnreachable",
+	ErrWorkspaceGone:         "ErrWorkspaceGone",
+	ErrStreamClosed:          "ErrStreamClosed",
+	ErrThreadsNotSupported:   "ErrThreadsNotSupported",
+	ErrTasksNotSupported:     "ErrTasksNotSupported",
+	ErrDiscoveryDisabled:     "ErrDiscoveryDisabled",
+	ErrAttachFileMissing:     "ErrAttachFileMissing",
+	ErrAttachIsDirectory:     "ErrAttachIsDirectory",
+	ErrAttachTooBig:          "ErrAttachTooBig",
+	ErrAttachUnsupportedType: "ErrAttachUnsupportedType",
+	ErrAttachReadFailed:      "ErrAttachReadFailed",
 }
 
 func errorVarName(sentinel error) string {

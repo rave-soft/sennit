@@ -32,15 +32,25 @@ func Config() string {
 
 // Short replaces the actual home path from [Dir] with `~`.
 func Short(p string) string {
-	if homedir == "" || !strings.HasPrefix(p, homedir) {
+	return ShortWithHome(homedir, p)
+}
+
+// ShortWithHome is [Short] parameterized on the home directory to shorten
+// against, rather than this process's own. A path that names a directory
+// on another machine — the server's Workspace.WorkingDir(), once Sennit
+// runs against a remote daemon — must be shortened against that machine's
+// home, not this process's; see workspace.FrontendConfig.ServerHome and
+// internal/ui/common.PrettyServerPath, its caller.
+func ShortWithHome(home, p string) string {
+	if home == "" || !strings.HasPrefix(p, home) {
 		return p
 	}
 	// A bare prefix match also fires for an unrelated sibling directory
-	// that happens to start with the same characters (homedir
-	// "/home/bob" matching "/home/bobby"), so the byte right after the
-	// prefix must be a separator (or the prefix must be the whole
-	// string) before this counts as "inside home".
-	rest := p[len(homedir):]
+	// that happens to start with the same characters (home "/home/bob"
+	// matching "/home/bobby"), so the byte right after the prefix must be
+	// a separator (or the prefix must be the whole string) before this
+	// counts as "inside home".
+	rest := p[len(home):]
 	if rest != "" && !os.IsPathSeparator(rest[0]) {
 		return p
 	}

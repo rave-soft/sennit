@@ -27,7 +27,7 @@ func (c *workspaceCacheState) selectedModel() *workspace.AgentModel {
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.lay.layout.main.Dx()
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
+	cwd := common.PrettyServerPath(t, m.com.Config().ServerHome, m.com.Workspace.WorkingDir(), width)
 
 	parts := []string{
 		cwd,

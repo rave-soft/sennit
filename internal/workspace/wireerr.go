@@ -59,6 +59,11 @@ var sentinelCodes = []sentinelCode{
 	{"threads_not_supported", ErrThreadsNotSupported},
 	{"tasks_not_supported", ErrTasksNotSupported},
 	{"discovery_disabled", ErrDiscoveryDisabled},
+	{"attach_file_missing", ErrAttachFileMissing},
+	{"attach_is_directory", ErrAttachIsDirectory},
+	{"attach_too_big", ErrAttachTooBig},
+	{"attach_unsupported_type", ErrAttachUnsupportedType},
+	{"attach_read_failed", ErrAttachReadFailed},
 }
 
 // sentinelCodeMap indexes sentinelCodes by code, built once so DecodeError

@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
-	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/ui/key"
 	"github.com/rave-soft/sennit/internal/ui/list"
 )
@@ -201,16 +200,18 @@ func (c *Completions) SetMaxWidth(maxW int) {
 	c.capWidth = maxW
 }
 
-// Open opens the completions with file items from the filesystem and MCP
-// resources from loadResources, which the caller supplies bound to its
+// Open opens the completions with file items and MCP resources from
+// loadFiles/loadResources, which the caller supplies bound to its
 // workspace.Workspace (this package has no dependency of its own on
-// internal/app or internal/workspace).
-func (c *Completions) Open(depth, limit int, loadResources func() []ResourceCompletionValue) tea.Cmd {
+// internal/app or internal/workspace - see workspace.Workspace.ListProjectFiles,
+// which loadFiles calls through a tea.Cmd rather than reading the
+// filesystem directly, per CLIENT-SERVER.md's "PR 0.6").
+func (c *Completions) Open(loadFiles func() []FileCompletionValue, loadResources func() []ResourceCompletionValue) tea.Cmd {
 	return func() tea.Msg {
 		var msg CompletionItemsLoadedMsg
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			msg.Files = loadFiles(depth, limit)
+			msg.Files = loadFiles()
 		})
 		wg.Go(func() {
 			msg.Resources = loadResources()
@@ -653,16 +654,4 @@ func scrollbarThumbBounds(height, contentSize, viewportSize, offset int) (start,
 		thumbPos = min(trackSpace, offset*trackSpace/maxOffset)
 	}
 	return thumbPos, thumbSize, true
-}
-
-func loadFiles(depth, limit int) []FileCompletionValue {
-	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
-	slices.Sort(files)
-	result := make([]FileCompletionValue, 0, len(files))
-	for _, file := range files {
-		result = append(result, FileCompletionValue{
-			Path: strings.TrimPrefix(file, "./"),
-		})
-	}
-	return result
 }

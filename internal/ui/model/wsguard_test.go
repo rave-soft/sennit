@@ -58,6 +58,7 @@ var updateGoroutineGuardedMethods = map[string]bool{
 	"AgentRunStream":               true,
 	"AgentSummarize":               true,
 	"ApplySessionModel":            true,
+	"AttachProjectFile":            true,
 	"AttachThread":                 true,
 	"BuiltinSkills":                true,
 	"CancelTask":                   true,
@@ -89,6 +90,7 @@ var updateGoroutineGuardedMethods = map[string]bool{
 	"ListMCPPrompts":               true,
 	"ListMessages":                 true,
 	"ListMessagesBySessionIDs":     true,
+	"ListProjectFiles":             true,
 	"ListSessionHistory":           true,
 	"ListSessions":                 true,
 	"ListSkills":                   true,
@@ -399,6 +401,16 @@ func (g *updateGoroutineGuard) FileTrackerListReadFiles(ctx context.Context, ses
 func (g *updateGoroutineGuard) FileTrackerRecordRead(ctx context.Context, sessionID string, path string) error {
 	g.check("FileTrackerRecordRead")
 	return g.Workspace.FileTrackerRecordRead(ctx, sessionID, path)
+}
+
+func (g *updateGoroutineGuard) ListProjectFiles(ctx context.Context, depth, limit int) ([]string, error) {
+	g.check("ListProjectFiles")
+	return g.Workspace.ListProjectFiles(ctx, depth, limit)
+}
+
+func (g *updateGoroutineGuard) AttachProjectFile(ctx context.Context, sessionID, path string) (message.Attachment, bool, error) {
+	g.check("AttachProjectFile")
+	return g.Workspace.AttachProjectFile(ctx, sessionID, path)
 }
 
 func (g *updateGoroutineGuard) GetLastSession(ctx context.Context) (session.Session, error) {

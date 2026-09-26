@@ -11,8 +11,36 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	fimage "github.com/rave-soft/sennit/internal/ui/image"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
+
+// serverPathTestWorkspace is a minimal [workspace.Workspace] stub whose
+// WorkingDir names a directory that plainly does not exist on this
+// machine, standing in for a remote daemon's project path — see
+// TestFilePicker_StartsInClientCwdNotWorkspaceWorkingDir.
+type serverPathTestWorkspace struct {
+	workspace.Workspace
+}
+
+func (serverPathTestWorkspace) WorkingDir() string {
+	return "/this/path/only/exists/on/the/server"
+}
+
+// TestFilePicker_StartsInClientCwdNotWorkspaceWorkingDir pins CLIENT-SERVER.md's
+// "PR 0.6": the picker chooses files off the user's own disk, so it must
+// start in this process's own cwd even when Workspace.WorkingDir() names
+// some other directory entirely (as it will once Workspace runs against a
+// remote daemon).
+func TestFilePicker_StartsInClientCwdNotWorkspaceWorkingDir(t *testing.T) {
+	styles := styles.SennitDark()
+	picker, _ := NewFilePicker(&common.Common{Styles: &styles, Workspace: serverPathTestWorkspace{}})
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.Equal(t, cwd, picker.WorkingDir())
+	require.Equal(t, cwd, picker.fp.CurrentDirectory)
+}
 
 func testPicker(t *testing.T) *FilePicker {
 	t.Helper()

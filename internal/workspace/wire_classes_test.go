@@ -99,6 +99,8 @@ var methodClasses = map[string]methodClass{
 	"FileTrackerLastReadTime":  classUnary,
 	"FileTrackerListReadFiles": classUnary,
 	"ListSessionHistory":       classUnary,
+	"ListProjectFiles":         classUnary,
+	"AttachProjectFile":        classUnary,
 
 	// LSPController. Already called from a tea.Cmd, so the table keeps
 	// these "U" rather than "C" even though they read cached state.

@@ -3,6 +3,7 @@ package model
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // If pasted text has more than 10 newlines, treat it as a file attachment.
@@ -226,52 +228,38 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	if hasSession {
 		sessionID = m.sess.current.ID
 	}
+	// dedupeKey is client-only bookkeeping for m.sess.fileReads (see that
+	// field's doc comment): before a session exists there is nothing to
+	// key a file-tracker lookup by, so the client remembers paths it has
+	// already attached in this pre-session window itself, by the same
+	// absolute-path string the server resolves path against (its own
+	// working directory, not this filepath.Abs call — this is a plain
+	// string join, not filesystem IO, done only to build a stable local
+	// dedupe key that matches server behavior in-process).
+	dedupeKey, _ := filepath.Abs(path)
 	fileReads := append([]string(nil), m.sess.fileReads...)
 	ws := m.com.Workspace
 	ctx := m.com.Context()
 
 	fileCmd := func() tea.Msg {
-		absPath, _ := filepath.Abs(path)
-
-		if hasSession {
-			// Skip attachment if file was already read and hasn't been modified.
-			lastRead, err := ws.FileTrackerLastReadTime(ctx, sessionID, absPath)
-			if err != nil {
-				slog.Warn("Failed to read last-read time for file", "session_id", sessionID, "path", absPath, "error", err)
-			}
-			if !lastRead.IsZero() {
-				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
-					return nil
-				}
-			}
-		} else if slices.Contains(fileReads, absPath) {
+		if !hasSession && slices.Contains(fileReads, dedupeKey) {
 			return nil
 		}
 
-		// Stat before reading: the @ completion list comes from
-		// fsext.ListDirectory, which enumerates every file regardless of
-		// size or type, so an oversized pick (a .sqlite, a .pack, a video)
-		// must be caught before it's read whole into memory.
-		info, err := os.Stat(path)
-		if err != nil {
+		attachment, unchanged, err := ws.AttachProjectFile(ctx, sessionID, path)
+		if unchanged {
+			// Already read by the agent and unchanged since - the @query
+			// text was already inserted as the path by completions.replace
+			// above; only the attachment is skipped.
+			return nil
+		}
+		switch {
+		case errors.Is(err, workspace.ErrAttachFileMissing), errors.Is(err, workspace.ErrAttachIsDirectory), errors.Is(err, workspace.ErrAttachReadFailed):
 			// If it fails, let the LLM handle it later.
 			return nil
-		}
-		if info.Size() > common.MaxAttachmentSize {
-			// The @query text was already inserted as the path by
-			// completions.replace above; only the attachment is skipped.
+		case errors.Is(err, workspace.ErrAttachTooBig):
 			return util.NewWarnMsg("File is too big to attach (>5mb); inserted path only")
-		}
-
-		// Add file as attachment.
-		content, err := os.ReadFile(path)
-		if err != nil {
-			// If it fails, let the LLM handle it later.
-			return nil
-		}
-
-		mimeType := mimeOf(content)
-		if !strings.HasPrefix(mimeType, "text/") && !strings.HasPrefix(mimeType, "image/") {
+		case errors.Is(err, workspace.ErrAttachUnsupportedType):
 			// Anything that isn't text or an image (a .sqlite, a .pack, an
 			// .mp4) would otherwise ride along as octet-stream forever in
 			// the session history. Leave just the path in the input; the
@@ -281,17 +269,16 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			// find nothing attached and no reason given is worse than
 			// either outcome.
 			return util.NewWarnMsg("Attached files must be text or images; inserted path only")
+		case err != nil:
+			// Unrecognized failure: same fallback as the missing/directory
+			// cases above rather than surfacing raw plumbing to the user.
+			return nil
 		}
 
 		return fileCompletionMsg{
-			uiOwned: uiOwned{owner: m},
-			absPath: absPath,
-			attachment: message.Attachment{
-				FilePath: path,
-				FileName: filepath.Base(path),
-				MimeType: mimeType,
-				Content:  content,
-			},
+			uiOwned:    uiOwned{owner: m},
+			absPath:    dedupeKey,
+			attachment: attachment,
 		}
 	}
 	return tea.Batch(heightCmd, fileCmd)

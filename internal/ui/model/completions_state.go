@@ -31,14 +31,14 @@ const (
 	completionsModeCommand
 )
 
-func (s *completionsLifecycleState) openFiles(startIndex int, anchor image.Point, maxWidth, depth, limit int, loadResources func() []completions.ResourceCompletionValue) tea.Cmd {
+func (s *completionsLifecycleState) openFiles(startIndex int, anchor image.Point, maxWidth int, loadFiles func() []completions.FileCompletionValue, loadResources func() []completions.ResourceCompletionValue) tea.Cmd {
 	s.open = true
 	s.mode = completionsModeFile
 	s.query = ""
 	s.startIndex = startIndex
 	s.anchor = anchor
 	s.popup.SetMaxWidth(maxWidth)
-	return s.popup.Open(depth, limit, loadResources)
+	return s.popup.Open(loadFiles, loadResources)
 }
 
 func (s *completionsLifecycleState) openCommands(startIndex int, anchor image.Point, maxWidth int, items []completions.CommandCompletionValue) {

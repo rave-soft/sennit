@@ -39,6 +39,7 @@ func TestApplyEnvironmentDefaults_UsesWorkspaceDirNotProcessCwd(t *testing.T) {
 		require.Nil(t, cfg.Tools.Ls.MaxItems, "should not clamp file-walk limits inside a git worktree")
 		require.Nil(t, cfg.Options.TUI.Completions.MaxDepth)
 		require.Nil(t, cfg.Options.TUI.Completions.MaxItems)
+		require.True(t, cfg.CompletionsLimitsExplicit(), "nothing was defaulted, so there is nothing to mark as defaulted")
 	})
 
 	t.Run("outside any git worktree", func(t *testing.T) {
@@ -57,5 +58,21 @@ func TestApplyEnvironmentDefaults_UsesWorkspaceDirNotProcessCwd(t *testing.T) {
 		require.Equal(t, 2, *cfg.Options.TUI.Completions.MaxDepth)
 		require.NotNil(t, cfg.Options.TUI.Completions.MaxItems)
 		require.Equal(t, 100, *cfg.Options.TUI.Completions.MaxItems)
+		require.False(t, cfg.CompletionsLimitsExplicit(), "the environment default filled these in, project config did not set them")
+	})
+
+	t.Run("explicit project config survives the environment default", func(t *testing.T) {
+		plainDir := t.TempDir()
+		depth, items := 7, 42
+
+		cfg := &Config{Options: &Options{TUI: &TUIOptions{Completions: Completions{MaxDepth: &depth, MaxItems: &items}}}}
+		cfg.setDefaults(plainDir, "")
+
+		applyEnvironmentDefaults(cfg)
+
+		gotDepth, gotItems := cfg.CompletionsLimits()
+		require.Equal(t, depth, gotDepth)
+		require.Equal(t, items, gotItems)
+		require.True(t, cfg.CompletionsLimitsExplicit(), "project config set these, applyEnvironmentDefaults must not claim them")
 	})
 }

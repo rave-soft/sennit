@@ -23,8 +23,9 @@ import (
 // survive every test that does not load a workspace config, and silently
 // reset for the users who have one.
 var carriedAcrossWorkspaceMerge = map[string]string{
-	"workingDir":              "restored by the setDefaults call after the merge",
-	"jsonAgentsBlockDetected": "OR-ed onto the merged config explicitly",
+	"workingDir":                 "restored by the setDefaults call after the merge",
+	"jsonAgentsBlockDetected":    "OR-ed onto the merged config explicitly",
+	"completionsLimitsDefaulted": "computed fresh by applyEnvironmentDefaults, which runs after the workspace merge in buildConfig",
 }
 
 func TestConfigUnexportedFieldsSurviveTheWorkspaceMerge(t *testing.T) {

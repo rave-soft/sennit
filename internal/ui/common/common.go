@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/clipboard"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -19,7 +20,7 @@ import (
 const MaxPreviewSize = int64(2 * 1024 * 1024)
 
 // MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
-const MaxAttachmentSize = int64(5 * 1024 * 1024)
+const MaxAttachmentSize = message.MaxAttachmentSize
 
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}

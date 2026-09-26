@@ -48,7 +48,35 @@ func TestConfigStoreAdapter_PrefsMergesGlobalAndProjectLayers(t *testing.T) {
 	prefs := adapter.Prefs()
 	require.Equal(t, "dark", prefs.ThemeID)
 	require.False(t, prefs.CompactMode)
+	// workingDir has no git repository, so applyEnvironmentDefaults filled
+	// in a project-specific completions default (config_test.go's sibling
+	// coverage pins the exact numbers) - Prefs must not bake that in, since
+	// it is a server-side fact the client cannot recompute correctly once
+	// Workspace runs against a remote daemon (CLIENT-SERVER.md, "PR 0.6").
+	require.Zero(t, prefs.CompletionsDepth)
+	require.Zero(t, prefs.CompletionsItems)
 	require.Equal(t, "always", prefs.Scrollbar, "project-scoped override must still apply")
+}
+
+// TestConfigStoreAdapter_PrefsSendsExplicitCompletionsLimits is the other
+// side of the test above: when the project actually configures a
+// completions limit, Prefs must report that number, not 0/0.
+func TestConfigStoreAdapter_PrefsSendsExplicitCompletionsLimits(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
+
+	workingDir := t.TempDir()
+	projectSeed := `{"options":{"tui":{"completions":{"max_depth":5,"max_items":42}}}}`
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "sennit.json"), []byte(projectSeed), 0o644))
+	require.NoError(t, config.Trust(workingDir))
+
+	store, err := config.LoadData(workingDir, "", false)
+	require.NoError(t, err)
+
+	prefs := NewConfigStoreAdapter(store).Prefs()
+	require.Equal(t, 5, prefs.CompletionsDepth)
+	require.Equal(t, 42, prefs.CompletionsItems)
 }
 
 // TestConfigStoreAdapter_SetWritesGlobalConfigFieldAndReloads is the
