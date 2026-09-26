@@ -47,7 +47,7 @@ func TestSecondSubmitDispatchesAfterAcceptInsteadOfQueueing(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &acceptTimeAgentRunWorkspace{countingWorkspace: &countingWorkspace{ready: true, agentBusy: true}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 
 	cmd := m.sendMessage("first")

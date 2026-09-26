@@ -2,17 +2,20 @@ package model
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
@@ -207,6 +210,75 @@ func (w *countingWorkspace) Config() *workspace.FrontendConfig { return nil }
 // it doesn't need a counter.
 func (w *countingWorkspace) WorkingDir() string { return "" }
 
+// Subscribe/SubscribeWith are no-ops, like cmdDrivingWorkspace's and
+// rootTestWorkspace's own (command_driving_test.go, root_test.go): no test
+// built through newBusyUI drives events through them directly, but
+// grpcws.NewServer (SENNIT_TEST_WIRE=grpc) starts its root event hub
+// eagerly at construction (CLIENT-SERVER.md, PR 1.4a) and calls
+// SubscribeWith on ws right away, regardless of whether anything in the
+// test ever subscribes -- leaving this unimplemented (the embedded nil
+// Workspace's default) would panic every newBusyUI-built test under grpc
+// mode, not just the ones that care about events.
+func (w *countingWorkspace) Subscribe(func(any))            {}
+func (w *countingWorkspace) SubscribeWith(func(any)) func() { return func() {} }
+
+// The class-C getters below have nothing to do with the synchronous-probe
+// invariant this stub otherwise pins (they're read from the calling side
+// only through the wsCache's tea.Cmd machinery, never from Update/View
+// directly) -- they exist purely so wsrpc.BuildClientState can read a
+// complete workspace.ClientState off this stub. grpcws.Client.Connect
+// (SENNIT_TEST_WIRE=grpc) calls Snapshot before returning, and Snapshot
+// falls back to BuildClientState whenever a hub hasn't published yet, so
+// every one of BuildClientState's reads has to resolve to *something*
+// rather than panic on the embedded nil Workspace's default. Zero values
+// throughout: no test built through newBusyUI depends on any of these.
+// AgentActivity mirrors AgentIsSessionBusy/AgentQueuedPromptsList's own
+// stub state (sessionBusy, queued) into the shape wsrpc.BuildClientState
+// needs: over SENNIT_TEST_WIRE=grpc, a client's AgentIsSessionBusy/
+// AgentQueuedPromptsList answer from its cached workspace.ClientState (fed
+// by this method), not by calling this stub directly per session id.
+// AgentQueuedPromptsList itself ignores its sessionID argument and answers
+// the same list for any id; "s1" and "s2" (the only session ids any test
+// built through newBusyUI ever loads -- see TestSessionSwitchRefreshes
+// QueueAndBusy) are what's worth keying here to match that.
+func (w *countingWorkspace) AgentActivity() workspace.AgentActivity {
+	var busy []string
+	for id, b := range w.sessionBusy {
+		if b {
+			busy = append(busy, id)
+		}
+	}
+	activity := workspace.AgentActivity{BusySessions: busy}
+	if len(w.queued) > 0 {
+		activity.QueuedPrompts = map[string][]string{"s1": w.queued, "s2": w.queued}
+	}
+	return activity
+}
+func (w *countingWorkspace) KnownProviders() []catwalk.Provider { return nil }
+func (w *countingWorkspace) CustomProviderTypes() []string      { return nil }
+func (w *countingWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {
+	return workspace.BackgroundJobCounts{}
+}
+func (w *countingWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer { return nil }
+func (w *countingWorkspace) DockerMCPAvailable() (available, known bool)      { return false, false }
+
+func (w *countingWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {
+	return accounts.Usage{}, false
+}
+
+func (w *countingWorkspace) AccountCapabilities(string) workspace.AccountCapabilities {
+	return workspace.AccountCapabilities{}
+}
+
+func (w *countingWorkspace) WorktreeState() workspace.WorktreeState { return workspace.WorktreeState{} }
+
+// PendingPrompts backs Snapshot's other half (the permission/question
+// requests currently awaiting an answer) -- see the comment above the
+// class-C getters this stub added it alongside.
+func (w *countingWorkspace) PendingPrompts(context.Context) (workspace.PendingPrompts, error) {
+	return workspace.PendingPrompts{}, nil
+}
+
 // syncProbes sums every synchronous counter; Update/View must keep this at
 // zero — the invariant is that no workspace call ever happens on the Update
 // goroutine (which is also the render loop).
@@ -238,8 +310,19 @@ func (w *countingWorkspace) resetCounters() {
 // exercises every test built through this constructor over the JSON wire
 // codec too; the stub still sees and counts every call, since the
 // loopback only round-trips arguments and results on the way through.
-func newBusyUI(ws workspace.Workspace) *UI {
-	com := common.DefaultCommon(context.Background(), maybeWireWorkspace(ws))
+func newBusyUI(t *testing.T, ws workspace.Workspace) *UI {
+	t.Helper()
+	com := common.DefaultCommon(context.Background(), maybeWireWorkspace(t, ws))
+	return newBusyUIFromCommon(com)
+}
+
+// newBusyUIFromCommon is newBusyUI's fixture (chat/status/editor/dialog
+// wiring, current session "s1") built from an already-constructed
+// *common.Common, for a caller that needs to wire the workspace itself --
+// e.g. wire_event_path_test.go's connection-loss test, which builds its own
+// *grpcws.Client around a severable dialer rather than going through
+// maybeWireWorkspace's fixed bufconn helper.
+func newBusyUIFromCommon(com *common.Common) *UI {
 	return &UI{
 		com: com,
 		widgets: widgets{
@@ -317,7 +400,15 @@ func TestUpdateDoesNotProbeWorkspacePerMessage(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
+	// Under SENNIT_TEST_WIRE=grpc, newBusyUI's own wiring (grpcws.Client.
+	// Connect, via wsrpctest.ServeGRPC) reads every class-C getter once to
+	// seed its cache (wsrpc.BuildClientState) before this test's Update
+	// calls run at all -- a one-time wire cost, not a probe from Update
+	// itself. Reset here so the assertions below measure only what
+	// follows construction, the same as they do unwired and under
+	// SENNIT_TEST_WIRE=1 (wsrpc.NewLoopback never probes eagerly).
+	ws.resetCounters()
 
 	for range 25 {
 		m.Update(plainMsg{})
@@ -335,7 +426,11 @@ func TestReadsNeverProbeWorkspace(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, agentBusy: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
+	// See TestUpdateDoesNotProbeWorkspacePerMessage's identical reset: a
+	// wired client's own Connect reads every getter once before this test
+	// starts driving m.
+	ws.resetCounters()
 
 	for range 10 {
 		m.isAgentBusy()
@@ -352,7 +447,7 @@ func TestStreamingUpdatedEventsDoNotProbe(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 	ws.resetCounters()
 
@@ -377,7 +472,7 @@ func TestMessageCreatedEventRefreshesBusyAndQueue(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"queued prompt"}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 	ws.resetCounters()
 
@@ -406,7 +501,7 @@ func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 	for _, typ := range []workspace.AgentNotificationType{workspace.AgentNotificationFinished, workspace.AgentNotificationError} {
 		t.Run(string(typ), func(t *testing.T) {
 			ws := &countingWorkspace{ready: true} // agent now idle
-			m := newBusyUI(ws)
+			m := newBusyUI(t, ws)
 			warmCaches(m, true) // stale: still busy
 			ws.resetCounters()
 			require.True(t, m.isAgentBusy())
@@ -436,7 +531,7 @@ func TestQueueChangedNotificationRefreshesQueueOnly(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"a", "b"}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true) // busy state starts fresh; only the queue is stale
 	ws.resetCounters()
 
@@ -460,7 +555,7 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, queued: []string{"a", "b"}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 	// stale queue pill from the previous session
 	m.promptQueue.cache.Value = []string{"x", "y", "z", "w", "v"}
@@ -483,7 +578,7 @@ func TestToggleYoloWritesThroughCache(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, yolo: false}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 
 	msg := m.toggleYoloMode()().(yoloToggledMsg)
 	_, _ = m.Update(msg)
@@ -508,7 +603,7 @@ func TestLocalYoloToggleSupersedesInFlightProbe(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, yolo: false}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 
 	// A busy/yolo probe carrying the pre-toggle generation is in flight.
@@ -538,7 +633,7 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true} // workspace still reports idle
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 
 	require.False(t, m.isAgentBusy())
@@ -565,7 +660,7 @@ func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, queued: []string{"a"}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 	m.promptQueue.cache.Value = []string{"a"}
 	ws.resetCounters()
@@ -584,7 +679,7 @@ func TestCancelAgentConfirmationOnlyChangesForEligibleRequests(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 
 	m.sess.current = nil
@@ -611,8 +706,12 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, agentBusy: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	// Caches start at their zero value: stale by definition.
+	// See TestUpdateDoesNotProbeWorkspacePerMessage's identical reset: a
+	// wired client's own Connect reads every getter once before this test
+	// starts driving m.
+	ws.resetCounters()
 
 	_, cmd := m.Update(plainMsg{})
 	require.True(t, m.wsCache.busyFetchInFlight, "stale caches must trigger a backstop refresh")
@@ -627,7 +726,15 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 	runCmds(m, cmd)
 	require.False(t, m.wsCache.busyFetchInFlight)
 	require.True(t, m.isAgentBusy(), "the backstop result must land in the cache")
-	require.Equal(t, 1, ws.agentBusyCalls, "exactly one probe per backstop refresh")
+	// The backstop's off-thread probe (workspace_cache.go) calls
+	// ws.AgentIsBusy() directly, same as any other caller -- under
+	// SENNIT_TEST_WIRE=grpc that resolves through grpcws.Client's own
+	// cache (AgentIsBusy is class C; CLIENT-SERVER.md, PR 1.4b) rather
+	// than reaching this stub, so the call count below can only be
+	// checked in-process/loopback, where every call is a direct one.
+	if os.Getenv(wireEnvVar) != "grpc" {
+		require.Equal(t, 1, ws.agentBusyCalls, "exactly one probe per backstop refresh")
+	}
 
 	// Freshly refreshed caches must not re-dispatch.
 	m.Update(plainMsg{})
@@ -648,7 +755,7 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, agentBusy: false}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 
 	// A message that looks unfinished (no Finish part, no content).
@@ -686,8 +793,14 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 
 	// This session is the one generating: animations should start.
 	ws.sessionBusy = map[string]bool{"s1": true}
-	cmd = loadSession()
-	require.NotNil(t, cmd, "applySessionMessageItems must start animations when this session is busy")
+	// AgentIsSessionBusy is class C (CLIENT-SERVER.md, PR 1.4b): a direct
+	// call like send.go's/ui.go's own is a cheap in-memory read in
+	// process or over wsrpc.Loopback, but under SENNIT_TEST_WIRE=grpc it
+	// answers from grpcws.Client's cache, which only catches up with the
+	// mutation above on the next state tick (wsrpctest.ServeGRPC's own
+	// grpcServeStateTick) or event -- so this one assertion polls instead
+	// of checking loadSession()'s very first call.
+	waitFor(t, func() bool { return loadSession() != nil })
 }
 
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for
@@ -699,7 +812,7 @@ func TestStaleBusyRefreshDiscardedAndReDispatched(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 
 	// A busy probe is in flight; capture the generation it was dispatched
@@ -731,7 +844,7 @@ func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, queued: []string{"real"}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 	m.promptQueue.cache.Value = []string{"real"}
 
@@ -764,7 +877,7 @@ func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws) // active session "s1"
+	m := newBusyUI(t, ws) // active session "s1"
 	warmCaches(m, false)
 	m.promptQueue.cache.InFlight = true
 	gen := m.promptQueue.cache.Generation
@@ -789,7 +902,11 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
+	// See TestUpdateDoesNotProbeWorkspacePerMessage's identical reset: a
+	// wired client's own Connect reads every getter once before this test
+	// starts driving m.
+	ws.resetCounters()
 	m.wsCache.agentCache.Value.ready = true
 	m.lsp.states = map[string]workspace.LSPClientInfo{
 		"gopls": {Name: "gopls", State: proto.LSPStateReady, DiagnosticCount: 3},
@@ -824,7 +941,7 @@ func TestBusyRefreshCarriesReadyAndModel(t *testing.T) {
 		ready: true,
 		model: workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "test-model", Provider: "prov"}},
 	}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	require.Nil(t, m.wsCache.selectedModel(), "before any probe the model is unknown")
 
 	_, cmd := m.Update(plainMsg{}) // stale caches: the backstop dispatches
@@ -847,7 +964,7 @@ func TestAgentModelChangedRefreshesModel(t *testing.T) {
 		ready: true,
 		model: workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "new-model"}},
 	}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 	m.wsCache.agentCache.Value.model = workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "old-model"}}
 	ws.resetCounters()
@@ -873,7 +990,7 @@ func TestMCPStateChangedRefreshesModel(t *testing.T) {
 		ready: true,
 		model: workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "post-mcp-model"}},
 	}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 	m.wsCache.agentCache.Value.model = workspace.AgentModel{ModelCfg: workspace.AgentSelection{Model: "pre-mcp-model"}}
 	ws.resetCounters()
@@ -906,7 +1023,7 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 		lspStates: map[string]workspace.LSPClientInfo{"gopls": {Name: "gopls", DiagnosticCount: 3}},
 		lspDiags:  map[string]proto.LSPDiagnosticCounts{"gopls": {Error: 2, Warning: 1}},
 	}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 	ws.resetCounters()
 
@@ -942,7 +1059,7 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	m.editor.textarea.Focus()
 	m.editor.textarea.SetWidth(40)
 	m.wsCache.yoloCache.Set(false)

@@ -722,6 +722,18 @@ device flow, а не берёт токен с диска. 1.3c (keepalive и н�
 
 ### PR 1.6. Задание CI поверх gRPC
 
+**Сделано.** `SENNIT_TEST_WIRE=grpc` обслуживает воркспейс настоящим
+`grpcws.NewServer` по bufconn (`grpcws/grpcwstest.ServeGRPC`); задание
+`wire` в CI гоняет оба режима. `ui/model/wire_event_path_test.go`
+проводит события через `SubscribeWith` → gRPC → `Update` и закрывает
+ограничение PR 0.7 (сломанный декодер `Params` роняет его в режиме grpc).
+Найдено: `MCPPendingAuth` падал на nil. Известное ограничение:
+`-race` вместе с `SENNIT_TEST_WIRE=grpc` находит гонки в несинхронизированных
+счётчиках тестовых заглушек `ui/model` (тикер состояния читает их в фоне);
+ни одно задание CI это сочетание не запускает.
+
+**Фаза 1 закрыта.**
+
 `SENNIT_TEST_WIRE=grpc`: те же пакеты, что в PR 0.7, но через
 `bufconn` + `remote.Workspace` + серверный адаптер. После этого PR есть три
 режима прогона: прямой, loopback, gRPC. Прямой и gRPC обязательны в CI,

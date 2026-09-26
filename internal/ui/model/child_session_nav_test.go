@@ -231,7 +231,7 @@ func TestAltUpExitsChildSessionThroughUpdate(t *testing.T) {
 func TestNewSessionClearsChildSessionNav(t *testing.T) {
 	t.Parallel()
 
-	u := newBusyUI(&countingWorkspace{})
+	u := newBusyUI(t, &countingWorkspace{})
 	u.sess.navStack = []sessionNavFrame{{parentSessionID: "parent-session", childSessionID: "child-1"}}
 	u.focus = uiFocusMain
 
@@ -251,7 +251,7 @@ func TestNewSessionClearsChildSessionNav(t *testing.T) {
 func TestSelectSessionClearsChildSessionNav(t *testing.T) {
 	t.Parallel()
 
-	u := newBusyUI(&countingWorkspace{})
+	u := newBusyUI(t, &countingWorkspace{})
 	u.sess.navStack = []sessionNavFrame{{parentSessionID: "parent-session", childSessionID: "child-1"}}
 	u.focus = uiFocusMain
 

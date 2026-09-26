@@ -35,7 +35,7 @@ func (w *taskSupportingWorkspace) ListTasks(context.Context) ([]proto.Thread, er
 // refresh never ran again for the rest of the session.
 func TestRootDeliversOwnedResultsToTheUIThatAskedForThem(t *testing.T) {
 	ws := &countingWorkspace{ready: true, agentBusy: true}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenMain}
 
 	// A probe goes out from the main screen…
 	cmd := r.main.dispatchBusyRefresh()
@@ -65,7 +65,7 @@ func TestRootDeliversOwnedResultsToTheUIThatAskedForThem(t *testing.T) {
 // session.
 func TestRootDeliversAgentsLoadedToTheUIThatAskedForIt(t *testing.T) {
 	ws := &taskSupportingWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenMain}
 
 	cmd := r.main.agentList.staleRefreshCmd(r.main.com, r.main, true)
 	require.NotNil(t, cmd, "the main screen must have started a delegation-list probe")
@@ -88,7 +88,7 @@ func TestRootDeliversAgentsLoadedToTheUIThatAskedForIt(t *testing.T) {
 // then queues behind it forever, since nothing else ever drains the queue.
 func TestRootDeliversShellResultToTheUIThatAskedForIt(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenMain}
 	r.main.editor.pendingSend.active = true
 
 	r.active = screenDashboard
@@ -113,8 +113,8 @@ func TestRootDeliversShellResultToTheUIThatAskedForIt(t *testing.T) {
 // type — is what decides.
 func TestRootRoutesAnOwnedResultAwayFromTheOtherUI(t *testing.T) {
 	ws := &countingWorkspace{ready: true, agentBusy: true}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
-	threadUI := newBusyUI(ws)
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenMain}
+	threadUI := newBusyUI(t, ws)
 	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
 	r.active = screenThread
 
@@ -142,7 +142,7 @@ func TestRootRoutesAnOwnedResultAwayFromTheOtherUI(t *testing.T) {
 // uiOwned themselves.
 func TestRootDeliversEnvelopedResultToTheUIThatDispatchedIt(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain}
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenMain}
 
 	cmd := ownCmd(r.main, r.main.status.ShowInfo(util.InfoMsg{Msg: "saved", TTL: time.Millisecond}))
 	require.NotNil(t, cmd)
@@ -167,8 +167,8 @@ func TestRootDeliversEnvelopedResultToTheUIThatDispatchedIt(t *testing.T) {
 // be what keeps them apart.
 func TestRootRoutesEnvelopedResultAwayFromTheOtherUI(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenThread}
-	threadUI := newBusyUI(ws)
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenThread}
+	threadUI := newBusyUI(t, ws)
 	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
 
 	mainCmd := ownCmd(r.main, r.main.status.ShowInfo(util.InfoMsg{Msg: "main", TTL: time.Millisecond}))
@@ -198,8 +198,8 @@ func TestRootRoutesEnvelopedResultAwayFromTheOtherUI(t *testing.T) {
 // once.
 func TestRootDeliversYoloToggleResultAwayFromTheOtherUI(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenThread}
-	threadUI := newBusyUI(ws)
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenThread}
+	threadUI := newBusyUI(t, ws)
 	r.attachment.thread = &threadAttachment{threadID: "t1", ui: threadUI}
 
 	mainCmd := r.main.toggleYoloMode()
@@ -236,7 +236,7 @@ func TestRootDeliversYoloToggleResultAwayFromTheOtherUI(t *testing.T) {
 // one.
 func TestOwnResultWrapsDelayedClickMsg(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
-	owner := newBusyUI(ws)
+	owner := newBusyUI(t, ws)
 
 	wrapped := ownResult(owner, chatlist.DelayedClickMsg{ClickID: 7})
 

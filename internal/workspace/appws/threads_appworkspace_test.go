@@ -342,7 +342,7 @@ func TestAppWorkspace_CreateListThread(t *testing.T) {
 	// methods below, with no type assertion back onto *AppWorkspace (unlike
 	// TestAppWorkspace_AttachThread, which unwraps the returned handle and
 	// so is left off the wire job) -- see wiretest_test.go.
-	ws := wireWorkspace(aw)
+	ws := wireWorkspace(t, aw)
 
 	threads, err := ws.ListThreads(ctx)
 	require.NoError(t, err)

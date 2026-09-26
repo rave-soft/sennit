@@ -31,6 +31,7 @@ import (
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc"
+	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws/grpcwstest"
 )
 
 // wireEnvVar is the CI "wire" job's switch (CLIENT-SERVER.md, "PR 0.7"):
@@ -38,27 +39,36 @@ import (
 // newCmdDrivenGoldenUI, newBusyUI, newTestRoot) route every Workspace call
 // through wsrpc.NewLoopback's JSON codec instead of calling the stub
 // directly, so a type or error that would not survive a real wire hop
-// breaks here in CI instead of only once gRPC exists.
+// breaks here in CI instead of only once gRPC exists. "grpc" (PR 1.6)
+// instead serves the stub behind a real grpcws.NewServer over bufconn and
+// hands back a connected *grpcws.Client, so the same harnesses also cross
+// an actual gRPC round trip, not just the in-process JSON codec.
 const wireEnvVar = "SENNIT_TEST_WIRE"
 
-// maybeWireWorkspace wraps ws in wsrpc.NewLoopback when wireEnvVar is set to
-// "1", and returns ws unchanged otherwise.
+// maybeWireWorkspace wraps ws in wsrpc.NewLoopback when wireEnvVar is "1",
+// or serves it behind a real gRPC server (grpcwstest.ServeGRPC) when
+// wireEnvVar is "grpc", and returns ws unchanged otherwise.
 //
 // Ordering: every harness that also applies newUpdateGoroutineGuard wraps
 // the *result* of maybeWireWorkspace in the guard, i.e. the guard sits
-// outermost and the loopback innermost (UI -> guard -> loopback -> stub).
-// Putting it the other way round would still let both layers see every
-// call -- neither swallows one -- but it would interleave the loopback's
-// own marshal/unmarshal frames between the UI's call site and g.check's
-// captured stack, which check truncates to 800 bytes; with the guard
-// outermost, check's stack starts at the actual offending caller instead
-// of losing it to codec noise. Keep new guarded harnesses consistent with
-// this order.
-func maybeWireWorkspace(ws workspace.Workspace) workspace.Workspace {
-	if os.Getenv(wireEnvVar) == "1" {
+// outermost and the loopback/gRPC client innermost (UI -> guard ->
+// loopback/client -> stub). Putting it the other way round would still let
+// both layers see every call -- neither swallows one -- but it would
+// interleave the wire layer's own marshal/unmarshal frames between the
+// UI's call site and g.check's captured stack, which check truncates to
+// 800 bytes; with the guard outermost, check's stack starts at the actual
+// offending caller instead of losing it to codec noise. Keep new guarded
+// harnesses consistent with this order.
+func maybeWireWorkspace(t *testing.T, ws workspace.Workspace) workspace.Workspace {
+	t.Helper()
+	switch os.Getenv(wireEnvVar) {
+	case "1":
 		return wsrpc.NewLoopback(ws)
+	case "grpc":
+		return grpcwstest.ServeGRPC(t, ws)
+	default:
+		return ws
 	}
-	return ws
 }
 
 // updateGoroutineGuardedMethods is every U/S/H method in

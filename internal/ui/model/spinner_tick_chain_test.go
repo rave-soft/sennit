@@ -72,7 +72,7 @@ func TestOffscreenSpinnerKeepsItsTickChain(t *testing.T) {
 // up: a tick that arrives while another screen is showing must come back,
 // not end the chain — and must stop once the item it drives is done.
 func TestSpinnerTickSurvivesANonChatScreen(t *testing.T) {
-	m := newBusyUI(&countingWorkspace{})
+	m := newBusyUI(t, &countingWorkspace{})
 	m.updateLayoutAndSize()
 	spinning := spinningAssistantItem(t, m.com.Styles, "m-spin")
 	m.chat.SetMessages(spinning)
@@ -145,7 +145,7 @@ func TestOffscreenDelegationRetriesOnlyItsRunningNestedTools(t *testing.T) {
 	}
 
 	// The non-chat screen path asks the same question.
-	m := newBusyUI(&countingWorkspace{})
+	m := newBusyUI(t, &countingWorkspace{})
 	m.updateLayoutAndSize()
 	m.chat.SetMessages(items...)
 	m.state = uiLanding

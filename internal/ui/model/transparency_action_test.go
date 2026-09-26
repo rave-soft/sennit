@@ -24,7 +24,7 @@ func TestApplySettingsDialogAction_TransparencyLifecycle(t *testing.T) {
 
 	t.Run("duplicate begin warns after configuration removal without another write", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(&config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}})
+		m, ws := newSettingsUI(t, &config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}})
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleTransparentBackground{})
 		require.True(t, handled)
@@ -50,7 +50,7 @@ func TestApplySettingsDialogAction_TransparencyLifecycle(t *testing.T) {
 	// Prefs always has a value (defaulted, if nothing else) to flip.
 	t.Run("missing workspace configuration does not block the toggle", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(nil)
+		m, ws := newSettingsUI(t, nil)
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleTransparentBackground{})
 
@@ -65,7 +65,7 @@ func TestApplySettingsDialogAction_TransparencyLifecycle(t *testing.T) {
 
 	t.Run("write error is consumed and permits a retry", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(&config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}})
+		m, ws := newSettingsUI(t, &config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}})
 		ws.setConfigFieldErr = errors.New("write failed")
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleTransparentBackground{})

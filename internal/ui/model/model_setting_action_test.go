@@ -34,7 +34,7 @@ func TestApplySettingsDialogAction_ToggleThinking(t *testing.T) {
 
 	t.Run("no configuration reports an error", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(nil)
+		m, _ := newSettingsUI(t, nil)
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleThinking{})
 
@@ -47,7 +47,7 @@ func TestApplySettingsDialogAction_ToggleThinking(t *testing.T) {
 
 	t.Run("no coder agent reports an error", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleThinking{})
 
@@ -60,7 +60,7 @@ func TestApplySettingsDialogAction_ToggleThinking(t *testing.T) {
 
 	t.Run("in-flight operation warns without starting another", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(coderModelConfig(config.SelectedModel{Think: false}))
+		m, ws := newSettingsUI(t, coderModelConfig(config.SelectedModel{Think: false}))
 		m.modelOperation.begin()
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleThinking{})
@@ -75,7 +75,7 @@ func TestApplySettingsDialogAction_ToggleThinking(t *testing.T) {
 
 	t.Run("success flips Think, closes the dialog, and reports a toast", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(coderModelConfig(config.SelectedModel{Provider: "p", Model: "m", Think: false}))
+		m, ws := newSettingsUI(t, coderModelConfig(config.SelectedModel{Provider: "p", Model: "m", Think: false}))
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.CommandsID})
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleThinking{})
@@ -96,7 +96,7 @@ func TestApplySettingsDialogAction_SelectReasoningEffort(t *testing.T) {
 
 	t.Run("agent busy warns before touching configuration", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(nil)
+		m, ws := newSettingsUI(t, nil)
 		m.wsCache.agentBusyCache.Set(true)
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectReasoningEffort{Effort: "high"})
@@ -111,7 +111,7 @@ func TestApplySettingsDialogAction_SelectReasoningEffort(t *testing.T) {
 
 	t.Run("no configuration reports an error", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(nil)
+		m, _ := newSettingsUI(t, nil)
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectReasoningEffort{Effort: "high"})
 
@@ -124,7 +124,7 @@ func TestApplySettingsDialogAction_SelectReasoningEffort(t *testing.T) {
 
 	t.Run("in-flight operation warns without starting another", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(coderModelConfig(config.SelectedModel{}))
+		m, ws := newSettingsUI(t, coderModelConfig(config.SelectedModel{}))
 		m.modelOperation.begin()
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectReasoningEffort{Effort: "high"})
@@ -139,7 +139,7 @@ func TestApplySettingsDialogAction_SelectReasoningEffort(t *testing.T) {
 
 	t.Run("success sets ReasoningEffort, closes the dialog, and reports a toast", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(coderModelConfig(config.SelectedModel{Provider: "p", Model: "m"}))
+		m, ws := newSettingsUI(t, coderModelConfig(config.SelectedModel{Provider: "p", Model: "m"}))
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.ReasoningID})
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectReasoningEffort{Effort: "high"})
@@ -156,7 +156,7 @@ func TestApplySettingsDialogAction_SelectReasoningEffort(t *testing.T) {
 
 	t.Run("update error surfaces without UpdateAgentModel side effect", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(coderModelConfig(config.SelectedModel{Provider: "p", Model: "m"}))
+		m, ws := newSettingsUI(t, coderModelConfig(config.SelectedModel{Provider: "p", Model: "m"}))
 		ws.updatePreferredModelErr = errors.New("update failed")
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectReasoningEffort{Effort: "medium"})

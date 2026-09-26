@@ -24,7 +24,7 @@ func TestApplySessionsLoaded(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.dialogGen = 2
 		m.sess.dialogLoading = true
 
@@ -37,7 +37,7 @@ func TestApplySessionsLoaded(t *testing.T) {
 
 	t.Run("error reports and clears loading without opening a dialog", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.dialogGen = 1
 		m.sess.dialogLoading = true
 
@@ -54,7 +54,7 @@ func TestApplySessionsLoaded(t *testing.T) {
 
 	t.Run("dialog already open is left alone", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.dialogGen = 1
 		m.sess.dialogLoading = true
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.SessionsID})
@@ -70,7 +70,7 @@ func TestApplySessionsLoaded(t *testing.T) {
 
 	t.Run("empty session list still opens the dialog", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.dialogGen = 1
 		m.sess.dialogLoading = true
 
@@ -83,7 +83,7 @@ func TestApplySessionsLoaded(t *testing.T) {
 
 	t.Run("non-empty session list opens the dialog with the selected id", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.dialogGen = 1
 		m.sess.dialogLoading = true
 		sessions := []session.Session{{ID: "s1"}, {ID: "s2"}}
@@ -101,7 +101,7 @@ func TestUpdateSession_SessionsLoadedMsg(t *testing.T) {
 
 	t.Run("success opens the dialog without an extra cmd", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.dialogGen = 1
 
 		cmds, done := m.updateSession(sessionsLoadedMsg{gen: 1, sessions: []session.Session{{ID: "s1"}}}, nil)
@@ -113,7 +113,7 @@ func TestUpdateSession_SessionsLoadedMsg(t *testing.T) {
 
 	t.Run("error is appended to cmds", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.dialogGen = 1
 
 		cmds, done := m.updateSession(sessionsLoadedMsg{gen: 1, err: errors.New("boom")}, nil)
@@ -129,7 +129,7 @@ func TestUpdateSession_AgentRunSubmittedMsg(t *testing.T) {
 	t.Run("mismatched load expectation is dropped", func(t *testing.T) {
 		t.Parallel()
 		ws := &countingWorkspace{ready: true}
-		m := newBusyUI(ws)
+		m := newBusyUI(t, ws)
 		warmCaches(m, false)
 		m.sess.loadExpectedID = "s-expected"
 		m.sess.loadGen = 5
@@ -145,7 +145,7 @@ func TestUpdateSession_AgentRunSubmittedMsg(t *testing.T) {
 	t.Run("matching load expectation clears pendingSendActive and refreshes", func(t *testing.T) {
 		t.Parallel()
 		ws := &countingWorkspace{ready: true}
-		m := newBusyUI(ws)
+		m := newBusyUI(t, ws)
 		warmCaches(m, false)
 		m.sess.loadExpectedID = "s1"
 		m.sess.loadGen = 5
@@ -161,7 +161,7 @@ func TestUpdateSession_AgentRunSubmittedMsg(t *testing.T) {
 	t.Run("draining the pending queue schedules sendPendingQueueMsg", func(t *testing.T) {
 		t.Parallel()
 		ws := &countingWorkspace{ready: true}
-		m := newBusyUI(ws)
+		m := newBusyUI(t, ws)
 		warmCaches(m, false)
 		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
 
@@ -185,7 +185,7 @@ func TestUpdateSession_LoadSessionMsg(t *testing.T) {
 
 	t.Run("mismatched generation or session id is dropped", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.loadGen = 2
 		m.sess.loadExpectedID = "s1"
 		before := m.sess.current
@@ -199,7 +199,7 @@ func TestUpdateSession_LoadSessionMsg(t *testing.T) {
 
 	t.Run("error discards pending sends and reports", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.loadGen = 1
 		m.sess.loadExpectedID = "s1"
 		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
@@ -221,7 +221,7 @@ func TestUpdateSession_LoadSessionMsg(t *testing.T) {
 	t.Run("success loads the session into chat state", func(t *testing.T) {
 		t.Parallel()
 		ws := &countingWorkspace{ready: true}
-		m := newBusyUI(ws)
+		m := newBusyUI(t, ws)
 		warmCaches(m, false)
 		m.sess.loadGen = 1
 		m.sess.loadExpectedID = "s2"
@@ -244,7 +244,7 @@ func TestUpdateSession_LoadSessionMsg(t *testing.T) {
 	t.Run("model switch schedules an agent model re-probe", func(t *testing.T) {
 		t.Parallel()
 		ws := &countingWorkspace{ready: true}
-		m := newBusyUI(ws)
+		m := newBusyUI(t, ws)
 		warmCaches(m, false)
 		m.sess.loadGen = 1
 		m.sess.loadExpectedID = "s2"
@@ -274,7 +274,7 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 
 	t.Run("no pending send in flight is a pass-through", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.loading = false
 
 		cmds, done := m.updateSession(createSessionMsg{generation: 1}, nil)
@@ -285,7 +285,7 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 
 	t.Run("mismatched generation is a pass-through", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.loading = true
 		m.editor.pendingSend.generation = 2
 
@@ -297,7 +297,7 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 
 	t.Run("success adopts the new session and requests its load", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.loading = true
 		m.editor.pendingSend.generation = 1
 		m.state = uiLanding
@@ -322,7 +322,7 @@ func TestUpdateSession_CreateSessionMsg(t *testing.T) {
 func TestUpdateSession_SessionFilesUpdatesMsg(t *testing.T) {
 	t.Parallel()
 
-	m := newBusyUI(&countingWorkspace{ready: true})
+	m := newBusyUI(t, &countingWorkspace{ready: true})
 	files := []SessionFile{{FirstVersion: history.File{Path: "main.go"}}}
 
 	cmds, done := m.updateSession(sessionFilesUpdatesMsg{sessionID: "s1", sessionFiles: files}, nil)
@@ -339,7 +339,7 @@ func TestUpdateSession_SessionFilesUpdatesMsg(t *testing.T) {
 func TestUpdateSession_SessionFilesUpdatesMsg_StaleSession(t *testing.T) {
 	t.Parallel()
 
-	m := newBusyUI(&countingWorkspace{ready: true})
+	m := newBusyUI(t, &countingWorkspace{ready: true})
 	existing := []SessionFile{{FirstVersion: history.File{Path: "current.go"}}}
 	m.sess.files = existing
 	staleFiles := []SessionFile{{FirstVersion: history.File{Path: "other-session.go"}}}
@@ -356,7 +356,7 @@ func TestUpdateSession_SessionEvent(t *testing.T) {
 
 	t.Run("deleting the current session starts a new one", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 
 		cmds, done := m.updateSession(pubsub.Event[session.Session]{
@@ -371,7 +371,7 @@ func TestUpdateSession_SessionEvent(t *testing.T) {
 
 	t.Run("deleting an unrelated session is a no-op", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		current := &session.Session{ID: "s1"}
 		m.sess.current = current
 
@@ -387,7 +387,7 @@ func TestUpdateSession_SessionEvent(t *testing.T) {
 
 	t.Run("an update for a different session is routed to the child-session handler", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 
 		// handleChildSessionUpdate only surfaces a status line for a
@@ -410,7 +410,7 @@ func TestUpdateSession_MessageEvent(t *testing.T) {
 
 	t.Run("no current session is a no-op", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = nil
 
 		cmds, done := m.updateSession(pubsub.Event[message.Message]{
@@ -424,7 +424,7 @@ func TestUpdateSession_MessageEvent(t *testing.T) {
 
 	t.Run("a message for a different session is routed to the child-session handler", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 
 		cmds, done := m.updateSession(pubsub.Event[message.Message]{
@@ -441,7 +441,7 @@ func TestUpdateSession_MessageEvent(t *testing.T) {
 
 	t.Run("deleted removes the message from chat", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 		m.chat.SetMessages(nil...)
 
@@ -464,7 +464,7 @@ func TestUpdateSession_MessageEvent(t *testing.T) {
 func TestUpdateSession_MessagesUpdatedBatch(t *testing.T) {
 	t.Parallel()
 
-	batched := newBusyUI(&countingWorkspace{ready: true})
+	batched := newBusyUI(t, &countingWorkspace{ready: true})
 	batched.sess.current = &session.Session{ID: "s1"}
 	batchedCmds, done := batched.updateSession(MessagesUpdatedMsg{Events: []pubsub.Event[message.Message]{
 		{Type: pubsub.UpdatedEvent, Payload: message.Message{ID: "m1", SessionID: "s1"}},
@@ -472,7 +472,7 @@ func TestUpdateSession_MessagesUpdatedBatch(t *testing.T) {
 	}}, nil)
 	require.False(t, done)
 
-	individual := newBusyUI(&countingWorkspace{ready: true})
+	individual := newBusyUI(t, &countingWorkspace{ready: true})
 	individual.sess.current = &session.Session{ID: "s1"}
 	var individualCmds []tea.Cmd
 	for _, id := range []string{"m1", "m2"} {
@@ -490,7 +490,7 @@ func TestUpdateSession_MessagesUpdatedBatch(t *testing.T) {
 func TestUpdateSession_HistoryFileEvent(t *testing.T) {
 	t.Parallel()
 
-	m := newBusyUI(&countingWorkspace{ready: true})
+	m := newBusyUI(t, &countingWorkspace{ready: true})
 
 	cmds, done := m.updateSession(pubsub.Event[history.File]{
 		Payload: history.File{Path: "main.go"},
@@ -505,7 +505,7 @@ func TestUpdateSession_SendMessageErrorMsg(t *testing.T) {
 
 	t.Run("stale load generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.loadExpectedID = "s1"
 		m.sess.loadGen = 5
 		m.editor.pendingSend.active = true
@@ -523,7 +523,7 @@ func TestUpdateSession_SendMessageErrorMsg(t *testing.T) {
 
 	t.Run("creating clears the pending-send queue on matching generation", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.loading = true
 		m.editor.pendingSend.generation = 3
 		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
@@ -544,7 +544,7 @@ func TestUpdateSession_SendMessageErrorMsg(t *testing.T) {
 
 	t.Run("non-creating error with a queued item schedules a drain", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.active = true
 		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
 
@@ -569,7 +569,7 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 
 	t.Run("nothing to send is a no-op", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 
 		cmds, done := m.updateSession(sendPendingQueueMsg{}, nil)
@@ -580,7 +580,7 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 
 	t.Run("already active is a no-op", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 		m.editor.pendingSend.active = true
 		m.editor.pendingSend.queue = []sendQueueItem{{content: "queued"}}
@@ -594,7 +594,7 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 
 	t.Run("stale item for a different session is dropped and the drain re-scheduled", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 		m.sess.loadGen = 5
 		m.editor.pendingSend.queue = []sendQueueItem{
@@ -615,7 +615,7 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 
 	t.Run("a matching bang item runs the shell command", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 		m.editor.pendingSend.queue = []sendQueueItem{
 			{content: "echo hi", sessionID: "s1", bang: true},
@@ -632,7 +632,7 @@ func TestUpdateSession_SendPendingQueueMsg(t *testing.T) {
 
 	t.Run("a matching regular item sends the message", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.sess.current = &session.Session{ID: "s1"}
 		m.editor.pendingSend.queue = []sendQueueItem{
 			{content: "hello", sessionID: "s1"},
@@ -652,7 +652,7 @@ func TestUpdateSession_BangSessionCreatedMsg(t *testing.T) {
 
 	t.Run("no pending send in flight is dropped", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.loading = false
 
 		cmds, done := m.updateSession(bangSessionCreatedMsg{generation: 1}, nil)
@@ -663,7 +663,7 @@ func TestUpdateSession_BangSessionCreatedMsg(t *testing.T) {
 
 	t.Run("mismatched generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.loading = true
 		m.editor.pendingSend.generation = 2
 
@@ -675,7 +675,7 @@ func TestUpdateSession_BangSessionCreatedMsg(t *testing.T) {
 
 	t.Run("success adopts the session and queues the bang command", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		m.editor.pendingSend.loading = true
 		m.editor.pendingSend.generation = 1
 		m.state = uiLanding

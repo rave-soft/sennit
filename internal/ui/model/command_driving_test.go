@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -278,6 +279,21 @@ func (w *cmdDrivingWorkspace) AgentIsBusy() bool {
 func (w *cmdDrivingWorkspace) AgentModel() workspace.AgentModel {
 	w.agentModelCalls++
 	return w.agentModel
+}
+
+// AgentActivity and PendingPrompts back wsrpc.BuildClientState and the
+// Events service's Snapshot RPC respectively -- grpcws.Client.Connect
+// (SENNIT_TEST_WIRE=grpc) calls Snapshot before returning, so both must
+// resolve to something rather than panic on the embedded nil Workspace's
+// default (see countingWorkspace's identical addition in
+// session_busy_test.go for the fuller explanation). Zero values: no test
+// built through this constructor depends on either.
+func (w *cmdDrivingWorkspace) AgentActivity() workspace.AgentActivity {
+	return workspace.AgentActivity{}
+}
+
+func (w *cmdDrivingWorkspace) PendingPrompts(context.Context) (workspace.PendingPrompts, error) {
+	return workspace.PendingPrompts{}, nil
 }
 
 func (w *cmdDrivingWorkspace) AgentQueuedPrompts(string) int { w.agentQueuedCalls++; return 0 }
@@ -666,7 +682,7 @@ func newCmdDrivenUI(t *testing.T, ws *cmdDrivingWorkspace) *UI {
 	t.Helper()
 	on := &atomic.Bool{}
 	on.Store(true)
-	com := common.DefaultCommon(context.Background(), newUpdateGoroutineGuard(t, maybeWireWorkspace(ws), on))
+	com := common.DefaultCommon(context.Background(), newUpdateGoroutineGuard(t, maybeWireWorkspace(t, ws), on))
 	m := &UI{
 		com: com,
 		widgets: widgets{
@@ -888,6 +904,12 @@ func TestCmdDriving_RepeatedEnter_SendAndSubmit(t *testing.T) {
 	}
 	m := newCmdDrivenUI(t, ws)
 	warmCmdDrivenCaches(m)
+	// Under SENNIT_TEST_WIRE=grpc, newCmdDrivenUI's own wiring
+	// (grpcws.Client.Connect) reads AgentIsBusy once to seed its cache
+	// before this test does anything -- a one-time wire cost, not the
+	// re-probe after send this test is pinning (see session_busy_test.go's
+	// identical resetCounters comment).
+	ws.agentBusyCalls = 0
 	m.editor.textarea.SetValue("hello")
 
 	// Simulate pressing Enter: goes through UI.Update → handleKeyPressMsg
@@ -912,8 +934,16 @@ func TestCmdDriving_RepeatedEnter_SendAndSubmit(t *testing.T) {
 	require.Equal(t, "s1", ws.agentRunSession, "AgentRun must target the current session")
 	require.Equal(t, "hello", ws.agentRunPrompt, "AgentRun must carry the message content")
 
-	// After agentRunSubmittedMsg, the model re-fetches busy state.
-	require.Equal(t, 1, ws.agentBusyCalls, "busy state must be re-probed after send")
+	// After agentRunSubmittedMsg, the model re-fetches busy state. Under
+	// SENNIT_TEST_WIRE=grpc that re-fetch calls ws.AgentIsBusy() through
+	// grpcws.Client, which answers from its own cache (class C;
+	// CLIENT-SERVER.md, PR 1.4b) rather than reaching this stub, so the
+	// call count can only be checked in-process/loopback (see
+	// session_busy_test.go's TestBackstopRefreshesStaleCaches for the
+	// identical gate).
+	if os.Getenv(wireEnvVar) != "grpc" {
+		require.Equal(t, 1, ws.agentBusyCalls, "busy state must be re-probed after send")
+	}
 }
 
 // ---------------------------------------------------------------------------

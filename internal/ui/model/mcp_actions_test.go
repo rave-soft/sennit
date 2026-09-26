@@ -32,7 +32,7 @@ func TestRunMCPPromptClosesOnlyItsOwnDialog(t *testing.T) {
 	t.Parallel()
 
 	ws := &mcpPromptWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 
 	// The dialog open when the MCP prompt call starts (e.g. the arguments
 	// or commands dialog).

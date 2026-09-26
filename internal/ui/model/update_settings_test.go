@@ -86,12 +86,13 @@ func (s wsPrefsStore) SetCompactMode(enabled bool) error {
 // newSettingsUI builds a UI wired to a settingsTestWorkspace, reusing
 // newBusyUI's fixture (chat/status/editor/dialog wiring) so setTheme,
 // updateLayoutAndSize, and setEditorPrompt all have what they need.
-func newSettingsUI(cfg *config.Config) (*UI, *settingsTestWorkspace) {
+func newSettingsUI(t *testing.T, cfg *config.Config) (*UI, *settingsTestWorkspace) {
+	t.Helper()
 	ws := &settingsTestWorkspace{
 		countingWorkspace: &countingWorkspace{ready: true},
 		cfg:               cfg,
 	}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	m.com.Prefs = wsPrefsStore{ws: ws}
 	// newBusyUI wires editor.attachments with a nil renderer (attachments
 	// aren't its concern); setTheme unconditionally dereferences it via
@@ -128,7 +129,7 @@ func TestUpdateSettings_ProviderConfiguredResult(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 5
 		m.modelOperation.loading = true
 
@@ -141,7 +142,7 @@ func TestUpdateSettings_ProviderConfiguredResult(t *testing.T) {
 
 	t.Run("error reports and clears loading", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 		wantErr := errors.New("boom")
@@ -159,7 +160,7 @@ func TestUpdateSettings_ProviderConfiguredResult(t *testing.T) {
 
 	t.Run("success dispatches init command", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 
@@ -186,7 +187,7 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 2
 		m.modelOperation.loading = true
 
@@ -198,7 +199,7 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 
 	t.Run("error reports and clears loading", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 		wantErr := errors.New("select failed")
@@ -215,7 +216,7 @@ func TestUpdateSettings_ModelSelectResult(t *testing.T) {
 
 	t.Run("success dispatches init command", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 3
 		m.modelOperation.loading = true
 
@@ -242,7 +243,7 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 2
 		m.modelOperation.loading = true
 
@@ -255,7 +256,7 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 
 	t.Run("error reports and clears loading", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 		wantErr := errors.New("init failed")
@@ -277,7 +278,7 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 			ID:     "p",
 			Models: []catwalk.Model{{ID: "m", Name: "Pretty Model"}},
 		})
-		m, _ := newSettingsUI(cfg)
+		m, _ := newSettingsUI(t, cfg)
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 		m.state = uiChat
@@ -300,7 +301,7 @@ func TestUpdateSettings_AgentModelInitializedMsg(t *testing.T) {
 
 	t.Run("non-onboarding success without a catalog match reports the raw model id", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 		m.state = uiChat
@@ -323,7 +324,7 @@ func TestUpdateSettings_ModelSettingUpdatedMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 2
 		m.modelOperation.loading = true
 
@@ -335,7 +336,7 @@ func TestUpdateSettings_ModelSettingUpdatedMsg(t *testing.T) {
 
 	t.Run("error reports", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 		wantErr := errors.New("setting failed")
@@ -350,7 +351,7 @@ func TestUpdateSettings_ModelSettingUpdatedMsg(t *testing.T) {
 
 	t.Run("success reports info", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 
@@ -369,7 +370,7 @@ func TestUpdateSettings_TransparentToggledMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.transparency.begin()
 		require.True(t, started)
 
@@ -382,7 +383,7 @@ func TestUpdateSettings_TransparentToggledMsg(t *testing.T) {
 
 	t.Run("error reports and leaves transparency unchanged", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.transparency.begin()
 		require.True(t, started)
 		m.lay.isTransparent = false
@@ -396,7 +397,7 @@ func TestUpdateSettings_TransparentToggledMsg(t *testing.T) {
 
 	t.Run("success flips transparency and closes the commands dialog", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.transparency.begin()
 		require.True(t, started)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.CommandsID})
@@ -415,7 +416,7 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		stale := m.themePersistence.begin()
 		m.themePersistence.begin()
 		m.themePreview.setLive("steel-teal")
@@ -429,7 +430,7 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 
 	t.Run("error restores the previous palette and reports", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation := m.themePersistence.begin()
 		m.themePreview.setLive("graphite-amber")
 
@@ -449,7 +450,7 @@ func TestUpdateSettings_ThemeSetMsg(t *testing.T) {
 
 	t.Run("success reports the new palette name", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation := m.themePersistence.begin()
 
 		cmds, _ := m.updateSettings(themeSetMsg{ID: "steel-teal", generation: generation}, nil)
@@ -466,7 +467,7 @@ func TestUpdateSettings_CompactModeToggledMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.compactMode.begin()
 		require.True(t, started)
 		require.True(t, m.compactMode.complete(generation))
@@ -482,7 +483,7 @@ func TestUpdateSettings_CompactModeToggledMsg(t *testing.T) {
 
 	t.Run("error reports and leaves compact mode unchanged", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.compactMode.begin()
 		require.True(t, started)
 		m.lay.forceCompactMode = false
@@ -496,7 +497,7 @@ func TestUpdateSettings_CompactModeToggledMsg(t *testing.T) {
 
 	t.Run("success flips compact mode and closes the commands dialog", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.compactMode.begin()
 		require.True(t, started)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.CommandsID})
@@ -515,7 +516,7 @@ func TestUpdateSettings_NotificationStyleSetMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.notificationStyle.begin()
 		require.True(t, started)
 		require.True(t, m.notificationStyle.complete(generation))
@@ -531,7 +532,7 @@ func TestUpdateSettings_NotificationStyleSetMsg(t *testing.T) {
 
 	t.Run("error reports", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.notificationStyle.begin()
 		require.True(t, started)
 
@@ -543,7 +544,7 @@ func TestUpdateSettings_NotificationStyleSetMsg(t *testing.T) {
 
 	t.Run("success closes the dialog and reports the new style", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.notificationStyle.begin()
 		require.True(t, started)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.NotificationsID})
@@ -573,7 +574,7 @@ func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation := start(t, m)
 
 		cmds, done := m.updateSettings(permissionResponseMsg{Permission: "perm-1", generation: generation - 1}, nil)
@@ -585,7 +586,7 @@ func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 
 	t.Run("mismatched permission id is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation := start(t, m)
 
 		cmds, done := m.updateSettings(permissionResponseMsg{Permission: "perm-2", generation: generation}, nil)
@@ -597,7 +598,7 @@ func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 
 	t.Run("refused closes the dialog and reports an error", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation := start(t, m)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.PermissionsID})
 
@@ -613,7 +614,7 @@ func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 
 	t.Run("accepted closes the dialog without reporting anything", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation := start(t, m)
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.PermissionsID})
 
@@ -628,7 +629,7 @@ func TestUpdateSettings_PermissionResponseMsg(t *testing.T) {
 func TestUpdateSettings_YoloPermissionEnabledMsgAppliesYoloForReplacedPermission(t *testing.T) {
 	t.Parallel()
 
-	m, _ := newSettingsUI(newSettingsConfig())
+	m, _ := newSettingsUI(t, newSettingsConfig())
 	m.wsCache.yoloCache.Set(false)
 	yoloGeneration, yoloStarted := m.yolo.begin()
 	require.True(t, yoloStarted)
@@ -664,7 +665,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.wsCache.yoloCache.Set(false)
 		busyGeneration := m.wsCache.busyFetchGen
 		generation, started := m.yolo.begin()
@@ -681,7 +682,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 
 	t.Run("error reports", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.wsCache.yoloCache.Set(false)
 		busyGeneration := m.wsCache.busyFetchGen
 		generation, started := m.yolo.begin()
@@ -697,7 +698,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 
 	t.Run("enabling reports enabled", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.yolo.begin()
 		require.True(t, started)
 
@@ -711,7 +712,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 
 	t.Run("disabling reports disabled", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		generation, started := m.yolo.begin()
 		require.True(t, started)
 
@@ -727,7 +728,7 @@ func TestUpdateSettings_YoloToggledMsg(t *testing.T) {
 func TestUpdateSettings_NotificationSentMsg(t *testing.T) {
 	t.Parallel()
 
-	m, _ := newSettingsUI(newSettingsConfig())
+	m, _ := newSettingsUI(t, newSettingsConfig())
 
 	cmds, done := m.updateSettings(notificationSentMsg{}, nil)
 
@@ -740,7 +741,7 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 
 	t.Run("stale generation is dropped", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 2
 		m.modelOperation.loading = true
 
@@ -752,7 +753,7 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 
 	t.Run("provider not configured opens the auth dialog", func(t *testing.T) {
 		t.Parallel()
-		m, _ := newSettingsUI(newSettingsConfig())
+		m, _ := newSettingsUI(t, newSettingsConfig())
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 		m.dialog.OpenDialog(stubIDDialog{id: dialog.ModelsID})
@@ -776,7 +777,7 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 		t.Parallel()
 		cfg := newSettingsConfig()
 		cfg.Providers.Set("github-copilot", config.ProviderConfig{ID: "github-copilot"})
-		m, ws := newSettingsUI(cfg)
+		m, ws := newSettingsUI(t, cfg)
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true
 
@@ -802,7 +803,7 @@ func TestUpdateSettings_ImportCopilotResult(t *testing.T) {
 		t.Parallel()
 		cfg := newSettingsConfig()
 		cfg.Providers.Set("github-copilot", config.ProviderConfig{ID: "github-copilot"})
-		m, ws := newSettingsUI(cfg)
+		m, ws := newSettingsUI(t, cfg)
 		ws.updatePreferredModelErr = errors.New("disk full")
 		m.modelOperation.generation = 1
 		m.modelOperation.loading = true

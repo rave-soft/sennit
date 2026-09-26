@@ -33,7 +33,7 @@ func TestApplySessionEvent_DelegationRefreshesDescendantCost(t *testing.T) {
 	t.Parallel()
 
 	ws := &descendantCostWorkspace{countingWorkspace: &countingWorkspace{ready: true}, cost: 2.5}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	m.sess.current = &session.Session{ID: "root"}
 
 	cmds := m.applySessionEvent(pubsub.Event[session.Session]{
@@ -72,7 +72,7 @@ func TestApplySessionEvent_UnrelatedSessionDoesNotRefresh(t *testing.T) {
 	t.Parallel()
 
 	ws := &descendantCostWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	m.sess.current = &session.Session{ID: "root"}
 
 	m.applySessionEvent(pubsub.Event[session.Session]{
@@ -92,7 +92,7 @@ func TestSessionSwitch_ClearsPreviousDescendantCost(t *testing.T) {
 	t.Parallel()
 
 	ws := &descendantCostWorkspace{countingWorkspace: &countingWorkspace{ready: true}, cost: 9}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 	m.sess.loadGen = 1
 	m.sess.loadExpectedID = "s2"
@@ -130,7 +130,7 @@ func TestNewSession_ClearsDescendantCost(t *testing.T) {
 	t.Parallel()
 
 	ws := &descendantCostWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	m.sess.current = &session.Session{ID: "s1"}
 	m.sess.descendantCost = 7
 

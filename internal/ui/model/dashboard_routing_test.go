@@ -174,7 +174,7 @@ func TestDashboardForwardsUntaggedAsyncResultToMain(t *testing.T) {
 	t.Parallel()
 
 	ws := &countingWorkspace{ready: true}
-	r := &Root{com: newBusyUI(ws).com, main: newBusyUI(ws), active: screenMain, dashboardDialog: dialog.NewOverlay()}
+	r := &Root{com: newBusyUI(t, ws).com, main: newBusyUI(t, ws), active: screenMain, dashboardDialog: dialog.NewOverlay()}
 	r.dashboard = delegations.New(r.com, &r.main.threadList)
 
 	generation, started := r.main.modelOperation.begin()

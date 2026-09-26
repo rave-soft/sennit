@@ -156,7 +156,7 @@ func TestConnectionResyncDedupesPendingPermission(t *testing.T) {
 func TestMergeReloadedMessageItemsKeepsNewerLiveUpdate(t *testing.T) {
 	t.Parallel()
 
-	m := newBusyUI(&countingWorkspace{ready: true})
+	m := newBusyUI(t, &countingWorkspace{ready: true})
 	base := message.Message{
 		ID: "a1", Role: message.Assistant, SessionID: "s1",
 		UpdatedAt: 100,
@@ -236,7 +236,7 @@ func TestMergeReloadedMessageItemsTieBreak(t *testing.T) {
 
 	t.Run("finished live beats unfinished reload", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		live := finishedAssistantMessage("done")
 		m.chat.SetMessages(chat.NewAssistantMessageItem(m.com.Styles, &live))
 
@@ -251,7 +251,7 @@ func TestMergeReloadedMessageItemsTieBreak(t *testing.T) {
 
 	t.Run("finished reload beats unfinished live", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		live := unfinishedAssistantMessage("still typing")
 		m.chat.SetMessages(chat.NewAssistantMessageItem(m.com.Styles, &live))
 
@@ -266,7 +266,7 @@ func TestMergeReloadedMessageItemsTieBreak(t *testing.T) {
 
 	t.Run("both unfinished keeps live", func(t *testing.T) {
 		t.Parallel()
-		m := newBusyUI(&countingWorkspace{ready: true})
+		m := newBusyUI(t, &countingWorkspace{ready: true})
 		live := unfinishedAssistantMessage("live text")
 		m.chat.SetMessages(chat.NewAssistantMessageItem(m.com.Styles, &live))
 

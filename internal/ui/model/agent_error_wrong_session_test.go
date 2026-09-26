@@ -22,7 +22,7 @@ func TestAgentErrorNotification_OtherSessionDoesNotReportInApp(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws) // m.sess.current.ID == "s1"
+	m := newBusyUI(t, ws) // m.sess.current.ID == "s1"
 	warmCaches(m, true)
 
 	common.StartTurn("s-other")

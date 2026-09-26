@@ -21,7 +21,7 @@ func TestUpdateSession_LoadSessionMsg_ClearsFileReadsFromThePreviousSession(t *t
 	t.Parallel()
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 	m.sess.fileReads = []string{"/repo/a.go"}
 	m.sess.loadGen = 1

@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/providers/accounts"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/chatlist"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -58,7 +59,49 @@ func (w *rootTestWorkspace) Config() *workspace.FrontendConfig {
 
 func (w *rootTestWorkspace) PermissionSkipRequests() bool { return false }
 func (w *rootTestWorkspace) AgentIsReady() bool           { return false }
+func (w *rootTestWorkspace) AgentIsBusy() bool            { return false }
+func (w *rootTestWorkspace) AgentReadyErr() error         { return nil }
 func (w *rootTestWorkspace) SupportsThreads() bool        { return w.supportsThreads }
+
+// The getters below have nothing to do with what this stub's tests
+// exercise -- they exist only so wsrpc.BuildClientState can read a
+// complete workspace.ClientState off it. grpcws.Client.Connect
+// (SENNIT_TEST_WIRE=grpc) calls Snapshot before returning, which falls
+// back to BuildClientState whenever a hub hasn't published yet, so every
+// one of its reads has to resolve to something rather than panic on the
+// embedded nil Workspace's default (see countingWorkspace's identical
+// addition in session_busy_test.go).
+func (w *rootTestWorkspace) AgentActivity() workspace.AgentActivity { return workspace.AgentActivity{} }
+
+func (w *rootTestWorkspace) AgentModel() workspace.AgentModel { return workspace.AgentModel{} }
+
+func (w *rootTestWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
+	return nil
+}
+
+func (w *rootTestWorkspace) LSPGetDiagnosticCounts(string) proto.LSPDiagnosticCounts {
+	return proto.LSPDiagnosticCounts{}
+}
+func (w *rootTestWorkspace) CustomProviderTypes() []string { return nil }
+func (w *rootTestWorkspace) BackgroundJobCounts() workspace.BackgroundJobCounts {
+	return workspace.BackgroundJobCounts{}
+}
+func (w *rootTestWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer { return nil }
+func (w *rootTestWorkspace) DockerMCPAvailable() (available, known bool)      { return false, false }
+
+func (w *rootTestWorkspace) CurrentPlanUsage(string) (accounts.Usage, bool) {
+	return accounts.Usage{}, false
+}
+
+func (w *rootTestWorkspace) AccountCapabilities(string) workspace.AccountCapabilities {
+	return workspace.AccountCapabilities{}
+}
+
+func (w *rootTestWorkspace) WorktreeState() workspace.WorktreeState { return workspace.WorktreeState{} }
+
+func (w *rootTestWorkspace) PendingPrompts(context.Context) (workspace.PendingPrompts, error) {
+	return workspace.PendingPrompts{}, nil
+}
 
 // QuestionCancel overrides the embedded nil Workspace: detaching an
 // attached thread now cancels any question still pending on it (see
@@ -112,7 +155,7 @@ func (w *neutralSubscriberWorkspace) emit(msg any) {
 func newTestRoot(t *testing.T, supportsThreads bool) *Root {
 	t.Helper()
 	ws := &rootTestWorkspace{supportsThreads: supportsThreads}
-	com := common.DefaultCommon(context.Background(), maybeWireWorkspace(ws))
+	com := common.DefaultCommon(context.Background(), maybeWireWorkspace(t, ws))
 	// Pin the platform so the ctrl+ key this test drives matches what
 	// configuredKeyMap actually binds, regardless of the host OS running
 	// the suite (see keys.go's darwin ctrl+ -> super+ rewrite).

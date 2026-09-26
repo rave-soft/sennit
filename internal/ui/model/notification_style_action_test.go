@@ -32,7 +32,7 @@ func TestApplySettingsDialogAction_NotificationStyleLifecycle(t *testing.T) {
 
 	t.Run("duplicate begin warns without dispatching another write", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(&config.Config{Options: &config.Options{}})
+		m, ws := newSettingsUI(t, &config.Config{Options: &config.Options{}})
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectNotificationStyle{Style: "desktop"})
 		require.True(t, handled)
@@ -76,7 +76,7 @@ func TestApplySettingsDialogAction_NotificationStyleLifecycle(t *testing.T) {
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				t.Parallel()
-				m, ws := newSettingsUI(&config.Config{Options: &config.Options{}})
+				m, ws := newSettingsUI(t, &config.Config{Options: &config.Options{}})
 
 				cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectNotificationStyle{Style: "desktop"})
 				require.True(t, handled)
@@ -108,7 +108,7 @@ func TestApplySettingsDialogAction_NotificationStyleLifecycle(t *testing.T) {
 			if cfg != nil {
 				cfg.Options = nil
 			}
-			m, ws := newSettingsUI(cfg)
+			m, ws := newSettingsUI(t, cfg)
 
 			cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectNotificationStyle{Style: "desktop"})
 			require.True(t, handled)
@@ -123,7 +123,7 @@ func TestApplySettingsDialogAction_NotificationStyleLifecycle(t *testing.T) {
 
 	t.Run("write error is consumed and permits a retry", func(t *testing.T) {
 		t.Parallel()
-		m, ws := newSettingsUI(&config.Config{Options: &config.Options{}})
+		m, ws := newSettingsUI(t, &config.Config{Options: &config.Options{}})
 		ws.setConfigFieldErr = errors.New("write failed")
 
 		cmd, handled := m.applySettingsDialogAction(dialog.ActionSelectNotificationStyle{Style: "desktop"})

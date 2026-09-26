@@ -36,7 +36,7 @@ func TestSendMessageNow_DoesNotResetAnAlreadyRunningTurnsTimer(t *testing.T) {
 		ready:       true,
 		sessionBusy: map[string]bool{sessionID: true},
 	}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 
 	common.StartTurn(sessionID)
@@ -61,7 +61,7 @@ func TestSendMessageNow_StartsTheTimerForAGenuinelyNewTurn(t *testing.T) {
 	t.Cleanup(func() { common.StopTurn(sessionID) })
 
 	ws := &succeedingAgentRunWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, false)
 
 	require.Equal(t, "", common.Elapsed(sessionID), "precondition: no turn running yet")
@@ -83,7 +83,7 @@ func TestConfirmAgentCancellation_StopsTheTurnTimer(t *testing.T) {
 	t.Cleanup(func() { common.StopTurn(sessionID) })
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 
 	common.StartTurn(sessionID)

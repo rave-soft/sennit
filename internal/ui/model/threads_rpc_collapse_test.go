@@ -37,7 +37,7 @@ func TestThreadEventDispatchesOneListThreadsCall(t *testing.T) {
 	// trip" has to do once the workspace is remote: count on the stub
 	// underneath, not on whatever decorator sits in front of it.
 	ws := &rootTestWorkspace{supportsThreads: true}
-	r := NewRoot(common.DefaultCommon(context.Background(), maybeWireWorkspace(ws)), "", false, withGOOS("linux"))
+	r := NewRoot(common.DefaultCommon(context.Background(), maybeWireWorkspace(t, ws)), "", false, withGOOS("linux"))
 
 	r.main.state = uiChat
 	r.dashboard = delegations.New(r.com, &r.main.threadList)

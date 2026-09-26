@@ -47,13 +47,22 @@ func TestRenameSession_PreservesConcurrentUsageAndTodos(t *testing.T) {
 	}, 1.5)
 	require.NoError(t, err)
 
-	a := &app.App{}
+	// app.NewForTest, not a bare &app.App{}: SENNIT_TEST_WIRE=grpc's
+	// grpcws.Client.Connect reads the full class-C surface up front
+	// (wsrpc.BuildClientState), including PermissionSkipRequests and the
+	// root event hub's eager SubscribeWith (CLIENT-SERVER.md, PR 1.4a) --
+	// both of which need a real permissions service and events broker, a
+	// bare App leaves nil. Under SENNIT_TEST_WIRE=1 (wsrpc.NewLoopback)
+	// this was never exercised, since Loopback never reads ahead of what
+	// a test actually calls.
+	a := app.NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
 	a.SetSessionsForTest(sessions)
 	store := configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir()))
 	// wireWorkspace: RenameSession below is the only call made through ws;
 	// everything else this test asserts on comes from sessions directly, so
 	// it's a clean candidate for the wire CI job -- see wiretest_test.go.
-	ws := wireWorkspace(NewAppWorkspace(a, store))
+	ws := wireWorkspace(t, NewAppWorkspace(a, store))
 
 	// Confirming the rename in the dialog only ever had staleSnapshot's
 	// title to offer; RenameSession must not carry the rest of that stale

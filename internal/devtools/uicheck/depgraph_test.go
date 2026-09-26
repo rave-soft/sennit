@@ -29,10 +29,10 @@ import (
 // the domain set — and the default build constraints
 // apply, matching what `go build ./...` compiles on this platform.
 //
-// Three sanctioned exceptions remain in the production graph: configtest,
-// testenv, and rendercachetest are dedicated test-support packages whose
-// APIs wrap testing.TB. They are exempted by exact path (Allow) and imported
-// only by _test.go files.
+// Four sanctioned exceptions remain in the production graph: configtest,
+// testenv, rendercachetest, and grpcws/grpcwstest are dedicated
+// test-support packages whose APIs wrap testing.TB. They are exempted by
+// exact path (Allow) and imported only by _test.go files.
 //
 // forbiddenImportRule bans one production import edge: the packages
 // under Pattern must not import the package Forbidden. Allow lists the
@@ -140,6 +140,7 @@ var forbiddenImports = []forbiddenImportRule{
 			"github.com/rave-soft/sennit/internal/config/configtest",
 			"github.com/rave-soft/sennit/internal/testenv",
 			"github.com/rave-soft/sennit/internal/ui/rendercachetest",
+			"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws/grpcwstest",
 		},
 		Why: "production packages must not import testing; only dedicated support packages imported exclusively by _test.go files are exempt",
 	},
@@ -358,6 +359,7 @@ func TestForbiddenMatchersAreExactAndEffective(t *testing.T) {
 		configPkg + "/configtest",
 		internalPkg + "/testenv",
 		internalPkg + "/ui/rendercachetest",
+		internalPkg + "/workspace/wsrpc/grpcws/grpcwstest",
 	}
 	if rule.Pattern != internalPkg || rule.Forbidden != "testing" {
 		t.Fatalf("testing rule drifted from the expected shape (pattern=%q, forbidden=%q); update the test if that is intentional", rule.Pattern, rule.Forbidden)

@@ -59,6 +59,13 @@ jobs:
       # implementation. A type or error that would not survive a real
       # gRPC hop breaks here, in CI, well before that transport exists.
       - run: SENNIT_TEST_WIRE=1 go test -count=1 ./internal/ui/... ./internal/cmd/... ./internal/workspace/...
+      # Same suites again, this time served over a real grpcws.NewServer
+      # (bufconn) instead of the in-process JSON codec (CLIENT-SERVER.md,
+      # "PR 1.6"): every call, result, error and event also crosses an
+      # actual gRPC round trip -- protobuf framing, the lease/handle
+      # interceptors, the event hub's Snapshot/Subscribe split -- none of
+      # which wsrpc.NewLoopback above exercises at all.
+      - run: SENNIT_TEST_WIRE=grpc go test -count=1 ./internal/ui/... ./internal/cmd/... ./internal/workspace/...
 
   lint:
     runs-on: ubuntu-latest

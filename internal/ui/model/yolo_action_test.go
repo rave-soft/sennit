@@ -21,7 +21,7 @@ func yoloResult(t *testing.T, cmd tea.Cmd) yoloToggledMsg {
 func TestApplySettingsDialogAction_YoloLifecycle(t *testing.T) {
 	t.Parallel()
 
-	m, ws := newSettingsUI(newSettingsConfig())
+	m, ws := newSettingsUI(t, newSettingsConfig())
 
 	cmd, handled := m.applySettingsDialogAction(dialog.ActionToggleYoloMode{})
 	require.True(t, handled)
@@ -67,7 +67,7 @@ func TestApplySettingsDialogAction_YoloLifecycle(t *testing.T) {
 func TestToggleYoloMode_SetSkipRequestsError(t *testing.T) {
 	t.Parallel()
 
-	m, ws := newSettingsUI(newSettingsConfig())
+	m, ws := newSettingsUI(t, newSettingsConfig())
 	m.wsCache.yoloCache.Set(false)
 
 	setErr := errors.New("workspace unreachable")
@@ -135,7 +135,7 @@ func reportedErrorCount(cmds []tea.Cmd) int {
 func TestUpdateSettings_YoloPermissionEnabled_SkipOKGrantFails(t *testing.T) {
 	t.Parallel()
 
-	m, _ := newSettingsUI(newSettingsConfig())
+	m, _ := newSettingsUI(t, newSettingsConfig())
 	const permID = "perm-skip-ok-grant-fails"
 
 	m.permissionResponse.open(permID, false)
@@ -174,7 +174,7 @@ func TestUpdateSettings_YoloPermissionEnabled_SkipOKGrantFails(t *testing.T) {
 func TestUpdateSettings_YoloPermissionEnabled_SkipFails(t *testing.T) {
 	t.Parallel()
 
-	m, _ := newSettingsUI(newSettingsConfig())
+	m, _ := newSettingsUI(t, newSettingsConfig())
 	const permID = "perm-skip-fails"
 
 	m.permissionResponse.open(permID, false)

@@ -36,7 +36,7 @@ func (errRefused) Error() string { return "thread is not running" }
 // it vanished into a real queue that does not exist.
 func TestSendMessage_FailedSendClearsItsQueuedPlaceholder(t *testing.T) {
 	ws := &alwaysRefusingAgentRunWorkspace{countingWorkspace: &countingWorkspace{ready: true, agentBusy: true}}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 
 	cmd := m.sendMessage("hello while busy")

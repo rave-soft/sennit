@@ -33,7 +33,7 @@ func fillChat(t *testing.T, m *UI, n int) {
 // window scrolled the conversation and snapped it to the selection,
 // without anything being dragged.
 func TestHoverDoesNotScrollTheChat(t *testing.T) {
-	m := newBusyUI(&countingWorkspace{})
+	m := newBusyUI(t, &countingWorkspace{})
 	m.updateLayoutAndSize()
 	fillChat(t, m, 60)
 	m.chat.ScrollToTop()

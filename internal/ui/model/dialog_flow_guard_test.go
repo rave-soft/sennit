@@ -421,7 +421,7 @@ func TestCommandPalette_OffersExitWorktreeWhenActive(t *testing.T) {
 	// what SENNIT_TEST_WIRE alone changes. maybeWireWorkspace is the only
 	// wrapping applied, so a normal run drives cmdDrivingWorkspace
 	// directly and a wire run drives it through wsrpc.Loopback.
-	m := New(common.DefaultCommon(context.Background(), maybeWireWorkspace(ws)), "", false, withGOOS("linux"))
+	m := New(common.DefaultCommon(context.Background(), maybeWireWorkspace(t, ws)), "", false, withGOOS("linux"))
 	m.state = uiChat
 	m.focus = uiFocusEditor
 	m.lay.width = 140

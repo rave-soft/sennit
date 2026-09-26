@@ -48,7 +48,7 @@ func TestAgentErrorNotificationReportsInApp(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 
 	_, cmd := m.Update(pubsub.Event[workspace.AgentNotification]{
@@ -82,7 +82,7 @@ func TestAgentFinishedNotificationReportsNothing(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m := newBusyUI(t, ws)
 	warmCaches(m, true)
 
 	_, cmd := m.Update(pubsub.Event[workspace.AgentNotification]{
@@ -126,7 +126,7 @@ func TestAgentFinishedNotificationSkipsChildSessions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := &countingWorkspace{ready: true}
-			m := newBusyUI(ws)
+			m := newBusyUI(t, ws)
 			warmCaches(m, true)
 			backend := &recordingNotifyBackend{}
 			m.notifyBackend = backend

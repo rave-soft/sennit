@@ -124,6 +124,15 @@ func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
 }
 
 func (w *AppWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer {
+	// A bare &app.App{} (sanctioned for tests, see ListMCPPrompts's
+	// identical guard above) leaves MCP nil. Unlike ListMCPPrompts, this
+	// is also reachable from wsrpc.BuildClientState -- the class-C state
+	// every SENNIT_TEST_WIRE=grpc client caches -- so any AppWorkspace
+	// test wired that way hits it via Connect's Snapshot, not just a
+	// direct MCPPendingAuth call.
+	if w.app.MCP == nil {
+		return nil
+	}
 	pending := w.app.MCP.PendingAuthMCPs(w.store)
 	result := make([]workspace.MCPPendingAuthServer, len(pending))
 	for i, server := range pending {
