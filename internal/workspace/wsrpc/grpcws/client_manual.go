@@ -12,7 +12,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/wireerr"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -142,22 +141,12 @@ func grpcStatusFromError(ctx context.Context, err error) error {
 	return status.Error(code, we.Message)
 }
 
-// notAvailableOverWire builds the error every S/H/X method below returns:
-// PR 1.1 is the unary transport only -- streams (S) and handles (H) are
-// hand-written in later PRs (1.2, 1.3).
+// notAvailableOverWire builds the error every H/X method below returns:
+// handles (H) are hand-written in a later PR (1.3); streams (S) are all
+// wired up now (AgentRunStream/AgentRunShellCommand in agent.go, Subscribe
+// in subscribe.go).
 func notAvailableOverWire(method string) error {
 	return fmt.Errorf("wsrpc: %s is not available over this transport yet", method)
-}
-
-// AgentRunShellCommand is class S; not available until PR 1.2 wires up
-// server streams.
-func (c *Client) AgentRunShellCommand(context.Context, string, string, int, func(string), bool) (proto.ShellCommandResponse, error) {
-	return proto.ShellCommandResponse{}, notAvailableOverWire("AgentRunShellCommand")
-}
-
-// AgentRunStream is class S; see AgentRunShellCommand.
-func (c *Client) AgentRunStream(context.Context, string, string, workspace.AgentRunOptions) (<-chan workspace.AgentRunEvent, error) {
-	return nil, notAvailableOverWire("AgentRunStream")
 }
 
 // initialReconnectBackoff and maxReconnectBackoff bound

@@ -143,7 +143,8 @@ func WithEventBufferSize(n int) ServerOption {
 }
 
 // NewServer builds a *grpc.Server exposing ws as the root workspace
-// handle (""), the Meta service's Hello, the Events service's Subscribe,
+// handle (""), the Meta service's Hello, the Agent service's
+// AgentRunStream/AgentRunShellCommand, the Events service's Subscribe,
 // and the standard gRPC health service -- everything a Client (or
 // `grpc_health_v1`'s own tooling) needs to talk to this process
 // (CLIENT-SERVER.md, PR 1.1, build step 5; PR 1.2 build steps 1-2). PR 1.3
@@ -170,13 +171,20 @@ func NewServer(ws workspace.Workspace, opts ...ServerOption) (*grpc.Server, func
 
 	s := grpc.NewServer(cfg.grpcOpts...)
 
-	RegisterWorkspaceServer(s, func(ctx context.Context) (workspace.Workspace, error) {
+	// resolveRoot is shared by every service that resolves a handle to a
+	// workspace.Workspace (Workspace itself, and the hand-written Agent
+	// service below): PR 1.2 only ever serves the root handle (""); PR 1.3
+	// adds non-root ones to whatever replaces this closure.
+	resolveRoot := func(ctx context.Context) (workspace.Workspace, error) {
 		handle := handleFromContext(ctx)
 		if handle != "" {
 			return nil, status.Error(codes.NotFound, fmt.Sprintf("wsrpc: no workspace registered for handle %q", handle))
 		}
 		return ws, nil
-	})
+	}
+
+	RegisterWorkspaceServer(s, resolveRoot)
+	s.RegisterService(&agentServiceDesc, &agentServer{resolve: resolveRoot})
 	s.RegisterService(&metaServiceDesc, &metaServer{workingDir: ws.WorkingDir, serverHome: cfg.serverHome})
 
 	rootHub := newEventHub(cfg.eventBufferSize)

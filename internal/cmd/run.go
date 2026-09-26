@@ -175,8 +175,16 @@ func runAgent(
 	}
 
 	stderrTTY := term.IsTerminal(os.Stderr.Fd())
+	// cfg is nil for any ws that doesn't implement ServerConfigReader —
+	// every remote Workspace (grpcws.Client included: ServerConfig
+	// deliberately never crosses the wire, see serverConfig's doc
+	// comment) as well as any future read-only stand-in. Unlike
+	// cfg.ThemeID()/cfg.SpinnerMode(), which are nil-receiver-safe
+	// methods, cfg.Options is a plain field access and needs its own nil
+	// check here, so it doesn't panic on exactly the workspace this
+	// package now also supports.
 	cfg := serverConfig(ws)
-	progress := cfg.Options.Progress == nil || *cfg.Options.Progress
+	progress := cfg == nil || cfg.Options == nil || cfg.Options.Progress == nil || *cfg.Options.Progress
 
 	var spinner *format.Spinner
 	if !hideSpinner && stderrTTY {
