@@ -46,11 +46,12 @@ type cmdDrivingWorkspace struct {
 	workspace.Workspace
 
 	// Config stubs
-	yolo       bool
-	agentReady bool
-	agentBusy  bool
-	agentErr   error
-	agentModel workspace.AgentModel
+	yolo          bool
+	agentReady    bool
+	agentBusy     bool
+	agentErr      error
+	agentModel    workspace.AgentModel
+	worktreeState workspace.WorktreeState
 
 	// Call counters
 	createSessionCalls    int
@@ -642,6 +643,15 @@ func (w *cmdDrivingWorkspace) StartOAuth(context.Context, string, string, bool) 
 	return w.startOAuthResult, nil, w.startOAuthErr
 }
 
+// WorktreeState is a guaranteed Workspace member (see commands.go's
+// command-palette build, which calls it directly rather than through a
+// type assertion since PR 0.7c's review); the zero value (not in a
+// worktree) matches every existing test here, none of which sets
+// worktreeState.
+func (w *cmdDrivingWorkspace) WorktreeState() workspace.WorktreeState {
+	return w.worktreeState
+}
+
 // ---------------------------------------------------------------------------
 // cmdDrivenUI builds a UI over cmdDrivingWorkspace with all caches warm.
 // ---------------------------------------------------------------------------
@@ -657,7 +667,7 @@ func newCmdDrivenUI(t *testing.T, ws *cmdDrivingWorkspace) *UI {
 	t.Helper()
 	on := &atomic.Bool{}
 	on.Store(true)
-	com := common.DefaultCommon(context.Background(), newUpdateGoroutineGuard(t, ws, on))
+	com := common.DefaultCommon(context.Background(), newUpdateGoroutineGuard(t, maybeWireWorkspace(ws), on))
 	m := &UI{
 		com: com,
 		widgets: widgets{

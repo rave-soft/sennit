@@ -156,12 +156,16 @@ func TestUIDoesNotTouchConfigConfig(t *testing.T) {
 	require.Zero(t, violations, "see individual t.Errorf calls above for each violation")
 }
 
-// underlyingNamed unwraps a pointer to reach the *types.Named underneath,
-// the same "Pointer, then Elem" pattern the wire walker in wire_dto_test.go
-// uses for reflect.Type - here for go/types.Type instead.
+// underlyingNamed unwraps a type alias (types.Unalias - common.Workspace is
+// `type Workspace = workspace.FrontendWorkspace`, and this Go toolchain
+// represents that as a *types.Alias distinct from *types.Named, not as
+// the aliased type directly) and then a pointer, to reach the *types.Named
+// underneath - the same "Pointer, then Elem" pattern the wire walker in
+// wire_dto_test.go uses for reflect.Type, here for go/types.Type instead.
 func underlyingNamed(t types.Type) (*types.Named, bool) {
+	t = types.Unalias(t)
 	if ptr, ok := t.(*types.Pointer); ok {
-		t = ptr.Elem()
+		t = types.Unalias(ptr.Elem())
 	}
 	named, ok := t.(*types.Named)
 	return named, ok

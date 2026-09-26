@@ -338,12 +338,17 @@ func TestAppWorkspace_SupportsThreads(t *testing.T) {
 func TestAppWorkspace_CreateListThread(t *testing.T) {
 	aw, _ := newTestThreadAppWorkspace(t)
 	ctx := t.Context()
+	// wireWorkspace: every call in this test goes through the plain U
+	// methods below, with no type assertion back onto *AppWorkspace (unlike
+	// TestAppWorkspace_AttachThread, which unwraps the returned handle and
+	// so is left off the wire job) -- see wiretest_test.go.
+	ws := wireWorkspace(aw)
 
-	threads, err := aw.ListThreads(ctx)
+	threads, err := ws.ListThreads(ctx)
 	require.NoError(t, err)
 	require.Empty(t, threads)
 
-	created, err := aw.CreateThread(ctx, proto.CreateThreadRequest{
+	created, err := ws.CreateThread(ctx, proto.CreateThreadRequest{
 		Name: "test-thread",
 		Goal: "do the thing",
 	})
@@ -352,7 +357,7 @@ func TestAppWorkspace_CreateListThread(t *testing.T) {
 	require.Equal(t, "test-thread", created.Name)
 	require.Equal(t, "do the thing", created.Goal)
 
-	threads, err = aw.ListThreads(ctx)
+	threads, err = ws.ListThreads(ctx)
 	require.NoError(t, err)
 	require.Len(t, threads, 1)
 	require.Equal(t, created.ID, threads[0].ID)

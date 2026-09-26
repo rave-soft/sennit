@@ -112,6 +112,12 @@ var MethodClasses = map[string]Class{
 	"ListSessionHistory":       U,
 	"ListProjectFiles":         U,
 	"AttachProjectFile":        U,
+	// PrepareSessionChanges is U, not C: unlike the LSPController getters
+	// below, nothing calls it synchronously from Update/View -- it only
+	// ever runs inside a tea.Cmd (session.go's refreshModifiedFiles /
+	// sessionLoadResolver.resolve), the same as any other on-demand U
+	// call, so there is no caching requirement to flag with C.
+	"PrepareSessionChanges": U,
 
 	// LSPController. Already called from a tea.Cmd, so the table keeps
 	// these "U" rather than "C" even though they read cached state.
@@ -195,6 +201,11 @@ var MethodClasses = map[string]Class{
 	// WorktreeController.
 	"EnterWorktree": H,
 	"ExitWorktree":  H,
+	// WorktreeState is C: the command palette (internal/ui/dialog/
+	// commands.go) calls it directly while building its item list, the
+	// same way the LSPController/MCP getters above are read straight
+	// from a dialog constructor.
+	"WorktreeState": C,
 
 	// ThreadController.
 	"ListThreads":     U,

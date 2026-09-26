@@ -1,11 +1,13 @@
 package model
 
 import (
+	"context"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/delegations"
 	"github.com/stretchr/testify/require"
 )
@@ -25,8 +27,17 @@ import (
 func TestThreadEventDispatchesOneListThreadsCall(t *testing.T) {
 	t.Parallel()
 
-	r := newTestRoot(t, true)
-	ws := r.com.Workspace.(*rootTestWorkspace)
+	// Built directly rather than through newTestRoot: this test counts
+	// calls on the concrete *rootTestWorkspace, which under
+	// SENNIT_TEST_WIRE=1 sits behind a *wsrpc.Loopback that r.com.Workspace
+	// would type-assert on instead -- an in-process implementation detail
+	// no real wire client could reach either. Keeping a direct reference to
+	// ws (still routed through maybeWireWorkspace, so the call itself
+	// still crosses the codec) is what a real assertion on "one round
+	// trip" has to do once the workspace is remote: count on the stub
+	// underneath, not on whatever decorator sits in front of it.
+	ws := &rootTestWorkspace{supportsThreads: true}
+	r := NewRoot(common.DefaultCommon(context.Background(), maybeWireWorkspace(ws)), "", false, withGOOS("linux"))
 
 	r.main.state = uiChat
 	r.dashboard = delegations.New(r.com, &r.main.threadList)

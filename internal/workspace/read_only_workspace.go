@@ -638,11 +638,11 @@ func (w *readOnlyWorkspace) ExitWorktree(ctx context.Context) (Workspace, func()
 	return nil, nil, w.readOnlyError("ExitWorktree")
 }
 
+// WorktreeState now forwards directly: WorktreeState is a guaranteed
+// Workspace member (PR 0.7c review folded it into WorktreeController), so
+// w.ws is statically known to implement it -- no assertion needed.
 func (w *readOnlyWorkspace) WorktreeState() WorktreeState {
-	if state, ok := w.ws.(interface{ WorktreeState() WorktreeState }); ok {
-		return state.WorktreeState()
-	}
-	return WorktreeState{}
+	return w.ws.WorktreeState()
 }
 
 func (w *readOnlyWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {

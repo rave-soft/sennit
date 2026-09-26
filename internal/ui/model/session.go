@@ -117,7 +117,6 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	generation := m.sess.loadGen
 	ctx := m.com.Context()
 	workspace := m.com.Workspace
-	sessionChanges := m.com.SessionChanges
 	styles := m.com.Styles
 	// Read here, on the Update goroutine, rather than inside the command:
 	// both enterChildSession and exitChildSession adjust the nav stack
@@ -127,13 +126,12 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	owner := m
 	return func() tea.Msg {
 		loader := sessionLoadResolver{
-			ctx:            ctx,
-			workspace:      workspace,
-			sessionChanges: sessionChanges,
-			styles:         styles,
-			config:         workspace.Config(),
-			resumable:      resumable,
-			owner:          owner,
+			ctx:       ctx,
+			workspace: workspace,
+			styles:    styles,
+			config:    workspace.Config(),
+			resumable: resumable,
+			owner:     owner,
 		}
 		return loader.resolve(sessionID, generation)
 	}
@@ -200,11 +198,10 @@ type sessionLoadWorkspace interface {
 }
 
 type sessionLoadResolver struct {
-	ctx            context.Context
-	workspace      sessionLoadWorkspace
-	sessionChanges workspace.SessionChangePreparer
-	styles         *styles.Styles
-	config         *workspace.FrontendConfig
+	ctx       context.Context
+	workspace sessionLoadWorkspace
+	styles    *styles.Styles
+	config    *workspace.FrontendConfig
 	// resumable marks a load the user can go on to type into: a top-level
 	// session, not a sub-agent's transcript they drilled into. Only such a
 	// load restores the session's pinned model, because only such a load
@@ -245,7 +242,7 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 			slog.Debug("Failed to restore the session's model", "session_id", sessionID, "error", err)
 		}
 	}
-	sessionFiles, err := loadModifiedFiles(r.ctx, r.sessionChanges, sessionID)
+	sessionFiles, err := loadModifiedFiles(r.ctx, r.workspace, sessionID)
 	if err != nil {
 		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
@@ -339,6 +336,12 @@ func (m *UI) refreshDescendantCost(sessionID string) tea.Cmd {
 	}
 }
 
+// loadModifiedFiles takes preparer as workspace.SessionChangePreparer
+// rather than the wider workspace.Workspace: PrepareSessionChanges is now
+// a guaranteed member of every real Workspace (see FileServices), so the
+// nil check below is only for the test/zero-value case (a com.Workspace
+// left nil), not a capability probe -- see CLIENT-SERVER.md, PR 0.7c's
+// review, and commands.go's WorktreeState for the matching fix.
 func loadModifiedFiles(ctx context.Context, preparer workspace.SessionChangePreparer, sessionID string) ([]SessionFile, error) {
 	if preparer == nil {
 		return nil, fmt.Errorf("session change preparer is unavailable")
@@ -379,9 +382,9 @@ func (s *sessionState) refreshModifiedFiles(com *common.Common, owner *UI) tea.C
 		return nil
 	}
 	sessionID := s.current.ID
-	ctx, preparer := com.Context(), com.SessionChanges
+	ctx, ws := com.Context(), com.Workspace
 	return func() tea.Msg {
-		files, err := loadModifiedFiles(ctx, preparer, sessionID)
+		files, err := loadModifiedFiles(ctx, ws, sessionID)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}

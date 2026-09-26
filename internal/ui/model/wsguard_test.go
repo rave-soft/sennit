@@ -10,7 +10,7 @@ package model
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -34,6 +34,34 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc"
 )
+
+// wireEnvVar is the CI "wire" job's switch (CLIENT-SERVER.md, "PR 0.7"):
+// when set, this package's guarded harnesses (newCmdDrivenUI,
+// newCmdDrivenGoldenUI, newBusyUI, newTestRoot) route every Workspace call
+// through wsrpc.NewLoopback's JSON codec instead of calling the stub
+// directly, so a type or error that would not survive a real wire hop
+// breaks here in CI instead of only once gRPC exists.
+const wireEnvVar = "SENNIT_TEST_WIRE"
+
+// maybeWireWorkspace wraps ws in wsrpc.NewLoopback when wireEnvVar is set to
+// "1", and returns ws unchanged otherwise.
+//
+// Ordering: every harness that also applies newUpdateGoroutineGuard wraps
+// the *result* of maybeWireWorkspace in the guard, i.e. the guard sits
+// outermost and the loopback innermost (UI -> guard -> loopback -> stub).
+// Putting it the other way round would still let both layers see every
+// call -- neither swallows one -- but it would interleave the loopback's
+// own marshal/unmarshal frames between the UI's call site and g.check's
+// captured stack, which check truncates to 800 bytes; with the guard
+// outermost, check's stack starts at the actual offending caller instead
+// of losing it to codec noise. Keep new guarded harnesses consistent with
+// this order.
+func maybeWireWorkspace(ws workspace.Workspace) workspace.Workspace {
+	if os.Getenv(wireEnvVar) == "1" {
+		return wsrpc.NewLoopback(ws)
+	}
+	return ws
+}
 
 // updateGoroutineGuardedMethods is every U/S/H method in
 // wsrpc.MethodClasses (everything that is not C or X), computed here
@@ -89,13 +117,14 @@ func newUpdateGoroutineGuard(t *testing.T, ws workspace.Workspace, on *atomic.Bo
 // t.Errorf.
 // extraGuardedMethods covers guard methods with no entry in
 // updateGoroutineGuardedMethods because they aren't Workspace methods at
-// all — PrepareSessionChanges is optional (workspace.SessionChangePreparer,
-// resolved by root.go's own type assertion), so it's outside
-// wire_classes_test.go's methodClasses and TestUIGuardMethodsMatchWireClasses'
-// reach. Kept separate so that table stays an exact mirror of the U/S/H set.
-var extraGuardedMethods = map[string]bool{
-	"PrepareSessionChanges": true,
-}
+// all: PrepareSessionChanges used to be one of these (optional
+// workspace.SessionChangePreparer, resolved by root.go's own type
+// assertion) until PR 0.7c's review folded it into Workspace itself
+// (FileServices) as a real, always-guaranteed member -- it is a plain
+// generated-style U method below now, like any other. PrepareSessionChanges
+// is what emptied this map; a future optional capability resolved the same
+// way root.go used to would go back in here.
+var extraGuardedMethods = map[string]bool{}
 
 func (g *updateGoroutineGuard) check(method string) {
 	// Every generated wrapper below must name itself here — this is what
@@ -121,21 +150,9 @@ func (g *updateGoroutineGuard) check(method string) {
 	)
 }
 
-// PrepareSessionChanges implements workspace.SessionChangePreparer,
-// forwarding to the wrapped workspace when it implements the optional
-// interface too. It cannot be part of the generated block below:
-// SessionChangePreparer is not a Workspace method (root.go resolves it
-// with its own type assertion, msg.ws.(workspace.SessionChangePreparer)),
-// so embedding alone would not satisfy it and the assertion would silently
-// see "unsupported" for any guarded workspace, the same way it would for a
-// real gRPC client stub that never implements this local-only interface.
 func (g *updateGoroutineGuard) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {
-	preparer, ok := g.Workspace.(workspace.SessionChangePreparer)
-	if !ok {
-		return nil, fmt.Errorf("workspace does not implement SessionChangePreparer")
-	}
 	g.check("PrepareSessionChanges")
-	return preparer.PrepareSessionChanges(ctx, sessionID)
+	return g.Workspace.PrepareSessionChanges(ctx, sessionID)
 }
 
 // uiGuardFlags maps a *UI built through the guarded test harness back to

@@ -349,6 +349,15 @@ type FileServices interface {
 	// AttachProjectFileUsing and its Err* sentinels for exactly which
 	// error means what.
 	AttachProjectFile(ctx context.Context, sessionID, path string) (message.Attachment, bool, error)
+
+	// SessionChangePreparer is embedded here rather than left an optional
+	// capability resolved by a type assertion the way root.go used to
+	// (`msg.ws.(workspace.SessionChangePreparer)`): that assertion cannot
+	// survive wsrpc.Loopback, and would not survive a remote gRPC client
+	// either (PR 0.7c review). Making PrepareSessionChanges a guaranteed
+	// member of Workspace is what lets callers use it directly instead of
+	// probing for it.
+	SessionChangePreparer
 }
 
 // LSPController starts/stops LSP servers and reports their state and
@@ -787,6 +796,17 @@ type WorktreeState struct {
 type WorktreeController interface {
 	EnterWorktree(ctx context.Context, name string) (Workspace, func(), error)
 	ExitWorktree(ctx context.Context) (Workspace, func(), error)
+	// WorktreeState is class C: the command palette calls it directly
+	// while building its item list (internal/ui/dialog/commands.go), which
+	// used to resolve it with its own type assertion on the concrete
+	// Workspace (`interface{ WorktreeState() WorktreeState }`). That
+	// assertion cannot survive wsrpc.Loopback, and would not survive a
+	// remote gRPC client either (PR 0.7c review, same class as the
+	// SessionChangePreparer finding below) -- see CLIENT-SERVER.md.
+	// Promoting it onto the interface itself is what makes it part of the
+	// wire contract instead of an implementation detail the frontend
+	// happens to be able to see through.
+	WorktreeState() WorktreeState
 }
 
 // ThreadController manages a workspace's threads: parallel agent work

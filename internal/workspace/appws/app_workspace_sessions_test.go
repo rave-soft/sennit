@@ -50,7 +50,10 @@ func TestRenameSession_PreservesConcurrentUsageAndTodos(t *testing.T) {
 	a := &app.App{}
 	a.SetSessionsForTest(sessions)
 	store := configtest.NewStore(t, &config.Config{}, configtest.WithLoadedPaths(t.TempDir()))
-	ws := NewAppWorkspace(a, store)
+	// wireWorkspace: RenameSession below is the only call made through ws;
+	// everything else this test asserts on comes from sessions directly, so
+	// it's a clean candidate for the wire CI job -- see wiretest_test.go.
+	ws := wireWorkspace(NewAppWorkspace(a, store))
 
 	// Confirming the rename in the dialog only ever had staleSnapshot's
 	// title to offer; RenameSession must not carry the rest of that stale

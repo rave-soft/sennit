@@ -57,7 +57,11 @@ func TestSharedCredentialsManager(t *testing.T) {
 	a.SetConfigForTest(store)
 	t.Cleanup(a.ShutdownForTest)
 
-	ws := NewAppWorkspace(a, store)
+	// wireWorkspace: the SetProviderAPIKey call below is the one thing
+	// this test drives through the Workspace interface (mgr itself is
+	// reached directly, not through ws), so it is a clean candidate for
+	// the wire CI job -- see wiretest_test.go.
+	ws := wireWorkspace(NewAppWorkspace(a, store))
 
 	// mgr is obtained exactly the way agent.CoordinatorOptions.Credentials
 	// is populated in production (app.Credentials()); using it directly

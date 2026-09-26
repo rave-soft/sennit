@@ -193,3 +193,12 @@ func wrapHandleWorkspace(ws workspace.Workspace) workspace.Workspace {
 func (l *Loopback) Shutdown() {
 	l.inner.Shutdown()
 }
+
+// PrepareSessionChanges used to need a hand-written forward here: it was
+// an optional capability outside Workspace itself, resolved by a type
+// assertion (root.go's old msg.ws.(workspace.SessionChangePreparer)) that
+// could not survive Loopback -- a real wire defect the wire CI job
+// (SENNIT_TEST_WIRE=1) caught. PR 0.7c's review folded it into
+// FileServices as a guaranteed Workspace member instead (same fix applied
+// to WorktreeState below), so it is class U now and the generator
+// (zz_generated_loopback.go) covers it like any other U method.

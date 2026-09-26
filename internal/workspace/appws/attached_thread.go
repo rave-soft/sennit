@@ -2,7 +2,6 @@ package appws
 
 import (
 	"context"
-	"errors"
 
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -123,12 +122,19 @@ func (w *attachedThreadWorkspace) SubscribeWith(send func(any)) func() {
 	return w.Workspace.SubscribeWith(send)
 }
 
+// PrepareSessionChanges forwards to the wrapped workspace's own
+// implementation.
+//
+// PrepareSessionChanges is now part of workspace.Workspace (previously it
+// was reached only by a type assertion outside the interface, which
+// failed silently for any wrapped workspace that satisfied Workspace
+// without also satisfying the separate, optional
+// workspace.SessionChangePreparer — see PR 0.7c's review), so the
+// embedded field promotes it automatically. This method is spelled out
+// anyway, purely as documentation that the promoted behavior is the
+// intended one here, the same as SubscribeWith above.
 func (w *attachedThreadWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {
-	preparer, ok := w.Workspace.(workspace.SessionChangePreparer)
-	if !ok {
-		return nil, errors.New("session change preparer is unavailable")
-	}
-	return preparer.PrepareSessionChanges(ctx, sessionID)
+	return w.Workspace.PrepareSessionChanges(ctx, sessionID)
 }
 
 // ApplySessionModel is refused for the thread's own session: a thread runs

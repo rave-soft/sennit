@@ -1,13 +1,16 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -392,4 +395,63 @@ func TestCommandPalette_FilterAndRunSummarize(t *testing.T) {
 	require.Zero(t, ws.agentSummarizeCalls, "AgentSummarize must not run synchronously")
 	runCmdTree(m, confirmCmd, nil)
 	require.Equal(t, 1, ws.agentSummarizeCalls)
+}
+
+// TestCommandPalette_OffersExitWorktreeWhenActive pins PR 0.7c's review
+// finding: internal/ui/dialog/commands.go used to discover WorktreeState
+// by asserting com.Workspace against an anonymous interface
+// (`interface{ WorktreeState() workspace.WorktreeState }`), which is
+// exactly the kind of probe wsrpc.Loopback cannot answer unless it
+// happens to have that method too (and a real gRPC client stub in a
+// later PR never would). Run this package's suite with
+// SENNIT_TEST_WIRE=1 to exercise it through the loopback: with the old
+// assertion and no WorktreeState on Loopback, the probe silently reports
+// "unsupported" and the palette falls back to offering "worktree" (enter)
+// even while already in one. WorktreeState is now a guaranteed member of
+// workspace.Workspace (WorktreeController), so commands.go calls it
+// directly and this holds regardless of what wraps the workspace.
+func TestCommandPalette_OffersExitWorktreeWhenActive(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{agentReady: true, worktreeState: workspace.WorktreeState{Active: true}}
+	// Built like newCmdDrivenGoldenUI, but deliberately without the
+	// update-goroutine guard: the guard is test-only scaffolding that
+	// would itself hide a promoted-but-not-declared method the same way
+	// Loopback would, which defeats this test's one purpose -- isolating
+	// what SENNIT_TEST_WIRE alone changes. maybeWireWorkspace is the only
+	// wrapping applied, so a normal run drives cmdDrivingWorkspace
+	// directly and a wire run drives it through wsrpc.Loopback.
+	m := New(common.DefaultCommon(context.Background(), maybeWireWorkspace(ws)), "", false, withGOOS("linux"))
+	m.state = uiChat
+	m.focus = uiFocusEditor
+	m.lay.width = 140
+	m.lay.height = 45
+	m.sess.current = &session.Session{ID: "s1"}
+	m.editor.placeholder = newEditorPlaceholderStateWithValues("Ready!", "Working!")
+	m.editor.textarea.Placeholder = m.editor.placeholder.ready
+	warmCmdDrivenCaches(m)
+
+	cmd := m.openCommandsDialog()
+	require.True(t, m.dialog.ContainsDialog(dialog.CommandsID))
+	if cmd != nil {
+		runCmdTree(m, cmd, nil)
+	}
+
+	// Filter down to the one item, the same way
+	// TestCommandPalette_FilterAndRunSummarize narrows to "summarize" --
+	// the full list is taller than the dialog's viewport, so an unfiltered
+	// render can't tell "present but scrolled past" from "not offered".
+	for _, r := range "exit worktree" {
+		_, keyCmd := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		runCmdTree(m, keyCmd, nil)
+	}
+
+	// Assert on the item's description, not its title: the filter input
+	// box itself echoes "exit worktree" back onto the screen the moment
+	// it's typed, regardless of whether anything actually matched, so
+	// checking for that exact substring would pass vacuously even with
+	// no matching item in the list.
+	rendered := ansi.Strip(string(renderCmdDrivenUI(m)))
+	require.Contains(t, rendered, "return to the main worktree",
+		"in an active worktree the palette must offer to exit it")
 }

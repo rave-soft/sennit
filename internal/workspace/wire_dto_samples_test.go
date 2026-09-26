@@ -906,6 +906,26 @@ var sampleOAuthStartResult = OAuthStartResult{
 	ExistingLoginFailure:   "previous login expired",
 }
 
+// sampleSessionFile and sampleWorktreeState are the two new entries
+// PR 0.7c's review added: PrepareSessionChanges and WorktreeState were
+// folded into Workspace itself (FileServices, WorktreeController), so
+// their result types are now reachable from collectWireTypes's walk.
+var sampleSessionFile = SessionFile{
+	FirstVersion:  sampleHistoryFile,
+	LatestVersion: history.File{ID: "hist-2", SessionID: "sess-1", Path: "internal/foo.go", Content: "package foo\n", Version: 3, CreatedAt: sampleTime.Unix(), UpdatedAt: sampleTime.Unix()},
+	Additions:     4,
+	Deletions:     1,
+	Uncommitted:   true,
+	GitKnown:      true,
+}
+
+var sampleWorktreeState = WorktreeState{
+	Name:   "session-abc12345",
+	Path:   "/repo/.worktrees/session-abc12345",
+	Phase:  "stable",
+	Active: true,
+}
+
 // wireSamples maps each type collectWireTypes finds to a fully populated
 // sample value. See wire_dto_test.go's TestWireTypesRoundTripJSON for how
 // this is checked (every exported field non-zero unless exempted above,
@@ -1021,6 +1041,8 @@ var wireSamples = map[reflect.Type]any{
 	reflectTypeOf[ModelRefreshResult]():            sampleModelRefreshResult,
 	reflectTypeOf[OAuthCompletion]():               sampleOAuthCompletion,
 	reflectTypeOf[OAuthStartResult]():              sampleOAuthStartResult,
+	reflectTypeOf[SessionFile]():                   sampleSessionFile,
+	reflectTypeOf[WorktreeState]():                 sampleWorktreeState,
 
 	reflectTypeOf[time.Time](): sampleTime,
 }

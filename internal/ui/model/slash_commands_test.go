@@ -36,6 +36,13 @@ func (w slashCommandsTestWorkspace) KnownProviders() []catwalk.Provider {
 	return providerruntime.Providers(w.cfg.Options != nil && w.cfg.Options.DisableDefaultProviders)
 }
 
+// WorktreeState: the command palette this file drives calls it directly
+// (see commands.go); the zero value (not in a worktree) is what every
+// test here needs.
+func (w slashCommandsTestWorkspace) WorktreeState() workspace.WorktreeState {
+	return workspace.WorktreeState{}
+}
+
 // SkillStates, BuiltinSkills: the skills panel reads these; no test
 // here has a catalog beyond what the binary ships.
 func (w slashCommandsTestWorkspace) SkillStates() []*skills.SkillState { return nil }

@@ -769,6 +769,17 @@ type PermissionSkipRequestsResponse struct {
 	Result bool `json:"result"`
 }
 
+// PrepareSessionChangesRequest is the request DTO for workspace.Workspace.PrepareSessionChanges.
+type PrepareSessionChangesRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// PrepareSessionChangesResponse is the response DTO for workspace.Workspace.PrepareSessionChanges.
+type PrepareSessionChangesResponse struct {
+	Result []workspace.SessionFile `json:"result"`
+	Err    *wireerr.Error          `json:"err,omitempty"`
+}
+
 // ProjectNeedsInitializationRequest is the request DTO for workspace.Workspace.ProjectNeedsInitialization.
 type ProjectNeedsInitializationRequest struct{}
 
@@ -1125,4 +1136,12 @@ type WorkingDirRequest struct{}
 // WorkingDirResponse is the response DTO for workspace.Workspace.WorkingDir.
 type WorkingDirResponse struct {
 	Result string `json:"result"`
+}
+
+// WorktreeStateRequest is the request DTO for workspace.Workspace.WorktreeState.
+type WorktreeStateRequest struct{}
+
+// WorktreeStateResponse is the response DTO for workspace.Workspace.WorktreeState.
+type WorktreeStateResponse struct {
+	Result workspace.WorktreeState `json:"result"`
 }

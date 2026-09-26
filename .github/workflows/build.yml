@@ -44,6 +44,22 @@ jobs:
           cache: true
       - run: go test -race -failfast ./...
 
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Runs the same UI/cmd/workspace suites as the default job, but with
+      # every test harness's Workspace wrapped in wsrpc.NewLoopback
+      # (CLIENT-SERVER.md, "PR 0.7"): every call, result, error and event
+      # crosses the JSON wire codec in-process before reaching the real
+      # implementation. A type or error that would not survive a real
+      # gRPC hop breaks here, in CI, well before that transport exists.
+      - run: SENNIT_TEST_WIRE=1 go test -count=1 ./internal/ui/... ./internal/cmd/... ./internal/workspace/...
+
   lint:
     runs-on: ubuntu-latest
     steps:

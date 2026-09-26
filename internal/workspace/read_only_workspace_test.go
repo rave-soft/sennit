@@ -777,6 +777,8 @@ func (s *stubWorkspace) EnterWorktree(context.Context, string) (Workspace, func(
 func (s *stubWorkspace) ExitWorktree(context.Context) (Workspace, func(), error) {
 	return nil, nil, nil
 }
+
+func (s *stubWorkspace) WorktreeState() WorktreeState                            { return WorktreeState{} }
 func (s *stubWorkspace) SupportsThreads() bool                                   { return false }
 func (s *stubWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) { return nil, nil }
 func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {

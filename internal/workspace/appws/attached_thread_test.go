@@ -49,9 +49,6 @@ func (s *subscribeStubWorkspace) SubscribeWith(send func(any)) func() {
 	return func() { s.stopped = true }
 }
 
-// plainStubWorkspace is a Workspace with no subscription of its own.
-type plainStubWorkspace struct{ workspace.Workspace }
-
 func TestAttachedThreadWorkspace_PreparesSessionChanges(t *testing.T) {
 	inner := &sessionChangeStubWorkspace{}
 	ws := &attachedThreadWorkspace{Workspace: inner, sessionID: "thread-session"}
@@ -62,12 +59,17 @@ func TestAttachedThreadWorkspace_PreparesSessionChanges(t *testing.T) {
 	require.Equal(t, []string{"thread-session"}, inner.sessions)
 }
 
-func TestAttachedThreadWorkspace_SessionChangesUnavailable(t *testing.T) {
-	ws := &attachedThreadWorkspace{Workspace: &plainStubWorkspace{}, sessionID: "thread-session"}
-
-	_, err := ws.PrepareSessionChanges(t.Context(), "thread-session")
-	require.EqualError(t, err, "session change preparer is unavailable")
-}
+// TestAttachedThreadWorkspace_SessionChangesUnavailable used to pin the
+// fallback for a wrapped workspace that did not implement the separate,
+// optional workspace.SessionChangePreparer interface (plainStubWorkspace,
+// embedding a nil workspace.Workspace, was exactly such a workspace).
+// PR 0.7c's review folded PrepareSessionChanges into workspace.Workspace
+// itself (FileServices), so every Workspace now statically implements it
+// -- there is no longer a workspace this fallback could ever see, and
+// plainStubWorkspace's nil embedded field would instead panic on the
+// promoted call, same as any other unimplemented method on a minimal
+// stub. Removed along with plainStubWorkspace, which existed only for
+// this test.
 
 type sessionChangeStubWorkspace struct {
 	workspace.Workspace

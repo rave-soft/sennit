@@ -547,7 +547,6 @@ func (r *Root) handleWorktreeTransfer(msg worktreeTransferMsg) (tea.Model, tea.C
 		previous.stop()
 	}
 	r.com.Workspace = msg.ws
-	r.com.SessionChanges, _ = msg.ws.(workspace.SessionChangePreparer)
 	r.main.com = r.com
 	r.main.wsCache.invalidateBusyCaches()
 	name := msg.name

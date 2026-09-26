@@ -49,22 +49,32 @@ func (p *recordingSessionChangePreparer) PrepareSessionChanges(_ context.Context
 	return []workspace.SessionFile{{FirstVersion: history.File{Path: sessionID}}}, nil
 }
 
-func TestDefaultCommonPreservesAttachedSessionChangePreparer(t *testing.T) {
+// TestDefaultCommonPreservesAttachedSessionChangePreparer and
+// TestDefaultCommonAttachedSessionChangesUnavailable used to pin
+// DefaultCommon's own type assertion (ws.(workspace.SessionChangePreparer))
+// that populated a separate Common.SessionChanges field. PR 0.7c's review
+// found that assertion could not survive wsrpc.Loopback or a real gRPC
+// client (same class as commands.go's WorktreeState finding), so
+// PrepareSessionChanges is now a guaranteed member of workspace.Workspace
+// itself (FileServices) and DefaultCommon no longer probes for it -- a
+// caller reaches it directly through com.Workspace. What these tests
+// actually need to prove -- that Common carries whatever
+// PrepareSessionChanges implementation the wrapped workspace has, forward
+// and unavailable cases alike -- is exercised directly below instead.
+func TestDefaultCommonWorkspacePreparesSessionChanges(t *testing.T) {
 	preparer := &recordingSessionChangePreparer{}
 	attached := &attachedSessionChangesWorkspace{inner: preparer}
 
 	com := DefaultCommon(t.Context(), attached)
-	require.NotNil(t, com.SessionChanges)
-	files, err := com.SessionChanges.PrepareSessionChanges(t.Context(), "thread-session")
+	files, err := com.Workspace.PrepareSessionChanges(t.Context(), "thread-session")
 	require.NoError(t, err)
 	require.Equal(t, []workspace.SessionFile{{FirstVersion: history.File{Path: "thread-session"}}}, files)
 	require.Equal(t, []string{"thread-session"}, preparer.sessions)
 }
 
-func TestDefaultCommonAttachedSessionChangesUnavailable(t *testing.T) {
+func TestDefaultCommonWorkspaceSessionChangesUnavailable(t *testing.T) {
 	com := DefaultCommon(t.Context(), &attachedSessionChangesWorkspace{})
 
-	require.NotNil(t, com.SessionChanges)
-	_, err := com.SessionChanges.PrepareSessionChanges(t.Context(), "thread-session")
+	_, err := com.Workspace.PrepareSessionChanges(t.Context(), "thread-session")
 	require.EqualError(t, err, "session change preparer is unavailable")
 }

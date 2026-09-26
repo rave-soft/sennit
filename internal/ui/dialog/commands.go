@@ -367,9 +367,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 	}
 
 	if hasSession && com.Workspace != nil {
-		if stateful, ok := com.Workspace.(interface {
-			WorktreeState() workspace.WorktreeState
-		}); ok && stateful.WorktreeState().Active {
+		if com.Workspace.WorktreeState().Active {
 			commands = append(commands, NewCommandItem(sty, "exit_worktree", "exit worktree", "", ActionExitWorktree{}).WithDescription("return to the main worktree"))
 		} else {
 			name := "session"

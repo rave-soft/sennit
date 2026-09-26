@@ -233,9 +233,13 @@ func (w *countingWorkspace) resetCounters() {
 // "s1", enough state for Update to run end to end. Takes the
 // workspace.Workspace interface (not *countingWorkspace) so callers can
 // pass a type that embeds *countingWorkspace but overrides specific
-// methods (e.g. AgentRun in agent_run_accept_test.go).
+// methods (e.g. AgentRun in agent_run_accept_test.go). ws is wrapped
+// through maybeWireWorkspace (wsguard_test.go) so the CI "wire" job
+// exercises every test built through this constructor over the JSON wire
+// codec too; the stub still sees and counts every call, since the
+// loopback only round-trips arguments and results on the way through.
 func newBusyUI(ws workspace.Workspace) *UI {
-	com := common.DefaultCommon(context.Background(), ws)
+	com := common.DefaultCommon(context.Background(), maybeWireWorkspace(ws))
 	return &UI{
 		com: com,
 		widgets: widgets{

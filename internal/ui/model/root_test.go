@@ -106,11 +106,13 @@ func (w *neutralSubscriberWorkspace) emit(msg any) {
 
 // newTestRoot builds a Root over rootTestWorkspace, configured so New()
 // lands in uiLanding/uiFocusEditor where the global key switch (and
-// therefore the threads key) is reachable.
+// therefore the threads key) is reachable. The workspace is wrapped
+// through maybeWireWorkspace (wsguard_test.go) so the CI "wire" job runs
+// Root's own tests over the JSON wire codec as well.
 func newTestRoot(t *testing.T, supportsThreads bool) *Root {
 	t.Helper()
 	ws := &rootTestWorkspace{supportsThreads: supportsThreads}
-	com := common.DefaultCommon(context.Background(), ws)
+	com := common.DefaultCommon(context.Background(), maybeWireWorkspace(ws))
 	// Pin the platform so the ctrl+ key this test drives matches what
 	// configuredKeyMap actually binds, regardless of the host OS running
 	// the suite (see keys.go's darwin ctrl+ -> super+ rewrite).

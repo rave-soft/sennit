@@ -76,7 +76,14 @@ func TestToggleYoloMode_SetSkipRequestsError(t *testing.T) {
 	cmd := m.toggleYoloMode()
 	require.NotNil(t, cmd)
 	result := yoloResult(t, cmd)
-	require.ErrorIs(t, result.Err, setErr)
+	// Under SENNIT_TEST_WIRE=1, ws is wrapped in wsrpc.Loopback, and
+	// setErr is an opaque error with no wire code (workspace.EncodeError
+	// falls back to code "internal"): DecodeError on the far side
+	// reconstructs it as a fresh errors.New(msg), so errors.Is against the
+	// original sentinel value legitimately cannot succeed -- a real wire
+	// hop would lose the same identity. Compare the message instead; that
+	// survives every mode this test runs in.
+	require.EqualError(t, result.Err, setErr.Error())
 	require.True(t, result.Enabled, "toggling from off attempts to turn yolo on")
 
 	cmds, _ := m.updateSettings(result, nil)

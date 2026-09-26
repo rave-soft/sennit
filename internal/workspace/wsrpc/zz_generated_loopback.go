@@ -2553,6 +2553,42 @@ func (l *Loopback) PermissionSkipRequests() (res0 bool) {
 	return
 }
 
+func (l *Loopback) PrepareSessionChanges(ctx context.Context, sessionID string) (res0 []workspace.SessionFile, err error) {
+	wsrpcReq := PrepareSessionChangesRequest{
+		SessionID: sessionID,
+	}
+	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
+	if wsrpcErr1 != nil {
+		err = fmt.Errorf("wsrpc: marshaling PrepareSessionChanges request: %w", wsrpcErr1)
+		return
+	}
+	var wsrpcDecodedReq PrepareSessionChangesRequest
+	wsrpcErr2 := json.Unmarshal(wsrpcReqJSON, &wsrpcDecodedReq)
+	if wsrpcErr2 != nil {
+		err = fmt.Errorf("wsrpc: decoding PrepareSessionChanges request: %w", wsrpcErr2)
+		return
+	}
+	wsrpcOut0, wsrpcOut1 := l.inner.PrepareSessionChanges(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcResp := PrepareSessionChangesResponse{
+		Result: wsrpcOut0,
+		Err:    workspace.EncodeError(wsrpcOut1),
+	}
+	wsrpcRespJSON, wsrpcErr3 := json.Marshal(wsrpcResp)
+	if wsrpcErr3 != nil {
+		err = fmt.Errorf("wsrpc: marshaling PrepareSessionChanges response: %w", wsrpcErr3)
+		return
+	}
+	var wsrpcDecodedResp PrepareSessionChangesResponse
+	wsrpcErr4 := json.Unmarshal(wsrpcRespJSON, &wsrpcDecodedResp)
+	if wsrpcErr4 != nil {
+		err = fmt.Errorf("wsrpc: decoding PrepareSessionChanges response: %w", wsrpcErr4)
+		return
+	}
+	res0 = wsrpcDecodedResp.Result
+	err = workspace.DecodeError(wsrpcDecodedResp.Err)
+	return
+}
+
 func (l *Loopback) ProjectNeedsInitialization() (res0 bool, err error) {
 	wsrpcReq := ProjectNeedsInitializationRequest{}
 	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
@@ -3719,6 +3755,34 @@ func (l *Loopback) WorkingDir() (res0 string) {
 	wsrpcErr4 := json.Unmarshal(wsrpcRespJSON, &wsrpcDecodedResp)
 	if wsrpcErr4 != nil {
 		panic(fmt.Sprintf("wsrpc: decoding WorkingDir response: %v", wsrpcErr4))
+	}
+	res0 = wsrpcDecodedResp.Result
+	return
+}
+
+func (l *Loopback) WorktreeState() (res0 workspace.WorktreeState) {
+	wsrpcReq := WorktreeStateRequest{}
+	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
+	if wsrpcErr1 != nil {
+		panic(fmt.Sprintf("wsrpc: marshaling WorktreeState request: %v", wsrpcErr1))
+	}
+	var wsrpcDecodedReq WorktreeStateRequest
+	wsrpcErr2 := json.Unmarshal(wsrpcReqJSON, &wsrpcDecodedReq)
+	if wsrpcErr2 != nil {
+		panic(fmt.Sprintf("wsrpc: decoding WorktreeState request: %v", wsrpcErr2))
+	}
+	wsrpcOut0 := l.inner.WorktreeState()
+	wsrpcResp := WorktreeStateResponse{
+		Result: wsrpcOut0,
+	}
+	wsrpcRespJSON, wsrpcErr3 := json.Marshal(wsrpcResp)
+	if wsrpcErr3 != nil {
+		panic(fmt.Sprintf("wsrpc: marshaling WorktreeState response: %v", wsrpcErr3))
+	}
+	var wsrpcDecodedResp WorktreeStateResponse
+	wsrpcErr4 := json.Unmarshal(wsrpcRespJSON, &wsrpcDecodedResp)
+	if wsrpcErr4 != nil {
+		panic(fmt.Sprintf("wsrpc: decoding WorktreeState response: %v", wsrpcErr4))
 	}
 	res0 = wsrpcDecodedResp.Result
 	return

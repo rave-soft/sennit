@@ -29,9 +29,8 @@ type Workspace = workspace.FrontendWorkspace
 
 // Common defines common UI options and configurations.
 type Common struct {
-	Workspace      Workspace
-	SessionChanges workspace.SessionChangePreparer
-	Styles         *styles.Styles
+	Workspace Workspace
+	Styles    *styles.Styles
 	// Prefs is where the UI reads and writes its own display preferences
 	// (theme, compact mode, keybindings, and the rest of the fields
 	// uiprefs.Prefs carries) instead of going through Workspace.Config().
@@ -83,13 +82,11 @@ func (c *Common) Context() context.Context {
 func DefaultCommon(ctx context.Context, ws Workspace, prefs ...uiprefs.Store) *Common {
 	store := firstPrefsStore(prefs)
 	s := styles.Theme(ThemeID(store)).WithSpinner(SpinnerMode(store))
-	sessionChanges, _ := ws.(workspace.SessionChangePreparer)
 	return &Common{
-		Workspace:      ws,
-		SessionChanges: sessionChanges,
-		Styles:         &s,
-		Prefs:          store,
-		Ctx:            ctx,
+		Workspace: ws,
+		Styles:    &s,
+		Prefs:     store,
+		Ctx:       ctx,
 	}
 }
 
