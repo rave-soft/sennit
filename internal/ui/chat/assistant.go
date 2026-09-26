@@ -320,6 +320,11 @@ func (a *AssistantMessageItem) ID() string {
 	return a.message.ID
 }
 
+// UpdatedAt implements Timestamped.
+func (a *AssistantMessageItem) UpdatedAt() int64 {
+	return a.message.UpdatedAt
+}
+
 // RawRender implements [MessageItem]. It computes the section cache keys
 // itself; renderRaw is the shared body so Render below can instead reuse
 // the keys it already computed for its own cache check (see renderRaw's

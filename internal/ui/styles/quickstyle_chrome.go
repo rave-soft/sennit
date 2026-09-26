@@ -54,6 +54,7 @@ func quickStyleHeader(s *Styles, o quickStyleOpts, base, muted, subtle lipgloss.
 	s.Header.LogoGradCanvas = lipgloss.NewStyle()
 	s.Header.LogoGradFromColor = o.secondary
 	s.Header.LogoGradToColor = o.primary
+	s.Header.ConnectionLost = base.Foreground(o.error)
 
 	s.CompactDetails.Title = base
 	s.CompactDetails.View = base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)

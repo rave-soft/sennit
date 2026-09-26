@@ -61,6 +61,37 @@ type MessageItem interface {
 	Identifiable
 }
 
+// Timestamped is implemented by a MessageItem that wraps a
+// [message.Message] directly (assistant and user items), exposing its
+// UpdatedAt. A session reload's freshly built items and the chat's
+// currently displayed ones are independent object graphs —
+// list.Versioned's per-item version counter only orders mutations of the
+// *same* instance, so it says nothing about which of two instances for the
+// same message ID is newer. UpdatedAt is the one field both sides share
+// that is actually comparable across that reload; see
+// applySessionMessageItems's merge for where this guards against a reload
+// clobbering a live update it raced.
+//
+// UpdatedAt is second granularity (SQLite's strftime('%s','now')), but a
+// streaming assistant message updates many times per second, so two
+// instances for the same message can tie on UpdatedAt while one is
+// meaningfully ahead of the other -- typically the live item just applied
+// the turn's Finish part in the same second a reload, fetched slightly
+// earlier, resolved with the pre-Finish content. The merge's tie-break is
+// therefore: prefer whichever of the two is Finished; if both or neither
+// are, prefer the existing (live) item, since live events arrive in order
+// and a still-streaming message gets healed by its own next live event,
+// while a reload has no such follow-up. Only a strictly newer UpdatedAt
+// overrides that in either direction.
+//
+// The tie-break also needs Finished, but that's already part of
+// MessageItem (via list.Item) -- every Timestamped is also a MessageItem,
+// so the merge calls it straight off the item instead of repeating it
+// here.
+type Timestamped interface {
+	UpdatedAt() int64
+}
+
 // HighlightableMessageItem is a message item that supports highlighting.
 type HighlightableMessageItem interface {
 	MessageItem

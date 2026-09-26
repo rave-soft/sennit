@@ -330,6 +330,11 @@ func (m *UserMessageItem) ID() string {
 	return m.message.ID
 }
 
+// UpdatedAt implements Timestamped.
+func (m *UserMessageItem) UpdatedAt() int64 {
+	return m.message.UpdatedAt
+}
+
 func (m *UserMessageItem) renderAttachments(width int) string {
 	var attachments []message.Attachment
 	for _, at := range m.message.BinaryContent() {

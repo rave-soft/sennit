@@ -106,6 +106,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.lspErrorCount(),
 		m.activeThreadBadgeCount(),
 		bindingKey(m.keyMap.Chat.Details),
+		m.conn.lost,
 	)
 }
 

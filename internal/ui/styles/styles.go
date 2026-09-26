@@ -52,6 +52,8 @@ const (
 
 	LSPErrorIcon   string = "E"
 	LSPWarningIcon string = "W"
+
+	ConnectionLostIcon string = "⚠"
 )
 
 const (
@@ -83,6 +85,11 @@ type Styles struct {
 		LogoGradCanvas    lipgloss.Style // Canvas for the compact "SENNIT" gradient
 		LogoGradFromColor color.Color    // "SENNIT" wordmark gradient start
 		LogoGradToColor   color.Color    // "SENNIT" wordmark gradient end
+
+		// ConnectionLost styles the persistent "reconnecting" indicator
+		// shown while the remote workspace's event stream is down (PR
+		// 1.4c, CLIENT-SERVER.md).
+		ConnectionLost lipgloss.Style
 	}
 
 	CompactDetails struct {

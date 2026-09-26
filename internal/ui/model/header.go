@@ -67,6 +67,7 @@ func (h *header) drawHeader(
 	lspErrorCount int,
 	activeThreads int,
 	detailsShortcut string,
+	connectionLost bool,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
@@ -97,6 +98,7 @@ func (h *header) drawHeader(
 		detailsOpen,
 		availDetailWidth,
 		detailsShortcut,
+		connectionLost,
 	)
 
 	remainingWidth := width -
@@ -129,10 +131,20 @@ func renderHeaderDetails(
 	detailsOpen bool,
 	availWidth int,
 	detailsShortcut string,
+	connectionLost bool,
 ) string {
 	t := com.Styles
 
 	var parts []string
+
+	// connectionLost is the remote workspace's event stream telling this UI
+	// it lost its connection to the sennit server and is retrying (PR 1.4c,
+	// CLIENT-SERVER.md). It leads the details so it is never truncated off
+	// by a crowded header, and stays up until Recovered/Resync clears it —
+	// unlike Status's TTL-based banner, this is not a one-shot notice.
+	if connectionLost {
+		parts = append(parts, t.Header.ConnectionLost.Render(styles.ConnectionLostIcon+" reconnecting"))
+	}
 
 	if lspErrorCount > 0 {
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))

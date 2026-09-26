@@ -35,8 +35,53 @@ func sessionMessageItems(sty *styles.Styles, cfg *workspace.FrontendConfig, msgs
 	return items, lastUserMessageTime
 }
 
+// mergeReloadedMessageItems keeps whichever version of each message item is
+// newer: the one this reload just built, or the one already displayed in
+// m.chat for the same message ID. A reload only needs this when it raced a
+// live update to the same session that landed first — the two run
+// concurrently across a Resync (see updateConnection's resyncCmds and
+// Timestamped's own doc comment for the full tie-break rule and why
+// UpdatedAt, not the item's list.Versioned counter, is the field that is
+// actually comparable across the two independently built item graphs).
+//
+// A strictly newer UpdatedAt always wins, in either direction. On a tie
+// (UpdatedAt is second-granularity, and a streaming message updates many
+// times a second) Finished breaks it: the finished item wins, since an
+// unfinished one still has a live event coming that will fix it, while a
+// reload does not. If both or neither are finished, the existing (live)
+// item wins — live events are already in order, so there is nothing a
+// same-second reload could know that a matching live item doesn't.
+//
+// Every other item passes through unchanged: one that doesn't wrap a
+// message.Message directly (a tool call), or whose ID the chat doesn't
+// already have.
+func (m *UI) mergeReloadedMessageItems(items []chat.MessageItem) []chat.MessageItem {
+	for i, item := range items {
+		reloaded, ok := item.(chat.Timestamped)
+		if !ok {
+			continue
+		}
+		existing := m.chat.MessageItem(item.ID())
+		if existing == nil {
+			continue
+		}
+		current, ok := existing.(chat.Timestamped)
+		if !ok {
+			continue
+		}
+		switch {
+		case current.UpdatedAt() > reloaded.UpdatedAt():
+			items[i] = existing
+		case current.UpdatedAt() == reloaded.UpdatedAt() && (existing.Finished() || !item.Finished()):
+			items[i] = existing
+		}
+	}
+	return items
+}
+
 func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageTime int64) tea.Cmd {
 	var cmds []tea.Cmd
+	items = m.mergeReloadedMessageItems(items)
 	m.sess.lastUserMessageTime = lastUserMessageTime
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually

@@ -189,6 +189,10 @@ type UI struct {
 	// counts. See lsp.go.
 	lsp lspState
 
+	// conn tracks the health of this UI's remote workspace event stream
+	// (CLIENT-SERVER.md, PR 1.4c). See update_connection.go.
+	conn connectionState
+
 	// integrationsState holds MCP/skill/custom-command state loaded by
 	// updateIntegrations. See update_integrations.go.
 	integrationsState
@@ -719,6 +723,9 @@ func buildUpdateGroups() map[reflect.Type]updateGroupFn {
 	register((*UI).updateStatus,
 		reflect.TypeFor[util.InfoMsg](), reflect.TypeFor[util.ClearStatusMsg](),
 		reflect.TypeFor[pubsub.Event[workspace.AgentNotification]](), reflect.TypeFor[cancelTimerExpiredMsg]())
+
+	register((*UI).updateConnection,
+		reflect.TypeFor[pubsub.Event[workspace.ConnectionEvent]]())
 
 	register((*UI).updateThreads,
 		reflect.TypeFor[pubsub.Event[proto.Thread]](), reflect.TypeFor[delegations.LoadedMsg](),
