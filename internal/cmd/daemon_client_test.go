@@ -54,6 +54,7 @@ var daemonTestTimeout = raceWait(30 * time.Second)
 func writeGlobalConfig(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dir) })
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
 	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(dir, "data"))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(mockGlobalConfig), 0o644))
@@ -207,6 +208,7 @@ func TestSetupDaemonWorkspace_CleanupDoesNotStopDaemon(t *testing.T) {
 	command := helperCommand(t)
 
 	projectDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, projectDir) })
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
 
@@ -221,7 +223,18 @@ func TestSetupDaemonWorkspace_CleanupDoesNotStopDaemon(t *testing.T) {
 	conn2, err := supervisor.Dial(socketPath)
 	require.NoError(t, err)
 	defer conn2.Close()
-	t.Cleanup(func() { dialAndRequestShutdown(t, ctx, projectDir) })
+	// context.Background(), not ctx: ctx's own defer cancel() above runs
+	// as part of this test function returning, before t.Cleanup callbacks
+	// run -- a cleanup built on ctx calls ResolveSocketPath (which shells
+	// out to git) over an already-canceled context, failing immediately
+	// and returning before ever asking the daemon to shut down: the
+	// daemon is silently left running. On Linux that orphan is harmless
+	// enough to go unnoticed (TempDir's own cleanup still succeeds with
+	// its handles held open); on Windows those same open handles are
+	// exactly what make TempDir's cleanup fail with "used by another
+	// process" -- the same bug the other dialAndRequestShutdown cleanups
+	// in this package avoid by using context.Background().
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), projectDir) })
 
 	client2 := grpcws.NewClient(conn2)
 	defer client2.Shutdown()
