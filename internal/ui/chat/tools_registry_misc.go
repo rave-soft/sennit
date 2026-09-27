@@ -12,6 +12,6 @@ func registerMiscToolRenderers() {
 	registerToolRenderer(tools.TodosToolName, &TodosToolRenderContext{})
 	registerToolRenderer(tools.QuestionToolName, &QuestionToolRenderContext{})
 	for _, name := range []string{tools.GitStatusToolName, tools.GitDiffToolName, tools.GitLogToolName} {
-		registerToolRenderer(name, &simpleToolRenderer{title: name, params: func(string) []string { return nil }, summary: func(*ToolRenderOpts) string { return "completed" }})
+		registerToolRenderer(name, &simpleToolRenderer{title: name, params: func(*ToolRenderOpts) []string { return nil }, summary: func(*ToolRenderOpts) string { return "completed" }})
 	}
 }

@@ -27,8 +27,10 @@ import (
 // this rule.
 type simpleToolRenderer struct {
 	title string
-	// params decodes opts.ToolCall.Input into the header's param list.
-	params func(input string) []string
+	// params decodes opts.ToolCall.Input into the header's param list. It
+	// takes the full opts (not just the input string) so a param that is
+	// itself a server-side path can shorten it against opts.ServerHome.
+	params func(opts *ToolRenderOpts) []string
 	// summary computes the " · outcome" suffix from a landed result.
 	// Only called once opts.HasEmptyResult() is false.
 	summary func(opts *ToolRenderOpts) string
@@ -40,7 +42,7 @@ func (r *simpleToolRenderer) RenderTool(sty *styles.Styles, width int, opts *Too
 		return pendingTool(sty, r.title, opts)
 	}
 
-	header := toolHeader(sty, opts.Status, r.title, width, opts, r.params(opts.ToolCall.Input)...)
+	header := toolHeader(sty, opts.Status, r.title, width, opts, r.params(opts)...)
 	if opts.Compact {
 		return header
 	}

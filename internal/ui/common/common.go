@@ -46,6 +46,14 @@ type Common struct {
 	// program rather than outliving it. Use Context() to read it, which
 	// tolerates a zero-value Common (tests construct it without Ctx).
 	Ctx context.Context
+	// RemoteHost is "user@host" when this session was opened with
+	// `--remote`/`attach ssh://...` (CLIENT-SERVER.md "PR 3.2"), set by
+	// internal/cmd/remote.go. Empty in every other mode (in-process,
+	// local daemon), including a remote session's own child threads and
+	// worktrees, which reuse the parent Common's value rather than
+	// recomputing it. The header shows it next to the working directory
+	// so a remote connection is never mistaken for a local one.
+	RemoteHost string
 }
 
 // Config returns the pure-data configuration associated with this [Common] instance.

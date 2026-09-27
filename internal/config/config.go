@@ -12,6 +12,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/oauth"
 	providerstate "github.com/rave-soft/sennit/internal/providers/state"
@@ -931,6 +932,16 @@ func (c *Config) MCPServerNames() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// ServerHomeDir implements chat.CustomAgentConfig for callers (internal/cmd)
+// that render tool output straight from *Config, with no Workspace/gRPC
+// boundary in between. That path never runs against a remote daemon, so
+// the process's own home is always the right one to shorten against -
+// unlike workspace.FrontendConfig.ServerHome, which names the machine the
+// tool actually ran on and can differ from this process's home.
+func (c *Config) ServerHomeDir() string {
+	return home.Dir()
 }
 
 // GetProviderForModel returns the provider configured for c.Model.

@@ -76,6 +76,7 @@ var frontendConfigMethodArgs = map[string][]any{
 	"AgentOverride":             {"reviewer"},
 	"HasCoderAgent":             {},
 	"MCPServerNames":            {},
+	"ServerHomeDir":             {},
 	"Provider":                  {"openai"},
 	"IsDockerMCPEnabled":        {},
 	"ProviderAuth":              {"openai"},

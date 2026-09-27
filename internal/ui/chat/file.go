@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -57,10 +57,10 @@ func (v *ReadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	var params tools.ReadParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
-	file := fsext.PrettyPath(params.FilePath)
+	file := home.ShortWithHome(opts.ServerHome, params.FilePath)
 	toolParams := []string{file}
 	if params.Limit != 0 {
 		toolParams = append(toolParams, "limit", fmt.Sprintf("%d", params.Limit))
@@ -161,10 +161,10 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	var params tools.WriteParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
-	file := fsext.PrettyPath(params.FilePath)
+	file := home.ShortWithHome(opts.ServerHome, params.FilePath)
 	header := toolHeader(sty, opts.Status, "Write", width, opts, file)
 	if opts.Compact {
 		return header
@@ -181,7 +181,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// exception to "no body" — it's a short, non-click-driven summary of
 	// what went wrong, not a content preview.
 	if opts.Result.IsError {
-		errLine := toolErrorContent(sty, opts.Result, width)
+		errLine := toolErrorContent(sty, opts.Result, opts.ServerHome, width)
 		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
@@ -238,10 +238,10 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	var params tools.EditParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
-	file := fsext.PrettyPath(params.FilePath)
+	file := home.ShortWithHome(opts.ServerHome, params.FilePath)
 	header := toolHeader(sty, opts.Status, "Edit", width, opts, file)
 	if opts.Compact {
 		return header
@@ -266,7 +266,7 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// On error (e.g. denied permission), the inline error tail is the one
 	// exception to "no body" — see the Write tool above.
 	if opts.Result.IsError {
-		errLine := toolErrorContent(sty, opts.Result, width)
+		errLine := toolErrorContent(sty, opts.Result, opts.ServerHome, width)
 		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
@@ -318,10 +318,10 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 
 	var params tools.MultiEditParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
-	file := fsext.PrettyPath(params.FilePath)
+	file := home.ShortWithHome(opts.ServerHome, params.FilePath)
 	toolParams := []string{file}
 	if len(params.Edits) > 0 {
 		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
@@ -366,7 +366,7 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	// On error (e.g. denied permission), the inline error tail is the one
 	// exception to "no body" — see the Write tool above.
 	if opts.Result.IsError {
-		errLine := toolErrorContent(sty, opts.Result, width)
+		errLine := toolErrorContent(sty, opts.Result, opts.ServerHome, width)
 		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
@@ -392,12 +392,12 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 
 	var params tools.DownloadParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	toolParams := []string{params.URL}
 	if params.FilePath != "" {
-		toolParams = append(toolParams, "file_path", fsext.PrettyPath(params.FilePath))
+		toolParams = append(toolParams, "file_path", home.ShortWithHome(opts.ServerHome, params.FilePath))
 	}
 	if params.Timeout != 0 {
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))

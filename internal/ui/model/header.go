@@ -184,6 +184,13 @@ func renderHeaderDetails(
 	cwd := fsext.DirTrim(home.ShortWithHome(com.Config().ServerHome, com.Workspace.WorkingDir()), dirTrimLimit)
 	cwd = t.Header.WorkingDir.Render(cwd)
 
+	// RemoteHost is only set once this session reaches its workspace over
+	// SSH (CLIENT-SERVER.md "PR 3.2") -- every other mode leaves it empty,
+	// so the header looks exactly as it did before RemoteHost existed.
+	if com.RemoteHost != "" {
+		cwd = t.Header.RemoteHost.Render(com.RemoteHost) + t.Header.Separator.Render(" ") + cwd
+	}
+
 	result := cwd + metadata
 	return ansi.Truncate(result, max(0, availWidth), "…")
 }

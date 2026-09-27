@@ -1305,6 +1305,57 @@ func TestLoad_AppleTerminalDefaultSurvivesReload(t *testing.T) {
 		"Apple Terminal transparent default should still be true after reload")
 }
 
+// TestLoadData_AppleTerminalDefaultIsClientSide pins CLIENT-SERVER.md's "PR
+// 0.5b" client-side-defaults note for the Apple Terminal transparency
+// default: config.LoadData is what internal/cmd's setupDaemonWorkspace
+// calls, in the CLIENT process, to read UI preferences for local-daemon
+// mode (the daemon itself never computes this - TERM_PROGRAM names the
+// terminal the person is sitting at, which is only ever the client's).
+// isAppleTerminal() reads os.Getenv in whatever process calls Load/
+// LoadData/LoadGlobalData, so the assertion here is just that the
+// environment of the calling test process drives the default - proving
+// the local-daemon UI-prefs path (LoadData) computes it exactly the
+// way the in-process path (Load) already did before PR 0.5b existed.
+func TestLoadData_AppleTerminalDefaultIsClientSide(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "Apple_Terminal")
+
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	store, err := LoadData(dir, dir, false)
+	require.NoError(t, err)
+
+	cfg := store.Config()
+	require.NotNil(t, cfg.Options.TUI.Transparent)
+	require.True(t, *cfg.Options.TUI.Transparent,
+		"LoadData should enable transparent mode under Apple Terminal, exactly like Load")
+}
+
+// TestLoadGlobalData_AppleTerminalDefaultIsClientSide is
+// TestLoadData_AppleTerminalDefaultIsClientSide's counterpart for
+// LoadGlobalData, the entry point internal/cmd's connectRemoteWorkspace
+// calls to read UI preferences for `--remote`/`attach ssh://...` (remote
+// daemon) mode. LoadGlobalData reads no project layer and passes
+// home.Dir() as its own workingDir, but still runs applyEnvironmentDefaults
+// in the calling (client) process, so the terminal-detection default must
+// come out the same as every other mode's.
+func TestLoadGlobalData_AppleTerminalDefaultIsClientSide(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "Apple_Terminal")
+
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	store, err := LoadGlobalData(dir, false)
+	require.NoError(t, err)
+
+	cfg := store.Config()
+	require.NotNil(t, cfg.Options.TUI.Transparent)
+	require.True(t, *cfg.Options.TUI.Transparent,
+		"LoadGlobalData should enable transparent mode under Apple Terminal, exactly like Load")
+}
+
 // TestReloadFromDisk_PublishedConfigNotMutated verifies the immutability
 // invariant: reloadFromDisk must not mutate a previously published Config
 // snapshot. It adds a markdown agent on disk between Load and Reload so

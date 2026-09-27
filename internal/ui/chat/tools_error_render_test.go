@@ -22,7 +22,7 @@ func TestToolErrorExpectedRefusalIsWarn(t *testing.T) {
 		"cannot edit /a/b/c.go: it changed on disk after you read it (modified X, last read Y).",
 		"cannot edit /a/b/c.go at lines 3-9: that part of the file has not been read in this session.",
 	} {
-		out := ansi.Strip(toolErrorContent(&sty, &message.ToolResult{Content: content}, 80))
+		out := ansi.Strip(toolErrorContent(&sty, &message.ToolResult{Content: content}, "", 80))
 		require.Contains(t, out, "WARN", content)
 		require.NotContains(t, out, "ERROR", content)
 	}
@@ -32,7 +32,7 @@ func TestToolErrorExpectedRefusalIsWarn(t *testing.T) {
 // actually failures.
 func TestToolErrorGenuineFailureStaysError(t *testing.T) {
 	sty := styles.SennitDark()
-	out := ansi.Strip(toolErrorContent(&sty, &message.ToolResult{Content: "old_string not found in file"}, 80))
+	out := ansi.Strip(toolErrorContent(&sty, &message.ToolResult{Content: "old_string not found in file"}, "", 80))
 	require.Contains(t, out, "ERROR")
 }
 
@@ -45,7 +45,7 @@ func TestToolErrorKeepsReasonVisible(t *testing.T) {
 	path := filepath.Join(home.Dir(), "Projects", "some", "deeply", "nested", "place", "tools_render.go")
 	content := "cannot edit " + path + ": it has not been read in this session. Read " + path + ", then retry this edit."
 
-	out := ansi.Strip(toolErrorContent(&sty, &message.ToolResult{Content: content}, 80))
+	out := ansi.Strip(toolErrorContent(&sty, &message.ToolResult{Content: content}, home.Dir(), 80))
 	require.Contains(t, out, "tools_render.go", "the file name identifies the file")
 	require.Contains(t, out, "has not been read", "the reason must survive truncation")
 	require.NotContains(t, out, home.Dir(), "the home prefix is shortened away")

@@ -31,7 +31,7 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	var params tools.FetchParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	toolParams := []string{params.URL}
@@ -73,7 +73,7 @@ func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 
 	var params tools.WebFetchParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	toolParams := []string{params.URL}
@@ -108,7 +108,7 @@ func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 
 	var params tools.WebSearchParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	toolParams := []string{params.Query}

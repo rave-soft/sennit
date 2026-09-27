@@ -66,3 +66,14 @@ func (t Target) String() string {
 	}
 	return "ssh://" + host + t.Path
 }
+
+// HostString renders "user@host", for the UI header naming which machine
+// a remote connection reaches -- unlike String(), it carries no scheme,
+// port or path, since those don't belong on a header line next to a
+// working directory.
+func (t Target) HostString() string {
+	if t.User != "" {
+		return t.User + "@" + t.Host
+	}
+	return t.Host
+}

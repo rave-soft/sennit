@@ -90,6 +90,12 @@ type Styles struct {
 		// shown while the remote workspace's event stream is down (PR
 		// 1.4c, CLIENT-SERVER.md).
 		ConnectionLost lipgloss.Style
+
+		// RemoteHost styles the "user@host" label shown next to the
+		// working directory when this session is connected to a remote
+		// daemon over SSH (CLIENT-SERVER.md "PR 3.2"). Empty in every
+		// other mode, so nothing renders with this style then.
+		RemoteHost lipgloss.Style
 	}
 
 	CompactDetails struct {

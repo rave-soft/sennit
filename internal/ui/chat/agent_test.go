@@ -894,6 +894,8 @@ func (c stubAgentConfig) AgentOverride(name string) (string, string, bool) {
 
 func (c stubAgentConfig) MCPServerNames() []string { return c.mcpServers }
 
+func (c stubAgentConfig) ServerHomeDir() string { return "" }
+
 // TestAgentToolMessageItem_IdentityFollowsStreamedInput is the regression
 // test for a delegation block stuck on the wrong name. The identity moved
 // from the tool name into the call's subagent_type, and internal/ui/model

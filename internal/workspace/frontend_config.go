@@ -377,6 +377,15 @@ func (c *FrontendConfig) HasCoderAgent() bool {
 	return ok
 }
 
+// ServerHomeDir implements chat.CustomAgentConfig. See the ServerHome
+// field's doc comment for what it shortens.
+func (c *FrontendConfig) ServerHomeDir() string {
+	if c == nil {
+		return ""
+	}
+	return c.ServerHome
+}
+
 // MCPServerNames returns the names of every configured MCP server,
 // disabled ones included. Mirrors config.Config.MCPServerNames.
 func (c *FrontendConfig) MCPServerNames() []string {

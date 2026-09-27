@@ -3,7 +3,7 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -33,7 +33,7 @@ func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	var params tools.GlobParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	toolParams := []string{params.Pattern}
@@ -80,7 +80,7 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// inputs.
 	var params tools.RipgrepParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	toolParams := []string{params.Pattern}
@@ -132,14 +132,14 @@ func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *To
 
 	var params tools.LSParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	path := params.Path
 	if path == "" {
 		path = "."
 	}
-	path = fsext.PrettyPath(path)
+	path = home.ShortWithHome(opts.ServerHome, path)
 
 	header := toolHeader(sty, opts.Status, "List", width, opts, path)
 	if opts.Compact {

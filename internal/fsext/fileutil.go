@@ -13,7 +13,6 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/brand"
-	"github.com/rave-soft/sennit/internal/home"
 )
 
 // commonIgnoredDirNames is the single source of truth for directory names
@@ -176,10 +175,6 @@ func ShouldExcludeFile(rootPath, filePath string) bool {
 	isDir := err == nil && info.IsDir()
 	return NewDirectoryLister(rootPath).
 		shouldIgnore(filePath, nil, isDir)
-}
-
-func PrettyPath(path string) string {
-	return home.Short(path)
 }
 
 func DirTrim(pwd string, lim int) string {

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/diff"
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -42,7 +42,7 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 		return pendingTool(sty, title, opts)
 	}
 
-	file := fsext.PrettyPath(params.FilePath)
+	file := home.ShortWithHome(opts.ServerHome, params.FilePath)
 	header := toolHeader(sty, opts.Status, title, width, opts, params.Symbol, file)
 	if opts.Compact {
 		return header
@@ -68,7 +68,7 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 
 	// On error, the inline error tail is the one exception to "no body".
 	if opts.Result.IsError {
-		errLine := toolErrorContent(sty, opts.Result, width)
+		errLine := toolErrorContent(sty, opts.Result, opts.ServerHome, width)
 		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 

@@ -856,6 +856,9 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	// worktree), whose config differs from the display prefs the user
 	// picked. See CLIENT-SERVER.md "PR 0.5b".
 	com := common.DefaultCommon(r.com.Context(), msg.ws, r.com.Prefs)
+	// Same connection as the parent, so it names the same remote host (or
+	// none) rather than recomputing it — see Common.RemoteHost's doc.
+	com.RemoteHost = r.com.RemoteHost
 	childUI := New(com, msg.sessionID, false, WithEmbedded(), WithBreadcrumbRoot(msg.name))
 
 	// SubscribeWith is a second, independently stoppable subscription,

@@ -49,6 +49,12 @@ type ToolMessageItem interface {
 	SetMessageID(id string)
 	SetStatus(status ToolStatus)
 	Status() ToolStatus
+	// SetServerHome records the home directory of the machine the tool
+	// ran on, so renderers can shorten the server-side paths it reports
+	// (see ToolRenderOpts.ServerHome). Called once by NewToolMessageItem;
+	// every concrete item embeds *baseToolMessageItem, which implements
+	// this.
+	SetServerHome(home string)
 }
 
 // ToolResultReporter is implemented by tool items that can say whether
@@ -98,6 +104,12 @@ type ToolRenderOpts struct {
 	Expanded bool
 	// Hovered reports that the pointer is over the expandable tool item.
 	Hovered bool
+	// ServerHome is the home directory of the machine the tool actually
+	// ran on, for shortening the server-side absolute paths tool calls
+	// carry (params, results, error text). Empty when unknown, in which
+	// case shortening falls back to the path unchanged - see
+	// home.ShortWithHome.
+	ServerHome string
 }
 
 // IsPending returns true if the tool call is still pending (not finished, no
@@ -170,6 +182,9 @@ type baseToolMessageItem struct {
 	// spinningFunc allows tools to override the default spinning logic.
 	// If nil, uses the default: !toolCall.Finished && !canceled.
 	spinningFunc SpinningFunc
+	// serverHome is the home directory of the machine this tool call
+	// actually ran on. See ToolRenderOpts.ServerHome.
+	serverHome string
 
 	sty  *styles.Styles
 	anim *spin.Anim
@@ -254,6 +269,11 @@ type CustomAgentConfig interface {
 	// real boundary rather than at the first underscore. See
 	// proto.SplitMCPToolName (imported here as tools).
 	MCPServerNames() []string
+	// ServerHomeDir is the home directory of the machine the tool actually
+	// ran on (workspace.FrontendConfig.ServerHome), used to shorten the
+	// server-side absolute paths tool calls carry. See
+	// internal/ui/common.PrettyServerPath and CLIENT-SERVER.md's "PR 3.2".
+	ServerHomeDir() string
 }
 
 // NewToolMessageItem creates a new [ToolMessageItem] based on the tool call name.
@@ -296,6 +316,9 @@ func NewToolMessageItem(
 		}
 	}
 	item.SetMessageID(messageID)
+	if cfg != nil {
+		item.SetServerHome(cfg.ServerHomeDir())
+	}
 	return item
 }
 

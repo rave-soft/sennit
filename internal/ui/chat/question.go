@@ -22,7 +22,7 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 
 	var params tools.QuestionParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, opts.ServerHome, width)
 	}
 
 	headerText := questionSummary(params)

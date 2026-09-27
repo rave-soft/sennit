@@ -49,7 +49,7 @@ func runInteractiveDaemon(cmd *cobra.Command, cwd, sessionID string, continueLas
 	}
 	defer cleanup()
 
-	return runDaemonTUI(cmd, client, prefs, sessionID, continueLast)
+	return runDaemonTUI(cmd, client, prefs, sessionID, continueLast, "")
 }
 
 // runInteractiveRemote is runInteractiveDaemon's remote counterpart
@@ -69,15 +69,18 @@ func runInteractiveRemote(cmd *cobra.Command, target transport.Target, sessionID
 	}
 	defer cleanup()
 
-	return runDaemonTUI(cmd, client, prefs, sessionID, continueLast)
+	return runDaemonTUI(cmd, client, prefs, sessionID, continueLast, target.HostString())
 }
 
 // runDaemonTUI drives the TUI against an already-connected daemon client
 // -- the tail end of runInteractiveDaemon, factored out so `sennit
 // attach` (which connects without ever being allowed to spawn a daemon,
 // see supervisor.ProbeRunning) can reach the same TUI loop without
-// duplicating it.
-func runDaemonTUI(cmd *cobra.Command, client *grpcws.Client, prefs uiprefs.Store, sessionID string, continueLast bool) error {
+// duplicating it. remoteHost is "user@host" when client reaches a daemon
+// over SSH (runInteractiveRemote), empty for a local daemon (
+// runInteractiveDaemon, attachCmd's local path) -- it becomes
+// Common.RemoteHost, which the header renders next to the working dir.
+func runDaemonTUI(cmd *cobra.Command, client *grpcws.Client, prefs uiprefs.Store, sessionID string, continueLast bool, remoteHost string) error {
 	ctx := cmd.Context()
 
 	if sessionID != "" {
@@ -92,6 +95,7 @@ func runDaemonTUI(cmd *cobra.Command, client *grpcws.Client, prefs uiprefs.Store
 	defer stopPprof()
 
 	com := common.DefaultCommon(ctx, client, prefs)
+	com.RemoteHost = remoteHost
 	model := ui.NewRoot(com, sessionID, continueLast)
 
 	inputFilter := ui.NewFilter()

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/diff"
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
@@ -78,13 +78,13 @@ func (t *baseToolMessageItem) formatReadResultForCopy() string {
 // formatDiffResultForCopy renders the shared diff-with-header body used by
 // formatEditResultForCopy and formatMultiEditResultForCopy, once metadata
 // and params have been decoded into their common fields.
-func formatDiffResultForCopy(oldContent, newContent, filePath string) string {
+func formatDiffResultForCopy(oldContent, newContent, filePath, serverHome string) string {
 	var result strings.Builder
 
 	if oldContent != "" || newContent != "" {
 		fileName := filePath
 		if fileName != "" {
-			fileName = fsext.PrettyPath(fileName)
+			fileName = home.ShortWithHome(serverHome, fileName)
 		}
 		diffContent, additions, removals := diff.GenerateDiff(oldContent, newContent, fileName)
 
@@ -117,7 +117,7 @@ func (t *baseToolMessageItem) formatEditResultForCopy() string {
 		params = tools.EditParams{}
 	}
 
-	return formatDiffResultForCopy(meta.OldContent, meta.NewContent, params.FilePath)
+	return formatDiffResultForCopy(meta.OldContent, meta.NewContent, params.FilePath, t.serverHome)
 }
 
 // formatMultiEditResultForCopy formats multi-edit tool results for clipboard.
@@ -140,7 +140,7 @@ func (t *baseToolMessageItem) formatMultiEditResultForCopy() string {
 		params = tools.MultiEditParams{}
 	}
 
-	return formatDiffResultForCopy(meta.OldContent, meta.NewContent, params.FilePath)
+	return formatDiffResultForCopy(meta.OldContent, meta.NewContent, params.FilePath, t.serverHome)
 }
 
 // formatWriteResultForCopy formats write tool results for clipboard.
@@ -157,7 +157,7 @@ func (t *baseToolMessageItem) formatWriteResultForCopy() string {
 	lang := langForCopyFile(params.FilePath)
 
 	var result strings.Builder
-	fmt.Fprintf(&result, "File: %s\n", fsext.PrettyPath(params.FilePath))
+	fmt.Fprintf(&result, "File: %s\n", home.ShortWithHome(t.serverHome, params.FilePath))
 	if lang != "" {
 		fmt.Fprintf(&result, "```%s\n", lang)
 	} else {

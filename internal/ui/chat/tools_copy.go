@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
@@ -70,7 +70,7 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		var params tools.ReadParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
-			parts = append(parts, fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath)))
+			parts = append(parts, fmt.Sprintf("**File:** %s", home.ShortWithHome(t.serverHome, params.FilePath)))
 			if params.Limit > 0 {
 				parts = append(parts, fmt.Sprintf("**Limit:** %d", params.Limit))
 			}
@@ -82,20 +82,20 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 	case tools.EditToolName:
 		var params tools.EditParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			return fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath))
+			return fmt.Sprintf("**File:** %s", home.ShortWithHome(t.serverHome, params.FilePath))
 		}
 	case tools.MultiEditToolName:
 		var params tools.MultiEditParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
-			parts = append(parts, fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath)))
+			parts = append(parts, fmt.Sprintf("**File:** %s", home.ShortWithHome(t.serverHome, params.FilePath)))
 			parts = append(parts, fmt.Sprintf("**Edits:** %d", len(params.Edits)))
 			return strings.Join(parts, "\n")
 		}
 	case tools.WriteToolName:
 		var params tools.WriteParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			return fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath))
+			return fmt.Sprintf("**File:** %s", home.ShortWithHome(t.serverHome, params.FilePath))
 		}
 	case tools.FetchToolName:
 		var params tools.FetchParams
@@ -160,14 +160,14 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 			if path == "" {
 				path = "."
 			}
-			return fmt.Sprintf("**Path:** %s", fsext.PrettyPath(path))
+			return fmt.Sprintf("**Path:** %s", home.ShortWithHome(t.serverHome, path))
 		}
 	case tools.DownloadToolName:
 		var params tools.DownloadParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
-			parts = append(parts, fmt.Sprintf("**File Path:** %s", fsext.PrettyPath(params.FilePath)))
+			parts = append(parts, fmt.Sprintf("**File Path:** %s", home.ShortWithHome(t.serverHome, params.FilePath)))
 			if params.Timeout > 0 {
 				parts = append(parts, fmt.Sprintf("**Timeout:** %s", (time.Duration(params.Timeout)*time.Second).String()))
 			}

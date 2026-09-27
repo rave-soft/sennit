@@ -1,7 +1,7 @@
 package chat
 
 import (
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
@@ -28,8 +28,8 @@ func registerLSPToolRenderers() {
 
 var definitionToolRenderer = simpleToolRenderer{
 	title: "Find Definition",
-	params: func(input string) []string {
-		p := decodeParams[tools.DefinitionParams](input)
+	params: func(opts *ToolRenderOpts) []string {
+		p := decodeParams[tools.DefinitionParams](opts.ToolCall.Input)
 		return []string{p.Symbol}
 	},
 	// Prefer the syntax-highlighted code metadata's line count; fall back
@@ -46,11 +46,11 @@ var definitionToolRenderer = simpleToolRenderer{
 
 var referencesToolRenderer = simpleToolRenderer{
 	title: "Find References",
-	params: func(input string) []string {
-		p := decodeParams[tools.ReferencesParams](input)
+	params: func(opts *ToolRenderOpts) []string {
+		p := decodeParams[tools.ReferencesParams](opts.ToolCall.Input)
 		params := []string{p.Symbol}
 		if p.Path != "" {
-			params = append(params, "path", fsext.PrettyPath(p.Path))
+			params = append(params, "path", home.ShortWithHome(opts.ServerHome, p.Path))
 		}
 		return params
 	},
@@ -59,8 +59,8 @@ var referencesToolRenderer = simpleToolRenderer{
 
 var symbolsToolRenderer = simpleToolRenderer{
 	title: "List Symbols",
-	params: func(input string) []string {
-		p := decodeParams[tools.SymbolsParams](input)
+	params: func(opts *ToolRenderOpts) []string {
+		p := decodeParams[tools.SymbolsParams](opts.ToolCall.Input)
 		return []string{p.FilePath}
 	},
 	summary: contentLineCountSummary,
@@ -68,11 +68,11 @@ var symbolsToolRenderer = simpleToolRenderer{
 
 var renameToolRenderer = simpleToolRenderer{
 	title: "Rename Symbol",
-	params: func(input string) []string {
-		p := decodeParams[tools.RenameParams](input)
+	params: func(opts *ToolRenderOpts) []string {
+		p := decodeParams[tools.RenameParams](opts.ToolCall.Input)
 		params := []string{p.Symbol + " → " + p.NewName}
 		if p.Path != "" {
-			params = append(params, "path", fsext.PrettyPath(p.Path))
+			params = append(params, "path", home.ShortWithHome(opts.ServerHome, p.Path))
 		}
 		return params
 	},
@@ -81,8 +81,8 @@ var renameToolRenderer = simpleToolRenderer{
 
 var callHierarchyToolRenderer = simpleToolRenderer{
 	title: "Call Hierarchy",
-	params: func(input string) []string {
-		p := decodeParams[tools.CallHierarchyParams](input)
+	params: func(opts *ToolRenderOpts) []string {
+		p := decodeParams[tools.CallHierarchyParams](opts.ToolCall.Input)
 		direction := "incoming"
 		if p.Direction == "outgoing" {
 			direction = "outgoing"
@@ -94,20 +94,20 @@ var callHierarchyToolRenderer = simpleToolRenderer{
 
 var diagnosticsToolRenderer = simpleToolRenderer{
 	title: "Diagnostics",
-	params: func(input string) []string {
-		p := decodeParams[tools.DiagnosticsParams](input)
+	params: func(opts *ToolRenderOpts) []string {
+		p := decodeParams[tools.DiagnosticsParams](opts.ToolCall.Input)
 		if p.FilePath == "" {
 			return []string{"project"}
 		}
-		return []string{fsext.PrettyPath(p.FilePath)}
+		return []string{home.ShortWithHome(opts.ServerHome, p.FilePath)}
 	},
 	summary: contentLineCountSummary,
 }
 
 var lspRestartToolRenderer = simpleToolRenderer{
 	title: "Restart LSP",
-	params: func(input string) []string {
-		p := decodeParams[tools.LSPRestartParams](input)
+	params: func(opts *ToolRenderOpts) []string {
+		p := decodeParams[tools.LSPRestartParams](opts.ToolCall.Input)
 		if p.Name == "" {
 			return nil
 		}

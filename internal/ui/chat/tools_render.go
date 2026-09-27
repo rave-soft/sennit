@@ -7,7 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/spin"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
@@ -72,7 +72,7 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	var msg string
 	switch opts.Status {
 	case ToolStatusError:
-		msg = toolErrorContent(sty, opts.Result, width)
+		msg = toolErrorContent(sty, opts.Result, opts.ServerHome, width)
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
 	case ToolStatusAwaitingPermission:
@@ -110,16 +110,18 @@ func isExpectedToolRefusal(content string) bool {
 
 // shortenPathsToFit fits a one-line error message into width by shrinking the
 // file paths inside it rather than cutting the sentence off at the right.
-// Paths are home-shortened the way tool headers show them, then the longest
-// one is elided from the head — "cannot edit …/chat/tools_render.go: it has
-// not been read" says what happened, where "cannot edit /home/user/Proj…"
-// says nothing at all. Truncation still happens afterwards if the sentence
+// Paths are home-shortened the way tool headers show them — against
+// serverHome, the machine the tool actually ran on, not this process's own
+// home (see ToolRenderOpts.ServerHome) — then the longest one is elided
+// from the head — "cannot edit …/chat/tools_render.go: it has not been
+// read" says what happened, where "cannot edit /home/user/Proj…" says
+// nothing at all. Truncation still happens afterwards if the sentence
 // alone overflows; this only keeps the paths from eating the whole budget.
-func shortenPathsToFit(msg string, width int) string {
+func shortenPathsToFit(msg, serverHome string, width int) string {
 	fields := strings.Split(msg, " ")
 	for i, f := range fields {
 		if presentation.IsLikelyPath(f) {
-			fields[i] = fsext.PrettyPath(f)
+			fields[i] = home.ShortWithHome(serverHome, f)
 		}
 	}
 	for {
@@ -153,7 +155,7 @@ func shortenPathsToFit(msg string, width int) string {
 }
 
 // toolErrorContent formats an error message with an ERROR or WARN tag.
-func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int) string {
+func toolErrorContent(sty *styles.Styles, result *message.ToolResult, serverHome string, width int) string {
 	if result == nil {
 		return ""
 	}
@@ -165,7 +167,7 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 		msgStyle = sty.Tool.WarnMessage
 	}
 	tagWidth := lipgloss.Width(tag)
-	errContent = shortenPathsToFit(errContent, width-tagWidth-3)
+	errContent = shortenPathsToFit(errContent, serverHome, width-tagWidth-3)
 	errContent = ansi.Truncate(errContent, width-tagWidth-3, "…")
 	return fmt.Sprintf("%s %s", tag, msgStyle.Render(errContent))
 }

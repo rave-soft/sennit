@@ -22,6 +22,16 @@ func (t *baseToolMessageItem) SetCompact(compact bool) {
 	t.Bump()
 }
 
+// SetServerHome implements [ToolMessageItem]. See the serverHome field.
+func (t *baseToolMessageItem) SetServerHome(home string) {
+	if t.serverHome == home {
+		return
+	}
+	t.serverHome = home
+	t.clearCache()
+	t.Bump()
+}
+
 // Hidden implements [list.Hideable].
 func (t *baseToolMessageItem) Hidden() bool { return t.hiddenWhilePanelled }
 
@@ -90,13 +100,14 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	if !ok || t.isSpinning() {
 		t.syncAnimLabel()
 		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
-			ToolCall: t.toolCall,
-			Result:   t.result,
-			Anim:     t.anim,
-			Compact:  t.isCompact,
-			Status:   t.computeStatus(),
-			Expanded: t.expanded,
-			Hovered:  t.hovered,
+			ToolCall:   t.toolCall,
+			Result:     t.result,
+			Anim:       t.anim,
+			Compact:    t.isCompact,
+			Status:     t.computeStatus(),
+			Expanded:   t.expanded,
+			Hovered:    t.hovered,
+			ServerHome: t.serverHome,
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.

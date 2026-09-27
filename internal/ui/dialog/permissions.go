@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/stringext"
@@ -225,6 +225,27 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 	}
 
 	return p
+}
+
+// prettyPath shortens a path the permission request carries. These paths
+// are always the server's - the machine the tool actually ran (or would
+// run) on - not this process's own, so they are shortened against
+// p.com.Config().ServerHome rather than fsext.PrettyPath's client $HOME.
+// See CLIENT-SERVER.md's "PR 3.2".
+//
+// Config() panics on a zero-value Common (Workspace unset), and
+// (*workspace.FrontendConfig)(nil).ServerHome panics too (it's a plain
+// field access, not a nil-safe method) - tests build the dialog directly
+// without a workspace, or with a stub whose Config() returns nil, so guard
+// both the same way knownMCPServerNames and Context() already do.
+func (p *Permissions) prettyPath(path string) string {
+	if p.com == nil || p.com.Workspace == nil {
+		return path
+	}
+	if cfg := p.com.Config(); cfg != nil {
+		return home.ShortWithHome(cfg.ServerHome, path)
+	}
+	return path
 }
 
 // Calculate usable content width (dialog border + horizontal padding).
@@ -578,7 +599,7 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		proto.DownloadToolName, proto.LSToolName:
 		// These tools show their own File/Directory line below.
 	default:
-		lines = append(lines, p.renderKeyValue("Path", fsext.PrettyPath(p.permission.Path), contentWidth))
+		lines = append(lines, p.renderKeyValue("Path", p.prettyPath(p.permission.Path), contentWidth))
 	}
 
 	// Add tool-specific header info.
@@ -590,7 +611,7 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	case proto.DownloadToolName:
 		if params, ok := p.permission.Params.(proto.DownloadPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
-			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
+			lines = append(lines, p.renderKeyValue("File", p.prettyPath(params.FilePath), contentWidth))
 		}
 	case proto.EditToolName, proto.WriteToolName, proto.MultiEditToolName, proto.ReadToolName, proto.ReplaceSymbolToolName:
 		var filePath string
@@ -607,11 +628,11 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			filePath = params.FilePath
 		}
 		if filePath != "" {
-			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(filePath), contentWidth))
+			lines = append(lines, p.renderKeyValue("File", p.prettyPath(filePath), contentWidth))
 		}
 	case proto.LSToolName:
 		if params, ok := p.permission.Params.(proto.LSPermissionsParams); ok {
-			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
+			lines = append(lines, p.renderKeyValue("Directory", p.prettyPath(params.Path), contentWidth))
 		}
 	}
 
@@ -756,8 +777,8 @@ func (p *Permissions) renderDiff(filePath, oldContent, newContent string, conten
 	// non-wrapped renderer, which does honour XOffset, and scrolling back
 	// to 0 restores wrapping.
 	formatter := common.DiffFormatter(p.com.Styles).
-		Before(fsext.PrettyPath(filePath), oldContent).
-		After(fsext.PrettyPath(filePath), newContent).
+		Before(p.prettyPath(filePath), oldContent).
+		After(p.prettyPath(filePath), newContent).
 		XOffset(p.diffXOffset).
 		Width(contentWidth).
 		WrapLines(p.diffXOffset == 0)
@@ -782,7 +803,7 @@ func (p *Permissions) renderDownloadContent(width int) string {
 		return ""
 	}
 
-	content := fmt.Sprintf("URL: %s\nFile: %s", params.URL, fsext.PrettyPath(params.FilePath))
+	content := fmt.Sprintf("URL: %s\nFile: %s", params.URL, p.prettyPath(params.FilePath))
 	if params.Timeout > 0 {
 		content += fmt.Sprintf("\nTimeout: %ds", params.Timeout)
 	}
@@ -821,7 +842,7 @@ func (p *Permissions) renderViewContent(width int) string {
 		return ""
 	}
 
-	content := fmt.Sprintf("File: %s", fsext.PrettyPath(params.FilePath))
+	content := fmt.Sprintf("File: %s", p.prettyPath(params.FilePath))
 	if params.Offset > 0 {
 		content += fmt.Sprintf("\nStarting from line: %d", params.Offset+1)
 	}
@@ -838,7 +859,7 @@ func (p *Permissions) renderLSContent(width int) string {
 		return ""
 	}
 
-	content := fmt.Sprintf("Directory: %s", fsext.PrettyPath(params.Path))
+	content := fmt.Sprintf("Directory: %s", p.prettyPath(params.Path))
 	if len(params.Ignore) > 0 {
 		content += fmt.Sprintf("\nIgnore patterns: %s", strings.Join(params.Ignore, ", "))
 	}

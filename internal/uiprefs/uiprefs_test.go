@@ -79,6 +79,39 @@ func TestConfigStoreAdapter_PrefsSendsExplicitCompletionsLimits(t *testing.T) {
 	require.Equal(t, 42, prefs.CompletionsItems)
 }
 
+// TestConfigStoreAdapter_RemotePathSendsCompletionsLimits is
+// TestConfigStoreAdapter_Prefs{Merges,SendsExplicit}...'s counterpart for
+// the remote-daemon path: `sennit --remote`/`attach ssh://...` reads UI
+// preferences through config.LoadGlobalData (internal/cmd/remote.go's
+// connectRemoteWorkspace), not config.LoadData, and has no project layer
+// at all — only a global one, loaded against home.Dir() rather than a
+// project workingDir. It must still send 0/0 ("apply the server's own
+// default") unless the person's own global config sets a completions
+// limit, exactly like the local-daemon/in-process path (CLIENT-SERVER.md,
+// "PR 0.6").
+func TestConfigStoreAdapter_RemotePathSendsCompletionsLimits(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
+
+	store, err := config.LoadGlobalData(globalDir, false)
+	require.NoError(t, err)
+
+	prefs := NewConfigStoreAdapter(store).Prefs()
+	require.Zero(t, prefs.CompletionsDepth, "unconfigured: the server applies its own default")
+	require.Zero(t, prefs.CompletionsItems, "unconfigured: the server applies its own default")
+
+	globalSeed := `{"options":{"tui":{"completions":{"max_depth":3,"max_items":7}}}}`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "sennit.json"), []byte(globalSeed), 0o644))
+
+	store, err = config.LoadGlobalData(globalDir, false)
+	require.NoError(t, err)
+
+	prefs = NewConfigStoreAdapter(store).Prefs()
+	require.Equal(t, 3, prefs.CompletionsDepth, "configured globally: the client's own number must be sent")
+	require.Equal(t, 7, prefs.CompletionsItems, "configured globally: the client's own number must be sent")
+}
+
 // TestConfigStoreAdapter_SetWritesGlobalConfigFieldAndReloads is the
 // acceptance check: toggling a pref through the adapter writes the same
 // config file key the UI wrote before this change, and the next Prefs()

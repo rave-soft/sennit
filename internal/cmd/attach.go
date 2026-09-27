@@ -52,7 +52,7 @@ var attachCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		return runDaemonTUI(cmd, client, prefs, sessionID, continueLast)
+		return runDaemonTUI(cmd, client, prefs, sessionID, continueLast, "")
 	},
 }
 
