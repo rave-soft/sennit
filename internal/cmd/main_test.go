@@ -13,6 +13,17 @@ import (
 // test that forgets to isolate writes sessions into the developer's real
 // profile, which is exactly what used to happen.
 func TestMain(m *testing.M) {
+	// This package re-execs its own test binary as a stand-in daemon
+	// (or lock/log helper) process, several times over -- helperCommand,
+	// loggingHelperCommand, startLockHelper, and daemonRestartCmd's own
+	// production spawn path (os.Executable(), exercised directly by
+	// TestDaemonRestartCmd) all do it. Under -race, every one of those
+	// children pays a full second of atexit sleep on its way out (see
+	// testenv.TrimChildRaceExitSleep's doc comment); left unset, that
+	// cost compounds across the helpers a single test run touches and
+	// was eating into supervisor.EnsureRunning's readiness budget.
+	testenv.TrimChildRaceExitSleep()
+
 	// Stamp this package's throwaway databases from one migrated
 	// template rather than running the migration chain per test; see
 	// db.UseMigratedTemplate.

@@ -237,6 +237,15 @@ var daemonStopCmd = &cobra.Command{
 	},
 }
 
+// daemonRestartReadyTimeout overrides EnsureRunning's readiness wait for
+// daemonRestartCmd's own spawn below; zero (the production default) keeps
+// supervisor's own defaultReadyTimeout. Only a test sets this -- see
+// daemon_commands_test.go's TestDaemonRestartCmd, which drives this RunE
+// directly (as opposed to through a Command hook) and so has no other way
+// to widen this specific wait under -race, where the re-exec'd helper
+// process this spawns is genuinely slower to become observable.
+var daemonRestartReadyTimeout time.Duration
+
 var daemonRestartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart this project's sennit daemon",
@@ -268,7 +277,11 @@ var daemonRestartCmd = &cobra.Command{
 			}
 		}
 
-		_, warning, err := supervisor.EnsureRunning(ctx, cwd, supervisor.Options{DataDir: dataDir, Debug: debug})
+		_, warning, err := supervisor.EnsureRunning(ctx, cwd, supervisor.Options{
+			DataDir:      dataDir,
+			Debug:        debug,
+			ReadyTimeout: daemonRestartReadyTimeout,
+		})
 		if err != nil {
 			return err
 		}
