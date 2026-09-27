@@ -111,6 +111,14 @@ type StubWorkspace struct {
 	AttachThreadReleased    chan struct{}
 	attachThreadReleaseOnce sync.Once
 
+	GotResumeWorktreeSessionID string
+	ResumeWorktreeWorkspace    workspace.Workspace
+	ResumeWorktreeErr          error
+	// ResumeWorktreeReleased mirrors WorktreeReleased, for ResumeWorktree's
+	// own release func.
+	ResumeWorktreeReleased    chan struct{}
+	resumeWorktreeReleaseOnce sync.Once
+
 	ShutdownCalled bool
 
 	WorkingDirResult string
@@ -372,6 +380,22 @@ func (s *StubWorkspace) attachThreadRelease() {
 	s.attachThreadReleaseOnce.Do(func() {
 		if s.AttachThreadReleased != nil {
 			close(s.AttachThreadReleased)
+		}
+	})
+}
+
+func (s *StubWorkspace) ResumeWorktree(_ context.Context, sessionID string) (workspace.Workspace, func(), error) {
+	s.GotResumeWorktreeSessionID = sessionID
+	if s.ResumeWorktreeErr != nil {
+		return nil, nil, s.ResumeWorktreeErr
+	}
+	return s.ResumeWorktreeWorkspace, s.resumeWorktreeRelease, nil
+}
+
+func (s *StubWorkspace) resumeWorktreeRelease() {
+	s.resumeWorktreeReleaseOnce.Do(func() {
+		if s.ResumeWorktreeReleased != nil {
+			close(s.ResumeWorktreeReleased)
 		}
 	})
 }

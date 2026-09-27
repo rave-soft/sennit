@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -156,6 +157,16 @@ type loadSessionMsg struct {
 	// pins none — see workspace.AgentController.ApplySessionModel.
 	modelSwitched bool
 	err           error
+
+	// resumedWorktreeWS and resumedWorktreeRelease carry a live worktree
+	// workspace ResumeWorktree found still owning this session -- see
+	// resolve's own comment. Root.handleSessionLoaded switches over to it
+	// exactly the way it would after an explicit EnterWorktree, and is
+	// responsible for eventually running resumedWorktreeRelease. Both are
+	// nil on the ordinary path (no worktree, or one this UI is already
+	// attached to).
+	resumedWorktreeWS      workspace.Workspace
+	resumedWorktreeRelease func()
 }
 
 // uiOwned: constructed only by loadInitialSession's continue-last-session
@@ -195,6 +206,16 @@ type sessionLoadWorkspace interface {
 	workspace.SessionStore
 	workspace.AgentController
 	workspace.FileServices
+}
+
+// worktreeResumer is asserted for separately from sessionLoadWorkspace
+// (rather than folded into it) since only the root workspace's own
+// ResumeWorktree ever finds anything -- see resolve's use of it. A
+// workspace that doesn't implement it (a stub in an older test, say)
+// just never offers a resume, the same as one that does but answers
+// workspace.ErrNoWorktreeForSession.
+type worktreeResumer interface {
+	ResumeWorktree(ctx context.Context, sessionID string) (workspace.Workspace, func(), error)
 }
 
 type sessionLoadResolver struct {
@@ -269,6 +290,36 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
 
+	// CLIENT-SERVER.md, PR 2.4b: a client that reconnects after another
+	// one entered a worktree and disconnected without exiting it lands
+	// here, on whatever workspace it currently targets (ordinarily
+	// root), with no way to reach the worktree App that still owns this
+	// session. Tried last, once every fallible step above has already
+	// succeeded, so a resumed hold is never acquired only to leak on an
+	// early return above: from here on the load always finishes and
+	// Root.handleSessionLoaded takes ownership of releasing it. Trying
+	// this on every resumable load costs nothing when there is nothing
+	// to resume (the in-process TUI's own registry is always empty,
+	// since it owns the whole process and never disconnects from
+	// itself) and correctly finds nothing when this UI is already
+	// attached to the right worktree (that workspace's own registry, if
+	// it has one at all, tracks only worktrees IT spawned).
+	var resumedWS workspace.Workspace
+	var resumedRelease func()
+	if r.resumable {
+		if resumer, ok := any(r.workspace).(worktreeResumer); ok {
+			ws, release, resumeErr := resumer.ResumeWorktree(r.ctx, sessionID)
+			switch {
+			case resumeErr == nil:
+				resumedWS, resumedRelease = ws, release
+			case errors.Is(resumeErr, workspace.ErrNoWorktreeForSession):
+				// The ordinary case: nothing to resume.
+			default:
+				slog.Debug("Failed to resume worktree for session", "session_id", sessionID, "error", resumeErr)
+			}
+		}
+	}
+
 	return loadSessionMsg{
 		uiOwned:             uiOwned{owner: r.owner},
 		gen:                 gen,
@@ -280,6 +331,9 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 		lastUserMessageTime: lastUserMessageTime,
 		modelUsed:           lastAssistantModel(sessionID, msgs),
 		modelSwitched:       modelSwitched,
+
+		resumedWorktreeWS:      resumedWS,
+		resumedWorktreeRelease: resumedRelease,
 	}
 }
 

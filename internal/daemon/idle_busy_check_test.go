@@ -42,6 +42,20 @@ type idleTestWorkspace struct {
 	listThreadsErr    error
 	listTasksResult   []proto.Thread
 	listTasksErr      error
+	// children, when non-nil, makes this workspace a worktreeAggregator
+	// (see idle.go) -- letting a test put a registered worktree workspace
+	// in the busy check's path the same way *appws.AppWorkspace's root
+	// instance would.
+	children []workspace.Workspace
+}
+
+// WorktreeChildren makes idleTestWorkspace satisfy worktreeAggregator
+// whenever children is set; an idleTestWorkspace with no children set
+// still reports the zero value (nil), same as a workspace that was never
+// asked to be an aggregator at all -- busy's type assertion still
+// succeeds, it simply has nothing to range over.
+func (w *idleTestWorkspace) WorktreeChildren() []workspace.Workspace {
+	return w.children
 }
 
 func newIdleTestWorkspace() *idleTestWorkspace {
@@ -201,6 +215,45 @@ func TestIdleBusyCheck(t *testing.T) {
 				return ws
 			},
 			wantBusy: true,
+		},
+		{
+			// CLIENT-SERVER.md PR 2.4b: a turn running in an orphaned
+			// worktree App (no client attached) must count as busy even
+			// though the root workspace's own AgentActivity reports
+			// nothing.
+			name:    "a busy session in a registered worktree workspace",
+			clients: fakeClientCounter(0),
+			ws: func() workspace.Workspace {
+				root := newIdleTestWorkspace()
+				child := newIdleTestWorkspace()
+				child.AgentActivityResult = workspace.AgentActivity{BusySessions: []string{"sess-1"}}
+				root.children = []workspace.Workspace{child}
+				return root
+			},
+			wantBusy: true,
+		},
+		{
+			name:    "a pending permission in a registered worktree workspace",
+			clients: fakeClientCounter(0),
+			ws: func() workspace.Workspace {
+				root := newIdleTestWorkspace()
+				child := newIdleTestWorkspace()
+				child.PendingPromptsResult = workspace.PendingPrompts{
+					Permissions: []permission.PermissionRequest{{ID: "p1"}},
+				}
+				root.children = []workspace.Workspace{child}
+				return root
+			},
+			wantBusy: true,
+		},
+		{
+			name:    "an idle registered worktree workspace does not count as busy",
+			clients: fakeClientCounter(0),
+			ws: func() workspace.Workspace {
+				root := newIdleTestWorkspace()
+				root.children = []workspace.Workspace{newIdleTestWorkspace()}
+				return root
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

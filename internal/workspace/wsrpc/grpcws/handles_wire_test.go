@@ -560,3 +560,115 @@ func TestNewServer_NonRootHandleNoGoroutineLeak(t *testing.T) {
 		return goleak.Find(ignoreBaseline) == nil
 	})
 }
+
+// TestResumeWorktree_ChildClientTargetsChildWorkspace mirrors
+// TestEnterWorktree_ChildClientTargetsChildWorkspace for ResumeWorktree
+// (CLIENT-SERVER.md, PR 2.4b): the handle it hands back must reach the
+// same child workspace the server-side Workspace.ResumeWorktree found,
+// not the root.
+func TestResumeWorktree_ChildClientTargetsChildWorkspace(t *testing.T) {
+	t.Parallel()
+
+	child := &wsrpctest.StubWorkspace{AgentModelResult: wsrpctest.AgentModelSample}
+	root := &wsrpctest.StubWorkspace{ResumeWorktreeWorkspace: child}
+	client := newServerAndClient(t, root)
+
+	childWS, release, err := client.ResumeWorktree(context.Background(), "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, "sess-1", root.GotResumeWorktreeSessionID)
+	require.NotNil(t, release)
+	t.Cleanup(release)
+
+	childClient, ok := childWS.(*grpcws.Client)
+	require.True(t, ok, "ResumeWorktree must hand back a *grpcws.Client")
+	require.NotEqual(t, "", childClient.Handle(), "the child must be bound to a real, non-root handle")
+
+	got := childClient.AgentModel()
+	require.Equal(t, wsrpctest.AgentModelSample, got, "calls on the returned client must reach the child stub, not root")
+}
+
+// TestResumeWorktree_SentinelErrorRoundTrips checks that
+// workspace.ErrNoWorktreeForSession -- the ordinary "nothing to resume"
+// answer -- survives the wire with its identity intact, the same as any
+// other sentinel in workspace.wireerr's table, rather than decoding as a
+// bare "internal" error a caller can't distinguish from a real failure.
+func TestResumeWorktree_SentinelErrorRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	root := &wsrpctest.StubWorkspace{ResumeWorktreeErr: workspace.ErrNoWorktreeForSession}
+	client := newServerAndClient(t, root)
+
+	_, _, err := client.ResumeWorktree(context.Background(), "sess-1")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, workspace.ErrNoWorktreeForSession))
+}
+
+// TestResumeWorktree_ReleaseCallsChildReleaseOnceThenErrWorkspaceGone
+// mirrors TestEnterWorktree_ReleaseCallsChildReleaseOnceThenErrWorkspaceGone
+// for ResumeWorktree's own release func.
+func TestResumeWorktree_ReleaseCallsChildReleaseOnceThenErrWorkspaceGone(t *testing.T) {
+	t.Parallel()
+
+	child := &wsrpctest.StubWorkspace{}
+	root := &wsrpctest.StubWorkspace{ResumeWorktreeWorkspace: child, ResumeWorktreeReleased: make(chan struct{})}
+	client := newServerAndClient(t, root)
+
+	childWS, release, err := client.ResumeWorktree(context.Background(), "sess-1")
+	require.NoError(t, err)
+	childClient := childWS.(*grpcws.Client)
+
+	release()
+	select {
+	case <-root.ResumeWorktreeReleased:
+	case <-time.After(raceWait(5 * time.Second)):
+		t.Fatal("release never reached the child's own release func")
+	}
+
+	// Idempotent, like every other H method's release.
+	release()
+
+	_, err = childClient.GetSession(context.Background(), "sess-1")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, workspace.ErrWorkspaceGone), "expected ErrWorkspaceGone after release, got: %v", err)
+}
+
+// TestResumeWorktree_SecondClientGetsOwnHandleToSameChild is CLIENT-
+// SERVER.md PR 2.4b's own wire-level scenario: two independent clients
+// (the reconnecting one and, in production, whichever client is still
+// attached to the worktree from before) both resolve to the same
+// underlying child workspace, each through its own handle, and one
+// client releasing its handle must not disturb the other's -- a
+// disconnect from the reconnecting client's own view must never take the
+// still-attached client's handle down with it.
+func TestResumeWorktree_SecondClientGetsOwnHandleToSameChild(t *testing.T) {
+	t.Parallel()
+
+	child := &wsrpctest.StubWorkspace{AgentModelResult: wsrpctest.AgentModelSample}
+	root := &wsrpctest.StubWorkspace{ResumeWorktreeWorkspace: child}
+	srv, stopHub := grpcws.NewServer(root)
+	lis := bufconn.Listen(bufSize)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() {
+		srv.Stop()
+		stopHub()
+		require.NoError(t, lis.Close())
+	})
+
+	clientA, _, connA := dialLeaseClient(t, lis, grpcws.WithClientID("client-a"))
+	clientB, _, connB := dialLeaseClient(t, lis, grpcws.WithClientID("client-b"))
+	t.Cleanup(func() { _ = connA.Close(); _ = connB.Close() })
+
+	wsA, releaseA, err := clientA.ResumeWorktree(context.Background(), "sess-1")
+	require.NoError(t, err)
+	childA := wsA.(*grpcws.Client)
+
+	wsB, releaseB, err := clientB.ResumeWorktree(context.Background(), "sess-1")
+	require.NoError(t, err)
+	childB := wsB.(*grpcws.Client)
+	t.Cleanup(releaseB)
+
+	require.NotEqual(t, childA.Handle(), childB.Handle(), "each caller gets its own handle even for the same child")
+
+	releaseA()
+	require.Equal(t, wsrpctest.AgentModelSample, childB.AgentModel(), "client B's handle must survive client A releasing its own")
+}

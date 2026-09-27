@@ -3,8 +3,11 @@ package e2e
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 // TestWorktreeThroughDaemon covers CLIENT-SERVER.md PR 2.4's worktree
@@ -14,19 +17,12 @@ import (
 // second, independently dialed connection cannot also claim the same
 // session while the first holds it.
 //
-// What this does NOT cover: a client that enters a worktree and then
-// drops its connection entirely (rather than calling ExitWorktree)
-// before a new connection tries to resume it. Handles are torn down once
-// their owning client goes quiet (internal/workspace/wsrpc/grpcws/
-// handles.go's leaseManager, CLIENT-SERVER.md PR 1.3), but the worktree
-// App instance behind that handle keeps running -- there is no RPC in
-// this codebase today that lets a fresh connection re-attach to an
-// already-entered worktree the way AttachThread does for a background
-// thread. Reaching that path in this package would just be timing out
-// waiting for something the wire protocol has no way to ask for; see this
-// test's own doc comment history/report for the finding, which is a
-// production gap worth its own follow-up rather than something to paper
-// over here with a synthetic wait.
+// The gap this test used to document -- a client that enters a worktree
+// and then drops its connection entirely, rather than calling
+// ExitWorktree, leaving no way for a fresh connection to resume it -- is
+// closed by ResumeWorktree (CLIENT-SERVER.md, PR 2.4b); see
+// TestWorktreeSurvivesDisconnectAndResumesOnReconnect below for that
+// scenario end to end.
 func TestWorktreeThroughDaemon(t *testing.T) {
 	if raceDetectorEnabled {
 		t.Skip("daemon e2e: skipped under -race, see racecheck_off_test.go")
@@ -83,4 +79,95 @@ func TestWorktreeThroughDaemon(t *testing.T) {
 	release2()
 	exitRelease()
 	shutdownCleanly(t, dp, client3)
+}
+
+// TestWorktreeSurvivesDisconnectAndResumesOnReconnect is CLIENT-SERVER.md
+// PR 2.4b's own scenario, the worktree gap TestWorktreeThroughDaemon used
+// to leave undocumented: client A enters a worktree and starts a slow
+// turn there, then disconnects entirely -- never calling ExitWorktree,
+// never releasing the handle it holds -- leaving the worktree App
+// running with nobody attached to it. Two things must both hold from
+// there:
+//   - the daemon must not exit on idle while that turn is still running,
+//     even with no client connected at all (idle.go's busy check must
+//     consult the orphaned worktree workspace, not just root);
+//   - a fresh connection (client B) opening the same session must be
+//     able to reach the worktree again through ResumeWorktree, see the
+//     turn through to completion, and cleanly exit the worktree
+//     afterward.
+func TestWorktreeSurvivesDisconnectAndResumesOnReconnect(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("daemon e2e: skipped under -race, see racecheck_off_test.go")
+	}
+
+	const reply = "the resumed worktree turn finished"
+	fixture := newFixtureServer(fixtureTurn{Text: reply, ChunkDelay: 500 * time.Millisecond})
+	defer fixture.Close()
+
+	projectDir := t.TempDir()
+	gitInitRepo(t, projectDir)
+	writeShortIdleTimeoutConfig(t, projectDir)
+
+	dp := startDaemonProcess(t, projectDir, fixture.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), hangGuard)
+	defer cancel()
+
+	clientA, closeA := dp.dial(t)
+	sess, err := clientA.CreateSession(ctx, "worktree resume test")
+	require.NoError(t, err)
+	require.NoError(t, clientA.SetCurrentSession(ctx, sess.ID))
+
+	handleA, _, err := clientA.EnterWorktree(ctx, "feature")
+	require.NoError(t, err)
+	require.True(t, handleA.WorktreeState().Active)
+	require.Equal(t, "feature", handleA.WorktreeState().Name)
+
+	require.NoError(t, handleA.AgentRun(ctx, sess.ID, "answer slowly"))
+	require.Eventually(t, func() bool {
+		return handleA.AgentIsSessionBusy(sess.ID)
+	}, hangGuard, 20*time.Millisecond, "turn in the worktree never became visibly busy")
+
+	// Client A vanishes without ExitWorktree and without releasing the
+	// handle it holds: the worktree App keeps running and keeps owning
+	// the session, exactly like a dropped connection in production.
+	closeA()
+
+	// The daemon must not exit on idle while that turn is still running,
+	// even though no client is connected at all right now -- the whole
+	// point of PR 2.4b's fix to idle.go's busy check.
+	select {
+	case err := <-dp.waitCh:
+		dp.waitCh <- err
+		t.Fatalf("daemon exited while an orphaned worktree turn was still in flight (err=%v)", err)
+	case <-time.After(2 * time.Second):
+	}
+
+	clientB, _ := dp.dial(t)
+	require.NoError(t, clientB.SetCurrentSession(ctx, sess.ID))
+	resumed, releaseB, err := clientB.ResumeWorktree(ctx, sess.ID)
+	require.NoError(t, err)
+	require.True(t, resumed.WorktreeState().Active)
+	require.Equal(t, "feature", resumed.WorktreeState().Name)
+
+	require.Eventually(t, func() bool {
+		return !resumed.AgentIsSessionBusy(sess.ID)
+	}, hangGuard, 50*time.Millisecond, "the resumed turn never finished")
+
+	msgs, err := resumed.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	found := false
+	for _, m := range msgs {
+		if m.Role == message.Assistant && m.Content().Text == reply {
+			found = true
+		}
+	}
+	require.True(t, found, "expected the complete assistant reply %q among %d messages", reply, len(msgs))
+
+	root, exitRelease, err := resumed.ExitWorktree(ctx)
+	require.NoError(t, err)
+	require.False(t, root.WorktreeState().Active)
+	releaseB()
+	exitRelease()
+
+	shutdownCleanly(t, dp, clientB)
 }

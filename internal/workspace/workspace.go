@@ -86,6 +86,15 @@ var (
 	// attached. Returned by every TaskController method except
 	// SupportsTasks when it reports false.
 	ErrTasksNotSupported = errors.New("workspace does not support tasks")
+	// ErrNoWorktreeForSession means ResumeWorktree found no live worktree
+	// workspace owning the given session in this process: either the
+	// session was never transferred into a worktree, or the worktree App
+	// that once owned it has already shut down (its ownership moved back
+	// to the root via ExitWorktree, or moved to yet another owner). The
+	// caller should keep serving the session from wherever it already is
+	// — the root workspace, typically — rather than treat this as a
+	// failure.
+	ErrNoWorktreeForSession = errors.New("no worktree workspace owns this session")
 )
 
 type AgentNotificationType string
@@ -884,6 +893,28 @@ type WorktreeState struct {
 type WorktreeController interface {
 	EnterWorktree(ctx context.Context, name string) (Workspace, func(), error)
 	ExitWorktree(ctx context.Context) (Workspace, func(), error)
+	// ResumeWorktree returns the live worktree workspace that currently
+	// owns sessionID in this process, for a client that lost its handle
+	// to it — typically a reconnect after another client entered a
+	// worktree and disconnected without calling ExitWorktree, leaving
+	// that worktree's App running and still owning the session, but with
+	// no client attached to it (CLIENT-SERVER.md, PR 2.4b: "the worktree
+	// gap"). Only the root workspace tracks the registry this reads from;
+	// called on anything else (a worktree workspace, a thread workspace)
+	// it returns ErrNoWorktreeForSession. That sentinel also covers the
+	// ordinary case of a session with no worktree at all, or one whose
+	// worktree App has already shut down (ownership moved back to root
+	// via ExitWorktree, or elsewhere) — callers distinguish "resume this"
+	// from "carry on with what you already have" with errors.Is, not by
+	// treating every error as fatal.
+	//
+	// The release func mirrors EnterWorktree/ExitWorktree's: it drops
+	// only the caller's own hold and must never shut the worktree App
+	// down while it still owns the session — the same rule EnterWorktree's
+	// own release follows, since a second caller resuming the same
+	// worktree must not tear down the App a still-attached first caller
+	// depends on.
+	ResumeWorktree(ctx context.Context, sessionID string) (Workspace, func(), error)
 	// WorktreeState is class C: the command palette calls it directly
 	// while building its item list (internal/ui/dialog/commands.go), which
 	// used to resolve it with its own type assertion on the concrete

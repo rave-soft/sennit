@@ -667,6 +667,14 @@ func (w *cmdDrivingWorkspace) WorktreeState() workspace.WorktreeState {
 	return w.worktreeState
 }
 
+// ResumeWorktree is called unconditionally on every resumable session
+// load (session.go's resolve) -- every test here has nothing to resume,
+// matching the in-process TUI's own registry, which is always empty (see
+// resolve's own comment).
+func (w *cmdDrivingWorkspace) ResumeWorktree(context.Context, string) (workspace.Workspace, func(), error) {
+	return nil, nil, workspace.ErrNoWorktreeForSession
+}
+
 // ---------------------------------------------------------------------------
 // cmdDrivenUI builds a UI over cmdDrivingWorkspace with all caches warm.
 // ---------------------------------------------------------------------------

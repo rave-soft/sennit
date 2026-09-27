@@ -1,6 +1,7 @@
 package appws
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"github.com/rave-soft/sennit/internal/app"
@@ -35,6 +36,20 @@ type AppWorkspace struct {
 	worktreeRoot *AppWorkspace
 	worktreeName string
 	worktreePath string
+
+	// worktreeChildren registers every worktree workspace this instance
+	// has spawned via EnterWorktree, keyed by session ID, for as long as
+	// that child's App is still running -- entries are added the moment
+	// EnterWorktree mints one and removed only when the child's App
+	// actually shuts down (either release path: ExitWorktree's, or
+	// EnterWorktree's own when ownership moved elsewhere before the
+	// caller ever used the handle). Only ever populated on a root
+	// instance (worktreeRoot == nil): EnterWorktree refuses to run on a
+	// worktree workspace, so a worktree's own map stays empty and its
+	// ResumeWorktree correctly finds nothing. See ResumeWorktree
+	// (app_workspace_worktree.go, CLIENT-SERVER.md PR 2.4b).
+	worktreeChildrenMu sync.Mutex
+	worktreeChildren   map[string]*AppWorkspace
 
 	// frontendConfigCache memoizes Config()'s *workspace.FrontendConfig
 	// against the *config.Config pointer it was built from - see

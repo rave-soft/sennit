@@ -22,7 +22,7 @@ import (
 // wire into the Handles service fails loudly here instead of silently
 // going unimplemented on the client.
 func wantHandleWorkspaceMethods() map[string]bool {
-	return map[string]bool{"EnterWorktree": true, "ExitWorktree": true, "AttachThread": true}
+	return map[string]bool{"EnterWorktree": true, "ExitWorktree": true, "AttachThread": true, "ResumeWorktree": true}
 }
 
 // TestHandlesServiceDescCoversEveryWorkspaceHandleMethod keeps

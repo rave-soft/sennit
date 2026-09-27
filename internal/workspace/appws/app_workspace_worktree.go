@@ -109,7 +109,19 @@ func (w *AppWorkspace) EnterWorktree(ctx context.Context, name string) (workspac
 	if err := w.app.OwnershipStore().Prepare(ctx, sessionID, ownerID, ownerEpoch, sessionstore.Ownership{OwnerID: targetOwner, OwnerRoot: path, WorktreeName: name, WorktreePath: path}); err != nil {
 		return nil, nil, err
 	}
-	boot, err := bootstrapWorktreeApp(ctx, path, app.BootstrapOptions{ProjectPath: w.app.ProjectPath(), ExistingSessionID: sessionID, ConfineWrites: true, InheritedAgents: w.store.Config().Agents})
+	// context.WithoutCancel: the new App's own globalCtx (app.New stores
+	// whatever ctx Bootstrap is given verbatim) must outlive this RPC —
+	// its AgentDispatcher, background jobs and every other goroutine
+	// bound to it need to keep running long after EnterWorktree returns
+	// and the incoming gRPC handler's own ctx is done. Passing that ctx
+	// through unwrapped left the worktree App's entire lifetime tied to
+	// one request: AgentDispatcher.Send's ownership check
+	// (app.checkSessionOwnership) reads app.globalCtx, so the very next
+	// AgentRun after EnterWorktree returned decoded as context.Canceled
+	// end to end (found via
+	// TestWorktreeSurvivesDisconnectAndResumesOnReconnect, CLIENT-SERVER.md
+	// PR 2.4b).
+	boot, err := bootstrapWorktreeApp(context.WithoutCancel(ctx), path, app.BootstrapOptions{ProjectPath: w.app.ProjectPath(), ExistingSessionID: sessionID, ConfineWrites: true, InheritedAgents: w.store.Config().Agents})
 	if err != nil {
 		_ = w.app.OwnershipStore().Rollback(context.WithoutCancel(ctx), sessionID, ownerID, ownerEpoch)
 		return nil, nil, err
@@ -133,13 +145,82 @@ func (w *AppWorkspace) EnterWorktree(ctx context.Context, name string) (workspac
 	target.worktreeRoot = w
 	target.worktreeName = committed.WorktreeName
 	target.worktreePath = committed.WorktreePath
+	w.registerWorktreeChild(sessionID, target)
 	release := func() {
 		owned, err := boot.App.OwnershipStore().IsOwner(context.WithoutCancel(ctx), sessionID, targetOwner, committed.Epoch)
 		if err == nil && !owned {
 			boot.App.Shutdown()
+			w.unregisterWorktreeChild(sessionID)
 		}
 	}
 	return target, release, nil
+}
+
+// registerWorktreeChild records child as the live worktree workspace
+// owning sessionID, so a later ResumeWorktree call against w can find it
+// again after the client that entered it disconnects (CLIENT-SERVER.md,
+// PR 2.4b).
+func (w *AppWorkspace) registerWorktreeChild(sessionID string, child *AppWorkspace) {
+	w.worktreeChildrenMu.Lock()
+	defer w.worktreeChildrenMu.Unlock()
+	if w.worktreeChildren == nil {
+		w.worktreeChildren = make(map[string]*AppWorkspace)
+	}
+	w.worktreeChildren[sessionID] = child
+}
+
+// unregisterWorktreeChild drops sessionID's entry once its worktree App
+// has actually shut down. A no-op if it was never registered or already
+// removed -- both release paths that call this (EnterWorktree's own
+// release, ExitWorktree's) can race each other harmlessly since a map
+// delete of an absent key is a no-op.
+func (w *AppWorkspace) unregisterWorktreeChild(sessionID string) {
+	w.worktreeChildrenMu.Lock()
+	defer w.worktreeChildrenMu.Unlock()
+	delete(w.worktreeChildren, sessionID)
+}
+
+// lookupWorktreeChild returns the registered worktree workspace for
+// sessionID, if any.
+func (w *AppWorkspace) lookupWorktreeChild(sessionID string) (*AppWorkspace, bool) {
+	w.worktreeChildrenMu.Lock()
+	defer w.worktreeChildrenMu.Unlock()
+	child, ok := w.worktreeChildren[sessionID]
+	return child, ok
+}
+
+// ResumeWorktree returns the live worktree workspace that still owns
+// sessionID, for a client reconnecting after the client that originally
+// called EnterWorktree disconnected without calling ExitWorktree -- the
+// worktree App keeps running and keeps owning the session (a turn may
+// still be in flight there), but until this call nothing could hand a
+// new client a fresh route to it (CLIENT-SERVER.md, PR 2.4b: "the
+// worktree gap"). Only a root workspace's own registry is consulted (see
+// worktreeChildren's doc comment), so calling this on a worktree or
+// thread workspace always returns ErrNoWorktreeForSession, the same
+// answer as "no worktree for this session at all".
+//
+// The release func follows EnterWorktree's own rule: it only shuts the
+// child's App down once that App no longer owns sessionID (checked via
+// the ownership store, exactly like EnterWorktree's release), so a
+// caller resuming a still-active worktree never tears down the App a
+// different, still-attached client depends on. app.App.Shutdown is
+// idempotent, so a second caller's release running after the first
+// already shut it down (because ownership moved on in between) is safe.
+func (w *AppWorkspace) ResumeWorktree(ctx context.Context, sessionID string) (workspace.Workspace, func(), error) {
+	child, ok := w.lookupWorktreeChild(sessionID)
+	if !ok {
+		return nil, nil, workspace.ErrNoWorktreeForSession
+	}
+	ownerID, ownerEpoch := child.app.OwnerIdentity()
+	release := func() {
+		owned, err := child.app.OwnershipStore().IsOwner(context.WithoutCancel(ctx), sessionID, ownerID, ownerEpoch)
+		if err == nil && !owned {
+			child.app.Shutdown()
+			w.unregisterWorktreeChild(sessionID)
+		}
+	}
+	return child, release, nil
 }
 
 // ExitWorktree reverses the transfer while retaining durable worktree
@@ -187,8 +268,37 @@ func (w *AppWorkspace) ExitWorktree(ctx context.Context) (workspace.Workspace, f
 	}
 	w.worktreeRoot.app.AdoptSessionOwnership(sessionID, rootOwner, committed.Epoch)
 	w.worktreeRoot.app.ReportCurrentSession(sessionID)
+	root := w.worktreeRoot
 	var once sync.Once
-	return w.worktreeRoot, func() { once.Do(w.app.Shutdown) }, nil
+	return root, func() {
+		once.Do(func() {
+			w.app.Shutdown()
+			root.unregisterWorktreeChild(sessionID)
+		})
+	}, nil
+}
+
+// WorktreeChildren returns every worktree workspace this instance's own
+// registry currently tracks -- every EnterWorktree spawn whose App is
+// still running, whether or not any client is presently attached to it.
+// It exists solely for the daemon's idle check (internal/daemon/idle.go),
+// via the worktreeAggregator interface it asserts for: a turn running in
+// an orphaned worktree App (one whose original client disconnected
+// without ExitWorktree) is otherwise invisible to AgentActivity/
+// BackgroundJobCounts/PendingPrompts on the root workspace alone
+// (CLIENT-SERVER.md, PR 2.4b). Not part of workspace.Workspace -- it is
+// implementation detail, like WorktreeName above, not wire contract.
+func (w *AppWorkspace) WorktreeChildren() []workspace.Workspace {
+	w.worktreeChildrenMu.Lock()
+	defer w.worktreeChildrenMu.Unlock()
+	if len(w.worktreeChildren) == 0 {
+		return nil
+	}
+	out := make([]workspace.Workspace, 0, len(w.worktreeChildren))
+	for _, child := range w.worktreeChildren {
+		out = append(out, child)
+	}
+	return out
 }
 
 func (w *AppWorkspace) WorktreeName() string { return w.worktreeName }

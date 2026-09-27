@@ -230,6 +230,7 @@ var sentinelVarNames = map[error]string{
 	ErrAttachTooBig:          "ErrAttachTooBig",
 	ErrAttachUnsupportedType: "ErrAttachUnsupportedType",
 	ErrAttachReadFailed:      "ErrAttachReadFailed",
+	ErrNoWorktreeForSession:  "ErrNoWorktreeForSession",
 }
 
 func errorVarName(sentinel error) string {

@@ -48,6 +48,16 @@ type idleBusyCheck struct {
 	clients idleClientCounter
 }
 
+// worktreeAggregator is implemented by *appws.AppWorkspace's root instance
+// (see its WorktreeChildren doc comment): it exposes every worktree
+// workspace the root has spawned via EnterWorktree and whose App is still
+// running, so busy can consult them too. A workspace with no such method
+// (a read-only wrapper, a test stub, a worktree/thread workspace itself)
+// simply has nothing to aggregate -- see busy's type assertion.
+type worktreeAggregator interface {
+	WorktreeChildren() []workspace.Workspace
+}
+
 // busy reports whether the daemon currently counts as busy, and why, for
 // the idle monitor's Debug log. A read that fails (ListThreads/ListTasks/
 // PendingPrompts erroring, e.g. because the workspace is already shutting
@@ -61,48 +71,75 @@ func (c *idleBusyCheck) busy(ctx context.Context) (bool, string) {
 		return true, fmt.Sprintf("%d connected client(s)", n)
 	}
 
-	activity := c.ws.AgentActivity()
+	if busy, reason := workspaceBusy(ctx, c.ws, "root workspace"); busy {
+		return true, reason
+	}
+
+	// A turn (or a pending permission/question) running in a worktree App
+	// that no client is currently attached to is otherwise invisible here:
+	// the root workspace's own AgentActivity/BackgroundJobCounts/
+	// PendingPrompts know nothing about a session a different App owns
+	// (CLIENT-SERVER.md, PR 2.4b). Only the root's own registry has
+	// anything to report; a worktree/thread workspace, a read-only
+	// wrapper, or a test stub simply isn't a worktreeAggregator.
+	if agg, ok := c.ws.(worktreeAggregator); ok {
+		for _, child := range agg.WorktreeChildren() {
+			if busy, reason := workspaceBusy(ctx, child, "worktree "+child.WorkingDir()); busy {
+				return true, reason
+			}
+		}
+	}
+
+	return false, ""
+}
+
+// workspaceBusy runs every read-only busyness source idleBusyCheck.busy
+// checks, against ws, labeling any reason it returns with label (e.g.
+// "root workspace" or a worktree's own working directory) so the idle
+// monitor's Debug log can tell which workspace was actually busy.
+func workspaceBusy(ctx context.Context, ws workspace.Workspace, label string) (bool, string) {
+	activity := ws.AgentActivity()
 	if len(activity.BusySessions) > 0 {
-		return true, fmt.Sprintf("%d busy session(s)", len(activity.BusySessions))
+		return true, fmt.Sprintf("%s: %d busy session(s)", label, len(activity.BusySessions))
 	}
 
-	if counts := c.ws.BackgroundJobCounts(); counts.Active > 0 {
-		return true, fmt.Sprintf("%d active background shell(s)", counts.Active)
+	if counts := ws.BackgroundJobCounts(); counts.Active > 0 {
+		return true, fmt.Sprintf("%s: %d active background shell(s)", label, counts.Active)
 	}
 
-	if c.ws.SupportsThreads() {
-		threads, err := c.ws.ListThreads(ctx)
+	if ws.SupportsThreads() {
+		threads, err := ws.ListThreads(ctx)
 		if err != nil {
-			return true, fmt.Sprintf("could not list threads: %v", err)
+			return true, fmt.Sprintf("%s: could not list threads: %v", label, err)
 		}
 		for _, th := range threads {
 			if !proto.ThreadStatus(th.Status).Terminal() {
-				return true, fmt.Sprintf("thread %s is %s", th.ID, th.Status)
+				return true, fmt.Sprintf("%s: thread %s is %s", label, th.ID, th.Status)
 			}
 		}
 	}
 
-	if c.ws.SupportsTasks() {
-		tasks, err := c.ws.ListTasks(ctx)
+	if ws.SupportsTasks() {
+		tasks, err := ws.ListTasks(ctx)
 		if err != nil {
-			return true, fmt.Sprintf("could not list tasks: %v", err)
+			return true, fmt.Sprintf("%s: could not list tasks: %v", label, err)
 		}
 		for _, tk := range tasks {
 			if !proto.ThreadStatus(tk.Status).Terminal() {
-				return true, fmt.Sprintf("task %s is %s", tk.ID, tk.Status)
+				return true, fmt.Sprintf("%s: task %s is %s", label, tk.ID, tk.Status)
 			}
 		}
 	}
 
-	prompts, err := c.ws.PendingPrompts(ctx)
+	prompts, err := ws.PendingPrompts(ctx)
 	if err != nil {
-		return true, fmt.Sprintf("could not read pending prompts: %v", err)
+		return true, fmt.Sprintf("%s: could not read pending prompts: %v", label, err)
 	}
 	if len(prompts.Permissions) > 0 {
-		return true, fmt.Sprintf("%d pending permission request(s)", len(prompts.Permissions))
+		return true, fmt.Sprintf("%s: %d pending permission request(s)", label, len(prompts.Permissions))
 	}
 	if len(prompts.Questions) > 0 {
-		return true, fmt.Sprintf("%d pending question(s)", len(prompts.Questions))
+		return true, fmt.Sprintf("%s: %d pending question(s)", label, len(prompts.Questions))
 	}
 
 	return false, ""

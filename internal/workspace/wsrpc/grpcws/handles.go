@@ -40,6 +40,11 @@ type AttachThreadRequest struct {
 	ID string `json:"id"`
 }
 
+// ResumeWorktreeRequest is ResumeWorktree's request.
+type ResumeWorktreeRequest struct {
+	SessionID string `json:"session_id"`
+}
+
 // HandleResponse is what EnterWorktree/ExitWorktree/AttachThread hand
 // back on success: Handle names the newly registered workspace for every
 // later call's "sennit-handle" metadata (see handleFromContext),
@@ -66,6 +71,7 @@ type HandlesServer interface {
 	EnterWorktree(ctx context.Context, req *EnterWorktreeRequest) (*HandleResponse, error)
 	ExitWorktree(ctx context.Context, req *ExitWorktreeRequest) (*HandleResponse, error)
 	AttachThread(ctx context.Context, req *AttachThreadRequest) (*HandleResponse, error)
+	ResumeWorktree(ctx context.Context, req *ResumeWorktreeRequest) (*HandleResponse, error)
 	ReleaseHandle(ctx context.Context, req *ReleaseHandleRequest) (*ReleaseHandleResponse, error)
 }
 
@@ -76,6 +82,7 @@ var handlesServiceDesc = grpc.ServiceDesc{
 		{MethodName: "EnterWorktree", Handler: _Handles_EnterWorktree_Handler},
 		{MethodName: "ExitWorktree", Handler: _Handles_ExitWorktree_Handler},
 		{MethodName: "AttachThread", Handler: _Handles_AttachThread_Handler},
+		{MethodName: "ResumeWorktree", Handler: _Handles_ResumeWorktree_Handler},
 		{MethodName: "ReleaseHandle", Handler: _Handles_ReleaseHandle_Handler},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -111,6 +118,8 @@ var _Handles_EnterWorktree_Handler = handlesUnaryHandler("EnterWorktree", (*hand
 var _Handles_ExitWorktree_Handler = handlesUnaryHandler("ExitWorktree", (*handlesServer).ExitWorktree)
 
 var _Handles_AttachThread_Handler = handlesUnaryHandler("AttachThread", (*handlesServer).AttachThread)
+
+var _Handles_ResumeWorktree_Handler = handlesUnaryHandler("ResumeWorktree", (*handlesServer).ResumeWorktree)
 
 var _Handles_ReleaseHandle_Handler = handlesUnaryHandler("ReleaseHandle", (*handlesServer).ReleaseHandle)
 
@@ -155,6 +164,18 @@ func (s *handlesServer) AttachThread(ctx context.Context, req *AttachThreadReque
 		return nil, grpcStatusFromError(ctx, err)
 	}
 	child, release, err := ws.AttachThread(ctx, req.ID)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, err)
+	}
+	return s.register(ctx, child, release), nil
+}
+
+func (s *handlesServer) ResumeWorktree(ctx context.Context, req *ResumeWorktreeRequest) (*HandleResponse, error) {
+	ws, err := s.resolve(ctx)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, err)
+	}
+	child, release, err := ws.ResumeWorktree(ctx, req.SessionID)
 	if err != nil {
 		return nil, grpcStatusFromError(ctx, err)
 	}

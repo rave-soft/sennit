@@ -173,6 +173,12 @@ func (l *Loopback) AttachThread(ctx context.Context, id string) (workspace.Works
 	return wrapHandleWorkspace(inner), release, roundTripError("AttachThread", err)
 }
 
+// ResumeWorktree is class H; see EnterWorktree.
+func (l *Loopback) ResumeWorktree(ctx context.Context, sessionID string) (workspace.Workspace, func(), error) {
+	inner, release, err := l.inner.ResumeWorktree(ctx, sessionID)
+	return wrapHandleWorkspace(inner), release, roundTripError("ResumeWorktree", err)
+}
+
 // wrapHandleWorkspace wraps ws in a fresh Loopback so a Workspace handed
 // back from an H method keeps every subsequent call on it running
 // through the codec too, matching what a real wire hop would do (the

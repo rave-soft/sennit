@@ -64,6 +64,7 @@ var sentinelCodes = []sentinelCode{
 	{"attach_too_big", ErrAttachTooBig},
 	{"attach_unsupported_type", ErrAttachUnsupportedType},
 	{"attach_read_failed", ErrAttachReadFailed},
+	{"no_worktree_for_session", ErrNoWorktreeForSession},
 }
 
 // sentinelCodeMap indexes sentinelCodes by code, built once so DecodeError

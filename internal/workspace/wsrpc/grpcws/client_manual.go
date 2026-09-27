@@ -370,6 +370,11 @@ func (c *Client) AttachThread(ctx context.Context, id string) (workspace.Workspa
 	return c.callHandles(ctx, "AttachThread", &AttachThreadRequest{ID: id})
 }
 
+// ResumeWorktree is class H; see EnterWorktree.
+func (c *Client) ResumeWorktree(ctx context.Context, sessionID string) (workspace.Workspace, func(), error) {
+	return c.callHandles(ctx, "ResumeWorktree", &ResumeWorktreeRequest{SessionID: sessionID})
+}
+
 // callHandles is EnterWorktree/ExitWorktree/AttachThread's shared body
 // (CLIENT-SERVER.md, PR 1.3, build step 4; PR 1.4b, build step 4): it
 // invokes the Handles service's RPC named name with req and, on success,

@@ -305,6 +305,8 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return r.handleWindowSize(msg)
+	case loadSessionMsg:
+		return r.handleSessionLoaded(msg)
 	case worktreeEventMsg:
 		if r.worktree != nil && r.worktree.generation == msg.generation {
 			_, cmd := r.main.Update(msg.inner)
@@ -529,6 +531,64 @@ func (r *Root) transferWorktreeCmd(name string, exit bool) tea.Cmd {
 		}
 		return worktreeTransferMsg{generation: generation, name: name, ws: next, release: release, err: err, exit: exit}
 	}
+}
+
+// handleSessionLoaded intercepts every loadSessionMsg on its way to the
+// *UI that started the load (see the default case below, which is what
+// would otherwise deliver it): a load that found a live worktree
+// workspace still owning its session (sessionLoadResolver.resolve's own
+// ResumeWorktree attempt, CLIENT-SERVER.md PR 2.4b) switches Root over to
+// it here, exactly the way handleWorktreeTransfer does after an explicit
+// EnterWorktree, before the message continues on to applyLoadSession.
+func (r *Root) handleSessionLoaded(msg loadSessionMsg) (tea.Model, tea.Cmd) {
+	var extra tea.Cmd
+	switch {
+	case msg.resumedWorktreeWS == nil:
+		// The ordinary path: nothing was resumed.
+	case msg.ownerUI() != r.main:
+		// Only the main screen's own workspace can become a worktree
+		// attachment. In practice a drilled-in view's own load is never
+		// resumable (see sessionLoadResolver.resumable), so this field is
+		// never set for one -- guarded anyway since nothing here would
+		// take ownership of the resumed hold otherwise.
+		release := msg.resumedWorktreeRelease
+		extra = func() tea.Msg { release(); return nil }
+	case r.worktree != nil || r.worktreePending:
+		// Already attached to a worktree, or an explicit EnterWorktree/
+		// ExitWorktree is in flight: drop the resumed hold rather than
+		// clobber state that transfer owns.
+		release := msg.resumedWorktreeRelease
+		extra = func() tea.Msg { release(); return nil }
+	default:
+		extra = r.applyResumedWorktree(msg.resumedWorktreeWS, msg.resumedWorktreeRelease)
+	}
+	var cmd tea.Cmd
+	if owner := msg.ownerUI(); owner != nil {
+		_, cmd = owner.Update(msg)
+	}
+	return r, tea.Batch(extra, cmd)
+}
+
+// applyResumedWorktree switches Root onto ws -- a worktree workspace
+// ResumeWorktree found still owning the just-loaded session -- following
+// handleWorktreeTransfer's own tail (subscribe, invalidate caches, crumb,
+// stale-workspace refresh) but without a "previous" attachment to reap:
+// the caller only reaches here when r.worktree was nil.
+func (r *Root) applyResumedWorktree(ws workspace.Workspace, release func()) tea.Cmd {
+	r.worktreeGen++
+	generation := r.worktreeGen
+	r.com.Workspace = ws
+	r.main.com = r.com
+	r.main.wsCache.invalidateBusyCaches()
+	state := ws.WorktreeState()
+	r.main.crumbRoot = state.Name
+	stop := ws.SubscribeWith(func(inner any) {
+		if r.send != nil {
+			r.send(worktreeEventMsg{generation: generation, inner: inner})
+		}
+	})
+	r.worktree = &worktreeAttachment{name: state.Name, stop: stop, release: release, generation: generation}
+	return tea.Batch(r.main.staleWorkspaceRefreshCmds()...)
 }
 
 func (r *Root) handleWorktreeTransfer(msg worktreeTransferMsg) (tea.Model, tea.Cmd) {

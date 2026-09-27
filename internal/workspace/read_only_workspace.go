@@ -643,6 +643,13 @@ func (w *readOnlyWorkspace) ExitWorktree(ctx context.Context) (Workspace, func()
 	return nil, nil, w.readOnlyError("ExitWorktree")
 }
 
+// ResumeWorktree is refused like EnterWorktree/ExitWorktree: this wrapper
+// exists for a thread's own (parentless) workspace, which owns no
+// worktree registry to resume from — the same refusal AttachThread gets.
+func (w *readOnlyWorkspace) ResumeWorktree(ctx context.Context, sessionID string) (Workspace, func(), error) {
+	return nil, nil, w.readOnlyError("ResumeWorktree")
+}
+
 // WorktreeState now forwards directly: WorktreeState is a guaranteed
 // Workspace member (PR 0.7c review folded it into WorktreeController), so
 // w.ws is statically known to implement it -- no assertion needed.

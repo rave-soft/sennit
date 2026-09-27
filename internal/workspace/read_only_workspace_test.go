@@ -784,6 +784,10 @@ func (s *stubWorkspace) ExitWorktree(context.Context) (Workspace, func(), error)
 	return nil, nil, nil
 }
 
+func (s *stubWorkspace) ResumeWorktree(context.Context, string) (Workspace, func(), error) {
+	return nil, nil, nil
+}
+
 func (s *stubWorkspace) WorktreeState() WorktreeState                            { return WorktreeState{} }
 func (s *stubWorkspace) SupportsThreads() bool                                   { return false }
 func (s *stubWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) { return nil, nil }

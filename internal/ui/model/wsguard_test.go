@@ -619,6 +619,11 @@ func (g *updateGoroutineGuard) RenameSession(ctx context.Context, sessionID stri
 	return g.Workspace.RenameSession(ctx, sessionID, title)
 }
 
+func (g *updateGoroutineGuard) ResumeWorktree(ctx context.Context, sessionID string) (workspace.Workspace, func(), error) {
+	g.check("ResumeWorktree")
+	return g.Workspace.ResumeWorktree(ctx, sessionID)
+}
+
 func (g *updateGoroutineGuard) SessionDescendantCost(ctx context.Context, sessionID string) (float64, error) {
 	g.check("SessionDescendantCost")
 	return g.Workspace.SessionDescendantCost(ctx, sessionID)

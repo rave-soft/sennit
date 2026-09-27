@@ -238,3 +238,124 @@ func TestWorktreeReleaseCallbacksOnlyShutdownStaleTarget(t *testing.T) {
 	shutdownTarget()
 	require.EqualValues(t, 1, shutdowns.Load(), "stale target shutdown must be idempotent")
 }
+
+// TestResumeWorktree_UnknownSessionReturnsSentinel covers the ordinary case:
+// a session with no worktree at all (or whose worktree App has already
+// shut down) must round-trip as ErrNoWorktreeForSession, not a bare nil
+// workspace a caller could mistake for success.
+func TestResumeWorktree_UnknownSessionReturnsSentinel(t *testing.T) {
+	root := NewAppWorkspace(app.NewForTest(t.Context()), configtest.NewStore(t, &config.Config{}))
+	t.Cleanup(root.app.ShutdownForTest)
+
+	ws, release, err := root.ResumeWorktree(t.Context(), "no-such-session")
+	require.Nil(t, ws)
+	require.Nil(t, release)
+	require.ErrorIs(t, err, workspace.ErrNoWorktreeForSession)
+}
+
+// TestResumeWorktree_FindsLiveChildAfterDisconnectAndForgetsItAfterExit is
+// CLIENT-SERVER.md PR 2.4b's own scenario, one level down from the daemon
+// e2e test: a client enters a worktree and then goes away without calling
+// ExitWorktree (simulated here by simply never invoking EnterWorktree's own
+// release) -- the worktree App keeps owning the session, and a second
+// caller's ResumeWorktree must find the same workspace. Its own release
+// must not shut that App down while it is still the owner (mirroring
+// TestWorktreeReleaseCallbacksOnlyShutdownStaleTarget's assertion for
+// EnterWorktree's release), and once the session is actually handed back
+// via ExitWorktree, ResumeWorktree must forget it.
+func TestResumeWorktree_FindsLiveChildAfterDisconnectAndForgetsItAfterExit(t *testing.T) {
+	repo := initWorktreeRepo(t)
+	dataDir := t.TempDir()
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
+	q := db.New(conn)
+	sessions := sessionstore.NewService(q, conn, repo)
+	sess, err := sessions.Create(t.Context(), "top-level")
+	require.NoError(t, err)
+	source := app.NewForTest(t.Context())
+	t.Cleanup(source.ShutdownForTest)
+	store := configtest.NewStore(t, &config.Config{Options: &config.Options{DataDirectory: dataDir}}, configtest.WithWorkingDir(repo))
+	source.SetConfigForTest(store)
+	source.SetSessionsForTest(sessions)
+	source.SetMessagesForTest(messagestore.NewService(q, messagestore.WithDebounce(0)))
+	source.SetOwnershipForTest(sessionstore.NewOwnershipStore(conn), "main")
+	source.ReportCurrentSession(sess.ID)
+	root := NewAppWorkspace(source, store)
+
+	originalBootstrap := bootstrapWorktreeApp
+	var shutdowns atomic.Int32
+	bootstrapWorktreeApp = func(_ context.Context, path string, _ app.BootstrapOptions) (*app.BootstrapResult, error) {
+		target := app.NewForTest(t.Context())
+		targetStore := configtest.NewStore(t, &config.Config{Options: &config.Options{DataDirectory: dataDir}}, configtest.WithWorkingDir(path))
+		target.SetConfigForTest(targetStore)
+		target.SetSessionsForTest(sessions)
+		target.SetMessagesForTest(messagestore.NewService(q, messagestore.WithDebounce(0)))
+		target.SetOwnershipForTest(sessionstore.NewOwnershipStore(conn), "prepared")
+		target.ReportCurrentSession(sess.ID)
+		target.ArmPreparedSession()
+		require.NoError(t, target.AddCleanup(func(context.Context) error { shutdowns.Add(1); return nil }))
+		return &app.BootstrapResult{App: target, Config: targetStore}, nil
+	}
+	t.Cleanup(func() { bootstrapWorktreeApp = originalBootstrap })
+
+	targetWorkspace, enterRelease, err := root.EnterWorktree(t.Context(), "resume")
+	require.NoError(t, err)
+	target := targetWorkspace.(*AppWorkspace)
+
+	// The client that entered the worktree vanished without ExitWorktree:
+	// its own release is simply never called here. A second caller
+	// reconnecting to the root workspace must still be able to reach the
+	// same App.
+	resumed, resumeRelease, err := root.ResumeWorktree(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Same(t, target, resumed)
+
+	// Resuming a still-owning worktree must not tear it down.
+	resumeRelease()
+	require.Zero(t, shutdowns.Load(), "resuming a worktree that still owns its session must not shut it down")
+
+	// The original caller's own release is a no-op for the same reason --
+	// the target still owns the session at this point.
+	enterRelease()
+	require.Zero(t, shutdowns.Load())
+
+	// Now the session is hand back to root, the ordinary way.
+	rootWorkspace, exitRelease, err := target.ExitWorktree(t.Context())
+	require.NoError(t, err)
+	require.Same(t, root, rootWorkspace)
+	exitRelease()
+	require.EqualValues(t, 1, shutdowns.Load())
+
+	// The registry no longer has anything to resume.
+	_, _, err = root.ResumeWorktree(t.Context(), sess.ID)
+	require.ErrorIs(t, err, workspace.ErrNoWorktreeForSession)
+}
+
+// TestWorktreeChildRegistryConcurrentAccess exercises registerWorktreeChild/
+// unregisterWorktreeChild/lookupWorktreeChild from many goroutines at once,
+// for -race: EnterWorktree/ExitWorktree/ResumeWorktree all reach the same
+// map through these three methods, and a missing lock there would only
+// ever show up under concurrent access, not in the single-goroutine tests
+// above.
+func TestWorktreeChildRegistryConcurrentAccess(t *testing.T) {
+	root := NewAppWorkspace(app.NewForTest(t.Context()), configtest.NewStore(t, &config.Config{}))
+	t.Cleanup(root.app.ShutdownForTest)
+	child := NewAppWorkspace(app.NewForTest(t.Context()), configtest.NewStore(t, &config.Config{}))
+	t.Cleanup(child.app.ShutdownForTest)
+
+	const n = 50
+	done := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			sessionID := "sess"
+			root.registerWorktreeChild(sessionID, child)
+			_, _ = root.lookupWorktreeChild(sessionID)
+			root.unregisterWorktreeChild(sessionID)
+		}()
+	}
+	for i := 0; i < n; i++ {
+		<-done
+	}
+}

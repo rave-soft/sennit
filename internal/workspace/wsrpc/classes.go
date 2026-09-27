@@ -205,8 +205,9 @@ var MethodClasses = map[string]Class{
 	"MCPAuthURL":                   C,
 
 	// WorktreeController.
-	"EnterWorktree": H,
-	"ExitWorktree":  H,
+	"EnterWorktree":  H,
+	"ExitWorktree":   H,
+	"ResumeWorktree": H,
 	// WorktreeState is C: the command palette (internal/ui/dialog/
 	// commands.go) calls it directly while building its item list, the
 	// same way the LSPController/MCP getters above are read straight
