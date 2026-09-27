@@ -253,8 +253,20 @@ func supportsProgressBar() bool {
 // sennitlog.Setup only takes effect on its first call in the process
 // (see internal/log's initOnce) - later calls, including from a second
 // command in the same process, are no-ops.
+//
+// processLogSetup is sennitlog.Setup by default. main_test.go's TestMain
+// overrides it to a no-op for this package's whole test binary: Setup's
+// sync.Once fires at most once per process, so whichever test happens to
+// call setupProcessLogging first would otherwise claim internal/log's file
+// handle against that one test's own t.TempDir() -- a handle held for the
+// rest of the process's life, which later makes every other test's
+// unrelated t.TempDir() cleanup for that same directory fail on Windows
+// (mandatory byte-range locks refuse the delete; Linux removes it under
+// the open handle without complaint, so this only ever showed up there).
+var processLogSetup = sennitlog.Setup
+
 func setupProcessLogging(cmd *cobra.Command, debug bool) {
-	sennitlog.Setup(config.GlobalLogFile(), debug, verboseLogWriters(cmd)...)
+	processLogSetup(config.GlobalLogFile(), debug, verboseLogWriters(cmd)...)
 	if earlyLogs != nil {
 		earlyLogs.Replay(slog.Default())
 	}

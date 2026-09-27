@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"testing"
 
@@ -23,6 +24,14 @@ func TestMain(m *testing.M) {
 	// cost compounds across the helpers a single test run touches and
 	// was eating into supervisor.EnsureRunning's readiness budget.
 	testenv.TrimChildRaceExitSleep()
+
+	// setupLocalWorkspace's PostConnect and initConfig both call
+	// setupProcessLogging on the paths this package's tests exercise
+	// in-process (never in a re-exec'd subprocess, which gets its own
+	// process and its own singleton) -- see processLogSetup's own doc
+	// comment in root.go for why the real sennitlog.Setup must never run
+	// here.
+	processLogSetup = func(string, bool, ...io.Writer) {}
 
 	// Stamp this package's throwaway databases from one migrated
 	// template rather than running the migration chain per test; see
