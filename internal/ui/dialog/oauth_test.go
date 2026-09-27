@@ -318,3 +318,9 @@ func (f *stubDialogOAuthFlow) cancelCount() int {
 	defer f.mu.Unlock()
 	return f.cancelled
 }
+
+// StartRelay is a no-op: these tests never reach a remote daemon, so
+// there is nothing to relay (CLIENT-SERVER.md, PR 3.3).
+func (f *stubDialogOAuthFlow) StartRelay(context.Context, string) (func(), error) {
+	return func() {}, nil
+}

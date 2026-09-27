@@ -407,6 +407,17 @@ func (h *Handler) Close() {
 	h.receiver.close()
 }
 
+// ServeCallback hands req to this server's own callback handler exactly as
+// its loopback listener would. It exists for a daemon whose browser runs
+// on another machine (CLIENT-SERVER.md, PR 3.3): the redirect that would
+// otherwise hit the receiver's own listener instead reaches a client-side
+// relay on the browser's own machine, which forwards it here over RPC
+// (see grpcws.oauthServer.DeliverOAuthCallback, mcp.authCoordinator.
+// DeliverAuthCallback).
+func (h *Handler) ServeCallback(w http.ResponseWriter, req *http.Request) {
+	h.receiver.handleCallback(w, req)
+}
+
 // callbackReceiver owns the localhost listener that the authorization
 // server redirects back to, and hands each authorization result to the
 // flow waiting for it.

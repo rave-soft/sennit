@@ -86,7 +86,10 @@ func connectRemoteWorkspace(ctx context.Context, target transport.Target, dialer
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("dialing remote daemon at %s: %w", target, err)
 	}
-	client = grpcws.NewClient(conn)
+	// grpcws.Remote() is what tells an OAuthFlow/Client it must actually
+	// relay a browser redirect (CLIENT-SERVER.md, PR 3.3): this is the
+	// one path that reaches a daemon on another machine at all.
+	client = grpcws.NewClient(conn, grpcws.Remote())
 
 	connectCtx, cancel := context.WithTimeout(ctx, daemonConnectTimeout)
 	defer cancel()

@@ -142,6 +142,11 @@ var readOnlySafeMethods = []string{
 	"MCPGetStates",
 	"MCPPendingAuth",
 	"MCPResources",
+	// StartMCPOAuthRelay only binds a local listener on the calling
+	// client's own machine and forwards it over RPC (CLIENT-SERVER.md,
+	// PR 3.3); it persists nothing and touches no workspace state, the
+	// same reasoning as MCPAuthURL/MCPPendingAuth just above.
+	"StartMCPOAuthRelay",
 	"OAuthConfiguredProxy",
 	"OAuthProviderConfiguredProxy",
 	"OAuthValidateProxy",

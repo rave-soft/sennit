@@ -775,6 +775,10 @@ func (s *stubWorkspace) MCPAuthenticate(ctx context.Context, name string) error 
 func (s *stubWorkspace) MCPPendingAuth() []MCPPendingAuthServer { return nil }
 func (s *stubWorkspace) MCPAuthURL(name string) string          { return "" }
 
+func (s *stubWorkspace) StartMCPOAuthRelay(context.Context, string, string) (func(), error) {
+	return func() {}, nil
+}
+
 // ThreadController (query only for stub)
 func (s *stubWorkspace) EnterWorktree(context.Context, string) (Workspace, func(), error) {
 	return nil, nil, nil

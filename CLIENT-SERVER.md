@@ -881,6 +881,25 @@ loopback теперь отменяет контекст при возврате,
 
 ### PR 3.3. OAuth и SSO через удалённый демон
 
+**Статус.** Реле для Codex и MCP сделано: RPC `DeliverOAuthCallback` на
+сервисе OAuth (`wsrpc/grpcws/oauth.go`) и клиентский релей
+`StartOAuthCallbackRelay` (`wsrpc/grpcws/oauth_relay.go`), включаемый только
+у `*grpcws.Client`, построенного через `grpcws.Remote()`
+(`internal/cmd/remote.go`); у локального демона и in-process режима —
+no-op, порт колбэка не трогается. `workspace.OAuthFlow.StartRelay` и
+`workspace.MCPController.StartMCPOAuthRelay` — прямые методы интерфейса
+(не приведение типа: `TestUIDoesNotTypeAssertWorkspace` это запрещает),
+реализованы в `appws` как no-op и в `grpcws.Client` как настоящий релей;
+диалог Codex (`ui/dialog/oauth_codex.go`) и `sennit login codex`
+(`cmd/login_codex.go`) зовут его перед ожиданием редиректа, диалог MCP
+(`ui/dialog/mcp_auth.go`) — перед открытием браузера. AWS SSO не тронут:
+`AWSSOCommand` (`aws sso login`) выполняется на машине демона
+(`agent/credential_refresh.go`'s `runAWSAuthRefresh`) и печатает URL
+device-code потока в свой stdout/stderr; сама команда опрашивает токен-
+эндпоинт, никакого локального листенера не открывает, так что диалогу
+(`ui/dialog/aws_sso.go:283`) достаточно открыть URL в браузере клиента —
+здесь нечего релеить.
+
 - Codex слушает `localhost:1455` на машине демона
   (`oauth/codex/oauth.go:97-98`), браузер открыт на клиенте. Клиент при
   удалённом подключении слушает тот же порт у себя и пересылает запрос
@@ -898,6 +917,11 @@ loopback теперь отменяет контекст при возврате,
 Проверка: тест с двумя сетевыми неймспейсами не нужен; достаточно, что
 клиентский слушатель и серверный обработчик связаны только RPC, и тест
 сверяет, что токен дошёл.
+
+**Фаза 3 закрыта** (`9b6dc5498` … коммит 3.3). Удалённое подключение по
+SSH, серверные пути и хост в UI, пароли прокси не уходят клиенту,
+пересылка OAuth-колбэка для Codex и MCP. Проверено тестами с поддельным
+`ssh` и bufconn; на двух настоящих машинах не проверялось.
 
 ## Фаза 4. Завершение
 

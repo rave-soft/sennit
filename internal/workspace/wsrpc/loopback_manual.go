@@ -152,6 +152,14 @@ func (f codecOAuthFlow) Cancel() {
 	f.inner.Cancel()
 }
 
+// StartRelay is a plain pass-through: a loopback flow is always
+// in-process, so this only ever reaches appws's own no-op implementation
+// (CLIENT-SERVER.md, PR 3.3) -- there is no wire hop here to round-trip
+// through a codec.
+func (f codecOAuthFlow) StartRelay(ctx context.Context, authorizationURL string) (func(), error) {
+	return f.inner.StartRelay(ctx, authorizationURL)
+}
+
 // EnterWorktree is class H: a non-nil error round-trips, and the
 // returned Workspace is wrapped in NewLoopback so every call made
 // through it also goes through the codec; release passes through
@@ -197,6 +205,14 @@ func wrapHandleWorkspace(ws workspace.Workspace) workspace.Workspace {
 // connection of its own to tear down.
 func (l *Loopback) Shutdown() {
 	l.inner.Shutdown()
+}
+
+// StartMCPOAuthRelay is class X: a plain delegation, like Shutdown. A
+// loopback is always in-process, so this only ever reaches appws's own
+// no-op implementation (CLIENT-SERVER.md, PR 3.3); only grpcws.Client
+// does real work here.
+func (l *Loopback) StartMCPOAuthRelay(ctx context.Context, name, authorizationURL string) (func(), error) {
+	return l.inner.StartMCPOAuthRelay(ctx, name, authorizationURL)
 }
 
 // PrepareSessionChanges used to need a hand-written forward here: it was

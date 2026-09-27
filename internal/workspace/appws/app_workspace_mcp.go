@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
@@ -15,6 +16,29 @@ import (
 
 func (w *AppWorkspace) WaitForMCPInit(ctx context.Context) error {
 	return w.app.MCP.WaitForInit(ctx)
+}
+
+// StartMCPOAuthRelay implements workspace.MCPController: in-process, this
+// workspace's own OAuth callback handler already runs on the same machine
+// the browser will, so there is nothing to relay (CLIENT-SERVER.md, PR
+// 3.3) — only grpcws.Client, reached over the SSH dialer, actually binds
+// a listener here.
+func (w *AppWorkspace) StartMCPOAuthRelay(context.Context, string, string) (func(), error) {
+	return func() {}, nil
+}
+
+// DeliverMCPOAuthCallback implements grpcws's mcpCallbackDeliverer
+// interface, used by the OAuth service's DeliverOAuthCallback RPC
+// (CLIENT-SERVER.md PR 3.3): it hands the browser's redirect to name's
+// pending MCP OAuth handler in-process, exactly as if this workspace's own
+// loopback listener had received it directly. The request actually arrived
+// over a relay running on the connected client's machine, which is where
+// the browser itself is running for a remote daemon.
+func (w *AppWorkspace) DeliverMCPOAuthCallback(name string, rw http.ResponseWriter, req *http.Request) bool {
+	if w.app.MCP == nil {
+		return false
+	}
+	return w.app.MCP.DeliverAuthCallback(name, rw, req)
 }
 
 func (w *AppWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo {

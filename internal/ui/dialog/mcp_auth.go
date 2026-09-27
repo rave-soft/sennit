@@ -42,6 +42,11 @@ type MCPAuth struct {
 
 	cancelAuth context.CancelFunc
 
+	// stopRelay tears down the current server's OAuth callback relay
+	// (CLIENT-SERVER.md, PR 3.3), if openAuthURL started one. Cleared by
+	// advance/CancelAuth, whichever ends this server's flow first.
+	stopRelay func()
+
 	spinner spinner.Model
 	help    help.Model
 	keyMap  struct {
@@ -97,6 +102,17 @@ func (m *MCPAuth) CancelAuth() {
 	if m.cancelAuth != nil {
 		m.cancelAuth()
 		m.cancelAuth = nil
+	}
+	m.stopCurrentRelay()
+}
+
+// stopCurrentRelay tears down the relay openAuthURL started for the
+// current server, if any -- called whenever that server's flow ends, one
+// way or another (advance, CancelAuth).
+func (m *MCPAuth) stopCurrentRelay() {
+	if m.stopRelay != nil {
+		m.stopRelay()
+		m.stopRelay = nil
 	}
 }
 
@@ -223,6 +239,18 @@ func (m *MCPAuth) openAuthURL() Action {
 	u := m.authURL()
 	if u == "" {
 		return nil
+	}
+	// StartMCPOAuthRelay is a no-op on a Workspace with nothing to relay
+	// (in-process, or a local daemon over a unix socket -- CLIENT-
+	// SERVER.md, PR 3.3); started once per server and idempotent because
+	// Submit re-fires this while MCPAuthStateAuthenticating.
+	if m.stopRelay == nil {
+		name := m.currentServer().Name
+		stop, err := m.com.Workspace.StartMCPOAuthRelay(m.com.Context(), name, u)
+		if err != nil {
+			return ActionCmd{util.ReportError(fmt.Errorf("starting the local OAuth callback relay: %w", err))}
+		}
+		m.stopRelay = stop
 	}
 	return ActionCmd{func() tea.Msg {
 		if err := browser.OpenURL(u); err != nil {

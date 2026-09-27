@@ -203,6 +203,7 @@ var MethodClasses = map[string]Class{
 	"MCPAuthenticate":              U,
 	"MCPPendingAuth":               C,
 	"MCPAuthURL":                   C,
+	"StartMCPOAuthRelay":           X,
 
 	// WorktreeController.
 	"EnterWorktree":  H,

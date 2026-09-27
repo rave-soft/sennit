@@ -8,6 +8,7 @@ package wsrpctest
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"sync/atomic"
 
@@ -92,6 +93,10 @@ type StubWorkspace struct {
 	OAuthResult        workspace.OAuthStartResult
 	OAuthErr           error
 	OAuthFlow          workspace.OAuthFlow
+
+	// DeliverMCPOAuthCallbackFn backs the DeliverMCPOAuthCallback method
+	// below.
+	DeliverMCPOAuthCallbackFn func(name string, w http.ResponseWriter, r *http.Request) bool
 
 	GotWorktreeName    string
 	ExitWorktreeCalled bool
@@ -404,6 +409,17 @@ func (s *StubWorkspace) Shutdown() {
 	s.ShutdownCalled = true
 }
 
+// DeliverMCPOAuthCallbackFn, if set, backs DeliverMCPOAuthCallback for a
+// grpcws DeliverOAuthCallback (Kind "mcp") test -- see grpcws's own
+// mcpCallbackDeliverer, which this satisfies structurally without
+// importing it.
+func (s *StubWorkspace) DeliverMCPOAuthCallback(name string, w http.ResponseWriter, r *http.Request) bool {
+	if s.DeliverMCPOAuthCallbackFn == nil {
+		return false
+	}
+	return s.DeliverMCPOAuthCallbackFn(name, w, r)
+}
+
 // StubOAuthFlow is workspace.OAuthFlow's stub implementation, letting a
 // StartOAuth test exercise a codec/transport's wrapping of the returned
 // handle, and a grpcws test exercise OAuthWait/OAuthCancel's own contract:
@@ -435,6 +451,26 @@ type StubOAuthFlow struct {
 	CancelMu    sync.Mutex
 	Cancelled   bool
 	CancelCalls int
+
+	// ServeCallbackFn, if set, backs ServeCallback for a grpcws
+	// DeliverOAuthCallback (Kind "codex") test -- see grpcws's own
+	// httpCallbackFlow, which this satisfies structurally without
+	// importing it.
+	ServeCallbackFn func(w http.ResponseWriter, r *http.Request)
+}
+
+func (f *StubOAuthFlow) ServeCallback(w http.ResponseWriter, r *http.Request) {
+	if f.ServeCallbackFn != nil {
+		f.ServeCallbackFn(w, r)
+	}
+}
+
+// StartRelay implements workspace.OAuthFlow's relay method as a no-op: the
+// server side of a test never calls it (only OAuthWait/OAuthCancel do),
+// only a *grpcws.Client's own wire implementation does, and that wraps
+// this stub rather than embedding it.
+func (f *StubOAuthFlow) StartRelay(context.Context, string) (func(), error) {
+	return func() {}, nil
 }
 
 func (f *StubOAuthFlow) Wait(ctx context.Context) (workspace.OAuthCompletion, error) {

@@ -25,6 +25,10 @@ func (f *stubFlow) Wait(context.Context) (workspace.OAuthCompletion, error) {
 
 func (f *stubFlow) Cancel() { f.cancelCalls++ }
 
+func (f *stubFlow) StartRelay(context.Context, string) (func(), error) {
+	return func() {}, nil
+}
+
 // TestOAuthFlowRegistry_ResolveUnknownReturnsFalse checks the registry's
 // own sentinel-free "not found" contract: unlike handleRegistry.resolve,
 // which returns workspace.ErrWorkspaceGone, resolve here is a private

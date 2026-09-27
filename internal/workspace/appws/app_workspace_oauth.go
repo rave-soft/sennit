@@ -3,6 +3,7 @@ package appws
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -201,6 +202,22 @@ func (a *codexFlowAdapter) Cancel() {
 	_ = a.flow.Close()
 }
 
+// ServeCallback implements grpcws's httpCallbackFlow interface, used by
+// the OAuth service's DeliverOAuthCallback RPC (CLIENT-SERVER.md PR 3.3):
+// it hands the browser's redirect straight to the underlying *codex.Flow,
+// exactly as its own loopback listener would.
+func (a *codexFlowAdapter) ServeCallback(w http.ResponseWriter, req *http.Request) {
+	a.flow.ServeCallback(w, req)
+}
+
+// StartRelay implements workspace.OAuthFlow: in-process, this flow's own
+// loopback listener already runs on the same machine the browser will, so
+// there is nothing to relay (CLIENT-SERVER.md, PR 3.3) — only grpcws's
+// clientOAuthFlow, reached over the SSH dialer, actually binds one.
+func (a *codexFlowAdapter) StartRelay(context.Context, string) (func(), error) {
+	return func() {}, nil
+}
+
 // startCodexOAuth reimplements the disk-reuse/refresh-then-browser-flow
 // dance formerly duplicated between oauth_codex.go's initiateAuth and
 // login_codex.go's codexToken.
@@ -371,6 +388,12 @@ func (a *copilotFlowAdapter) Wait(ctx context.Context) (workspace.OAuthCompletio
 // cancelling the ctx passed to Wait already does. Callers still call it
 // unconditionally, matching OAuthFlow's contract.
 func (a *copilotFlowAdapter) Cancel() {}
+
+// StartRelay implements workspace.OAuthFlow: Copilot is a device flow (no
+// browser redirect at all), so there is never anything to relay.
+func (a *copilotFlowAdapter) StartRelay(context.Context, string) (func(), error) {
+	return func() {}, nil
+}
 
 func (w *AppWorkspace) startCopilotOAuth(ctx context.Context, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

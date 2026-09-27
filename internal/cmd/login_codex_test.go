@@ -94,6 +94,12 @@ func (f *stubOAuthFlow) Wait(context.Context) (workspace.OAuthCompletion, error)
 
 func (f *stubOAuthFlow) Cancel() { f.cancelled++ }
 
+// StartRelay is a no-op: these tests never reach a remote daemon, so
+// there is nothing to relay (CLIENT-SERVER.md, PR 3.3).
+func (f *stubOAuthFlow) StartRelay(context.Context, string) (func(), error) {
+	return func() {}, nil
+}
+
 func (w *codexLoginWorkspaceFake) StartOAuth(_ context.Context, providerID, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
 	w.calls = append(w.calls, "StartOAuth:"+providerID)
 	w.startProxies = append(w.startProxies, proxyURL)

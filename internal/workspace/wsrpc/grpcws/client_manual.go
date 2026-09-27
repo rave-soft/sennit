@@ -46,6 +46,15 @@ type Client struct {
 	clientID    string
 	callTimeout time.Duration
 
+	// remote marks a Client built over the SSH dialer (CLIENT-SERVER.md,
+	// PR 3.3): only then does an OAuthFlow's StartRelay / Client's
+	// StartMCPOAuthRelay actually bind a local listener and forward it to
+	// DeliverOAuthCallback. A local daemon reached over a unix socket runs
+	// its own callback listener on the same machine the browser opens on
+	// already, so relaying to it would try to bind a port its listener
+	// already holds -- see Remote's doc comment.
+	remote bool
+
 	// lifeCtx/lifeCancel bound every subscription's lifetime: Subscribe
 	// rides lifeCtx directly ("blocks until Shutdown"), SubscribeWith
 	// derives its own child of it (its stop func cancels only that
@@ -132,6 +141,16 @@ func WithHandle(handle string) ClientOption {
 // than a brand-new one with no handles yet -- CLIENT-SERVER.md, PR 1.3.
 func WithClientID(id string) ClientOption {
 	return func(c *Client) { c.clientID = id }
+}
+
+// Remote marks a Client as reaching its daemon over the SSH dialer
+// (internal/transport.SSHDialer), rather than a local unix socket or an
+// in-process loopback -- CLIENT-SERVER.md, PR 3.3. connectRemoteWorkspace
+// is the only constructor that passes it: everything else connects to a
+// daemon on this same machine, where an OAuth callback listener already
+// runs where the browser will, so nothing needs relaying.
+func Remote() ClientOption {
+	return func(c *Client) { c.remote = true }
 }
 
 // withParentLifeCtx is unexported: only callHandles uses it (see

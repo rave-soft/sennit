@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -69,6 +70,29 @@ func (ac *authCoordinator) MCPAuthURL(name string) string {
 		return ""
 	}
 	return publication.auth.handler.AuthURL()
+}
+
+// DeliverAuthCallback hands req to name's OAuth handler, if one is
+// currently publishing an authorization URL, and reports whether one was
+// found. It is the daemon-side half of CLIENT-SERVER.md PR 3.3's MCP OAuth
+// relay: the redirect that would otherwise reach the daemon's own loopback
+// listener (mcpoauth.Handler's callbackReceiver) arrives here instead, from
+// a client-side relay running on the browser's own machine.
+//
+// Unlike the codex flow handle, this takes no client-ownership check: a
+// pending server's authorization URL is already workspace-wide state any
+// connected client can read back (MCPPendingAuth/MCPAuthURL), so delivering
+// its callback is no more privileged than reading that URL in the first
+// place.
+func (ac *authCoordinator) DeliverAuthCallback(name string, w http.ResponseWriter, req *http.Request) bool {
+	ac.reg.publishMu.Lock()
+	publication, ok := ac.reg.authURLs.Get(name)
+	ac.reg.publishMu.Unlock()
+	if !ok || publication.auth == nil || publication.auth.handler == nil {
+		return false
+	}
+	publication.auth.handler.ServeCallback(w, req)
+	return true
 }
 
 // PendingAuthMCPs returns MCP servers in StateNeedsAuth with their URLs.

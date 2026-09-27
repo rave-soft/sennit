@@ -107,6 +107,16 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 			fmt.Println("Could not reuse the Codex CLI login:", result.ExistingLoginFailure)
 		}
 
+		// A flow obtained from a remote daemon over SSH needs its redirect
+		// relayed from this machine (CLIENT-SERVER.md, PR 3.3); every
+		// other OAuthFlow's StartRelay is a no-op (in-process, or a local
+		// daemon over a unix socket, has nothing to relay).
+		stopRelay, relayErr := flow.StartRelay(loginCtx, result.AuthorizationURL)
+		if relayErr != nil {
+			return fmt.Errorf("starting the local OAuth callback relay: %w", relayErr)
+		}
+		defer stopRelay()
+
 		fmt.Println()
 		fmt.Println("Press enter to open this URL and sign in with your ChatGPT account:")
 		fmt.Println()

@@ -71,6 +71,7 @@ type OAuthCodex struct {
 	// that lands after the teardown is closed immediately instead.
 	mu         sync.Mutex
 	flow       workspace.OAuthFlow
+	stopRelay  func()
 	cancelFunc func()
 	stopped    bool
 }
@@ -146,17 +147,39 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 		return ActionCompleteOAuth{Completion: *result.Completed, Note: existingLoginNote(result)}
 	}
 
+	// A flow obtained from a remote daemon over SSH needs its redirect
+	// relayed from this machine (CLIENT-SERVER.md, PR 3.3); every other
+	// OAuthFlow's StartRelay is a no-op (in-process, or a local daemon
+	// over a unix socket, has nothing to relay in the first place). flow
+	// is nil here only for a test double that doesn't honor StartOAuth's
+	// contract (Completed unset implies flow is non-nil); guarded rather
+	// than trusted, matching startPolling's own nil check below. Started
+	// before the stopped/dismissed check below, so a dismissal racing
+	// this call is torn down the same way flow.Cancel() already is.
+	var stopRelay func()
+	if flow != nil {
+		var relayErr error
+		stopRelay, relayErr = flow.StartRelay(m.com.Context(), result.AuthorizationURL)
+		if relayErr != nil {
+			return ActionOAuthErrored{Error: relayErr}
+		}
+	}
+
 	m.mu.Lock()
 	if m.stopped {
 		m.mu.Unlock()
 		// Dismissed while this was binding: release the port rather than
 		// leaving it held by a dialog that is gone.
+		if stopRelay != nil {
+			stopRelay()
+		}
 		if flow != nil {
 			flow.Cancel()
 		}
 		return nil
 	}
 	m.flow = flow
+	m.stopRelay = stopRelay
 	m.mu.Unlock()
 
 	return ActionInitiateOAuth{
@@ -198,12 +221,15 @@ func (m *OAuthCodex) startPolling(_ string, _ int) tea.Cmd {
 func (m *OAuthCodex) stopPolling() tea.Msg {
 	m.mu.Lock()
 	m.stopped = true
-	cancel, flow := m.cancelFunc, m.flow
-	m.cancelFunc, m.flow = nil, nil
+	cancel, flow, stopRelay := m.cancelFunc, m.flow, m.stopRelay
+	m.cancelFunc, m.flow, m.stopRelay = nil, nil, nil
 	m.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
+	}
+	if stopRelay != nil {
+		stopRelay()
 	}
 	if flow != nil {
 		flow.Cancel()

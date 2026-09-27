@@ -148,6 +148,16 @@ func (f *Flow) Wait(ctx context.Context) (*oauth.Token, error) {
 	}
 }
 
+// ServeCallback hands req to this flow's own callback handler exactly as
+// the flow's loopback listener would. It exists for a daemon whose browser
+// runs on another machine (CLIENT-SERVER.md, PR 3.3): the redirect that
+// would otherwise hit localhost:callbackPort here instead reaches a
+// client-side relay on the browser's own machine, which forwards it to
+// this method over RPC (see grpcws.oauthServer.DeliverOAuthCallback).
+func (f *Flow) ServeCallback(w http.ResponseWriter, req *http.Request) {
+	f.handleCallback(w, req)
+}
+
 // handleCallback receives the redirect, shows the user the outcome, and
 // hands the code to Wait.
 //

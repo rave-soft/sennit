@@ -681,6 +681,17 @@ type OAuthFlow interface {
 	// listener, an in-flight poll). Must be called exactly once when the
 	// flow is no longer needed, whether or not Wait was called.
 	Cancel()
+	// StartRelay begins relaying this flow's browser redirect from this
+	// machine to wherever its loopback listener actually runs, for a flow
+	// obtained from a remote daemon over SSH (CLIENT-SERVER.md, PR 3.3):
+	// the daemon's listener binds on its own machine, but the browser the
+	// caller is about to open runs here. It returns a stop func that must
+	// be called exactly once the flow is done with, whether it succeeded,
+	// failed, or was cancelled. An implementation with nothing to relay
+	// (in-process, or a local daemon reached over a unix socket, where the
+	// listener already runs on the same machine the browser will) returns
+	// a stop func that does nothing.
+	StartRelay(ctx context.Context, authorizationURL string) (stop func(), err error)
 }
 
 // OAuthCompletion is what CompleteOAuth returns once the credential and
@@ -880,6 +891,15 @@ type MCPController interface {
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []MCPPendingAuthServer
 	MCPAuthURL(name string) string
+	// StartMCPOAuthRelay begins relaying name's browser redirect from this
+	// machine to wherever its OAuth callback listener actually runs, for a
+	// workspace reached over a network hop (CLIENT-SERVER.md, PR 3.3) —
+	// OAuthFlow.StartRelay's counterpart for a named MCP server rather
+	// than a codex flow handle, since MCP servers have no StartOAuth/
+	// OAuthFlow of their own. An implementation with nothing to relay
+	// (in-process, or a local daemon over a unix socket) returns a stop
+	// func that does nothing.
+	StartMCPOAuthRelay(ctx context.Context, name, authorizationURL string) (stop func(), err error)
 }
 
 // WorktreeState describes where the session currently displayed lives.

@@ -851,6 +851,10 @@ func (w *readOnlyWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
 	return w.ws.MCPPendingAuth()
 }
 
+func (w *readOnlyWorkspace) StartMCPOAuthRelay(ctx context.Context, name, authorizationURL string) (func(), error) {
+	return w.ws.StartMCPOAuthRelay(ctx, name, authorizationURL)
+}
+
 func (w *readOnlyWorkspace) MCPResources() []MCPResourceInfo {
 	return w.ws.MCPResources()
 }

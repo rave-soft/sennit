@@ -1,10 +1,14 @@
 package grpcws
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -66,6 +70,35 @@ type OAuthCancelRequest struct {
 // OAuthCancelResponse is OAuthCancel's (empty) response.
 type OAuthCancelResponse struct{}
 
+// DeliverOAuthCallbackRequest is DeliverOAuthCallback's request (CLIENT-
+// SERVER.md, PR 3.3): a client-side relay hands it the browser redirect it
+// just received on its own machine, so the daemon's flow can process it
+// exactly as if its own loopback listener had. Kind picks which registry
+// FlowHandle/ServerName is resolved against: "codex" resolves FlowHandle
+// through the same oauthFlowRegistry StartOAuth/OAuthWait/OAuthCancel use
+// (and is only honored for the flow's own owner -- see
+// oauthFlowRegistry.resolveOwned); "mcp" resolves ServerName against
+// whichever MCP server is currently publishing that name's authorization
+// URL, with no per-client ownership check (see authCoordinator.
+// DeliverAuthCallback's doc comment on why that's the right call).
+type DeliverOAuthCallbackRequest struct {
+	Kind       string `json:"kind"`
+	FlowHandle string `json:"flow_handle,omitempty"`
+	ServerName string `json:"server_name,omitempty"`
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	RawQuery   string `json:"raw_query"`
+	Body       []byte `json:"body,omitempty"`
+}
+
+// DeliverOAuthCallbackResponse carries the daemon-side handler's HTTP
+// response back verbatim, for the relay to write to the browser.
+type DeliverOAuthCallbackResponse struct {
+	Status  int                 `json:"status"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Body    []byte              `json:"body,omitempty"`
+}
+
 // OAuthServer is the interface grpc.Server.RegisterService checks the
 // registered handler against (see MetaServer's doc comment for why this
 // can't just be *oauthServer).
@@ -73,6 +106,7 @@ type OAuthServer interface {
 	StartOAuth(context.Context, *StartOAuthRequest) (*StartOAuthResponse, error)
 	OAuthCancel(context.Context, *OAuthCancelRequest) (*OAuthCancelResponse, error)
 	OAuthWait(*OAuthWaitRequest, OAuthWaitServer) error
+	DeliverOAuthCallback(context.Context, *DeliverOAuthCallbackRequest) (*DeliverOAuthCallbackResponse, error)
 }
 
 // OAuthWaitServer is the server side of the OAuthWait stream.
@@ -115,6 +149,8 @@ var _OAuth_StartOAuth_Handler = oauthUnaryHandler("StartOAuth", (*oauthServer).S
 
 var _OAuth_OAuthCancel_Handler = oauthUnaryHandler("OAuthCancel", (*oauthServer).OAuthCancel)
 
+var _OAuth_DeliverOAuthCallback_Handler = oauthUnaryHandler("DeliverOAuthCallback", (*oauthServer).DeliverOAuthCallback)
+
 func _OAuth_OAuthWait_Handler(srv any, stream grpc.ServerStream) error {
 	m := new(OAuthWaitRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -129,6 +165,7 @@ var oauthServiceDesc = grpc.ServiceDesc{
 	Methods: []grpc.MethodDesc{
 		{MethodName: "StartOAuth", Handler: _OAuth_StartOAuth_Handler},
 		{MethodName: "OAuthCancel", Handler: _OAuth_OAuthCancel_Handler},
+		{MethodName: "DeliverOAuthCallback", Handler: _OAuth_DeliverOAuthCallback_Handler},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -215,6 +252,79 @@ func (s *oauthServer) OAuthWait(req *OAuthWaitRequest, stream OAuthWaitServer) (
 	return stream.Send(&OAuthWaitFrame{Completion: completion})
 }
 
+// httpCallbackFlow is implemented by an OAuthFlow that can also serve its
+// own callback in-process -- appws's codexFlowAdapter, wrapping a
+// *codex.Flow. DeliverOAuthCallback type-asserts a resolved
+// workspace.OAuthFlow against this rather than adding ServeCallback to
+// workspace.OAuthFlow itself: every other implementation (loopback's own
+// pass-through, wsrpctest's stub) would otherwise have to grow a method
+// they have no way to implement meaningfully.
+type httpCallbackFlow interface {
+	ServeCallback(w http.ResponseWriter, r *http.Request)
+}
+
+// mcpCallbackDeliverer is implemented by a root workspace.Workspace that
+// can serve a named MCP server's pending OAuth callback in-process --
+// appws.AppWorkspace, in production. A workspace that doesn't implement
+// this (a test stub, a read-only wrapper) simply fails a "mcp"-kind
+// DeliverOAuthCallback, the same way an unresolvable handle fails a
+// "codex"-kind one.
+type mcpCallbackDeliverer interface {
+	DeliverMCPOAuthCallback(name string, w http.ResponseWriter, r *http.Request) bool
+}
+
+// DeliverOAuthCallback implements the RPC from CLIENT-SERVER.md, PR 3.3's
+// build step 1: it replays req as an in-process HTTP request against
+// whichever handler owns the flow (Kind), and hands back that handler's
+// response verbatim for the caller's relay to write to the browser.
+//
+// The handler's own path check (Flow.handleCallback /
+// callbackReceiver.handleCallback) rejects anything but the flow's exact
+// callback path with a 404, so no separate validation is needed here.
+func (s *oauthServer) DeliverOAuthCallback(ctx context.Context, req *DeliverOAuthCallbackRequest) (*DeliverOAuthCallbackResponse, error) {
+	var handler func(http.ResponseWriter, *http.Request)
+	switch req.Kind {
+	case "codex":
+		flow, ok := s.registry.resolveOwned(req.FlowHandle, clientIDFromContext(ctx))
+		if !ok {
+			return nil, grpcStatusFromError(ctx, workspace.ErrWorkspaceGone)
+		}
+		deliverable, ok := flow.(httpCallbackFlow)
+		if !ok {
+			return nil, grpcStatusFromError(ctx, errors.New("oauth: this flow does not support callback delivery"))
+		}
+		handler = deliverable.ServeCallback
+	case "mcp":
+		ws, err := s.resolve(ctx)
+		if err != nil {
+			return nil, grpcStatusFromError(ctx, err)
+		}
+		deliverer, ok := ws.(mcpCallbackDeliverer)
+		if !ok {
+			return nil, grpcStatusFromError(ctx, errors.New("oauth: this workspace does not support MCP callback delivery"))
+		}
+		name := req.ServerName
+		handler = func(w http.ResponseWriter, r *http.Request) {
+			if !deliverer.DeliverMCPOAuthCallback(name, w, r) {
+				http.NotFound(w, r)
+			}
+		}
+	default:
+		return nil, grpcStatusFromError(ctx, fmt.Errorf("oauth: unknown callback kind %q", req.Kind))
+	}
+
+	httpReq := httptest.NewRequestWithContext(ctx, req.Method, req.Path+"?"+req.RawQuery, bytes.NewReader(req.Body))
+	rec := httptest.NewRecorder()
+	handler(rec, httpReq)
+	result := rec.Result()
+	defer result.Body.Close()
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, fmt.Errorf("oauth: reading callback response: %w", err))
+	}
+	return &DeliverOAuthCallbackResponse{Status: result.StatusCode, Headers: map[string][]string(result.Header), Body: body}, nil
+}
+
 // oauthFlowEntry is one pending OAuth sign-in flow StartOAuth minted,
 // awaiting OAuthWait or OAuthCancel.
 type oauthFlowEntry struct {
@@ -262,6 +372,22 @@ func (r *oauthFlowRegistry) resolve(handle string) (workspace.OAuthFlow, bool) {
 	defer r.mu.Unlock()
 	entry, ok := r.byID[handle]
 	if !ok {
+		return nil, false
+	}
+	return entry.flow, true
+}
+
+// resolveOwned is resolve's owner-checked sibling, used only by
+// DeliverOAuthCallback: it reports handle's flow, but only when it is
+// still owned by owner (the calling client's lease -- clientIDFromContext),
+// so a client can never deliver a callback for a codex flow another
+// client started (CLIENT-SERVER.md, PR 3.3's build step, "the flow handle
+// must belong to the calling client ID").
+func (r *oauthFlowRegistry) resolveOwned(handle, owner string) (workspace.OAuthFlow, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.byID[handle]
+	if !ok || entry.owner != owner {
 		return nil, false
 	}
 	return entry.flow, true
@@ -349,6 +475,31 @@ type clientOAuthFlow struct {
 	handle string
 }
 
+var _ workspace.OAuthFlow = (*clientOAuthFlow)(nil)
+
+// StartRelay implements workspace.OAuthFlow (CLIENT-SERVER.md, PR 3.3): it
+// is a no-op, succeeding with a stop func that does nothing, unless this
+// Client was built with the SSH dialer (see Remote/withRemote) -- a local
+// daemon reached over a unix socket has its callback listener on the same
+// machine the browser opens on, and relaying to it would try to bind a
+// port its own listener already holds.
+func (f *clientOAuthFlow) StartRelay(ctx context.Context, authorizationURL string) (func(), error) {
+	if !f.c.remote {
+		return func() {}, nil
+	}
+	deliver := func(ctx context.Context, method, path, rawQuery string, body []byte) (int, http.Header, []byte, error) {
+		resp, err := f.c.deliverOAuthCallback(ctx, &DeliverOAuthCallbackRequest{
+			Kind: "codex", FlowHandle: f.handle,
+			Method: method, Path: path, RawQuery: rawQuery, Body: body,
+		})
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		return resp.Status, http.Header(resp.Headers), resp.Body, nil
+	}
+	return StartOAuthCallbackRelay(authorizationURL, deliver)
+}
+
 // Wait opens the OAuth service's OAuthWait stream and returns its one
 // frame, or the RPC's own error (identity-preserving, per
 // decodeClientError) -- see OAuthServer.OAuthWait's doc comment for the
@@ -381,6 +532,39 @@ func (f *clientOAuthFlow) Wait(ctx context.Context) (workspace.OAuthCompletion, 
 		return workspace.OAuthCompletion{}, decodeClientError("OAuthWait", tailErr, stream.Trailer())
 	}
 	return frame.Completion, nil
+}
+
+// deliverOAuthCallback calls the OAuth service's DeliverOAuthCallback RPC.
+// Shared by clientOAuthFlow.StartRelay ("codex") and StartMCPOAuthRelay
+// ("mcp").
+func (c *Client) deliverOAuthCallback(ctx context.Context, req *DeliverOAuthCallbackRequest) (*DeliverOAuthCallbackResponse, error) {
+	resp := new(DeliverOAuthCallbackResponse)
+	fullMethod := "/" + oauthServiceName + "/DeliverOAuthCallback"
+	if err := c.invokeMethod(ctx, fullMethod, "DeliverOAuthCallback", req, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// StartMCPOAuthRelay implements workspace.MCPController: StartRelay's
+// counterpart for a named MCP server rather than a codex flow handle
+// (CLIENT-SERVER.md, PR 3.3). Like StartRelay, it is a no-op unless this
+// Client was built with the SSH dialer.
+func (c *Client) StartMCPOAuthRelay(ctx context.Context, name, authorizationURL string) (func(), error) {
+	if !c.remote {
+		return func() {}, nil
+	}
+	deliver := func(ctx context.Context, method, path, rawQuery string, body []byte) (int, http.Header, []byte, error) {
+		resp, err := c.deliverOAuthCallback(ctx, &DeliverOAuthCallbackRequest{
+			Kind: "mcp", ServerName: name,
+			Method: method, Path: path, RawQuery: rawQuery, Body: body,
+		})
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		return resp.Status, http.Header(resp.Headers), resp.Body, nil
+	}
+	return StartOAuthCallbackRelay(authorizationURL, deliver)
 }
 
 // Cancel calls the OAuth service's OAuthCancel RPC, bounded by this
