@@ -23,7 +23,6 @@ import (
 
 	"github.com/rave-soft/sennit/internal/daemon"
 	"github.com/rave-soft/sennit/internal/daemon/supervisor"
-	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/rave-soft/sennit/internal/version"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
 	"github.com/rave-soft/sennit/internal/workspacelock"
