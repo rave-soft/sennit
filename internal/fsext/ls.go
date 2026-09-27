@@ -375,6 +375,17 @@ func (s *directoryVisitState) shouldIgnore(path string, ignorePatterns []string,
 // that keeps a partially read tree from ever being reported as a complete,
 // merely small one, without requiring every caller to be touched.
 func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
+	// Match what fastwalk hands back per entry before comparing against
+	// it anywhere below: conf.ToSlash (set unconditionally true, see its
+	// own comment) makes fastwalk itself walk using a "/"-converted copy
+	// of its root internally, on every platform whose native separator
+	// isn't already "/" (Windows). Leaving this local initialPath
+	// unconverted made the root's own entry compare unequal to itself in
+	// the walk callback below (path != initialPath), letting the root
+	// leak into the results as an empty string once its unmatched prefix
+	// was trimmed -- and broke dl's identical root-exemption check in
+	// shouldIgnore the same way.
+	initialPath = filepath.ToSlash(initialPath)
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 	incomplete := false
