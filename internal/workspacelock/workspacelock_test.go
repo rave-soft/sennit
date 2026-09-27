@@ -130,13 +130,13 @@ func TestAcquire_WithModeRecordsDaemonAndSocket(t *testing.T) {
 }
 
 // TestCurrentOwner_OldFormatRecordReadsAsTUI pins backward compatibility:
-// a lock file written by a binary that predates Mode/Socket (just pid,
-// version, started_at) must still be read, with Mode normalized to
+// an owner-info file written by a binary that predates Mode/Socket (just
+// pid, version, started_at) must still be read, with Mode normalized to
 // ModeTUI rather than left as the JSON-decoded zero value "".
 func TestCurrentOwner_OldFormatRecordReadsAsTUI(t *testing.T) {
 	dir := t.TempDir()
-	lockPath := filepath.Join(dir, lockFileName)
-	require.NoError(t, os.WriteFile(lockPath,
+	ownerPath := filepath.Join(dir, ownerInfoFileName)
+	require.NoError(t, os.WriteFile(ownerPath,
 		[]byte(`{"pid": 4242, "version": "0.1.0", "started_at": "2020-01-01T00:00:00Z"}`), 0o600))
 
 	owner, ok, err := CurrentOwner(dir)
@@ -145,6 +145,41 @@ func TestCurrentOwner_OldFormatRecordReadsAsTUI(t *testing.T) {
 	require.Equal(t, ModeTUI, owner.Mode)
 	require.Equal(t, 4242, owner.PID)
 	require.Empty(t, owner.Socket)
+}
+
+// TestCurrentOwner_ReadableWhileLockFileIsHeld is the regression test for
+// the Windows failure this package fixed: owner info must be readable
+// while the lock file itself is actively locked by someone else.
+//
+// A second, independent OS lock handle on the same lock path (bypassing
+// Acquire's in-process pool) stands in for a second real process holding
+// the workspace lock. On Windows, LockFileEx locks the whole file
+// (lock_windows.go) and is mandatory: any other handle's ReadFile on
+// that range fails outright, which is exactly what broke CurrentOwner
+// when owner info lived inside the locked file. POSIX flock never
+// exhibits this (a plain read is never blocked by another process's
+// flock), so this test can only prove the fix holds on Linux/macOS by
+// exercising the same code path with contention proven, not the
+// Windows-specific mandatory-lock failure itself -- see this package's
+// review notes for why that failure can't be reproduced on Linux.
+func TestCurrentOwner_ReadableWhileLockFileIsHeld(t *testing.T) {
+	dir := t.TempDir()
+
+	l, err := Acquire(dir, WithMode(ModeDaemon, "/run/sennit/test.sock"))
+	require.NoError(t, err)
+	t.Cleanup(l.Release)
+
+	// Prove a second handle sees the lock file as actively locked --
+	// standing in for a second process holding it.
+	lockPath := filepath.Join(dir, lockFileName)
+	_, err = lock.TryFile(lockPath)
+	require.ErrorIs(t, err, lock.ErrContended, "expected the lock file to be contended while Acquire holds it")
+
+	owner, ok, err := CurrentOwner(dir)
+	require.NoError(t, err, "owner info must be readable even while the lock file is held elsewhere")
+	require.True(t, ok)
+	require.Equal(t, ModeDaemon, owner.Mode)
+	require.Equal(t, "/run/sennit/test.sock", owner.Socket)
 }
 
 // TestCurrentOwner_NoLockFileYet confirms CurrentOwner reports ok=false

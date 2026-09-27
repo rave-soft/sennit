@@ -20,6 +20,7 @@ import (
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/workspace"
+	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
 	"github.com/rave-soft/sennit/internal/workspacelock"
 )
 
@@ -62,7 +63,7 @@ func startTestDaemon(t *testing.T, ctx context.Context, project string) string {
 	t.Helper()
 	socketPath, _, err := supervisor.EnsureRunning(ctx, project, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), project) })
 	return socketPath
 }
 
@@ -308,7 +309,27 @@ func startInProcessDaemon(t *testing.T, ctx context.Context, project string, app
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for the daemon to become ready")
 	}
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), socketPath) })
+	// This daemon runs in-process (the goroutine above), not as a spawned
+	// subprocess, so there is no separate PID to wait for the way
+	// dialAndRequestShutdown does for the rest of this file's tests: this
+	// test process IS the daemon here. What must actually finish before
+	// this cleanup returns is daemon.Run's own goroutine -- it holds
+	// sennit.db open until it does -- so wait on runErrCh, not just the
+	// socket going quiet.
+	t.Cleanup(func() {
+		conn, err := supervisor.Dial(socketPath)
+		if err == nil {
+			client := grpcws.NewClient(conn)
+			_, _ = client.RequestShutdown(context.Background(), false)
+			client.Shutdown()
+			conn.Close()
+		}
+		select {
+		case <-runErrCh:
+		case <-time.After(daemonTestTimeout):
+			t.Fatal("in-process daemon.Run did not return after shutdown")
+		}
+	})
 	return socketPath
 }
 
@@ -385,7 +406,7 @@ func TestDaemonRestartCmd(t *testing.T) {
 	cmd := daemonCmdTestCommand(t, project)
 	cmd.SetContext(ctx)
 	require.NoError(t, daemonRestartCmd.RunE(cmd, nil))
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), mustSocketPath(t, project)) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), project) })
 
 	after, ok, err := workspacelock.CurrentOwner(lockDir)
 	require.NoError(t, err)
@@ -435,9 +456,9 @@ func TestDaemonLogsCmd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
 
-	socketPath, _, err := supervisor.EnsureRunning(ctx, project, supervisor.Options{Command: loggingHelperCommand(t)})
+	_, _, err := supervisor.EnsureRunning(ctx, project, supervisor.Options{Command: loggingHelperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), project) })
 
 	_, lockDir, err := daemon.ResolveSocketPath(ctx, project, "", false)
 	require.NoError(t, err)

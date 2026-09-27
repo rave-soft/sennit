@@ -24,6 +24,23 @@ var ErrLocked = errors.New("workspace already in use by another sennit process")
 // directory. It lives next to sennit.db so users can `ls` and find it.
 const lockFileName = brand.LockFile
 
+// ownerInfoFileName is a sibling of the lock file that holds OwnerInfo's
+// JSON payload. It is deliberately never the file lock.TryFile locks.
+//
+// On Windows, LockFileEx locks are mandatory, not advisory: a second
+// handle on the same file can't even read bytes in a locked range --
+// ReadFile fails with ERROR_LOCK_VIOLATION ("The process cannot access
+// the file because another process has locked a portion of the file")
+// -- whereas POSIX flock (used on Linux/macOS) only ever blocks a second
+// *lock* attempt and never blocks a plain read of a file someone else
+// holds locked. lockFile (internal/lock/lock_windows.go) locks the whole
+// file (offset 0, length MaxUint32), so as long as owner info lived
+// inside that same file, CurrentOwner, contendedLockError and SetMode
+// were all unreadable/unwritable-by-a-second-handle for as long as any
+// process held the workspace lock on Windows. Keeping owner info in its
+// own, never-locked file sidesteps that entirely, on every platform.
+const ownerInfoFileName = lockFileName + ".owner"
+
 // Mode records what kind of process holds a workspace lock: an
 // interactive TUI (or any other in-process, embedded caller) or a
 // headless daemon serving the workspace over its unix socket.
@@ -31,7 +48,7 @@ type Mode string
 
 const (
 	// ModeTUI is the default: an in-process caller with no socket of its
-	// own. It is also what an OwnerInfo read back from a lock file
+	// own. It is also what an OwnerInfo read back from an owner-info file
 	// written before Mode existed normalizes to — see CurrentOwner.
 	ModeTUI Mode = "tui"
 	// ModeDaemon is a `sennit daemon run` process; Socket names the unix
@@ -39,15 +56,17 @@ const (
 	ModeDaemon Mode = "daemon"
 )
 
-// OwnerInfo is the JSON payload written into the lock file by
-// the process that currently owns it. It is purely informational; the
-// authoritative state of ownership is the operating system flock on
-// the file descriptor.
+// OwnerInfo is the JSON payload written into the owner-info file (a
+// sibling of the lock file, see ownerInfoFileName) by the process that
+// currently owns the workspace. It is purely informational; the
+// authoritative state of ownership is the operating system lock on the
+// lock file's descriptor.
 //
-// Mode and Socket were added after this record first shipped. A lock
-// file written by an older binary has neither field, which decodes as
-// the zero Mode (""); CurrentOwner normalizes that to ModeTUI rather
-// than leaving callers to special-case the empty string themselves.
+// Mode and Socket were added after this record first shipped. An
+// owner-info file written by an older binary has neither field, which
+// decodes as the zero Mode (""); CurrentOwner normalizes that to ModeTUI
+// rather than leaving callers to special-case the empty string
+// themselves.
 type OwnerInfo struct {
 	PID       int    `json:"pid"`
 	Version   string `json:"version,omitempty"`
@@ -99,18 +118,18 @@ func (l *Lock) Enforced() bool {
 // StartedAt this lock was acquired with; only Mode and Socket change.
 //
 // A no-op (nil error) on a nil *Lock or one that isn't Enforced: neither
-// holds a real lock file to rewrite, and a caller that skipped locking
-// (SENNIT_SKIP_DATADIR_LOCK) has nothing here to report to anyone else
-// anyway.
+// holds a real owner-info file to rewrite, and a caller that skipped
+// locking (SENNIT_SKIP_DATADIR_LOCK) has nothing here to report to
+// anyone else anyway.
 func (l *Lock) SetMode(mode Mode, socket string) error {
 	if l == nil || !l.enforced {
 		return nil
 	}
-	path := filepath.Join(l.dir, lockFileName)
-	info := readOwnerInfo(path)
+	ownerPath := filepath.Join(l.dir, ownerInfoFileName)
+	info := readOwnerInfo(ownerPath)
 	info.Mode = mode
 	info.Socket = socket
-	return writeOwnerInfoStruct(path, info)
+	return writeOwnerInfoStruct(ownerPath, info)
 }
 
 // poolEntry is the process-local, refcounted OS lock backing every
@@ -197,10 +216,11 @@ func Acquire(dir string, opts ...AcquireOption) (*Lock, error) {
 	}
 
 	path := filepath.Join(absDir, lockFileName)
+	ownerPath := filepath.Join(absDir, ownerInfoFileName)
 	release, err := lock.TryFile(path)
 	if err != nil {
 		if errors.Is(err, lock.ErrContended) {
-			return nil, contendedLockError(dir, path)
+			return nil, contendedLockError(dir, ownerPath)
 		}
 		return nil, fmt.Errorf("failed to lock workspace directory %q: %w", dir, err)
 	}
@@ -209,8 +229,8 @@ func Acquire(dir string, opts ...AcquireOption) (*Lock, error) {
 	// us. Failures here are non-fatal: the OS-level lock is what
 	// actually guarantees mutual exclusion, and a missing/partial JSON
 	// payload only degrades the diagnostic a contender prints.
-	if err := writeOwnerInfo(path, cfg.mode, cfg.socket); err != nil {
-		slog.Debug("Failed to write workspace lock owner info", "path", path, "error", err)
+	if err := writeOwnerInfo(ownerPath, cfg.mode, cfg.socket); err != nil {
+		slog.Debug("Failed to write workspace lock owner info", "path", ownerPath, "error", err)
 	}
 
 	// The lock file itself is intentionally never unlinked. flock is
@@ -254,8 +274,8 @@ type acquireConfig struct {
 // AcquireOption configures Acquire.
 type AcquireOption func(*acquireConfig)
 
-// WithMode records mode and (for ModeDaemon) socket in the lock file's
-// owner info, in place of the default ModeTUI with no socket.
+// WithMode records mode and (for ModeDaemon) socket in the owner-info
+// file, in place of the default ModeTUI with no socket.
 func WithMode(mode Mode, socket string) AcquireOption {
 	return func(c *acquireConfig) {
 		c.mode = mode
@@ -263,11 +283,11 @@ func WithMode(mode Mode, socket string) AcquireOption {
 	}
 }
 
-// writeOwnerInfo truncates and rewrites the lock file with the current
-// process's identifying information. It is called only after the lock
-// is held.
-func writeOwnerInfo(path string, mode Mode, socket string) error {
-	return writeOwnerInfoStruct(path, OwnerInfo{
+// writeOwnerInfo writes ownerPath (the sibling owner-info file, never
+// the locked file) with the current process's identifying information.
+// It is called only after the lock is held.
+func writeOwnerInfo(ownerPath string, mode Mode, socket string) error {
+	return writeOwnerInfoStruct(ownerPath, OwnerInfo{
 		PID:       os.Getpid(),
 		Version:   version.Version,
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
@@ -276,25 +296,44 @@ func writeOwnerInfo(path string, mode Mode, socket string) error {
 	})
 }
 
-// writeOwnerInfoStruct truncates and rewrites the lock file with info
-// verbatim. Shared by writeOwnerInfo (a fresh acquisition) and
-// Lock.SetMode (an update to one already held).
-func writeOwnerInfoStruct(path string, info OwnerInfo) error {
+// writeOwnerInfoStruct rewrites ownerPath with info verbatim, via a
+// write-temp-then-rename in the same directory so a concurrent reader
+// never observes a partially written file. Shared by writeOwnerInfo (a
+// fresh acquisition) and Lock.SetMode (an update to one already held).
+func writeOwnerInfoStruct(ownerPath string, info OwnerInfo) error {
 	payload, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
 		return err
 	}
 	payload = append(payload, '\n')
-	return os.WriteFile(path, payload, 0o600)
+
+	tmp, err := os.CreateTemp(filepath.Dir(ownerPath), filepath.Base(ownerPath)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp owner info file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds.
+
+	if _, err := tmp.Write(payload); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp owner info file %q: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp owner info file %q: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, ownerPath); err != nil {
+		return fmt.Errorf("rename temp owner info file %q to %q: %w", tmpPath, ownerPath, err)
+	}
+	return nil
 }
 
-// readOwnerInfo returns the lock file's recorded owner, if it parses.
-// A missing or malformed file yields an empty struct and no error;
-// the caller decides what to surface to the user. Mode is left exactly
-// as decoded (possibly "", for a pre-Mode lock file); callers that need
-// the normalized value use effectiveMode or CurrentOwner.
-func readOwnerInfo(path string) OwnerInfo {
-	raw, err := os.ReadFile(path)
+// readOwnerInfo returns the owner-info file's recorded owner, if it
+// parses. A missing or malformed file yields an empty struct and no
+// error; the caller decides what to surface to the user. Mode is left
+// exactly as decoded (possibly "", for a pre-Mode record); callers that
+// need the normalized value use effectiveMode or CurrentOwner.
+func readOwnerInfo(ownerPath string) OwnerInfo {
+	raw, err := os.ReadFile(ownerPath)
 	if err != nil || len(raw) == 0 {
 		return OwnerInfo{}
 	}
@@ -303,39 +342,43 @@ func readOwnerInfo(path string) OwnerInfo {
 	return info
 }
 
-// CurrentOwner reads the lock file's recorded owner for dir without
-// taking the lock itself — for a caller (a client dialing a project's
-// daemon, say) that needs to know who holds a workspace before deciding
-// whether to contend for it. ok is false when dir has never been locked,
-// or its lock file is missing or unreadable; Mode is normalized (a
-// pre-Mode record reads as ModeTUI).
+// CurrentOwner reads dir's recorded owner without taking the lock itself
+// — for a caller (a client dialing a project's daemon, say) that needs
+// to know who holds a workspace before deciding whether to contend for
+// it. ok is false when dir has never been locked, or its owner-info file
+// is missing or unreadable; Mode is normalized (a pre-Mode record reads
+// as ModeTUI).
+//
+// This reads the owner-info sibling file, not the locked file itself, so
+// it stays readable on Windows even while another process holds the
+// workspace lock — see ownerInfoFileName's doc comment.
 func CurrentOwner(dir string) (info OwnerInfo, ok bool, err error) {
 	absDir, err := canonicalDir(dir)
 	if err != nil {
 		return OwnerInfo{}, false, err
 	}
-	path := filepath.Join(absDir, lockFileName)
-	raw, err := os.ReadFile(path)
+	ownerPath := filepath.Join(absDir, ownerInfoFileName)
+	raw, err := os.ReadFile(ownerPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return OwnerInfo{}, false, nil
 		}
-		return OwnerInfo{}, false, fmt.Errorf("failed to read workspace lock owner info %q: %w", path, err)
+		return OwnerInfo{}, false, fmt.Errorf("failed to read workspace lock owner info %q: %w", ownerPath, err)
 	}
 	if len(raw) == 0 {
 		return OwnerInfo{}, false, nil
 	}
 	if err := json.Unmarshal(raw, &info); err != nil {
-		return OwnerInfo{}, false, fmt.Errorf("failed to parse workspace lock owner info %q: %w", path, err)
+		return OwnerInfo{}, false, fmt.Errorf("failed to parse workspace lock owner info %q: %w", ownerPath, err)
 	}
 	info.Mode = info.effectiveMode()
 	return info, true, nil
 }
 
 // contendedLockError builds a wrapped ErrLocked annotated with whatever
-// owner metadata is currently in the lock file.
-func contendedLockError(dir, lockPath string) error {
-	info := readOwnerInfo(lockPath)
+// owner metadata is currently in the owner-info file.
+func contendedLockError(dir, ownerPath string) error {
+	info := readOwnerInfo(ownerPath)
 	details := ""
 	switch {
 	case info.PID != 0 && info.StartedAt != "":

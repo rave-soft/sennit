@@ -91,7 +91,7 @@ func TestConnectRemoteWorkspace_ThroughFakeSSH(t *testing.T) {
 	// this test's fixture controls exactly when the daemon exists.
 	socketPath, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), projectDir) })
 
 	target := transport.Target{Host: "fake-remote-host", Path: projectDir}
 	dialerOpts := transport.DialerOptions{Command: fakeSSHCommand(t, socketPath)}
@@ -239,7 +239,7 @@ func TestConnectRemoteWorkspace_ReconnectsAfterProcessKill(t *testing.T) {
 
 	socketPath, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), projectDir) })
 
 	tracker := &sshSpawnTracker{}
 	target := transport.Target{Host: "fake-remote-host", Path: projectDir}
@@ -317,7 +317,7 @@ func TestSSHDialer_IdleConnSurvivesKeepaliveInterval(t *testing.T) {
 
 	socketPath, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), projectDir) })
 
 	tracker := &sshSpawnTracker{}
 	target := transport.Target{Host: "fake-remote-host", Path: projectDir}
