@@ -120,7 +120,9 @@ func (l *Loopback) ActivateThread(ctx context.Context, id string) (res0 proto.Th
 		err = fmt.Errorf("wsrpc: decoding ActivateThread request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ActivateThread(ctx, wsrpcDecodedReq.Id)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ActivateThread(wsrpcCallCtx, wsrpcDecodedReq.Id)
+	wsrpcCallCancel()
 	wsrpcResp := ActivateThreadResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -430,7 +432,9 @@ func (l *Loopback) AgentRun(ctx context.Context, sessionID string, prompt string
 		err = fmt.Errorf("wsrpc: decoding AgentRun request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.AgentRun(ctx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Prompt, wsrpcDecodedReq.Attachments...)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.AgentRun(wsrpcCallCtx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Prompt, wsrpcDecodedReq.Attachments...)
+	wsrpcCallCancel()
 	wsrpcResp := AgentRunResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -464,7 +468,9 @@ func (l *Loopback) AgentSummarize(ctx context.Context, sessionID string) (err er
 		err = fmt.Errorf("wsrpc: decoding AgentSummarize request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.AgentSummarize(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.AgentSummarize(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := AgentSummarizeResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -498,7 +504,9 @@ func (l *Loopback) ApplySessionModel(ctx context.Context, sessionID string) (res
 		err = fmt.Errorf("wsrpc: decoding ApplySessionModel request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ApplySessionModel(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ApplySessionModel(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := ApplySessionModelResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -535,7 +543,9 @@ func (l *Loopback) AttachProjectFile(ctx context.Context, sessionID string, path
 		err = fmt.Errorf("wsrpc: decoding AttachProjectFile request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1, wsrpcOut2 := l.inner.AttachProjectFile(ctx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Path)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1, wsrpcOut2 := l.inner.AttachProjectFile(wsrpcCallCtx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Path)
+	wsrpcCallCancel()
 	wsrpcResp := AttachProjectFileResponse{
 		Result0: wsrpcOut0,
 		Result1: wsrpcOut1,
@@ -630,7 +640,9 @@ func (l *Loopback) CancelTask(ctx context.Context, id string, reason string) (er
 		err = fmt.Errorf("wsrpc: decoding CancelTask request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.CancelTask(ctx, wsrpcDecodedReq.Id, wsrpcDecodedReq.Reason)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.CancelTask(wsrpcCallCtx, wsrpcDecodedReq.Id, wsrpcDecodedReq.Reason)
+	wsrpcCallCancel()
 	wsrpcResp := CancelTaskResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -665,7 +677,9 @@ func (l *Loopback) CancelThread(ctx context.Context, id string, reason string) (
 		err = fmt.Errorf("wsrpc: decoding CancelThread request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.CancelThread(ctx, wsrpcDecodedReq.Id, wsrpcDecodedReq.Reason)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.CancelThread(wsrpcCallCtx, wsrpcDecodedReq.Id, wsrpcDecodedReq.Reason)
+	wsrpcCallCancel()
 	wsrpcResp := CancelThreadResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -756,7 +770,9 @@ func (l *Loopback) ConfigureCustomProvider(ctx context.Context, scope config.Sco
 		err = fmt.Errorf("wsrpc: decoding ConfigureCustomProvider request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ConfigureCustomProvider(ctx, wsrpcDecodedReq.Scope, wsrpcDecodedReq.Params)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ConfigureCustomProvider(wsrpcCallCtx, wsrpcDecodedReq.Scope, wsrpcDecodedReq.Params)
+	wsrpcCallCancel()
 	wsrpcResp := ConfigureCustomProviderResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -792,7 +808,9 @@ func (l *Loopback) CreateSession(ctx context.Context, title string) (res0 sessio
 		err = fmt.Errorf("wsrpc: decoding CreateSession request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.CreateSession(ctx, wsrpcDecodedReq.Title)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.CreateSession(wsrpcCallCtx, wsrpcDecodedReq.Title)
+	wsrpcCallCancel()
 	wsrpcResp := CreateSessionResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -828,7 +846,9 @@ func (l *Loopback) CreateThread(ctx context.Context, req proto.CreateThreadReque
 		err = fmt.Errorf("wsrpc: decoding CreateThread request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.CreateThread(ctx, wsrpcDecodedReq.Req)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.CreateThread(wsrpcCallCtx, wsrpcDecodedReq.Req)
+	wsrpcCallCancel()
 	wsrpcResp := CreateThreadResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -924,7 +944,9 @@ func (l *Loopback) DeleteSession(ctx context.Context, sessionID string) (err err
 		err = fmt.Errorf("wsrpc: decoding DeleteSession request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.DeleteSession(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.DeleteSession(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := DeleteSessionResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -1046,7 +1068,9 @@ func (l *Loopback) EnableDockerMCP(ctx context.Context) (err error) {
 		err = fmt.Errorf("wsrpc: decoding EnableDockerMCP request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.EnableDockerMCP(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.EnableDockerMCP(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := EnableDockerMCPResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -1081,7 +1105,9 @@ func (l *Loopback) FileTrackerLastReadTime(ctx context.Context, sessionID string
 		err = fmt.Errorf("wsrpc: decoding FileTrackerLastReadTime request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.FileTrackerLastReadTime(ctx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Path)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.FileTrackerLastReadTime(wsrpcCallCtx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Path)
+	wsrpcCallCancel()
 	wsrpcResp := FileTrackerLastReadTimeResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1117,7 +1143,9 @@ func (l *Loopback) FileTrackerListReadFiles(ctx context.Context, sessionID strin
 		err = fmt.Errorf("wsrpc: decoding FileTrackerListReadFiles request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.FileTrackerListReadFiles(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.FileTrackerListReadFiles(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := FileTrackerListReadFilesResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1154,7 +1182,9 @@ func (l *Loopback) FileTrackerRecordRead(ctx context.Context, sessionID string, 
 		err = fmt.Errorf("wsrpc: decoding FileTrackerRecordRead request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.FileTrackerRecordRead(ctx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Path)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.FileTrackerRecordRead(wsrpcCallCtx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Path)
+	wsrpcCallCancel()
 	wsrpcResp := FileTrackerRecordReadResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -1186,7 +1216,9 @@ func (l *Loopback) GetLastSession(ctx context.Context) (res0 session.Session, er
 		err = fmt.Errorf("wsrpc: decoding GetLastSession request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.GetLastSession(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.GetLastSession(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := GetLastSessionResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1224,7 +1256,9 @@ func (l *Loopback) GetMCPPrompt(ctx context.Context, clientID string, promptID s
 		err = fmt.Errorf("wsrpc: decoding GetMCPPrompt request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.GetMCPPrompt(ctx, wsrpcDecodedReq.ClientID, wsrpcDecodedReq.PromptID, wsrpcDecodedReq.Args)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.GetMCPPrompt(wsrpcCallCtx, wsrpcDecodedReq.ClientID, wsrpcDecodedReq.PromptID, wsrpcDecodedReq.Args)
+	wsrpcCallCancel()
 	wsrpcResp := GetMCPPromptResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1260,7 +1294,9 @@ func (l *Loopback) GetSession(ctx context.Context, sessionID string) (res0 sessi
 		err = fmt.Errorf("wsrpc: decoding GetSession request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.GetSession(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.GetSession(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := GetSessionResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1294,7 +1330,9 @@ func (l *Loopback) ImportCopilot(ctx context.Context) (res0 bool, err error) {
 		err = fmt.Errorf("wsrpc: decoding ImportCopilot request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ImportCopilot(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ImportCopilot(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ImportCopilotResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1328,7 +1366,9 @@ func (l *Loopback) InitCoderAgent(ctx context.Context) (err error) {
 		err = fmt.Errorf("wsrpc: decoding InitCoderAgent request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.InitCoderAgent(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.InitCoderAgent(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := InitCoderAgentResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -1360,7 +1400,9 @@ func (l *Loopback) InitCoderAgentNonInteractive(ctx context.Context) (err error)
 		err = fmt.Errorf("wsrpc: decoding InitCoderAgentNonInteractive request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.InitCoderAgentNonInteractive(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.InitCoderAgentNonInteractive(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := InitCoderAgentNonInteractiveResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -1514,7 +1556,9 @@ func (l *Loopback) LSPStart(ctx context.Context, path string) (err error) {
 		err = fmt.Errorf("wsrpc: decoding LSPStart request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.LSPStart(ctx, wsrpcDecodedReq.Path)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.LSPStart(wsrpcCallCtx, wsrpcDecodedReq.Path)
+	wsrpcCallCancel()
 	wsrpcResp := LSPStartResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -1546,7 +1590,9 @@ func (l *Loopback) LSPStopAll(ctx context.Context) (err error) {
 		err = fmt.Errorf("wsrpc: decoding LSPStopAll request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.LSPStopAll(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.LSPStopAll(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := LSPStopAllResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -1614,7 +1660,9 @@ func (l *Loopback) ListAllUserMessages(ctx context.Context) (res0 []message.Mess
 		err = fmt.Errorf("wsrpc: decoding ListAllUserMessages request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListAllUserMessages(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListAllUserMessages(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ListAllUserMessagesResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1648,7 +1696,9 @@ func (l *Loopback) ListCustomCommands(ctx context.Context) (res0 []workspace.Cus
 		err = fmt.Errorf("wsrpc: decoding ListCustomCommands request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListCustomCommands(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListCustomCommands(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ListCustomCommandsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1682,7 +1732,9 @@ func (l *Loopback) ListMCPPrompts(ctx context.Context) (res0 []workspace.MCPProm
 		err = fmt.Errorf("wsrpc: decoding ListMCPPrompts request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListMCPPrompts(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListMCPPrompts(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ListMCPPromptsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1718,7 +1770,9 @@ func (l *Loopback) ListMessages(ctx context.Context, sessionID string) (res0 []m
 		err = fmt.Errorf("wsrpc: decoding ListMessages request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListMessages(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListMessages(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := ListMessagesResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1756,7 +1810,9 @@ func (l *Loopback) ListMessagesBySessionIDs(ctx context.Context, rootSessionID s
 		err = fmt.Errorf("wsrpc: decoding ListMessagesBySessionIDs request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListMessagesBySessionIDs(ctx, wsrpcDecodedReq.RootSessionID, wsrpcDecodedReq.Generation, wsrpcDecodedReq.SessionIDs)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListMessagesBySessionIDs(wsrpcCallCtx, wsrpcDecodedReq.RootSessionID, wsrpcDecodedReq.Generation, wsrpcDecodedReq.SessionIDs)
+	wsrpcCallCancel()
 	wsrpcResp := ListMessagesBySessionIDsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1793,7 +1849,9 @@ func (l *Loopback) ListProjectFiles(ctx context.Context, depth int, limit int) (
 		err = fmt.Errorf("wsrpc: decoding ListProjectFiles request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListProjectFiles(ctx, wsrpcDecodedReq.Depth, wsrpcDecodedReq.Limit)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListProjectFiles(wsrpcCallCtx, wsrpcDecodedReq.Depth, wsrpcDecodedReq.Limit)
+	wsrpcCallCancel()
 	wsrpcResp := ListProjectFilesResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1829,7 +1887,9 @@ func (l *Loopback) ListSessionHistory(ctx context.Context, sessionID string) (re
 		err = fmt.Errorf("wsrpc: decoding ListSessionHistory request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListSessionHistory(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListSessionHistory(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := ListSessionHistoryResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1863,7 +1923,9 @@ func (l *Loopback) ListSessions(ctx context.Context) (res0 []session.Session, er
 		err = fmt.Errorf("wsrpc: decoding ListSessions request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListSessions(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListSessions(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ListSessionsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1897,7 +1959,9 @@ func (l *Loopback) ListSkills(ctx context.Context) (res0 []skills.CatalogEntry, 
 		err = fmt.Errorf("wsrpc: decoding ListSkills request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListSkills(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListSkills(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ListSkillsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1931,7 +1995,9 @@ func (l *Loopback) ListTasks(ctx context.Context) (res0 []proto.Thread, err erro
 		err = fmt.Errorf("wsrpc: decoding ListTasks request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListTasks(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListTasks(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ListTasksResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -1965,7 +2031,9 @@ func (l *Loopback) ListThreads(ctx context.Context) (res0 []proto.Thread, err er
 		err = fmt.Errorf("wsrpc: decoding ListThreads request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListThreads(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListThreads(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := ListThreadsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -2001,7 +2069,9 @@ func (l *Loopback) ListUserMessages(ctx context.Context, sessionID string) (res0
 		err = fmt.Errorf("wsrpc: decoding ListUserMessages request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ListUserMessages(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ListUserMessages(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := ListUserMessagesResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -2067,7 +2137,9 @@ func (l *Loopback) MCPAuthenticate(ctx context.Context, name string) (err error)
 		err = fmt.Errorf("wsrpc: decoding MCPAuthenticate request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.MCPAuthenticate(ctx, wsrpcDecodedReq.Name)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.MCPAuthenticate(wsrpcCallCtx, wsrpcDecodedReq.Name)
+	wsrpcCallCancel()
 	wsrpcResp := MCPAuthenticateResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -2157,7 +2229,9 @@ func (l *Loopback) MCPRefreshPrompts(ctx context.Context, name string) (err erro
 		err = fmt.Errorf("wsrpc: decoding MCPRefreshPrompts request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.MCPRefreshPrompts(ctx, wsrpcDecodedReq.Name)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.MCPRefreshPrompts(wsrpcCallCtx, wsrpcDecodedReq.Name)
+	wsrpcCallCancel()
 	wsrpcResp := MCPRefreshPromptsResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -2191,7 +2265,9 @@ func (l *Loopback) MCPRefreshResources(ctx context.Context, name string) (err er
 		err = fmt.Errorf("wsrpc: decoding MCPRefreshResources request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.MCPRefreshResources(ctx, wsrpcDecodedReq.Name)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.MCPRefreshResources(wsrpcCallCtx, wsrpcDecodedReq.Name)
+	wsrpcCallCancel()
 	wsrpcResp := MCPRefreshResourcesResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -2412,7 +2488,9 @@ func (l *Loopback) PendingPrompts(ctx context.Context) (res0 workspace.PendingPr
 		err = fmt.Errorf("wsrpc: decoding PendingPrompts request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.PendingPrompts(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.PendingPrompts(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := PendingPromptsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -2618,7 +2696,9 @@ func (l *Loopback) PrepareSessionChanges(ctx context.Context, sessionID string) 
 		err = fmt.Errorf("wsrpc: decoding PrepareSessionChanges request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.PrepareSessionChanges(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.PrepareSessionChanges(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := PrepareSessionChangesResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -2797,7 +2877,9 @@ func (l *Loopback) ReadMCPResource(ctx context.Context, name string, uri string)
 		err = fmt.Errorf("wsrpc: decoding ReadMCPResource request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.ReadMCPResource(ctx, wsrpcDecodedReq.Name, wsrpcDecodedReq.Uri)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.ReadMCPResource(wsrpcCallCtx, wsrpcDecodedReq.Name, wsrpcDecodedReq.Uri)
+	wsrpcCallCancel()
 	wsrpcResp := ReadMCPResourceResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -2833,7 +2915,9 @@ func (l *Loopback) ReadSkill(ctx context.Context, skillID string) (res0 []byte, 
 		err = fmt.Errorf("wsrpc: decoding ReadSkill request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1, wsrpcOut2 := l.inner.ReadSkill(ctx, wsrpcDecodedReq.SkillID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1, wsrpcOut2 := l.inner.ReadSkill(wsrpcCallCtx, wsrpcDecodedReq.SkillID)
+	wsrpcCallCancel()
 	wsrpcResp := ReadSkillResponse{
 		Result0: wsrpcOut0,
 		Result1: wsrpcOut1,
@@ -2909,7 +2993,9 @@ func (l *Loopback) RefreshAccountLimits(ctx context.Context, providerID string) 
 		err = fmt.Errorf("wsrpc: decoding RefreshAccountLimits request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.RefreshAccountLimits(ctx, wsrpcDecodedReq.ProviderID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.RefreshAccountLimits(wsrpcCallCtx, wsrpcDecodedReq.ProviderID)
+	wsrpcCallCancel()
 	wsrpcResp := RefreshAccountLimitsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -2943,7 +3029,9 @@ func (l *Loopback) RefreshDockerMCPAvailability(ctx context.Context) (res0 bool,
 		err = fmt.Errorf("wsrpc: decoding RefreshDockerMCPAvailability request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.RefreshDockerMCPAvailability(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.RefreshDockerMCPAvailability(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := RefreshDockerMCPAvailabilityResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -2979,7 +3067,9 @@ func (l *Loopback) RefreshMCPTools(ctx context.Context, name string) (err error)
 		err = fmt.Errorf("wsrpc: decoding RefreshMCPTools request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.RefreshMCPTools(ctx, wsrpcDecodedReq.Name)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.RefreshMCPTools(wsrpcCallCtx, wsrpcDecodedReq.Name)
+	wsrpcCallCancel()
 	wsrpcResp := RefreshMCPToolsResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3014,7 +3104,9 @@ func (l *Loopback) RefreshOAuthToken(ctx context.Context, scope config.Scope, pr
 		err = fmt.Errorf("wsrpc: decoding RefreshOAuthToken request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.RefreshOAuthToken(ctx, wsrpcDecodedReq.Scope, wsrpcDecodedReq.ProviderID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.RefreshOAuthToken(wsrpcCallCtx, wsrpcDecodedReq.Scope, wsrpcDecodedReq.ProviderID)
+	wsrpcCallCancel()
 	wsrpcResp := RefreshOAuthTokenResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3050,7 +3142,9 @@ func (l *Loopback) RefreshOAuthTokenForAccount(ctx context.Context, scope config
 		err = fmt.Errorf("wsrpc: decoding RefreshOAuthTokenForAccount request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.RefreshOAuthTokenForAccount(ctx, wsrpcDecodedReq.Scope, wsrpcDecodedReq.ProviderID, wsrpcDecodedReq.AccountID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.RefreshOAuthTokenForAccount(wsrpcCallCtx, wsrpcDecodedReq.Scope, wsrpcDecodedReq.ProviderID, wsrpcDecodedReq.AccountID)
+	wsrpcCallCancel()
 	wsrpcResp := RefreshOAuthTokenForAccountResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3084,7 +3178,9 @@ func (l *Loopback) RefreshProviderModels(ctx context.Context, providerID string)
 		err = fmt.Errorf("wsrpc: decoding RefreshProviderModels request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.RefreshProviderModels(ctx, wsrpcDecodedReq.ProviderID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.RefreshProviderModels(wsrpcCallCtx, wsrpcDecodedReq.ProviderID)
+	wsrpcCallCancel()
 	wsrpcResp := RefreshProviderModelsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -3192,7 +3288,9 @@ func (l *Loopback) RemoveThread(ctx context.Context, id string, opts proto.Remov
 		err = fmt.Errorf("wsrpc: decoding RemoveThread request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.RemoveThread(ctx, wsrpcDecodedReq.Id, wsrpcDecodedReq.Opts)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.RemoveThread(wsrpcCallCtx, wsrpcDecodedReq.Id, wsrpcDecodedReq.Opts)
+	wsrpcCallCancel()
 	wsrpcResp := RemoveThreadResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3227,7 +3325,9 @@ func (l *Loopback) RenameSession(ctx context.Context, sessionID string, title st
 		err = fmt.Errorf("wsrpc: decoding RenameSession request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.RenameSession(ctx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Title)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.RenameSession(wsrpcCallCtx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Title)
+	wsrpcCallCancel()
 	wsrpcResp := RenameSessionResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3261,7 +3361,9 @@ func (l *Loopback) SessionDescendantCost(ctx context.Context, sessionID string) 
 		err = fmt.Errorf("wsrpc: decoding SessionDescendantCost request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.SessionDescendantCost(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.SessionDescendantCost(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := SessionDescendantCostResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -3333,7 +3435,9 @@ func (l *Loopback) SetCurrentSession(ctx context.Context, sessionID string) (err
 		err = fmt.Errorf("wsrpc: decoding SetCurrentSession request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.SetCurrentSession(ctx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.SetCurrentSession(wsrpcCallCtx, wsrpcDecodedReq.SessionID)
+	wsrpcCallCancel()
 	wsrpcResp := SetCurrentSessionResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3368,7 +3472,9 @@ func (l *Loopback) SetCurrentSessionGeneration(ctx context.Context, sessionID st
 		err = fmt.Errorf("wsrpc: decoding SetCurrentSessionGeneration request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.SetCurrentSessionGeneration(ctx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Generation)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.SetCurrentSessionGeneration(wsrpcCallCtx, wsrpcDecodedReq.SessionID, wsrpcDecodedReq.Generation)
+	wsrpcCallCancel()
 	wsrpcResp := SetCurrentSessionGenerationResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3501,7 +3607,9 @@ func (l *Loopback) Stats(ctx context.Context, req stats.Request) (res0 stats.Sna
 		err = fmt.Errorf("wsrpc: decoding Stats request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.Stats(ctx, wsrpcDecodedReq.Req)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.Stats(wsrpcCallCtx, wsrpcDecodedReq.Req)
+	wsrpcCallCancel()
 	wsrpcResp := StatsResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -3591,7 +3699,9 @@ func (l *Loopback) UncommittedFiles(ctx context.Context) (res0 []git.FileChange,
 		err = fmt.Errorf("wsrpc: decoding UncommittedFiles request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0, wsrpcOut1 := l.inner.UncommittedFiles(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0, wsrpcOut1 := l.inner.UncommittedFiles(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := UncommittedFilesResponse{
 		Result: wsrpcOut0,
 		Err:    workspace.EncodeError(wsrpcOut1),
@@ -3661,7 +3771,9 @@ func (l *Loopback) UpdateAgentModel(ctx context.Context) (err error) {
 		err = fmt.Errorf("wsrpc: decoding UpdateAgentModel request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.UpdateAgentModel(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.UpdateAgentModel(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := UpdateAgentModelResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3731,7 +3843,9 @@ func (l *Loopback) VerifyProviderAPIKey(ctx context.Context, providerID string, 
 		err = fmt.Errorf("wsrpc: decoding VerifyProviderAPIKey request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.VerifyProviderAPIKey(ctx, wsrpcDecodedReq.ProviderID, wsrpcDecodedReq.ApiKey)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.VerifyProviderAPIKey(wsrpcCallCtx, wsrpcDecodedReq.ProviderID, wsrpcDecodedReq.ApiKey)
+	wsrpcCallCancel()
 	wsrpcResp := VerifyProviderAPIKeyResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}
@@ -3763,7 +3877,9 @@ func (l *Loopback) WaitForMCPInit(ctx context.Context) (err error) {
 		err = fmt.Errorf("wsrpc: decoding WaitForMCPInit request: %w", wsrpcErr2)
 		return
 	}
-	wsrpcOut0 := l.inner.WaitForMCPInit(ctx)
+	wsrpcCallCtx, wsrpcCallCancel := context.WithCancel(ctx)
+	wsrpcOut0 := l.inner.WaitForMCPInit(wsrpcCallCtx)
+	wsrpcCallCancel()
 	wsrpcResp := WaitForMCPInitResponse{
 		Err: workspace.EncodeError(wsrpcOut0),
 	}

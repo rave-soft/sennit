@@ -450,7 +450,23 @@ const (
 	varErrMarshal2   = "wsrpcErr3"
 	varErrUnmarshal2 = "wsrpcErr4"
 	varResultPrefix  = "wsrpcOut"
+	varCallCtx       = "wsrpcCallCtx"
+	varCallCancel    = "wsrpcCallCancel"
 )
+
+// hasCtxParam reports whether m takes a context.Context parameter -- every
+// U/C method that does gets a call-scoped ctx (see writeLoopbackMethod)
+// rather than the caller's own, so a wire hop's real ctx lifetime (a unary
+// gRPC handler's ctx is cancelled the instant it returns) reproduces
+// in-process under SENNIT_TEST_WIRE=1 too.
+func hasCtxParam(m *methodInfo) bool {
+	for _, p := range m.Params {
+		if p.IsCtx {
+			return true
+		}
+	}
+	return false
+}
 
 func writeLoopbackMethod(body *strings.Builder, imp *importSet, m *methodInfo, wsAlias string) {
 	paramSig := buildParamSig(m, imp)
@@ -467,12 +483,26 @@ func writeLoopbackMethod(body *strings.Builder, imp *importSet, m *methodInfo, w
 	fmt.Fprintf(body, "\tvar %s %sRequest\n", varDecodedReq, m.Name)
 	codecStep(body, m, "", varErrUnmarshal1, fmt.Sprintf("json.Unmarshal(%s, &%s)", varReqJSON, varDecodedReq), "decoding", m.Name, "request")
 
-	callArgs := buildCallArgs(m)
+	// callCtx is cancelled the instant l.inner's call returns, mirroring a
+	// real unary gRPC handler's own ctx lifetime (grpc-go cancels it right
+	// after the handler returns, success or not). Anything the inner
+	// implementation starts on this ctx and expects to outlive the call --
+	// a goroutine, a subprocess, a subscription -- dies here too, the same
+	// way it would over the wire, instead of surviving only because
+	// Loopback happened to hand it the long-lived caller ctx unchanged.
+	hasCtx := hasCtxParam(m)
+	if hasCtx {
+		fmt.Fprintf(body, "\t%s, %s := context.WithCancel(ctx)\n", varCallCtx, varCallCancel)
+	}
+	callArgs := buildCallArgs(m, hasCtx)
 	innerResVars := make([]string, len(m.Results))
 	for i := range m.Results {
 		innerResVars[i] = fmt.Sprintf("%s%d", varResultPrefix, i)
 	}
 	fmt.Fprintf(body, "\t%s := l.inner.%s(%s)\n", strings.Join(innerResVars, ", "), m.Name, callArgs)
+	if hasCtx {
+		fmt.Fprintf(body, "\t%s()\n", varCallCancel)
+	}
 
 	fmt.Fprintf(body, "\t%s := %sResponse{\n", varResp, m.Name)
 	for i, f := range m.ResFields {
@@ -518,11 +548,15 @@ func codecStep(body *strings.Builder, m *methodInfo, valueVar, errVar, expr, ver
 	}
 }
 
-func buildCallArgs(m *methodInfo) string {
+func buildCallArgs(m *methodInfo, useCallCtx bool) string {
 	var parts []string
 	for _, p := range m.Params {
 		if p.IsCtx {
-			parts = append(parts, "ctx")
+			if useCallCtx {
+				parts = append(parts, varCallCtx)
+			} else {
+				parts = append(parts, "ctx")
+			}
 			continue
 		}
 		arg := varDecodedReq + "." + exportName(p.LocalName)

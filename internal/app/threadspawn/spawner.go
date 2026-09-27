@@ -153,8 +153,20 @@ func (s *LocalSpawner) bootstrapOptions(delegationID, sessionID string) app.Boot
 }
 
 // Spawn implements thread.Spawner.
+//
+// context.WithoutCancel: app.New keeps whatever ctx Bootstrap is given as
+// the new App's own globalCtx, which every long-lived goroutine it starts
+// (the MCP init watcher, LSPManager.TrackConfigured, AgentDispatcher) is
+// bound to — it must outlive this one Spawn call. Passing ctx through
+// unwrapped broke exactly this way for [thread.TaskManager.Create]'s
+// worktree-isolated path: its own prepCtx is unconditionally cancelled by
+// a deferred cancelPreparation() the instant Create returns (see
+// tasks.go), which through here cancelled the freshly spawned task App's
+// globalCtx before its first turn had a chance to run — the same failure
+// [AppWorkspace.EnterWorktree] hit and fixed the same way (see its own
+// comment on this pattern).
 func (s *LocalSpawner) Spawn(ctx context.Context, request thread.SpawnRequest) (thread.Handle, error) {
-	boot, err := app.Bootstrap(ctx, request.Path, s.bootstrapOptions(request.DelegationID, request.SessionID))
+	boot, err := app.Bootstrap(context.WithoutCancel(ctx), request.Path, s.bootstrapOptions(request.DelegationID, request.SessionID))
 	if err != nil {
 		return nil, err
 	}

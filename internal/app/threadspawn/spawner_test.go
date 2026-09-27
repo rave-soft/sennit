@@ -159,6 +159,67 @@ func TestLocalSpawnerResumeValidatesPersistedDelegationOwnership(t *testing.T) {
 	assertFinished(foreign.ID, foreignMsg.ID, false)
 }
 
+// TestLocalSpawnerAppOutlivesSpawnCallerContextCancellation guards against
+// the defect [LocalSpawner.Spawn]'s own doc comment describes:
+// [thread.TaskManager.Create] derives its prepCtx from the RPC's own ctx
+// and unconditionally cancels it (via a deferred cancelPreparation) the
+// instant Create returns -- success included -- for every worktree-isolated
+// task. Passing that ctx straight into app.Bootstrap would tie the spawned
+// task App's own globalCtx to it, killing every long-lived goroutine
+// bound to globalCtx (the MCP init watcher, LSPManager.TrackConfigured,
+// the AgentDispatcher) before the task's first turn ever got to run --
+// exactly the failure [AppWorkspace.EnterWorktree] hit on the worktree
+// transfer path and fixed with the same context.WithoutCancel.
+//
+// app.App exposes no direct read of its own globalCtx, so this drives
+// Subscribe (which derives its own ctx from globalCtx via
+// context.WithCancel, see app.go) as an observable proxy: a globalCtx
+// already cancelled makes Subscribe return almost immediately, while a
+// live one keeps it running until this test's own stop tells it to.
+func TestLocalSpawnerAppOutlivesSpawnCallerContextCancellation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(func() { db.ResetPool() })
+
+	spawner := NewLocalSpawner(nil, nil, nil, nil)
+
+	// Mirrors TaskManager.Create's own prepCtx: a context this call site
+	// owns and cancels the moment its caller (Create) returns, regardless
+	// of outcome.
+	callCtx, cancelCall := context.WithCancel(context.Background())
+	handle, err := spawner.Spawn(callCtx, thread.SpawnRequest{Path: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
+
+	// Simulates Create's deferred cancelPreparation() firing right after
+	// Spawn returns.
+	cancelCall()
+
+	lh := handle.(*localHandle)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		lh.app.Subscribe(func(any) {}, func() {})
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("the spawned App's globalCtx was cancelled along with its caller's context")
+	case <-time.After(200 * time.Millisecond):
+		// Still running: globalCtx survived callCtx's cancellation, as it
+		// must.
+	}
+
+	lh.app.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Subscribe did not stop after the App shut down")
+	}
+}
+
 func TestLocalSpawnerDoesNotShareProcessHerdrClient(t *testing.T) {
 	spawner := NewLocalSpawner(nil, nil, nil, nil)
 	opts := spawner.bootstrapOptions("", "")
