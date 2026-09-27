@@ -1,6 +1,7 @@
 package sockpath
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -38,6 +39,30 @@ func TestPath_Deterministic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, p1, p2)
 	require.True(t, strings.HasSuffix(p1, ".sock"))
+}
+
+// TestPath_StableWhenDirectoryIsCreated pins that a lock directory keys
+// the same socket before and after it exists, when an ancestor is a
+// symlink. The daemon resolves its socket before Bootstrap creates the
+// directory and clients resolve it afterwards; on macOS every temp dir
+// sits under the /var -> /private/var symlink, so a key that changed
+// here left clients dialing a socket nobody listened on.
+func TestPath_StableWhenDirectoryIsCreated(t *testing.T) {
+	setRuntimeDirEnv(t, testenv.ShortRuntimeDir(t))
+
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	dir := filepath.Join(link, "project", ".sennit")
+
+	before, err := Path(dir)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	after, err := Path(dir)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }
 
 // TestPath_DiffersByDirectory pins that two distinct projects never

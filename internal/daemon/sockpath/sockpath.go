@@ -12,8 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 // maxPathLen returns the platform's sockaddr_un.sun_path capacity, the
@@ -73,17 +75,20 @@ func Path(dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("sockpath: resolve %q: %w", dir, err)
 	}
-	// EvalSymlinks matches workspacelock's own canonicalization
-	// (canonicalDir): two paths that alias the same directory through a
-	// symlink must key the same socket. A directory that does not exist
-	// yet (a workspace lock dir can be a not-yet-created data directory)
-	// is not an error here; Clean(abs) is canonical enough for hashing.
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("sockpath: canonicalize %q: %w", dir, err)
-		}
-		resolved = filepath.Clean(abs)
+	// The key must not change when the directory comes into existence:
+	// Run resolves the path before Bootstrap creates the lock directory,
+	// and every later client resolves it after. A plain EvalSymlinks
+	// fails on the missing directory, and a fallback to the unresolved
+	// path then keys a different socket than the resolved one does
+	// whenever an ancestor is a symlink (macOS's /var -> /private/var) or,
+	// on Windows, an 8.3 short name (RUNNER~1). fsext.Canonical resolves
+	// the nearest existing ancestor and rejoins the missing components,
+	// so both calls agree. Windows paths are case-insensitive, and
+	// Canonical lower-cases only its missing-path branch, so the key is
+	// lower-cased on Windows in every case.
+	resolved := fsext.Canonical(abs)
+	if runtime.GOOS == "windows" {
+		resolved = strings.ToLower(resolved)
 	}
 
 	sum := sha256.Sum256([]byte(resolved))
