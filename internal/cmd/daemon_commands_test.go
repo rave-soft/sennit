@@ -384,6 +384,18 @@ func TestDaemonRestartCmd(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
+	// This RunE re-execs the test binary itself (daemonRestartCmd's
+	// production spawn path, no Command hook to intercept), which under
+	// -race means running a chunk of this package's own suite before it
+	// reaches the daemon-helper test that answers health checks (see
+	// daemon_client_test.go's TestCmdDaemonHelperProcess and
+	// helperCommand's doc comment) -- comfortably fast without -race,
+	// but slow enough under it to need more than supervisor's default
+	// 10s readiness budget. Widen it here rather than in
+	// defaultReadyTimeout itself, which stays the real product default.
+	daemonRestartReadyTimeout = raceWait(10 * time.Second)
+	t.Cleanup(func() { daemonRestartReadyTimeout = 0 })
+
 	cmd := daemonCmdTestCommand(t, project)
 	cmd.SetContext(ctx)
 	require.NoError(t, daemonRestartCmd.RunE(cmd, nil))
