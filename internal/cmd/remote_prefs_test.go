@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -65,7 +67,7 @@ func TestConnectRemoteWorkspace_PrefsIgnoreLocalProjectConfig(t *testing.T) {
 	// actually matters here is that the CLIENT's cwd (above) is not the
 	// one connectRemoteWorkspace consults for prefs at all.
 	daemonProjectDir := t.TempDir()
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
 

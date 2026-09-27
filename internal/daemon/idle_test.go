@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/agent"
@@ -129,7 +131,7 @@ func requireExitsWithin(t *testing.T, runErr <-chan error) {
 // once idle_timeout has elapsed, and cleans up its socket exactly as a
 // signaled shutdown would.
 func TestDaemon_IdleExitsAfterTimeout(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -153,7 +155,7 @@ func TestDaemon_IdleExitsAfterTimeout(t *testing.T) {
 // the daemon down itself (ctx cancel), rather than proving a negative
 // forever.
 func TestDaemon_IdleTimeoutDisabled(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -176,7 +178,7 @@ func TestDaemon_IdleTimeoutDisabled(t *testing.T) {
 // this package) holds the daemon up past what would otherwise be an idle
 // exit, and disconnecting starts the idle clock.
 func TestDaemon_ClientKeepsAliveThenExits(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -200,7 +202,7 @@ func TestDaemon_ClientKeepsAliveThenExits(t *testing.T) {
 // point 4: a pending permission request holds the daemon open even with
 // no clients connected at all. Granting it lets the idle clock start.
 func TestDaemon_PendingPermissionKeepsAlive(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -247,7 +249,7 @@ func TestDaemon_PendingPermissionKeepsAlive(t *testing.T) {
 // question.Request (review point 4: a pending question must hold the
 // daemon open exactly as a pending permission does, not just permissions).
 func TestDaemon_PendingQuestionKeepsAlive(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -301,7 +303,7 @@ func TestDaemon_PendingQuestionKeepsAlive(t *testing.T) {
 // only overrides BusySessions/IsSessionBusy/IsBusy to report one session
 // busy.
 func TestDaemon_BusySessionKeepsAlive(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 

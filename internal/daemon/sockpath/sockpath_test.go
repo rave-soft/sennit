@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,7 +15,7 @@ import (
 // dialing a daemon it never talked to before must be able to compute the
 // exact same path the daemon listens on.
 func TestPath_Deterministic(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 
 	dir := t.TempDir()
@@ -28,7 +30,7 @@ func TestPath_Deterministic(t *testing.T) {
 // TestPath_DiffersByDirectory pins that two distinct projects never
 // collide on the same socket.
 func TestPath_DiffersByDirectory(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 
 	p1, err := Path(t.TempDir())
@@ -41,7 +43,7 @@ func TestPath_DiffersByDirectory(t *testing.T) {
 // TestPath_RespectsXDGRuntimeDir pins that Path places the socket under
 // XDG_RUNTIME_DIR/sennit rather than always falling back to os.TempDir.
 func TestPath_RespectsXDGRuntimeDir(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 
 	p, err := Path(t.TempDir())

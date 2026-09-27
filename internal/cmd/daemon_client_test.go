@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -153,7 +155,7 @@ func startLockHelper(t *testing.T, lockDir string) *lockHelper {
 // returns writes to the client's own (local) global config file.
 func TestSetupDaemonWorkspace_ConnectsAndWorks(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	command := helperCommand(t)
 
 	projectDir := t.TempDir()
@@ -194,7 +196,7 @@ func TestSetupDaemonWorkspace_ConnectsAndWorks(t *testing.T) {
 // package's own daemon_client.go doc comments for the invariant.
 func TestSetupDaemonWorkspace_CleanupDoesNotStopDaemon(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	command := helperCommand(t)
 
 	projectDir := t.TempDir()
@@ -255,7 +257,7 @@ func dialAndRequestShutdown(t *testing.T, ctx context.Context, socketPath string
 // same wording, no daemon-specific rewrap.
 func TestSetupDaemonWorkspace_ErrTUILocked(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 
 	projectDir := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
@@ -284,7 +286,7 @@ func TestSetupDaemonWorkspace_ErrTUILocked(t *testing.T) {
 // be non-nil and must point at dropping --daemon as the way to recover.
 func TestSetupDaemonWorkspace_ConnectFailureHintsNoDaemon(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 
 	projectDir := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -79,7 +81,7 @@ func TestFakeSSHHelperProcess(t *testing.T) {
 // read back as the daemon's own, not this test process's.
 func TestConnectRemoteWorkspace_ThroughFakeSSH(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 
 	projectDir := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
@@ -231,7 +233,7 @@ func requireConnectionEvent(t *testing.T, events <-chan any, state workspace.Con
 // lost and not duplicated.
 func TestConnectRemoteWorkspace_ReconnectsAfterProcessKill(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 
 	projectDir := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
@@ -309,7 +311,7 @@ drain:
 // would make an idle attach drop every few keepalive intervals.
 func TestSSHDialer_IdleConnSurvivesKeepaliveInterval(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 
 	projectDir := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
