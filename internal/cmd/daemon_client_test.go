@@ -91,9 +91,16 @@ func TestCmdDaemonHelperProcess(t *testing.T) {
 		return
 	}
 	cwd := os.Args[len(os.Args)-1]
-	_ = daemon.Run(context.Background(), cwd, daemon.Options{
+	if err := daemon.Run(context.Background(), cwd, daemon.Options{
 		LogSetup: func(string, bool) {},
-	})
+	}); err != nil {
+		// See supervisor_test.go's TestSupervisorDaemonHelperProcess: this
+		// is the process's stderr, redirected to the startup log a
+		// readiness-timeout error quotes, so a real failure here must not
+		// be silently swallowed by the unconditional os.Exit(0) below.
+		fmt.Fprintln(os.Stderr, "daemon.Run failed:", err)
+		os.Exit(1)
+	}
 	os.Exit(0)
 }
 

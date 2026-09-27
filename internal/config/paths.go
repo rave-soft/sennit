@@ -103,7 +103,17 @@ func GlobalLogDir() string {
 // process of its own and means somebody else's log, resolves through
 // LatestGlobalLogFile instead.
 func GlobalLogFile() string {
-	return filepath.Join(GlobalLogDir(), fmt.Sprintf("%s-%d.log", brand.Slug, os.Getpid()))
+	return LogFileForPID(os.Getpid())
+}
+
+// LogFileForPID returns the log file a sennit process with this PID would
+// open from inside its own process (GlobalLogFile embeds os.Getpid() at
+// the time it runs there) -- for a caller with no live connection of its
+// own to ask, such as internal/daemon/supervisor quoting a freshly
+// spawned child's own log tail after a readiness timeout, or `sennit
+// daemon logs` reading a PID out of the workspace lock.
+func LogFileForPID(pid int) string {
+	return filepath.Join(GlobalLogDir(), fmt.Sprintf("%s-%d.log", brand.Slug, pid))
 }
 
 // isRunLogName reports whether name is a log written by a running

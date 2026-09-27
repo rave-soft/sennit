@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -439,12 +440,16 @@ func TestCmdDaemonLoggingHelperProcess(t *testing.T) {
 		return
 	}
 	cwd := os.Args[len(os.Args)-1]
-	_ = daemon.Run(context.Background(), cwd, daemon.Options{
+	if err := daemon.Run(context.Background(), cwd, daemon.Options{
 		LogSetup: func(logFile string, _ bool) {
 			_ = os.MkdirAll(filepath.Dir(logFile), 0o700)
 			_ = os.WriteFile(logFile, []byte("sennit daemon test log marker\n"), 0o600)
 		},
-	})
+	}); err != nil {
+		// See TestCmdDaemonHelperProcess: don't let a real failure here
+		// disappear silently.
+		fmt.Fprintln(os.Stderr, "daemon.Run failed:", err)
+	}
 }
 
 func loggingHelperCommand(t *testing.T) func(args []string) *exec.Cmd {

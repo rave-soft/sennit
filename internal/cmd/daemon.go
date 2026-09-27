@@ -7,11 +7,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/daemon"
 	"github.com/rave-soft/sennit/internal/daemon/supervisor"
@@ -76,7 +74,7 @@ const daemonLogsPollInterval = 500 * time.Millisecond
 // PID read out of the workspace lock, for a caller with no live
 // connection of its own to ask.
 func daemonLogPath(pid int) string {
-	return filepath.Join(config.GlobalLogDir(), fmt.Sprintf("%s-%d.log", brand.Slug, pid))
+	return config.LogFileForPID(pid)
 }
 
 // daemonStatusReport is `sennit daemon status`'s whole answer, and its

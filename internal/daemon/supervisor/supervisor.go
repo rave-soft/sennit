@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/daemon"
 	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/lock"
@@ -318,11 +319,11 @@ func spawnSingleFlight(ctx context.Context, cwd, lockDir, socketPath string, opt
 			// against it never gets confused).
 			_ = os.Remove(socketPath)
 
-			logPath, err := spawnDetached(cwd, lockDir, opts)
+			logPath, daemonLogPath, err := spawnDetached(cwd, lockDir, opts)
 			if err != nil {
 				return "", err
 			}
-			return waitForReady(ctx, socketPath, logPath, opts)
+			return waitForReady(ctx, socketPath, logPath, daemonLogPath, opts)
 		}
 
 		if time.Now().After(deadline) {
@@ -343,10 +344,13 @@ func spawnSingleFlight(ctx context.Context, cwd, lockDir, socketPath string, opt
 // the daemon would permanently attach to whichever terminal pane
 // happened to spawn it first), and the process is put in its own
 // session/process group (detachProcess) so it is not sent our signals
-// and does not die when we exit. It returns the startup log's path and
-// releases the child (os.Process.Release) without waiting on it beyond
-// confirming Start succeeded.
-func spawnDetached(cwd, lockDir string, opts Options) (logPath string, err error) {
+// and does not die when we exit. It returns the startup log's path, the
+// path the child's own logger will write to once it gets that far
+// (config.LogFileForPID, computed from the child's PID -- the startup
+// log only ever holds what ran before that point), and releases the
+// child (os.Process.Release) without waiting on it beyond confirming
+// Start succeeded.
+func spawnDetached(cwd, lockDir string, opts Options) (logPath, daemonLogPath string, err error) {
 	args := []string{"daemon", "run", "--cwd", cwd}
 	if opts.DataDir != "" {
 		args = append(args, "--data-dir", opts.DataDir)
@@ -361,7 +365,7 @@ func spawnDetached(cwd, lockDir string, opts Options) (logPath string, err error
 	} else {
 		exe, err := os.Executable()
 		if err != nil {
-			return "", fmt.Errorf("supervisor: resolve executable: %w", err)
+			return "", "", fmt.Errorf("supervisor: resolve executable: %w", err)
 		}
 		// context.Background(), not ctx: the whole point of this
 		// process is to outlive the caller (see this func's own doc
@@ -373,7 +377,7 @@ func spawnDetached(cwd, lockDir string, opts Options) (logPath string, err error
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0)
 	if err != nil {
-		return "", fmt.Errorf("supervisor: open %s: %w", os.DevNull, err)
+		return "", "", fmt.Errorf("supervisor: open %s: %w", os.DevNull, err)
 	}
 	defer devNull.Close()
 	cmd.Stdin = devNull
@@ -381,7 +385,7 @@ func spawnDetached(cwd, lockDir string, opts Options) (logPath string, err error
 	logPath = filepath.Join(lockDir, startupLogName)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", fmt.Errorf("supervisor: open startup log %q: %w", logPath, err)
+		return "", "", fmt.Errorf("supervisor: open startup log %q: %w", logPath, err)
 	}
 	defer logFile.Close()
 	cmd.Stdout = logFile
@@ -391,26 +395,32 @@ func spawnDetached(cwd, lockDir string, opts Options) (logPath string, err error
 	detachProcess(cmd)
 
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("supervisor: start daemon: %w", err)
+		return "", "", fmt.Errorf("supervisor: start daemon: %w", err)
 	}
+	daemonLogPath = config.LogFileForPID(cmd.Process.Pid)
 	if err := cmd.Process.Release(); err != nil {
-		return "", fmt.Errorf("supervisor: release daemon process: %w", err)
+		return "", "", fmt.Errorf("supervisor: release daemon process: %w", err)
 	}
-	return logPath, nil
+	return logPath, daemonLogPath, nil
 }
 
 // waitForReady polls socketPath's health check every pollInterval until
 // it answers SERVING or opts.readyTimeout elapses, in which case the
-// returned error quotes logPath's tail (if any) so the caller sees why
-// the daemon it just spawned never came up.
-func waitForReady(ctx context.Context, socketPath, logPath string, opts Options) (string, error) {
+// returned error quotes both logPath's tail and daemonLogPath's tail (if
+// any) so the caller sees why the daemon it just spawned never came up
+// -- a hang past "Initializing MCP clients" (the last line the startup
+// log sees before Bootstrap hands off to the real logger) is otherwise
+// invisible, since everything after that point goes only to
+// daemonLogPath.
+func waitForReady(ctx context.Context, socketPath, logPath, daemonLogPath string, opts Options) (string, error) {
 	deadline := time.Now().Add(opts.readyTimeout())
 	for {
 		if probeHealthy(ctx, socketPath, opts.probeTimeout()) {
 			return socketPath, nil
 		}
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("supervisor: timed out waiting for daemon to become ready%s", logTail(logPath))
+			return "", fmt.Errorf("supervisor: timed out waiting for daemon to become ready%s%s",
+				logTail("daemon startup log", logPath), logTail("daemon log", daemonLogPath))
 		}
 		select {
 		case <-ctx.Done():
@@ -438,9 +448,12 @@ func awaitSocketGone(ctx context.Context, socketPath string) error {
 	}
 }
 
-// logTail returns the last portion of the file at path, formatted for
-// appending to an error message, or "" if path is empty or unreadable.
-func logTail(path string) string {
+// logTail returns the last portion of the file at path under label,
+// formatted for appending to an error message, or "" if path is empty
+// or unreadable -- unreadable includes "doesn't exist yet," which is
+// the ordinary case for daemonLogPath when the child never got far
+// enough to open its own logger.
+func logTail(label, path string) string {
 	if path == "" {
 		return ""
 	}
@@ -452,7 +465,7 @@ func logTail(path string) string {
 	if len(data) > maxTail {
 		data = data[len(data)-maxTail:]
 	}
-	return fmt.Sprintf("\n--- daemon startup log (%s) ---\n%s", path, data)
+	return fmt.Sprintf("\n--- %s (%s) ---\n%s", label, path, data)
 }
 
 // ProbeRunning reports whether a daemon is already running and healthy

@@ -159,10 +159,19 @@ func TestSupervisorDaemonHelperProcess(t *testing.T) {
 	}
 
 	cwd := os.Args[len(os.Args)-1]
-	_ = daemon.Run(context.Background(), cwd, daemon.Options{
+	if err := daemon.Run(context.Background(), cwd, daemon.Options{
 		LogSetup:          func(string, bool) {},
 		DelayBeforeListen: delayBeforeListen,
-	})
+	}); err != nil {
+		// Stderr is the startup log supervisor.spawnDetached redirects
+		// this whole process's output to (see its doc comment); a real
+		// `sennit daemon run` would report this same error through
+		// cobra, but this helper otherwise exits 0 either way, which
+		// left a real failure here indistinguishable from "never got
+		// this far" -- see supervisor.waitForReady's logTail quoting.
+		fmt.Fprintln(os.Stderr, "daemon.Run failed:", err)
+		os.Exit(1)
+	}
 	os.Exit(0)
 }
 
