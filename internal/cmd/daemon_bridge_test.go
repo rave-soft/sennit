@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/rave-soft/sennit/internal/testenv"
 )
 
 // fakeUnixServer listens on a fresh unix socket, accepts exactly one
@@ -25,7 +27,7 @@ import (
 // just a timing nicety.
 func fakeUnixServer(t *testing.T, serverBytes []byte) (socketPath string, clientReceived func() []byte, waitDone func()) {
 	t.Helper()
-	socketPath = filepath.Join(t.TempDir(), "fake.sock")
+	socketPath = filepath.Join(testenv.ShortSocketDir(t), "fake.sock")
 	var lc net.ListenConfig
 	lis, err := lc.Listen(context.Background(), "unix", socketPath)
 	require.NoError(t, err)

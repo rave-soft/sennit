@@ -79,8 +79,11 @@ func TestPath_FallsBackWithoutRuntimeDirEnv(t *testing.T) {
 	// Redirect os.TempDir() itself into a throwaway directory so the
 	// fallback branch (which mkdirs under it) never touches the real
 	// system temp directory — on every OS os.TempDir() consults, hence
-	// all four env vars.
-	fallback := t.TempDir()
+	// all four env vars. A short one (not t.TempDir(), whose per-test
+	// nesting is long enough by itself to push the resulting socket
+	// path over sockaddr_un.sun_path's limit) so this test exercises the
+	// fallback branch itself, not that unrelated length limit.
+	fallback := testenv.ShortRuntimeDir(t)
 	t.Setenv("TMPDIR", fallback)
 	t.Setenv("TMP", fallback)
 	t.Setenv("TEMP", fallback)

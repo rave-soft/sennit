@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/rave-soft/sennit/internal/transport"
 	"github.com/rave-soft/sennit/internal/version"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
@@ -81,7 +82,7 @@ var fakeMetaServiceDesc = grpc.ServiceDesc{
 // without a real daemon.
 func startFakeMetaServer(t *testing.T, protocolVersion int, buildID string) (socketPath string) {
 	t.Helper()
-	socketPath = filepath.Join(t.TempDir(), "fake-meta.sock")
+	socketPath = filepath.Join(testenv.ShortSocketDir(t), "fake-meta.sock")
 	var lc net.ListenConfig
 	lis, err := lc.Listen(context.Background(), "unix", socketPath)
 	require.NoError(t, err)
