@@ -116,7 +116,7 @@ func newWireEventPathUI(t *testing.T) (*UI, *wireEventPathWorkspace, chan any) {
 // goroutine) with an empty channel.
 func drainEvents(t *testing.T, m *UI, eventsCh chan any) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(raceWait(2 * time.Second))
 	got := false
 	for time.Now().Before(deadline) {
 		select {
@@ -301,7 +301,7 @@ func TestWireEventPath_ConnectionLostRecovered(t *testing.T) {
 	// The client's own pump reconnects on its next attempt (the dialer
 	// itself is still live -- only the sever()'d connections were cut);
 	// wait for the Recovered event the same way.
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(raceWait(5 * time.Second))
 	for time.Now().Before(deadline) && m.conn.lost {
 		select {
 		case v := <-eventsCh:

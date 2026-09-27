@@ -49,7 +49,7 @@ func TestWithCallTimeout_BoundsACtxlessCall(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("AgentIsBusy did not return within the call timeout")
 	}
 }

@@ -47,7 +47,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 // reached the hub (via stub.SubscribeWithReady, which gives a
 // happens-before edge -race can see -- a bare poll of
 // stub.SubscribeWithSend races its write on the gRPC stream handler's own
-// goroutine), then retries a harmless warmup event until seen() confirms
+// goroutine), then retries a harmless warmup event until count() confirms
 // delivery, and returns the send func to use for the rest of the test.
 //
 // SubscribeWithReady firing only proves eventHub.ensureStarted has run
@@ -58,23 +58,49 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 // gap in which a publish reaches nobody. Retrying the warmup event closes
 // that gap instead of racing it: stub.SubscribeWithSend records only the
 // latest call, so re-sending the same harmless event is safe.
-func waitSubscribed(t *testing.T, stub *wsrpctest.StubWorkspace, seen func() bool) func(any) {
+//
+// count, not a bool: every caller clears its recorder right after this
+// call and then asserts an exact sequence, so a retry sent before
+// delivery caught up -- still traveling the same real hub/gRPC pipeline
+// as any other event once issued, not superseded by a later retry --
+// must not be able to land after that clear. Under real delivery latency
+// (the CI race job's own cross-package contention; see AGENTS.md's
+// "wall-clock budgets under -race") more than one retry can be in flight
+// by the time the first one is observed, so this waits for arrivals to
+// go quiet for a short settle window before returning, on top of the
+// count going positive at all. This reproduced without any change to the
+// retry loop itself, just by widening its own deadline (raceWait) enough
+// for several retries to stack up -- see the regression this settle
+// phase fixes in git history's CI investigation.
+func waitSubscribed(t *testing.T, stub *wsrpctest.StubWorkspace, count func() int) func(any) {
 	t.Helper()
 	select {
 	case <-stub.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("SubscribeWith was never called")
 	}
 	send := stub.SubscribeWithSend
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if seen() {
-			return send
-		}
+	deadline := time.Now().Add(raceWait(5 * time.Second))
+	for time.Now().Before(deadline) && count() == 0 {
 		send(wsrpctest.SessionEvent)
 		time.Sleep(5 * time.Millisecond)
 	}
-	require.True(t, seen(), "warmup event was never delivered to the new stream")
+	require.Greater(t, count(), 0, "warmup event was never delivered to the new stream")
+
+	settleDeadline := time.Now().Add(raceWait(2 * time.Second))
+	last := count()
+	stableSince := time.Now()
+	for time.Now().Before(settleDeadline) {
+		time.Sleep(5 * time.Millisecond)
+		if n := count(); n != last {
+			last = n
+			stableSince = time.Now()
+			continue
+		}
+		if time.Since(stableSince) >= 25*time.Millisecond {
+			break
+		}
+	}
 	return send
 }
 
@@ -93,10 +119,10 @@ func TestSubscribe_DeliversRegisteredEventTypesInOrder(t *testing.T) {
 	})
 	t.Cleanup(stop)
 
-	send := waitSubscribed(t, stub, func() bool {
+	send := waitSubscribed(t, stub, func() int {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(got) > 0
+		return len(got)
 	})
 	mu.Lock()
 	got = nil // drop the warmup event(s); only the sequence below counts.
@@ -109,7 +135,7 @@ func TestSubscribe_DeliversRegisteredEventTypesInOrder(t *testing.T) {
 	send(messageEvent)
 	send(permissionEvent)
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(got) == 3
@@ -188,10 +214,10 @@ func TestSubscribe_ReconnectWithoutLoss(t *testing.T) {
 		got = append(got, v)
 	})
 
-	send := waitSubscribed(t, stub, func() bool {
+	send := waitSubscribed(t, stub, func() int {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(got) > 0
+		return len(got)
 	})
 	mu.Lock()
 	got = nil
@@ -199,7 +225,7 @@ func TestSubscribe_ReconnectWithoutLoss(t *testing.T) {
 	mu.Unlock()
 
 	send(wsrpctest.SessionEvent)
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(got) == 1
@@ -211,7 +237,7 @@ func TestSubscribe_ReconnectWithoutLoss(t *testing.T) {
 	send(wsrpctest.SessionEvent)
 	send(wsrpctest.SessionEvent)
 
-	waitFor(t, 10*time.Second, func() bool {
+	waitFor(t, raceWait(10*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(got) == 3
@@ -260,17 +286,17 @@ func TestSubscribeWith_StopEndsDelivery(t *testing.T) {
 		mu.Unlock()
 	})
 
-	send := waitSubscribed(t, stub, func() bool {
+	send := waitSubscribed(t, stub, func() int {
 		mu.Lock()
 		defer mu.Unlock()
-		return count > 0
+		return count
 	})
 	mu.Lock()
 	count = 0
 	mu.Unlock()
 
 	send(wsrpctest.SessionEvent)
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return count == 1
@@ -299,14 +325,14 @@ func TestClient_ShutdownEndsSubscribe(t *testing.T) {
 
 	select {
 	case <-stub.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Subscribe never reached the server")
 	}
 	client.Shutdown()
 
 	select {
 	case <-subscribeReturned:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Subscribe did not return after Shutdown")
 	}
 }
@@ -333,7 +359,7 @@ func TestNewServer_EventHubNoGoroutineLeak(t *testing.T) {
 		stop := client.SubscribeWith(func(any) {})
 		select {
 		case <-stub.SubscribeWithReady:
-		case <-time.After(5 * time.Second):
+		case <-time.After(raceWait(5 * time.Second)):
 			t.Fatal("SubscribeWith was never called")
 		}
 		stop()
@@ -349,7 +375,7 @@ func TestNewServer_EventHubNoGoroutineLeak(t *testing.T) {
 	// synchronous from the caller's point of view, but the stream
 	// handler goroutine and gRPC's own internal ones exit asynchronously
 	// -- give them a moment before asserting no leak.
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		return goleak.Find(ignoreBaseline) == nil
 	})
 }
@@ -397,10 +423,10 @@ func TestSubscribe_BufferOverflowTriggersResyncOverTheWire(t *testing.T) {
 		got = append(got, v)
 	})
 
-	send := waitSubscribed(t, stub, func() bool {
+	send := waitSubscribed(t, stub, func() int {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(got) > 0
+		return len(got)
 	})
 	mu.Lock()
 	got = nil
@@ -412,7 +438,7 @@ func TestSubscribe_BufferOverflowTriggersResyncOverTheWire(t *testing.T) {
 		send(wsrpctest.SessionEvent)
 	}
 
-	waitFor(t, 10*time.Second, func() bool {
+	waitFor(t, raceWait(10*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return resyncs > 0
@@ -420,7 +446,7 @@ func TestSubscribe_BufferOverflowTriggersResyncOverTheWire(t *testing.T) {
 
 	// Live delivery keeps working after the resync.
 	send(wsrpctest.SessionEvent)
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(got) > 0

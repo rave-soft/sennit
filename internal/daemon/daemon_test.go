@@ -44,14 +44,21 @@ const mockGlobalConfig = `{
 // alone, for every ctx a daemon.Run call in this file receives, and used
 // as exec.CommandContext's ctx for every subprocess helper so a stuck
 // child is killed rather than left running past the test.
-const testTimeout = 20 * time.Second
+//
+// Widened under -race (raceIdleScale, idle_test.go): these tests spawn
+// real subprocesses and dial real unix sockets, and -race's own overhead
+// plus CI's cross-package CPU contention (AGENTS.md's "wall-clock budgets
+// under -race") can make that comfortably slower than in isolation. This
+// is a hang guard, not a performance assertion, so widening it costs
+// nothing but wall time on a genuine hang.
+var testTimeout = raceIdleScale(20 * time.Second)
 
 // shutdownWait bounds awaitShutdown's own select, independent of the
 // ctx a test just canceled to *trigger* that shutdown: waiting on that
 // same ctx's Done() would race against the cancellation that starts the
 // wait (Done() is already closed by the time awaitShutdown runs), so
 // this is a fresh timer instead.
-const shutdownWait = 10 * time.Second
+var shutdownWait = raceIdleScale(10 * time.Second)
 
 // writeGlobalConfig points the global config location at a fresh
 // directory for this test and seeds it with mockGlobalConfig. Mirrors

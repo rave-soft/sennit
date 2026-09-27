@@ -40,10 +40,19 @@ func update(id, sessionID string) pubsub.Event[message.Message] {
 }
 
 // waitFor polls until cond holds or the deadline passes, so a test never
-// depends on a single sleep landing after the pacer's timer.
+// depends on a single sleep landing after the pacer's timer. Its budget
+// is widened under -race (raceDetectorEnabled, racecheck_{on,off}_test.go):
+// this is a hang guard, not a performance assertion, and -race's own
+// instrumentation overhead plus CI's cross-package CPU contention
+// (AGENTS.md's "wall-clock budgets under -race") can otherwise make a
+// correctness wait that clears comfortably in isolation arrive late.
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	budget := 2 * time.Second
+	if raceDetectorEnabled {
+		budget = 30 * time.Second
+	}
+	deadline := time.Now().Add(budget)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

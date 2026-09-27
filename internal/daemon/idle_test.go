@@ -21,10 +21,20 @@ import (
 // a test observes idle exit (or its absence) in well under a second
 // rather than waiting out production timescales. idleTimeoutConfig is the
 // value written into each test's sennit.json.
-const (
-	idlePollInterval  = 15 * time.Millisecond
-	idleTimeoutConfig = "80ms"
-	idleTimeout       = 80 * time.Millisecond
+//
+// idlePollInterval and idleTimeout are widened under -race (see
+// racecheck_off_test.go): they are real scheduling deadlines the daemon's
+// idle monitor goroutine has to hit, not just hang-guard budgets, so
+// -race's instrumentation overhead and CI's cross-package CPU contention
+// can otherwise make a monitor tick land late enough to flake these tests
+// even though nothing about idle detection itself is broken. Widening
+// both by the same factor keeps every relationship the doc comments below
+// rely on (idleObserveWindow vs. idleTimeout, poll vs. timeout) intact,
+// just slower.
+var (
+	idlePollInterval  = raceIdleScale(15 * time.Millisecond)
+	idleTimeout       = raceIdleScale(80 * time.Millisecond)
+	idleTimeoutConfig = idleTimeout.String()
 	// idleObserveWindow bounds how long a "must NOT have exited yet" check
 	// waits before concluding the daemon really is staying up. This has to
 	// be comfortably longer than idleTimeout plus a few poll ticks, not
@@ -38,6 +48,19 @@ const (
 	// 5x-idleTimeout (400ms) window sometimes missed and sometimes caught.
 	idleObserveWindow = 25 * idleTimeout
 )
+
+// raceIdleScale widens a daemon idle-timing value under -race, for the
+// same reason raceWait widens hang-guard budgets elsewhere (see
+// grpcws_test_helpers_test.go's doc comment) -- except these are the
+// system under test's own configured deadlines, not just a test's wait
+// budget, so every caller scales together rather than each picking its
+// own multiplier.
+func raceIdleScale(d time.Duration) time.Duration {
+	if raceDetectorEnabled {
+		return d * 6
+	}
+	return d
+}
 
 // writeDaemonIdleConfig writes a project-scoped sennit.json setting
 // options.daemon.idle_timeout, mirroring how a real project would opt into

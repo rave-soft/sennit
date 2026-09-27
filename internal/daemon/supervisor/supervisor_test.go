@@ -39,8 +39,28 @@ const mockGlobalConfig = `{
 }`
 
 // testTimeout bounds every EnsureRunning call and every subprocess wait
-// this file makes.
-const testTimeout = 30 * time.Second
+// this file makes. Widened under -race (raceWait): these tests spawn
+// real subprocesses, and -race's own overhead plus CI's cross-package
+// CPU contention (AGENTS.md's "wall-clock budgets under -race") can make
+// that comfortably slower than in isolation -- a hang guard, not a
+// performance assertion.
+var testTimeout = raceWait(30 * time.Second)
+
+// raceWait widens a correctness wait/hang-guard budget under -race, the
+// same pattern internal/workspace/wsrpc/grpcws uses (see its
+// grpcws_test_helpers_test.go doc comment) and internal/daemon uses
+// (raceIdleScale). Leave a budget alone when it is itself a performance
+// assertion -- see this file's two elapsed-time checks, which skip
+// under -race entirely instead (racecheck_off_test.go's doc comment).
+func raceWait(d time.Duration) time.Duration {
+	if !raceDetectorEnabled {
+		return d
+	}
+	if w := d * 6; w > 60*time.Second {
+		return w
+	}
+	return 60 * time.Second
+}
 
 // writeGlobalConfig points the global config location at a fresh
 // directory for this test and seeds it with mockGlobalConfig, mirroring
@@ -179,7 +199,7 @@ func dialAndShutdown(t *testing.T, ctx context.Context, socketPath string) {
 
 	_, _ = client.RequestShutdown(ctx, false)
 
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(raceWait(10 * time.Second))
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(socketPath); os.IsNotExist(err) {
 			return
@@ -355,6 +375,16 @@ func TestEnsureRunning_TUIHoldsLock(t *testing.T) {
 	// it (ModeTUI + a live flock): it must not wait out any part of the
 	// readiness timeout to report it. defaultReadyTimeout is 10s; this
 	// generously bounds "fast" at a small fraction of that.
+	//
+	// Skipped under -race rather than widened: this is a performance
+	// assertion (it must NOT take as long as the readiness timeout), and
+	// -race's own instrumentation overhead can blow a fixed "fast" bound
+	// on its own, independent of whether EnsureRunning's actual behavior
+	// is correct (see AGENTS.md's wall-clock-budgets-under-race note and
+	// racecheck_off_test.go's doc comment).
+	if raceDetectorEnabled {
+		t.Skip("elapsed-time assertion is not meaningful under -race; see racecheck_off_test.go")
+	}
 	require.Lessf(t, elapsed, 2*time.Second, "expected ErrTUILocked without waiting for the readiness timeout, took %s", elapsed)
 }
 
@@ -555,6 +585,14 @@ func TestEnsureRunning_ReadinessTimeout(t *testing.T) {
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "timed out waiting for daemon to become ready")
+	// Skipped under -race rather than widened: a fixed 500ms ReadyTimeout
+	// racing -race's own instrumentation overhead is not a meaningful
+	// performance assertion any more (see racecheck_off_test.go's doc
+	// comment); the error path itself (asserted above) is what this test
+	// is really for, and that already ran.
+	if raceDetectorEnabled {
+		t.Skip("elapsed-time assertion is not meaningful under -race; see racecheck_off_test.go")
+	}
 	require.Lessf(t, elapsed, 5*time.Second, "expected the bounded ReadyTimeout to be honored, took %s", elapsed)
 }
 
@@ -676,7 +714,7 @@ func killDaemon(pid int) error {
 // unhealthy, which probeHealthy inside the package already covers).
 func waitGone(t *testing.T, ctx context.Context, socketPath string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(raceWait(10 * time.Second))
 	for time.Now().Before(deadline) {
 		dialCtx, dialCancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", socketPath)

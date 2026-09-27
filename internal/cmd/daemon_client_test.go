@@ -36,8 +36,12 @@ const mockGlobalConfig = `{
 }`
 
 // daemonTestTimeout bounds every setupDaemonWorkspace call and subprocess
-// wait in this file.
-const daemonTestTimeout = 30 * time.Second
+// wait in this file. Widened under -race (raceWait): these tests spawn
+// real subprocesses and dial real unix sockets, and -race's own overhead
+// plus CI's cross-package CPU contention (AGENTS.md's "wall-clock budgets
+// under -race") can make that comfortably slower than in isolation -- a
+// hang guard, not a performance assertion.
+var daemonTestTimeout = raceWait(30 * time.Second)
 
 // writeGlobalConfig points the global config location at a fresh
 // directory for this test and seeds it with mockGlobalConfig, mirroring

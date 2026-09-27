@@ -151,7 +151,7 @@ func TestOAuthWait_ClientCtxCancelCancelsServerWait(t *testing.T) {
 	var serverCtx context.Context
 	select {
 	case serverCtx = <-flow.WaitCtxCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("flow.Wait was never called server-side")
 	}
 
@@ -160,17 +160,17 @@ func TestOAuthWait_ClientCtxCancelCancelsServerWait(t *testing.T) {
 	select {
 	case err := <-waitErrCh:
 		require.Error(t, err)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Wait never returned after the caller's ctx was cancelled")
 	}
 
 	select {
 	case <-serverCtx.Done():
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the server-side ctx passed to flow.Wait was never cancelled")
 	}
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		flow.CancelMu.Lock()
 		defer flow.CancelMu.Unlock()
 		return flow.CancelCalls == 1
@@ -236,7 +236,7 @@ func TestLeaseGrace_CancelsPendingOAuthFlowOnHalfOpenDisconnect(t *testing.T) {
 	t.Cleanup(stopSub)
 	select {
 	case <-root.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Subscribe never reached the server")
 	}
 
@@ -284,7 +284,7 @@ func TestNewServer_OAuthFlowNoGoroutineLeak(t *testing.T) {
 		require.NoError(t, lis.Close())
 	}()
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		return goleak.Find(ignoreBaseline) == nil
 	})
 }

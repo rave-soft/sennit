@@ -30,7 +30,7 @@ func TestSnapshot_HubStartsAtNewServerTime(t *testing.T) {
 
 	select {
 	case <-stub.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the root hub must subscribe to the workspace at NewServer time, not at first Subscribe")
 	}
 	send := stub.SubscribeWithSend
@@ -39,7 +39,7 @@ func TestSnapshot_HubStartsAtNewServerTime(t *testing.T) {
 	require.Eventually(t, func() bool {
 		snap, err := client.Snapshot(context.Background())
 		return err == nil && snap.Seq >= 1
-	}, 5*time.Second, 10*time.Millisecond, "an event published before any Subscribe call must still be buffered")
+	}, raceWait(5*time.Second), 10*time.Millisecond, "an event published before any Subscribe call must still be buffered")
 
 	snap, err := client.Snapshot(context.Background())
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestSnapshot_PerHandle(t *testing.T) {
 	require.Eventually(t, func() bool {
 		snap, err := childClient.Snapshot(context.Background())
 		return err == nil && snap.State.WorkingDir == "/child"
-	}, 5*time.Second, 10*time.Millisecond, "Snapshot against a handle must resolve to that handle's own workspace, not the root's")
+	}, raceWait(5*time.Second), 10*time.Millisecond, "Snapshot against a handle must resolve to that handle's own workspace, not the root's")
 }
 
 // TestClientStatePublisher_TickIntervalIsConfigurable checks
@@ -107,12 +107,12 @@ func TestClientStatePublisher_TickIntervalIsConfigurable(t *testing.T) {
 
 	select {
 	case <-stub.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("root hub never subscribed")
 	}
 
 	require.Eventually(t, func() bool {
 		snap, err := client.Snapshot(context.Background())
 		return err == nil && snap.State.WorkingDir == "/repo" && snap.State.Version >= 1
-	}, 2*time.Second, 5*time.Millisecond, "the shrunk ticker must publish a client_state event well within its own interval")
+	}, raceWait(2*time.Second), 5*time.Millisecond, "the shrunk ticker must publish a client_state event well within its own interval")
 }

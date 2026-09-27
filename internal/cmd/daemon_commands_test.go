@@ -277,7 +277,7 @@ func TestDaemonStopCmd_Idle(t *testing.T) {
 	require.True(t, accepted)
 
 	require.NoError(t, supervisor.AwaitGone(ctx, socketPath))
-	require.False(t, supervisor.ProbeHealthy(ctx, socketPath, 500*time.Millisecond))
+	require.False(t, supervisor.ProbeHealthy(ctx, socketPath, raceWait(500*time.Millisecond)))
 }
 
 // startInProcessDaemon runs daemon.Run directly, in-process, in a
@@ -357,7 +357,7 @@ func TestDaemonStopCmd_Busy(t *testing.T) {
 	require.Contains(t, out.String(), "bash", "expected the busy report to name the waiting tool")
 
 	// The refusal must not have touched the daemon: still healthy.
-	require.True(t, supervisor.ProbeHealthy(ctx, socketPath, time.Second))
+	require.True(t, supervisor.ProbeHealthy(ctx, socketPath, raceWait(time.Second)))
 
 	forceCmd := daemonCmdTestCommand(t, project)
 	forceCmd.SetContext(ctx)
@@ -449,7 +449,7 @@ func TestDaemonLogsCmd(t *testing.T) {
 	require.Eventually(t, func() bool {
 		data, err := os.ReadFile(logPath)
 		return err == nil && len(data) > 0
-	}, 10*time.Second, 100*time.Millisecond, "expected the daemon's log file to appear")
+	}, raceWait(10*time.Second), 100*time.Millisecond, "expected the daemon's log file to appear")
 
 	cmd := daemonCmdTestCommand(t, project)
 	cmd.SetContext(ctx)

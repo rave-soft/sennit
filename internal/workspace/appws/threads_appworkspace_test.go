@@ -283,7 +283,7 @@ func (s *fakeThreadSpawner) Release(ctx context.Context, id string) error {
 func shutdownManagerOnCleanup(t *testing.T, mgr *thread.Manager) {
 	t.Helper()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), raceWait(10*time.Second))
 		defer cancel()
 		require.NoError(t, mgr.Shutdown(ctx))
 	})
@@ -552,7 +552,7 @@ func TestAppWorkspace_TranslateEvent_ThreadLifecycle(t *testing.T) {
 			case pubsub.DeletedEvent:
 				sawRemoved = true
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(raceWait(5 * time.Second)):
 			t.Fatal("timed out waiting for translated created/removed thread events")
 		}
 	}
@@ -598,7 +598,7 @@ func TestAppWorkspace_CompletionCleanupEventSequencing(t *testing.T) {
 
 			var terminals []pubsub.Event[proto.Thread]
 			var reports []util.InfoMsg
-			deadline := time.After(5 * time.Second)
+			deadline := time.After(raceWait(5 * time.Second))
 			for len(terminals) == 0 {
 				select {
 				case raw := <-events:
@@ -900,7 +900,7 @@ func TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	select {
 	case ev := <-raised:
 		req = ev.Payload
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the thread never raised its permission request")
 	}
 	require.Equal(t, st.ID, req.Delegation.ID, "precondition: the request is attributed to its thread")
@@ -913,7 +913,7 @@ func TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	select {
 	case ok := <-granted:
 		require.True(t, ok)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the thread stayed blocked after the parent granted its request")
 	}
 }
@@ -958,7 +958,7 @@ func TestAttachedThread_PermissionAnswerReachesTheParentThatRaisedIt(t *testing.
 	select {
 	case ev := <-raised:
 		req = ev.Payload
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the parent never raised its permission request")
 	}
 	require.Empty(t, req.Delegation.ID, "precondition: this is the parent's own turn")
@@ -971,7 +971,7 @@ func TestAttachedThread_PermissionAnswerReachesTheParentThatRaisedIt(t *testing.
 	select {
 	case ok := <-granted:
 		require.True(t, ok)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the parent stayed blocked after its request was answered from the thread's screen")
 	}
 }

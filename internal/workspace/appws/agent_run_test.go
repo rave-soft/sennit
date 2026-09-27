@@ -78,14 +78,14 @@ func TestAppWorkspace_AgentRun_ReturnsBeforeTurnCompletes(t *testing.T) {
 
 	select {
 	case <-entered:
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("dispatched run never entered RunAccepted")
 	}
 
 	select {
 	case err := <-done:
 		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("AgentRun did not return once the run was accepted")
 	}
 
@@ -167,13 +167,13 @@ func TestAppWorkspace_Shutdown_JoinsRunDispatchedViaAgentRun(t *testing.T) {
 
 	select {
 	case <-entered:
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("dispatched run never entered RunAccepted")
 	}
 	select {
 	case err := <-runDone:
 		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("AgentRun did not return once the run was accepted")
 	}
 
@@ -193,7 +193,7 @@ func TestAppWorkspace_Shutdown_JoinsRunDispatchedViaAgentRun(t *testing.T) {
 
 	select {
 	case <-shutdownDone:
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("Shutdown did not complete after the blocked run was released")
 	}
 }

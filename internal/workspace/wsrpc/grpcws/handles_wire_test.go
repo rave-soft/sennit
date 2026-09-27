@@ -85,17 +85,17 @@ func TestEnterWorktree_EventsArriveOnItsOwnSubscribe(t *testing.T) {
 	})
 	t.Cleanup(stop)
 
-	send := waitSubscribed(t, child, func() bool {
+	send := waitSubscribed(t, child, func() int {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(got) > 0
+		return len(got)
 	})
 	mu.Lock()
 	got = nil
 	mu.Unlock()
 
 	send(wsrpctest.SessionEvent)
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(got) == 1
@@ -123,7 +123,7 @@ func TestEnterWorktree_ReleaseCallsChildReleaseOnceThenErrWorkspaceGone(t *testi
 	release()
 	select {
 	case <-root.WorktreeReleased:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("release never reached the child's own release func")
 	}
 
@@ -159,7 +159,7 @@ func TestAttachThread_ReleaseDoesNotStopTheThread(t *testing.T) {
 	release()
 	select {
 	case <-root.AttachThreadReleased:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("release never reached AttachThread's own release func")
 	}
 	require.False(t, child.ShutdownCalled, "detaching a thread view must never shut the thread's own workspace down")
@@ -237,7 +237,7 @@ func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet(t *testing.T) {
 	client.SubscribeWith(func(any) {})
 	select {
 	case <-root.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Subscribe never reached the server")
 	}
 
@@ -249,7 +249,7 @@ func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet(t *testing.T) {
 
 	select {
 	case <-root.WorktreeReleased:
-	case <-time.After(10 * time.Second):
+	case <-time.After(raceWait(10 * time.Second)):
 		t.Fatal("handle was never released after the client went quiet past the lease grace")
 	}
 }
@@ -306,7 +306,7 @@ func TestLeaseGrace_ReleasesHandlesOnceClientGoesQuiet_RealDisconnectNoRedial(t 
 	t.Cleanup(stopSub) // left running until cleanup -- no manual stop, no redial.
 	select {
 	case <-root.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Subscribe never reached the server")
 	}
 
@@ -350,7 +350,7 @@ func TestLeaseGrace_ReconnectWithinGraceKeepsHandles(t *testing.T) {
 	stopSub1 := client1.SubscribeWith(func(any) {})
 	select {
 	case <-root.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Subscribe never reached the server")
 	}
 
@@ -418,7 +418,7 @@ func TestLeaseGrace_DisconnectedClientDoesNotCountAsBusy(t *testing.T) {
 	stopSubA := clientA.SubscribeWith(func(any) {})
 	select {
 	case <-root.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("client A's Subscribe never reached the server")
 	}
 
@@ -479,7 +479,7 @@ func TestLeaseGrace_OneClientsDisconnectDoesNotTouchAnothers(t *testing.T) {
 	t.Cleanup(stopSubA)
 	select {
 	case <-root.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("client A's Subscribe never reached the server")
 	}
 	_, _, err := clientA.EnterWorktree(context.Background(), "feature-a")
@@ -500,7 +500,7 @@ func TestLeaseGrace_OneClientsDisconnectDoesNotTouchAnothers(t *testing.T) {
 
 	select {
 	case <-root.AttachThreadReleased:
-	case <-time.After(10 * time.Second):
+	case <-time.After(raceWait(10 * time.Second)):
 		t.Fatal("client B's own handle was never released after it went quiet")
 	}
 
@@ -542,7 +542,7 @@ func TestNewServer_NonRootHandleNoGoroutineLeak(t *testing.T) {
 		stop := childClient.SubscribeWith(func(any) {})
 		select {
 		case <-child.SubscribeWithReady:
-		case <-time.After(5 * time.Second):
+		case <-time.After(raceWait(5 * time.Second)):
 			t.Fatal("SubscribeWith was never called")
 		}
 		stop()
@@ -556,7 +556,7 @@ func TestNewServer_NonRootHandleNoGoroutineLeak(t *testing.T) {
 		require.NoError(t, lis.Close())
 	}()
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		return goleak.Find(ignoreBaseline) == nil
 	})
 }

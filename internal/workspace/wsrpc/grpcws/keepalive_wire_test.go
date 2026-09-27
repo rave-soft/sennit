@@ -114,7 +114,7 @@ func TestKeepalive_HalfOpenConnection_ReleasesHandlesAndTurnSurvives(t *testing.
 	t.Cleanup(stopSub)
 	select {
 	case <-root.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("Subscribe never reached the server")
 	}
 
@@ -127,7 +127,7 @@ func TestKeepalive_HalfOpenConnection_ReleasesHandlesAndTurnSurvives(t *testing.
 	var serverCtx context.Context
 	select {
 	case serverCtx = <-ctxCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("server-side AgentRunStream was never called")
 	}
 
@@ -136,7 +136,7 @@ func TestKeepalive_HalfOpenConnection_ReleasesHandlesAndTurnSurvives(t *testing.
 	case ev, ok := <-out:
 		require.True(t, ok)
 		require.Equal(t, "thinking", ev.Status)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("first event never arrived before the cut")
 	}
 
@@ -211,14 +211,14 @@ func TestKeepalive_HealthyIdleConnectionSurvivesSeveralPingIntervals(t *testing.
 	// connected in the first place -- proving nothing about keepalive
 	// either way.
 	conn.Connect()
-	waitForReady(t, conn, 5*time.Second)
+	waitForReady(t, conn, raceWait(5*time.Second))
 
 	// Stay genuinely idle -- no calls, no streams -- across several of the
 	// server's own ping intervals, the exact condition PermitWithoutStream
 	// exists for.
 	time.Sleep(3*pingTime + pingTimeout)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), raceWait(5*time.Second))
 	defer cancel()
 	_, err = client.GetSession(ctx, "sess-1")
 	require.NoError(t, err, "an idle connection with default keepalive settings must not have been closed")

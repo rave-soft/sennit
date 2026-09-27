@@ -95,14 +95,14 @@ func TestAppWorkspace_AgentRunStream_AbandonedConsumerDoesNotLeakGoroutine(t *te
 	select {
 	case _, ok := <-out:
 		require.True(t, ok)
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("never received the first event")
 	}
 
 	select {
 	case err := <-published:
 		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("coordinator never published")
 	}
 
@@ -111,7 +111,7 @@ func TestAppWorkspace_AgentRunStream_AbandonedConsumerDoesNotLeakGoroutine(t *te
 	// The fix's own goroutines (the fan-in loop, the Run wrapper, and
 	// the message-events subscription's fan-out) must all wind down on
 	// their own now that ctx is canceled, with nobody left reading out.
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(raceWait(2 * time.Second))
 	var leakErr error
 	for time.Now().Before(deadline) {
 		leakErr = goleak.Find(ignoreBaseline)

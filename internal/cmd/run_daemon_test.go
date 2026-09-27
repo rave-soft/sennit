@@ -37,7 +37,7 @@ func TestSetupRunWorkspace_NoDaemon_NeverSpawns(t *testing.T) {
 
 	socketPath, _, err := daemon.ResolveSocketPath(context.Background(), project, "", false)
 	require.NoError(t, err)
-	require.False(t, supervisor.ProbeHealthy(context.Background(), socketPath, 200*time.Millisecond),
+	require.False(t, supervisor.ProbeHealthy(context.Background(), socketPath, raceWait(200*time.Millisecond)),
 		"a plain `sennit run` must never spawn a daemon")
 }
 

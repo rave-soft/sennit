@@ -35,7 +35,7 @@ func TestEventHub_ClientStatePublisher_OnlyPublishesOnChange(t *testing.T) {
 	select {
 	case frame := <-sub.ch:
 		require.Equal(t, "client_state", frame.Event.Type)
-	case <-time.After(time.Second):
+	case <-time.After(raceWait(time.Second)):
 		t.Fatal("expected the initial client_state publish, got nothing")
 	}
 
@@ -53,7 +53,7 @@ func TestEventHub_ClientStatePublisher_OnlyPublishesOnChange(t *testing.T) {
 	select {
 	case frame := <-sub.ch:
 		require.Equal(t, "client_state", frame.Event.Type)
-	case <-time.After(time.Second):
+	case <-time.After(raceWait(time.Second)):
 		t.Fatal("expected a client_state event after AgentIsBusy changed")
 	}
 
@@ -107,7 +107,7 @@ func TestEventHub_StatePublisher_TicksOnItsOwnSchedule(t *testing.T) {
 	require.Eventually(t, func() bool {
 		seq, state := h.snapshot()
 		return seq >= 1 && state.Version >= 1
-	}, time.Second, time.Millisecond, "the ticker must publish the initial client_state on its own, with no Subscribe call")
+	}, raceWait(time.Second), time.Millisecond, "the ticker must publish the initial client_state on its own, with no Subscribe call")
 
 	_, state := h.snapshot()
 	require.Equal(t, "/repo", state.WorkingDir)

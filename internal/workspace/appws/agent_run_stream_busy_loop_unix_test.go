@@ -91,8 +91,19 @@ func TestAppWorkspace_AgentRunStream_ClosedMessageChannelDoesNotBusyLoop(t *test
 
 	select {
 	case <-entered:
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("run never entered Coordinator.Run")
+	}
+
+	// The assertion below is a CPU-usage performance check, not a
+	// correctness one: -race's own instrumentation overhead on
+	// unrelated goroutines (GC, the detector's own bookkeeping) can push
+	// RUSAGE_SELF's process-wide CPU time over a fixed budget on its own,
+	// regardless of whether the fan-in goroutine busy-loops -- see
+	// AGENTS.md's wall-clock-budgets-under-race note and this package's
+	// racecheck_off_test.go. Skipped under -race rather than widened.
+	if raceDetectorEnabled {
+		t.Skip("CPU-usage assertion is not meaningful under -race; see racecheck_off_test.go")
 	}
 
 	// Simulate the broker closing the subscription mid-run, well before

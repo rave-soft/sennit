@@ -84,7 +84,7 @@ func TestAppWorkspace_AgentRunStream_CtxCancelAlwaysDeliversTerminalEvent(t *tes
 
 		select {
 		case <-coord.entered:
-		case <-time.After(2 * time.Second):
+		case <-time.After(raceWait(2 * time.Second)):
 			t.Fatalf("iteration %d: coordinator.Run never entered", i)
 		}
 
@@ -105,7 +105,7 @@ func TestAppWorkspace_AgentRunStream_CtxCancelAlwaysDeliversTerminalEvent(t *tes
 					gotTerminal = true
 					terminalErr = workspace.DecodeError(ev.Err)
 				}
-			case <-time.After(2 * time.Second):
+			case <-time.After(raceWait(2 * time.Second)):
 				t.Fatalf("iteration %d: never observed the channel close", i)
 			}
 		}
@@ -135,7 +135,7 @@ func TestAppWorkspace_AgentRunStream_InternalCancellationIsTerminalError(t *test
 	require.NoError(t, err)
 	select {
 	case <-coord.entered:
-	case <-time.After(2 * time.Second):
+	case <-time.After(raceWait(2 * time.Second)):
 		t.Fatal("coordinator.Run never entered")
 	}
 	close(coord.release) // coordinator returns context.Canceled, caller remains live.

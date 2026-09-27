@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -14,6 +15,34 @@ import (
 )
 
 const bufSize = 1 << 20
+
+// raceMultiplier and raceFloor set how far raceWait widens a wait/delivery
+// budget under -race: enough to absorb the instrumentation overhead and
+// cross-package CPU contention CI's race job runs under (all packages'
+// -race suites in parallel, plus SQLite's own race cost -- see AGENTS.md's
+// "wall-clock budgets under -race"), never so little that a genuine hang
+// still reads as a false pass.
+const (
+	raceMultiplier = 6
+	raceFloor      = 60 * time.Second
+)
+
+// raceWait widens a correctness wait's timeout under -race. These budgets
+// exist only to turn a hang into a failure, not to assert performance, so
+// widening them costs nothing but wall time on an actual hang. Leave a
+// budget alone (do not route it through raceWait) when it is itself a
+// performance assertion -- see leaseGrace and keepaliveTuning, which widen
+// their own margins for the same reason but must stay tight enough to
+// still exercise the timing they test.
+func raceWait(d time.Duration) time.Duration {
+	if !raceDetectorEnabled {
+		return d
+	}
+	if w := d * raceMultiplier; w > raceFloor {
+		return w
+	}
+	return raceFloor
+}
 
 // startServer starts srv listening on an in-memory bufconn.Listener and
 // returns a dialer for it (grpc.WithContextDialer) plus a cleanup that

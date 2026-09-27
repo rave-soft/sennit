@@ -79,19 +79,19 @@ func (s *ctxReactiveStreamStub) AgentRunStream(ctx context.Context, _ string, _ 
 				}
 				select {
 				case out <- ev:
-				case <-time.After(2 * time.Second):
+				case <-time.After(raceWait(2 * time.Second)):
 					return
 				}
 			case <-ctx.Done():
 				select {
 				case out <- workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(ctx.Err())}:
-				case <-time.After(2 * time.Second):
+				case <-time.After(raceWait(2 * time.Second)):
 				}
 				return
 			case <-s.cancelCh:
 				select {
 				case out <- workspace.AgentRunEvent{Done: true, Err: workspace.EncodeError(context.Canceled)}:
-				case <-time.After(2 * time.Second):
+				case <-time.After(raceWait(2 * time.Second)):
 				}
 				return
 			}
@@ -162,7 +162,7 @@ func TestAgentRunStream_CallerCancelMidTurn_SendsAgentCancelAndDeliversContextCa
 
 	select {
 	case <-ctxCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("server-side AgentRunStream was never called")
 	}
 
@@ -174,18 +174,18 @@ func TestAgentRunStream_CallerCancelMidTurn_SendsAgentCancelAndDeliversContextCa
 		require.True(t, ev.Done)
 		require.True(t, errors.Is(workspace.DecodeError(ev.Err), context.Canceled),
 			"expected context.Canceled, got: %v", workspace.DecodeError(ev.Err))
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("no terminal event delivered after caller cancellation")
 	}
 
 	select {
 	case _, ok := <-out:
 		require.False(t, ok, "channel must close after the terminal event")
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("channel was never closed after the terminal event")
 	}
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		stub.AgentCancelMu.Lock()
 		defer stub.AgentCancelMu.Unlock()
 		return len(stub.AgentCancelCalls) == 1
@@ -260,7 +260,7 @@ func TestAgentRunStream_CallerCancelBeforeStartedAck_StillSendsAgentCancel(t *te
 
 	select {
 	case <-ctxCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("server-side AgentRunStream was never called")
 	}
 
@@ -271,11 +271,11 @@ func TestAgentRunStream_CallerCancelBeforeStartedAck_StillSendsAgentCancel(t *te
 	case err := <-resultCh:
 		require.Error(t, err)
 		require.True(t, errors.Is(err, context.Canceled), "expected context.Canceled, got: %v", err)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("AgentRunStream never returned after cancellation")
 	}
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		stub.AgentCancelMu.Lock()
 		defer stub.AgentCancelMu.Unlock()
 		return len(stub.AgentCancelCalls) == 1
@@ -328,7 +328,7 @@ func TestAgentRunStream_ConnectionDroppedMidTurn_TurnSurvivesNoAgentCancel(t *te
 	var serverCtx context.Context
 	select {
 	case serverCtx = <-ctxCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("server-side AgentRunStream was never called")
 	}
 
@@ -337,7 +337,7 @@ func TestAgentRunStream_ConnectionDroppedMidTurn_TurnSurvivesNoAgentCancel(t *te
 	case ev, ok := <-out:
 		require.True(t, ok)
 		require.Equal(t, "thinking", ev.Status)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("first event never arrived")
 	}
 
@@ -351,7 +351,7 @@ func TestAgentRunStream_ConnectionDroppedMidTurn_TurnSurvivesNoAgentCancel(t *te
 		require.True(t, ev.Done)
 		require.True(t, errors.Is(workspace.DecodeError(ev.Err), workspace.ErrServerUnreachable),
 			"expected ErrServerUnreachable, got: %v", workspace.DecodeError(ev.Err))
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("no terminal event delivered after the connection dropped")
 	}
 
@@ -407,7 +407,7 @@ func TestAgentRunStream_ServerDiesMidTurn_TerminalErrServerUnreachableAndChannel
 	case ev, ok := <-out:
 		require.True(t, ok)
 		require.Equal(t, "thinking", ev.Status)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("first event never arrived")
 	}
 
@@ -420,14 +420,14 @@ func TestAgentRunStream_ServerDiesMidTurn_TerminalErrServerUnreachableAndChannel
 		decoded := workspace.DecodeError(ev.Err)
 		require.True(t, errors.Is(decoded, workspace.ErrServerUnreachable),
 			"expected ErrServerUnreachable, got: %v", decoded)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("no terminal event delivered after the server died")
 	}
 
 	select {
 	case _, ok := <-out:
 		require.False(t, ok, "channel must close (bounded wait), not stay open forever")
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("channel was never closed after the server died")
 	}
 
@@ -530,7 +530,7 @@ func TestAgentRunShellCommand_CallerCancelMidCommandCancelsServerCtx(t *testing.
 	var serverCtx context.Context
 	select {
 	case serverCtx = <-ctxCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("server-side AgentRunShellCommand was never called")
 	}
 
@@ -539,11 +539,11 @@ func TestAgentRunShellCommand_CallerCancelMidCommandCancelsServerCtx(t *testing.
 	select {
 	case err := <-resultCh:
 		require.True(t, errors.Is(err, context.Canceled), "expected context.Canceled, got: %v", err)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("AgentRunShellCommand never returned after cancellation")
 	}
 
-	waitFor(t, 5*time.Second, func() bool { return serverCtx.Err() != nil })
+	waitFor(t, raceWait(5*time.Second), func() bool { return serverCtx.Err() != nil })
 }
 
 // TestAgentStreams_NoGoroutineLeakAfterCancelOrServerDeath is
@@ -648,7 +648,7 @@ func TestAgentStreams_NoGoroutineLeakAfterCancelOrServerDeath(t *testing.T) {
 		require.NoError(t, lis.Close())
 	}()
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		return goleak.Find(ignoreBaseline) == nil
 	})
 }

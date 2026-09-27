@@ -23,6 +23,20 @@ import (
 // alone turns the assertion red.
 const clientCountGraceRegressionTimeout = 2 * time.Second
 
+// clientCountGraceTimeout is clientCountGraceRegressionTimeout, widened a
+// little under -race for the same reason raceWait widens other budgets --
+// but capped well under the 10s production grace it regresses against
+// (see clientCountGraceRegressionTimeout's own doc comment), unlike
+// raceWait's generic 30s floor: a floor at or above 10s would let the
+// exact bug this file pins (ClientCount only dropping once the grace
+// timer fires) pass silently under -race.
+func clientCountGraceTimeout() time.Duration {
+	if raceDetectorEnabled {
+		return 4 * time.Second
+	}
+	return clientCountGraceRegressionTimeout
+}
+
 // TestServer_ClientCount covers the accessor the daemon's idle monitor
 // polls (CLIENT-SERVER.md, PR 2.1): 0 before anyone connects, 1 while a
 // client's Subscribe stream (opened by Connect) is open, and back to 0
@@ -39,11 +53,11 @@ func TestServer_ClientCount(t *testing.T) {
 
 	client := dialClient(t, dialer)
 	require.NoError(t, client.Connect(t.Context()))
-	require.Eventually(t, func() bool { return srv.ClientCount() == 1 }, time.Second, 5*time.Millisecond,
+	require.Eventually(t, func() bool { return srv.ClientCount() == 1 }, raceWait(time.Second), 5*time.Millisecond,
 		"expected the connected client's open Subscribe stream to count")
 
 	client.Shutdown()
-	require.Eventually(t, func() bool { return srv.ClientCount() == 0 }, clientCountGraceRegressionTimeout, 5*time.Millisecond,
+	require.Eventually(t, func() bool { return srv.ClientCount() == 0 }, clientCountGraceTimeout(), 5*time.Millisecond,
 		"expected the count to drop back to 0 as soon as the client disconnects, not after its handle-release grace period")
 }
 
@@ -61,11 +75,11 @@ func TestServer_ClientCountMultipleClients(t *testing.T) {
 	clientB := dialClient(t, dialer)
 	require.NoError(t, clientB.Connect(context.Background()))
 
-	require.Eventually(t, func() bool { return srv.ClientCount() == 2 }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return srv.ClientCount() == 2 }, raceWait(time.Second), 5*time.Millisecond)
 
 	clientA.Shutdown()
-	require.Eventually(t, func() bool { return srv.ClientCount() == 1 }, clientCountGraceRegressionTimeout, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return srv.ClientCount() == 1 }, clientCountGraceTimeout(), 5*time.Millisecond)
 
 	clientB.Shutdown()
-	require.Eventually(t, func() bool { return srv.ClientCount() == 0 }, clientCountGraceRegressionTimeout, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return srv.ClientCount() == 0 }, clientCountGraceTimeout(), 5*time.Millisecond)
 }

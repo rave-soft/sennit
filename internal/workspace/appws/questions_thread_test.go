@@ -46,7 +46,7 @@ func TestAppWorkspace_QuestionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	select {
 	case ev := <-raised:
 		req = ev.Payload
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the thread never raised its question request")
 	}
 
@@ -60,7 +60,7 @@ func TestAppWorkspace_QuestionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 	case answers := <-answered:
 		require.Len(t, answers, 1)
 		require.True(t, *answers[0].Yes)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the thread stayed blocked after the parent answered its question")
 	}
 }
@@ -105,7 +105,7 @@ func TestAppWorkspace_QuestionCancelTargetsOnlyItsOwnBatch(t *testing.T) {
 	select {
 	case ev := <-parentRaised:
 		parentReq = ev.Payload
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the parent never raised its question request")
 	}
 
@@ -126,7 +126,7 @@ func TestAppWorkspace_QuestionCancelTargetsOnlyItsOwnBatch(t *testing.T) {
 	select {
 	case ev := <-threadRaised:
 		threadReq = ev.Payload
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the thread never raised its question request")
 	}
 
@@ -138,7 +138,7 @@ func TestAppWorkspace_QuestionCancelTargetsOnlyItsOwnBatch(t *testing.T) {
 	select {
 	case err := <-threadDone:
 		require.ErrorIs(t, err, question.ErrCancelled)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the thread's question was never cancelled")
 	}
 
@@ -191,7 +191,7 @@ func TestAttachedThread_QuestionAnswerReachesTheParentThatRaisedIt(t *testing.T)
 	select {
 	case ev := <-raised:
 		req = ev.Payload
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the parent never raised its question request")
 	}
 
@@ -205,7 +205,7 @@ func TestAttachedThread_QuestionAnswerReachesTheParentThatRaisedIt(t *testing.T)
 	case answers := <-answered:
 		require.Len(t, answers, 1)
 		require.True(t, *answers[0].Yes)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the parent stayed blocked after its question was answered from the thread's screen")
 	}
 }

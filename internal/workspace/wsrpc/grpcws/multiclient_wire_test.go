@@ -136,7 +136,7 @@ func (w *realServiceWorkspace) SubscribeWith(send func(any)) func() {
 
 func waitForPermissionRequest(t *testing.T, ch <-chan any, toolCallID string) permission.PermissionRequest {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(raceWait(5 * time.Second))
 	for {
 		select {
 		case v := <-ch:
@@ -152,7 +152,7 @@ func waitForPermissionRequest(t *testing.T, ch <-chan any, toolCallID string) pe
 
 func waitForPermissionNotification(t *testing.T, ch <-chan any, toolCallID string) permission.PermissionNotification {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(raceWait(5 * time.Second))
 	for {
 		select {
 		case v := <-ch:
@@ -169,7 +169,7 @@ func waitForPermissionNotification(t *testing.T, ch <-chan any, toolCallID strin
 
 func waitForQuestionRequest(t *testing.T, ch <-chan any, batchID string) question.Request {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(raceWait(5 * time.Second))
 	for {
 		select {
 		case v := <-ch:
@@ -185,7 +185,7 @@ func waitForQuestionRequest(t *testing.T, ch <-chan any, batchID string) questio
 
 func waitForQuestionNotification(t *testing.T, ch <-chan any, batchID string) question.Notification {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(raceWait(5 * time.Second))
 	for {
 		select {
 		case v := <-ch:
@@ -372,7 +372,7 @@ func TestMultiClient_GrantPersistentTamperedCopyUsesStoredFields(t *testing.T) {
 	// context.Background(): if the grant landed under the tampered
 	// fields instead, nothing will ever answer this one, and the point of
 	// this test is to fail loudly on that, not hang the suite.
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), raceWait(200*time.Millisecond))
 	defer cancel2()
 	granted2, err := ws.app.Permissions().Request(ctx2, permission.CreatePermissionRequest{
 		SessionID:  sessionID,
@@ -389,7 +389,7 @@ func TestMultiClient_GrantPersistentTamperedCopyUsesStoredFields(t *testing.T) {
 	// grant was ever recorded for them. Bound the wait with a short ctx
 	// timeout rather than blocking forever on an answer that will never
 	// come.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), raceWait(200*time.Millisecond))
 	defer cancel()
 	granted3, err := ws.app.Permissions().Request(ctx, permission.CreatePermissionRequest{
 		SessionID:  sessionID,
@@ -520,7 +520,7 @@ func TestMultiClient_PendingPermissionReplaysToLateSubscriber(t *testing.T) {
 	require.Eventually(t, func() bool {
 		req, ok := ws.app.Permissions().ActiveRequest()
 		return ok && req.ToolCallID == toolCallID
-	}, 2*time.Second, 5*time.Millisecond, "the request must be pending with no client connected yet")
+	}, raceWait(2*time.Second), 5*time.Millisecond, "the request must be pending with no client connected yet")
 
 	clientA := dialClient(t, dialer)
 	gotA := make(chan any, 128)

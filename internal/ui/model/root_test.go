@@ -525,7 +525,7 @@ func TestDetachThreadDoesNotJoinTheEventPumpOnTheEventLoop(t *testing.T) {
 	var cmd tea.Cmd
 	select {
 	case cmd = <-left:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("leaving a thread blocked the event loop on its own event pump")
 	}
 	require.Equal(t, screenMain, r.active)
@@ -538,7 +538,7 @@ func TestDetachThreadDoesNotJoinTheEventPumpOnTheEventLoop(t *testing.T) {
 	close(release)
 	select {
 	case <-stopReturned:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("the event pump was never stopped")
 	}
 }

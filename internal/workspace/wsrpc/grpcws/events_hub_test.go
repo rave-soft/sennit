@@ -145,14 +145,14 @@ func TestEventHub_SlowSubscriberDoesNotBlockPublish(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("publish blocked on the slow subscriber's full channel")
 	}
 
 	for range n {
 		select {
 		case <-got:
-		case <-time.After(5 * time.Second):
+		case <-time.After(raceWait(5 * time.Second)):
 			t.Fatal("fast subscriber did not receive every event")
 		}
 	}
@@ -165,7 +165,7 @@ func TestEventHub_SlowSubscriberDoesNotBlockPublish(t *testing.T) {
 	for ok {
 		select {
 		case _, ok = <-slow.ch:
-		case <-time.After(time.Second):
+		case <-time.After(raceWait(time.Second)):
 			t.Fatal("slow subscriber's channel never closed")
 		}
 	}

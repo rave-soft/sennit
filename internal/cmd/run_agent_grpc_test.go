@@ -127,7 +127,7 @@ func TestRunAgent_OverGRPC_CancelMatchesInProcess(t *testing.T) {
 
 	select {
 	case <-streamCtxCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("server-side AgentRunStream was never called")
 	}
 
@@ -137,11 +137,11 @@ func TestRunAgent_OverGRPC_CancelMatchesInProcess(t *testing.T) {
 	case err := <-resultCh:
 		require.Error(t, err, "a cancelled run must not report success")
 		require.True(t, errors.Is(err, context.Canceled), "expected context.Canceled, got: %v", err)
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("runAgent never returned after ctx cancellation")
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(raceWait(5 * time.Second))
 	for {
 		stub.AgentCancelMu.Lock()
 		n := len(stub.AgentCancelCalls)

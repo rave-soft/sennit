@@ -119,7 +119,7 @@ func TestLeaseManager_ExpiresOnlyWhenClientStaysIdle(t *testing.T) {
 	require.Zero(t, released.Load())
 	lm.end("client-1")
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(raceWait(5 * time.Second))
 	for released.Load() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}

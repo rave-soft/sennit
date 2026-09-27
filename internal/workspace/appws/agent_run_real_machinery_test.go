@@ -261,7 +261,7 @@ func TestAppWorkspace_AgentRun_QueuedPromptVisibleWhileFirstActive_RealMachinery
 
 	select {
 	case <-model.entered:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("first run never entered Stream")
 	}
 	require.True(t, aw.AgentIsSessionBusy(sess.ID), "first run must be active before the second is sent")
@@ -270,7 +270,7 @@ func TestAppWorkspace_AgentRun_QueuedPromptVisibleWhileFirstActive_RealMachinery
 
 	select {
 	case <-coord.callReturned:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("second run's accept/queue handoff never completed")
 	}
 
@@ -285,7 +285,7 @@ func TestAppWorkspace_AgentRun_QueuedPromptVisibleWhileFirstActive_RealMachinery
 	}()
 	select {
 	case <-waited:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("dispatcher did not join both runs after the gate was released")
 	}
 }
@@ -347,7 +347,7 @@ func TestAppWorkspace_AgentRun_CancelBetweenAcceptAndActive_RealMachinery(t *tes
 	// so the accept handle is accepted but not active.
 	select {
 	case <-entered:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("dispatched run never reached the gate")
 	}
 
@@ -367,7 +367,7 @@ func TestAppWorkspace_AgentRun_CancelBetweenAcceptAndActive_RealMachinery(t *tes
 	}()
 	select {
 	case <-waited:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("dispatcher did not join the canceled run")
 	}
 

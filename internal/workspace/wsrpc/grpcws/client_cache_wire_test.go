@@ -97,13 +97,13 @@ func TestClientCache_StateChangeReachesGetterWithinTick(t *testing.T) {
 
 	select {
 	case <-stub.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("root hub never subscribed")
 	}
 	require.False(t, client.AgentIsBusy())
 
 	stub.SetAgentIsBusyResult(true)
-	waitFor(t, 2*time.Second, client.AgentIsBusy)
+	waitFor(t, raceWait(2*time.Second), client.AgentIsBusy)
 
 	require.Equal(t, int64(0), count.Load(), "the cache must update from the event stream, never a getter-side RPC")
 }
@@ -134,7 +134,7 @@ func TestClientCache_PendingPermissionReplayedThenNotAfterResolved(t *testing.T)
 	})
 	t.Cleanup(stop)
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, v := range got {
@@ -147,14 +147,14 @@ func TestClientCache_PendingPermissionReplayedThenNotAfterResolved(t *testing.T)
 
 	select {
 	case <-stub.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("root hub never subscribed")
 	}
 	stub.SubscribeWithSend(pubsub.Event[permission.PermissionNotification]{
 		Type: pubsub.CreatedEvent, Payload: permission.PermissionNotification{ToolCallID: "call-1", Granted: true},
 	})
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, v := range got {
@@ -222,7 +222,7 @@ func TestClientCache_ResyncAppliesFreshSnapshotAndReplaysPending(t *testing.T) {
 
 	select {
 	case <-stub.SubscribeWithReady:
-	case <-time.After(5 * time.Second):
+	case <-time.After(raceWait(5 * time.Second)):
 		t.Fatal("root hub never subscribed")
 	}
 	send := stub.SubscribeWithSend
@@ -240,7 +240,26 @@ func TestClientCache_ResyncAppliesFreshSnapshotAndReplaysPending(t *testing.T) {
 	stub.SetPendingPromptsResult(workspace.PendingPrompts{Permissions: []permission.PermissionRequest{perm}})
 	stub.SetWorkingDirResult("/after")
 
-	waitFor(t, 10*time.Second, func() bool { return client.WorkingDir() == "/after" })
+	waitFor(t, raceWait(10*time.Second), func() bool { return client.WorkingDir() == "/after" })
+
+	// WorkingDir (a class-C getter, fed by the cache) and the pending
+	// permission's own replay onto SubscribeWith are two separate
+	// delivery paths off the same Resync -- nothing ties their arrival
+	// together, so under enough delivery latency the cache can flip
+	// before the replayed event has actually reached this callback. Wait
+	// for the event itself, not just the cache, before reading events:
+	// otherwise this is checking a lower bound on delivery, not a real
+	// ordering guarantee.
+	waitFor(t, raceWait(10*time.Second), func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, v := range events {
+			if e, ok := v.(pubsub.Event[permission.PermissionRequest]); ok && e.Payload.ToolCallID == "call-1" {
+				return true
+			}
+		}
+		return false
+	})
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -314,7 +333,7 @@ func TestClientCache_GoleakClean(t *testing.T) {
 		require.NoError(t, lis.Close())
 	}()
 
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, raceWait(5*time.Second), func() bool {
 		return goleak.Find(ignoreBaseline) == nil
 	})
 }

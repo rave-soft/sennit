@@ -86,7 +86,7 @@ func TestRunAgent_EventChannelClosesWhileCtxCancelled_ReturnsError(t *testing.T)
 		select {
 		case err := <-resultCh:
 			require.Error(t, err, "iteration %d: a channel close under a cancelled ctx must not be reported as success", i)
-		case <-time.After(2 * time.Second):
+		case <-time.After(raceWait(2 * time.Second)):
 			t.Fatalf("iteration %d: runAgent never returned", i)
 		}
 	}

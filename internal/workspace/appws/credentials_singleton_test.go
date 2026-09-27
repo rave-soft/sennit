@@ -70,7 +70,7 @@ func TestSharedCredentialsManager(t *testing.T) {
 	require.NotNil(t, mgr)
 	require.Same(t, mgr, a.Credentials(), "App.Credentials must return the same instance on every call")
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), raceWait(5*time.Second))
 	defer cancel()
 
 	errCh := make(chan error, 1)
