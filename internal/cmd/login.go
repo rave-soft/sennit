@@ -150,11 +150,13 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool, io logi
 	// sign-in that ignored it would fail while the provider looked
 	// correctly configured.
 	//
-	// This reads OAuthConfiguredProxy, a Workspace method, rather than
-	// ws.Config()'s FrontendProvider.ProxyURL: that field is redacted for
-	// display (password stripped, see redactProxyURL), which would
-	// silently break a proxy credential this value is about to route the
-	// sign-in through. See workspace.OAuthController.OAuthConfiguredProxy.
+	// OAuthConfiguredProxy's answer has any password stripped (see
+	// workspace.RedactProxyURL) now that a Workspace may be a remote
+	// daemon's client — the same reason ws.Config()'s
+	// FrontendProvider.ProxyURL is redacted. That is fine here: proxyURL is
+	// threaded straight into StartOAuth below, whose implementation
+	// substitutes the full stored proxy back in when what it's handed is
+	// exactly that redacted form (see StartOAuth's doc comment).
 	proxyURL := ws.OAuthConfiguredProxy("copilot")
 	if cfg := ws.Config(); cfg != nil {
 		if pc, ok := cfg.Provider("copilot"); ok && !force && pc.Auth.HasOAuth {

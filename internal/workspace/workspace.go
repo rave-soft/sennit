@@ -715,7 +715,13 @@ type OAuthCompletion struct {
 // backend side instead of in a frontend.
 type OAuthController interface {
 	// StartOAuth begins providerID's sign-in flow using proxyURL ("" for
-	// none).
+	// none). proxyURL may be a value a frontend only ever saw redacted
+	// (OAuthConfiguredProxy/OAuthProviderConfiguredProxy's password-stripped
+	// answer, handed back unchanged because the caller never touched the
+	// proxy step) — the implementation substitutes the full stored proxy
+	// for that case before using it, so a frontend never has to hold the
+	// password to complete a sign-in through it. See appws's
+	// resolveSubmittedProxy.
 	//
 	// forceNewAccount says the caller deliberately asked to sign in an
 	// account ("Add account…", `sennit accounts add`) rather than to
@@ -728,20 +734,24 @@ type OAuthController interface {
 	StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (OAuthStartResult, OAuthFlow, error)
 	// OAuthConfiguredProxy is the proxy providerID already uses: whatever
 	// Sennit has configured for it, falling back to a sibling CLI's own
-	// on-disk config for a provider that has one (Codex).
+	// on-disk config for a provider that has one (Codex). The answer has
+	// any userinfo password stripped (see RedactProxyURL) before it
+	// reaches a frontend — a proxy credential crosses no further than it
+	// has to, including over a remote daemon connection. A caller that
+	// hands this value back to StartOAuth/OAuthValidateProxy unchanged
+	// gets the full stored value substituted back in; see those methods.
 	OAuthConfiguredProxy(providerID string) string
 	// OAuthProviderConfiguredProxy is providers.<providerID>.proxy_url as
-	// Sennit's own config has it, unredacted — never falling back to a
-	// sibling CLI's on-disk config the way OAuthConfiguredProxy does. A
-	// caller that already has OAuthConfiguredProxy's answer can compare
-	// the two to tell whether that value came from Sennit's own config or
-	// was borrowed from the CLI (see internal/cmd/login_codex.go's
-	// configuredCodexProxy). This exists because FrontendConfig's
-	// FrontendProvider.ProxyURL is redacted (password stripped) for
-	// display, which is wrong for a value about to be used to actually
-	// route the sign-in itself.
+	// Sennit's own config has it — like OAuthConfiguredProxy, redacted for
+	// a frontend, and never falling back to a sibling CLI's on-disk config
+	// the way OAuthConfiguredProxy does. A caller that already has
+	// OAuthConfiguredProxy's answer can compare the two to tell whether
+	// that value came from Sennit's own config or was borrowed from the
+	// CLI (see internal/cmd/login_codex.go's configuredCodexProxy).
 	OAuthProviderConfiguredProxy(providerID string) string
 	// OAuthValidateProxy checks proxyURL is well-formed for providerID.
+	// Like StartOAuth, a redacted value handed back unchanged is resolved
+	// to the full stored proxy before it is checked.
 	OAuthValidateProxy(providerID, proxyURL string) error
 	// ImportCopilot imports the credentials of an existing GitHub Copilot
 	// CLI login, if one is present on this machine, and persists it as this

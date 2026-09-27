@@ -787,11 +787,17 @@ loopback можно убрать, если он не находит ничего
 `ps`, `daemon status/stop/restart/logs`, `run --detach`; `run`, `login`,
 `logout`, `accounts` идут через демон, если он запущен, и сами его не
 поднимают; herdr в режиме демона ведёт клиент (`herdr.TranslateFrontend`).
-Открыто: `OAuthConfiguredProxy` и `OAuthProviderConfiguredProxy` отдают
-клиенту URL прокси с паролем, тогда как `FrontendConfig` пароль вырезает.
-Для удалённого режима (фаза 3) нужно решение: подставлять сохранённый прокси
-на сервере, когда клиент прислал неизменённое значение, и не отдавать пароль
-вовсе.
+Закрыто (2026-09-27): `OAuthConfiguredProxy` и `OAuthProviderConfiguredProxy`
+теперь вырезают пароль так же, как `FrontendConfig` (`RedactProxyURL`,
+оставляя `user@` для отображения). `StartOAuth` и `OAuthValidateProxy`
+подставляют сохранённый прокси на сервере (`appws.resolveSubmittedProxy`),
+когда присланное значение совпадает с редактированной формой того, что уже
+настроено — включая codex-фолбэк на диск CLI. `SetProviderProxy` и
+`UpdateAccountFields` подстановки не требуют: единственные фронтенд-вызовы
+(`account_form.go`, `provider_settings.go`) уже сравнивают ввод с
+редактированным префиллом и отправляют поле, только если оно изменилось;
+CLI (`sennit accounts proxy`) всегда передаёт значение, введённое
+пользователем напрямую.
 
 - `sennit` при `options.daemon = "auto"` подключается к демону или
   запускает его; `--no-daemon` принудительно поднимает `App` в процессе.

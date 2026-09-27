@@ -395,3 +395,179 @@ func TestAppWorkspace_OAuth_UnsupportedProvider(t *testing.T) {
 	_, _, err := w.StartOAuth(t.Context(), "anthropic", "", false)
 	require.Error(t, err)
 }
+
+// TestAppWorkspace_OAuthConfiguredProxy_RedactsPassword pins that both
+// proxy-answering methods strip the userinfo password before handing a
+// value to a frontend, for every source OAuthConfiguredProxy can pull
+// from: Sennit's own provider config and the Codex CLI's on-disk fallback.
+// "user@" stays visible so the person can still tell which credentials are
+// configured - see workspace.RedactProxyURL.
+func TestAppWorkspace_OAuthConfiguredProxy_RedactsPassword(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[network]\nproxy_url = \"http://diskuser:diskpw@disk-host:8080\"\n"), 0o600))
+
+	w := newOAuthProxyTestWorkspace(t)
+
+	// Disk fallback: nothing configured for Codex in Sennit's own config
+	// yet, so OAuthConfiguredProxy falls back to codex.ProxyFromDisk.
+	require.Equal(t, "http://diskuser@disk-host:8080", w.OAuthConfiguredProxy(codex.ProviderID))
+	require.NotContains(t, w.OAuthConfiguredProxy(codex.ProviderID), "diskpw")
+
+	// Sennit's own configured proxy wins over the disk fallback, and is
+	// redacted the same way.
+	require.NoError(t, w.store.SetConfigField(config.ScopeGlobal,
+		config.ProviderFieldKey(codex.ProviderID, "proxy_url"),
+		"socks5://cfguser:cfgpw@configured-host:1080"))
+	require.Equal(t, "socks5://cfguser@configured-host:1080", w.OAuthConfiguredProxy(codex.ProviderID))
+	require.Equal(t, "socks5://cfguser@configured-host:1080", w.OAuthProviderConfiguredProxy(codex.ProviderID))
+	require.NotContains(t, w.OAuthConfiguredProxy(codex.ProviderID), "cfgpw")
+	require.NotContains(t, w.OAuthProviderConfiguredProxy(codex.ProviderID), "cfgpw")
+
+	// Copilot has no disk fallback, but its configured proxy is redacted
+	// the same way.
+	require.NoError(t, w.store.SetConfigField(config.ScopeGlobal,
+		config.ProviderFieldKey(copilotProviderID, "proxy_url"),
+		"http://copuser:coppw@cop-host:3128"))
+	require.Equal(t, "http://copuser@cop-host:3128", w.OAuthConfiguredProxy(copilotProviderID))
+	require.NotContains(t, w.OAuthConfiguredProxy(copilotProviderID), "coppw")
+}
+
+// TestAppWorkspace_OAuthProxyMethods_NeverLeakPassword is the OAuthController
+// half of workspace's wire-secret gate (internal/workspace/wire_secret_test.go):
+// a sentinel password embedded in a configured or disk-fallback proxy must
+// never appear in what either proxy-answering method returns, checked both
+// as a raw string and through its JSON encoding (the encoding of a string
+// carries the same bytes, but this is what a wire boundary actually ships).
+func TestAppWorkspace_OAuthProxyMethods_NeverLeakPassword(t *testing.T) {
+	const pw = "SENTINEL-pw"
+	assertNoPassword := func(t *testing.T, got string) {
+		t.Helper()
+		require.NotContains(t, got, pw)
+		data, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.NotContains(t, string(data), pw)
+	}
+
+	t.Run("provider-configured proxy", func(t *testing.T) {
+		w := newOAuthProxyTestWorkspace(t)
+		require.NoError(t, w.store.SetConfigField(config.ScopeGlobal,
+			config.ProviderFieldKey(codex.ProviderID, "proxy_url"),
+			"http://u:"+pw+"@h:1"))
+
+		assertNoPassword(t, w.OAuthConfiguredProxy(codex.ProviderID))
+		assertNoPassword(t, w.OAuthProviderConfiguredProxy(codex.ProviderID))
+	})
+
+	t.Run("codex CLI disk fallback proxy", func(t *testing.T) {
+		// No t.Parallel: t.Setenv pins CODEX_HOME for this subtest.
+		home := t.TempDir()
+		t.Setenv("CODEX_HOME", home)
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+			[]byte("[network]\nproxy_url = \"http://u:"+pw+"@h:1\"\n"), 0o600))
+
+		w := newOAuthProxyTestWorkspace(t)
+		assertNoPassword(t, w.OAuthConfiguredProxy(codex.ProviderID))
+		// OAuthProviderConfiguredProxy never falls back to disk (see its
+		// doc comment), so it has nothing to check for this case: with no
+		// provider config at all it just answers "".
+		require.Empty(t, w.OAuthProviderConfiguredProxy(codex.ProviderID))
+	})
+}
+
+// TestAppWorkspace_ResolveSubmittedProxy_MatchesRedactedForm pins
+// resolveSubmittedProxy's contract directly: a submission equal to the
+// redacted form of what's configured is substituted back to the full
+// stored value, a freshly typed value (even one that happens to carry its
+// own password) passes through untouched, and "" always means "no proxy".
+func TestAppWorkspace_ResolveSubmittedProxy_MatchesRedactedForm(t *testing.T) {
+	w := newOAuthProxyTestWorkspace(t)
+	const full = "socks5://user:secret@configured-host:1080"
+	require.NoError(t, w.store.SetConfigField(config.ScopeGlobal,
+		config.ProviderFieldKey(codex.ProviderID, "proxy_url"), full))
+
+	redacted := w.OAuthConfiguredProxy(codex.ProviderID)
+	require.Equal(t, "socks5://user@configured-host:1080", redacted)
+
+	require.Equal(t, full, w.resolveSubmittedProxy(codex.ProviderID, redacted),
+		"a submission matching the redacted form must resolve back to the full stored proxy")
+
+	const different = "http://other:pw@elsewhere:8080"
+	require.Equal(t, different, w.resolveSubmittedProxy(codex.ProviderID, different),
+		"a freshly typed proxy - even a different one with its own password - must be used exactly as submitted")
+
+	require.Equal(t, "", w.resolveSubmittedProxy(codex.ProviderID, ""),
+		`"" must still mean "no proxy", never a request to keep whatever is configured`)
+}
+
+// TestAppWorkspace_StartOAuthCodex_SubstitutesRedactedProxy is the
+// end-to-end proof for StartOAuth's half of the fix: a caller (the CLI's
+// loginCodex, or the TUI's OAuthCodex dialog when the person never touches
+// the proxy step) that hands OAuthConfiguredProxy's redacted answer
+// straight back to StartOAuth must have the full stored password
+// substituted back in before it is used - not just accepted as-is, which
+// would silently persist the password-stripped value over the real one
+// the next time completeCodexOAuth's unchanged-proxy guard sees a mismatch.
+//
+// The disk-reuse path (a usable access token already on disk) is used here
+// because it runs synchronously with no real network dependency, and it
+// still exercises the same completeCodexOAuth proxy-persistence code the
+// browser-flow path shares.
+func TestAppWorkspace_StartOAuthCodex_SubstitutesRedactedProxy(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	// newOAuthProxyTestWorkspace (config.LoadData, no RuntimeProcessor) is
+	// used rather than newOAuthTestWorkspace/establishExistingCodexLogin: a
+	// proxy set through RecordAccount's normal path is only visible on
+	// cfg.Providers once the account also has models, which this test has
+	// no reason to fetch - see that helper's own doc comment for why
+	// OAuthConfiguredProxy's tests read the config this way.
+	w := newOAuthProxyTestWorkspace(t)
+	const full = "socks5://user:secret@configured-host:1080"
+	require.NoError(t, w.store.SetConfigField(config.ScopeGlobal,
+		config.ProviderFieldKey(codex.ProviderID, "proxy_url"), full))
+
+	redacted := w.OAuthConfiguredProxy(codex.ProviderID)
+	require.Equal(t, "socks5://user@configured-host:1080", redacted)
+	require.NotEqual(t, full, redacted)
+
+	// A usable disk login (a different account) triggers the synchronous
+	// reuse path in startCodexOAuth.
+	auth := map[string]any{
+		"tokens": map[string]any{
+			"access_token":  fakeCodexJWT(t, "acct-disk-reuse"),
+			"refresh_token": "rt-disk",
+		},
+	}
+	data, err := json.Marshal(auth)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "auth.json"), data, 0o600))
+
+	result, flow, err := w.StartOAuth(t.Context(), codex.ProviderID, redacted, false)
+	require.NoError(t, err)
+	require.Nil(t, flow)
+	require.NotNil(t, result.Completed)
+	require.Nil(t, result.Completed.ProxyError)
+
+	require.Equal(t, full, persistedCodexProxy(t),
+		"StartOAuth must have substituted the full stored proxy before completeCodexOAuth ever saw it, "+
+			"or the redacted (password-stripped) value would have been persisted over the real one")
+}
+
+// TestAppWorkspace_OAuthValidateProxy_AcceptsRedactedValue pins the other
+// entry point resolveSubmittedProxy guards: validating the redacted answer
+// for a provider that has a real proxy configured must succeed exactly as
+// validating the full value would.
+func TestAppWorkspace_OAuthValidateProxy_AcceptsRedactedValue(t *testing.T) {
+	w := newOAuthProxyTestWorkspace(t)
+	require.NoError(t, w.store.SetConfigField(config.ScopeGlobal,
+		config.ProviderFieldKey(codex.ProviderID, "proxy_url"),
+		"socks5://user:secret@configured-host:1080"))
+
+	redacted := w.OAuthConfiguredProxy(codex.ProviderID)
+	require.NoError(t, w.OAuthValidateProxy(codex.ProviderID, redacted))
+}

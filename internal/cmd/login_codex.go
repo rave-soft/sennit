@@ -183,10 +183,17 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 // nothing asked for a proxy change at all.
 //
 // This is also why it reads a narrow Workspace method instead of
-// ws.Config()'s FrontendProvider.ProxyURL: that field is redacted for
-// display (password stripped, see redactProxyURL), which would silently
-// break a proxy credential this value goes on to actually route the
-// sign-in through. See workspace.OAuthController.OAuthProviderConfiguredProxy.
+// ws.Config()'s FrontendProvider.ProxyURL: both are redacted the same way
+// (password stripped, see workspace.RedactProxyURL) now that a Workspace
+// may be a remote daemon's client, but only this one's answer is threaded
+// straight into StartOAuth, whose implementation (appws's
+// resolveSubmittedProxy) substitutes the full stored proxy back in when
+// what it's handed is exactly that redacted form — see
+// workspace.OAuthController.OAuthProviderConfiguredProxy and StartOAuth's
+// doc comments. Reading FrontendProvider.ProxyURL here instead would still
+// work the same way for that reason, but this is the value
+// OAuthConfiguredProxy's CLI-fallback branch already compares itself
+// against, so the two stay read the same way.
 func configuredCodexProxy(ws interface {
 	OAuthProviderConfiguredProxy(providerID string) string
 },

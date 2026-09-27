@@ -33,6 +33,10 @@ func NewOAuthCopilot(
 // so this must run off the Update goroutine; it is called from
 // initiateAuth, which already runs as a tea.Cmd, rather than from
 // NewOAuthCopilot itself.
+//
+// The answer has any password stripped (workspace.RedactProxyURL), same as
+// OAuthCodex.proxyURL; StartOAuth substitutes the full stored proxy back in
+// when this value is passed straight through unchanged.
 func configuredCopilotProxy(com *common.Common) string {
 	// Common carries no workspace in tests, so its absence is a
 	// legitimate "nothing configured" here.

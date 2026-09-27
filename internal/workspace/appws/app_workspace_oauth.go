@@ -55,6 +55,7 @@ func previousCodexProxyURL(w *AppWorkspace) string {
 
 // StartOAuth implements workspace.OAuthController.
 func (w *AppWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL string, forceNewAccount bool) (workspace.OAuthStartResult, workspace.OAuthFlow, error) {
+	proxyURL = w.resolveSubmittedProxy(providerID, proxyURL)
 	switch providerID {
 	case codex.ProviderID:
 		return w.startCodexOAuth(ctx, proxyURL, forceNewAccount)
@@ -68,7 +69,11 @@ func (w *AppWorkspace) StartOAuth(ctx context.Context, providerID, proxyURL stri
 	}
 }
 
-// OAuthConfiguredProxy implements workspace.OAuthController.
+// OAuthConfiguredProxy implements workspace.OAuthController: the answer is
+// redacted (see workspace.RedactProxyURL) since it goes to a frontend that
+// may be a remote daemon's client — see resolveSubmittedProxy for how a
+// caller that routes this value back into StartOAuth/OAuthValidateProxy
+// gets the real one back.
 func (w *AppWorkspace) OAuthConfiguredProxy(providerID string) string {
 	switch providerID {
 	case codex.ProviderID:
@@ -77,16 +82,16 @@ func (w *AppWorkspace) OAuthConfiguredProxy(providerID string) string {
 		// configured Sennit's proxy but has told the CLI about theirs.
 		if cfg := w.store.Config(); cfg != nil {
 			if pc, ok := cfg.Providers.Get(codex.ProviderID); ok && pc.ProxyURL != "" {
-				return pc.ProxyURL
+				return workspace.RedactProxyURL(pc.ProxyURL)
 			}
 		}
-		return codex.ProxyFromDisk()
+		return workspace.RedactProxyURL(codex.ProxyFromDisk())
 	case copilotProviderID:
 		// No sibling CLI to fall back to, matching the dialog's
 		// configuredCopilotProxy this replaces.
 		if cfg := w.store.Config(); cfg != nil {
 			if pc, ok := cfg.Providers.Get(copilotProviderID); ok {
-				return pc.ProxyURL
+				return workspace.RedactProxyURL(pc.ProxyURL)
 			}
 		}
 		return ""
@@ -97,7 +102,8 @@ func (w *AppWorkspace) OAuthConfiguredProxy(providerID string) string {
 
 // OAuthProviderConfiguredProxy implements workspace.OAuthController: unlike
 // OAuthConfiguredProxy, it never falls back to a sibling CLI's on-disk
-// config, so it answers only "what has Sennit itself got configured".
+// config, so it answers only "what has Sennit itself got configured" — but
+// redacted the same way, for the same reason.
 func (w *AppWorkspace) OAuthProviderConfiguredProxy(providerID string) string {
 	cfg := w.store.Config()
 	if cfg == nil || cfg.Providers == nil {
@@ -107,7 +113,54 @@ func (w *AppWorkspace) OAuthProviderConfiguredProxy(providerID string) string {
 	if !ok {
 		return ""
 	}
-	return pc.ProxyURL
+	return workspace.RedactProxyURL(pc.ProxyURL)
+}
+
+// configuredProxyCandidates returns every full (unredacted) proxy value
+// OAuthConfiguredProxy could have handed back for providerID, in the same
+// preference order it uses: Sennit's own configured proxy, then (Codex
+// only) the CLI's on-disk one. resolveSubmittedProxy matches a submitted
+// value's redacted form against each of these to find what to substitute.
+func (w *AppWorkspace) configuredProxyCandidates(providerID string) []string {
+	var candidates []string
+	if cfg := w.store.Config(); cfg != nil {
+		if pc, ok := cfg.Providers.Get(providerID); ok && pc.ProxyURL != "" {
+			candidates = append(candidates, pc.ProxyURL)
+		}
+	}
+	if providerID == codex.ProviderID {
+		if disk := codex.ProxyFromDisk(); disk != "" {
+			candidates = append(candidates, disk)
+		}
+	}
+	return candidates
+}
+
+// resolveSubmittedProxy substitutes the full, stored proxy value for
+// providerID when submitted is exactly the redacted form
+// OAuthConfiguredProxy/OAuthProviderConfiguredProxy would hand a frontend
+// today (password stripped, "user@" kept - see workspace.RedactProxyURL):
+// that is the signature of a caller that never touched the proxy step and
+// is handing the prefilled display value straight back, not one who typed
+// a real (possibly password-bearing) proxy of their own.
+//
+// submitted == "" is left alone: it means "no proxy", the same as it does
+// today, and is never what a redacted answer looks like. Any other
+// submitted value that doesn't match a candidate's redacted form is used
+// exactly as given - it is a freshly typed proxy, and this must not become
+// a way to launder an attacker-guessed prefix past the check. Called at
+// every entry point that takes a proxy from a frontend and goes on to use
+// it for traffic (StartOAuth) or validate it (OAuthValidateProxy).
+func (w *AppWorkspace) resolveSubmittedProxy(providerID, submitted string) string {
+	if submitted == "" {
+		return submitted
+	}
+	for _, stored := range w.configuredProxyCandidates(providerID) {
+		if submitted == workspace.RedactProxyURL(stored) {
+			return stored
+		}
+	}
+	return submitted
 }
 
 // OAuthValidateProxy implements workspace.OAuthController.
@@ -117,7 +170,7 @@ func (w *AppWorkspace) OAuthProviderConfiguredProxy(providerID string) string {
 // the check itself is provider-neutral; Copilot has no dialog proxy step
 // today, so this is exercised for it only defensively.
 func (w *AppWorkspace) OAuthValidateProxy(providerID, proxyURL string) error {
-	return codex.ValidateProxy(proxyURL)
+	return codex.ValidateProxy(w.resolveSubmittedProxy(providerID, proxyURL))
 }
 
 // -- Codex --

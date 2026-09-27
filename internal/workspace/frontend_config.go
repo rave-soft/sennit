@@ -84,7 +84,7 @@ type FrontendProvider struct {
 	Type    catwalk.Type `json:"type,omitempty"`
 	Disable bool         `json:"disable,omitempty"`
 
-	// ProxyURL has any userinfo password stripped - see redactProxyURL.
+	// ProxyURL has any userinfo password stripped - see RedactProxyURL.
 	ProxyURL string                 `json:"proxy_url,omitempty"`
 	Rotation *config.RotationConfig `json:"rotation,omitempty"`
 	Models   []catwalk.Model        `json:"models,omitempty"`
@@ -184,7 +184,7 @@ func newFrontendProvider(cfg *config.Config, id string, pc config.ProviderConfig
 		BaseURL:  pc.BaseURL,
 		Type:     pc.Type,
 		Disable:  pc.Disable,
-		ProxyURL: redactProxyURL(pc.ProxyURL),
+		ProxyURL: RedactProxyURL(pc.ProxyURL),
 		Rotation: pc.Rotation,
 		Models:   pc.Models,
 		Custom:   isCustomProvider(id, pc, knownProviders),
@@ -232,11 +232,16 @@ func isCustomProvider(id string, pc config.ProviderConfig, knownProviders []catw
 	return true
 }
 
-// redactProxyURL strips any password from a proxy URL's userinfo before it
-// crosses the wire. An unparseable value (e.g. a "$VAR" template that has
-// not been shell-expanded) is returned unchanged - it carries no parsed
+// RedactProxyURL strips any password from a proxy URL's userinfo before it
+// crosses to a frontend. An unparseable value (e.g. a "$VAR" template that
+// has not been shell-expanded) is returned unchanged - it carries no parsed
 // credential to strip.
-func redactProxyURL(raw string) string {
+//
+// Exported so appws's OAuthController methods (OAuthConfiguredProxy,
+// OAuthProviderConfiguredProxy) and their resolveSubmittedProxy helper can
+// apply and reverse the same redaction a proxy goes through here - see
+// those methods' doc comments.
+func RedactProxyURL(raw string) string {
 	if raw == "" {
 		return raw
 	}

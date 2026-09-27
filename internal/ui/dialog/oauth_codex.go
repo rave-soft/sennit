@@ -89,6 +89,13 @@ func (m *OAuthCodex) name() string {
 // CLI's. Someone behind a proxy has told the CLI about it already, and
 // asking again for the same fact is a worse first impression than offering
 // it back for confirmation.
+//
+// The prefilled value has any password stripped (workspace.RedactProxyURL):
+// this dialog may be talking to a remote daemon, and a proxy credential
+// should not have to cross that connection just to be displayed. Accepting
+// the step unchanged still works because initiateAuth hands this value
+// straight to StartOAuth, whose implementation substitutes the full stored
+// proxy back in when what it's given is exactly this redacted form.
 func (m *OAuthCodex) proxyURL() string {
 	if m.proxy != "" {
 		return m.proxy

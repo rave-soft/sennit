@@ -76,6 +76,14 @@ func (w *AppWorkspace) ActivateAccount(scope config.Scope, providerID, accountID
 // APIKey) always comes from disk, never from the caller, so a frontend
 // can never overwrite it by round-tripping a FrontendAccount it was
 // handed (see CLIENT-SERVER.md PR 0.5c).
+//
+// edit.ProxyURL is never resolveSubmittedProxy'd (contrast StartOAuth/
+// OAuthValidateProxy): every frontend caller of this method (account_form.go)
+// only sets it when the typed value differs from the pre-filled, already-
+// redacted FrontendAccount.ProxyURL, so a redacted value never reaches
+// here in the first place - see account_form.go's submit(). The CLI's
+// `sennit accounts proxy` reaches this with a value the user typed
+// directly, never one read back off FrontendAccount/FrontendConfig.
 func (w *AppWorkspace) UpdateAccountFields(providerID, accountID string, edit workspace.AccountEdit) error {
 	store := w.accountStore()
 	account, ok, err := store.Get(providerID, accountID)
@@ -117,7 +125,12 @@ func (w *AppWorkspace) PurgeAccounts(scope config.Scope, providerID string) erro
 	return w.accounts().Purge(scope, providerID)
 }
 
-// SetProviderProxy implements Workspace.
+// SetProviderProxy implements Workspace. See UpdateAccountFields' doc
+// comment: proxy is never resolveSubmittedProxy'd here either, for the same
+// reason - provider_settings.go's submit() only sends a proxy edit when it
+// differs from the pre-filled, already-redacted FrontendProvider.ProxyURL,
+// and the CLI's `sennit accounts proxy` (with no account arg) reaches this
+// with a value typed directly.
 func (w *AppWorkspace) SetProviderProxy(providerID, proxy string) error {
 	return w.accounts().SetProviderProxy(providerID, proxy)
 }

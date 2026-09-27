@@ -21,7 +21,7 @@ type FrontendAccount struct {
 	AccountID string `json:"account_id,omitempty"`
 	Email     string `json:"email,omitempty"`
 
-	// ProxyURL has any userinfo password stripped - see redactProxyURL.
+	// ProxyURL has any userinfo password stripped - see RedactProxyURL.
 	ProxyURL string         `json:"proxy_url,omitempty"`
 	Disabled bool           `json:"disabled,omitempty"`
 	Usage    accounts.Usage `json:"usage"`
@@ -40,7 +40,7 @@ func NewFrontendAccount(a accounts.Account) FrontendAccount {
 		Label:     a.Label,
 		AccountID: a.AccountID,
 		Email:     a.Email,
-		ProxyURL:  redactProxyURL(a.ProxyURL),
+		ProxyURL:  RedactProxyURL(a.ProxyURL),
 		Disabled:  a.Disabled,
 		Usage:     a.Usage,
 		HasAPIKey: a.APIKey != "",

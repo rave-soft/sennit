@@ -29,7 +29,7 @@ import (
 // sentinelStringOverrides forces one exact field path to a fixed value
 // instead of the generic "SENTINEL-<path>" pattern - currently only
 // ProviderConfig.ProxyURL, whose password has to be provably stripped
-// (redactProxyURL, frontend_config.go) rather than merely renamed: a
+// (RedactProxyURL, frontend_config.go) rather than merely renamed: a
 // sentinel that still looks like a URL with a userinfo password is what
 // actually exercises that code path.
 var sentinelStringOverrides = map[string]string{
@@ -261,7 +261,7 @@ func TestFrontendConfigSecretSentinel(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotContains(t, string(data), "SENTINEL-pw",
-		"provider ProxyURL's password must be stripped before it reaches the UI (see redactProxyURL)")
+		"provider ProxyURL's password must be stripped before it reaches the UI (see RedactProxyURL)")
 
 	for _, tok := range sentinelTokenPattern.FindAllString(string(data), -1) {
 		if reason, ok := wireSentinelAllowList[tok]; ok {
