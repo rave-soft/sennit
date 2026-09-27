@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -59,7 +61,7 @@ func setupGlobalProfile(t *testing.T, fixtureURL string) {
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sennit.json"), []byte(mockProviderConfig(fixtureURL)), 0o644))
 	t.Setenv("SENNIT_GLOBAL_CONFIG", configDir)
 	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(dir, "data"))
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 }
 
 // writeShortIdleTimeoutConfig writes projectDir/sennit.json setting

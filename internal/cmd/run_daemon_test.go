@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/daemon"
@@ -19,7 +21,7 @@ import (
 // never start one, unlike `sennit --daemon`.
 func TestSetupRunWorkspace_NoDaemon_NeverSpawns(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 
 	cmd := daemonCmdTestCommand(t, project)
@@ -46,7 +48,7 @@ func TestSetupRunWorkspace_NoDaemon_NeverSpawns(t *testing.T) {
 // App.
 func TestSetupRunWorkspace_DaemonRunning_GoesThroughIt(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -72,7 +74,7 @@ func TestSetupRunWorkspace_DaemonRunning_GoesThroughIt(t *testing.T) {
 // provider is unreachable) for the session to exist and be visible.
 func TestRunDetached_PrintsSessionID(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()

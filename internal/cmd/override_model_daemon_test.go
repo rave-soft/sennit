@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -92,7 +94,7 @@ func waitForModel(ctx context.Context, client *grpcws.Client, want config.Select
 // instead.
 func TestOverrideModel_ThroughDaemon_MatchesInProcess(t *testing.T) {
 	writeTwoProviderGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	t.Setenv("SENNIT_CMD_REUSE_GLOBAL_PROFILE", "1")
 
 	daemonProject := t.TempDir()

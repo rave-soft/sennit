@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -216,7 +218,7 @@ func dialAndShutdown(t *testing.T, ctx context.Context, socketPath string) {
 // running, EnsureRunning spawns exactly one, and the returned socket
 // answers Hello.
 func TestEnsureRunning_ColdStart(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -257,7 +259,7 @@ func TestEnsureRunning_ConcurrentCallersSpawnOnlyOneDaemon(t *testing.T) {
 		t.Skip("spawn counter file locking assumed here is unix-specific")
 	}
 
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -309,7 +311,7 @@ func TestEnsureRunning_StaleSocketAfterCrash(t *testing.T) {
 		t.Skip("SIGKILL-based crash simulation is unix-specific")
 	}
 
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -347,7 +349,7 @@ func TestEnsureRunning_StaleSocketAfterCrash(t *testing.T) {
 // second time from THIS test process would just refcount the same lock
 // rather than reproduce the contention EnsureRunning needs to detect.
 func TestEnsureRunning_TUIHoldsLock(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -411,7 +413,7 @@ func TestEnsureRunning_TUIHoldsLock(t *testing.T) {
 // slowed) DelayBeforeListen window, and requires both to succeed with
 // the same socket rather than the second one seeing ErrTUILocked.
 func TestEnsureRunning_SlowBootstrapIsNotMistakenForTUI(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 	t.Setenv("SENNIT_TEST_DELAY_BEFORE_LISTEN", "3s")
@@ -536,7 +538,7 @@ func readLineBounded(t *testing.T, r *bufio.Reader, timeout time.Duration) strin
 // never inherit HERDR_* variables, or it would permanently attach to
 // whichever terminal pane happened to spawn it first.
 func TestEnsureRunning_StripsHerdrEnv(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 	t.Setenv("HERDR_ENV", "1")
@@ -566,7 +568,7 @@ func TestEnsureRunning_StripsHerdrEnv(t *testing.T) {
 // (shrunk, for this test) ReadyTimeout budget rather than hang, and the
 // error must quote the startup log.
 func TestEnsureRunning_ReadinessTimeout(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 	t.Setenv("SENNIT_TEST_NEVER_READY", "1")
@@ -601,7 +603,7 @@ func TestEnsureRunning_ReadinessTimeout(t *testing.T) {
 // different BuildID than this client, while idle, is restarted, and the
 // caller gets a fresh daemon back with no warning.
 func TestEnsureRunning_BuildMismatch_RestartsWhenIdle(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 	t.Setenv("SENNIT_TEST_BUILD_ID", "stale-build")
@@ -635,7 +637,7 @@ func TestEnsureRunning_BuildMismatch_RestartsWhenIdle(t *testing.T) {
 // BuildID must be reused, with a warning EnsureRunning's caller can
 // print, rather than torn down mid-use.
 func TestEnsureRunning_BuildMismatch_WarnsWhenBusy(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 	t.Setenv("SENNIT_TEST_BUILD_ID", "stale-build")

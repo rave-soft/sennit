@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -17,7 +19,7 @@ import (
 // setupRunWorkspace.
 func TestSetupAccountWorkspace_NoDaemon_NeverSpawns(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 
 	cmd := daemonCmdTestCommand(t, project)
@@ -41,7 +43,7 @@ func TestSetupAccountWorkspace_NoDaemon_NeverSpawns(t *testing.T) {
 // daemon already holds it).
 func TestSetupAccountWorkspace_DaemonRunning_GoesThroughIt(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -81,7 +83,7 @@ func dialSecondClient(t *testing.T, ctx context.Context, project string) *grpcws
 // independent one.
 func TestAccountsAddListRemove_ThroughDaemon(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	// The daemon this test spawns must see the "mock" provider
 	// writeGlobalConfig wrote, not re-isolate its own global profile --
 	// see main_test.go's TestMain and TestRunDetached_PrintsSessionID's
@@ -128,7 +130,7 @@ func TestAccountsAddListRemove_ThroughDaemon(t *testing.T) {
 // removed by logoutProvider driven on a second, independent connection.
 func TestLogoutProvider_ThroughDaemon(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	t.Setenv("SENNIT_CMD_REUSE_GLOBAL_PROFILE", "1")
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
@@ -157,7 +159,7 @@ func TestLogoutProvider_ThroughDaemon(t *testing.T) {
 // panicking or misreading a nil config.
 func TestPickLoggedInProvider_ThroughDaemon(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()

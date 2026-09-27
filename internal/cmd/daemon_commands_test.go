@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
@@ -71,7 +73,7 @@ func startTestDaemon(t *testing.T, ctx context.Context, project string) string {
 // message rather than starting a daemon.
 func TestAttachCmd_NoDaemonRunning(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 
 	_, _, _, err := setupAttachWorkspace(context.Background(), project, "", false)
@@ -84,7 +86,7 @@ func TestAttachCmd_NoDaemonRunning(t *testing.T) {
 // setupAttachWorkspace returns a connected client.
 func TestAttachCmd_ConnectsToRunningDaemon(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -104,7 +106,7 @@ func TestAttachCmd_ConnectsToRunningDaemon(t *testing.T) {
 // exit 0 (nil error), plain message, never spawns.
 func TestPSCmd_NoDaemonRunning(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 
 	cmd := daemonCmdTestCommand(t, project)
@@ -115,7 +117,7 @@ func TestPSCmd_NoDaemonRunning(t *testing.T) {
 // daemon: no error, and (with --json) an empty-but-well-formed report.
 func TestPSCmd_RunningDaemonIdle(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -229,7 +231,7 @@ func TestCollectPS_Idle(t *testing.T) {
 // owner, version/protocol populated from a live Hello).
 func TestDaemonStatusCmd(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -260,7 +262,7 @@ func TestDaemonStatusCmd(t *testing.T) {
 // uses) is refused without --force and accepted with it.
 func TestDaemonStopCmd_Idle(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -320,7 +322,7 @@ func startInProcessDaemon(t *testing.T, ctx context.Context, project string, app
 // stops it anyway.
 func TestDaemonStopCmd_Busy(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -370,7 +372,7 @@ func TestDaemonStopCmd_Busy(t *testing.T) {
 // different PID than the one that was stopped.
 func TestDaemonRestartCmd(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()
@@ -430,7 +432,7 @@ func loggingHelperCommand(t *testing.T) func(args []string) *exec.Cmd {
 // marker line TestCmdDaemonLoggingHelperProcess wrote.
 func TestDaemonLogsCmd(t *testing.T) {
 	writeGlobalConfig(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
 	defer cancel()

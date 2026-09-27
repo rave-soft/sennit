@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/testenv"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -179,7 +181,7 @@ func awaitShutdown(t *testing.T, runErr <-chan error) {
 // hand-written meta RPC), a generated unary call, and Snapshot -- the
 // three surfaces PR 2.1's acceptance criteria call out by name.
 func TestDaemon_HelloListSessionsSnapshot(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -215,7 +217,7 @@ func TestDaemon_HelloListSessionsSnapshot(t *testing.T) {
 // the first must free everything (socket file and workspace lock) for a
 // third start to succeed.
 func TestDaemon_SecondStartFailsThenSucceedsAfterFirstStops(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -255,7 +257,7 @@ func TestDaemon_SecondStartFailsThenSucceedsAfterFirstStops(t *testing.T) {
 // sitting at that path. Run must detect that nothing answers there and
 // replace it, not refuse to start.
 func TestDaemon_StaleSocketFileIsReplaced(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -468,7 +470,7 @@ func readLineBounded(t *testing.T, r *bufio.Reader, timeout time.Duration) strin
 // whatever was sitting at the socket path completely alone: Run never
 // touches a path it isn't certain it exclusively owns.
 func TestDaemon_FailsWhenTUIHoldsLock(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -505,7 +507,7 @@ func TestDaemon_FailsWhenTUIHoldsLock(t *testing.T) {
 // interleaving window inside listen(), not a certainty on any single
 // run.
 func TestDaemon_ConcurrentStartsOnlyOneServes(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -571,7 +573,7 @@ func parseReadyLine(line string) string {
 // daemon actually goes on to shut itself down through the same path idle
 // exit uses.
 func TestDaemon_ShutdownRPC_AcceptsWhenIdle(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
@@ -595,7 +597,7 @@ func TestDaemon_ShutdownRPC_AcceptsWhenIdle(t *testing.T) {
 // still-open connection must -- OnlyIfIdle refuses, and the daemon keeps
 // running.
 func TestDaemon_ShutdownRPC_RefusesWhenAnotherClientConnected(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := testenv.ShortRuntimeDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	writeGlobalConfig(t)
 
