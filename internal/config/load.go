@@ -45,17 +45,30 @@ type credentialsFileDependency struct {
 // providers, models, or credentials still must go through
 // LoadWithProcessor.
 func LoadData(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
-	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, nil)
+	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, nil, false)
 }
 
 func LoadWithProcessor(workingDir, dataDir string, debug bool, processor RuntimeProcessor) (*ConfigStore, error) {
 	if processor == nil {
 		return nil, fmt.Errorf("runtime processor is required")
 	}
-	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, processor)
+	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, processor, false)
 }
 
-func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFileDependency, processor RuntimeProcessor) (*ConfigStore, error) {
+// LoadGlobalData loads only the global configuration layers -- machine
+// config plus the global sennitrc/sennit.json -- with no project
+// directory consulted at all, and no RuntimeProcessor (see LoadData's own
+// doc comment for why: no network, no credential resolution). A client
+// attached to a remote daemon uses this to read its own UI preferences
+// (CLIENT-SERVER.md, PR 3.2 owner decision): the project the daemon is
+// serving lives on the daemon's machine, so the client has no local
+// project layer of its own to merge in, and must not accidentally pick up
+// whatever project sennitrc happens to sit under its own cwd.
+func LoadGlobalData(dataDir string, debug bool) (*ConfigStore, error) {
+	return load(home.Dir(), dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, nil, true)
+}
+
+func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFileDependency, processor RuntimeProcessor, globalOnly bool) (*ConfigStore, error) {
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
@@ -76,6 +89,7 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 		persistFallback:   true,
 		credentialsFile:   credentialsFile,
 		processor:         processor,
+		globalOnly:        globalOnly,
 	})
 	if err != nil {
 		return nil, err

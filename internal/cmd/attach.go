@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rave-soft/sennit/internal/daemon/supervisor"
+	"github.com/rave-soft/sennit/internal/transport"
 	"github.com/rave-soft/sennit/internal/uiprefs"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
 	"github.com/spf13/cobra"
@@ -15,13 +16,28 @@ import (
 // TUI loop the root command's own daemon mode drives, but attachCmd
 // never starts one: a project with no daemon running is an error here,
 // where the root command would spawn one under options.daemon=auto.
+//
+// A single positional argument is instead an `ssh://[user@]host[:port]/
+// path` remote target (CLIENT-SERVER.md, PR 3.1): `sennit attach
+// ssh://host/path` reaches over SSH for a project's daemon on another
+// machine, the same way `sennit --remote ssh://...` does for the root
+// command's own daemon mode.
 var attachCmd = &cobra.Command{
-	Use:   "attach",
+	Use:   "attach [ssh://[user@]host[:port]/path]",
 	Short: "Attach to this project's running sennit daemon",
-	Long:  "Connect to the sennit daemon already running for this project's directory and open the TUI. Never starts a daemon; use `sennit --daemon` (or set options.daemon=auto) for that.",
+	Long:  "Connect to the sennit daemon already running for this project's directory (or a remote one, given an ssh:// target) and open the TUI. Never starts a local daemon; use `sennit --daemon` (or set options.daemon=auto) for that.",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
+
+		if len(args) == 1 {
+			target, err := transport.ParseTarget(args[0])
+			if err != nil {
+				return err
+			}
+			return runInteractiveRemote(cmd, target, sessionID, continueLast)
+		}
 
 		cwd, err := ResolveCwd(cmd)
 		if err != nil {

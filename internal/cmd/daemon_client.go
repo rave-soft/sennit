@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/daemon/supervisor"
 	"github.com/rave-soft/sennit/internal/devtools"
+	"github.com/rave-soft/sennit/internal/transport"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	ui "github.com/rave-soft/sennit/internal/ui/model"
 	"github.com/rave-soft/sennit/internal/uiprefs"
@@ -43,6 +44,26 @@ func runInteractiveDaemon(cmd *cobra.Command, cwd, sessionID string, continueLas
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 
 	client, prefs, cleanup, err := setupDaemonWorkspace(ctx, cwd, dataDir, debug, supervisor.Options{})
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	return runDaemonTUI(cmd, client, prefs, sessionID, continueLast)
+}
+
+// runInteractiveRemote is runInteractiveDaemon's remote counterpart
+// (CLIENT-SERVER.md, PR 3.1/3.2): it dials target over SSH instead of
+// finding or starting a local daemon, then drives the exact same TUI
+// loop -- runDaemonTUI takes a *grpcws.Client regardless of what
+// transport backs its connection, so nothing downstream of connect
+// needs to know this one went over SSH rather than a unix socket.
+func runInteractiveRemote(cmd *cobra.Command, target transport.Target, sessionID string, continueLast bool) error {
+	ctx := cmd.Context()
+	debug, _ := cmd.Flags().GetBool("debug")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+
+	client, prefs, cleanup, err := connectRemoteWorkspace(ctx, target, remoteDialerOptions(cmd), dataDir, debug)
 	if err != nil {
 		return err
 	}

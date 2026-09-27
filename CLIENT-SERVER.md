@@ -847,6 +847,13 @@ loopback теперь отменяет контекст при возврате,
 
 ### PR 3.1. Мост через SSH
 
+**Сделано.** `sennit daemon bridge` (скрытая), `internal/transport`
+(`ParseTarget`, `SSHDialer` через системный `ssh -T`, stderr ssh в ошибках,
+новый процесс на каждое переподключение), `sennit --remote ssh://…`,
+`sennit attach ssh://…`, `sennit ps --remote`. UI-настройки в удалённом
+режиме: `config.LoadGlobalData` (только глобальные слои). Остальные
+команды пока только локальные.
+
 - `sennit daemon bridge --cwd <path>`: поднимает демон через supervisor,
   соединяется с сокетом и копирует stdio ↔ сокет.
 - `sennit attach ssh://[user@]host[:port]/path` и

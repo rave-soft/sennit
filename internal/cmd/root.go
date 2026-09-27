@@ -102,6 +102,12 @@ sennit --continue
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
 
+		if target, ok, err := remoteTargetFlag(cmd); err != nil {
+			return err
+		} else if ok {
+			return runInteractiveRemote(cmd, target, sessionID, continueLast)
+		}
+
 		cwd, err := ResolveCwd(cmd)
 		if err != nil {
 			return err

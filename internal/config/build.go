@@ -34,6 +34,15 @@ type buildConfigOptions struct {
 	persistFallback bool
 	credentialsFile credentialsFileDependency
 	processor       RuntimeProcessor
+
+	// globalOnly skips the project-directory config discovery entirely
+	// (lookupConfigs, the trust check, and the .sennit/ workspace layer):
+	// only the global layers (globalConfigPaths) are merged. Set by
+	// LoadGlobalData for a client that has no local project to read from
+	// at all -- a remote attach (CLIENT-SERVER.md, PR 3.2), where
+	// opts.workingDir names no project on this machine and must not be
+	// scanned as though it did.
+	globalOnly bool
 }
 
 // builtConfig is the result of one buildConfig run. configured mirrors
@@ -85,9 +94,14 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 	if opts.credentialsFile.stat == nil {
 		opts.credentialsFile = credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}
 	}
-	configPaths := lookupConfigs(opts.workingDir)
+	var configPaths []string
+	if opts.globalOnly {
+		configPaths = globalConfigPaths()
+	} else {
+		configPaths = lookupConfigs(opts.workingDir)
+	}
 
-	trusted := IsTrusted(opts.workingDir)
+	trusted := !opts.globalOnly && IsTrusted(opts.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(opts.ctx, configPaths, trusted)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
@@ -103,7 +117,10 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 		cfg.Options.Debug = true
 	}
 
-	if trusted {
+	if opts.globalOnly {
+		// No project directory was ever consulted; nothing to warn about
+		// and no workspace config layer to merge.
+	} else if trusted {
 		if err := applyWorkspaceConfig(cfg, opts.workingDir, &loadedPaths); err != nil {
 			return nil, err
 		}

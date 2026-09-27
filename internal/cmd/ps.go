@@ -21,29 +21,42 @@ var psCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "Show what this project's sennit daemon is doing",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := ResolveCwd(cmd)
-		if err != nil {
-			return err
-		}
 		debug, _ := cmd.Flags().GetBool("debug")
 		dataDir, _ := cmd.Flags().GetString("data-dir")
 		jsonOut, _ := cmd.Flags().GetBool("json")
-
 		ctx := cmd.Context()
-		socketPath, running, err := supervisor.ProbeRunning(ctx, cwd, supervisor.Options{DataDir: dataDir, Debug: debug})
-		if err != nil {
-			return err
-		}
-		if !running {
-			fmt.Fprintf(cmd.OutOrStdout(), "no daemon running for %s\n", cwd)
-			return nil
-		}
 
-		client, _, cleanup, err := connectDaemonWorkspace(ctx, cwd, dataDir, debug, socketPath)
-		if err != nil {
+		var client psSource
+		if target, ok, err := remoteTargetFlag(cmd); err != nil {
 			return err
+		} else if ok {
+			c, _, cleanup, err := connectRemoteWorkspace(ctx, target, remoteDialerOptions(cmd), dataDir, debug)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			client = c
+		} else {
+			cwd, err := ResolveCwd(cmd)
+			if err != nil {
+				return err
+			}
+			socketPath, running, err := supervisor.ProbeRunning(ctx, cwd, supervisor.Options{DataDir: dataDir, Debug: debug})
+			if err != nil {
+				return err
+			}
+			if !running {
+				fmt.Fprintf(cmd.OutOrStdout(), "no daemon running for %s\n", cwd)
+				return nil
+			}
+
+			c, _, cleanup, err := connectDaemonWorkspace(ctx, cwd, dataDir, debug, socketPath)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			client = c
 		}
-		defer cleanup()
 
 		report, err := collectPS(ctx, client)
 		if err != nil {
