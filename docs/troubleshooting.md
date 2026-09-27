@@ -218,6 +218,14 @@ and `0` means keep forever. See
 It is a leftover from before history moved to one shared database. Nothing
 imports it and nothing reads it; delete it.
 
+### "workspace already in use", mode=daemon
+
+Plain `sennit` (no `--daemon`) refuses to start in-process while this
+project's daemon holds the workspace lock: the error names `mode=daemon`
+and the daemon's pid. Use `sennit attach` to open the TUI against that
+daemon instead, or `sennit daemon stop` it first if you actually want to
+run in-process.
+
 ### `sennit stat` numbers look wrong
 
 They are approximate by construction for sessions that used more than one
@@ -225,6 +233,49 @@ model — those rows are marked with `~`. Message counts and time are exact. The
 [caveats are documented](concepts/sessions.md#usage-statistics).
 
 ---
+
+## Daemon and remote sessions
+
+See [the background daemon and remote sessions](concepts/daemon.md) for how
+this all fits together; a few specific problems:
+
+### `sennit attach` says no daemon is running
+
+`attach` never starts one, by design: it's the counterpart to `sennit
+--daemon`, which does. Start it first, or use `sennit --daemon` directly
+instead of `attach` if you don't need a separate step.
+
+### A stale socket from a crashed daemon
+
+`sennit --daemon` and `run --detach` detect a socket left behind by a
+daemon that died (a `kill -9`, an out-of-memory kill) and start a fresh
+one; nothing needs to be cleaned up by hand. `attach` treats such a socket
+as no daemon running.
+`sennit daemon status` reports "not running" for the same case rather
+than hanging on a dead socket.
+
+### The daemon won't stop
+
+`sennit daemon stop`/`restart` refuse while the daemon is busy: a
+running turn, or a pending permission/question with no client connected
+to answer it. `sennit ps` shows what's holding it open; `--force` stops
+it anyway.
+
+### Where the daemon's log is
+
+`sennit daemon status` prints its log path; `sennit daemon logs [-f]`
+shows it directly, and covers both the daemon's own process log and its
+startup log (useful if it failed before it got that far).
+
+### A remote session can't connect
+
+`sennit attach ssh://host/path` and `sennit --remote ssh://host/path` run
+the system `ssh` and expect `sennit` on the remote host's `PATH`: pass
+`--remote-bin` if it's installed under another name. An SSH-level failure
+(bad host key, refused connection, wrong path) is reported with `ssh`'s
+own stderr; the usual `ssh host` troubleshooting applies before Sennit is
+even reached. A protocol version mismatch between client and remote
+daemon is reported by name; update `sennit` on whichever side is older.
 
 ## Behaviour
 

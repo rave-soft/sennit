@@ -62,6 +62,7 @@ nav:
       - concepts/index.md
       - Steering and delegation: concepts/delegation.md
       - Sessions and data storage: concepts/sessions.md
+      - Background daemon and remote sessions: concepts/daemon.md
   - Reference:
       - reference/index.md
       - Command line: reference/cli.md

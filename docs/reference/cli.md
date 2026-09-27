@@ -17,8 +17,11 @@ Accepted by every command.
 | `-d`, `--debug` | debug logging |
 | `-h`, `--help` | help |
 | `--trust-project` | trust the current project, enabling its `.sennit/sennitrc`/`sennit.json` config (see [Project trust](../configuration/sennitrc.md#project-trust)) |
+| `--remote <ssh://[user@]host[:port]/path>` | connect to a project's daemon on another machine over SSH instead of a local one (see [the background daemon](../concepts/daemon.md)) |
+| `--remote-bin <name>` | remote `sennit` binary name for `--remote`/`attach`, if it isn't `sennit` on the remote `PATH` |
+| `--ssh-opt <opt>` | extra `-o key=value` for the `ssh` connection behind `--remote`/`attach` (repeatable) |
 
-The root command takes four more:
+The root command takes five more:
 
 | Flag | Meaning |
 |:--|:--|
@@ -26,12 +29,15 @@ The root command takes four more:
 | `-C`, `--continue` | resume the most recent session |
 | `-v`, `--version` | print the version |
 | `-y`, `--yolo` | auto-accept all permissions |
+| `--daemon` | connect to (or start) this project's daemon instead of running in-process |
 
 ```sh
 sennit                              # TUI here
 sennit --cwd /path/to/project       # TUI elsewhere
 sennit --continue                   # resume the last session
 sennit --yolo                       # no permission prompts (careful)
+sennit --daemon                     # connect to (or start) this project's daemon
+sennit --remote ssh://host/path     # same, for a project's daemon on another machine
 ```
 
 ## `run` — one non-interactive prompt
@@ -50,13 +56,43 @@ stdout, so it pipes.
 | `-v`, `--verbose` | show logs; also hides the spinner, like `--quiet` |
 | `-s`, `--session` | continue a session by ID |
 | `-C`, `--continue` | continue the most recent session |
+| `--detach` | start (or find) this project's daemon, hand it the turn, print the session ID, and exit immediately |
 
 ```sh
 sennit run "Guess my 5 favorite Pokémon"
 curl https://example.com | sennit run "Summarize this website"
 sennit run "Generate a hot README for this project" > MY_HOT_README.md
 sennit run --continue "Follow up on your last response"
+sennit run --detach "Refactor internal/agent for clarity"
 ```
+
+Without `--detach`, `run` uses this project's daemon if one is already
+running, and runs in-process otherwise; either way it waits for the turn
+to finish. `--detach` never waits; see
+[the background daemon](../concepts/daemon.md).
+
+## `attach`, `ps`, `daemon` — the background daemon
+
+```sh
+sennit attach [--session ID] [ssh://[user@]host[:port]/path]
+sennit ps [--json]
+sennit daemon status [--json]
+sennit daemon stop [--force]
+sennit daemon restart [--force]
+sennit daemon logs [-f]
+```
+
+`attach` opens the TUI against this project's already-running daemon (or
+a remote one, given an `ssh://` target); unlike `sennit --daemon` it never
+starts one; a project with none running is an error. `ps` reports busy
+sessions, pending permission/question prompts, and live threads or tasks,
+without ever starting a daemon either. `daemon status` reports whether
+one is running (pid, socket, version, log path); `stop`/`restart` refuse
+a busy daemon unless given `--force`; `logs` shows its log file,
+`-f`/`--follow` to keep tailing it.
+
+Full explanation, idle exit, and remote sessions over SSH:
+[the background daemon and remote sessions](../concepts/daemon.md).
 
 ## `models` — what is available
 

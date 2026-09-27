@@ -16,3 +16,8 @@ actually stop, press <kbd>Esc</kbd> twice.
 Where conversations, messages and file history are kept — one shared SQLite
 database for every project, not one per project — and how to inspect, resume
 and prune them.
+
+## [Background daemon and remote sessions](daemon.md)
+
+Running the backend headlessly with `--daemon` so a turn survives closing
+the terminal, and reaching a project's daemon on another machine over SSH.

@@ -540,6 +540,9 @@ Integer Keys:
 Duration Keys:
   auto-summarize-idle-after string how long a session must sit idle before
                                    it is summarized, e.g. 4m or 90s
+  daemon-idle-timeout string      how long "sennit daemon run" may sit idle
+                                   before it exits on its own, default 10m;
+                                   0 or negative disables idle exit
 
 List Keys:
   context-path string             append a project context path
@@ -552,6 +555,7 @@ List Keys:
 option progress false
 option skill-path ./skills
 option attribution-trailer-style assisted-by
+option daemon-idle-timeout 30m
 ```
 
 #### `option reset`

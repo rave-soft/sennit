@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Sennit can now run its backend as a background daemon, one per project,
+  so a turn survives closing the terminal or a dropped SSH connection,
+  and several windows can share the same agent. In-process stays the
+  default; the daemon only starts on an explicit flag or command:
+  `sennit --daemon` connects to (or starts) it, `sennit attach` opens the
+  TUI against one already running (never starting it), `sennit run
+  --detach` hands it a turn and exits immediately, and `sennit ps` /
+  `sennit daemon status|stop|restart|logs` manage and inspect it. With
+  nothing left to do, it exits on its own after
+  `options.daemon.idle_timeout` (10 minutes by default, `option
+  daemon-idle-timeout <duration>` in `sennitrc`). A permission prompt or
+  question with no client connected to answer it is the one exception:
+  it holds the daemon open with no timeout of its own, however long that
+  takes. `sennit attach ssh://[user@]host[:port]/path` and `sennit
+  --remote ssh://...` reach a project's daemon on another machine over
+  SSH (the remote host needs `sennit` on its `PATH`); the daemon
+  machine's own config governs providers, models, MCP, LSP, hooks and
+  permissions, while the TUI's own look (theme, keybindings, and the
+  rest) stays yours, read from your local config. Signing in to Codex or
+  an MCP server from a remote session still opens the browser locally,
+  and relays the OAuth callback back to the daemon. The CLI utilities
+  (`doctor`, `models`, `gc`, `import`, `logs`, `session`, `stat`) keep
+  reading the local database and config directly; run them over SSH on
+  the daemon's machine instead.
 - The question tool takes 500 characters of question text, up from 240, and
   every one of its limits now counts characters rather than bytes. Counted
   in bytes, any non-Latin script got about half the allowance the error

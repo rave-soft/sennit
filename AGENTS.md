@@ -42,6 +42,17 @@ internal/
     migrations/                    Schema migrations
   lsp/                             LSP client manager, auto-discovery, on-demand startup
   ui/                              Bubble Tea v2 TUI (see internal/ui/AGENTS.md)
+  workspace/                       Workspace interface: how UI and cmd reach the backend
+    appws/                         In-process implementation, wraps *app.App
+    wsrpc/                         Method-class table, generated DTOs/loopback, JSON codec
+      gen/                         Code generator (`go generate ./internal/workspace/wsrpc/...`)
+      grpcws/                      gRPC transport: server, client, codec, event hub, OAuth relay
+  workspacelock/                   Per-project lock file: owner PID, mode, socket path
+  daemon/                          Headless backend: daemon.Run serves a project over a unix socket
+    supervisor/                    Client side: finds or starts a project's daemon, checks versions
+    e2e/                           End-to-end daemon tests against a real binary and socket
+  transport/                       SSH dialer and ssh:// target parsing, for a remote daemon
+  uiprefs/                         TUI-only config (theme, keys, ...), read from the client's own config
   permission/                      Tool permission checking and allow-lists
   skills/                          Skill file discovery and loading
   shell/                           Bash command execution with background job support
@@ -86,11 +97,41 @@ internal/
   `skills`). Types with behavior, runtime references, or transitive
   dependencies require explicit DTOs in `proto`, with narrowly scoped
   conversion at the boundary. Do not add a general conversion framework.
-  - **There is no remote transport in this tree.** `proto` was shaped for a
-    client/server split that no longer exists: every `Workspace`
-    implementation is in-process, and events reach the TUI through
-    `internal/pubsub` channels, not over a wire. Read any "wire contract"
-    language in `proto`'s own comments as historical. Audited 2026-09-02.
+  - **The workspace/UI boundary is served over gRPC**, with a JSON codec
+    on `encoding/json` in place of protobuf wire encoding: no `.proto`
+    file, no generated pb structs. `internal/workspace/wsrpc` holds the
+    method-class table (`classes.go`): every `workspace.Workspace` method
+    gets one class: `U` (ordinary request/response, JSON both ways), `C`
+    (a getter the UI calls straight from `Update`/`View`; still generated
+    like `U` for the loopback path, but answered from the client's own
+    cache instead of a round trip, kept current by `workspace.ClientState`
+    events), `S` (a server-stream method, e.g. `Subscribe`,
+    `AgentRunStream`), `H` (returns or consumes a handle, e.g.
+    `EnterWorktree`, `StartOAuth`), or `X` (never crosses the wire, e.g.
+    `Shutdown`). A reflection-based test
+    (`internal/workspace/wsrpc/classes_test.go`) fails if a method has no
+    class or a class names a dead method. `internal/workspace/wsrpc/gen`
+    (invoked via `go generate ./internal/workspace/wsrpc/...`, itself
+    `go run ./gen`) reads the table and `workspace.Workspace`'s method set
+    through `go/types` and writes the generated DTOs, the loopback
+    decorator, and the gRPC service; `classes_gen_test.go` regenerates
+    the same output in memory and diffs it against what's committed, so a
+    method added or reclassified without re-running the generator fails
+    `go test`, not just a separate CI step. `internal/workspace/wsrpc/grpcws`
+    is the actual gRPC transport (server, client, codec, event hub, OAuth
+    callback relay); `internal/daemon` and `internal/transport` are what
+    run a project's backend headlessly and reach it over SSH.
+    **The rule for a new `Workspace` method**: add it to the interface,
+    implement it on `appws.AppWorkspace`, add one line to
+    `wsrpc/classes.go`, and add a DTO only if the existing types don't
+    already survive the codec (wire-safe, no secrets; see
+    `workspace.FrontendConfig`'s allowlist for the shape that follows). The
+    in-process path goes through the same codec in tests:
+    `SENNIT_TEST_WIRE=1` wraps a test's workspace in `wsrpc.NewLoopback`
+    (the JSON codec, in-process, no network); `SENNIT_TEST_WIRE=grpc`
+    serves it behind a real `grpcws.NewServer` over `bufconn` instead.
+    Unset, a test talks to the workspace directly. See `CLIENT-SERVER.md`
+    for the design history and phase-by-phase status.
   - `proto.Thread` is the one live DTO. It is a real struct, named
     throughout `Workspace`'s thread and task methods, and
     `internal/workspace/appws/protoconv.go` converts `thread.Thread` into
@@ -128,8 +169,9 @@ internal/
   - `proto.Session` was unused and has been removed. `proto.Todo` remains an
     alias of `session.Todo` in `proto/lsp.go` to preserve its type identity.
   - So: add a DTO to `proto` only for something that genuinely crosses the
-    workspace/UI boundary as data, the way `proto.Thread` does. Do not add one
-    because a type "might be sent somewhere" — nothing is sent anywhere.
+    workspace/UI boundary as data, the way `proto.Thread` does. A type that
+    already survives the JSON codec as-is (see the rule above) needs no
+    DTO at all, so check that first before reaching for one.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
 - **Context files**: Sennit reads AGENTS.md, SENNIT.md, CLAUDE.md, GEMINI.md

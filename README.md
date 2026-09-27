@@ -188,11 +188,15 @@ sennit import claude|opencode         # bring in another tool's agents/skills
 ```
 
 `--yolo` auto-accepts every permission prompt, and `--data-dir` points the
-project's state elsewhere. With `options.daemon` set to `auto` (or
-`--daemon`), Sennit connects to (or starts) a headless backend for the
-project and every client — the TUI, `run`, `attach`, `ps` — shares it;
-`sennit attach` and `sennit ps` only ever connect to one already running,
-never starting it themselves.
+project's state elsewhere. In-process is the default; `--daemon` connects
+to (or starts) a headless backend for the project instead. While it runs,
+`sennit attach` opens more TUIs against it, `sennit ps` shows what it is
+doing, and `sennit run` sends its turn to it; none of these start a daemon.
+`sennit run --detach` starts one if needed, hands it the turn and exits. `sennit --remote
+ssh://host/path` and `sennit attach ssh://host/path` reach a project's
+daemon on another machine over SSH instead: see [the background daemon
+and remote sessions](docs/concepts/daemon.md) for how it starts, what
+survives a dropped connection, and what stays local.
 
 ## Data Storage
 
