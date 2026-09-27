@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,8 +22,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/daemon"
 	"github.com/rave-soft/sennit/internal/daemon/supervisor"
+	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/version"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
 	"github.com/rave-soft/sennit/internal/workspacelock"
@@ -598,8 +601,32 @@ func TestEnsureRunning_ReadinessTimeout(t *testing.T) {
 	t.Setenv("SENNIT_TEST_NEVER_READY", "1")
 
 	projectDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, projectDir) })
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
 	defer cancel()
+
+	// TestSupervisorDaemonHelperProcess's own SENNIT_TEST_NEVER_READY path
+	// sleeps 3s and exits on its own -- self-bounded so nothing here
+	// leaks a process past that, but EnsureRunning gives up long before
+	// that on its own 500ms ReadyTimeout and returns while the child is
+	// still very much alive, still holding this project's startup log
+	// open. On Windows that open handle is what makes projectDir's own
+	// t.TempDir() cleanup (which runs right after this test returns) fail
+	// with "used by another process" -- so wait for the child to actually
+	// exit before returning, the same way dialAndShutdown does for a
+	// daemon that did come up.
+	//
+	// spawnDetached itself releases (os.Process.Release) the *exec.Cmd it
+	// starts before EnsureRunning ever gets a chance to return -- Release
+	// sets Process.Pid to -1, so reading it back from a Command hook
+	// after the fact (rather than before Release runs) always sees -1,
+	// not the real pid. SENNIT_TEST_SPAWN_COUNTER, already used by
+	// TestEnsureRunning_ConcurrentCallersSpawnOnlyOneDaemon for the same
+	// reason, sidesteps that: the pid it records is the one the helper
+	// process reports about itself (os.Getpid()), written before its own
+	// NEVER_READY sleep.
+	spawnCounter := filepath.Join(t.TempDir(), "spawn-counter")
+	t.Setenv("SENNIT_TEST_SPAWN_COUNTER", spawnCounter)
 
 	start := time.Now()
 	_, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{
@@ -620,6 +647,20 @@ func TestEnsureRunning_ReadinessTimeout(t *testing.T) {
 		t.Skip("elapsed-time assertion is not meaningful under -race; see racecheck_off_test.go")
 	}
 	require.Lessf(t, elapsed, 5*time.Second, "expected the bounded ReadyTimeout to be honored, took %s", elapsed)
+
+	testenv.WaitForProcessExit(t, readSpawnedPID(t, spawnCounter), raceWait(10*time.Second))
+}
+
+// readSpawnedPID reads back the single pid TestSupervisorDaemonHelperProcess
+// wrote to path (via SENNIT_TEST_SPAWN_COUNTER) about itself.
+func readSpawnedPID(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "helper process never recorded its own pid")
+	line := strings.TrimSpace(strings.SplitN(string(data), "\n", 2)[0])
+	pid, err := strconv.Atoi(line)
+	require.NoErrorf(t, err, "malformed spawn counter contents %q", data)
+	return pid
 }
 
 // TestEnsureRunning_BuildMismatch_RestartsWhenIdle covers version-skew
@@ -756,4 +797,56 @@ func waitGone(t *testing.T, ctx context.Context, socketPath string) {
 		}
 	}
 	t.Fatal("timed out waiting for killed daemon's socket to stop answering")
+}
+
+// TestAwaitWorkspaceLockFree_WaitsForRelease pins the gap AwaitGone alone
+// leaves open (see AwaitWorkspaceLockFree's own doc comment): a socket
+// going quiet doesn't mean the workspace lock is free yet. This holds
+// the lock file directly (as if a shutting-down daemon still held it),
+// confirms AwaitWorkspaceLockFree does not return early, then releases
+// it and confirms AwaitWorkspaceLockFree unblocks.
+func TestAwaitWorkspaceLockFree_WaitsForRelease(t *testing.T) {
+	t.Parallel()
+
+	lockDir := t.TempDir()
+	release, err := lock.TryFile(filepath.Join(lockDir, brand.LockFile))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), raceWait(5*time.Second))
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- supervisor.AwaitWorkspaceLockFree(ctx, lockDir) }()
+
+	select {
+	case err := <-done:
+		t.Fatalf("AwaitWorkspaceLockFree returned %v while the lock was still held", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	release()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(raceWait(5 * time.Second)):
+		t.Fatal("AwaitWorkspaceLockFree did not unblock after the lock was released")
+	}
+}
+
+// TestAwaitWorkspaceLockFree_CtxDone covers the other side: a lock that
+// never frees must not hang past ctx's own deadline.
+func TestAwaitWorkspaceLockFree_CtxDone(t *testing.T) {
+	t.Parallel()
+
+	lockDir := t.TempDir()
+	release, err := lock.TryFile(filepath.Join(lockDir, brand.LockFile))
+	require.NoError(t, err)
+	t.Cleanup(release)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err = supervisor.AwaitWorkspaceLockFree(ctx, lockDir)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }

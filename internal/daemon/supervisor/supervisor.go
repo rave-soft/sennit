@@ -501,6 +501,32 @@ func AwaitGone(ctx context.Context, socketPath string) error {
 	return awaitSocketGone(ctx, socketPath)
 }
 
+// AwaitWorkspaceLockFree waits, bounded by ctx, for lockDir's workspace
+// lock to have no live holder. `sennit daemon restart` calls this between
+// AwaitGone and EnsureRunning: AwaitGone only proves the outgoing
+// daemon's socket has stopped answering, not that the process itself has
+// exited and released the workspace lock -- spawnSingleFlight's own doc
+// comment describes the same gap. Without this, that leftover teardown
+// time comes out of EnsureRunning's ReadyTimeout instead of its own
+// budget, silently shrinking how long the new daemon actually gets to
+// become ready once it does start.
+func AwaitWorkspaceLockFree(ctx context.Context, lockDir string) error {
+	for {
+		free, err := workspaceLockFree(lockDir)
+		if err != nil {
+			return err
+		}
+		if free {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
 // StartupLogPath returns the path a spawned daemon's stdout/stderr is
 // redirected to for lockDir -- the same path spawnDetached writes to.
 // `sennit daemon logs` shows it alongside the daemon's own process log so

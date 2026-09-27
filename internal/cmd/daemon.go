@@ -273,6 +273,17 @@ var daemonRestartCmd = &cobra.Command{
 			if err := supervisor.AwaitGone(ctx, socketPath); err != nil {
 				return fmt.Errorf("waiting for daemon to stop: %w", err)
 			}
+			// AwaitGone only proves the outgoing daemon's socket has gone
+			// quiet, not that its process has actually exited and released
+			// the workspace lock (see AwaitWorkspaceLockFree's own doc
+			// comment) -- waiting for that here, on its own budget, keeps
+			// that teardown time from silently eating into the ReadyTimeout
+			// the new daemon gets below.
+			if _, lockDir, err := daemon.ResolveSocketPath(ctx, cwd, dataDir, debug); err == nil {
+				if err := supervisor.AwaitWorkspaceLockFree(ctx, lockDir); err != nil {
+					return fmt.Errorf("waiting for the old daemon to release its workspace lock: %w", err)
+				}
+			}
 		}
 
 		_, warning, err := supervisor.EnsureRunning(ctx, cwd, supervisor.Options{
