@@ -41,6 +41,14 @@ func Short(p string) string {
 // runs against a remote daemon — must be shortened against that machine's
 // home, not this process's; see workspace.FrontendConfig.ServerHome and
 // internal/ui/common.PrettyServerPath, its caller.
+//
+// home and p both describe the machine that produced them, which need not
+// be this one: a remote daemon's ServerHome and the paths it reports keep
+// whatever separator that machine's OS uses, regardless of this process's
+// own GOOS. So the separator check and the join below must accept either
+// convention and must not run the result through filepath.Join, which
+// would normalize it to this process's native separator (e.g. turning a
+// Linux daemon's "/proj/a.go" into "\proj\a.go" on a Windows client).
 func ShortWithHome(home, p string) string {
 	if home == "" || !strings.HasPrefix(p, home) {
 		return p
@@ -51,10 +59,21 @@ func ShortWithHome(home, p string) string {
 	// a separator (or the prefix must be the whole string) before this
 	// counts as "inside home".
 	rest := p[len(home):]
-	if rest != "" && !os.IsPathSeparator(rest[0]) {
+	if rest != "" && !isPathSeparator(rest[0]) {
 		return p
 	}
-	return filepath.Join("~", rest)
+	if rest == "" {
+		return "~"
+	}
+	return "~" + rest
+}
+
+// isPathSeparator reports whether b is a path separator under either the
+// POSIX or the Windows convention. Unlike os.IsPathSeparator, this does not
+// depend on the running process's GOOS: the string being tested may
+// describe a different machine's filesystem (see ShortWithHome).
+func isPathSeparator(b byte) bool {
+	return b == '/' || b == '\\'
 }
 
 // Long replaces the `~` with actual home path from [Dir]. Only a bare
