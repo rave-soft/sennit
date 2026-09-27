@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -308,6 +309,7 @@ func TestDaemon_BusySessionKeepsAlive(t *testing.T) {
 	writeGlobalConfig(t)
 
 	projectDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, projectDir) })
 	writeDaemonIdleConfig(t, projectDir, idleTimeoutConfig)
 
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
@@ -326,22 +328,46 @@ func TestDaemon_BusySessionKeepsAlive(t *testing.T) {
 }
 
 // busySessionCoordinator decorates a real agent.Coordinator, reporting one
-// extra always-busy session while forwarding everything else unchanged.
+// extra always-busy session while forwarding everything else unchanged --
+// until CancelAll runs. App.Shutdown's own teardown (internal/app/shutdown.go)
+// calls coord.CancelAll() and then treats a coordinator that still reports
+// IsBusy() as work that "did not stop before the shutdown deadline,"
+// deliberately retaining the workspace lock and database rather than
+// release them out from under supposedly-live work. A fake busy session
+// that stayed busy forever (as this type did before this fix) trips that
+// same retention path on the test's own cancel()+awaitShutdown at the end,
+// leaking an open handle on projectDir's sennit.lock/sennit.db that
+// t.TempDir()'s cleanup can delete on Linux but Windows refuses (mandatory
+// locking) -- exactly the failure testenv.AssertRemovableOnWindows now
+// catches here even on Linux. A real busy session stops being busy once
+// canceled; this fake one must too.
 type busySessionCoordinator struct {
 	agent.Coordinator
 	sessionID string
+	cancelled atomic.Bool
+}
+
+func (c *busySessionCoordinator) CancelAll() {
+	c.cancelled.Store(true)
+	c.Coordinator.CancelAll()
 }
 
 func (c *busySessionCoordinator) BusySessions() []string {
+	if c.cancelled.Load() {
+		return c.Coordinator.BusySessions()
+	}
 	return append([]string{c.sessionID}, c.Coordinator.BusySessions()...)
 }
 
 func (c *busySessionCoordinator) IsSessionBusy(sessionID string) bool {
-	return sessionID == c.sessionID || c.Coordinator.IsSessionBusy(sessionID)
+	if !c.cancelled.Load() && sessionID == c.sessionID {
+		return true
+	}
+	return c.Coordinator.IsSessionBusy(sessionID)
 }
 
 func (c *busySessionCoordinator) IsBusy() bool {
-	return true
+	return !c.cancelled.Load() || c.Coordinator.IsBusy()
 }
 
 var _ agent.Coordinator = (*busySessionCoordinator)(nil)
