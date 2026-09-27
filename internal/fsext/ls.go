@@ -416,7 +416,13 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 
 		if path != initialPath {
 			if isDir {
-				path = path + string(filepath.Separator)
+				// fastwalk with ToSlash (conf.ToSlash above) already
+				// hands back "/"-separated entries on every platform, so
+				// the trailing marker must match that, not this
+				// process's native filepath.Separator — appending "\" on
+				// Windows would leave a directory entry mixing both
+				// conventions (e.g. "sub\" after a "/"-joined prefix).
+				path += "/"
 			}
 			found.Append(path)
 		}
