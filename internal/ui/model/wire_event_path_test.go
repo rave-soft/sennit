@@ -294,15 +294,64 @@ func TestWireEventPath_ConnectionLostRecovered(t *testing.T) {
 	stop := client.SubscribeWith(func(v any) { eventsCh <- v })
 	t.Cleanup(stop)
 
-	dialer.sever()
-	drainEvents(t, m, eventsCh)
-	waitFor(t, func() bool { return m.conn.lost })
+	// A single sever() races runPump's own goroutine startup (client.
+	// Connect launches it asynchronously -- see client_pump.go's connect):
+	// if runPump hasn't yet opened its event stream when the one
+	// connection Snapshot dialed goes down, gRPC's own automatic
+	// reconnect can re-dial and heal it, over bufconn's zero-latency
+	// loop, before anything in this process ever calls Recv() on the
+	// dying transport or NewStream() on the not-yet-healed one -- so no
+	// failure is ever observed and ConnectionLost never fires. That is
+	// specific to bufconn's instant redial, not a real transport (a real
+	// reconnect takes long enough that the pump's own retry always finds
+	// it still down), so severUntilLost's fix belongs here, not in
+	// client_pump.go: keep severing on a short interval until the drop is
+	// actually observed, which guarantees the eventual sever() lands
+	// while runPump is genuinely blocked in Recv() and so cannot go
+	// unnoticed the way a single racing sever() can.
+	severUntilLost(t, dialer, m, eventsCh)
 
 	// The client's own pump reconnects on its next attempt (the dialer
 	// itself is still live -- only the sever()'d connections were cut);
-	// wait for the Recovered event the same way.
+	// wait for the Recovered event. This direction has no equivalent
+	// race (m.conn.lost is already true, so there is a real stream up
+	// and an active Recv() for the reconnect to be observed through),
+	// but the wait is still async and worth a generous, event-driven
+	// budget rather than a fixed sleep.
+	requireConnLost(t, m, eventsCh, false, "the indicator must clear once the connection recovers")
+}
+
+// severUntilLost severs every currently open connection, then keeps
+// draining eventsCh into m.Update and re-severing on a short interval
+// until m.conn.lost is observed true or the deadline passes -- see the
+// race its caller documents above. A sever() that lands while runPump is
+// not yet blocked in Recv() can heal invisibly, so a single attempt
+// cannot be trusted; repeating it is what actually closes the race,
+// since each attempt is aimed at whatever connection is live at that
+// moment (severingDialer.dial records every redial, including gRPC's own
+// automatic ones).
+func severUntilLost(t *testing.T, dialer *severingDialer, m *UI, eventsCh chan any) {
+	t.Helper()
 	deadline := time.Now().Add(raceWait(5 * time.Second))
-	for time.Now().Before(deadline) && m.conn.lost {
+	dialer.sever()
+	for time.Now().Before(deadline) && !m.conn.lost {
+		select {
+		case v := <-eventsCh:
+			_, cmd := m.Update(v)
+			runCmds(m, cmd)
+		case <-time.After(20 * time.Millisecond):
+			dialer.sever()
+		}
+	}
+	require.True(t, m.conn.lost, "a severed connection must set the lost indicator")
+}
+
+// requireConnLost drains eventsCh into m.Update until m.conn.lost matches
+// want or the deadline passes, then asserts it matches.
+func requireConnLost(t *testing.T, m *UI, eventsCh chan any, want bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(raceWait(5 * time.Second))
+	for time.Now().Before(deadline) && m.conn.lost != want {
 		select {
 		case v := <-eventsCh:
 			_, cmd := m.Update(v)
@@ -310,7 +359,7 @@ func TestWireEventPath_ConnectionLostRecovered(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	require.False(t, m.conn.lost, "the indicator must clear once the connection recovers")
+	require.Equal(t, want, m.conn.lost, msg)
 }
 
 // severingDialer wraps a bufconn.Listener's dialer, tracking every
