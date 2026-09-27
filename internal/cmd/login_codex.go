@@ -62,8 +62,8 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 	}
 
 	if !force {
-		if cfg := serverConfig(ws); cfg != nil {
-			if pc, ok := cfg.RuntimeProvider(codex.ProviderID); ok && pc.OAuthToken != nil {
+		if cfg := ws.Config(); cfg != nil {
+			if pc, ok := cfg.Provider(codex.ProviderID); ok && pc.Auth.HasOAuth {
 				fmt.Println("You are already logged in to OpenAI Codex.")
 				fmt.Println("Use --force to re-authenticate.")
 				return nil
@@ -170,24 +170,26 @@ func loginCodex(ws codexLoginWorkspace, force, forceNewAccount bool, proxyURL st
 // configuredCodexProxy returns the provider-level proxy the Codex provider
 // is already configured with, or "" if none.
 //
-// It reads ConfiguredProxyURL, not ProxyURL: ProxyURL is the *effective*
-// proxy — whatever the currently active account resolved to, which may be
-// that account's own override, or "none" forcing a direct connection (see
-// accounts.ResolveProxy) — while ConfiguredProxyURL is the provider-level
-// default as written in config. loginCodex falls back to this value when
-// --proxy is not passed, and the completed sign-in then persists it back to
+// It reads OAuthProviderConfiguredProxy, not ProxyURL: ProxyURL is the
+// *effective* proxy — whatever the currently active account resolved to,
+// which may be that account's own override, or "none" forcing a direct
+// connection (see accounts.ResolveProxy) — while
+// OAuthProviderConfiguredProxy is the provider-level default as written in
+// config. loginCodex falls back to this value when --proxy is not passed,
+// and the completed sign-in then persists it back to
 // providers.codex.proxy_url; using the effective value there would promote
 // one account's route to every account's default on the next login, and
 // would rewrite a "$VAR" template to its resolved literal even though
 // nothing asked for a proxy change at all.
-func configuredCodexProxy(ws workspace.ConfigReader) string {
-	cfg := serverConfig(ws)
-	if cfg == nil {
-		return ""
-	}
-	pc, ok := cfg.Providers.Get(codex.ProviderID)
-	if !ok {
-		return ""
-	}
-	return pc.ProxyURL
+//
+// This is also why it reads a narrow Workspace method instead of
+// ws.Config()'s FrontendProvider.ProxyURL: that field is redacted for
+// display (password stripped, see redactProxyURL), which would silently
+// break a proxy credential this value goes on to actually route the
+// sign-in through. See workspace.OAuthController.OAuthProviderConfiguredProxy.
+func configuredCodexProxy(ws interface {
+	OAuthProviderConfiguredProxy(providerID string) string
+},
+) string {
+	return ws.OAuthProviderConfiguredProxy(codex.ProviderID)
 }

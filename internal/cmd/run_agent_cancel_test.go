@@ -80,7 +80,7 @@ func TestRunAgent_EventChannelClosesWhileCtxCancelled_ReturnsError(t *testing.T)
 
 		resultCh := make(chan error, 1)
 		go func() {
-			resultCh <- runAgent(ctx, ws, "hello", "", true, "", false)
+			resultCh <- runAgent(ctx, ws, "hello", "", true, "", false, "", "", false)
 		}()
 
 		select {
@@ -101,6 +101,6 @@ func TestRunAgent_CleanFinish_ReturnsNil(t *testing.T) {
 	close(events)
 	ws := &fakeRunWorkspace{events: events}
 
-	err := runAgent(context.Background(), ws, "hello", "", true, "", false)
+	err := runAgent(context.Background(), ws, "hello", "", true, "", false, "", "", false)
 	require.NoError(t, err)
 }

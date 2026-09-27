@@ -628,6 +628,11 @@ func (s *stubWorkspace) OAuthConfiguredProxy(providerID string) string {
 	return ""
 }
 
+func (s *stubWorkspace) OAuthProviderConfiguredProxy(providerID string) string {
+	s.track("OAuthProviderConfiguredProxy")
+	return ""
+}
+
 func (s *stubWorkspace) OAuthValidateProxy(providerID, proxyURL string) error {
 	s.track("OAuthValidateProxy")
 	return nil

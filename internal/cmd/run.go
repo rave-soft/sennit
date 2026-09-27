@@ -86,6 +86,13 @@ sennit run --continue "Follow up on your last response"
 			return runDetached(cmd, prompt, model, sessionID, useLast)
 		}
 
+		cwd, err := ResolveCwd(cmd)
+		if err != nil {
+			return err
+		}
+		dataDir, _ := cmd.Flags().GetString("data-dir")
+		debug, _ := cmd.Flags().GetBool("debug")
+
 		ws, cleanup, err := setupRunWorkspace(cmd)
 		if err != nil {
 			return err
@@ -104,7 +111,7 @@ sennit run --continue "Follow up on your last response"
 			sessionID = sess.ID
 		}
 
-		return runAgent(ctx, ws, prompt, model, quiet || verbose, sessionID, useLast)
+		return runAgent(ctx, ws, prompt, model, quiet || verbose, sessionID, useLast, cwd, dataDir, debug)
 	},
 }
 
@@ -232,6 +239,8 @@ func runAgent(
 	hideSpinner bool,
 	continueSessionID string,
 	useLast bool,
+	cwd, dataDir string,
+	debug bool,
 ) error {
 	slog.Info("Running in non-interactive mode")
 
@@ -266,16 +275,19 @@ func runAgent(
 	}
 
 	stderrTTY := term.IsTerminal(os.Stderr.Fd())
-	// cfg is nil for any ws that doesn't implement ServerConfigReader —
-	// every remote Workspace (grpcws.Client included: ServerConfig
-	// deliberately never crosses the wire, see serverConfig's doc
-	// comment) as well as any future read-only stand-in. Unlike
+	// cfg is only resolved when there's a terminal to draw the
+	// spinner/progress bar on at all - it's unused otherwise, and
+	// runDisplayConfig's daemon-mode fallback (config.LoadData) is real
+	// disk I/O not worth paying for on every headless run. Unlike
 	// cfg.ThemeID()/cfg.SpinnerMode(), which are nil-receiver-safe
 	// methods, cfg.Options is a plain field access and needs its own nil
-	// check here, so it doesn't panic on exactly the workspace this
-	// package now also supports.
-	cfg := serverConfig(ws)
-	progress := cfg == nil || cfg.Options == nil || cfg.Options.Progress == nil || *cfg.Options.Progress
+	// check here.
+	var cfg *config.Config
+	progress := true
+	if stderrTTY {
+		cfg = runDisplayConfig(ws, cwd, dataDir, debug)
+		progress = cfg == nil || cfg.Options == nil || cfg.Options.Progress == nil || *cfg.Options.Progress
+	}
 
 	var spinner *format.Spinner
 	if !hideSpinner && stderrTTY {
@@ -371,12 +383,27 @@ func runAgent(
 // applies uniformly regardless of the concrete implementation. Helper
 // (small) model resolution is fully automatic and needs no CLI-side
 // override.
+//
+// It reads ws.Config() (*FrontendConfig), not serverConfig: the latter
+// is nil against a daemon connection (a plain `sennit run` goes through
+// one whenever the project already has one running, since 1e5d36339),
+// and matching against a nil *config.Config's Providers panicked --
+// serverConfig's own doc comment now names this as the one remaining
+// consumer that still needs fixing after CLIENT-SERVER.md PR 2.3's
+// login/logout/accounts work. FrontendConfig carries everything
+// FindModelMatches needs (provider id, Disable, each model's ID)
+// without exposing secrets, so no new Workspace method is needed --
+// see modelMatchProviders.
 func overrideModel(ctx context.Context, ws workspace.Workspace, model string) error {
 	if model == "" {
 		return nil
 	}
 
-	providers := serverConfig(ws).Providers.Copy()
+	cfg := ws.Config()
+	if cfg == nil {
+		return fmt.Errorf("no configuration available to resolve model %q", model)
+	}
+	providers := modelMatchProviders(cfg)
 
 	matches, err := config.FindModelMatches(providers, model)
 	if err != nil {
@@ -396,4 +423,25 @@ func overrideModel(ctx context.Context, ws workspace.Workspace, model string) er
 	}
 
 	return ws.UpdateAgentModel(ctx)
+}
+
+// modelMatchProviders adapts cfg.Providers into the map shape
+// config.FindModelMatches searches (map[string]config.ProviderConfig,
+// keyed by provider id): ParseModelString/collectModelMatches only ever
+// read a provider's id (the map key, and modelFilterMatches' provider
+// argument), Disable, and each model's ID, all of which FrontendProvider
+// already carries -- so this needs no new Workspace method, and no
+// FrontendProvider field beyond what NewFrontendConfig already builds.
+// Every other ProviderConfig field (APIKey, OAuthToken, ProxyURL, ...) is
+// left zero, since nothing here reads them.
+func modelMatchProviders(cfg *workspace.FrontendConfig) map[string]config.ProviderConfig {
+	providers := make(map[string]config.ProviderConfig, len(cfg.Providers))
+	for _, p := range cfg.Providers {
+		providers[p.ID] = config.ProviderConfig{
+			ID:      p.ID,
+			Disable: p.Disable,
+			Models:  p.Models,
+		}
+	}
+	return providers
 }

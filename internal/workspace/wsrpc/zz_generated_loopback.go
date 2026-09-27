@@ -2300,6 +2300,36 @@ func (l *Loopback) OAuthConfiguredProxy(providerID string) (res0 string) {
 	return
 }
 
+func (l *Loopback) OAuthProviderConfiguredProxy(providerID string) (res0 string) {
+	wsrpcReq := OAuthProviderConfiguredProxyRequest{
+		ProviderID: providerID,
+	}
+	wsrpcReqJSON, wsrpcErr1 := json.Marshal(wsrpcReq)
+	if wsrpcErr1 != nil {
+		panic(fmt.Sprintf("wsrpc: marshaling OAuthProviderConfiguredProxy request: %v", wsrpcErr1))
+	}
+	var wsrpcDecodedReq OAuthProviderConfiguredProxyRequest
+	wsrpcErr2 := json.Unmarshal(wsrpcReqJSON, &wsrpcDecodedReq)
+	if wsrpcErr2 != nil {
+		panic(fmt.Sprintf("wsrpc: decoding OAuthProviderConfiguredProxy request: %v", wsrpcErr2))
+	}
+	wsrpcOut0 := l.inner.OAuthProviderConfiguredProxy(wsrpcDecodedReq.ProviderID)
+	wsrpcResp := OAuthProviderConfiguredProxyResponse{
+		Result: wsrpcOut0,
+	}
+	wsrpcRespJSON, wsrpcErr3 := json.Marshal(wsrpcResp)
+	if wsrpcErr3 != nil {
+		panic(fmt.Sprintf("wsrpc: marshaling OAuthProviderConfiguredProxy response: %v", wsrpcErr3))
+	}
+	var wsrpcDecodedResp OAuthProviderConfiguredProxyResponse
+	wsrpcErr4 := json.Unmarshal(wsrpcRespJSON, &wsrpcDecodedResp)
+	if wsrpcErr4 != nil {
+		panic(fmt.Sprintf("wsrpc: decoding OAuthProviderConfiguredProxy response: %v", wsrpcErr4))
+	}
+	res0 = wsrpcDecodedResp.Result
+	return
+}
+
 func (l *Loopback) OAuthValidateProxy(providerID string, proxyURL string) (err error) {
 	wsrpcReq := OAuthValidateProxyRequest{
 		ProviderID: providerID,

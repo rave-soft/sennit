@@ -494,6 +494,11 @@ func (g *updateGoroutineGuard) OAuthConfiguredProxy(providerID string) string {
 	return g.Workspace.OAuthConfiguredProxy(providerID)
 }
 
+func (g *updateGoroutineGuard) OAuthProviderConfiguredProxy(providerID string) string {
+	g.check("OAuthProviderConfiguredProxy")
+	return g.Workspace.OAuthProviderConfiguredProxy(providerID)
+}
+
 func (g *updateGoroutineGuard) OAuthValidateProxy(providerID string, proxyURL string) error {
 	g.check("OAuthValidateProxy")
 	return g.Workspace.OAuthValidateProxy(providerID, proxyURL)

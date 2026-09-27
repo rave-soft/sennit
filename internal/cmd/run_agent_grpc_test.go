@@ -92,7 +92,7 @@ func TestRunAgent_OverGRPC_CleanFinishReturnsNil(t *testing.T) {
 	ws := &grpcRunWorkspace{StubWorkspace: &wsrpctest.StubWorkspace{StreamChan: events}}
 	client := newGRPCRunClient(t, ws)
 
-	err := runAgent(context.Background(), client, "hello", "", true, "", false)
+	err := runAgent(context.Background(), client, "hello", "", true, "", false, "", "", false)
 	require.NoError(t, err)
 }
 
@@ -122,7 +122,7 @@ func TestRunAgent_OverGRPC_CancelMatchesInProcess(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- runAgent(ctx, client, "hello", "", true, "", false)
+		resultCh <- runAgent(ctx, client, "hello", "", true, "", false, "", "", false)
 	}()
 
 	select {

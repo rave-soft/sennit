@@ -721,6 +721,17 @@ type OAuthController interface {
 	// Sennit has configured for it, falling back to a sibling CLI's own
 	// on-disk config for a provider that has one (Codex).
 	OAuthConfiguredProxy(providerID string) string
+	// OAuthProviderConfiguredProxy is providers.<providerID>.proxy_url as
+	// Sennit's own config has it, unredacted — never falling back to a
+	// sibling CLI's on-disk config the way OAuthConfiguredProxy does. A
+	// caller that already has OAuthConfiguredProxy's answer can compare
+	// the two to tell whether that value came from Sennit's own config or
+	// was borrowed from the CLI (see internal/cmd/login_codex.go's
+	// configuredCodexProxy). This exists because FrontendConfig's
+	// FrontendProvider.ProxyURL is redacted (password stripped) for
+	// display, which is wrong for a value about to be used to actually
+	// route the sign-in itself.
+	OAuthProviderConfiguredProxy(providerID string) string
 	// OAuthValidateProxy checks proxyURL is well-formed for providerID.
 	OAuthValidateProxy(providerID, proxyURL string) error
 	// ImportCopilot imports the credentials of an existing GitHub Copilot

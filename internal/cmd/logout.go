@@ -33,7 +33,7 @@ sennit logout codex
 	ValidArgs: oauthPlatformCompletions(),
 	Args:      cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
+		ws, cleanup, err := setupAccountWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func logoutCodex(ws logoutWorkspace) error {
 }
 
 func pickLoggedInProvider(ws workspace.ConfigReader) string {
-	cfg := serverConfig(ws)
+	cfg := ws.Config()
 	if cfg == nil {
 		fmt.Println(logoutPromptStyle.Render("You are not logged in to any platform."))
 		return ""
@@ -144,7 +144,7 @@ func pickLoggedInProvider(ws workspace.ConfigReader) string {
 
 	var loggedIn []loggedInProvider
 	for _, platform := range oauthPlatforms {
-		if p, ok := cfg.RuntimeProvider(platform.ID); ok && p.OAuthToken != nil {
+		if p, ok := cfg.Provider(platform.ID); ok && p.Auth.HasOAuth {
 			loggedIn = append(loggedIn, loggedInProvider{id: platform.ID, name: platform.DisplayName})
 		}
 	}

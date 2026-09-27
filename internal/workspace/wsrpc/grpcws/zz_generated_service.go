@@ -86,6 +86,7 @@ type WorkspaceServer interface {
 	MCPResources(ctx context.Context, req *wsrpc.MCPResourcesRequest) (*wsrpc.MCPResourcesResponse, error)
 	MarkProjectInitialized(ctx context.Context, req *wsrpc.MarkProjectInitializedRequest) (*wsrpc.MarkProjectInitializedResponse, error)
 	OAuthConfiguredProxy(ctx context.Context, req *wsrpc.OAuthConfiguredProxyRequest) (*wsrpc.OAuthConfiguredProxyResponse, error)
+	OAuthProviderConfiguredProxy(ctx context.Context, req *wsrpc.OAuthProviderConfiguredProxyRequest) (*wsrpc.OAuthProviderConfiguredProxyResponse, error)
 	OAuthValidateProxy(ctx context.Context, req *wsrpc.OAuthValidateProxyRequest) (*wsrpc.OAuthValidateProxyResponse, error)
 	OverridePreferredModel(ctx context.Context, req *wsrpc.OverridePreferredModelRequest) (*wsrpc.OverridePreferredModelResponse, error)
 	PendingPrompts(ctx context.Context, req *wsrpc.PendingPromptsRequest) (*wsrpc.PendingPromptsResponse, error)
@@ -187,6 +188,7 @@ var WorkspaceServiceDesc = grpc.ServiceDesc{
 		{MethodName: "MCPResources", Handler: _Workspace_MCPResources_Handler},
 		{MethodName: "MarkProjectInitialized", Handler: _Workspace_MarkProjectInitialized_Handler},
 		{MethodName: "OAuthConfiguredProxy", Handler: _Workspace_OAuthConfiguredProxy_Handler},
+		{MethodName: "OAuthProviderConfiguredProxy", Handler: _Workspace_OAuthProviderConfiguredProxy_Handler},
 		{MethodName: "OAuthValidateProxy", Handler: _Workspace_OAuthValidateProxy_Handler},
 		{MethodName: "OverridePreferredModel", Handler: _Workspace_OverridePreferredModel_Handler},
 		{MethodName: "PendingPrompts", Handler: _Workspace_PendingPrompts_Handler},
@@ -1022,6 +1024,21 @@ func _Workspace_OAuthConfiguredProxy_Handler(srv any, ctx context.Context, dec f
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/OAuthConfiguredProxy"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(WorkspaceServer).OAuthConfiguredProxy(ctx, req.(*wsrpc.OAuthConfiguredProxyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Workspace_OAuthProviderConfiguredProxy_Handler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(wsrpc.OAuthProviderConfiguredProxyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkspaceServer).OAuthProviderConfiguredProxy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/OAuthProviderConfiguredProxy"}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return srv.(WorkspaceServer).OAuthProviderConfiguredProxy(ctx, req.(*wsrpc.OAuthProviderConfiguredProxyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2305,6 +2322,17 @@ func (s *workspaceServer) OAuthConfiguredProxy(ctx context.Context, req *wsrpc.O
 	}, nil
 }
 
+func (s *workspaceServer) OAuthProviderConfiguredProxy(ctx context.Context, req *wsrpc.OAuthProviderConfiguredProxyRequest) (*wsrpc.OAuthProviderConfiguredProxyResponse, error) {
+	ws, err := s.resolve(ctx)
+	if err != nil {
+		return nil, grpcStatusFromError(ctx, err)
+	}
+	res0 := ws.OAuthProviderConfiguredProxy(req.ProviderID)
+	return &wsrpc.OAuthProviderConfiguredProxyResponse{
+		Result: res0,
+	}, nil
+}
+
 func (s *workspaceServer) OAuthValidateProxy(ctx context.Context, req *wsrpc.OAuthValidateProxyRequest) (*wsrpc.OAuthValidateProxyResponse, error) {
 	ws, err := s.resolve(ctx)
 	if err != nil {
@@ -3481,6 +3509,22 @@ func (c *Client) OAuthConfiguredProxy(providerID string) (res0 string) {
 	wsrpcResp := new(wsrpc.OAuthConfiguredProxyResponse)
 	if err := c.invoke(ctx, "OAuthConfiguredProxy", wsrpcReq, wsrpcResp); err != nil {
 		slog.Warn("Wsrpc client call failed, returning zero value", "method", "OAuthConfiguredProxy", "error", err)
+		var zero0 string
+		return zero0
+	}
+	return wsrpcResp.Result
+}
+
+// OAuthProviderConfiguredProxy calls the Workspace service's OAuthProviderConfiguredProxy RPC.
+func (c *Client) OAuthProviderConfiguredProxy(providerID string) (res0 string) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.callTimeout)
+	defer cancel()
+	wsrpcReq := &wsrpc.OAuthProviderConfiguredProxyRequest{
+		ProviderID: providerID,
+	}
+	wsrpcResp := new(wsrpc.OAuthProviderConfiguredProxyResponse)
+	if err := c.invoke(ctx, "OAuthProviderConfiguredProxy", wsrpcReq, wsrpcResp); err != nil {
+		slog.Warn("Wsrpc client call failed, returning zero value", "method", "OAuthProviderConfiguredProxy", "error", err)
 		var zero0 string
 		return zero0
 	}

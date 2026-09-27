@@ -95,6 +95,21 @@ func (w *AppWorkspace) OAuthConfiguredProxy(providerID string) string {
 	}
 }
 
+// OAuthProviderConfiguredProxy implements workspace.OAuthController: unlike
+// OAuthConfiguredProxy, it never falls back to a sibling CLI's on-disk
+// config, so it answers only "what has Sennit itself got configured".
+func (w *AppWorkspace) OAuthProviderConfiguredProxy(providerID string) string {
+	cfg := w.store.Config()
+	if cfg == nil || cfg.Providers == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return ""
+	}
+	return pc.ProxyURL
+}
+
 // OAuthValidateProxy implements workspace.OAuthController.
 //
 // Both providers share proxyhttp.ValidateProxy (codex.ValidateProxy is

@@ -87,7 +87,7 @@ sennit login -f copilot
 	ValidArgs: oauthPlatformCompletions(),
 	Args:      cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
+		ws, cleanup, err := setupAccountWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -149,16 +149,18 @@ func loginCopilot(ws loginAccountWorkspace, force, forceNewAccount bool, io logi
 	// sign-in too: the model calls it will make afterwards use it, and a
 	// sign-in that ignored it would fail while the provider looked
 	// correctly configured.
-	var proxyURL string
-	cfg := serverConfig(ws)
-	if cfg != nil {
-		if pc, ok := cfg.RuntimeProvider("copilot"); ok {
-			proxyURL = pc.ProxyURL
-			if !force && pc.OAuthToken != nil {
-				fmt.Println("You are already logged in to GitHub Copilot.")
-				fmt.Println("Use --force to re-authenticate.")
-				return nil
-			}
+	//
+	// This reads OAuthConfiguredProxy, a Workspace method, rather than
+	// ws.Config()'s FrontendProvider.ProxyURL: that field is redacted for
+	// display (password stripped, see redactProxyURL), which would
+	// silently break a proxy credential this value is about to route the
+	// sign-in through. See workspace.OAuthController.OAuthConfiguredProxy.
+	proxyURL := ws.OAuthConfiguredProxy("copilot")
+	if cfg := ws.Config(); cfg != nil {
+		if pc, ok := cfg.Provider("copilot"); ok && !force && pc.Auth.HasOAuth {
+			fmt.Println("You are already logged in to GitHub Copilot.")
+			fmt.Println("Use --force to re-authenticate.")
+			return nil
 		}
 	}
 

@@ -166,12 +166,13 @@ var MethodClasses = map[string]Class{
 	"CustomProviderTypes":  C,
 
 	// OAuthController.
-	"StartOAuth":                  H,
-	"OAuthConfiguredProxy":        U,
-	"OAuthValidateProxy":          U,
-	"ImportCopilot":               U,
-	"RefreshOAuthToken":           U,
-	"RefreshOAuthTokenForAccount": U,
+	"StartOAuth":                   H,
+	"OAuthConfiguredProxy":         U,
+	"OAuthProviderConfiguredProxy": U,
+	"OAuthValidateProxy":           U,
+	"ImportCopilot":                U,
+	"RefreshOAuthToken":            U,
+	"RefreshOAuthTokenForAccount":  U,
 
 	// ProjectLifecycle.
 	"ProjectNeedsInitialization": U,

@@ -689,6 +689,16 @@ type OAuthConfiguredProxyResponse struct {
 	Result string `json:"result"`
 }
 
+// OAuthProviderConfiguredProxyRequest is the request DTO for workspace.Workspace.OAuthProviderConfiguredProxy.
+type OAuthProviderConfiguredProxyRequest struct {
+	ProviderID string `json:"provider_id"`
+}
+
+// OAuthProviderConfiguredProxyResponse is the response DTO for workspace.Workspace.OAuthProviderConfiguredProxy.
+type OAuthProviderConfiguredProxyResponse struct {
+	Result string `json:"result"`
+}
+
 // OAuthValidateProxyRequest is the request DTO for workspace.Workspace.OAuthValidateProxy.
 type OAuthValidateProxyRequest struct {
 	ProviderID string `json:"provider_id"`

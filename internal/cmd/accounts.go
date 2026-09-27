@@ -43,7 +43,7 @@ var accountsListCmd = &cobra.Command{
 	Short:   "List accounts, optionally for one provider",
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
+		ws, cleanup, err := setupAccountWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -71,7 +71,7 @@ var accountsUseCmd = &cobra.Command{
 	Short: "Switch a provider to one of its stored accounts",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
+		ws, cleanup, err := setupAccountWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -110,7 +110,7 @@ has. OAuth providers (Codex, Copilot) run through the same sign-in flow as
 "sennit login"; API-key providers take --api-key, or prompt for one.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
+		ws, cleanup, err := setupAccountWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -133,7 +133,7 @@ var accountsRemoveCmd = &cobra.Command{
 	Short:   "Remove an account from a provider",
 	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
+		ws, cleanup, err := setupAccountWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ falls back to the environment; an account falls back to the provider).
 inheriting anything.`,
 	Args: cobra.RangeArgs(2, 3),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
+		ws, cleanup, err := setupAccountWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -358,14 +358,14 @@ func authListAll(ws interface {
 	workspace.AccountLister
 },
 ) error {
-	cfg := serverConfig(ws)
-	if cfg == nil || cfg.Providers == nil {
+	cfg := ws.Config()
+	if cfg == nil || len(cfg.Providers) == 0 {
 		fmt.Println("No accounts stored for any provider.")
 		return nil
 	}
 
 	var providerIDs []string
-	for providerID := range cfg.Providers.Seq2() {
+	for providerID := range cfg.ProvidersSeq() {
 		providerIDs = append(providerIDs, providerID)
 	}
 	slices.Sort(providerIDs)
@@ -399,9 +399,9 @@ var (
 // (accounts.CapabilitiesOf) — its stored allowance figures.
 func printAccountList(ws workspace.ConfigReader, providerID string, accts []workspace.FrontendAccount) {
 	activeID := ""
-	if cfg := serverConfig(ws); cfg != nil {
-		if pc, ok := cfg.RuntimeProvider(providerID); ok {
-			activeID = pc.Account
+	if cfg := ws.Config(); cfg != nil {
+		if pc, ok := cfg.Provider(providerID); ok {
+			activeID = pc.Auth.Account
 		}
 	}
 	showUsage := accounts.CapabilitiesOf(providerID).Usage

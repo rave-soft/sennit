@@ -37,9 +37,10 @@ func (a *realConfigAccessor) Config() *workspace.FrontendConfig {
 }
 
 // ServerConfig satisfies workspace.ServerConfigReader, which serverConfig
-// (server_config.go) type-asserts for: authListAll/printAccountList need
-// the full config (RuntimeProvider, Providers.Seq2), which FrontendConfig
-// deliberately drops.
+// (server_config.go) type-asserts for. authListAll/printAccountList read
+// ws.Config() (*FrontendConfig) now (CLIENT-SERVER.md PR 2.3), so this
+// method is unused by them; it stays for whichever of this file's other
+// tests still drive serverConfig-reading code (run.go's overrideModel).
 func (a *realConfigAccessor) ServerConfig() *config.Config { return a.store.Config() }
 
 func (a *realConfigAccessor) WorkingDir() string                { return a.store.WorkingDir() }

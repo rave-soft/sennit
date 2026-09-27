@@ -51,6 +51,8 @@ func (w *copilotLoginWorkspaceFake) StartOAuth(_ context.Context, providerID, pr
 
 func (w *copilotLoginWorkspaceFake) OAuthConfiguredProxy(string) string { return "" }
 
+func (w *copilotLoginWorkspaceFake) OAuthProviderConfiguredProxy(string) string { return "" }
+
 func (w *copilotLoginWorkspaceFake) OAuthValidateProxy(string, string) error { return nil }
 
 func (w *copilotLoginWorkspaceFake) ListAccounts(string) ([]workspace.FrontendAccount, error) {

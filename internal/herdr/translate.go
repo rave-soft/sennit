@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // Translate converts a pub/sub event (domain or proto) into a herdr
@@ -32,6 +33,41 @@ func Translate(ev any) Event {
 	default:
 		return nil
 	}
+}
+
+// TranslateFrontend converts an event a frontend receives through
+// Workspace.Subscribe into a herdr Event, for driving herdr from
+// daemon-mode's own client connection instead of BridgeLocal's local
+// pub/sub subscriptions (CLIENT-SERVER.md, PR 1.5). The daemon never
+// runs a herdr client of its own (internal/daemon/daemon.go), so each
+// frontend process — the TUI, in-process or attached to a daemon — must
+// drive one from whatever it sees on its own event stream.
+//
+// message.Message and the two permission types cross the wire unchanged
+// (see internal/workspace/wsrpc/events.go's registry), so this delegates
+// those cases straight to Translate. notify.RunComplete does not:
+// translateEvent (internal/workspace/appws) never forwards it to a
+// frontend, so the "a turn ended" signal frontends actually get is
+// workspace.AgentNotification with Type AgentNotificationFinished, and
+// this maps that to the same RunComplete transition Translate produces
+// for notify.RunComplete. AgentNotificationTurnStarted — a turn becoming
+// a session's active run, which has no domain pub/sub equivalent at all
+// — maps to the same "became working" transition AssistantMessage
+// produces, since that is the earliest confirmed sign a turn is running
+// and permission requests before the first token need it exactly as
+// AssistantMessage's in-process case does.
+func TranslateFrontend(ev any) Event {
+	if e, ok := ev.(pubsub.Event[workspace.AgentNotification]); ok {
+		switch e.Payload.Type {
+		case workspace.AgentNotificationTurnStarted:
+			return AssistantMessage{SessionID: e.Payload.SessionID}
+		case workspace.AgentNotificationFinished:
+			return RunComplete{SessionID: e.Payload.SessionID}
+		default:
+			return nil
+		}
+	}
+	return Translate(ev)
 }
 
 // translateMessage is the shared message-mapping logic for both domain

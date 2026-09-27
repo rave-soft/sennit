@@ -14,31 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// codexProviderConfigAccessor extends stubConfigAccessor with a Config()
-// that reports a single Codex provider entry, for configuredCodexProxy's
-// tests.
+// codexProviderConfigAccessor stands in for a Workspace, answering only
+// OAuthProviderConfiguredProxy, for configuredCodexProxy's own tests.
 type codexProviderConfigAccessor struct {
-	stubConfigAccessor
-	provider config.ProviderConfig
+	proxyURL string
 }
 
-func (s *codexProviderConfigAccessor) rawConfig() *config.Config {
-	return &config.Config{
-		Providers: csync.NewMap(map[string]config.ProviderConfig{
-			codex.ProviderID: s.provider,
-		}),
-	}
-}
-
-func (s *codexProviderConfigAccessor) Config() *workspace.FrontendConfig {
-	return workspace.NewFrontendConfig(s.rawConfig(), nil)
-}
-
-// ServerConfig satisfies workspace.ServerConfigReader, which
-// configuredCodexProxy (serverConfig in server_config.go) type-asserts
-// for.
-func (s *codexProviderConfigAccessor) ServerConfig() *config.Config {
-	return s.rawConfig()
+func (s *codexProviderConfigAccessor) OAuthProviderConfiguredProxy(string) string {
+	return s.proxyURL
 }
 
 // TestConfiguredCodexProxy_UsesConfiguredNotEffective guards the fix for a
@@ -51,9 +34,7 @@ func (s *codexProviderConfigAccessor) ServerConfig() *config.Config {
 func TestConfiguredCodexProxy_UsesConfiguredNotEffective(t *testing.T) {
 	t.Parallel()
 
-	ws := &codexProviderConfigAccessor{provider: config.ProviderConfig{
-		ProxyURL: "socks5://configured-proxy:1080",
-	}}
+	ws := &codexProviderConfigAccessor{proxyURL: "socks5://configured-proxy:1080"}
 
 	require.Equal(t, "socks5://configured-proxy:1080", configuredCodexProxy(ws))
 }
@@ -63,7 +44,7 @@ func TestConfiguredCodexProxy_UsesConfiguredNotEffective(t *testing.T) {
 func TestConfiguredCodexProxy_NoProviderYet(t *testing.T) {
 	t.Parallel()
 
-	ws := &stubConfigAccessor{}
+	ws := &codexProviderConfigAccessor{}
 	require.Empty(t, configuredCodexProxy(ws))
 }
 
@@ -127,6 +108,12 @@ func (w *codexLoginWorkspaceFake) StartOAuth(_ context.Context, providerID, prox
 }
 
 func (w *codexLoginWorkspaceFake) OAuthConfiguredProxy(string) string { return w.configuredProxy }
+
+// OAuthProviderConfiguredProxy defaults to "" (nothing configured in
+// Sennit's own config yet, see configuredCodexProxy's doc comment);
+// codexLoginConfiguredProxyFake overrides it for the "configured provider
+// proxy" rung of TestLoginCodex_ProxyResolutionOrder.
+func (w *codexLoginWorkspaceFake) OAuthProviderConfiguredProxy(string) string { return "" }
 
 func (w *codexLoginWorkspaceFake) OAuthValidateProxy(_, proxyURL string) error {
 	if proxyURL == "bad-proxy" {
@@ -312,22 +299,8 @@ type codexLoginConfiguredProxyFake struct {
 	proxyURL string
 }
 
-func (w *codexLoginConfiguredProxyFake) rawConfig() *config.Config {
-	return &config.Config{
-		Providers: csync.NewMap(map[string]config.ProviderConfig{
-			codex.ProviderID: {ID: codex.ProviderID, ProxyURL: w.proxyURL},
-		}),
-	}
-}
-
-func (w *codexLoginConfiguredProxyFake) Config() *workspace.FrontendConfig {
-	return workspace.NewFrontendConfig(w.rawConfig(), nil)
-}
-
-// ServerConfig satisfies workspace.ServerConfigReader, which loginCodex
-// (serverConfig in server_config.go) type-asserts for.
-func (w *codexLoginConfiguredProxyFake) ServerConfig() *config.Config {
-	return w.rawConfig()
+func (w *codexLoginConfiguredProxyFake) OAuthProviderConfiguredProxy(string) string {
+	return w.proxyURL
 }
 
 func loginCodexWithConfiguredProxy(t *testing.T, ws *codexLoginWorkspaceFake, proxyURL string) error {

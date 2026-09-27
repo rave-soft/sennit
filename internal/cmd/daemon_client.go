@@ -83,7 +83,7 @@ func runDaemonTUI(cmd *cobra.Command, client *grpcws.Client, prefs uiprefs.Store
 	)
 	model.SetSend(program.Send)
 	pacedSend, stopPacing := ui.PaceMessages(func(msg any) { program.Send(msg) })
-	go client.Subscribe(pacedSend)
+	go client.Subscribe(wireHerdr(pacedSend))
 
 	_, runErr := program.Run()
 	stopPacing()
@@ -183,6 +183,39 @@ func connectDaemonWorkspace(ctx context.Context, cwd, dataDir string, debug bool
 		_ = conn.Close()
 	}
 	return client, uiPrefsStoreFromConfig(cfgStore), cleanup, nil
+}
+
+// setupAccountWorkspace is login/logout/accounts' own workspace setup
+// (CLIENT-SERVER.md, PR 2.3): these commands manage credentials, not
+// turns, so — like setupRunWorkspace — they connect to this project's
+// daemon when one is already running and never start one otherwise; a
+// stray daemon spawn on `sennit logout` would be a surprise, not a
+// convenience. Unlike setupRunWorkspace, the in-process fallback goes
+// through setupWorkspaceWithProgressBar (not the bare setupLocalWorkspace):
+// these commands showed a progress bar for a slow first-time bootstrap
+// before daemon mode existed, and this keeps that unchanged.
+func setupAccountWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
+	ctx := cmd.Context()
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	debug, _ := cmd.Flags().GetBool("debug")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+
+	socketPath, running, err := supervisor.ProbeRunning(ctx, cwd, supervisor.Options{DataDir: dataDir, Debug: debug})
+	if err != nil {
+		return nil, nil, err
+	}
+	if !running {
+		return setupWorkspaceWithProgressBar(cmd)
+	}
+
+	client, _, cleanup, err := connectDaemonWorkspace(ctx, cwd, dataDir, debug, socketPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, cleanup, nil
 }
 
 // ensureDaemonWithProgressBar wraps supervisor.EnsureRunning with the same

@@ -544,6 +544,10 @@ func (w *readOnlyWorkspace) OAuthConfiguredProxy(providerID string) string {
 	return w.ws.OAuthConfiguredProxy(providerID)
 }
 
+func (w *readOnlyWorkspace) OAuthProviderConfiguredProxy(providerID string) string {
+	return w.ws.OAuthProviderConfiguredProxy(providerID)
+}
+
 func (w *readOnlyWorkspace) OAuthValidateProxy(providerID, proxyURL string) error {
 	return w.ws.OAuthValidateProxy(providerID, proxyURL)
 }
