@@ -396,7 +396,23 @@ func TestDaemonRestartCmd(t *testing.T) {
 	writeGlobalConfig(t)
 	t.Setenv("XDG_RUNTIME_DIR", testenv.ShortRuntimeDir(t))
 	project := t.TempDir()
-	ctx, cancel := context.WithTimeout(t.Context(), daemonTestTimeout)
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, project) })
+
+	// This RunE re-execs the test binary itself (daemonRestartCmd's
+	// production spawn path, no Command hook to intercept), with no
+	// -test.run filter -- which runs this whole package's own test suite
+	// serially before it ever reaches the one test that actually answers
+	// health checks (daemon_client_test.go's TestCmdDaemonHelperProcess,
+	// gated by SENNIT_CMD_DAEMON_HELPER; see helperCommand's doc comment).
+	// That was assumed "comfortably fast without -race", needing the
+	// wider budget only there, but a loaded CI runner (observed on
+	// windows-latest, no -race involved) can make running this whole
+	// suite once take longer than the package's shared 30s
+	// daemonTestTimeout/10s readiness budget -- so this test gets its own
+	// wider ones, unconditionally, rather than widening those shared
+	// constants for every test that doesn't need to.
+	restartTestTimeout := raceWait(90 * time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), restartTestTimeout)
 	defer cancel()
 
 	startTestDaemon(t, ctx, project)
@@ -406,16 +422,7 @@ func TestDaemonRestartCmd(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// This RunE re-execs the test binary itself (daemonRestartCmd's
-	// production spawn path, no Command hook to intercept), which under
-	// -race means running a chunk of this package's own suite before it
-	// reaches the daemon-helper test that answers health checks (see
-	// daemon_client_test.go's TestCmdDaemonHelperProcess and
-	// helperCommand's doc comment) -- comfortably fast without -race,
-	// but slow enough under it to need more than supervisor's default
-	// 10s readiness budget. Widen it here rather than in
-	// defaultReadyTimeout itself, which stays the real product default.
-	daemonRestartReadyTimeout = raceWait(10 * time.Second)
+	daemonRestartReadyTimeout = restartTestTimeout
 	t.Cleanup(func() { daemonRestartReadyTimeout = 0 })
 
 	cmd := daemonCmdTestCommand(t, project)
