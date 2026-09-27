@@ -209,6 +209,19 @@ func (s *eventsServer) Subscribe(req *SubscribeRequest, stream WorkspaceEventsSu
 			return err
 		}
 	}
+	if !resync && len(replay) == 0 {
+		// Neither a Resync nor any replay frame went out above, so a
+		// reconnect onto an idle stream (nothing published since) would
+		// otherwise send nothing at all until the next real event -- the
+		// client only dispatches ConnectionRecovered on a successful
+		// Recv, so the "connection lost" indicator would stay stuck
+		// forever on an idle daemon. An empty frame gives the client that
+		// Recv immediately; the client already skips frames with
+		// Event == nil without advancing FromSeq.
+		if err := stream.Send(&EventFrame{}); err != nil {
+			return err
+		}
+	}
 
 	ctx := stream.Context()
 	for {

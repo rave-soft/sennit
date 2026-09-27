@@ -253,6 +253,80 @@ func TestSubscribe_ReconnectWithoutLoss(t *testing.T) {
 	require.Greater(t, recoveredAt, lostAt, "a Recovered must follow the Lost")
 }
 
+// TestSubscribe_RecoversOnIdleStreamWithNoEvents is
+// TestSubscribe_ReconnectWithoutLoss's counterpart with nothing published
+// after the sever: eventsServer.Subscribe must still hand the client a
+// Recv() to observe, or ConnectionRecovered never fires and the "connection
+// lost" indicator sticks forever on an otherwise healthy, idle reconnect.
+func TestSubscribe_RecoversOnIdleStreamWithNoEvents(t *testing.T) {
+	t.Parallel()
+
+	stub := &wsrpctest.StubWorkspace{SubscribeWithReady: make(chan struct{})}
+	srv, stopHub := grpcws.NewServer(stub)
+	lis := bufconn.Listen(bufSize)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() {
+		srv.Stop()
+		stopHub()
+		_ = lis.Close()
+	})
+
+	dialer := &severableDialer{lis: lis}
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(dialer.dial),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := grpcws.NewClient(conn)
+
+	var mu sync.Mutex
+	var got []any
+	var states []workspace.ConnectionState
+	client.SubscribeWith(func(v any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if ce, ok := v.(pubsub.Event[workspace.ConnectionEvent]); ok {
+			states = append(states, ce.Payload.State)
+			return
+		}
+		got = append(got, v)
+	})
+
+	send := waitSubscribed(t, stub, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got)
+	})
+	mu.Lock()
+	got = nil
+	states = nil
+	mu.Unlock()
+
+	send(wsrpctest.SessionEvent)
+	waitFor(t, raceWait(5*time.Second), func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got) == 1
+	})
+
+	// Sever the transport and publish nothing else at all -- an idle
+	// stream with no event to Recv() until the daemon's next real activity,
+	// which on an idle connection may never come.
+	dialer.sever()
+
+	waitFor(t, raceWait(10*time.Second), func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(states) > 0 && states[len(states)-1] == workspace.ConnectionRecovered
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Contains(t, states, workspace.ConnectionLost)
+	require.Contains(t, states, workspace.ConnectionRecovered)
+}
+
 func indexOf(states []workspace.ConnectionState, want workspace.ConnectionState) int {
 	for i, s := range states {
 		if s == want {
