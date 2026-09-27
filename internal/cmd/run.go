@@ -117,10 +117,10 @@ sennit run --continue "Follow up on your last response"
 
 // setupRunWorkspace is `sennit run`'s own workspace setup: it connects
 // to this project's daemon when one is already running, and never
-// starts one otherwise (CLIENT-SERVER.md, PR 2.3) -- unlike the
-// interactive root command's options.daemon=auto path, a plain `run`
-// spawning a daemon behind the person's back would be a surprise, not a
-// convenience, for a single non-interactive invocation. A daemon lock
+// starts one otherwise (CLIENT-SERVER.md, PR 2.3) -- unlike `sennit
+// --daemon`, a plain `run` spawning a daemon behind the person's back
+// would be a surprise, not a convenience, for a single non-interactive
+// invocation. A daemon lock
 // held by an embedded TUI (*supervisor.ErrTUILocked) is returned as-is,
 // same wording an in-process run would hit on its own when it tries to
 // acquire the workspace lock.

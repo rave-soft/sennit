@@ -1,112 +1,96 @@
 package cmd
 
 import (
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/daemon/supervisor"
 )
 
-// discoveryModeTestCommand builds the minimal flag set effectiveDaemonMode
-// reads, the same pattern trustTestCommand uses for initConfig -- a fresh
+// rootFlagsTestCommand builds the flag set wantsDaemon and setupLocalWorkspace
+// read, mirroring trustTestCommand's pattern for the same reason: a fresh
 // *cobra.Command rather than the package's singleton rootCmd, so this
 // test's flags can't race or leak state with any other test's.
-func discoveryModeTestCommand() *cobra.Command {
+func rootFlagsTestCommand(t *testing.T, cwd string) *cobra.Command {
+	t.Helper()
+	before, err := os.Getwd()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.Chdir(before)) })
+
 	cmd := &cobra.Command{}
-	cmd.Flags().Bool("no-daemon", false, "")
-	cmd.Flags().Bool("daemon", false, "")
-	cmd.Flags().Bool("debug", false, "")
+	cmd.SetContext(t.Context())
+	cmd.Flags().String("cwd", cwd, "")
 	cmd.Flags().String("data-dir", "", "")
+	cmd.Flags().Bool("debug", false, "")
+	cmd.Flags().Bool("yolo", false, "")
+	cmd.Flags().Bool("trust-project", false, "")
+	cmd.Flags().StringSlice("channels", nil, "")
+	cmd.Flags().Bool("daemon", false, "")
 	return cmd
 }
 
-// discoveringProviderConfig seeds a global config with disable_default_
-// providers and one custom provider whose base_url points at srv and
-// whose discover_models is explicitly true with no hand-written models --
-// runDiscoveryRequests (internal/providerload/discover.go) fires an HTTP
-// request for exactly this shape whenever a RuntimeProcessor actually
-// runs. Used to prove effectiveDaemonMode and the daemon-mode prefs load
-// never trigger it.
-func discoveringProviderConfig(baseURL string) string {
-	return fmt.Sprintf(`{
-  "options": {"disable_default_providers": true, "daemon": {"mode": "auto"}},
-  "providers": {"discoverme": {"id": "discoverme", "name": "DiscoverMe", "type": "openai",
-    "base_url": %q, "api_key": "test-key", "discover_models": true}},
-  "models": {"large": {"provider": "discoverme", "model": "whatever"},
-             "small": {"provider": "discoverme", "model": "whatever"}}
-}`, baseURL)
+// TestWantsDaemon_FlagOnly pins that the daemon routing decision reads
+// only the --daemon flag: unset (the default) is false, and setting it is
+// the only way to make it true. There is no config knob left that can
+// flip this.
+func TestWantsDaemon_FlagOnly(t *testing.T) {
+	t.Parallel()
+
+	cmd := rootFlagsTestCommand(t, t.TempDir())
+	require.False(t, wantsDaemon(cmd))
+
+	require.NoError(t, cmd.Flags().Set("daemon", "true"))
+	require.True(t, wantsDaemon(cmd))
 }
 
-// countingDiscoveryServer is an httptest.Server standing in for a
-// provider's /v1/models endpoint, counting every request it receives.
-func countingDiscoveryServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
-	t.Helper()
-	var requests atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"data":[]}`))
-	}))
-	t.Cleanup(srv.Close)
-	return srv, &requests
-}
-
-// TestEffectiveDaemonMode_NoProviderDiscovery is the regression test for
-// the finding in PR 2.3a round 1: effectiveDaemonMode must read
-// options.daemon.mode without ever running provider model discovery.
-// Reintroducing configruntime.Load (the RuntimeProcessor-backed loader)
-// here turns this red -- see this file's sibling test for the daemon-mode
-// prefs-store half of the same finding.
-func TestEffectiveDaemonMode_NoProviderDiscovery(t *testing.T) {
-	srv, requests := countingDiscoveryServer(t)
-
-	dir := t.TempDir()
-	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
-	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(dir, "data"))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(discoveringProviderConfig(srv.URL+"/v1")), 0o644))
-
-	cwd := t.TempDir()
-	mode, err := effectiveDaemonMode(discoveryModeTestCommand(), cwd)
-	require.NoError(t, err)
-	require.Equal(t, "auto", mode)
-	require.Zero(t, requests.Load(), "effectiveDaemonMode must not trigger provider model discovery")
-}
-
-// TestSetupDaemonWorkspace_PrefsLoadDoesNoProviderDiscovery covers the
-// other surface of the same finding: the client-side config load
-// setupDaemonWorkspace does purely to build the UI prefs store must not
-// repeat the discovery the daemon it just connected to already ran.
+// TestRoot_DefaultTakesInProcessPathWithNoDaemon is the regression test
+// for the owner decision that a background daemon starts only when asked
+// for explicitly: without --daemon, the root command must take the
+// in-process path and must never dial or start a project daemon, even
+// when the project config sets options.daemon fields (idle_timeout).
 //
-// This calls config.LoadData and uiPrefsStoreFromConfig directly --
-// exactly the two calls setupDaemonWorkspace makes to build the prefs
-// store -- rather than going through the whole EnsureRunning/daemon-spawn
-// pipeline: EnsureRunning's own ResolveSocketPath call already loads
-// config with the real RuntimeProcessor for an unrelated reason (finding
-// the project's socket/lock directory) and would confound a "zero
-// requests" assertion made across the whole pipeline with a request this
-// fix has nothing to do with.
-func TestSetupDaemonWorkspace_PrefsLoadDoesNoProviderDiscovery(t *testing.T) {
-	srv, requests := countingDiscoveryServer(t)
-
-	dir := t.TempDir()
-	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
-	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(dir, "data"))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(discoveringProviderConfig(srv.URL+"/v1")), 0o644))
+// Reintroducing a config-driven (or unconditional) daemon start in
+// root.go's RunE -- e.g. making wantsDaemon also consult
+// options.daemon.idle_timeout, or dropping the "if wantsDaemon(cmd)"
+// guard entirely -- turns this red: setupLocalWorkspace would then never
+// run, or a daemon socket would appear for cwd where ProbeRunning must
+// see none.
+func TestRoot_DefaultTakesInProcessPathWithNoDaemon(t *testing.T) {
+	writeGlobalConfig(t)
 
 	cwd := t.TempDir()
-	cfgStore, err := config.LoadData(cwd, "", false)
-	require.NoError(t, err)
-	prefs := uiPrefsStoreFromConfig(cfgStore)
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, "sennit.json"), []byte(`{
+  "options": {"daemon": {"idle_timeout": "1s"}}
+}`), 0o644))
 
-	require.NotNil(t, prefs)
-	require.Zero(t, requests.Load(), "the daemon-mode prefs store's config load must not trigger provider model discovery")
+	cmd := rootFlagsTestCommand(t, cwd)
+	require.NoError(t, cmd.Flags().Set("trust-project", "true"))
+	require.False(t, wantsDaemon(cmd), "no --daemon flag means the in-process path")
+
+	ws, cleanup, err := setupLocalWorkspace(cmd)
+	require.NoError(t, err)
+	require.NotNil(t, ws)
+
+	// The config's own daemon.idle_timeout is read fine -- it just never
+	// influenced whether a daemon runs.
+	cs, ok := ws.(interface{ ConfigStore() *config.ConfigStore })
+	require.True(t, ok)
+	require.Equal(t, time.Second, cs.ConfigStore().Config().Options.Daemon.EffectiveIdleTimeout())
+
+	// Release setupLocalWorkspace's own workspace lock before probing:
+	// while it is held, ProbeRunning correctly refuses (ErrTUILocked) --
+	// that guards a second sennit from clobbering a live TUI, and is not
+	// what this test is about. What this test is about is what comes
+	// after: setupLocalWorkspace must never itself have started (or
+	// dialed) a daemon for cwd.
+	cleanup()
+	_, running, err := supervisor.ProbeRunning(t.Context(), cwd, supervisor.Options{})
+	require.NoError(t, err)
+	require.False(t, running, "no daemon should have been started for cwd")
 }

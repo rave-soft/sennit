@@ -13,9 +13,9 @@ import (
 
 // attachCmd connects to the daemon already running for this project's
 // cwd and opens the TUI against it (CLIENT-SERVER.md, PR 2.3) -- the same
-// TUI loop the root command's own daemon mode drives, but attachCmd
-// never starts one: a project with no daemon running is an error here,
-// where the root command would spawn one under options.daemon=auto.
+// TUI loop `sennit --daemon` drives, but attachCmd never starts one: a
+// project with no daemon running is an error here, where `sennit
+// --daemon` would spawn one.
 //
 // A single positional argument is instead an `ssh://[user@]host[:port]/
 // path` remote target (CLIENT-SERVER.md, PR 3.1): `sennit attach
@@ -25,7 +25,7 @@ import (
 var attachCmd = &cobra.Command{
 	Use:   "attach [ssh://[user@]host[:port]/path]",
 	Short: "Attach to this project's running sennit daemon",
-	Long:  "Connect to the sennit daemon already running for this project's directory (or a remote one, given an ssh:// target) and open the TUI. Never starts a local daemon; use `sennit --daemon` (or set options.daemon=auto) for that.",
+	Long:  "Connect to the sennit daemon already running for this project's directory (or a remote one, given an ssh:// target) and open the TUI. Never starts a local daemon; use `sennit --daemon` for that.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID, _ := cmd.Flags().GetString("session")
@@ -68,7 +68,7 @@ func init() {
 // a plain `sennit run` -- when supervisor.ProbeRunning finds none
 // running.
 func errNoDaemonRunning(cwd string) error {
-	return fmt.Errorf("no daemon running for %s; start one with `sennit --daemon` or set options.daemon=auto in sennitrc", cwd)
+	return fmt.Errorf("no daemon running for %s; start one with `sennit --daemon`", cwd)
 }
 
 // setupAttachWorkspace finds (never spawns) the daemon running for cwd's

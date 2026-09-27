@@ -151,7 +151,7 @@ func setupDaemonWorkspace(ctx context.Context, cwd, dataDir string, debug bool, 
 			// add here, the message already names the owner.
 			return nil, nil, nil, err
 		}
-		return nil, nil, nil, fmt.Errorf("%w\nRun with --no-daemon to use sennit without the daemon", err)
+		return nil, nil, nil, fmt.Errorf("%w\nRun without --daemon to use sennit without the daemon", err)
 	}
 	if warning != "" {
 		fmt.Fprintln(os.Stderr, warning)
@@ -170,7 +170,7 @@ func setupDaemonWorkspace(ctx context.Context, cwd, dataDir string, debug bool, 
 func connectDaemonWorkspace(ctx context.Context, cwd, dataDir string, debug bool, socketPath string) (client *grpcws.Client, prefs uiprefs.Store, cleanup func(), err error) {
 	conn, err := supervisor.Dial(socketPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("connecting to sennit daemon: %w\nRun with --no-daemon to use sennit without the daemon", err)
+		return nil, nil, nil, fmt.Errorf("connecting to sennit daemon: %w\nRun without --daemon to use sennit without the daemon", err)
 	}
 	client = grpcws.NewClient(conn)
 
@@ -180,7 +180,7 @@ func connectDaemonWorkspace(ctx context.Context, cwd, dataDir string, debug bool
 	if err != nil {
 		client.Shutdown()
 		_ = conn.Close()
-		return nil, nil, nil, fmt.Errorf("connecting to sennit daemon: %w\nRun with --no-daemon to use sennit without the daemon", err)
+		return nil, nil, nil, fmt.Errorf("connecting to sennit daemon: %w\nRun without --daemon to use sennit without the daemon", err)
 	}
 
 	// UI preferences come from the client's own config, loaded from cwd

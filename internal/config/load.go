@@ -40,8 +40,8 @@ type credentialsFileDependency struct {
 // of merged config) is exactly what a caller that only needs to read a
 // handful of fields wants in production too, without paying for discovery
 // or a second one when a RuntimeProcessor-backed load already ran or is
-// about to (see internal/cmd's effectiveDaemonMode and
-// setupDaemonWorkspace, CLIENT-SERVER.md PR 2.3). Anything that needs
+// about to (see internal/cmd's setupDaemonWorkspace, CLIENT-SERVER.md
+// PR 2.3). Anything that needs
 // providers, models, or credentials still must go through
 // LoadWithProcessor.
 func LoadData(workingDir, dataDir string, debug bool) (*ConfigStore, error) {

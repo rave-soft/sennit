@@ -48,9 +48,7 @@ func init() {
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
-	rootCmd.Flags().Bool("no-daemon", false, "Run entirely in-process, ignoring options.daemon.mode")
-	rootCmd.Flags().Bool("daemon", false, "Connect to (or start) this project's daemon for this run, ignoring options.daemon.mode")
-	rootCmd.MarkFlagsMutuallyExclusive("no-daemon", "daemon")
+	rootCmd.Flags().Bool("daemon", false, "Connect to (or start) this project's daemon for this run")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -112,11 +110,7 @@ sennit --continue
 		if err != nil {
 			return err
 		}
-		mode, err := effectiveDaemonMode(cmd, cwd)
-		if err != nil {
-			return err
-		}
-		if mode == "auto" {
+		if wantsDaemon(cmd) {
 			return runInteractiveDaemon(cmd, cwd, sessionID, continueLast)
 		}
 
@@ -382,36 +376,14 @@ func uiPrefsStoreFromConfig(cs *config.ConfigStore) uiprefs.Store {
 	return uiprefs.NewConfigStoreAdapter(cs)
 }
 
-// effectiveDaemonMode decides whether this invocation of the interactive
-// root command should talk to a project daemon (CLIENT-SERVER.md, PR
-// 2.3): "--no-daemon"/"--daemon" override options.daemon.mode outright for
-// this one run; otherwise cwd's project config is loaded and its
-// Options.Daemon.EffectiveMode() decides.
-//
-// This reads config.LoadData, not configruntime.Load: the in-process path
-// below reloads config through the real RuntimeProcessor pipeline anyway
-// (setupLocalWorkspace -> app.Bootstrap), and that pipeline runs provider
-// model discovery (network calls, see internal/providerload) — paying for
-// that twice on every single default (off-mode) invocation just to read
-// one string would be a startup-latency and network regression for
-// everyone. LoadData merges the same layers and applies the same
-// defaults without a processor, so options.daemon.mode still comes out
-// right; it just can't answer anything that needs providers or
-// credentials, which this doesn't.
-func effectiveDaemonMode(cmd *cobra.Command, cwd string) (string, error) {
-	if noDaemon, _ := cmd.Flags().GetBool("no-daemon"); noDaemon {
-		return "off", nil
-	}
-	if forceDaemon, _ := cmd.Flags().GetBool("daemon"); forceDaemon {
-		return "auto", nil
-	}
-	debug, _ := cmd.Flags().GetBool("debug")
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	cfg, err := config.LoadData(cwd, dataDir, debug)
-	if err != nil {
-		return "", err
-	}
-	return cfg.Config().Options.Daemon.EffectiveMode(), nil
+// wantsDaemon reports whether this invocation of the root command should
+// connect to (or start) this project's daemon, instead of running
+// in-process. This is decided by the --daemon flag alone: nothing in
+// config can turn the daemon on, so a project's options.daemon.* fields
+// (idle_timeout, ...) never affect the routing decision.
+func wantsDaemon(cmd *cobra.Command) bool {
+	daemon, _ := cmd.Flags().GetBool("daemon")
+	return daemon
 }
 
 func MaybePrependStdin(prompt string) (string, error) {

@@ -16,8 +16,7 @@ import (
 // TestSetupRunWorkspace_NoDaemon_NeverSpawns covers
 // `sennit run`'s own contract (CLIENT-SERVER.md, PR 2.3): with no daemon
 // running for the project, it must fall back to the in-process path --
-// never start one, unlike the interactive root command's own
-// options.daemon=auto path.
+// never start one, unlike `sennit --daemon`.
 func TestSetupRunWorkspace_NoDaemon_NeverSpawns(t *testing.T) {
 	writeGlobalConfig(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())

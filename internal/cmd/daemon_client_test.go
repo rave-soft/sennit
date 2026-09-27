@@ -273,15 +273,15 @@ func TestSetupDaemonWorkspace_ErrTUILocked(t *testing.T) {
 	var lockErr *supervisor.ErrTUILocked
 	require.ErrorAsf(t, err, &lockErr, "expected *supervisor.ErrTUILocked, got %T: %v", err, err)
 	require.Equal(t, helper.pid, lockErr.PID)
-	// The message must be exactly the wrapped cause -- no "--no-daemon"
+	// The message must be exactly the wrapped cause -- no "--daemon"
 	// hint appended, since this isn't a daemon-connect failure.
-	require.NotContains(t, err.Error(), "--no-daemon")
+	require.NotContains(t, err.Error(), "--daemon")
 }
 
 // TestSetupDaemonWorkspace_ConnectFailureHintsNoDaemon covers any other
 // EnsureRunning failure (here: a spawn hook that can never produce a
 // healthy daemon before the readiness timeout): the returned error must
-// be non-nil and must point at --no-daemon as the way to recover.
+// be non-nil and must point at dropping --daemon as the way to recover.
 func TestSetupDaemonWorkspace_ConnectFailureHintsNoDaemon(t *testing.T) {
 	writeGlobalConfig(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
@@ -302,7 +302,7 @@ func TestSetupDaemonWorkspace_ConnectFailureHintsNoDaemon(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.NotErrorIs(t, err, workspacelock.ErrLocked)
-	require.Contains(t, err.Error(), "--no-daemon")
+	require.Contains(t, err.Error(), "--daemon")
 }
 
 // TestPrintDaemonQuitNote_BusySession covers the quit note itself, as
