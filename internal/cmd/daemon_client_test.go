@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/daemon"
 	"github.com/rave-soft/sennit/internal/daemon/supervisor"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
 	"github.com/rave-soft/sennit/internal/workspacelock"
@@ -168,7 +169,7 @@ func TestSetupDaemonWorkspace_ConnectsAndWorks(t *testing.T) {
 	// cleanup (above) only ends this client's own connection, by design
 	// (CLIENT-SERVER.md, PR 2.3) -- the spawned daemon itself is torn
 	// down separately, the same way supervisor's own tests do.
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), mustSocketPath(t, projectDir)) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), projectDir) })
 
 	var _ workspace.Workspace = client
 
@@ -214,7 +215,7 @@ func TestSetupDaemonWorkspace_CleanupDoesNotStopDaemon(t *testing.T) {
 	conn2, err := supervisor.Dial(socketPath)
 	require.NoError(t, err)
 	defer conn2.Close()
-	t.Cleanup(func() { dialAndRequestShutdown(t, ctx, socketPath) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, ctx, projectDir) })
 
 	client2 := grpcws.NewClient(conn2)
 	defer client2.Shutdown()
@@ -233,13 +234,26 @@ func mustSocketPath(t *testing.T, projectDir string) string {
 	return socketPath
 }
 
-// dialAndRequestShutdown tears down a daemon this file's tests started, by
-// asking it to shut down unconditionally and waiting for its socket to
-// stop answering -- supervisor.spawnDetached deliberately releases
-// (rather than waits on) the child process it starts, so a real RPC is
-// the only reliable, cross-platform way back to it.
-func dialAndRequestShutdown(t *testing.T, ctx context.Context, socketPath string) {
+// dialAndRequestShutdown tears down a daemon this file's tests started,
+// by asking it to shut down unconditionally, waiting for its socket to
+// stop answering, and then waiting for the daemon process itself to
+// exit -- supervisor.spawnDetached deliberately releases (rather than
+// waits on) the child process it starts, so a real RPC is the only
+// reliable, cross-platform way back to it, but the socket going quiet is
+// not the same as the process being gone: it can still hold its own log
+// file, sennit.db, or the parent's inherited daemon-startup.log open for
+// a little longer while it finishes exiting. On Windows that open handle
+// is exactly what makes t.TempDir()'s own cleanup (which follows this
+// one, by t.Cleanup's LIFO order) fail with "used by another process";
+// see testenv.WaitForProcessExit's doc comment.
+func dialAndRequestShutdown(t *testing.T, ctx context.Context, projectDir string) {
 	t.Helper()
+	socketPath, lockDir, err := daemon.ResolveSocketPath(ctx, projectDir, "", false)
+	if err != nil {
+		return
+	}
+	owner, ok, _ := workspacelock.CurrentOwner(lockDir)
+
 	conn, err := supervisor.Dial(socketPath)
 	if err != nil {
 		return
@@ -248,6 +262,18 @@ func dialAndRequestShutdown(t *testing.T, ctx context.Context, socketPath string
 	client := grpcws.NewClient(conn)
 	defer client.Shutdown()
 	_, _ = client.RequestShutdown(ctx, false)
+
+	deadline := time.Now().Add(daemonTestTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if ok {
+		testenv.WaitForProcessExit(t, owner.PID, daemonTestTimeout)
+	}
 }
 
 // TestSetupDaemonWorkspace_ErrTUILocked covers the lock-holder path: when

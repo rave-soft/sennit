@@ -23,6 +23,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/daemon"
 	"github.com/rave-soft/sennit/internal/daemon/supervisor"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/rave-soft/sennit/internal/version"
 	"github.com/rave-soft/sennit/internal/workspace/wsrpc/grpcws"
 	"github.com/rave-soft/sennit/internal/workspacelock"
@@ -183,8 +184,19 @@ func testenvIsolate() {}
 // since supervisor.spawnDetached deliberately releases (rather than
 // waits on) the child process it starts -- the daemon's own RPC surface
 // is the only reliable, cross-platform way back to it.
-func dialAndShutdown(t *testing.T, ctx context.Context, socketPath string) {
+func dialAndShutdown(t *testing.T, ctx context.Context, projectDir string) {
 	t.Helper()
+	socketPath, lockDir, err := daemon.ResolveSocketPath(ctx, projectDir, "", false)
+	if err != nil {
+		return
+	}
+	// Read the daemon's real PID before asking it to shut down: spawnDetached
+	// releases the child it starts (see its own doc comment), so a real RPC
+	// followed by waiting for the PID itself to exit is the only reliable,
+	// cross-platform way to know it is actually gone -- see
+	// testenv.WaitForProcessExit's doc comment for why this matters.
+	owner, ok, _ := workspacelock.CurrentOwner(lockDir)
+
 	opts := append(grpcws.DefaultClientDialOptions(),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
@@ -204,13 +216,17 @@ func dialAndShutdown(t *testing.T, ctx context.Context, socketPath string) {
 	deadline := time.Now().Add(raceWait(10 * time.Second))
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(socketPath); os.IsNotExist(err) {
-			return
+			break
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+
+	if ok {
+		testenv.WaitForProcessExit(t, owner.PID, raceWait(10*time.Second))
 	}
 }
 
@@ -230,7 +246,7 @@ func TestEnsureRunning_ColdStart(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, warning)
 	require.NotEmpty(t, socketPath)
-	t.Cleanup(func() { dialAndShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndShutdown(t, context.Background(), projectDir) })
 
 	opts := append(grpcws.DefaultClientDialOptions(),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
@@ -292,7 +308,7 @@ func TestEnsureRunning_ConcurrentCallersSpawnOnlyOneDaemon(t *testing.T) {
 		require.NoErrorf(t, err, "caller %d", i)
 		require.Equalf(t, sockets[0], sockets[i], "caller %d got a different socket", i)
 	}
-	t.Cleanup(func() { dialAndShutdown(t, context.Background(), sockets[0]) })
+	t.Cleanup(func() { dialAndShutdown(t, context.Background(), projectDir) })
 
 	data, err := os.ReadFile(spawnCounter)
 	require.NoError(t, err)
@@ -328,7 +344,7 @@ func TestEnsureRunning_StaleSocketAfterCrash(t *testing.T) {
 
 	socketPath2, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndShutdown(t, context.Background(), socketPath2) })
+	t.Cleanup(func() { dialAndShutdown(t, context.Background(), projectDir) })
 
 	require.Equal(t, socketPath1, socketPath2, "the daemon's socket is deterministic per project")
 
@@ -452,7 +468,7 @@ func TestEnsureRunning_SlowBootstrapIsNotMistakenForTUI(t *testing.T) {
 		require.NoErrorf(t, err, "caller %d", i)
 	}
 	require.Equal(t, sockets[0], sockets[1])
-	t.Cleanup(func() { dialAndShutdown(t, context.Background(), sockets[0]) })
+	t.Cleanup(func() { dialAndShutdown(t, context.Background(), projectDir) })
 }
 
 // TestSupervisorLockHelperProcess is a subprocess helper (gated by
@@ -552,9 +568,9 @@ func TestEnsureRunning_StripsHerdrEnv(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
 	defer cancel()
 
-	socketPath, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
+	_, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndShutdown(t, context.Background(), projectDir) })
 
 	data, err := os.ReadFile(envDump)
 	require.NoError(t, err)
@@ -625,7 +641,7 @@ func TestEnsureRunning_BuildMismatch_RestartsWhenIdle(t *testing.T) {
 	freshSocket, warning, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
 	require.Empty(t, warning)
-	t.Cleanup(func() { dialAndShutdown(t, context.Background(), freshSocket) })
+	t.Cleanup(func() { dialAndShutdown(t, context.Background(), projectDir) })
 
 	require.Equal(t, staleSocket, freshSocket, "the socket path is deterministic per project")
 	freshPID := findDaemonPID(t, ctx, projectDir)
@@ -648,7 +664,7 @@ func TestEnsureRunning_BuildMismatch_WarnsWhenBusy(t *testing.T) {
 
 	staleSocket, _, err := supervisor.EnsureRunning(ctx, projectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndShutdown(t, context.Background(), staleSocket) })
+	t.Cleanup(func() { dialAndShutdown(t, context.Background(), projectDir) })
 
 	// Hold a connection open so the daemon looks busy to its own
 	// OnlyIfIdle check (excludingClientCounter, internal/daemon) when

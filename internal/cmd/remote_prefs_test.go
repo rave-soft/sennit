@@ -73,7 +73,7 @@ func TestConnectRemoteWorkspace_PrefsIgnoreLocalProjectConfig(t *testing.T) {
 
 	socketPath, _, err := supervisor.EnsureRunning(ctx, daemonProjectDir, supervisor.Options{Command: helperCommand(t)})
 	require.NoError(t, err)
-	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), socketPath) })
+	t.Cleanup(func() { dialAndRequestShutdown(t, context.Background(), daemonProjectDir) })
 
 	target := transport.Target{Host: "fake-remote-host", Path: daemonProjectDir}
 	dialerOpts := transport.DialerOptions{Command: fakeSSHCommand(t, socketPath)}
