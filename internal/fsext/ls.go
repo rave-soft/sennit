@@ -388,8 +388,16 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 		// tree contains. Following would also let the walk escape
 		// initialPath (into module caches, the nix store, $HOME, etc.)
 		// and chase symlink cycles, which is slow and can hang.
-		Follow:   false,
-		ToSlash:  fastwalk.DefaultToSlash(),
+		Follow: false,
+		// Unconditionally true, not fastwalk.DefaultToSlash(): that
+		// helper answers a narrower question ("is this an MSYS/Git-Bash
+		// shell on Windows"), false on an ordinary Windows CI runner or
+		// PowerShell session — which left every entry below in native
+		// "\"-separated form, clashing with the "/" this walk's own
+		// isDir suffix always appends (see below) and with every
+		// caller's assumption (appws.ListProjectFiles among them) that
+		// ListDirectory's output is "/"-separated on every platform.
+		ToSlash:  true,
 		Sort:     fastwalk.SortDirsFirst,
 		MaxDepth: depth,
 	}
