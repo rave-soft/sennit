@@ -149,7 +149,11 @@ func toolSpecs() []toolSpec {
 				tools.NewGitStatusTool(b.runtimeCfg.workingDir),
 				tools.NewGitDiffTool(b.runtimeCfg.workingDir),
 				tools.NewGitLogTool(b.runtimeCfg.workingDir),
-				tools.NewSennitInfoTool(b.runtimeCfg, rb.mcp, f.lspManager, b.allSkills, b.activeSkills, b.skillTracker, b.inputs.skillStates),
+				// sennit_info reads the live store, not b.runtimeCfg: a run
+				// keeps these tools for its whole length, and a report of the
+				// current state must not trail a refresh made mid-run. See
+				// TestSennitInfoSeesConfigPublishedAfterBuild.
+				tools.NewSennitInfoTool(rb.cfg, rb.mcp, f.lspManager, b.allSkills, b.activeSkills, b.skillTracker, b.inputs.skillStates),
 				tools.NewSennitLogsTool(b.logFile),
 				tools.NewAgentTraceTool(b.logFile),
 				tools.NewJobOutputTool(f.background),
