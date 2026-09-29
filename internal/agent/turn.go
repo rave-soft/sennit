@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -131,13 +132,24 @@ type runTurn struct {
 	// request and the parent's context then said only "started, its
 	// result will follow separately" — which is how a parent came to
 	// dispatch the same delegate a second time for work already
-	// reported on.
-	foldedCompletions []fantasy.Message
-	foldedReportIDs   []string
+	// reported on. Each one goes back where it was folded (see
+	// weaveFolded), not at the end of the rebuilt prompt.
+	foldedCompletions []foldedMessage
 	// pendingFoldedCount is how many of foldedCompletions belong to
 	// pendingCompletions, so a requeued batch takes its messages back
 	// out with it instead of being shown twice when it is folded again.
 	pendingFoldedCount int
+	// foldedSteering is every follow-up prompt foldSteering folded into
+	// this turn, kept for later steps the same way foldedCompletions is.
+	foldedSteering []foldedMessage
+	// stepBaseLen is the length of the current step's prompt as fantasy
+	// built it, placeholder stripped, before anything was folded into it:
+	// the position a message folded in this step is put back at.
+	stepBaseLen int
+	// placeholderAt is where a continuation's placeholder sits in every
+	// step's prompt: the end of fantasy's initial prompt, which each step
+	// starts with. See stripContinuationPlaceholderAt.
+	placeholderAt int
 
 	// loopWarned maps each tool-call signature the model has been warned
 	// about in this turn to the number of steps the turn had taken when
@@ -193,7 +205,13 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	t.stepNumber = options.StepNumber
 	t.attempt = 0
 
-	prepared.Messages = options.Messages
+	// A copy, not options.Messages itself: fantasy builds each step's
+	// messages as append(initialPrompt, responses...), which shares
+	// initialPrompt's backing array. Stripping the placeholder and then
+	// appending in place wrote the folded report over the placeholder
+	// inside initialPrompt, so every later step of the turn carried the
+	// report twice: once there and once re-appended.
+	prepared.Messages = slices.Clone(options.Messages)
 	for i := range prepared.Messages {
 		prepared.Messages[i].ProviderOptions = nil
 	}
@@ -218,12 +236,20 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	// leak the placeholder into the model's context as a fabricated user
 	// turn, or delete real content - both silent. A mismatch fails this
 	// step loudly instead, at the point the assumption broke.
-	if t.call.Continuation && options.StepNumber == 0 {
-		prepared.Messages, err = stripContinuationPlaceholder(prepared.Messages)
+	//
+	// Every step, not only the first: each step's prompt starts with the
+	// same initial prompt, placeholder included. Step 0 finds it last;
+	// later steps find it at the same index, followed by the responses.
+	if t.call.Continuation {
+		if options.StepNumber == 0 {
+			t.placeholderAt = len(prepared.Messages) - 1
+		}
+		prepared.Messages, err = stripContinuationPlaceholderAt(prepared.Messages, t.placeholderAt)
 		if err != nil {
 			return callContext, prepared, err
 		}
 	}
+	t.stepBaseLen = len(prepared.Messages)
 
 	// A batch folded here is only accepted after the provider step and its
 	// local persistence complete in onStepFinish. Preparation failures put it
@@ -271,9 +297,10 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 // The report is written to the session's own history first, the same way
 // a folded steering prompt is (createUserMessage), and only then appended:
 // a report that lives solely in this step's in-memory messages survives
-// exactly one provider request. Every report folded earlier in this turn
-// is re-appended too, since the step the model sees is rebuilt from the
-// turn's initial prompt each time — see runTurn.foldedCompletions.
+// exactly one provider request. Every report and follow-up folded earlier
+// in this turn is put back too, at the position it was folded, since the
+// step the model sees is rebuilt from the turn's initial prompt each time
+// — see runTurn.foldedCompletions and weaveFolded.
 //
 // The drained batch still stays owned by the turn (returned as its second
 // value, held in pendingCompletions) until the step reaches the model:
@@ -284,7 +311,7 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 func (t *runTurn) foldCompletions(ctx context.Context, messages []fantasy.Message, stepNumber int) ([]fantasy.Message, []TaskCompletion, error) {
 	completions := t.agent.drainCompletionsForStep(t.call.SessionID)
 	if len(completions) == 0 {
-		return t.appendFoldedCompletions(messages), nil, nil
+		return t.weaveFolded(messages), nil, nil
 	}
 	if t.call.Continuation && stepNumber == 0 {
 		// Only knowable now that we see what actually woke this turn.
@@ -325,11 +352,10 @@ func (t *runTurn) foldCompletions(ctx context.Context, messages []fantasy.Messag
 	// than something the person typed, and the leading label in
 	// joinTaskCompletions keeps the model from reading it as user speech.
 	//
-	var folded []fantasy.Message
-	var reportIDs []string
-	seen := make(map[string]struct{}, len(t.foldedReportIDs))
-	for _, id := range t.foldedReportIDs {
-		seen[id] = struct{}{}
+	var folded []foldedMessage
+	seen := make(map[string]struct{}, len(t.foldedCompletions))
+	for _, f := range t.foldedCompletions {
+		seen[f.reportID] = struct{}{}
 	}
 	for _, completion := range completions {
 		id := ""
@@ -359,30 +385,60 @@ func (t *runTurn) foldCompletions(ctx context.Context, messages []fantasy.Messag
 		_, inHistory := t.historyMessageIDs[reportMsg.ID]
 		_, alreadyFolded := seen[reportMsg.ID]
 		if !inHistory && !alreadyFolded {
-			converted := toAIMessage(&reportMsg)
-			folded = append(folded, converted...)
-			for range converted {
-				reportIDs = append(reportIDs, reportMsg.ID)
+			for _, converted := range toAIMessage(&reportMsg) {
+				folded = append(folded, foldedMessage{at: len(messages), msg: converted, reportID: reportMsg.ID})
 			}
 			seen[reportMsg.ID] = struct{}{}
 		}
 	}
-	t.foldedReportIDs = append(t.foldedReportIDs, reportIDs...)
 	t.foldedCompletions = append(t.foldedCompletions, folded...)
 	t.pendingFoldedCount = len(folded)
-	return append(messages, t.foldedCompletions...), completions, nil
+	return t.weaveFolded(messages), completions, nil
 }
 
-// appendFoldedCompletions re-appends every report this turn has already
-// folded. Persisting them (foldCompletions) is what makes them durable
-// history, but the turn already in flight built its prompt before they
-// existed, so the steps that follow still need them handed back
-// explicitly - see runTurn.foldedCompletions.
-func (t *runTurn) appendFoldedCompletions(messages []fantasy.Message) []fantasy.Message {
-	if len(t.foldedCompletions) == 0 {
+// foldedMessage is a message PrepareStep folded into one step of a turn,
+// kept so every later step can be handed it again.
+type foldedMessage struct {
+	// at is the position the message was folded at, in the prompt
+	// fantasy builds for a step (placeholder stripped, nothing folded).
+	// fantasy only ever appends to that prompt from one step to the
+	// next, so the position stays valid for the rest of the turn.
+	at  int
+	msg fantasy.Message
+	// reportID is the persisted report's message ID, for a completion.
+	reportID string
+}
+
+// weaveFolded hands back every report and follow-up this turn has already
+// folded, each at the position it was folded at. Persisting them is what
+// makes them durable history, but the turn already in flight built its
+// prompt before they existed, so the steps that follow still need them
+// handed back explicitly - see runTurn.foldedCompletions. Appending them
+// at the end instead put a report after the model's own reaction to it,
+// where it reads as the same report delivered a second time.
+//
+// Both lists are ordered by at. On a tie, reports go before follow-ups,
+// the order the step they were folded in had them in.
+func (t *runTurn) weaveFolded(messages []fantasy.Message) []fantasy.Message {
+	if len(t.foldedCompletions) == 0 && len(t.foldedSteering) == 0 {
 		return messages
 	}
-	return append(messages, t.foldedCompletions...)
+	out := make([]fantasy.Message, 0, len(messages)+len(t.foldedCompletions)+len(t.foldedSteering))
+	reports, steering := t.foldedCompletions, t.foldedSteering
+	for i := 0; ; i++ {
+		for len(reports) > 0 && (reports[0].at <= i || i >= len(messages)) {
+			out = append(out, reports[0].msg)
+			reports = reports[1:]
+		}
+		for len(steering) > 0 && (steering[0].at <= i || i >= len(messages)) {
+			out = append(out, steering[0].msg)
+			steering = steering[1:]
+		}
+		if i >= len(messages) {
+			return out
+		}
+		out = append(out, messages[i])
+	}
 }
 
 func (t *runTurn) requeuePendingCompletions() {
@@ -394,7 +450,6 @@ func (t *runTurn) requeuePendingCompletions() {
 	// report twice once the requeued batch is folded again.
 	if t.pendingFoldedCount > 0 {
 		t.foldedCompletions = t.foldedCompletions[:len(t.foldedCompletions)-t.pendingFoldedCount]
-		t.foldedReportIDs = t.foldedReportIDs[:len(t.foldedReportIDs)-t.pendingFoldedCount]
 		t.pendingFoldedCount = 0
 	}
 	t.agent.requeueCompletions(t.call.SessionID, t.pendingCompletions)
@@ -448,7 +503,10 @@ func (t *runTurn) foldSteering(callContext context.Context, messages []fantasy.M
 			t.agent.requeueDrained(t.call.SessionID, fold[i:])
 			return messages, createErr
 		}
-		messages = append(messages, toAIMessage(&userMessage)...)
+		for _, converted := range toAIMessage(&userMessage) {
+			messages = append(messages, converted)
+			t.foldedSteering = append(t.foldedSteering, foldedMessage{at: t.stepBaseLen, msg: converted})
+		}
 	}
 	// Every queued call in fold reached this point only once it was
 	// successfully persisted above (an error returns early, before this

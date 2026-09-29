@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"charm.land/fantasy"
@@ -175,21 +176,33 @@ func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason 
 // instead - loud and at the exact point the assumption broke, not a
 // quiet wrongness discovered later in a transcript.
 func stripContinuationPlaceholder(messages []fantasy.Message) ([]fantasy.Message, error) {
+	return stripContinuationPlaceholderAt(messages, len(messages)-1)
+}
+
+// stripContinuationPlaceholderAt is stripContinuationPlaceholder for a
+// placeholder at index at rather than last: a continuation's later steps
+// carry it at the end of fantasy's initial prompt, followed by the
+// earlier steps' responses. The result is a new slice; messages is left
+// as it was.
+func stripContinuationPlaceholderAt(messages []fantasy.Message, at int) ([]fantasy.Message, error) {
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("agent: continuation turn has no messages to strip a placeholder from")
 	}
-	last := messages[len(messages)-1]
-	if last.Role != fantasy.MessageRoleUser {
-		return nil, fmt.Errorf("agent: continuation turn's last message has role %q, want %q - refusing to strip an unexpected message (fantasy's prompt construction may have changed)", last.Role, fantasy.MessageRoleUser)
+	if at < 0 || at >= len(messages) {
+		return nil, fmt.Errorf("agent: continuation turn's placeholder index %d is outside its %d messages", at, len(messages))
 	}
-	if len(last.Content) != 1 {
-		return nil, fmt.Errorf("agent: continuation turn's placeholder message has %d content parts, want 1 (fantasy's prompt construction may have changed)", len(last.Content))
+	msg := messages[at]
+	if msg.Role != fantasy.MessageRoleUser {
+		return nil, fmt.Errorf("agent: continuation turn's placeholder message has role %q, want %q - refusing to strip an unexpected message (fantasy's prompt construction may have changed)", msg.Role, fantasy.MessageRoleUser)
 	}
-	text, ok := last.Content[0].(fantasy.TextPart)
+	if len(msg.Content) != 1 {
+		return nil, fmt.Errorf("agent: continuation turn's placeholder message has %d content parts, want 1 (fantasy's prompt construction may have changed)", len(msg.Content))
+	}
+	text, ok := msg.Content[0].(fantasy.TextPart)
 	if !ok || text.Text != continuationPromptPlaceholder {
-		return nil, fmt.Errorf("agent: continuation turn's last message does not match the expected placeholder text (fantasy's prompt construction may have changed)")
+		return nil, fmt.Errorf("agent: continuation turn's placeholder message does not match the expected placeholder text (fantasy's prompt construction may have changed)")
 	}
-	return messages[:len(messages)-1], nil
+	return slices.Delete(slices.Clone(messages), at, at+1), nil
 }
 
 // wakeFromInboxIfIdle re-checks sessionID's completion inbox once this
