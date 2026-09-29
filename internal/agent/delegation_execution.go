@@ -36,23 +36,24 @@ func (d *delegationFinalizer) snapshotDelegation(args *tools.TaskCreateArgs, def
 		if err != nil {
 			return fmt.Errorf("snapshot delegation sessions: %w", err)
 		}
-		for _, priorSession := range prior {
-			messages, err := d.messages.List(ctx, priorSession.ID)
-			if err != nil {
-				return fmt.Errorf("snapshot delegation messages: %w", err)
-			}
-			if messages = trimToSummary(priorSession, messages); len(messages) != 0 {
-				captured := make([]delegationHistoryMessage, 0, len(messages))
-				for _, item := range messages {
-					parts, err := message.MarshalParts(item.Parts)
-					if err != nil {
-						return fmt.Errorf("snapshot delegation content: %w", err)
-					}
-					item.Parts = nil
-					captured = append(captured, delegationHistoryMessage{Message: delegationMessage(item), Parts: parts})
+		// The run's budget is only known once its runtime is built, but it
+		// never exceeds maxCarriedSubAgentChars, so what the snapshot leaves
+		// out here the run would have dropped anyway.
+		perSession, _, err := d.loadCarriedSessions(ctx, prior, maxCarriedSubAgentChars)
+		if err != nil {
+			return fmt.Errorf("snapshot delegation messages: %w", err)
+		}
+		for _, messages := range perSession {
+			captured := make([]delegationHistoryMessage, 0, len(messages))
+			for _, item := range messages {
+				parts, err := message.MarshalParts(item.Parts)
+				if err != nil {
+					return fmt.Errorf("snapshot delegation content: %w", err)
 				}
-				spec.History = append(spec.History, captured)
+				item.Parts = nil
+				captured = append(captured, delegationHistoryMessage{Message: delegationMessage(item), Parts: parts})
 			}
+			spec.History = append(spec.History, captured)
 		}
 	}
 	if options := d.cfg.Config().Options; options != nil {

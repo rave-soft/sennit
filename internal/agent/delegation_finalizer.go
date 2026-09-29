@@ -899,6 +899,43 @@ func (d *delegationFinalizer) finishSubAgent(outcome subAgentOutcome) fantasy.To
 
 // carryOverMessages collects the named sub-agent's earlier conversations
 // under the same parent, trimmed to the carried-history budget.
+// loadCarriedSessions reads the prior sessions (oldest first, as
+// ListSubAgentSessions returns them) that applyCarryOverBudget can still
+// carry under limit, and returns them oldest first with empty sessions left
+// out. It walks newest first and stops at the first session that
+// applyCarryOverBudget would drop under limit, so older transcripts are
+// never read. skipped counts the sessions left out by that stop, empty
+// ones included, since the walk never read them to find out.
+//
+// applyCarryOverBudget over the result, with any budget up to limit, keeps
+// what it would have kept over every session: both walks add the same
+// sizes from the newest end, and a budget no larger than limit stops no
+// earlier than limit does. A named sub-agent that ran fifty times under one
+// parent used to drag all fifty transcripts through memory and into its
+// delegation snapshot, 90MB of which its prompt used at most limit bytes.
+func (d *delegationFinalizer) loadCarriedSessions(ctx context.Context, prior []session.Session, limit int) (perSession [][]message.Message, skipped int, err error) {
+	total := 0
+	for i := len(prior) - 1; i >= 0; i-- {
+		msgs, err := d.messages.List(ctx, prior[i].ID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("session %s: %w", prior[i].ID, err)
+		}
+		msgs = trimToSummary(prior[i], msgs)
+		if len(msgs) == 0 {
+			continue
+		}
+		size := messagesTextLen(msgs)
+		if len(perSession) > 0 && total+size > limit {
+			skipped = i + 1
+			break
+		}
+		total += size
+		perSession = append(perSession, msgs)
+	}
+	slices.Reverse(perSession)
+	return perSession, skipped, nil
+}
+
 func (d *delegationFinalizer) carryOverMessages(ctx context.Context, in carryOverBudgetInput, parentSessionID, agentID, currentSessionID string) ([]message.Message, error) {
 	if agentID == "" {
 		return nil, nil
@@ -912,32 +949,22 @@ func (d *delegationFinalizer) carryOverMessages(ctx context.Context, in carryOve
 		return nil, nil
 	}
 
-	// Per-session slices, kept apart until the budget has been applied:
-	// the budget drops whole sessions, never half of an exchange.
-	perSession := make([][]message.Message, 0, len(prior))
-	for _, s := range prior {
-		msgs, err := d.messages.List(ctx, s.ID)
-		if err != nil {
-			return nil, fmt.Errorf("list messages of prior %s session %s: %w", agentID, s.ID, err)
-		}
-		msgs = trimToSummary(s, msgs)
-		if len(msgs) == 0 {
-			continue
-		}
-		perSession = append(perSession, msgs)
+	budget := carryOverBudget(in)
+	perSession, skipped, err := d.loadCarriedSessions(ctx, prior, budget)
+	if err != nil {
+		return nil, fmt.Errorf("list messages of prior %s %w", agentID, err)
 	}
 
-	budget := carryOverBudget(in)
 	// The trim is correlated to the PARENT session (the one whose sub-agent
 	// history is being carried) and the current run, so the chain tool can
 	// group it with the run's provider/repair lines by session_id/run_id.
 	kept, dropped := applyCarryOverBudget(perSession, budget, trimCorr(parentSessionID, RunIDFromContext(ctx)))
-	if dropped > 0 {
+	if dropped+skipped > 0 {
 		slog.Info(
 			"Dropped oldest sub-agent sessions from carried history",
 			"agent", agentID,
 			"parent_session", parentSessionID,
-			"dropped_sessions", dropped,
+			"dropped_sessions", dropped+skipped,
 			"kept_sessions", len(perSession)-dropped,
 			"budget_bytes", budget,
 			"context_window", in.Model.CatalogCfg.ContextWindow,
