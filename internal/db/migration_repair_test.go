@@ -40,7 +40,7 @@ func migrateToBeforeRepair(t *testing.T) *sql.DB {
 // old schema allowed and the new UNIQUE(path, version) forbids: two
 // sessions each holding their own version 0 of one path. The migration
 // has to renumber rather than fail, and it has to keep the recorded
-// order, since that order is what ListBySessionTree and the UI's
+// order, since that order is what ListEndpointsBySessionTree and the UI's
 // first-to-latest diff read.
 func TestMigration_RepairRenumbersDuplicateFileVersions(t *testing.T) {
 	conn := migrateToBeforeRepair(t)

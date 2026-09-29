@@ -392,6 +392,9 @@ type FileServices interface {
 	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error)
 	FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error)
 
+	// ListSessionHistory returns the first and the latest version of every
+	// path touched anywhere in sessionID's session tree: what the
+	// changed-files panel diffs, and nothing in between.
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
 
 	// ListProjectFiles lists project files for the @-mention completions

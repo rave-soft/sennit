@@ -103,21 +103,17 @@ func TestCreateVersionConcurrent(t *testing.T) {
 		require.True(t, seenVersions[v], "missing version %d", v)
 	}
 
-	persisted, err := files.ListBySessionTree(t.Context(), sessionID)
-	require.NoError(t, err)
+	persisted := allFileVersions(t, dataDir, "concurrent.go")
 	require.Len(t, persisted, n)
 	persistedVersions := make(map[int64]bool, n)
 	persistedContents := make(map[string]bool, n)
-	for _, file := range persisted {
-		persistedVersions[file.Version] = true
-		persistedContents[file.Content] = true
+	for version, content := range persisted {
+		persistedVersions[version] = true
+		persistedContents[content] = true
 	}
 	require.Equal(t, seenVersions, persistedVersions)
 	require.Equal(t, seenContents, persistedContents)
 
-	deleted, err := files.ListBySessionTree(t.Context(), sessionID)
-	require.NoError(t, err)
-	require.Len(t, deleted, n)
 	cleanupConn, err := db.OpenDB(t.Context(), filepath.Join(dataDir, "sennit.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, cleanupConn.Close()) })
@@ -154,14 +150,13 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	}
 	require.Len(t, secondSeen, secondRound)
 
-	resurrected, err := files.ListBySessionTree(t.Context(), sessionID)
-	require.NoError(t, err)
+	resurrected := allFileVersions(t, dataDir, "concurrent.go")
 	require.Len(t, resurrected, secondRound)
 	resurrectedVersions := make(map[int64]bool, secondRound)
 	resurrectedContents := make(map[string]bool, secondRound)
-	for _, file := range resurrected {
-		resurrectedVersions[file.Version] = true
-		resurrectedContents[file.Content] = true
+	for version, content := range resurrected {
+		resurrectedVersions[version] = true
+		resurrectedContents[content] = true
 	}
 	require.Equal(t, secondSeen, resurrectedVersions)
 	for i := range secondRound {
@@ -169,7 +164,7 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	}
 }
 
-func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
+func TestListEndpointsBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
 	files, sessions, rootID, _ := newTestService(t)
 	child, err := sessions.CreateTaskSession(t.Context(), "child", rootID, "child")
 	require.NoError(t, err)
@@ -186,7 +181,7 @@ func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, sessionID := range []string{rootID, child.ID, sibling.ID, nested.ID} {
-		treeFiles, listErr := files.ListBySessionTree(t.Context(), sessionID)
+		treeFiles, listErr := files.ListEndpointsBySessionTree(t.Context(), sessionID)
 		require.NoError(t, listErr)
 		paths := make([]string, len(treeFiles))
 		for i, file := range treeFiles {
@@ -194,6 +189,57 @@ func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
 		}
 		require.ElementsMatch(t, []string{"root.go", "child.go", "nested.go"}, paths)
 	}
+}
+
+// TestListEndpointsBySessionTreeSkipsIntermediateVersions pins that only
+// the first and the latest version of a path come back, whichever session
+// in the tree wrote them, and that a version written outside the tree is
+// neither.
+func TestListEndpointsBySessionTreeSkipsIntermediateVersions(t *testing.T) {
+	files, sessions, rootID, _ := newTestService(t)
+	child, err := sessions.CreateTaskSession(t.Context(), "child", rootID, "child")
+	require.NoError(t, err)
+	other, err := sessions.Create(t.Context(), "other")
+	require.NoError(t, err)
+
+	for i, sessionID := range []string{rootID, child.ID, rootID, child.ID} {
+		_, err := files.CreateVersion(t.Context(), sessionID, "main.go", fmt.Sprintf("v%d", i))
+		require.NoError(t, err)
+	}
+	_, err = files.CreateVersion(t.Context(), other.ID, "main.go", "outside")
+	require.NoError(t, err)
+	_, err = files.CreateVersion(t.Context(), child.ID, "once.go", "only")
+	require.NoError(t, err)
+
+	endpoints, err := files.ListEndpointsBySessionTree(t.Context(), rootID)
+	require.NoError(t, err)
+	got := make(map[string][]string)
+	for _, file := range endpoints {
+		got[file.Path] = append(got[file.Path], file.Content)
+	}
+	require.Equal(t, map[string][]string{"main.go": {"v0", "v3"}, "once.go": {"only"}}, got)
+}
+
+// allFileVersions reads every stored version of path straight from the
+// database, keyed by version: the service itself only lists a tree's
+// endpoints.
+func allFileVersions(t *testing.T, dataDir, path string) map[int64]string {
+	t.Helper()
+	conn, err := db.OpenDB(t.Context(), filepath.Join(dataDir, "sennit.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, conn.Close()) }()
+	rows, err := conn.QueryContext(t.Context(), "SELECT version, content FROM files WHERE path = ?", path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, rows.Close()) }()
+	versions := make(map[int64]string)
+	for rows.Next() {
+		var version int64
+		var content string
+		require.NoError(t, rows.Scan(&version, &content))
+		versions[version] = content
+	}
+	require.NoError(t, rows.Err())
+	return versions
 }
 
 // TestCreateVersionNumbersAcrossSessions pins that one path's versions

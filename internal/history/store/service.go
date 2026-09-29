@@ -27,7 +27,9 @@ type Service interface {
 	CreateVersion(ctx context.Context, sessionID, path, content string) (history.File, error)
 
 	GetByPathAndSession(ctx context.Context, path, sessionID string) (history.File, error)
-	ListBySessionTree(ctx context.Context, sessionID string) ([]history.File, error)
+	// ListEndpointsBySessionTree returns the first and the latest version
+	// of every path touched anywhere in sessionID's session tree.
+	ListEndpointsBySessionTree(ctx context.Context, sessionID string) ([]history.File, error)
 }
 
 type service struct {
@@ -48,8 +50,8 @@ func NewService(q *db.Queries, sqlDB *sql.DB) Service {
 // number. If no previous versions exist for the path, it creates the initial
 // version. The provided content is stored as the new version. Version
 // numbers are global per path — shared across sessions, which is what lets
-// ListBySessionTree order one file's versions across a whole session tree
-// and is enforced by UNIQUE(path, version) — so the next version is
+// ListEndpointsBySessionTree find one file's first and latest version
+// across a whole session tree and is enforced by UNIQUE(path, version) — so the next version is
 // computed inside the same transaction as the insert to avoid a
 // read-then-write race between concurrent callers.
 func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (history.File, error) {
@@ -88,10 +90,13 @@ func (s *service) GetByPathAndSession(ctx context.Context, path, sessionID strin
 	return s.fromDBItem(dbFile), nil
 }
 
-// ListBySessionTree returns files from the root session and all of its
-// descendants, regardless of which session in the tree was requested.
-func (s *service) ListBySessionTree(ctx context.Context, sessionID string) ([]history.File, error) {
-	dbFiles, err := s.q.ListFilesBySessionTree(ctx, sessionID)
+// ListEndpointsBySessionTree returns the first and the latest version of
+// every path touched by the root session or any of its descendants,
+// regardless of which session in the tree was requested. See
+// ListFileEndpointsBySessionTree for why the versions in between are left
+// out.
+func (s *service) ListEndpointsBySessionTree(ctx context.Context, sessionID string) ([]history.File, error) {
+	dbFiles, err := s.q.ListFileEndpointsBySessionTree(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}

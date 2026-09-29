@@ -97,7 +97,14 @@ type Querier interface {
 	// this work land" as the database gets: whether a reviewer approved the
 	// change is not something this process records.
 	ListDelegationOutcomesSince(ctx context.Context, arg ListDelegationOutcomesSinceParams) ([]ListDelegationOutcomesSinceRow, error)
-	ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error)
+	// The first and the latest version of every path the session tree touched,
+	// from the root session and all of its descendants, whichever session in
+	// the tree is asked about. The versions in between are not read: the
+	// changed-files panel diffs first against latest, and on a long session
+	// with many delegations the full history ran to hundreds of megabytes per
+	// refresh. Versions are unique per path (UNIQUE(path, version)), so this
+	// is at most two rows per path.
+	ListFileEndpointsBySessionTree(ctx context.Context, sessionID string) ([]File, error)
 	// Scoped by joining sessions rather than by a project_path column of its
 	// own: the scope of a latency event is the scope of the session that
 	// produced it, and duplicating the path would let the two disagree after
@@ -198,7 +205,7 @@ type Querier interface {
 	ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]ListUnfinishedAssistantMessagesRow, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	// Version numbers are allocated per path across every session, which is
-	// what makes ListFilesBySessionTree's cross-session ordering and the
+	// what makes ListFileEndpointsBySessionTree's cross-session ordering and the
 	// UI's first-to-latest diff meaningful. UNIQUE(path, version) is the key
 	// that holds this up, so callers must allocate inside the same
 	// transaction as the insert.
