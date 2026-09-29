@@ -23,7 +23,6 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -188,7 +187,9 @@ func stopThreadTurnTimer(thread *threadAttachment) {
 
 // Root is the top-level tea.Model. See the package doc comment above.
 type Root struct {
-	com             *common.Common
+	com *common.Common
+	// dashboardCanvas is dashboardView's buffer, kept between frames.
+	dashboardCanvas frameCanvas
 	main            *UI
 	dashboard       *delegations.Dashboard // lazily created on first ctrl+e
 	dashboardDialog *dialog.Overlay        // hosts delegation cleanup confirmation
@@ -284,7 +285,7 @@ func (r *Root) dashboardView() tea.View {
 	v.KeyboardEnhancements.ReportAssociatedText = true
 	v.WindowTitle = brand.Slug + " delegations"
 
-	canvas := uv.NewScreenBuffer(r.width, r.height)
+	canvas := r.dashboardCanvas.next(r.width, r.height)
 	r.dashboard.Draw(canvas, canvas.Bounds())
 	if r.dashboardDialog.HasDialogs() {
 		v.Cursor = r.dashboardDialog.Draw(canvas, canvas.Bounds())

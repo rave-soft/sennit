@@ -319,7 +319,7 @@ func (m *UI) View() tea.View {
 		v.WindowTitle += " — " + m.sess.current.Title
 	}
 
-	canvas := uv.NewScreenBuffer(m.lay.width, m.lay.height)
+	canvas := m.canvas.next(m.lay.width, m.lay.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
 	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines

@@ -117,6 +117,9 @@ type copyChatHighlightMsg struct{ uiOwned }
 type UI struct {
 	com *common.Common
 
+	// canvas is View's screen buffer, kept between frames.
+	canvas frameCanvas
+
 	sess sessionState
 
 	// queued holds the chat placeholders for prompts submitted into a
