@@ -26,8 +26,22 @@ type AgentListParams struct{}
 // a thread, and the two records genuinely differ (a thread has a branch
 // and a worktree, a task has neither).
 type AgentListResponseMetadata struct {
-	Tasks   []TaskInfo   `json:"tasks"`
-	Threads []ThreadInfo `json:"threads"`
+	Tasks   []AgentListRow `json:"tasks"`
+	Threads []AgentListRow `json:"threads"`
+}
+
+// AgentListRow is what the transcript renders of one listed delegation:
+// the task count line reads each task's Status and nothing else. Field
+// names match TaskInfo and ThreadInfo, whose full rows this used to hold,
+// so a result stored before still decodes the same way. The goal and the
+// result summary stay out: this metadata is stored with every agent_list
+// call for good, and with a few hundred delegations the full rows ran to
+// over a megabyte a call, a long session's single largest cost when the
+// UI loads it.
+type AgentListRow struct {
+	ID     string
+	Name   string `json:",omitempty"`
+	Status string
 }
 
 // NewAgentListTool creates the agent_list tool. Either manager may be
@@ -81,10 +95,17 @@ func NewAgentListTool(tasks TaskManager, threads ThreadManager) fantasy.AgentToo
 				fmt.Fprintf(&sb, "%s\t%s\t%s\t%s\t%s\n", st.ID, KindThread, st.Status, st.Name, firstLine(summary))
 			}
 
-			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(sb.String()),
-				AgentListResponseMetadata{Tasks: taskRows, Threads: threadRows},
-			), nil
+			meta := AgentListResponseMetadata{
+				Tasks:   make([]AgentListRow, len(taskRows)),
+				Threads: make([]AgentListRow, len(threadRows)),
+			}
+			for i, ti := range taskRows {
+				meta.Tasks[i] = AgentListRow{ID: ti.ID, Status: ti.Status}
+			}
+			for i, st := range threadRows {
+				meta.Threads[i] = AgentListRow{ID: st.ID, Name: st.Name, Status: st.Status}
+			}
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), meta), nil
 		},
 	)
 }

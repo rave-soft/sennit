@@ -458,3 +458,22 @@ func TestTaskListTool_PersonsSessionSeesEverythingItStarted(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"a", "b"}, listed)
 }
+
+// TestTaskListTool_MetadataCarriesNoGoalsOrSummaries: the metadata is kept
+// with every agent_list result for good, and with a few hundred
+// delegations their goals and summaries ran to over a megabyte a call. The
+// transcript reads statuses alone.
+func TestTaskListTool_MetadataCarriesNoGoalsOrSummaries(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Goal: "GOAL-TEXT", Status: "completed", ResultSummary: "SUMMARY-TEXT", Error: "ERROR-TEXT"}
+
+	resp := callTaskTool(t, NewAgentListTool(manager, nil), AgentListParams{})
+	require.False(t, resp.IsError)
+	require.NotContains(t, resp.Metadata, "GOAL-TEXT")
+	require.NotContains(t, resp.Metadata, "SUMMARY-TEXT")
+	require.NotContains(t, resp.Metadata, "ERROR-TEXT")
+
+	var meta AgentListResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, []AgentListRow{{ID: "t1", Status: "completed"}}, meta.Tasks)
+}
