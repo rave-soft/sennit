@@ -43,14 +43,34 @@ type ListCache struct {
 
 // Threads returns only isolated delegations for the active-work dock and
 // header badge. The dashboard reads Cache.Value directly to show all kinds.
+//
+// It runs several times per frame from View, over a list that holds every
+// task the project ever ran (a thousand and more in a long-lived project),
+// of which isolated delegations are a handful. So it sizes the copy to the
+// matches, not to the whole list, and returns nil without allocating when
+// there are none: sized to the whole list, it was the largest single
+// source of garbage in the process.
 func (c *ListCache) Threads() []proto.Thread {
-	threads := make([]proto.Thread, 0, len(c.Cache.Value))
+	n := 0
 	for _, delegation := range c.Cache.Value {
-		if proto.ThreadKind(delegation.Kind) == proto.ThreadKindThread || delegation.Kind == "" {
+		if isIsolated(delegation) {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	threads := make([]proto.Thread, 0, n)
+	for _, delegation := range c.Cache.Value {
+		if isIsolated(delegation) {
 			threads = append(threads, delegation)
 		}
 	}
 	return threads
+}
+
+func isIsolated(delegation proto.Thread) bool {
+	return proto.ThreadKind(delegation.Kind) == proto.ThreadKindThread || delegation.Kind == ""
 }
 
 // LoadedMsg delivers an off-thread all-delegation list result.

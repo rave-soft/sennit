@@ -3,6 +3,7 @@ package delegations
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -501,4 +502,23 @@ func TestApplyThreadEventTreatsEmptyKindAsThread(t *testing.T) {
 	})
 
 	require.Equal(t, []proto.Thread{{ID: "thr-1"}}, c.Cache.Value)
+}
+
+// Threads runs several times per frame over every task the project ever
+// ran. With no isolated delegation among them it must not allocate, and
+// with some it must allocate only their copy.
+func TestThreadsAllocatesOnlyForMatches(t *testing.T) {
+	c := &ListCache{}
+	tasks := make([]proto.Thread, 2000)
+	for i := range tasks {
+		tasks[i] = proto.Thread{ID: fmt.Sprintf("task-%d", i), Kind: "task", Goal: "a long goal"}
+	}
+	c.Cache.Set(tasks)
+
+	require.Nil(t, c.Threads())
+	require.Zero(t, testing.AllocsPerRun(100, func() { _ = c.Threads() }))
+
+	c.Cache.Set(append(tasks, proto.Thread{ID: "thr-1", Kind: "thread"}))
+	require.Equal(t, []proto.Thread{{ID: "thr-1", Kind: "thread"}}, c.Threads())
+	require.Equal(t, 1, cap(c.Threads()), "the copy is sized to the matches, not the whole list")
 }
