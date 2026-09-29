@@ -13,9 +13,15 @@ import (
 )
 
 func sessionMessageItems(sty *styles.Styles, cfg *workspace.FrontendConfig, msgs []message.Message) ([]chat.MessageItem, int64) {
+	// Each message gets its own allocation. User and assistant items keep
+	// a *message.Message; pointing those into msgs kept the whole backing
+	// array alive, and with it every tool message's parts, long after the
+	// items had taken the results they render (which they may compact, see
+	// chat.compactToolResult).
 	msgPtrs := make([]*message.Message, len(msgs))
 	for i := range msgs {
-		msgPtrs[i] = &msgs[i]
+		msg := msgs[i]
+		msgPtrs[i] = &msg
 	}
 	toolResultMap := chat.BuildToolResultMap(msgPtrs)
 	var lastUserMessageTime int64

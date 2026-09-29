@@ -215,7 +215,7 @@ func newBaseToolMessageItem(
 		sty:                      sty,
 		toolRenderer:             toolRenderer,
 		toolCall:                 toolCall,
-		result:                   result,
+		result:                   compactToolResult(toolCall.Name, result),
 		status:                   status,
 		hasCappedWidth:           hasCappedWidth,
 	}

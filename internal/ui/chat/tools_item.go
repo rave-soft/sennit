@@ -208,7 +208,7 @@ func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
-	t.result = res
+	t.result = compactToolResult(t.toolCall.Name, res)
 	t.clearCache()
 	t.Bump()
 }

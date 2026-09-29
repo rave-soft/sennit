@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
@@ -58,6 +59,41 @@ type taskInfo struct {
 type taskListMetadata struct {
 	Tasks []taskInfo
 }
+
+// compactToolResult returns the result an item keeps for a tool named
+// name: res itself, or a copy holding only what the item renders. An
+// agent_list result stored before its metadata was slimmed down carries
+// every listed delegation's goal and result summary, over a megabyte a
+// call with a few hundred of them, all to render a count; the copy keeps
+// each task's status alone. The text the model saw, which copying the
+// item reads, is kept as it was.
+func compactToolResult(name string, res *message.ToolResult) *message.ToolResult {
+	if res == nil || name != tools.AgentListToolName || len(res.Metadata) < compactMetadataOver {
+		return res
+	}
+	var meta taskListMetadata
+	if json.Unmarshal([]byte(res.Metadata), &meta) != nil {
+		return res
+	}
+	statuses := make([]taskStatusOnly, len(meta.Tasks))
+	for i, task := range meta.Tasks {
+		statuses[i] = taskStatusOnly{Status: task.Status}
+	}
+	data, err := json.Marshal(struct{ Tasks []taskStatusOnly }{statuses})
+	if err != nil {
+		return res
+	}
+	compacted := *res
+	compacted.Metadata = string(data)
+	return &compacted
+}
+
+// compactMetadataOver is the metadata size below which compactToolResult
+// leaves a result alone: a new-format agent_list result is already small.
+const compactMetadataOver = 4 << 10
+
+// taskStatusOnly is the part of a listed task the count line reads.
+type taskStatusOnly struct{ Status string }
 
 // taskOutputMetadata mirrors tools.TaskOutput: how much of a task's
 // transcript came back, and how much there was.

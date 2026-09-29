@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -139,4 +140,33 @@ func TestTaskGoalHeadline(t *testing.T) {
 			require.Equal(t, tc.want, taskGoalHeadline(tc.goal))
 		})
 	}
+}
+
+// TestCompactToolResultKeepsTheTaskCount: an agent_list result stored in
+// the old, full-row format is cut down to task statuses when an item takes
+// it, and still renders the same count line; the text is left alone.
+func TestCompactToolResultKeepsTheTaskCount(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("goal and summary text ", 400)
+	type fullRow struct{ ID, Goal, Status, ResultSummary, Error string }
+	legacy, err := json.Marshal(struct{ Tasks []fullRow }{[]fullRow{
+		{ID: "a", Goal: long, Status: "running", ResultSummary: long},
+		{ID: "b", Goal: long, Status: "completed", ResultSummary: long},
+		{ID: "c", Goal: long, Status: "completed", ResultSummary: long},
+	}})
+	require.NoError(t, err)
+	require.Greater(t, len(legacy), compactMetadataOver)
+
+	res := &message.ToolResult{ToolCallID: "tc-1", Content: "a\ttask\trunning", Metadata: string(legacy)}
+	compacted := compactToolResult(tools.AgentListToolName, res)
+	require.NotSame(t, res, compacted, "the stored result must not be modified in place")
+	require.Equal(t, string(legacy), res.Metadata)
+	require.Less(t, len(compacted.Metadata), 200)
+	require.Equal(t, res.Content, compacted.Content)
+
+	out := renderTaskTool(t, tools.AgentListToolName, `{}`, string(legacy), res.Content)
+	require.Contains(t, out, "3 tasks, 1 running")
+
+	require.Same(t, res, compactToolResult(tools.AgentResultToolName, res), "only agent_list is compacted")
 }
