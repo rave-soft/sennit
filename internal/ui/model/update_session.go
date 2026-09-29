@@ -285,6 +285,16 @@ func (m *UI) applyCreateSession(msg createSessionMsg, cmds []tea.Cmd) ([]tea.Cmd
 // stale reply from a session the user has since switched away from and
 // skipping the refresh entirely when nothing actually changed.
 func (m *UI) applySessionFilesUpdates(msg sessionFilesUpdatesMsg, cmds []tea.Cmd) []tea.Cmd {
+	m.sess.filesRefreshInFlight = false
+	if m.sess.filesRefreshPending {
+		m.sess.filesRefreshPending = false
+		if cmd := m.sess.refreshModifiedFiles(m.com, m); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if msg.err != nil {
+		return append(cmds, util.ReportError(msg.err))
+	}
 	// Drop a stale reply from a session the user has since switched
 	// away from — otherwise it clobbers the sidebar's file list with
 	// another session's files.

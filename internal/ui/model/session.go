@@ -17,7 +17,6 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
-	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -32,6 +31,14 @@ type sessionState struct {
 	// (sidebar.go) keys off it instead of diffing the slice itself, since
 	// files is always assigned wholesale when it changes.
 	filesVersion int
+
+	// filesRefreshInFlight is set while a refreshModifiedFiles load runs,
+	// and filesRefreshPending when another was asked for meanwhile. File
+	// events and tool results arrive in bursts, one per write of every
+	// agent in the tree; each used to start its own load of the tree's
+	// file history. Now a burst costs one load plus one more after it.
+	filesRefreshInFlight bool
+	filesRefreshPending  bool
 
 	// keeps track of read files while we don't have a session id
 	fileReads []string
@@ -87,6 +94,10 @@ type sessionFilesUpdatesMsg struct {
 
 	sessionID    string
 	sessionFiles []SessionFile
+	// err is the load's failure. It still arrives as this message, not
+	// as an error message of its own, so that it clears
+	// filesRefreshInFlight.
+	err error
 }
 
 // createSessionMsg carries a newly created session and the captured send
@@ -427,22 +438,27 @@ func sameSessionFile(a, b SessionFile) bool {
 // viewed one for equality meant a subagent could rewrite half the repo
 // without a single row appearing in the panel of the session that started
 // it — the list only caught up on the parent's next tool call. The reload
-// is scoped to the session tree in SQL (History.ListBySessionTree), which
+// is scoped to the session tree in SQL (History.ListEndpointsBySessionTree), which
 // is the authority on what belongs to this session; an event from an
 // unrelated session reloads the same list, and the update is then dropped
 // as a no-op (see sessionFilesUpdatesMsg).
+//
+// While one load runs, further calls only mark another as pending; the
+// reply's handler starts it (see filesRefreshInFlight).
 func (s *sessionState) refreshModifiedFiles(com *common.Common, owner *UI) tea.Cmd {
 	if s.current == nil {
 		return nil
 	}
+	if s.filesRefreshInFlight {
+		s.filesRefreshPending = true
+		return nil
+	}
+	s.filesRefreshInFlight = true
 	sessionID := s.current.ID
 	ctx, ws := com.Context(), com.Workspace
 	return func() tea.Msg {
 		files, err := loadModifiedFiles(ctx, ws, sessionID)
-		if err != nil {
-			return util.NewErrorMsg(err)
-		}
-		return sessionFilesUpdatesMsg{uiOwned: uiOwned{owner: owner}, sessionID: sessionID, sessionFiles: files}
+		return sessionFilesUpdatesMsg{uiOwned: uiOwned{owner: owner}, sessionID: sessionID, sessionFiles: files, err: err}
 	}
 }
 

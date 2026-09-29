@@ -2,10 +2,13 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
@@ -283,4 +286,54 @@ func TestFileListFitsItsBudget(t *testing.T) {
 			"maxItems=%d must bound the rendered lines, got:\n%s", maxItems, out)
 		require.Contains(t, out, "more", "the hint must still be shown")
 	}
+}
+
+// TestFileEventBurstCoalescesRefreshes pins the in-flight guard on
+// refreshModifiedFiles: every file event and tool result used to start its
+// own load of the session tree's file history, so a delegation writing a
+// dozen files read that history a dozen times at once. A burst now costs
+// the load already running plus one more once it lands.
+func TestFileEventBurstCoalescesRefreshes(t *testing.T) {
+	t.Parallel()
+
+	com := common.DefaultCommon(context.Background(), fileHistoryWorkspace{})
+	m := &UI{com: com}
+	m.sess.current = &session.Session{ID: "s1"}
+	event := pubsub.Event[history.File]{Payload: history.File{SessionID: "s1", Path: "main.go"}}
+
+	first := nonNilCmds(m.updateSession(event, nil))
+	require.Len(t, first, 1)
+	for range 4 {
+		cmds := nonNilCmds(m.updateSession(event, nil))
+		require.Empty(t, cmds, "a refresh already running must absorb further events")
+	}
+
+	followUp := nonNilCmds(m.updateSession(first[0](), nil))
+	require.Len(t, followUp, 1, "events absorbed during the load must cost one more load")
+
+	done := nonNilCmds(m.updateSession(followUp[0](), nil))
+	require.Empty(t, done, "nothing was asked for during the follow-up")
+
+	again := nonNilCmds(m.updateSession(event, nil))
+	require.Len(t, again, 1, "an idle panel must refresh on the next event")
+}
+
+// TestFailedFilesRefreshDoesNotWedgeTheGuard: a load that fails must still
+// clear the in-flight flag, or the panel would never refresh again.
+func TestFailedFilesRefreshDoesNotWedgeTheGuard(t *testing.T) {
+	t.Parallel()
+
+	com := common.DefaultCommon(context.Background(), fileHistoryWorkspace{})
+	m := &UI{com: com}
+	m.sess.current = &session.Session{ID: "s1"}
+
+	require.NotNil(t, m.sess.refreshModifiedFiles(m.com, m))
+	cmds := nonNilCmds(m.updateSession(sessionFilesUpdatesMsg{uiOwned: uiOwned{owner: m}, sessionID: "s1", err: errors.New("disk")}, nil))
+	require.Len(t, cmds, 1, "the failure must still be reported")
+	require.NotNil(t, m.sess.refreshModifiedFiles(m.com, m), "a failed load must not leave the guard set")
+}
+
+// nonNilCmds drops the nil commands Update's handlers append unguarded.
+func nonNilCmds(cmds []tea.Cmd, _ bool) []tea.Cmd {
+	return slices.DeleteFunc(cmds, func(c tea.Cmd) bool { return c == nil })
 }
