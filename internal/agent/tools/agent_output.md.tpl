@@ -21,7 +21,8 @@ here — use `agent_result` for what a thread has reported.
 
 Only user and assistant text is included — no tool calls, tool results,
 or reasoning — and only the most recent messages, not the whole
-transcript, so checking in does not flood your own context. If there are
+transcript, so checking in does not flood your own context. The goal you
+gave the delegation is not repeated back to you. If there are
 more messages than shown, the response says so ("showing last N of M")
 instead of silently hiding them; ask again with a higher `limit` for more,
 up to the maximum.

@@ -156,6 +156,7 @@ func TestTaskResultTool_ReportsStatusWhenStillRunning(t *testing.T) {
 	resp := callTaskTool(t, NewAgentResultTool(manager, nil), AgentResultParams{ID: "t1"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "still running")
+	require.Contains(t, resp.Content, "end your turn to wait")
 	require.NotContains(t, resp.Content, "finished")
 }
 
@@ -314,6 +315,45 @@ func TestTaskOutputTool_EmptyWhenNoMessages(t *testing.T) {
 	resp := callTaskTool(t, NewAgentOutputTool(manager, nil), AgentOutputParams{ID: "t1"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "No output yet")
+}
+
+// TestTaskOutputTool_OmitsGoalAndHintsToWait covers the loop a local model
+// fell into: a task with nothing but its goal in the transcript answered
+// every agent_output call with the caller's own goal, and nothing in the
+// answer said that polling does not wait.
+func TestTaskOutputTool_OmitsGoalAndHintsToWait(t *testing.T) {
+	manager := newFakeTaskManager()
+	goal := "design the OTLP load generator"
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Goal: goal, Status: "running"}
+	manager.outputs["t1"] = TaskOutput{Messages: []TaskOutputMessage{{Role: "user", Text: goal}}, Total: 1}
+
+	resp := callTaskTool(t, NewAgentOutputTool(manager, nil), AgentOutputParams{ID: "t1"})
+	require.False(t, resp.IsError)
+	require.NotContains(t, resp.Content, goal)
+	require.Contains(t, resp.Content, "No output yet beyond the goal")
+	require.Contains(t, resp.Content, "end your turn to wait")
+
+	manager.outputs["t1"] = TaskOutput{Messages: []TaskOutputMessage{
+		{Role: "user", Text: goal},
+		{Role: "assistant", Text: "reading the ingest code"},
+	}, Total: 2}
+	resp = callTaskTool(t, NewAgentOutputTool(manager, nil), AgentOutputParams{ID: "t1"})
+	require.NotContains(t, resp.Content, goal)
+	require.Contains(t, resp.Content, "(the goal you gave it, omitted)")
+	require.Contains(t, resp.Content, "reading the ingest code")
+}
+
+// TestTaskOutputTool_KeepsGoalInTruncatedTail: a tail that does not start
+// at the transcript's first message cannot be opening with the goal, even
+// when a later message repeats its text.
+func TestTaskOutputTool_KeepsGoalInTruncatedTail(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Goal: "again", Status: "completed"}
+	manager.outputs["t1"] = TaskOutput{Messages: []TaskOutputMessage{{Role: "user", Text: "again"}}, Total: 3}
+
+	resp := callTaskTool(t, NewAgentOutputTool(manager, nil), AgentOutputParams{ID: "t1", Limit: 1})
+	require.Contains(t, resp.Content, "[user] again")
+	require.NotContains(t, resp.Content, "end your turn", "a finished task has nothing to wait for")
 }
 
 func TestTaskOutputTool_MissingID(t *testing.T) {

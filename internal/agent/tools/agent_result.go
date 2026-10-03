@@ -65,8 +65,28 @@ func describeTaskResult(ti TaskInfo) string {
 	case "failed", "interrupted", "cancelled":
 		return fmt.Sprintf("Task %s did not complete (status=%s): %s", ti.ID, ti.Status, ti.Error)
 	default:
-		return fmt.Sprintf("Task %s is still %s; no result yet.", ti.ID, ti.Status)
+		return fmt.Sprintf("Task %s is still %s; no result yet. %s", ti.ID, ti.Status, waitHint)
 	}
+}
+
+// waitHint closes every answer about a delegation that has not finished.
+// The tool descriptions already say not to poll, but a model polling a
+// silent task reads the result, not the description: a local model was
+// seen calling agent_result and agent_output in turn every three seconds
+// for minutes, each answer saying only "still running".
+const waitHint = "Its result will be delivered to you when it finishes, " +
+	"without you asking: end your turn to wait for it. Calling agent_result " +
+	"or agent_output again in the meantime does not wait, it only spends " +
+	"turns and context."
+
+// taskFinished reports whether ti's status is terminal, the same set
+// describeTaskResult answers with an outcome for.
+func taskFinished(ti TaskInfo) bool {
+	switch ti.Status {
+	case "completed", "failed", "interrupted", "cancelled":
+		return true
+	}
+	return false
 }
 
 // describeThread renders a thread's state, including the worktree facts a

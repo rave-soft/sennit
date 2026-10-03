@@ -59,19 +59,44 @@ func NewAgentOutputTool(tasks TaskManager, threads ThreadManager) fantasy.AgentT
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			if len(out.Messages) == 0 {
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse("No output yet."), out), nil
-			}
-
-			var sb strings.Builder
-			if out.Total > len(out.Messages) {
-				fmt.Fprintf(&sb, "Showing last %d of %d messages.\n\n", len(out.Messages), out.Total)
-			}
-			for _, m := range out.Messages {
-				fmt.Fprintf(&sb, "[%s] %s\n\n", m.Role, m.Text)
-			}
-
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(strings.TrimSpace(sb.String())), out), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(renderTaskOutput(ref.Task, out)), out), nil
 		},
 	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}, "limit": intSchemaBounds(100)})
+}
+
+// renderTaskOutput renders out for the caller. The task's goal is left
+// out when the transcript opens with it: the caller wrote it, and echoing
+// it back made every check on a task that had not said anything yet cost
+// the caller its whole prompt again. A task that has not finished ends
+// with waitHint, since a caller reading its transcript is the one most
+// likely to be polling it.
+func renderTaskOutput(ti TaskInfo, out TaskOutput) string {
+	msgs := out.Messages
+	goalOmitted := false
+	if len(msgs) == out.Total && len(msgs) > 0 && msgs[0].Role == "user" && msgs[0].Text == ti.Goal {
+		msgs = msgs[1:]
+		goalOmitted = true
+	}
+
+	var sb strings.Builder
+	switch {
+	case len(msgs) == 0 && goalOmitted:
+		sb.WriteString("No output yet beyond the goal you gave it.")
+	case len(msgs) == 0:
+		sb.WriteString("No output yet.")
+	default:
+		if out.Total > len(out.Messages) {
+			fmt.Fprintf(&sb, "Showing last %d of %d messages.\n\n", len(out.Messages), out.Total)
+		}
+		if goalOmitted {
+			sb.WriteString("[user] (the goal you gave it, omitted)\n\n")
+		}
+		for _, m := range msgs {
+			fmt.Fprintf(&sb, "[%s] %s\n\n", m.Role, m.Text)
+		}
+	}
+	if !taskFinished(ti) {
+		fmt.Fprintf(&sb, "\n\nTask %s is still %s. %s", ti.ID, ti.Status, waitHint)
+	}
+	return strings.TrimSpace(sb.String())
 }
