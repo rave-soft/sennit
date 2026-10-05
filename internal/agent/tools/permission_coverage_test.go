@@ -209,6 +209,7 @@ func toolClassifications() []toolClassification {
 		{name: ReadMCPResourceToolName, writes: false},
 		{name: AgentListToolName, writes: false},
 		{name: AgentResultToolName, writes: false},
+		{name: AgentWaitToolName, writes: false},
 		{name: AgentCancelToolName, writes: false},
 		{name: AgentSendToolName, writes: false},
 		{name: AgentOutputToolName, writes: false},

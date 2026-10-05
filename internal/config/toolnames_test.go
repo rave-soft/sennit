@@ -89,12 +89,12 @@ func TestDiscoverMarkdownAgents_DropsObsoleteThreadToolsAndDoctorWarns(t *testin
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte(`---
 name: reviewer
-tools: [thread_create, thread_merge, thread_remove, thread_list, thread_result, thread_cancel, thread_send, thread_output]
+tools: [thread_create, thread_merge, thread_remove, thread_list, thread_result, thread_wait, thread_cancel, thread_send, thread_output]
 ---
 You review code.`), 0o644))
 	cfg := &Config{Options: &Options{}, workingDir: root}
 	cfg.SetupAgents()
-	require.Equal(t, []string{"agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output"}, cfg.Agents["reviewer"].AllowedTools)
+	require.Equal(t, []string{"agent_list", "agent_result", "agent_wait", "agent_cancel", "agent_send", "agent_output"}, cfg.Agents["reviewer"].AllowedTools)
 	problems := Doctor(cfg)
 	require.Len(t, problems, 3)
 	for _, problem := range problems {

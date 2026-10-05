@@ -179,10 +179,11 @@ func toolSpecs() []toolSpec {
 		// is nil in a workspace with no thread manager, and then they
 		// answer for tasks alone. Same restriction as the worktree tools,
 		// plus the explicit options.background_agents opt-out.
-		{[]string{"agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{[]string{"agent_list", "agent_result", "agent_wait", "agent_cancel", "agent_send", "agent_output"}, func(_ context.Context, rb *runtimeBuilder, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
 				tools.NewAgentListTool(b.taskManager, b.threads),
 				tools.NewAgentResultTool(b.taskManager, b.threads),
+				tools.NewAgentWaitTool(b.taskManager, b.threads),
 				tools.NewAgentCancelTool(b.taskManager, b.threads, b.inputs.permissions),
 				tools.NewAgentSendTool(b.taskManager, b.threads),
 				tools.NewAgentOutputTool(b.taskManager, b.threads),

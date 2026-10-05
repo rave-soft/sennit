@@ -13,7 +13,9 @@ cost is. This is the one place both are written down together.
 ## Steering
 
 Send a message while the agent is already working on something, and it does
-not start a new turn or interrupt whatever tool call is in flight. It's
+not start a new turn or interrupt a tool doing work. A default `agent`
+wait or `agent_wait` returns early on a person's message, leaving the
+delegation running so the next step can answer the person. The message is
 folded into the current turn and picked up at its next step, alongside
 whatever the model was already doing.
 
@@ -34,9 +36,17 @@ else in the workspace, so it doesn't suit work that edits files. It's best
 for read-only or research work: something to go look into while the current
 turn keeps going.
 
-A delegation isn't polled for its result. Once it finishes, its outcome is
-delivered back automatically and shows up as a report at the next step of
-whatever turn created it.
+By default, `agent` waits event-driven for a completed, failed, interrupted,
+or cancelled status and returns the outcome inline to the next provider step.
+Set `background: true` to return immediately and continue independent work.
+Use `agent_wait` with selected IDs when the next action depends on all of them.
+Neither wait uses shell sleep or `job_output`, and results should not be polled.
+
+The durable completion inbox also delivers terminal outcomes automatically.
+An outcome returned inline can appear again as an inbox report; correlate by
+delegation and child-session id and do not repeat actions for the same outcome.
+Inbox delivery remains enabled so cancellation, steering, or a failed parent
+step cannot discard a report.
 
 If that turn has already ended, the report starts a new one — but only in
 the session this sennit is working in. A sennit works in exactly one:
@@ -73,7 +83,7 @@ delegations is capped at 3 levels deep either way.
 ## Every delegation tool answers from where you stand
 
 The delegations form a tree, and `agent_list`, `agent_result`,
-`agent_output`, `agent_send` and `agent_cancel` all read it from one place:
+`agent_wait`, `agent_output`, `agent_send` and `agent_cancel` all read it from one place:
 the session the call came from. Each reaches that session's own subtree —
 what it started, and what those started, at any depth — and nothing else. A
 delegation cannot cancel itself, cannot cancel the delegation it hangs

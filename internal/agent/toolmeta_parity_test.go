@@ -18,7 +18,7 @@ var expectedGateByName = map[toolmeta.Gate][]string{
 	},
 	toolmeta.GateAllowed:     {"agent", "agentic_fetch"},
 	toolmeta.GateNotSubAgent: {"ask_parent"},
-	toolmeta.GateDelegations: {"agent_list", "agent_result", "agent_cancel", "agent_send", "agent_output"},
+	toolmeta.GateDelegations: {"agent_list", "agent_result", "agent_wait", "agent_cancel", "agent_send", "agent_output"},
 	toolmeta.GateLSP:         {"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"},
 	toolmeta.GateMCP:         {"list_mcp_resources", "read_mcp_resource"},
 	toolmeta.GateInteractive: {"question"},

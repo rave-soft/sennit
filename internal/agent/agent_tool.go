@@ -87,8 +87,6 @@ func delegatedAgentPrompt(definition string) string {
 }
 
 // AgentParams is the work to delegate and which agent to hand it to.
-// Delegations are always asynchronous; a tool call is only an
-// acknowledgement of launch.
 //
 // SubagentType keeps user-defined agents off the tool list: registering
 // one tool per agent would grow the tool list with every file in
@@ -107,6 +105,7 @@ type AgentParams struct {
 	// own name.
 	Description string `json:"description,omitempty" description:"Short (3-5 word) label for this delegation"`
 	Isolation   string `json:"isolation,omitempty" description:"Use worktree to run in an isolated git worktree"`
+	Background  bool   `json:"background,omitempty" description:"Run concurrently and return immediately"`
 }
 
 const AgentToolName = "agent"

@@ -106,6 +106,7 @@ var sequentialDenyList = []struct {
 	{JobKillToolName, "kills background shell processes"},
 	{AgentListToolName, "task and thread manager state"},
 	{AgentResultToolName, "task and thread manager state"},
+	{AgentWaitToolName, "blocks on task and thread lifecycle state"},
 	{AgentOutputToolName, "task manager state"},
 	{AgentSendToolName, "posts into a delegation's queue"},
 	{AgentCancelToolName, "cancels a delegation"},
@@ -279,6 +280,8 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewAgentListTool(panicTaskManager{}, nil)
 	case AgentResultToolName:
 		return NewAgentResultTool(panicTaskManager{}, nil)
+	case AgentWaitToolName:
+		return NewAgentWaitTool(panicTaskManager{}, nil)
 	case AgentOutputToolName:
 		return NewAgentOutputTool(panicTaskManager{}, nil)
 	case AgentSendToolName:

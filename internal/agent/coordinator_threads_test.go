@@ -42,7 +42,7 @@ func (noopThreadManager) Wait(context.Context, []string, time.Duration) error {
 
 // threadToolNames lists the agent_* management tools available when a workspace has threads.
 var threadToolNames = []string{
-	tools.AgentListToolName, tools.AgentResultToolName, tools.AgentCancelToolName, tools.AgentSendToolName, tools.AgentOutputToolName,
+	tools.AgentListToolName, tools.AgentResultToolName, tools.AgentWaitToolName, tools.AgentCancelToolName, tools.AgentSendToolName, tools.AgentOutputToolName,
 }
 
 // newThreadsTestCoordinator builds a coordinator with the minimal

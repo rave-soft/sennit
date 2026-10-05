@@ -75,6 +75,10 @@ func (a *agentToolTaskManager) Get(ctx context.Context, id string) (tools.TaskIn
 	return toTaskInfo(st), nil
 }
 
+func (a *agentToolTaskManager) Wait(ctx context.Context, ids []string) error {
+	return a.t.Wait(ctx, ids)
+}
+
 func (a *agentToolTaskManager) Cancel(ctx context.Context, id, reason string) error {
 	return a.t.Cancel(ctx, id, reason)
 }

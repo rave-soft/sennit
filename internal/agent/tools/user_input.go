@@ -42,8 +42,6 @@ func WithUserInput(ctx context.Context, fn UserInputFunc) context.Context {
 //
 // It says nothing about tools that are busy working: interrupting those
 // would throw away the work, which is not what a new message asks for.
-// Delegations do not need this signal because their tool calls acknowledge
-// immediately and the task lifecycle delivers their results later.
 func WaitForUserInput(ctx context.Context) <-chan struct{} {
 	fn := getContextValue[UserInputFunc](ctx, UserInputContextKey, nil)
 	if fn == nil {

@@ -41,6 +41,7 @@ func (noopTaskManager) Output(context.Context, string, int) (tools.TaskOutput, e
 var taskToolNames = []string{
 	tools.AgentListToolName,
 	tools.AgentResultToolName,
+	tools.AgentWaitToolName,
 	tools.AgentCancelToolName,
 	tools.AgentSendToolName,
 	tools.AgentOutputToolName,

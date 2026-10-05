@@ -493,6 +493,40 @@ func (t *TaskManager) List(ctx context.Context) ([]Thread, error) {
 	return tasks, nil
 }
 
+func (t *TaskManager) Wait(ctx context.Context, ids []string) error {
+	for {
+		changed := t.lc.waitChan()
+		active, err := t.anyActive(ctx, ids)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (t *TaskManager) anyActive(ctx context.Context, ids []string) (bool, error) {
+	if len(ids) == 0 {
+		return false, nil
+	}
+	for _, id := range ids {
+		st, err := t.Get(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if st.Status.Active() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // execution returns st's delegation snapshot, which store reads leave out
 // (see [ExecutionStore]). A store that keeps it on the Thread has already
 // supplied it.

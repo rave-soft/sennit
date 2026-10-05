@@ -105,6 +105,17 @@ func TestAgentIsolationAdmissionMatrix(t *testing.T) {
 				require.NoError(t, err)
 				_, err = boot.App.Coordinator().Run(t.Context(), parent.ID, "LAUNCH_MATRIX_PARENT")
 				require.NoError(t, err)
+				mu.Lock()
+				parentStep := ""
+				for _, body := range requests {
+					if strings.Contains(body, "LAUNCH_MATRIX_PARENT") && strings.Contains(body, `"role":"tool"`) {
+						parentStep = body
+					}
+				}
+				mu.Unlock()
+				require.Contains(t, parentStep, "Delegation ")
+				require.Contains(t, parentStep, "completed.")
+				require.Contains(t, parentStep, "MATRIX_RESULT")
 				var task thread.Thread
 				require.Eventually(t, func() bool {
 					tasks, err := boot.App.TaskManager().List(t.Context())

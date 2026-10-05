@@ -27,6 +27,7 @@ import (
 func registerTaskToolRenderers() {
 	for _, name := range []string{
 		tools.AgentResultToolName,
+		tools.AgentWaitToolName,
 		tools.AgentOutputToolName,
 		tools.AgentListToolName,
 		tools.AgentCancelToolName,
@@ -35,8 +36,8 @@ func registerTaskToolRenderers() {
 		// were merged into agent_* still hold calls under them and must
 		// keep rendering; the subject each one reads comes from metadata
 		// attached in the same shape.
-		"task_result", "task_output", "task_list", "task_cancel", "task_send",
-		"thread_list", "thread_status", "thread_result", "thread_cancel", "thread_send", "thread_output",
+		"task_result", "task_wait", "task_output", "task_list", "task_cancel", "task_send",
+		"thread_list", "thread_status", "thread_result", "thread_wait", "thread_cancel", "thread_send", "thread_output",
 	} {
 		registerToolRenderer(name, &TaskToolRenderContext{})
 	}

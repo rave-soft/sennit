@@ -26,6 +26,7 @@ type fakeTaskManager struct {
 	info         tools.TaskInfo
 	err          error
 	cancelCalled bool
+	waited       []string
 }
 
 func (f *fakeTaskManager) Create(_ context.Context, args tools.TaskCreateArgs) (tools.TaskInfo, error) {
@@ -42,8 +43,15 @@ func (f *fakeTaskManager) Create(_ context.Context, args tools.TaskCreateArgs) (
 // tests for the task_* tools these back.
 func (f *fakeTaskManager) List(context.Context) ([]tools.TaskInfo, error) { return nil, nil }
 
-func (f *fakeTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
-	return tools.TaskInfo{}, nil
+func (f *fakeTaskManager) Get(_ context.Context, id string) (tools.TaskInfo, error) {
+	info := f.info
+	info.ID = id
+	return info, nil
+}
+
+func (f *fakeTaskManager) Wait(_ context.Context, ids []string) error {
+	f.waited = append([]string(nil), ids...)
+	return nil
 }
 
 func (f *fakeTaskManager) Cancel(context.Context, string, string) error {
@@ -125,7 +133,7 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
-	input, err := json.Marshal(AgentParams{Prompt: "look into X"})
+	input, err := json.Marshal(AgentParams{Prompt: "look into X", Background: true})
 	require.NoError(t, err)
 
 	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
@@ -143,6 +151,23 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	require.Equal(t, "task-1", meta.TaskID)
 	require.Equal(t, "child-sess", meta.SessionID)
 	require.Equal(t, "running", meta.Status)
+	require.Empty(t, fake.waited)
+}
+
+func TestAgentTool_DefaultWaitsForDelegation(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "completed"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	tool, err := coord.delegation.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()), true)
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	input, err := json.Marshal(AgentParams{Prompt: "look into X"})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Equal(t, []string{"task-1"}, fake.waited)
+	require.Contains(t, resp.Content, "Delegation task-1 completed")
 }
 
 // TestAgentTool_AlwaysCreatesTask proves delegation no longer has a

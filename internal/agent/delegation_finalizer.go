@@ -551,10 +551,8 @@ func (d *delegationFinalizer) markSubSessionBusy(sessionID string) func() {
 
 // launchDelegation creates a durable background delegation through the
 // workspace's task manager, enforcing the background-agents gate and the
-// cascade depth limit. Completion is delivered independently by the task
-// lifecycle (see TaskCompletion), never by keeping the caller's tool
-// invocation open.
-func (d *delegationFinalizer) launchDelegation(ctx context.Context, args tools.TaskCreateArgs) (fantasy.ToolResponse, error) {
+// cascade depth limit.
+func (d *delegationFinalizer) launchDelegation(ctx context.Context, args tools.TaskCreateArgs, wait bool) (fantasy.ToolResponse, error) {
 	if !d.backgroundAgentsEnabled() {
 		return fantasy.NewTextErrorResponse("Delegation is disabled in this workspace (options.background_agents)."), nil
 	}
@@ -574,9 +572,48 @@ func (d *delegationFinalizer) launchDelegation(ctx context.Context, args tools.T
 	// own turns, and reported back on its completion — see
 	// TaskCompletion.Depth and runTurn.foldCompletions.
 	args.Depth = depth + 1
+	if wait {
+		if _, ok := manager.(tools.TaskWaiter); !ok {
+			return fantasy.NewTextErrorResponse("Waiting for delegations is unavailable in this workspace; use background: true to launch concurrently."), nil
+		}
+	}
+	input := tools.WaitForUserInput(ctx)
 	info, err := manager.Create(ctx, args)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to start delegation: %s", err)), nil
+	}
+	if wait {
+		if waiter, ok := manager.(tools.TaskWaiter); ok {
+			waitCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			waitDone := make(chan error, 1)
+			go func() { waitDone <- waiter.Wait(waitCtx, []string{info.ID}) }()
+			select {
+			case err := <-waitDone:
+				if err != nil {
+					return fantasy.ToolResponse{}, fmt.Errorf("wait for delegation: %w", err)
+				}
+			case <-input:
+				cancel()
+				<-waitDone
+				return fantasy.WithResponseMetadata(
+					fantasy.NewTextResponse(fmt.Sprintf("Delegation %s is still running. Wait interrupted because the person sent a message; respond to them now. The delegation continues in the background and will report automatically.", info.ID)),
+					AgentBackgroundResponseMetadata{TaskID: info.ID, SessionID: info.SessionID, Status: info.Status},
+				), nil
+			case <-ctx.Done():
+				cancel()
+				<-waitDone
+				return fantasy.ToolResponse{}, ctx.Err()
+			}
+			info, err = manager.Get(ctx, info.ID)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("read completed delegation: %w", err)
+			}
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(renderDelegationTerminalResult(info)),
+				AgentBackgroundResponseMetadata{TaskID: info.ID, SessionID: info.SessionID, Status: info.Status},
+			), nil
+		}
 	}
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(fmt.Sprintf("Started delegation %s (session %s, status=%s). Its result will follow separately.", info.ID, info.SessionID, info.Status)),
@@ -597,10 +634,26 @@ func builtinDelegatePrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	return prompt.NewPrompt("task", string(taskPromptTmpl)+"\n\n"+delegatedAgentContract, append(opts, prompt.ForSubagent())...)
 }
 
-func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, title, childSessionID string, childDepth int, isolations ...string) (fantasy.ToolResponse, error) {
-	isolation := ""
-	if len(isolations) > 0 {
-		isolation = isolations[0]
+func renderDelegationTerminalResult(info tools.TaskInfo) string {
+	switch info.Status {
+	case "completed":
+		return fmt.Sprintf("Delegation %s completed.\n\nResult:\n%s", info.ID, info.ResultSummary)
+	case "failed", "interrupted", "cancelled":
+		return fmt.Sprintf("Delegation %s finished with status=%s.\n\nError:\n%s", info.ID, info.Status, info.Error)
+	default:
+		return fmt.Sprintf("Delegation %s reached status=%s.", info.ID, info.Status)
+	}
+}
+
+type delegationLaunchOptions struct {
+	isolation string
+	wait      bool
+}
+
+func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, title, childSessionID string, childDepth int, launchOptions ...delegationLaunchOptions) (fantasy.ToolResponse, error) {
+	options := delegationLaunchOptions{wait: true}
+	if len(launchOptions) > 0 {
+		options = launchOptions[0]
 	}
 	if title == "" {
 		title = "New Agent Session"
@@ -614,13 +667,13 @@ func (d *delegationFinalizer) runBackgroundAgent(ctx context.Context, sessionID,
 		ParentSessionID: sessionID,
 		SessionTitle:    title,
 		SessionID:       childSessionID,
-		Isolation:       isolation,
+		Isolation:       options.isolation,
 	}
 	args.Depth = childDepth
 	if err := d.snapshotDelegation(&args, &agentCfg, ctx); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	return d.launchDelegation(ctx, args)
+	return d.launchDelegation(ctx, args, options.wait)
 }
 
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
@@ -1041,7 +1094,7 @@ func (d *delegationFinalizer) agentTool(_ context.Context, cfg agentConfig, allo
 			// workspace has an agent of its own by that name, which the
 			// user meant and which the alias must not swallow.
 			if params.SubagentType == "" || (params.SubagentType == generalPurposeAgentID && !generalPurposeIsConfigured) {
-				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, call.ID), delegationDepth(ctx), params.Isolation)
+				return d.runBackgroundAgent(ctx, sessionID, params.Prompt, params.Description, delegationSessionID(ctx, call.ID), delegationDepth(ctx), delegationLaunchOptions{isolation: params.Isolation, wait: !params.Background})
 			}
 			if !allowNamedAgents {
 				return fantasy.NewTextErrorResponse(
@@ -1091,7 +1144,7 @@ func (d *delegationFinalizer) runNamedAgent(ctx context.Context, parentID string
 	if err := d.snapshotDelegation(&args, &latest, ctx); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	return d.launchDelegation(ctx, args)
+	return d.launchDelegation(ctx, args, !params.Background)
 }
 
 //nolint:unparam // matches the (tool, error) signature of the other buildTools helpers
@@ -1119,7 +1172,7 @@ func (d *delegationFinalizer) agenticFetchTool(_ context.Context, client *http.C
 				Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 					return d.agenticFetchFactory(ctx, client, params, validation, call, childDepth, childID)
 				},
-			})
+			}, false)
 		},
 	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
 }

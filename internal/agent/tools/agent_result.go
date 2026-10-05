@@ -74,10 +74,10 @@ func describeTaskResult(ti TaskInfo) string {
 // silent task reads the result, not the description: a local model was
 // seen calling agent_result and agent_output in turn every three seconds
 // for minutes, each answer saying only "still running".
-const waitHint = "Its result will be delivered to you when it finishes, " +
-	"without you asking: end your turn to wait for it. Calling agent_result " +
-	"or agent_output again in the meantime does not wait, it only spends " +
-	"turns and context."
+const waitHint = "Its result will be delivered to you when it finishes. If your next action " +
+	"depends on it, call agent_wait with its ID; otherwise continue useful work. " +
+	"Calling agent_result or agent_output again in the meantime does not wait, " +
+	"it only spends turns and context."
 
 // taskFinished reports whether ti's status is terminal, the same set
 // describeTaskResult answers with an outcome for.

@@ -273,6 +273,7 @@ func TestRunSubAgent_SummarizedPriorSessionCarriesOnlyItsSummaryOnward(t *testin
 type factoryRunningTaskManager struct {
 	sessions sessionstore.Service
 	nextID   int
+	info     tools.TaskInfo
 }
 
 func (m *factoryRunningTaskManager) Create(ctx context.Context, args tools.TaskCreateArgs) (tools.TaskInfo, error) {
@@ -300,14 +301,17 @@ func (m *factoryRunningTaskManager) Create(ctx context.Context, args tools.TaskC
 	if err != nil {
 		return tools.TaskInfo{}, err
 	}
-	return tools.TaskInfo{ID: sess.ID, SessionID: sess.ID, Status: "completed", ResultSummary: result.Text}, nil
+	m.info = tools.TaskInfo{ID: sess.ID, SessionID: sess.ID, Status: "completed", ResultSummary: result.Text}
+	return m.info, nil
 }
 
 func (m *factoryRunningTaskManager) List(context.Context) ([]tools.TaskInfo, error) { return nil, nil }
 
 func (m *factoryRunningTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
-	return tools.TaskInfo{}, nil
+	return m.info, nil
 }
+
+func (m *factoryRunningTaskManager) Wait(context.Context, []string) error { return nil }
 
 func (m *factoryRunningTaskManager) Cancel(context.Context, string, string) error { return nil }
 

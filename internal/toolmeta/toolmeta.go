@@ -121,6 +121,7 @@ var descriptors = []Descriptor{
 	// the tool that does that job now instead of silently naming nothing.
 	{Name: "agent_list", Aliases: []string{"task_list", "thread_list"}, Access: AccessRead, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
 	{Name: "agent_result", Aliases: []string{"task_result", "thread_status", "thread_result"}, Access: AccessRead, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "agent_wait", Aliases: []string{"task_wait", "thread_wait"}, Access: AccessRead, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
 	{Name: "agent_cancel", Aliases: []string{"task_cancel", "thread_cancel"}, Access: AccessWrite, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
 	{Name: "agent_send", Aliases: []string{"task_send", "thread_send"}, Access: AccessWrite, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},
 	{Name: "agent_output", Aliases: []string{"task_output", "thread_output"}, Access: AccessRead, DefaultAllowed: true, Gate: GateDelegations, Renderer: RendererDedicated, Docs: DocsDelegation},

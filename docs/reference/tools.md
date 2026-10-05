@@ -82,6 +82,7 @@ See [Steering and delegation](../concepts/delegation.md).
 | `agent` | Delegate to a subagent. `subagent_type` names one from `.sennit/agents/`; omit it for the general-purpose agent. `isolation: worktree` gives it a git worktree of its own |
 | `agent_list` | Every delegation you can act on, isolated or not |
 | `agent_result` | A delegation's status, and its final answer once finished |
+| `agent_wait` | Wait event-driven for selected delegations to reach terminal states |
 | `agent_output` | An unisolated delegation's transcript so far, without waiting |
 | `agent_send` | Send a follow-up into a delegation's session |
 | `agent_cancel` | Stop a running delegation |
@@ -89,9 +90,10 @@ See [Steering and delegation](../concepts/delegation.md).
 
 The `agent_*` tools take a delegation's id, or an isolated one's name, so
 one set addresses both kinds. The older management names (`task_list`,
-`task_result`, `task_cancel`, `task_send`, `task_output`, `thread_list`,
-`thread_status`, `thread_result`, `thread_cancel`, `thread_send`, and
-`thread_output`) still resolve to them in `tools:` lists and permission
+`task_result`, `task_wait`, `task_cancel`, `task_send`, `task_output`,
+`thread_list`, `thread_status`, `thread_result`, `thread_wait`,
+`thread_cancel`, `thread_send`, and `thread_output`) still resolve to them in
+`tools:` lists and permission
 configs. There is no tool that creates or removes a worktree: isolation is
 `agent`'s `isolation: worktree` parameter, and cleaning up afterwards is the
 runtime's and the user's, not the model's.

@@ -32,6 +32,7 @@ const (
 	ReadMCPResourceToolName  = "read_mcp_resource"
 	AgentListToolName        = "agent_list"
 	AgentResultToolName      = "agent_result"
+	AgentWaitToolName        = "agent_wait"
 	AgentCancelToolName      = "agent_cancel"
 	AgentSendToolName        = "agent_send"
 	AgentOutputToolName      = "agent_output"
@@ -47,6 +48,7 @@ type AgentParams struct {
 	SubagentType string `json:"subagent_type,omitempty"`
 	Description  string `json:"description,omitempty"`
 	Isolation    string `json:"isolation,omitempty"`
+	Background   bool   `json:"background,omitempty"`
 }
 
 type AgentBackgroundResponseMetadata struct {

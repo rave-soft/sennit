@@ -27,6 +27,7 @@ type fakeTaskManager struct {
 	// sendOutcome is what Send reports back for an accepted message, so a
 	// test can pick which of the outcomes task_send has to render.
 	sendOutcome SendOutcome
+	wait        func(context.Context, []string) error
 }
 
 func newFakeTaskManager() *fakeTaskManager {
@@ -84,6 +85,13 @@ func (f *fakeTaskManager) Send(_ context.Context, id, message string) (SendOutco
 // internal/thread's behavior (see TestTaskManager_OutputReportsTruncation
 // there), not this fake's to reimplement. This tool layer only needs to
 // prove the tool renders whatever (Messages, Total) shape it is handed.
+func (f *fakeTaskManager) Wait(ctx context.Context, ids []string) error {
+	if f.wait != nil {
+		return f.wait(ctx, ids)
+	}
+	return nil
+}
+
 func (f *fakeTaskManager) Output(_ context.Context, id string, _ int) (TaskOutput, error) {
 	if _, ok := f.tasks[id]; !ok {
 		return TaskOutput{}, fmt.Errorf("thread: %q is not a task", id)
@@ -156,8 +164,29 @@ func TestTaskResultTool_ReportsStatusWhenStillRunning(t *testing.T) {
 	resp := callTaskTool(t, NewAgentResultTool(manager, nil), AgentResultParams{ID: "t1"})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "still running")
-	require.Contains(t, resp.Content, "end your turn to wait")
+	require.Contains(t, resp.Content, "call agent_wait")
 	require.NotContains(t, resp.Content, "finished")
+}
+
+func TestAgentWaitTool_WaitsForTasksWithoutPolling(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession, Status: "completed"}
+	waited := make(chan []string, 1)
+	manager.wait = func(ctx context.Context, ids []string) error {
+		waited <- ids
+		return nil
+	}
+
+	resp := callTaskTool(t, NewAgentWaitTool(manager, nil), AgentWaitParams{IDs: []string{"t1", "t1"}})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "Task t1 status: completed")
+	require.Equal(t, []string{"t1"}, <-waited)
+}
+
+func TestAgentWaitTool_RejectsEmptyIDs(t *testing.T) {
+	resp := callTaskTool(t, NewAgentWaitTool(newFakeTaskManager(), nil), AgentWaitParams{})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "ids must contain")
 }
 
 func TestTaskResultTool_MissingID(t *testing.T) {
@@ -331,7 +360,7 @@ func TestTaskOutputTool_OmitsGoalAndHintsToWait(t *testing.T) {
 	require.False(t, resp.IsError)
 	require.NotContains(t, resp.Content, goal)
 	require.Contains(t, resp.Content, "No output yet beyond the goal")
-	require.Contains(t, resp.Content, "end your turn to wait")
+	require.Contains(t, resp.Content, "call agent_wait")
 
 	manager.outputs["t1"] = TaskOutput{Messages: []TaskOutputMessage{
 		{Role: "user", Text: goal},
