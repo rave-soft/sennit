@@ -70,6 +70,12 @@ func NewMultiReadTool(permissions permission.Requester, tracker FileTracking, wo
 		if budget < 1 || budget > MaxReadSize {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("effective budget must be between 1 and %d", MaxReadSize)), nil
 		}
+		// The cursor fingerprint below covers the budget the caller asked
+		// for, not the one granted, so a page cut short by the step's
+		// context budget resumes with the same arguments.
+		budget, _ = reserveContextBudget(ctx, budget)
+		used := 0
+		defer func() { releaseContextBudget(ctx, budget-used) }()
 		fingerprintInput, _ := json.Marshal(struct {
 			Files     []MultiReadItem `json:"files"`
 			MaxBytes  int             `json:"max_bytes"`
@@ -161,6 +167,7 @@ func NewMultiReadTool(permissions permission.Requester, tracker FileTracking, wo
 			out.Cursor, _ = encodePageCursor(c)
 		}
 		out.Bytes = body.Len()
+		used = out.Bytes
 		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(body.String()), out), nil
 	})
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{

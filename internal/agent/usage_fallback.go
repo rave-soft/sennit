@@ -95,7 +95,15 @@ func estimateStepCompletionTokens(step fantasy.StepResult) int64 {
 // the tools it called, which come back into the next request whether the
 // provider ran them or this process did.
 func estimateStepHistoryTokens(step fantasy.StepResult) int64 {
-	tokens := estimateStepCompletionTokens(step)
+	return estimateStepCompletionTokens(step) + estimateStepToolResultTokens(step)
+}
+
+// estimateStepToolResultTokens is the part of a finished step that no usage
+// figure has counted yet: the results of the tools this process ran. The
+// provider reported the step's prompt and its reply; the results only show
+// up in the next request's prompt.
+func estimateStepToolResultTokens(step fantasy.StepResult) int64 {
+	var tokens int64
 	for _, content := range step.Content {
 		switch c := content.(type) {
 		case fantasy.ToolResultContent:

@@ -113,6 +113,11 @@ type runTurn struct {
 	// when the run starts and grown by every step it finishes (see
 	// onStepFinish); zero means unknown. See stopOnContextWindow.
 	historyTokens int64
+	// pendingResultTokens is the previous step's tool results, which the
+	// next request carries but the session's token counters do not yet
+	// include (see estimateStepToolResultTokens). Set by onStepFinish and
+	// read by freeContextTokens.
+	pendingResultTokens int64
 	// currentAssistant is the in-flight step's assistant message;
 	// PrepareStep (re)assigns it once per streaming step. It's the turn's
 	// final assistant message once streaming ends.
@@ -584,6 +589,9 @@ func (t *runTurn) createStepAssistant(callContext context.Context, messages []fa
 	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.model.CatalogCfg.SupportsImages)
 	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.model.CatalogCfg.Name)
 	callContext = context.WithValue(callContext, tools.DepthContextKey, t.call.Depth)
+	if free, known := t.freeContextTokens(); known {
+		callContext = tools.WithContextBudget(callContext, tools.NewContextBudget(free))
+	}
 	t.currentAssistant = &assistantMsg
 	return callContext, nil
 }
@@ -909,6 +917,7 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 	if t.historyTokens > 0 {
 		t.historyTokens += estimateStepHistoryTokens(stepResult)
 	}
+	t.pendingResultTokens = estimateStepToolResultTokens(stepResult)
 	// The provider request's "finished" line is logged by the instrumented
 	// model that performed this step's Stream (it is the 1:1 counterpart of
 	// the "started" line, and it is what carries finish_reason + usage). We
@@ -969,6 +978,26 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 // means unknown, which summarizeBuffer reads as "use the standard buffer".
 func (t *runTurn) maxOutputTokens() int64 {
 	return modelMaxOutputTokens(t.model)
+}
+
+// freeContextTokens is how many tokens this step's tool results may add
+// before stopOnContextWindow would stop the turn: the window, less what the
+// last request and its reply used, less the tool results that followed them,
+// less the room a summary needs. It can be negative. The second result is
+// false when the model declares no window, and then nothing is capped, for
+// the reason stopOnContextWindow gives.
+//
+// The same figure applies with auto-summarize disabled. The room held back
+// is then the model's own reply, which has to fit either way.
+func (t *runTurn) freeContextTokens() (int64, bool) {
+	cw := t.summarize.window(t.model.CatalogCfg.ContextWindow)
+	if cw <= 0 {
+		return 0, false
+	}
+	t.sessionLock.Lock()
+	tokens := t.currentSession.CompletionTokens + t.currentSession.PromptTokens
+	t.sessionLock.Unlock()
+	return cw - tokens - t.pendingResultTokens - summarizeBuffer(cw, t.maxOutputTokens()), true
 }
 
 // stopOnContextWindow is the auto-summarize StopWhen condition: it stops

@@ -249,3 +249,32 @@ func TestStopOnContextWindow_HistoryGrownDuringTheRunIsReclaimable(t *testing.T)
 	require.True(t, turn.stopOnContextWindow(nil))
 	require.True(t, turn.shouldSummarize)
 }
+
+// TestFreeContextTokens_CountsToolResultsNoUsageFigureHasSeen: the session's
+// counters describe the last request and its reply. The tool results that
+// came after it are already in the next prompt, so the room left for this
+// step's tools is smaller by that much.
+func TestFreeContextTokens_CountsToolResultsNoUsageFigureHasSeen(t *testing.T) {
+	t.Parallel()
+
+	// The buffer on this window is 40,960 (see the cases above).
+	turn := newThresholdTurn(262_144, 150_000, 2_000, 100_000)
+	free, known := turn.freeContextTokens()
+	require.True(t, known)
+	require.Equal(t, int64(262_144-152_000-40_960), free)
+
+	turn.pendingResultTokens = 50_000
+	free, _ = turn.freeContextTokens()
+	require.Equal(t, int64(262_144-152_000-50_000-40_960), free)
+}
+
+// TestFreeContextTokens_UnknownWindowCapsNothing mirrors stopOnContextWindow:
+// a model that declares no window gets no budget invented for it.
+func TestFreeContextTokens_UnknownWindowCapsNothing(t *testing.T) {
+	t.Parallel()
+
+	for _, window := range []int64{0, -1} {
+		_, known := newThresholdTurn(window, 10_000, 0, 5_000).freeContextTokens()
+		require.False(t, known)
+	}
+}

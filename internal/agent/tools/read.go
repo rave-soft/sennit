@@ -106,7 +106,12 @@ func NewReadTool(lspManager *lsp.Manager, permissions permission.Requester, trac
 			}
 			return readSkillSource(params, []byte(source), skillTracker), nil
 		}
-		result, err := core(ctx, params, call, ReadToolName, MaxReadSize, false)
+		// The size cap is the tool's own, lowered to what the step's
+		// context budget still has: a file read into a nearly full window
+		// pushes the session past the point where it can summarize.
+		budget, contextLimited := reserveContextBudget(ctx, MaxReadSize)
+		result, err := core(ctx, params, call, ReadToolName, budget, false)
+		releaseContextBudget(ctx, budget-len(result.content))
 		if err != nil {
 			return fantasy.ToolResponse{}, err
 		}
@@ -141,7 +146,7 @@ func NewReadTool(lspManager *lsp.Manager, permissions permission.Requester, trac
 		waitForLSPDiagnostics(ctx, lspManager, result.filePath, 300*time.Millisecond)
 		output := "<file>\n" + addLineNumbers(result.content, result.offset+1)
 		if result.truncated {
-			output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)", result.nextOffset)
+			output += "\n\n" + readContinuationNote(result, contextLimited)
 		}
 		output += "\n</file>\n" + getDiagnostics(result.filePath, lspManager)
 		meta := ReadResponseMetadata{FilePath: result.filePath, Content: result.content, TotalLines: result.totalLines, NextOffset: result.nextOffset, Truncated: result.truncated, Cursor: result.cursor}
@@ -154,6 +159,18 @@ func NewReadTool(lspManager *lsp.Manager, permissions permission.Requester, trac
 		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), meta), nil
 	})
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}, "offset": intSchemaMinimum(0), "limit": intSchemaBounds(DefaultReadLimit), "cursor": {minLength: intPtr(1)}})
+}
+
+// readContinuationNote tells the model what part of the file it was given
+// and how to get the rest. The total is there so it can choose between one
+// more read and a search; a read cut short by the context budget says so,
+// because the model cannot see how full its own context is.
+func readContinuationNote(result readCoreResult, contextLimited bool) string {
+	shown := fmt.Sprintf("Showing lines %d-%d of %d.", result.offset+1, result.nextOffset, result.totalLines)
+	if contextLimited && result.budgetTruncated {
+		return fmt.Sprintf("(%s Stopped here because the context window is nearly full: read on only if you need the rest, with 'offset' %d)", shown, result.nextOffset)
+	}
+	return fmt.Sprintf("(%s Use 'offset' parameter to read beyond line %d)", shown, result.nextOffset)
 }
 
 func addLineNumbers(content string, startLine int) string {
