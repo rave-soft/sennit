@@ -18,6 +18,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/shell"
 )
@@ -49,13 +50,14 @@ func pageThroughSearch(t *testing.T, tool fantasy.AgentTool, name string, freeTo
 		response := runToolWith(t, tool, ctx, name, params(cursor))
 		require.False(t, response.IsError, response.Content)
 		metadata := responseMetadata[GrepResponseMetadata](t, response.Metadata)
-		shown := grepResponseLines(response.Content)
+		body := pageBody(t, response.Content, metadata.Cursor)
+		shown := grepResponseLines(body)
 		require.Len(t, shown, metadata.NumberOfMatches)
 		require.Contains(t, response.Content, fmt.Sprintf("Found %d matches\n", len(shown)))
 		lines = append(lines, shown...)
 		pages++
 		if pages == 1 {
-			first = response.Content
+			first = body
 		}
 		require.Less(t, pages, 100, "the cursor is not advancing")
 		if !metadata.Truncated {
@@ -133,6 +135,38 @@ func TestRenderGrepMatches_ShowsTheFirstMatchWhateverItsSize(t *testing.T) {
 	require.Contains(t, out, "Found 1 matches\n")
 	require.Contains(t, out, "  Line 1: xxx")
 	require.NotContains(t, out, "Line 2")
+}
+
+// With context lines one match can outweigh the whole budget. It is then
+// shown as its own line, so the page neither stays empty nor overruns.
+func TestGrep_FirstMatchDropsContextThatDoesNotFit(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	wide := strings.Repeat("c", 400)
+	var b strings.Builder
+	for range 30 {
+		b.WriteString(wide + "\n")
+	}
+	b.WriteString("needle\n")
+	for range 30 {
+		b.WriteString(wide + "\n")
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte(b.String()), 0o600))
+	tool := NewGrepTool(nil, dir, config.ToolGrep{})
+	params := GrepParams{Pattern: "needle", BeforeContext: 30, AfterContext: 30}
+
+	roomy := runToolWith(t, tool, t.Context(), GrepToolName, params)
+	require.Greater(t, len(roomy.Content), 24_000)
+	require.NotContains(t, roomy.Content, "context lines omitted")
+
+	// A full context is the minimum grant of 8KB; the match needs 24KB.
+	tight := runToolWith(t, tool, WithContextBudget(t.Context(), NewContextBudget(-1)), GrepToolName, params)
+	require.False(t, tight.IsError, tight.Content)
+	require.Less(t, len(tight.Content), minContextBudgetBytes)
+	require.Contains(t, tight.Content, "  Line 31, Char 1: needle\n")
+	require.Contains(t, tight.Content, "context lines omitted")
+	require.Equal(t, 1, responseMetadata[GrepResponseMetadata](t, tight.Metadata).NumberOfMatches)
 }
 
 func TestRipgrep_PagesByContextBudgetWithoutLosingMatches(t *testing.T) {
@@ -285,4 +319,130 @@ func TestWebFetch_SavesToAFileWhatTheContextCannotHold(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(pageDir, "page-*.md"))
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
+}
+
+func TestFitContextBudget(t *testing.T) {
+	t.Parallel()
+
+	text := strings.Repeat("語", 10_000) // 30KB.
+	require.Equal(t, text, fitContextBudget(context.Background(), text))
+	require.Equal(t, text, fitContextBudget(budgetCtx(180_000), text))
+
+	cut := fitContextBudget(budgetCtx(4_000), text)
+	require.True(t, utf8.ValidString(cut))
+	require.LessOrEqual(t, len(cut), minContextBudgetBytes+100)
+	require.Contains(t, cut, "the context window is nearly full]")
+}
+
+type textRunner struct{ text string }
+
+func (r textRunner) RunTool(context.Context, mcp.ConfigProvider, string, string, string) (mcp.ToolResult, error) {
+	return mcp.ToolResult{Type: "text", Content: r.text}, nil
+}
+
+// An MCP tool's result is capped only at megabytes by its own package.
+func TestMCPTool_IsHeldToTheContextBudget(t *testing.T) {
+	t.Parallel()
+
+	text := strings.Repeat("m", 300_000)
+	tool := &Tool{
+		mcpName: "srv",
+		tool:    &mcp.Tool{Name: "dump"},
+		cfg:     &stubMCPConfigProvider{cfg: &config.Config{}},
+		reg:     textRunner{text: text},
+	}
+	run := func(ctx context.Context) fantasy.ToolResponse {
+		resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "1", Name: tool.Name(), Input: "{}"})
+		require.NoError(t, err)
+		require.False(t, resp.IsError, resp.Content)
+		return resp
+	}
+	require.Equal(t, text, run(context.WithValue(t.Context(), SessionIDContextKey, "sess")).Content)
+
+	limited := run(budgetCtx(4_000))
+	require.LessOrEqual(t, len(limited.Content), minContextBudgetBytes+100)
+	require.Contains(t, limited.Content, "the context window is nearly full]")
+}
+
+func TestReadMCPResource_IsHeldToTheContextBudget(t *testing.T) {
+	t.Parallel()
+
+	tool := NewReadMCPResourceTool(testConfigStore(t, t.TempDir()), fakeResourceReader{contents: []*mcp.ResourceContents{
+		{URI: "res://doc", MIMEType: "text/plain", Text: strings.Repeat("r", 300_000)},
+	}}, nil)
+	resp, err := tool.Run(budgetCtx(4_000), fantasy.ToolCall{
+		ID: "1", Name: ReadMCPResourceToolName,
+		Input: mustJSONInput(t, ReadMCPResourceParams{MCPName: "srv", URI: "res://doc"}),
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.LessOrEqual(t, len(resp.Content), minContextBudgetBytes+100)
+	require.Contains(t, resp.Content, "the context window is nearly full]")
+}
+
+func TestAgentOutput_IsHeldToTheContextBudget(t *testing.T) {
+	t.Parallel()
+
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1", ParentSessionID: callerSession}
+	manager.outputs["t1"] = TaskOutput{Messages: []TaskOutputMessage{{Role: "assistant", Text: strings.Repeat("o", 300_000)}}, Total: 1}
+	ctx := WithContextBudget(context.WithValue(t.Context(), SessionIDContextKey, callerSession), NewContextBudget(4_000))
+
+	resp, err := NewAgentOutputTool(manager, nil).Run(ctx, fantasy.ToolCall{ID: "1", Input: mustJSONInput(t, AgentOutputParams{ID: "t1"})})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.LessOrEqual(t, len(resp.Content), minContextBudgetBytes+100)
+	require.Contains(t, resp.Content, "the context window is nearly full]")
+}
+
+func TestSennitLogs_IsHeldToTheContextBudget(t *testing.T) {
+	t.Parallel()
+
+	entries := make([]map[string]any, 100)
+	for i := range entries {
+		entries[i] = makeLogEntry("INFO", strings.Repeat("l", 1000), "app.go", i, nil)
+	}
+	tool := NewSennitLogsTool(createTestLogFile(t, entries))
+	resp, err := tool.Run(budgetCtx(4_000), fantasy.ToolCall{ID: "1", Name: SennitLogsToolName, Input: mustJSONInput(t, SennitLogsParams{Lines: 100})})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.LessOrEqual(t, len(resp.Content), minContextBudgetBytes+100)
+	require.Contains(t, resp.Content, "the context window is nearly full]")
+}
+
+// A diff page is cut to the budget, and its cursor still walks the whole
+// diff: the pages join into exactly what git printed.
+func TestGitDiff_PagesByContextBudget(t *testing.T) {
+	dir := gitToolRepo(t)
+	path := filepath.Join(dir, "big.txt")
+	require.NoError(t, os.WriteFile(path, []byte("old\n"), 0o644))
+	gitToolCommand(t, dir, "add", "big.txt")
+	gitToolCommand(t, dir, "commit", "-m", "initial")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("a changed line of some length\n", 800)), 0o644))
+	tool := NewGitDiffTool(dir)
+
+	params := GitDiffParams{}
+	var all string
+	pages := 0
+	for {
+		r, err := tool.Run(WithContextBudget(t.Context(), NewContextBudget(-1)), fantasy.ToolCall{ID: "test", Name: GitDiffToolName, Input: mustJSONInput(t, params)})
+		require.NoError(t, err)
+		require.False(t, r.IsError, r.Content)
+		meta := responseMetadata[gitMeta](t, r.Metadata)
+		body := pageBody(t, r.Content, meta.Cursor)
+		require.LessOrEqual(t, len(body), minContextBudgetBytes)
+		all += body
+		pages++
+		require.Less(t, pages, 50)
+		if !meta.Truncated {
+			break
+		}
+		params.Cursor = meta.Cursor
+	}
+	require.Equal(t, 4, pages)
+	cmd := exec.CommandContext(t.Context(), "git", "-c", "core.quotepath=true", "diff", "--no-ext-diff", "--patch")
+	cmd.Dir = dir
+	want, err := cmd.Output()
+	require.NoError(t, err)
+	require.Equal(t, string(want), all)
 }

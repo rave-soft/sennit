@@ -122,7 +122,7 @@ func NewWorkspaceSymbolsTool(m *lsp.Manager, root string) fantasy.AgentTool {
 			}
 			fmt.Fprintf(&b, "%s %s — %s:%d\n", symbolKindNames[x.symbol.Kind], x.symbol.Name, filepath.ToSlash(path), x.symbol.Line)
 		}
-		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(b.String()), meta), nil
+		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(b.String()+cursorNote(meta.Cursor)), meta), nil
 	}), map[string]toolParameterSchema{"query": {minLength: intPtr(1)}})
 }
 

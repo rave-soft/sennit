@@ -226,6 +226,7 @@ func TestLSPToolsThroughManagerAndProcess(t *testing.T) {
 	firstMeta := responseMetadata[WorkspaceSymbolsMetadata](t, first.Metadata)
 	require.True(t, firstMeta.Truncated)
 	require.NotEmpty(t, firstMeta.Cursor)
+	pageBody(t, first.Content, firstMeta.Cursor)
 
 	second := runToolWith(t, symbols, t.Context(), WorkspaceSymbolsToolName, WorkspaceSymbolsParams{Query: "Exact", Limit: 1, Cursor: firstMeta.Cursor})
 	require.False(t, second.IsError)

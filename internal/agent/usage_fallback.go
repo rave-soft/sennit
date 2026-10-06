@@ -79,11 +79,11 @@ func estimateStepCompletionTokens(step fantasy.StepResult) int64 {
 			tokens += estimateToolCallTokens(c.ToolName, c.Input)
 		case fantasy.ToolResultContent:
 			if c.ProviderExecuted {
-				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.Result)
 			}
 		case *fantasy.ToolResultContent:
 			if c.ProviderExecuted {
-				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.Result)
 			}
 		}
 	}
@@ -108,11 +108,11 @@ func estimateStepToolResultTokens(step fantasy.StepResult) int64 {
 		switch c := content.(type) {
 		case fantasy.ToolResultContent:
 			if !c.ProviderExecuted {
-				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.Result)
 			}
 		case *fantasy.ToolResultContent:
 			if !c.ProviderExecuted {
-				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.Result)
 			}
 		}
 	}
@@ -138,9 +138,9 @@ func estimateMessagePartTokens(part fantasy.MessagePart) int64 {
 	case *fantasy.ToolCallPart:
 		return estimateToolCallTokens(p.ToolName, p.Input)
 	case fantasy.ToolResultPart:
-		return estimateToolResultContentTokens(p.ToolCallID, "", "", p.Output)
+		return estimateToolResultContentTokens(p.ToolCallID, "", p.Output)
 	case *fantasy.ToolResultPart:
-		return estimateToolResultContentTokens(p.ToolCallID, "", "", p.Output)
+		return estimateToolResultContentTokens(p.ToolCallID, "", p.Output)
 	default:
 		return 0
 	}
@@ -150,8 +150,13 @@ func estimateToolCallTokens(toolName, input string) int64 {
 	return approxTokenCount(toolName) + approxTokenCount(input)
 }
 
-func estimateToolResultContentTokens(toolCallID, toolName, metadata string, output fantasy.ToolResultOutputContent) int64 {
-	tokens := approxTokenCount(toolCallID) + approxTokenCount(toolName) + approxTokenCount(metadata)
+// estimateToolResultContentTokens leaves a result's client metadata out: it
+// is kept for the UI and is not part of any request (see
+// toAIMessage, whose tool results carry the output only).
+// Counting it doubled the estimate for a file read, whose metadata holds a
+// second copy of the content.
+func estimateToolResultContentTokens(toolCallID, toolName string, output fantasy.ToolResultOutputContent) int64 {
+	tokens := approxTokenCount(toolCallID) + approxTokenCount(toolName)
 	switch result := output.(type) {
 	case fantasy.ToolResultOutputContentText:
 		tokens += approxTokenCount(result.Text)

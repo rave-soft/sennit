@@ -207,11 +207,7 @@ func NewFetchTool(permissions permission.Requester, workingDir string, client *h
 			// MaxFetchSize caps the body as fetched. What reaches the
 			// conversation is the converted content, and that is what has
 			// to fit in the context the step has left.
-			budget, _ := reserveContextBudget(ctx, len(content))
-			if len(content) > budget {
-				content = truncateToRuneBoundary(content, budget) + fmt.Sprintf("\n\n[Content truncated to %d bytes: the context window is nearly full]", budget)
-			}
-			releaseContextBudget(ctx, budget-len(content))
+			content = fitContextBudget(ctx, content)
 			// Report truncation off the raw-read flag, not off the
 			// (possibly since-shrunk-by-conversion) content length - see
 			// the comment on truncated's assignment above.

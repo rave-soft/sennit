@@ -229,6 +229,7 @@ func NewGrepTool(permissions permission.Requester, workingDir string, config con
 			cursor := ""
 			if truncated {
 				cursor = makePageKeyCursor("grep", query, generation, last)
+				output += cursorNote(cursor)
 			}
 			if incomplete {
 				// Mirrors ls/glob: part of the tree could not be read
@@ -300,8 +301,8 @@ func renderGrepPage(ctx, searchCtx context.Context, matches []grepMatch, truncat
 
 // renderGrepMatchesWithContext renders matches until the next one would take
 // the output past maxBytes (0 means no cap) and returns how many it showed.
-// The first match is rendered whatever its size: a page that shows nothing
-// leaves its cursor where it started.
+// The first match is always rendered, without its context lines if those do
+// not fit: a page that shows nothing leaves its cursor where it started.
 func renderGrepMatchesWithContext(ctx context.Context, matches []grepMatch, truncated bool, before, after, maxBytes int, contextLimited bool) (string, int, error) {
 	contexts, err := loadGrepContexts(ctx, matches, before, after, os.Open)
 	if err != nil {
@@ -315,32 +316,18 @@ func renderGrepMatchesWithContext(ctx context.Context, matches []grepMatch, trun
 	shown := 0
 	currentFile := ""
 	for _, match := range matches {
-		var block strings.Builder
-		if currentFile != match.path {
-			if currentFile != "" {
-				block.WriteString("\n")
+		block := renderGrepMatch(match, currentFile, contexts[match.path][match.lineNum])
+		if maxBytes > 0 && body.Len()+len(block) > maxBytes {
+			if shown > 0 {
+				break
 			}
-			fmt.Fprintf(&block, "%s:\n", filepath.ToSlash(match.path))
-		}
-		if match.lineNum > 0 {
-			for _, line := range contexts[match.path][match.lineNum] {
-				fmt.Fprintf(&block, "  %s Line %d: %s\n", line.marker, line.number, truncateGrepLine(line.text))
-			}
-			lineText := match.lineText
-			lineText = truncateGrepLine(lineText)
-			if match.charNum > 0 {
-				fmt.Fprintf(&block, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
-			} else {
-				fmt.Fprintf(&block, "  Line %d: %s\n", match.lineNum, lineText)
-			}
-		} else {
-			fmt.Fprintf(&block, "  %s\n", match.path)
-		}
-		if maxBytes > 0 && shown > 0 && body.Len()+block.Len() > maxBytes {
-			break
+			// Nothing is on the page yet, so this match is shown anyway,
+			// but as its own line only: with 30 lines of context either
+			// side one match can be larger than everything the step has.
+			block = renderGrepMatch(match, currentFile, nil) + "  (context lines omitted: they do not fit)\n"
 		}
 		currentFile = match.path
-		body.WriteString(block.String())
+		body.WriteString(block)
 		shown++
 	}
 
@@ -354,6 +341,32 @@ func renderGrepMatchesWithContext(ctx context.Context, matches []grepMatch, trun
 		output += "\n(Results are truncated. Consider using a more specific path or pattern.)"
 	}
 	return output, shown, nil
+}
+
+// renderGrepMatch renders one match with its context lines, preceded by its
+// file's header when the match is the first one of that file on the page.
+func renderGrepMatch(match grepMatch, currentFile string, context []grepContextLine) string {
+	var block strings.Builder
+	if currentFile != match.path {
+		if currentFile != "" {
+			block.WriteString("\n")
+		}
+		fmt.Fprintf(&block, "%s:\n", filepath.ToSlash(match.path))
+	}
+	if match.lineNum <= 0 {
+		fmt.Fprintf(&block, "  %s\n", match.path)
+		return block.String()
+	}
+	for _, line := range context {
+		fmt.Fprintf(&block, "  %s Line %d: %s\n", line.marker, line.number, truncateGrepLine(line.text))
+	}
+	lineText := truncateGrepLine(match.lineText)
+	if match.charNum > 0 {
+		fmt.Fprintf(&block, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
+	} else {
+		fmt.Fprintf(&block, "  Line %d: %s\n", match.lineNum, lineText)
+	}
+	return block.String()
 }
 
 type grepContextLine struct {

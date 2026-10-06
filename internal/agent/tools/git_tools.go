@@ -196,7 +196,7 @@ func appendPaths(a, p []string) []string {
 }
 
 func gitResponse(text string, meta gitMeta) fantasy.ToolResponse {
-	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text), meta)
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text+cursorNote(meta.Cursor)), meta)
 }
 
 // gitError classifies a failure from a git-tool call. Cancellation
@@ -389,6 +389,12 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 		if max < 1 || max > 200000 {
 			return gitError(ctx, fmt.Errorf("max_bytes must be between 1 and 200000"))
 		}
+		// The page is cut to what the step's context budget grants. The
+		// cursor is bound to the diff, not to max_bytes, so a shorter page
+		// resumes from where it ended.
+		max, _ = reserveContextBudget(ctx, max)
+		used := 0
+		defer func() { releaseContextBudget(ctx, max-used) }()
 		mode := p.Mode
 		if mode == "" {
 			mode = "unstaged"
@@ -442,6 +448,7 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 				return gitError(ctx, err)
 			}
 			text := renderStat(page)
+			used = len(text)
 			meta := gitMeta{Count: len(page), Total: count, Truncated: more, Entries: page, TotalBytes: total, RenderedBytes: rendered, SHA256: gen}
 			if more {
 				meta.Cursor = makePageKeyCursor(GitDiffToolName, query, gen, last)
@@ -463,6 +470,7 @@ func NewGitDiffTool(dir string) fantasy.AgentTool {
 		if err != nil {
 			return gitError(ctx, err)
 		}
+		used = len(page)
 		meta := gitMeta{Count: 1, Total: 1, TotalBytes: total, RenderedBytes: len(page), SHA256: gen, Truncated: end < total}
 		if meta.Truncated {
 			meta.Cursor, _ = encodePageCursor(pageCursor{Version: 2, Kind: GitDiffToolName, Query: query, Gen: gen, Offset: end})

@@ -278,3 +278,19 @@ func TestFreeContextTokens_UnknownWindowCapsNothing(t *testing.T) {
 		require.False(t, known)
 	}
 }
+
+// TestEstimateStepToolResultTokens_LeavesClientMetadataOut: a tool result's
+// metadata is kept for the UI and is in no request. A file read carries a
+// second copy of the file there, so counting it doubled the figure the
+// context budget is taken from.
+func TestEstimateStepToolResultTokens_LeavesClientMetadataOut(t *testing.T) {
+	t.Parallel()
+
+	step := fantasy.StepResult{Response: fantasy.Response{Content: fantasy.ResponseContent{fantasy.ToolResultContent{
+		ToolCallID:     "call-0",
+		ToolName:       "read",
+		ClientMetadata: strings.Repeat("m", 40_000),
+		Result:         fantasy.ToolResultOutputContentText{Text: strings.Repeat("x", 40_000)},
+	}}}}
+	require.InDelta(t, 10_000, estimateStepToolResultTokens(step), 10)
+}

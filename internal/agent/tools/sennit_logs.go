@@ -194,7 +194,7 @@ func NewSennitLogsTool(logFile string) fantasy.AgentTool {
 				}
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fitContextBudget(ctx, output)), metadata), nil
 		},
 	)
 	info := tool.Info()

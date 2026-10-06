@@ -155,7 +155,7 @@ func NewReadMCPResourceTool(cfg mcpResourceConfig, reg mcpResourceReader, permis
 			// only one part - N parts could otherwise hand the model N
 			// times the intended budget. Apply the same cap to the joined
 			// result, matching mcp-tools.go's RunTool.
-			return fantasy.NewTextResponse(mcp.TruncateResourceContentText(strings.Join(textParts, "\n"))), nil
+			return fantasy.NewTextResponse(fitContextBudget(ctx, mcp.TruncateResourceContentText(strings.Join(textParts, "\n")))), nil
 		},
 	), map[string]toolParameterSchema{"mcp_name": {minLength: intPtr(1)}, "uri": {minLength: intPtr(1)}})
 }

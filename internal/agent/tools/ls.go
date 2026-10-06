@@ -122,7 +122,7 @@ func NewLsTool(permissions permission.Requester, workingDir string, lsConfig con
 			}
 
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output),
+				fantasy.NewTextResponse(output+cursorNote(metadata.Cursor)),
 				metadata,
 			), nil
 		},

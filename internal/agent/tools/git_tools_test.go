@@ -53,9 +53,10 @@ func TestGitStatusStructuredRenameAndPagination(t *testing.T) {
 	gitToolCommand(t, dir, "mv", "old", "new")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "other"), []byte("x"), 0o644))
 	tool := NewGitStatusTool(dir)
-	_, first := callGitTool[GitStatusParams, gitMeta](t, tool, GitStatusToolName, GitStatusParams{Limit: 1, IncludeUntracked: true})
+	firstResponse, first := callGitTool[GitStatusParams, gitMeta](t, tool, GitStatusToolName, GitStatusParams{Limit: 1, IncludeUntracked: true})
 	require.Len(t, first.Entries.([]any), 1)
 	require.True(t, first.Truncated)
+	pageBody(t, firstResponse.Content, first.Cursor)
 	_, second := callGitTool[GitStatusParams, gitMeta](t, tool, GitStatusToolName, GitStatusParams{Limit: 1, IncludeUntracked: true, Cursor: first.Cursor})
 	require.False(t, second.Truncated)
 	require.NotEmpty(t, second.Entries)
@@ -130,8 +131,9 @@ func TestGitDiffUTF8PagesJoinExactly(t *testing.T) {
 		r, meta := callGitTool[GitDiffParams, gitMeta](t, tool, GitDiffToolName, params)
 		require.False(t, r.IsError)
 		require.True(t, utf8.ValidString(r.Content))
-		require.LessOrEqual(t, len(r.Content), params.MaxBytes)
-		all += r.Content
+		body := pageBody(t, r.Content, meta.Cursor)
+		require.LessOrEqual(t, len(body), params.MaxBytes)
+		all += body
 		if !meta.Truncated {
 			break
 		}

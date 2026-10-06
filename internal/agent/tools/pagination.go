@@ -202,6 +202,16 @@ func decodePageCursor(token string) (pageCursor, error) {
 	return c, nil
 }
 
+// cursorNote is the line that hands a continuation cursor to the model. A
+// tool's response metadata is for the UI and never reaches the provider, so
+// a cursor left only there is one the model cannot pass back.
+func cursorNote(cursor string) string {
+	if cursor == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n\n(More results are available: repeat the call with the same arguments and cursor=%q)", cursor)
+}
+
 func makePageKeyCursor(kind, query, generation, last string) string {
 	token, _ := encodePageCursor(pageCursor{Version: 2, Kind: kind, Query: query, Gen: generation, Last: last})
 	return token

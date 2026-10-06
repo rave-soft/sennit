@@ -61,8 +61,9 @@ func TestMultiReadBudgetContinuationPreservesFileSequence(t *testing.T) {
 	for page := 0; ; page++ {
 		response, metadata := runMultiRead(t, tool, multiReadContext(), params)
 		require.False(t, response.IsError)
-		require.LessOrEqual(t, len(response.Content), params.MaxBytes)
-		all.WriteString(response.Content)
+		body := pageBody(t, response.Content, metadata.Cursor)
+		require.LessOrEqual(t, len(body), params.MaxBytes)
+		all.WriteString(body)
 		if !metadata.Truncated {
 			break
 		}
@@ -243,12 +244,12 @@ func TestMultiReadBudgets(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			response, metadata := runMultiRead(t, tool, multiReadContext(), MultiReadParams{Files: []MultiReadItem{{FilePath: "file.txt"}}, MaxBytes: test.maxBytes, MaxTokens: test.maxTokens})
 			require.Equal(t, test.wantError, response.IsError)
-			require.LessOrEqual(t, len(response.Content), test.wantBudget)
+			require.LessOrEqual(t, len(pageBody(t, response.Content, metadata.Cursor)), test.wantBudget)
 			if test.wantError {
 				require.Contains(t, response.Content, "too small for one line")
 				require.Zero(t, metadata.Bytes)
 			} else {
-				require.Equal(t, len(response.Content), metadata.Bytes)
+				require.Equal(t, len(pageBody(t, response.Content, metadata.Cursor)), metadata.Bytes)
 			}
 		})
 	}

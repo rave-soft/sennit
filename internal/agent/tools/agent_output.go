@@ -59,7 +59,7 @@ func NewAgentOutputTool(tasks TaskManager, threads ThreadManager) fantasy.AgentT
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(renderTaskOutput(ref.Task, out)), out), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fitContextBudget(ctx, renderTaskOutput(ref.Task, out))), out), nil
 		},
 	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}, "limit": intSchemaBounds(100)})
 }

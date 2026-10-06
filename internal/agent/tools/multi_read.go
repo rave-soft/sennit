@@ -168,7 +168,9 @@ func NewMultiReadTool(permissions permission.Requester, tracker FileTracking, wo
 		}
 		out.Bytes = body.Len()
 		used = out.Bytes
-		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(body.String()), out), nil
+		// Outside the byte budget, which is for file content: without
+		// this line a truncated batch looks complete.
+		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(body.String()+cursorNote(out.Cursor)), out), nil
 	})
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{
 		"files":                 {minItems: intPtr(1), maxItems: intPtr(MaxMultiReadFiles)},

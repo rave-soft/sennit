@@ -140,6 +140,7 @@ func NewGlobTool(permissions permission.Requester, workingDir string, cfg config
 			cursor := ""
 			if truncated {
 				cursor = makePageKeyCursor("glob", query, generation, last)
+				output += cursorNote(cursor)
 			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GlobResponseMetadata{NumberOfFiles: len(files), TotalFiles: total, Truncated: truncated, Incomplete: incomplete, Cursor: cursor}), nil
 		},

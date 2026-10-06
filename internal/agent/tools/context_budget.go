@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -76,4 +77,16 @@ func releaseContextBudget(ctx context.Context, unused int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.bytes += int64(unused)
+}
+
+// fitContextBudget cuts text to what the step's context budget grants and
+// says so at the cut. It is for tools whose whole result is one text with
+// no page of its own to shorten; a tool that can page should reserve its
+// size up front instead, so that it stops at a boundary it can resume from.
+func fitContextBudget(ctx context.Context, text string) string {
+	budget, limited := reserveContextBudget(ctx, len(text))
+	if limited {
+		text = truncateToRuneBoundary(text, budget) + fmt.Sprintf("\n\n[Content truncated to %d bytes: the context window is nearly full]", budget)
+	}
+	return text
 }

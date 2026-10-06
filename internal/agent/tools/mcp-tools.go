@@ -225,9 +225,9 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		} else {
 			response = fantasy.NewMediaResponse(result.Data, result.MediaType)
 		}
-		response.Content = result.Content
+		response.Content = fitContextBudget(ctx, result.Content)
 		return response, nil
 	default:
-		return fantasy.NewTextResponse(result.Content), nil
+		return fantasy.NewTextResponse(fitContextBudget(ctx, result.Content)), nil
 	}
 }

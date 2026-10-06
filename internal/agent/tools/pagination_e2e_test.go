@@ -27,6 +27,21 @@ func responseMetadata[T any](t *testing.T, responseMetadata string) T {
 	return metadata
 }
 
+// pageBody returns a paged response without its cursor note, after checking
+// that the note is there and carries the cursor from the metadata: the text
+// is the only part of a response the model receives, so a cursor missing
+// from it is a page the model cannot follow.
+func pageBody(t *testing.T, content, cursor string) string {
+	t.Helper()
+	if cursor == "" {
+		require.NotContains(t, content, "cursor=")
+		return content
+	}
+	note := cursorNote(cursor)
+	require.True(t, strings.HasSuffix(content, note), "the response text must end with its continuation cursor")
+	return strings.TrimSuffix(content, note)
+}
+
 func grepResponseLines(content string) []string {
 	matchLine := regexp.MustCompile(`^  Line ([0-9]+)(?:, Char [0-9]+)?:`)
 	var lines []string
@@ -198,7 +213,7 @@ func TestGlobAndLSHandlerPaginationNoGapsAndStaleGeneration(t *testing.T) {
 		require.False(t, response.IsError, response.Content)
 		metadata := responseMetadata[GlobResponseMetadata](t, response.Metadata)
 		require.Equal(t, 215, metadata.TotalFiles)
-		body := strings.Split(response.Content, "\n\n(")[0]
+		body := strings.Split(pageBody(t, response.Content, metadata.Cursor), "\n\n(")[0]
 		files = append(files, strings.Split(body, "\n")...)
 		cursor = metadata.Cursor
 		if !metadata.Truncated {
@@ -233,6 +248,7 @@ func TestGlobAndLSHandlerPaginationNoGapsAndStaleGeneration(t *testing.T) {
 		require.False(t, response.IsError, response.Content)
 		metadata := responseMetadata[LSResponseMetadata](t, response.Metadata)
 		require.Equal(t, 216, metadata.TotalFiles)
+		pageBody(t, response.Content, metadata.Cursor)
 		totalSeen += metadata.NumberOfFiles
 		cursor = metadata.Cursor
 		if !metadata.Truncated {

@@ -163,6 +163,7 @@ func NewRipgrepTool(permissions permission.Requester, workingDir string, cfg con
 			cursor := ""
 			if truncated {
 				cursor = makePageKeyCursor("ripgrep", query, generation, last)
+				output += cursorNote(cursor)
 			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GrepResponseMetadata{NumberOfMatches: len(page), TotalMatches: total, Truncated: truncated, Cursor: cursor}), nil
 		},
