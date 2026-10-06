@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -60,7 +61,11 @@ const (
 	MaxAutoBackgroundAfter = 600
 
 	MaxOutputLength = 30000
-	BashNoOutput    = "no output"
+	// maxBashOutputBytes bounds one command's output in bytes, stdout and
+	// stderr together. MaxOutputLength is a display width per stream; this
+	// is four bytes for each cell of both, so plain text never meets it.
+	maxBashOutputBytes = 2 * 4 * MaxOutputLength
+	BashNoOutput       = "no output"
 )
 
 //go:embed bash.md.tpl
@@ -353,7 +358,7 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 					if err := bgManager.Remove(bgShell.ID); err != nil && !errors.Is(err, shell.ErrBackgroundShellNotFound) {
 						return fantasy.ToolResponse{}, fmt.Errorf("error removing finished background shell: %w", err)
 					}
-					return finishBashRun(bgShell, params, startTime, stdout, stderr, execErr)
+					return finishBashRun(ctx, bgShell, params, startTime, stdout, stderr, execErr)
 				}
 
 				// Still running after fast-failure check - return as background job
@@ -409,7 +414,7 @@ func newBashTool(permissions permission.Requester, workingDir string, attributio
 				if err := bgManager.Remove(bgShell.ID); err != nil && !errors.Is(err, shell.ErrBackgroundShellNotFound) {
 					return fantasy.ToolResponse{}, fmt.Errorf("error removing finished background shell: %w", err)
 				}
-				return finishBashRun(bgShell, params, startTime, stdout, stderr, execErr)
+				return finishBashRun(ctx, bgShell, params, startTime, stdout, stderr, execErr)
 			}
 
 			// Still running - keep as background job
@@ -441,14 +446,14 @@ func normalizeAutoBackgroundAfter(seconds int) int {
 // BashResponseMetadata otherwise. Shared by the run-in-background path's
 // fast-failure check and the synchronous path's within-threshold
 // completion — both call this once bgShell.GetOutput() reports done.
-func finishBashRun(bgShell *shell.BackgroundShell, params BashParams, startTime time.Time, stdout, stderr string, execErr error) (fantasy.ToolResponse, error) {
+func finishBashRun(ctx context.Context, bgShell *shell.BackgroundShell, params BashParams, startTime time.Time, stdout, stderr string, execErr error) (fantasy.ToolResponse, error) {
 	interrupted := shell.IsInterrupt(execErr)
 	exitCode := shell.ExitCode(execErr)
 	if exitCode == 0 && !interrupted && execErr != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 	}
 
-	stdout = formatOutput(stdout, stderr, execErr)
+	stdout = formatOutput(ctx, stdout, stderr, execErr)
 
 	metadata := BashResponseMetadata{
 		StartTime:        startTime.UnixMilli(),
@@ -482,12 +487,19 @@ func stillRunningBashResponse(bgShell *shell.BackgroundShell, params BashParams,
 }
 
 // formatOutput formats the output of a completed command with error handling
-func formatOutput(stdout, stderr string, execErr error) string {
+func formatOutput(ctx context.Context, stdout, stderr string, execErr error) string {
 	interrupted := shell.IsInterrupt(execErr)
 	exitCode := shell.ExitCode(execErr)
 
 	stdout = truncateOutput(stdout)
 	stderr = truncateOutput(stderr)
+	// The two streams share one grant from the step's context budget.
+	// stderr is cut first and to at most half of it, so an error message
+	// survives a flood on stdout; stdout gets whatever that leaves.
+	budget, contextLimited := reserveContextBudget(ctx, maxBashOutputBytes)
+	stderr = truncateOutputBytes(stderr, budget/2, contextLimited)
+	stdout = truncateOutputBytes(stdout, max(budget-len(stderr), 0), contextLimited)
+	releaseContextBudget(ctx, budget-len(stdout)-len(stderr))
 
 	errorMessage := stderr
 	if errorMessage == "" && execErr != nil {
@@ -530,6 +542,30 @@ func TruncateOutput(content string) string {
 
 	truncatedLinesCount := max(strings.Count(content, "\n")-strings.Count(start, "\n")-strings.Count(end, "\n"), 0)
 	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLinesCount, end)
+}
+
+// truncateOutputBytes cuts content to about maxBytes, keeping its head and
+// tail the way TruncateOutput does. TruncateOutput measures display width,
+// which escape sequences do not have, so colored output can be many times
+// larger in bytes than the width cap suggests; and no width cap knows how
+// much context is left. contextLimited says the cap came from the step's
+// context budget, and the marker then tells the model so.
+func truncateOutputBytes(content string, maxBytes int, contextLimited bool) string {
+	if len(content) <= maxBytes {
+		return content
+	}
+	half := maxBytes / 2
+	start := truncateToRuneBoundary(content, half)
+	end := content[len(content)-half:]
+	for len(end) > 0 && !utf8.RuneStart(end[0]) {
+		end = end[1:]
+	}
+	truncatedLinesCount := max(strings.Count(content, "\n")-strings.Count(start, "\n")-strings.Count(end, "\n"), 0)
+	reason := ""
+	if contextLimited {
+		reason = ": the context window is nearly full"
+	}
+	return fmt.Sprintf("%s\n\n... [%d lines truncated%s] ...\n\n%s", start, truncatedLinesCount, reason, end)
 }
 
 func truncateOutput(content string) string {

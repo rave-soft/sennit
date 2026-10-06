@@ -204,7 +204,7 @@ func TestGrepContextFormat(t *testing.T) {
 	if err := os.WriteFile(path, []byte("before\nneedle\nafter\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := renderGrepMatchesWithContext(t.Context(), []grepMatch{{path: path, lineNum: 2, charNum: 1, lineText: "needle"}}, false, 1, 1)
+	got, _, err := renderGrepMatchesWithContext(t.Context(), []grepMatch{{path: path, lineNum: 2, charNum: 1, lineText: "needle"}}, false, 1, 1, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}

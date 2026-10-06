@@ -112,6 +112,11 @@ const (
 	// line is re-read from disk and rendered into the response, so the cap
 	// bounds the token cost of a single search.
 	maxGrepContextLines = 30
+	// maxGrepOutputBytes caps a rendered page. The result count and the
+	// line width are each bounded, but their product with the context
+	// lines is not: 1000 matches with 30 lines either side is megabytes.
+	// A default page (100 matches, no context) stays under it.
+	maxGrepOutputBytes = 100 * 1024
 )
 
 //go:embed grep.md.tpl
@@ -211,13 +216,19 @@ func NewGrepTool(permissions permission.Requester, workingDir string, config con
 			if err := finishPageKeyCursor(continuation, generation); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			output, shown, err := renderGrepPage(ctx, searchCtx, page, truncated, params.BeforeContext, params.AfterContext)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("rendering search context: %w", err)
+			}
+			if shown < len(page) {
+				// The size cap ended the page early: the cursor resumes
+				// after the last match the model was shown.
+				page, truncated = page[:shown], true
+				last = grepMatchPageKey(page[shown-1], params.Sort)
+			}
 			cursor := ""
 			if truncated {
 				cursor = makePageKeyCursor("grep", query, generation, last)
-			}
-			output, err := renderGrepMatchesWithContext(searchCtx, page, truncated, params.BeforeContext, params.AfterContext)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("rendering search context: %w", err)
 			}
 			if incomplete {
 				// Mirrors ls/glob: part of the tree could not be read
@@ -276,49 +287,73 @@ func sortAndTruncateMatches(matches []grepMatch, limit int) ([]grepMatch, bool) 
 	return matches, truncated
 }
 
-func renderGrepMatchesWithContext(ctx context.Context, matches []grepMatch, truncated bool, before, after int) (string, error) {
+// renderGrepPage renders a page of matches within what the step's context
+// budget grants, and reports how many of them it showed. A caller that gets
+// back fewer than it passed must cut its page and move its cursor to the
+// last match shown, so the next page starts where this one stopped.
+func renderGrepPage(ctx, searchCtx context.Context, matches []grepMatch, truncated bool, before, after int) (string, int, error) {
+	budget, contextLimited := reserveContextBudget(ctx, maxGrepOutputBytes)
+	output, shown, err := renderGrepMatchesWithContext(searchCtx, matches, truncated, before, after, budget, contextLimited)
+	releaseContextBudget(ctx, budget-len(output))
+	return output, shown, err
+}
+
+// renderGrepMatchesWithContext renders matches until the next one would take
+// the output past maxBytes (0 means no cap) and returns how many it showed.
+// The first match is rendered whatever its size: a page that shows nothing
+// leaves its cursor where it started.
+func renderGrepMatchesWithContext(ctx context.Context, matches []grepMatch, truncated bool, before, after, maxBytes int, contextLimited bool) (string, int, error) {
 	contexts, err := loadGrepContexts(ctx, matches, before, after, os.Open)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	var output strings.Builder
 	if len(matches) == 0 {
-		output.WriteString("No files found")
-		return output.String(), nil
+		return "No files found", 0, nil
 	}
 
-	fmt.Fprintf(&output, "Found %d matches\n", len(matches))
-
+	var body strings.Builder
+	shown := 0
 	currentFile := ""
 	for _, match := range matches {
+		var block strings.Builder
 		if currentFile != match.path {
 			if currentFile != "" {
-				output.WriteString("\n")
+				block.WriteString("\n")
 			}
-			currentFile = match.path
-			fmt.Fprintf(&output, "%s:\n", filepath.ToSlash(match.path))
+			fmt.Fprintf(&block, "%s:\n", filepath.ToSlash(match.path))
 		}
 		if match.lineNum > 0 {
 			for _, line := range contexts[match.path][match.lineNum] {
-				fmt.Fprintf(&output, "  %s Line %d: %s\n", line.marker, line.number, truncateGrepLine(line.text))
+				fmt.Fprintf(&block, "  %s Line %d: %s\n", line.marker, line.number, truncateGrepLine(line.text))
 			}
 			lineText := match.lineText
 			lineText = truncateGrepLine(lineText)
 			if match.charNum > 0 {
-				fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
+				fmt.Fprintf(&block, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
 			} else {
-				fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, lineText)
+				fmt.Fprintf(&block, "  Line %d: %s\n", match.lineNum, lineText)
 			}
 		} else {
-			fmt.Fprintf(&output, "  %s\n", match.path)
+			fmt.Fprintf(&block, "  %s\n", match.path)
 		}
+		if maxBytes > 0 && shown > 0 && body.Len()+block.Len() > maxBytes {
+			break
+		}
+		currentFile = match.path
+		body.WriteString(block.String())
+		shown++
 	}
 
-	if truncated {
-		output.WriteString("\n(Results are truncated. Consider using a more specific path or pattern.)")
+	output := fmt.Sprintf("Found %d matches\n", shown) + body.String()
+	switch {
+	case shown < len(matches) && contextLimited:
+		output += "\n(Results are truncated because the context window is nearly full. Use a more specific path or pattern.)"
+	case shown < len(matches):
+		output += "\n(Results are truncated at the output size limit. Consider using a more specific path or pattern.)"
+	case truncated:
+		output += "\n(Results are truncated. Consider using a more specific path or pattern.)"
 	}
-
-	return output.String(), nil
+	return output, shown, nil
 }
 
 type grepContextLine struct {

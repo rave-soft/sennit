@@ -66,7 +66,9 @@ func NewWebFetchTool(permissions permission.Requester, workingDir, pageDir strin
 				}
 			}
 
-			content, filePath, err := FetchLargeContent(ctx, client, pageDir, params.URL)
+			budget, _ := reserveContextBudget(ctx, LargeContentThreshold)
+			content, filePath, err := fetchContentWithin(ctx, client, pageDir, params.URL, budget)
+			releaseContextBudget(ctx, budget-len(content))
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 			}

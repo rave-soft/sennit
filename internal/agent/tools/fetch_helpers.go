@@ -89,12 +89,19 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 // into the conversation. dir is created (0o700) if it does not already
 // exist. Exactly one of content/filePath is non-empty on success.
 func FetchLargeContent(ctx context.Context, client *http.Client, dir, url string) (content string, filePath string, err error) {
+	return fetchContentWithin(ctx, client, dir, url, LargeContentThreshold)
+}
+
+// fetchContentWithin is FetchLargeContent with the inline threshold given
+// by the caller, so a tool can lower it to what the step's context budget
+// has left: a page that would not fit goes to a file like any large one.
+func fetchContentWithin(ctx context.Context, client *http.Client, dir, url string, threshold int) (content string, filePath string, err error) {
 	content, err = FetchURLAndConvert(ctx, client, url)
 	if err != nil {
 		return "", "", err
 	}
 
-	if len(content) <= LargeContentThreshold {
+	if len(content) <= threshold {
 		return content, "", nil
 	}
 

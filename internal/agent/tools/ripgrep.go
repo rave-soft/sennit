@@ -150,13 +150,19 @@ func NewRipgrepTool(permissions permission.Requester, workingDir string, cfg con
 			if err := finishPageKeyCursor(continuation, generation); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			output, shown, err := renderGrepPage(ctx, searchCtx, page, truncated, params.BeforeContext, params.AfterContext)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("rendering search context: %w", err)
+			}
+			if shown < len(page) {
+				// The size cap ended the page early: the cursor resumes
+				// after the last match the model was shown.
+				page, truncated = page[:shown], true
+				last = grepMatchPageKey(page[shown-1], params.Sort)
+			}
 			cursor := ""
 			if truncated {
 				cursor = makePageKeyCursor("ripgrep", query, generation, last)
-			}
-			output, err := renderGrepMatchesWithContext(searchCtx, page, truncated, params.BeforeContext, params.AfterContext)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("rendering search context: %w", err)
 			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GrepResponseMetadata{NumberOfMatches: len(page), TotalMatches: total, Truncated: truncated, Cursor: cursor}), nil
 		},

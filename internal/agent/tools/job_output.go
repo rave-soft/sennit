@@ -130,6 +130,9 @@ func NewJobOutputTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool
 
 			output := strings.Join(outputParts, "\n")
 			output = TruncateOutput(output)
+			budget, contextLimited := reserveContextBudget(ctx, maxBashOutputBytes)
+			output = truncateOutputBytes(output, budget, contextLimited)
+			releaseContextBudget(ctx, budget-len(output))
 
 			metadata := JobOutputResponseMetadata{
 				ShellID:          params.ShellID,
