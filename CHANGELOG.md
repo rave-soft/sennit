@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
 
 - Sennit can now run its backend as a background daemon, one per project,
   so a turn survives closing the terminal or a dropped SSH connection,
@@ -33,6 +33,35 @@
   bytes and came back as "text exceeds 240 characters". The form wraps and
   scrolls whatever it is given, so the ceiling is about how much there is
   to read before answering, not about what fits.
+- Tool output is now sized to the context window that is left. Each step
+  works out how many tokens remain before the session would have to
+  summarize, and `read`, `multi_read`, `grep`, `ripgrep`, `bash`,
+  `job_output`, `fetch`, `web_fetch`, `git_diff`, `agent_output`, the logs
+  tool, MCP tools and MCP resources all draw on that figure. Before, each
+  had only a fixed cap of its own (200KB for a read, 100KB for a fetch, 5MB
+  for an MCP result), so one call into a nearly full window could push the
+  session past the point where it can still summarize. A result cut short
+  for this reason says so, and several calls in one step share the room
+  rather than each taking all of it. A model with no declared context
+  window is not affected.
+- The agent no longer pages through files a hundred lines at a time. The
+  system prompt told it to avoid reading whole files, which cost a step per
+  chunk on any file it needed in full. It now reads a file in one call and
+  uses `offset` and `limit` when it wants one part, and a truncated read
+  reports the range it showed and the file's total line count.
+- Paged tool results can be continued. The continuation cursor of `grep`,
+  `ripgrep`, `glob`, `ls`, `multi_read`, `workspace_symbols`, `git_status`,
+  `git_log` and `git_diff` was returned only in metadata the model never
+  receives, so it could ask for a second page of none of them. The cursor
+  is now part of the result text.
+- A `grep` or `ripgrep` page is capped at 100KB. The number of results and
+  the width of a line were each bounded, but their product with context
+  lines was not, and a broad pattern with context could return megabytes.
+  A default page is well under the cap.
+- `bash` output is bounded in bytes as well as in characters. The existing
+  30,000-character limit measures display width, which color escape
+  sequences do not have, so colored output could be several times larger
+  than the limit suggested.
 
 ## 0.12.0
 
