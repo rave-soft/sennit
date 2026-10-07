@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1144,6 +1145,11 @@ const maxPromptLabelLen = 32
 // so ordinary prose that happens to contain a colon ("Fix this: the parser
 // drops newlines") is shown exactly as written, and a prompt with no
 // structure at all keeps its first line — which is all it ever had.
+//
+// A heading written as a sentence ("Цель пункта одной строкой:") is the
+// same scaffolding in another case: it ends at its colon and announces the
+// line below it, so it is skipped as well and the line it announces is
+// shown.
 func delegationHeadline(name, prompt string) string {
 	for _, line := range strings.Split(prompt, "\n") {
 		line = strings.TrimSpace(line)
@@ -1152,6 +1158,9 @@ func delegationHeadline(name, prompt string) string {
 		}
 		value, ok := promptLabelValue(line)
 		if !ok {
+			if isBareHeading(line) {
+				continue
+			}
 			return line
 		}
 		if value == "" || strings.EqualFold(value, strings.TrimSpace(name)) {
@@ -1160,6 +1169,19 @@ func delegationHeadline(name, prompt string) string {
 		return value
 	}
 	return firstLine(prompt)
+}
+
+// isBareHeading reports whether line is a short heading with nothing after
+// its colon, in any case. The length bound is in runes, the same budget a
+// label gets, so a full sentence that happens to end in a colon is still
+// shown as written.
+func isBareHeading(line string) bool {
+	heading, ok := strings.CutSuffix(line, ":")
+	if !ok {
+		return false
+	}
+	heading = strings.TrimSpace(heading)
+	return heading != "" && utf8.RuneCountInString(heading) <= maxPromptLabelLen
 }
 
 // promptLabelValue splits a structured prompt's "LABEL: value" line,

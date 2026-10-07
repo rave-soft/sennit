@@ -493,6 +493,24 @@ func TestDelegationHeadline(t *testing.T) {
 			want:   "убрать вторую строчку",
 		},
 		{
+			name:   "a sentence-case heading with nothing after its colon is skipped",
+			agent:  "developer-middle",
+			prompt: "Цель пункта одной строкой:\nперенести OTLP-конфиг в поддерево\n",
+			want:   "перенести OTLP-конфиг в поддерево",
+		},
+		{
+			name:   "a long sentence ending in a colon is not a heading",
+			agent:  "task",
+			prompt: "Read the three review files listed below before you touch anything:\na.md\n",
+			want:   "Read the three review files listed below before you touch anything:",
+		},
+		{
+			name:   "nothing but a heading falls back to the first line",
+			agent:  "task",
+			prompt: "Цель пункта одной строкой:\n",
+			want:   "Цель пункта одной строкой:",
+		},
+		{
 			name:   "an ordinary prompt keeps its first line",
 			agent:  "task",
 			prompt: "scan the repo for TODOs\nand report them\n",
